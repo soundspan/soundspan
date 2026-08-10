@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
 import { buildCachePath, isPastStaleWindow } from "./cacheHelpers";
+import { buildSafeAudiobookCoverUrl } from "./audiobookCoverProxy";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -278,7 +279,8 @@ export class AudiobookCacheService {
     }
 
     /**
-     * Get full Audiobookshelf cover URL by prepending base URL
+     * Get the full Audiobookshelf cover URL, confining the path through the
+     * shared cover-path allowlist.
      */
     private async getFullCoverUrl(
         relativePath: string,
@@ -290,7 +292,16 @@ export class AudiobookCacheService {
 
             if (settings?.audiobookshelfUrl) {
                 const baseUrl = settings.audiobookshelfUrl.replace(/\/$/, "");
-                return `${baseUrl}/api/${relativePath}`;
+                const coverUrl = buildSafeAudiobookCoverUrl(
+                    relativePath,
+                    baseUrl,
+                );
+                if (!coverUrl) {
+                    logger.warn(
+                        `[AUDIOBOOK] Rejected unsafe cover path: ${relativePath}`,
+                    );
+                }
+                return coverUrl;
             }
 
             return null;

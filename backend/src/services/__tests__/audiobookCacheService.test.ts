@@ -261,6 +261,41 @@ describe("audiobook cache service behavior", () => {
         );
     });
 
+    it("rejects a traversal-bearing cover path and logs a warning", async () => {
+        const service = new AudiobookCacheService();
+
+        await expect(
+            (service as any).getFullCoverUrl("items/../../me/cover"),
+        ).resolves.toBeNull();
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("items/../../me/cover"),
+        );
+    });
+
+    it("skips cover download and caching for a traversal-bearing audiobook id", async () => {
+        const service = new AudiobookCacheService();
+        mockGetAllAudiobooks.mockResolvedValue([buildBook({ id: "../../me" })]);
+
+        const result = await service.syncAll();
+
+        expect(result).toEqual({
+            synced: 1,
+            failed: 0,
+            skipped: 0,
+            errors: [],
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
+        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    id: "../../me",
+                    localCoverPath: null,
+                }),
+            }),
+        );
+    });
+
     it("handles cover downloads for unavailable cache, HTTP failures, and success", async () => {
         const service = new AudiobookCacheService();
 

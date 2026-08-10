@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Security
+
+- Audiobook cover sync/download now routes Audiobookshelf cover paths through
+  the shared cover-path allowlist, so a traversal-bearing item id can no longer
+  pivot the admin-token fetch onto arbitrary ABS API paths.
+
 ### Added
 
 - Added repo-wide Prettier and EditorConfig conventions, applied through
