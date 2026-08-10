@@ -1,5 +1,11 @@
 import { Request, Response } from "express";
 
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
+
 jest.mock("../../middleware/subsonicAuth", () => ({
     requireSubsonicAuth: (_req: Request, _res: Response, next: () => void) =>
         next(),
@@ -118,6 +124,9 @@ describe("subsonic metadata compatibility handlers", () => {
             syncedLyrics: null,
             plainLyrics: null,
         });
+        // The hardened outbound path DNS-resolves cover hosts before fetching;
+        // resolve test hostnames to a public address so happy paths proceed.
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     });
 
     function buildCoverArtRes(): Response {

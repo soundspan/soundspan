@@ -4,6 +4,11 @@ import fs from "node:fs";
 const mockGetStreamFilePath = jest.fn();
 const mockStreamFileWithRangeSupport = jest.fn();
 const mockDestroyStreamingService = jest.fn();
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
 
 jest.mock("../../middleware/subsonicAuth", () => ({
     requireSubsonicAuth: (_req: Request, _res: Response, next: () => void) =>
@@ -222,6 +227,9 @@ describe("subsonic branch coverage focused handlers", () => {
         mockGetStreamFilePath.mockReset();
         mockStreamFileWithRangeSupport.mockReset();
         mockDestroyStreamingService.mockReset();
+        // The hardened outbound path DNS-resolves cover hosts before fetching;
+        // resolve test hostnames to a public address so happy paths proceed.
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
         global.fetch = jest.fn() as unknown as typeof fetch;
     });
 
