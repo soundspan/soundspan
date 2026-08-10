@@ -1664,11 +1664,10 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                             `[Retry] Failed to queue scan:`,
                             scanError,
                         );
+                        // The session log is returned verbatim to any authenticated caller via GET /api/spotify/import/session-log, so raw error text must not be written to it.
                         sessionLog(
                             "PENDING-RETRY",
-                            `Failed to queue scan: ${
-                                (scanError as any)?.message || scanError
-                            }`,
+                            "Failed to queue scan (raw detail in server log)",
                             "ERROR",
                         );
                     }

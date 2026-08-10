@@ -109,6 +109,22 @@ test("countLeakPattern flags an intermediate const assigned from error.message",
     assert.equal(countLeakPattern(source), 1);
 });
 
+test("countLeakPattern flags suffixed-error optional message access", () => {
+    assert.equal(
+        countLeakPattern("res.json({ error: scanError?.message })"),
+        1,
+    );
+});
+
+test("countLeakPattern flags cast-wrapped suffixed-error message access", () => {
+    const source = 'sessionLog("X", `boom: ${(scanError as any)?.message}`)';
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern flags a suffixed-error intermediate assignment", () => {
+    assert.equal(countLeakPattern("const detail = fetchError.message;"), 1);
+});
+
 test("countLeakPattern flags a template-literal error.stack interpolation", () => {
     assert.equal(countLeakPattern("res.send(`trace: ${error?.stack}`);"), 1);
 });
@@ -118,4 +134,12 @@ test("countLeakPattern exempts raw errors logged server-side via logger.*", () =
         "logger.error(`[CLEANUP] ${artistName}: ${error.message}`);\n" +
         "logger.error('boom', error?.message || error);";
     assert.equal(countLeakPattern(source), 0);
+});
+
+test("countLeakPattern exempts suffixed-error details logged server-side", () => {
+    assert.equal(countLeakPattern("logger.error(`x ${scanError.message}`)"), 0);
+});
+
+test("countLeakPattern ignores message access on non-error identifiers", () => {
+    assert.equal(countLeakPattern("res.json({ msg: payload.message })"), 0);
 });

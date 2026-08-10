@@ -2298,6 +2298,66 @@ describe("playlists route runtime", () => {
         );
     });
 
+    it("sanitizes scan-queue enqueue errors out of the client-visible session log", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce({
+            id: "pt-scan-error",
+            spotifyArtist: "Artist",
+            spotifyTitle: "Title",
+            spotifyAlbum: "Album",
+            albumMbid: "rg-1",
+            artistMbid: "ar-1",
+        });
+        getSystemSettings.mockResolvedValueOnce({
+            musicPath: "/music",
+            soulseekUsername: "user",
+            soulseekPassword: "pass",
+        });
+        prisma.downloadJob.create.mockResolvedValueOnce({
+            id: "job-scan-error",
+            metadata: {},
+        });
+        soulseekService.searchTrack.mockResolvedValueOnce({
+            found: true,
+            allMatches: [{ id: "match-1" }],
+        });
+        soulseekService.downloadBestMatch.mockResolvedValueOnce({
+            success: true,
+            filePath: "/music/Artist/Album/track.flac",
+        });
+        scanQueue.add.mockRejectedValueOnce(new Error("scan blew up"));
+
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-scan-error" },
+        } as any;
+        const res = createRes();
+        await retryPending(req, res);
+        await flushAsyncWork();
+
+        expect(res.statusCode).toBe(200);
+        expect(prisma.downloadJob.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "job-scan-error" },
+                data: expect.objectContaining({ status: "completed" }),
+            }),
+        );
+        const sessionLogMock = jest.requireMock("../../utils/playlistLogger")
+            .sessionLog as jest.Mock;
+        expect(JSON.stringify(sessionLogMock.mock.calls)).not.toContain(
+            "scan blew up",
+        );
+        expect(sessionLogMock).toHaveBeenCalledWith(
+            "PENDING-RETRY",
+            "Failed to queue scan (raw detail in server log)",
+            "ERROR",
+        );
+    });
+
     it("marks retry download jobs failed when Soulseek returns an unsuccessful result", async () => {
         prisma.playlist.findUnique.mockResolvedValueOnce({
             id: "pl-1",

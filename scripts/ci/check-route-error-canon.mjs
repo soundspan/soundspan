@@ -57,15 +57,19 @@ const BASELINE = Object.freeze({
 // Raw error details can disclose internal implementation data to clients (OWASP).
 // This independent ratchet prevents new error.message/error.stack response leaks.
 const LEAK_BASELINE = Object.freeze({
+    // auth.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L813 and ~L1247); code-owned schema messages, not raw errors.
+    "backend/src/routes/auth.ts": 2,
     "backend/src/routes/discover.ts": 0,
     "backend/src/routes/downloads.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
     "backend/src/routes/notifications.ts": 2,
     "backend/src/routes/playbackState.ts": 1,
-    // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904).
+    // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); the scanError sessionLog instance was sanitized (fixed, not frozen).
     "backend/src/routes/playlists.ts": 1,
     // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.
     "backend/src/routes/podcasts.ts": 2,
+    // streaming.ts remaining 7: segmentedError.message from toSegmentedSessionError() (~L493); typed SegmentedSessionError domain errors with static code-owned messages/status codes, not raw caught errors.
+    "backend/src/routes/streaming.ts": 7,
 });
 
 export function countPattern(source) {
@@ -97,12 +101,22 @@ export function stripLoggerCalls(source) {
 }
 
 export function countLeakPattern(source) {
-    const stripped = stripLoggerCalls(source);
-    const normalizedSource = stripped.replace(
-        /error\s*(\??)\s*\.\s*(message|stack)\b/g,
-        "error$1.$2",
+    const ERROR_ID = String.raw`(?:[A-Za-z_$][\w$]*Error|error)`;
+    const stripped = stripLoggerCalls(source).replace(
+        new RegExp(String.raw`\(\s*(${ERROR_ID})\s+as\s+[^()]*\)`, "g"),
+        "$1",
     );
-    const pattern = /(?::\s*|=\s*|\$\{[^}]*)error\??\.(?:message|stack)\b/g;
+    const normalizedSource = stripped.replace(
+        new RegExp(
+            String.raw`(${ERROR_ID})\s*(\??)\s*\.\s*(message|stack)\b`,
+            "g",
+        ),
+        "$1$2.$3",
+    );
+    const pattern = new RegExp(
+        String.raw`(?::\s*|=\s*|\$\{[^}]*?)${ERROR_ID}\??\.(?:message|stack)\b`,
+        "g",
+    );
     return normalizedSource.match(pattern)?.length ?? 0;
 }
 

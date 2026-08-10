@@ -141,6 +141,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Sanitized the scan-queue failure message written to the client-readable Spotify
+  import session log, keeping raw detail in the server log only, and widened the
+  route error-canon leak ratchet to catch suffixed error identifiers
+  (`scanError.message`, etc.) and `as`-cast property access, with new frozen,
+  documented baselines for `auth.ts` (Zod validation detail) and `streaming.ts`
+  (typed `SegmentedSessionError` messages).
 - Stopped returning raw caught-error text to clients from the playlist
   pending-track retry path and podcast refresh-all: the retry handler wrote
   `error.message` into the session log (returned verbatim to any authenticated
