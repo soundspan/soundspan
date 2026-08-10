@@ -948,6 +948,16 @@ router.get(
                 res.setHeader(key, value);
             });
 
+            stream.data.on("error", (streamErr: Error) => {
+                logger.warn(
+                    `[TIDAL-STREAM] Upstream stream error for track ${trackId}: ${streamErr.message}`,
+                );
+                if (!res.headersSent) {
+                    res.status(502).json({ error: "Upstream stream failed" });
+                } else {
+                    res.end();
+                }
+            });
             // Clean up upstream stream when client disconnects
             res.on("close", () => {
                 if (

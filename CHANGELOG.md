@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TIDAL stream proxying now handles upstream stream errors after headers are
+  sent instead of crashing the entire backend via an uncaught exception; a
+  mid-playback sidecar disconnect now ends only that response.
 - Podcast cover downloads now time out after 15 seconds so an unresponsive
   image host can no longer stall the cover-sync loops.
 - Fixed the tidal-downloader stream-URL cache race where concurrent mutation

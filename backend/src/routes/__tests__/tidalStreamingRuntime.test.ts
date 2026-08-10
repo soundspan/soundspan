@@ -54,6 +54,7 @@ jest.mock("../../utils/encryption", () => ({
     decrypt: mockDecrypt,
 }));
 
+import { EventEmitter } from "node:events";
 import router from "../tidalStreaming";
 
 function getRouteLayer(
@@ -97,6 +98,7 @@ function createRes() {
             headers[key] = value;
             return res;
         }),
+        end: jest.fn(),
         on: jest.fn(),
     };
     return res;
@@ -157,6 +159,7 @@ describe("tidal streaming route runtime", () => {
                 "content-range": "bytes 0-100/200",
             },
             data: {
+                on: jest.fn(),
                 pipe: jest.fn(),
             },
         });
@@ -500,7 +503,7 @@ describe("tidal streaming route runtime", () => {
                 "content-type": "audio/aac",
                 "content-range": "bytes 0-100/200",
             },
-            data: { pipe: pipeMock },
+            data: { on: jest.fn(), pipe: pipeMock },
         });
 
         const req = {
@@ -523,6 +526,7 @@ describe("tidal streaming route runtime", () => {
 
     it("destroys the upstream stream when the client disconnects", async () => {
         const data = {
+            on: jest.fn(),
             pipe: jest.fn(),
             destroy: jest.fn(),
             destroyed: false,
@@ -552,6 +556,61 @@ describe("tidal streaming route runtime", () => {
         data.destroyed = true;
         closeHandler();
         expect(data.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("ends the response when the upstream stream errors after headers are sent", async () => {
+        const data = Object.assign(new EventEmitter(), {
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+            destroyed: false,
+        });
+        tidalStreamingService.getStreamProxy.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data,
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { trackId: "99" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+        res.headersSent = true;
+
+        await streamHandler(req, res);
+
+        expect(data.listenerCount("error")).toBeGreaterThan(0);
+        expect(() =>
+            data.emit("error", new Error("sidecar dropped")),
+        ).not.toThrow();
+        expect(res.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 502 when the upstream stream errors before headers are sent", async () => {
+        const data = Object.assign(new EventEmitter(), {
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+            destroyed: false,
+        });
+        tidalStreamingService.getStreamProxy.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data,
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { trackId: "99" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+        data.emit("error", new Error("sidecar dropped"));
+
+        expect(res.statusCode).toBe(502);
+        expect(res.body).toEqual({ error: "Upstream stream failed" });
     });
 
     it("initiates device auth and maps initiation errors", async () => {
