@@ -78,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   override was removed so the pod inherits the chart-wide UID/GID 1000 pod
   security context, matching the realigned frontend image (`USER node`) and
   fixing `.next/cache` write failures in individual deployment mode.
+- Fixed the tidal-downloader cross-thread race where browse-session builds on
+  worker threads could mutate `_browse_sessions` during event-loop invalidation
+  iteration, aborting session refresh, restore, or logout with `RuntimeError`;
+  browse-session caches and per-user auth state are now lock-guarded like the
+  stream-URL cache.
 
 - Lidarr queue/history helper HTTP calls are now bounded. The module-level
   `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,

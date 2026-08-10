@@ -105,6 +105,7 @@ MUSIC_PATH = Path(os.getenv("MUSIC_PATH", "/music"))
 _user_apis: dict[str, TidalAPI] = {}
 _user_api_locks: dict[str, asyncio.Lock] = {}
 _user_auth_state: dict[str, dict[str, str]] = {}
+_user_auth_state_lock = threading.Lock()
 
 # ── Stream URL cache (per-user, keyed by (user_id, track_id, quality)) ─────
 _stream_cache: dict[tuple[str, int, str], dict] = {}
@@ -130,8 +131,10 @@ TIDALAPI_DEFAULT_QUALITY = tidalapi.Quality.high_lossless
 # ── Per-user tidalapi browse sessions ─────────────────────────────
 # Keyed by "user_id:quality" so changing quality creates a new session.
 _browse_sessions: dict[str, tidalapi.Session] = {}
+_browse_sessions_lock = threading.Lock()
 _BROWSE_SESSION_MAX = 50
 _public_browse_sessions: dict[str, tidalapi.Session] = {}
+_public_browse_sessions_lock = threading.Lock()
 _PUBLIC_BROWSE_SESSION_MAX = 8
 _BATCH_SEARCH_MAX_QUERIES = 50
 _BATCH_SEARCH_CONCURRENCY = 5
@@ -147,30 +150,33 @@ def _build_browse_session(user_id: str, quality: str | None = None) -> tidalapi.
     api_quality = TIDDL_TO_TIDALAPI_QUALITY.get(normalized or "", TIDALAPI_DEFAULT_QUALITY)
     cache_key = f"{user_id}:{api_quality.value}"
 
-    cached = _browse_sessions.get(cache_key)
+    with _browse_sessions_lock:
+        cached = _browse_sessions.get(cache_key)
     if cached is not None:
         return cached
 
-    creds = _user_auth_state.get(user_id)
-    if not creds:
+    with _user_auth_state_lock:
+        creds = _user_auth_state.get(user_id)
+        creds_snapshot = dict(creds) if creds else None
+    if not creds_snapshot:
         raise HTTPException(
             status_code=401,
             detail=f"No TIDAL session for user {user_id}. Restore credentials first.",
         )
 
-    # Evict oldest entries if cache is full
-    while len(_browse_sessions) >= _BROWSE_SESSION_MAX:
-        oldest_key = next(iter(_browse_sessions))
-        _browse_sessions.pop(oldest_key, None)
-
     session = tidalapi.Session(tidalapi.Config(quality=api_quality))
     session.load_oauth_session(
         token_type="Bearer",  # noqa: S106 -- OAuth token scheme, not a credential
-        access_token=creds["access_token"],
-        refresh_token=creds.get("refresh_token"),
+        access_token=creds_snapshot["access_token"],
+        refresh_token=creds_snapshot.get("refresh_token"),
         expiry_time=None,
     )
-    _browse_sessions[cache_key] = session
+    with _browse_sessions_lock:
+        # Evict oldest entries if cache is full
+        while len(_browse_sessions) >= _BROWSE_SESSION_MAX:
+            oldest_key = next(iter(_browse_sessions))
+            _browse_sessions.pop(oldest_key, None)
+        _browse_sessions[cache_key] = session
     return session
 
 
@@ -180,16 +186,17 @@ def _build_public_browse_session(quality: str | None = None) -> tidalapi.Session
     api_quality = TIDDL_TO_TIDALAPI_QUALITY.get(normalized or "", TIDALAPI_DEFAULT_QUALITY)
     cache_key = api_quality.value
 
-    cached = _public_browse_sessions.get(cache_key)
+    with _public_browse_sessions_lock:
+        cached = _public_browse_sessions.get(cache_key)
     if cached is not None:
         return cached
 
-    while len(_public_browse_sessions) >= _PUBLIC_BROWSE_SESSION_MAX:
-        oldest_key = next(iter(_public_browse_sessions))
-        _public_browse_sessions.pop(oldest_key, None)
-
     session = tidalapi.Session(tidalapi.Config(quality=api_quality))
-    _public_browse_sessions[cache_key] = session
+    with _public_browse_sessions_lock:
+        while len(_public_browse_sessions) >= _PUBLIC_BROWSE_SESSION_MAX:
+            oldest_key = next(iter(_public_browse_sessions))
+            _public_browse_sessions.pop(oldest_key, None)
+        _public_browse_sessions[cache_key] = session
     return session
 
 
@@ -500,10 +507,12 @@ def _clear_stream_cache(
 def _invalidate_user_api(user_id: str):
     """Remove a user's API instance (e.g. on logout)."""
     _user_apis.pop(user_id, None)
-    _user_auth_state.pop(user_id, None)
+    with _user_auth_state_lock:
+        _user_auth_state.pop(user_id, None)
     # Clear all browse sessions for this user (keyed as "user_id:quality")
-    for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
-        _browse_sessions.pop(key, None)
+    with _browse_sessions_lock:
+        for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
+            _browse_sessions.pop(key, None)
     _clear_stream_cache(user_id)
 
 
@@ -539,7 +548,8 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
     lock = _get_user_lock(user_id)
 
     async with lock:
-        creds = _user_auth_state.get(user_id)
+        with _user_auth_state_lock:
+            creds = _user_auth_state.get(user_id)
         if not creds or not creds.get("refresh_token"):
             raise HTTPException(
                 status_code=401,
@@ -567,14 +577,16 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
             await asyncio.to_thread(refreshed_api.get_session)
 
             _user_apis[user_id] = refreshed_api
-            creds["access_token"] = new_access_token
-            creds["tidal_user_id"] = new_user_id
-            creds["country_code"] = new_country
+            with _user_auth_state_lock:
+                creds["access_token"] = new_access_token
+                creds["tidal_user_id"] = new_user_id
+                creds["country_code"] = new_country
 
             # Stream URLs and browse sessions are tied to prior auth state; clear on refresh.
             _clear_stream_cache(user_id)
-            for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
-                _browse_sessions.pop(key, None)
+            with _browse_sessions_lock:
+                for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
+                    _browse_sessions.pop(key, None)
 
             log.info(f"Refreshed TIDAL session for user {user_id}")
             return refreshed_api
@@ -1293,14 +1305,16 @@ def _store_user_session(
 ) -> None:
     """Store a verified per-user API and invalidate stale browse sessions."""
     _user_apis[soundspan_user_id] = api
-    _user_auth_state[soundspan_user_id] = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "tidal_user_id": tidal_user_id,
-        "country_code": country_code,
-    }
-    for key in [key for key in _browse_sessions if key.startswith(f"{soundspan_user_id}:")]:
-        _browse_sessions.pop(key, None)
+    with _user_auth_state_lock:
+        _user_auth_state[soundspan_user_id] = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "tidal_user_id": tidal_user_id,
+            "country_code": country_code,
+        }
+    with _browse_sessions_lock:
+        for key in [key for key in _browse_sessions if key.startswith(f"{soundspan_user_id}:")]:
+            _browse_sessions.pop(key, None)
 
 
 async def _refresh_and_restore_user(
