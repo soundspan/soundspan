@@ -276,6 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audiobooks API, and validated and contained the cover-cache fallback path,
   closing an unauthenticated arbitrary-image read and path traversal; existing
   frontend cover URLs already include `?token=`, so no client change was needed.
+  The endpoint also now uses the shared image rate limiter and defers CORS
+  headers to the app-level origin allowlist instead of reflecting the request
+  origin with credentials.
 - Stopped forwarding raw download-failure text to clients from the playlist
   pending-track retry session log and the notifications download-retry
   response (static messages; raw detail stays in the server log), and widened

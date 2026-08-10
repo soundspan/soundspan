@@ -178,6 +178,27 @@ describe("audiobook cover authorization and path containment", () => {
         });
     });
 
+    it("does not reflect arbitrary request origins on served covers", async () => {
+        const coverBytes = Buffer.from("fallback-cover-bytes");
+        writeCover(
+            path.join(mockMusicPath, "cover-cache", "audiobooks", "book-1.jpg"),
+            coverBytes,
+        );
+
+        const response = await request(buildApp())
+            .get("/api/audiobooks/book-1/cover")
+            .set("x-test-user", "yes")
+            .set("Origin", "https://evil.example");
+
+        expect(response.status).toBe(200);
+        // CORS headers are owned by the app-level cors() allowlist
+        // middleware; the route handler must not reflect the origin itself.
+        expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+        expect(
+            response.headers["access-control-allow-credentials"],
+        ).toBeUndefined();
+    });
+
     it("serves a valid cover from the database path", async () => {
         const coverBytes = Buffer.from("database-cover-bytes");
         const localCoverPath = path.join(mockTempRoot, "db-cover.jpg");

@@ -596,11 +596,12 @@ router.options("/:id/cover", (req, res) => {
 /**
  * GET /audiobooks/:id/cover
  * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
- * NO RATE LIMITING - These are static files served from disk with aggressive caching
+ * Uses the high-volume imageLimiter (matches library/browse image routes)
  */
 router.get<{ id: string }>(
     "/:id/cover",
     requireAuthOrToken,
+    imageLimiter,
     async (req, res) => {
         try {
             const { id } = req.params;
@@ -639,15 +640,14 @@ router.get<{ id: string }>(
                 }
             }
 
-            // If local cover exists, serve it
+            // If local cover exists, serve it. CORS headers come from the
+            // app-level cors() middleware, which enforces the origin
+            // allowlist; do not reflect the request origin here.
             if (coverPath && fs.existsSync(coverPath)) {
-                const origin = req.headers.origin || "http://localhost:3030";
                 res.setHeader(
                     "Cache-Control",
                     "public, max-age=31536000, immutable",
                 );
-                res.setHeader("Access-Control-Allow-Origin", origin);
-                res.setHeader("Access-Control-Allow-Credentials", "true");
                 res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
                 return res.sendFile(coverPath);
             }
@@ -677,8 +677,6 @@ router.get<{ id: string }>(
                         });
 
                         if (response.ok) {
-                            const origin =
-                                req.headers.origin || "http://localhost:3030";
                             res.setHeader(
                                 "Content-Type",
                                 response.headers.get("content-type") ||
@@ -688,14 +686,6 @@ router.get<{ id: string }>(
                                 "Cache-Control",
                                 "public, max-age=86400",
                             ); // 24 hours for proxied
-                            res.setHeader(
-                                "Access-Control-Allow-Origin",
-                                origin,
-                            );
-                            res.setHeader(
-                                "Access-Control-Allow-Credentials",
-                                "true",
-                            );
                             res.setHeader(
                                 "Cross-Origin-Resource-Policy",
                                 "cross-origin",
