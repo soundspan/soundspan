@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import sys
+import threading
 import time
 from base64 import b64decode
 from collections.abc import Callable
@@ -107,6 +108,7 @@ _user_auth_state: dict[str, dict[str, str]] = {}
 
 # ── Stream URL cache (per-user, keyed by (user_id, track_id, quality)) ─────
 _stream_cache: dict[tuple[str, int, str], dict] = {}
+_stream_cache_lock = threading.Lock()
 STREAM_CACHE_TTL = 600  # 10 minutes
 STREAM_QUALITY_OPTIONS = {"LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"}
 
@@ -478,18 +480,19 @@ def _clear_stream_cache(
 ):
     """Clear cached stream URLs for a user, optionally scoped by track/quality."""
     normalized_quality = _normalize_stream_quality(quality) if quality is not None else None
-    keys_to_remove = []
-    for cache_user_id, cache_track_id, cache_quality in _stream_cache:
-        if cache_user_id != user_id:
-            continue
-        if track_id is not None and cache_track_id != track_id:
-            continue
-        if normalized_quality is not None and cache_quality != normalized_quality:
-            continue
-        keys_to_remove.append((cache_user_id, cache_track_id, cache_quality))
+    with _stream_cache_lock:
+        keys_to_remove = []
+        for cache_user_id, cache_track_id, cache_quality in _stream_cache:
+            if cache_user_id != user_id:
+                continue
+            if track_id is not None and cache_track_id != track_id:
+                continue
+            if normalized_quality is not None and cache_quality != normalized_quality:
+                continue
+            keys_to_remove.append((cache_user_id, cache_track_id, cache_quality))
 
-    for key in keys_to_remove:
-        _stream_cache.pop(key, None)
+        for key in keys_to_remove:
+            _stream_cache.pop(key, None)
 
 
 def _invalidate_user_api(user_id: str):
@@ -684,7 +687,8 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
     """
     normalized_quality = _normalize_stream_quality(quality)
     cache_key = (user_id, track_id, normalized_quality)
-    cached = _stream_cache.get(cache_key)
+    with _stream_cache_lock:
+        cached = _stream_cache.get(cache_key)
     if cached and time.time() < cached.get("expires_at", 0):
         return cached
 
@@ -748,16 +752,18 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
         "expires_at": time.time() + STREAM_CACHE_TTL,
     }
 
-    _stream_cache[cache_key] = result
+    with _stream_cache_lock:
+        _stream_cache[cache_key] = result
     return result
 
 
 def _clean_stream_cache():
     """Remove expired entries from the stream cache."""
     now = time.time()
-    expired = [k for k, v in _stream_cache.items() if now >= v.get("expires_at", 0)]
-    for k in expired:
-        _stream_cache.pop(k, None)
+    with _stream_cache_lock:
+        expired = [k for k, v in _stream_cache.items() if now >= v.get("expires_at", 0)]
+        for k in expired:
+            _stream_cache.pop(k, None)
 
 
 # ════════════════════════════════════════════════════════════════════

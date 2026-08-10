@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation (Arrow/Home/End to move focus between visible tracks, Enter/Space
   to explore the focused track) alongside the existing pointer interactions.
 
+### Fixed
+
+- Fixed the tidal-downloader stream-URL cache race where concurrent mutation
+  during invalidation iteration could raise `RuntimeError` and abort
+  stream/refresh requests.
+
 ### Changed
 
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
