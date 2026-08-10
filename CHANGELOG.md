@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sanitized playback-state 500 responses and persisted download-job errors so
   raw failure details remain server-log only, and restricted
   `POST /api/downloads/clear-lidarr-queue` to administrators.
+- Capped batch TIDAL search requests at 50 queries and limited concurrent
+  searches against each shared per-user TIDAL session to 5.
 
 ### Changed
 

@@ -133,6 +133,8 @@ _browse_sessions: dict[str, tidalapi.Session] = {}
 _BROWSE_SESSION_MAX = 50
 _public_browse_sessions: dict[str, tidalapi.Session] = {}
 _PUBLIC_BROWSE_SESSION_MAX = 8
+_BATCH_SEARCH_MAX_QUERIES = 50
+_BATCH_SEARCH_CONCURRENCY = 5
 
 
 def _build_browse_session(user_id: str, quality: str | None = None) -> tidalapi.Session:
@@ -1446,14 +1448,22 @@ async def user_search_batch(
     Batch search — run multiple search queries in one request.
     Used for gap-fill matching (find streaming versions of unowned tracks).
     """
+    if len(queries) > _BATCH_SEARCH_MAX_QUERIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Batch search accepts at most {_BATCH_SEARCH_MAX_QUERIES} queries",
+        )
+
+    semaphore = asyncio.Semaphore(_BATCH_SEARCH_CONCURRENCY)
 
     async def _run_one(q: BatchSearchQuery) -> dict:
         try:
-            results = await _run_user_api_call(
-                user_id,
-                lambda current_api: current_api.get_search(q.query),
-                operation=f"batch search '{q.query}'",
-            )
+            async with semaphore:
+                results = await _run_user_api_call(
+                    user_id,
+                    lambda current_api: current_api.get_search(q.query),
+                    operation=f"batch search '{q.query}'",
+                )
             tracks = [
                 {
                     "id": t.id,
