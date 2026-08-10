@@ -15,6 +15,18 @@ import {
 
 describe("imageProxy", () => {
     const originalFetch = global.fetch;
+    const makeBodyTrackedResponse = (options: {
+        status: number;
+        statusText?: string;
+        headers?: Record<string, string>;
+    }) => {
+        const cancelSpy = jest.fn();
+        const stream = new ReadableStream({ cancel: cancelSpy });
+        return {
+            response: new Response(stream, options),
+            cancelSpy,
+        };
+    };
     const makeImmediateSetTimeout = () =>
         jest.spyOn(global, "setTimeout").mockImplementation((cb) => {
             cb();
@@ -88,9 +100,10 @@ describe("imageProxy", () => {
         });
 
         it("returns not_found for 404 responses", async () => {
-            global.fetch = jest
-                .fn()
-                .mockResolvedValue(new Response(null, { status: 404 })) as any;
+            const { response, cancelSpy } = makeBodyTrackedResponse({
+                status: 404,
+            });
+            global.fetch = jest.fn().mockResolvedValue(response) as any;
 
             const result = await fetchExternalImage({
                 url: "https://example.com/missing.jpg",
@@ -102,6 +115,34 @@ describe("imageProxy", () => {
                 status: "not_found",
                 url: "https://example.com/missing.jpg",
             });
+            expect(cancelSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("cancels redirect bodies before following a safe redirect", async () => {
+            const { response: redirectResponse, cancelSpy } =
+                makeBodyTrackedResponse({
+                    status: 301,
+                    headers: {
+                        location: "http://cdn.example.com/redirected.jpg",
+                    },
+                });
+            global.fetch = jest
+                .fn()
+                .mockResolvedValueOnce(redirectResponse)
+                .mockResolvedValueOnce(
+                    new Response("image-bytes", {
+                        status: 200,
+                        headers: { "content-type": "image/jpeg" },
+                    }),
+                ) as any;
+
+            const result = await fetchExternalImage({
+                url: "https://example.com/cover.jpg",
+                maxRetries: 1,
+            });
+
+            expect(result.ok).toBe(true);
+            expect(cancelSpy).toHaveBeenCalledTimes(1);
         });
 
         it("returns image payload + metadata for success responses", async () => {
@@ -150,12 +191,11 @@ describe("imageProxy", () => {
         });
 
         it("returns fetch_error for non-ok non-404 responses", async () => {
-            global.fetch = jest.fn().mockResolvedValue(
-                new Response("bad", {
-                    status: 400,
-                    statusText: "Bad Request",
-                }),
-            ) as any;
+            const { response, cancelSpy } = makeBodyTrackedResponse({
+                status: 403,
+                statusText: "Forbidden",
+            });
+            global.fetch = jest.fn().mockResolvedValue(response) as any;
 
             const result = await fetchExternalImage({
                 url: "https://example.com/bad.jpg",
@@ -166,20 +206,21 @@ describe("imageProxy", () => {
                 ok: false,
                 status: "fetch_error",
                 url: "https://example.com/bad.jpg",
-                message: "400 Bad Request",
+                message: "403 Forbidden",
             });
+            expect(cancelSpy).toHaveBeenCalledTimes(1);
         });
 
         it("retries on transient 5xx failures and eventually succeeds", async () => {
             makeImmediateSetTimeout();
+            const { response: retryResponse, cancelSpy } =
+                makeBodyTrackedResponse({
+                    status: 500,
+                    statusText: "Server Error",
+                });
             global.fetch = jest
                 .fn()
-                .mockResolvedValueOnce(
-                    new Response("down", {
-                        status: 502,
-                        statusText: "Bad Gateway",
-                    }),
-                )
+                .mockResolvedValueOnce(retryResponse)
                 .mockResolvedValueOnce(
                     new Response("image-bytes", {
                         status: 200,
@@ -193,6 +234,7 @@ describe("imageProxy", () => {
             });
 
             expect(global.fetch).toHaveBeenCalledTimes(2);
+            expect(cancelSpy).toHaveBeenCalledTimes(1);
             expect(result.ok).toBe(true);
             if (result.ok) {
                 expect(result.url).toBe("https://example.com/retry.jpg");

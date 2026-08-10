@@ -214,6 +214,7 @@ export class PodcastCacheService {
             });
 
             if (!response.ok) {
+                await response.body?.cancel().catch(() => {});
                 throw new Error(
                     `HTTP ${response.status}: ${response.statusText}`,
                 );

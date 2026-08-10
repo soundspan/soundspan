@@ -208,6 +208,36 @@ describe("PodcastCacheService", () => {
         expect(fsPromises.writeFile).toHaveBeenCalledTimes(1);
     });
 
+    it("syncAllCovers cancels a non-ok cover response before skipping it", async () => {
+        const service = new PodcastCacheService();
+        const cancel = jest.fn().mockResolvedValue(undefined);
+
+        prisma.podcast.findMany.mockResolvedValueOnce([
+            {
+                id: "pod-error",
+                title: "Server Error",
+                imageUrl: "https://img.example/error.jpg",
+            },
+        ]);
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            statusText: "Server Error",
+            body: { cancel },
+        });
+
+        const result = await service.syncAllCovers();
+
+        expect(result).toEqual({
+            synced: 0,
+            failed: 0,
+            skipped: 1,
+            errors: [],
+        });
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    });
+
     it("syncAllCovers rethrows fatal setup failures", async () => {
         const service = new PodcastCacheService();
         fsPromises.mkdir.mockRejectedValueOnce(new Error("mkdir denied"));

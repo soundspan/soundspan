@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Outbound image fetches (external image proxy and podcast cover cache) now
+  cancel undici response bodies on non-success, redirect, and retry paths so
+  pooled connections are released promptly instead of waiting for GC.
 - TIDAL logout is now authoritative against an in-flight token refresh:
   `/user/auth/clear` serializes with the per-user refresh lock and a refresh
   aborts its re-insert if the session was cleared during its awaited calls, so

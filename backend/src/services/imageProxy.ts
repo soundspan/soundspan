@@ -63,6 +63,7 @@ async function fetchWithSafeRedirects(options: {
         if (!isRedirect || !location) {
             return { response, finalUrl: currentUrl };
         }
+        await response.body?.cancel().catch(() => {});
 
         const redirectedUrl = new URL(location, currentUrl).toString();
         const normalizedRedirect = await resolveSafeOutboundRedirectTarget(
@@ -177,6 +178,7 @@ export async function fetchExternalImage(options: {
             const { response, finalUrl } = redirectResult;
 
             if (response.status === 404) {
+                await response.body?.cancel().catch(() => {});
                 return {
                     ok: false,
                     url: finalUrl,
@@ -185,6 +187,7 @@ export async function fetchExternalImage(options: {
             }
 
             if (!response.ok) {
+                await response.body?.cancel().catch(() => {});
                 const message = `${response.status} ${response.statusText}`;
                 if (response.status >= 500 && attempt < maxRetries) {
                     await new Promise((resolve) =>
