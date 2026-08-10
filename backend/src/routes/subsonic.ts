@@ -3065,12 +3065,13 @@ async function getRootMusicDirectoryChildren(): Promise<
             id: true,
             name: true,
             heroUrl: true,
-            albums: {
-                where: {
-                    location: LIBRARY_LOCATION,
-                },
+            _count: {
                 select: {
-                    id: true,
+                    albums: {
+                        where: {
+                            location: LIBRARY_LOCATION,
+                        },
+                    },
                 },
             },
         },
@@ -3083,7 +3084,7 @@ async function getRootMusicDirectoryChildren(): Promise<
         ...formatArtistForSubsonic({
             id: artist.id,
             name: artist.name,
-            albumCount: artist.albums.length,
+            albumCount: artist._count.albums,
             heroUrl: artist.heroUrl,
         }),
         parent: SUBSONIC_MUSIC_FOLDER_ID,
@@ -5191,6 +5192,55 @@ async function resolveStarMutationTrackIds(input: {
     return Array.from(combinedIds);
 }
 
+async function getPlaylistDurations(
+    playlists: Array<{ id: string; _count: { items: number } }>,
+): Promise<Map<string, number>> {
+    const nonEmptyPlaylists = playlists.filter(
+        (playlist) => playlist._count.items > 0,
+    );
+    const durationRows = await Promise.all(
+        nonEmptyPlaylists.map(async (playlist) => ({
+            playlistId: playlist.id,
+            aggregate: await prisma.track.aggregate({
+                where: {
+                    playlistItems: { some: { playlistId: playlist.id } },
+                },
+                _sum: { duration: true },
+            }),
+        })),
+    );
+    return new Map(
+        durationRows.map(({ playlistId, aggregate }) => [
+            playlistId,
+            aggregate._sum.duration ?? 0,
+        ]),
+    );
+}
+
+async function getPlaylistCoverFlags(
+    playlistIds: string[],
+): Promise<Set<string>> {
+    if (playlistIds.length === 0) {
+        return new Set();
+    }
+    const rows = await prisma.playlistItem.findMany({
+        where: {
+            playlistId: { in: playlistIds },
+            track: {
+                album: {
+                    AND: [
+                        { coverUrl: { not: null } },
+                        { coverUrl: { not: "" } },
+                    ],
+                },
+            },
+        },
+        distinct: ["playlistId"],
+        select: { playlistId: true },
+    });
+    return new Set(rows.map((row) => row.playlistId));
+}
+
 /**
  * Executes handleGetPlaylists.
  */
@@ -5214,54 +5264,31 @@ export async function handleGetPlaylists(
                         items: true,
                     },
                 },
-                items: {
-                    orderBy: {
-                        sort: "asc",
-                    },
-                    select: {
-                        track: {
-                            select: {
-                                duration: true,
-                                album: {
-                                    select: {
-                                        coverUrl: true,
-                                        genres: true,
-                                        userGenres: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
             },
         });
+        const playlistIds = playlists.map((playlist) => playlist.id);
+        const [durations, coverFlags] = await Promise.all([
+            getPlaylistDurations(playlists),
+            getPlaylistCoverFlags(playlistIds),
+        ]);
 
         sendSubsonicSuccess(
             res,
             {
                 playlists: {
-                    playlist: playlists.map((playlist) => {
-                        const duration = playlist.items.reduce(
-                            (sum, item) => sum + (item.track?.duration ?? 0),
-                            0,
-                        );
-                        const hasCover = playlist.items.some((item) =>
-                            Boolean(item.track?.album.coverUrl),
-                        );
-                        return {
-                            id: toSubsonicId("playlist", playlist.id),
-                            name: playlist.name,
-                            songCount: playlist._count.items,
-                            duration,
-                            public: playlist.isPublic,
-                            owner: req.user!.username,
-                            created: playlist.createdAt.toISOString(),
-                            changed: playlist.createdAt.toISOString(),
-                            coverArt: hasCover
-                                ? toSubsonicId("playlist", playlist.id)
-                                : undefined,
-                        };
-                    }),
+                    playlist: playlists.map((playlist) => ({
+                        id: toSubsonicId("playlist", playlist.id),
+                        name: playlist.name,
+                        songCount: playlist._count.items,
+                        duration: durations.get(playlist.id) ?? 0,
+                        public: playlist.isPublic,
+                        owner: req.user!.username,
+                        created: playlist.createdAt.toISOString(),
+                        changed: playlist.createdAt.toISOString(),
+                        coverArt: coverFlags.has(playlist.id)
+                            ? toSubsonicId("playlist", playlist.id)
+                            : undefined,
+                    })),
                 },
             },
             format,
@@ -6382,12 +6409,13 @@ async function buildStarredPayload(userId: string): Promise<{
         }
     }
 
-    const [albums, artists] = await Promise.all([
+    const albumIds = Array.from(albumStarredAt.keys());
+    const [albums, artists, albumTrackStats] = await Promise.all([
         albumStarredAt.size > 0
             ? prisma.album.findMany({
                   where: {
                       id: {
-                          in: Array.from(albumStarredAt.keys()),
+                          in: albumIds,
                       },
                       location: LIBRARY_LOCATION,
                   },
@@ -6402,11 +6430,6 @@ async function buildStarredPayload(userId: string): Promise<{
                           select: {
                               id: true,
                               name: true,
-                          },
-                      },
-                      tracks: {
-                          select: {
-                              duration: true,
                           },
                       },
                   },
@@ -6428,37 +6451,49 @@ async function buildStarredPayload(userId: string): Promise<{
                       id: true,
                       name: true,
                       heroUrl: true,
-                      albums: {
-                          where: {
-                              location: LIBRARY_LOCATION,
-                          },
+                      _count: {
                           select: {
-                              id: true,
+                              albums: {
+                                  where: {
+                                      location: LIBRARY_LOCATION,
+                                  },
+                              },
                           },
                       },
                   },
               })
             : Promise.resolve([]),
+        albumIds.length > 0
+            ? prisma.track.groupBy({
+                  by: ["albumId"],
+                  where: { albumId: { in: albumIds } },
+                  _count: { _all: true },
+                  _sum: { duration: true },
+              })
+            : Promise.resolve([]),
     ]);
+    const albumTrackStatsById = new Map(
+        albumTrackStats.map((row) => [row.albumId, row]),
+    );
 
     const albumEntries = albums
-        .map((album) => ({
-            ...formatAlbumForSubsonic({
-                id: album.id,
-                title: album.title,
-                year: album.year,
-                coverUrl: album.coverUrl,
-                genres: album.genres,
-                userGenres: album.userGenres,
-                artist: album.artist,
-                songCount: album.tracks.length,
-                duration: album.tracks.reduce(
-                    (sum, track) => sum + (track.duration ?? 0),
-                    0,
-                ),
-            }),
-            starred: albumStarredAt.get(album.id)?.toISOString(),
-        }))
+        .map((album) => {
+            const stats = albumTrackStatsById.get(album.id);
+            return {
+                ...formatAlbumForSubsonic({
+                    id: album.id,
+                    title: album.title,
+                    year: album.year,
+                    coverUrl: album.coverUrl,
+                    genres: album.genres,
+                    userGenres: album.userGenres,
+                    artist: album.artist,
+                    songCount: stats?._count._all ?? 0,
+                    duration: stats?._sum.duration ?? 0,
+                }),
+                starred: albumStarredAt.get(album.id)?.toISOString(),
+            };
+        })
         .sort((left, right) =>
             String(right.starred ?? "").localeCompare(
                 String(left.starred ?? ""),
@@ -6470,7 +6505,7 @@ async function buildStarredPayload(userId: string): Promise<{
             ...formatArtistForSubsonic({
                 id: artist.id,
                 name: artist.name,
-                albumCount: artist.albums.length,
+                albumCount: artist._count.albums,
                 heroUrl: artist.heroUrl,
             }),
             starred: artistStarredAt.get(artist.id)?.toISOString(),

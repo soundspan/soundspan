@@ -23,6 +23,8 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         track: {
             findMany: jest.fn(),
+            aggregate: jest.fn(),
+            groupBy: jest.fn(),
         },
         album: {
             findMany: jest.fn(),
@@ -152,6 +154,8 @@ function buildReqWithUser(
 
 describe("subsonic Tier B handlers", () => {
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
+    const mockTrackAggregate = prisma.track.aggregate as jest.Mock;
+    const mockTrackGroupBy = prisma.track.groupBy as jest.Mock;
     const mockAlbumFindMany = prisma.album.findMany as jest.Mock;
     const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
     const mockPlaylistFindMany = prisma.playlist.findMany as jest.Mock;
@@ -184,6 +188,9 @@ describe("subsonic Tier B handlers", () => {
         jest.clearAllMocks();
         resetSubsonicScanStartCooldownForTests();
         mockPlaylistFindMany.mockResolvedValue([]);
+        mockTrackAggregate.mockResolvedValue({ _sum: { duration: null } });
+        mockTrackGroupBy.mockResolvedValue([]);
+        mockPlaylistItemFindMany.mockResolvedValue([]);
         mockPlaylistDelete.mockResolvedValue({});
         mockPlaylistFindFirst.mockResolvedValue(null);
         mockUserFindUnique.mockResolvedValue(null);
@@ -672,7 +679,6 @@ describe("subsonic Tier B handlers", () => {
                     id: "artist-1",
                     name: "Artist One",
                 },
-                tracks: [{ duration: 180 }],
             },
         ]);
         mockArtistFindMany.mockResolvedValue([
@@ -680,7 +686,14 @@ describe("subsonic Tier B handlers", () => {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: "https://example.test/artist.jpg",
-                albums: [{ id: "album-1" }],
+                _count: { albums: 1 },
+            },
+        ]);
+        mockTrackGroupBy.mockResolvedValue([
+            {
+                albumId: "album-1",
+                _count: { _all: 1 },
+                _sum: { duration: 180 },
             },
         ]);
 
@@ -934,28 +947,6 @@ describe("subsonic Tier B handlers", () => {
                 _count: {
                     items: 2,
                 },
-                items: [
-                    {
-                        track: {
-                            duration: 120,
-                            album: {
-                                coverUrl: "https://example.test/cover.jpg",
-                                genres: [],
-                                userGenres: [],
-                            },
-                        },
-                    },
-                    {
-                        track: {
-                            duration: 45,
-                            album: {
-                                coverUrl: null,
-                                genres: [],
-                                userGenres: [],
-                            },
-                        },
-                    },
-                ],
             },
             {
                 id: "playlist-2",
@@ -965,21 +956,38 @@ describe("subsonic Tier B handlers", () => {
                 _count: {
                     items: 0,
                 },
-                items: [],
             },
+        ]);
+        mockTrackAggregate.mockResolvedValue({ _sum: { duration: 165 } });
+        mockPlaylistItemFindMany.mockResolvedValue([
+            { playlistId: "playlist-1" },
         ]);
 
         await handleGetPlaylists(buildReq({}), buildRes());
 
-        expect(mockPlaylistFindMany).toHaveBeenCalledWith({
-            where: {
-                userId: "user-1",
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
-            include: expect.any(Object),
+        const playlistQuery = mockPlaylistFindMany.mock.calls[0][0];
+        expect(playlistQuery).toMatchObject({
+            where: { userId: "user-1" },
+            orderBy: { createdAt: "desc" },
+            include: { _count: { select: { items: true } } },
         });
+        expect(playlistQuery.include).not.toHaveProperty("items");
+        expect(mockTrackAggregate).toHaveBeenCalledTimes(1);
+        expect(mockTrackAggregate).toHaveBeenCalledWith({
+            where: {
+                playlistItems: {
+                    some: { playlistId: "playlist-1" },
+                },
+            },
+            _sum: { duration: true },
+        });
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(1);
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                distinct: ["playlistId"],
+                select: { playlistId: true },
+            }),
+        );
         const playlists = (
             mockSendSuccess.mock.calls[0][1] as {
                 playlists: { playlist: Array<Record<string, unknown>> };

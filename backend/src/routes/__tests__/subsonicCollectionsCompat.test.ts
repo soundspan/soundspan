@@ -35,6 +35,10 @@ jest.mock("../../utils/db", () => ({
         track: {
             findFirst: jest.fn(),
             findMany: jest.fn(),
+            aggregate: jest.fn(),
+        },
+        playlistItem: {
+            findMany: jest.fn(),
         },
     },
 }));
@@ -110,6 +114,8 @@ describe("subsonic collections/core compatibility handlers", () => {
         .findMany as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
     const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
+    const mockTrackAggregate = prisma.track.aggregate as jest.Mock;
+    const mockPlaylistItemFindMany = prisma.playlistItem.findMany as jest.Mock;
     const mockSendError = sendSubsonicError as jest.Mock;
     const mockSendSuccess = sendSubsonicSuccess as jest.Mock;
 
@@ -121,6 +127,8 @@ describe("subsonic collections/core compatibility handlers", () => {
         mockPlaybackStateFindMany.mockResolvedValue([]);
         mockTrackFindMany.mockResolvedValue([]);
         mockTrackFindFirst.mockResolvedValue(null);
+        mockTrackAggregate.mockResolvedValue({ _sum: { duration: null } });
+        mockPlaylistItemFindMany.mockResolvedValue([]);
     });
 
     it("returns protocol ping payload", () => {
@@ -180,39 +188,56 @@ describe("subsonic collections/core compatibility handlers", () => {
                 _count: {
                     items: 2,
                 },
-                items: [
-                    {
-                        track: {
-                            duration: 180,
-                            album: {
-                                coverUrl: null,
-                                genres: null,
-                                userGenres: null,
-                            },
-                        },
-                    },
-                    {
-                        track: {
-                            duration: 120,
-                            album: {
-                                coverUrl: "https://example.test/covers/1.jpg",
-                                genres: null,
-                                userGenres: null,
-                            },
-                        },
-                    },
-                ],
             },
+            {
+                id: "playlist-2",
+                name: "Empty",
+                isPublic: false,
+                createdAt: new Date("2026-01-02T00:00:00.000Z"),
+                _count: {
+                    items: 0,
+                },
+            },
+        ]);
+        mockTrackAggregate.mockResolvedValue({ _sum: { duration: 300 } });
+        mockPlaylistItemFindMany.mockResolvedValue([
+            { playlistId: "playlist-1" },
         ]);
 
         await handleGetPlaylists(buildReq({}), buildRes());
 
-        expect(mockPlaylistFindMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { userId: "user-1" },
-                orderBy: { createdAt: "desc" },
-            }),
-        );
+        const playlistQuery = mockPlaylistFindMany.mock.calls[0][0];
+        expect(playlistQuery).toMatchObject({
+            where: { userId: "user-1" },
+            orderBy: { createdAt: "desc" },
+            include: { _count: { select: { items: true } } },
+        });
+        expect(playlistQuery.include).not.toHaveProperty("items");
+        expect(mockTrackAggregate).toHaveBeenCalledTimes(1);
+        expect(mockTrackAggregate).toHaveBeenCalledWith({
+            where: {
+                playlistItems: {
+                    some: { playlistId: "playlist-1" },
+                },
+            },
+            _sum: { duration: true },
+        });
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(1);
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
+            where: {
+                playlistId: { in: ["playlist-1", "playlist-2"] },
+                track: {
+                    album: {
+                        AND: [
+                            { coverUrl: { not: null } },
+                            { coverUrl: { not: "" } },
+                        ],
+                    },
+                },
+            },
+            distinct: ["playlistId"],
+            select: { playlistId: true },
+        });
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
@@ -226,6 +251,12 @@ describe("subsonic collections/core compatibility handlers", () => {
                             duration: 300,
                             coverArt: "pl-playlist-1",
                         }),
+                        expect.objectContaining({
+                            id: "pl-playlist-2",
+                            songCount: 0,
+                            duration: 0,
+                            coverArt: undefined,
+                        }),
                     ]),
                 }),
             }),
@@ -235,7 +266,16 @@ describe("subsonic collections/core compatibility handlers", () => {
     });
 
     it("returns generic error when getPlaylists query fails", async () => {
-        mockPlaylistFindMany.mockRejectedValueOnce(new Error("boom"));
+        mockPlaylistFindMany.mockResolvedValueOnce([
+            {
+                id: "playlist-1",
+                name: "Road Trip",
+                isPublic: false,
+                createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                _count: { items: 1 },
+            },
+        ]);
+        mockTrackAggregate.mockRejectedValueOnce(new Error("boom"));
 
         await handleGetPlaylists(buildReq({}), buildRes());
 
@@ -243,6 +283,19 @@ describe("subsonic collections/core compatibility handlers", () => {
             expect.anything(),
             0,
             "Failed to fetch playlists",
+            "json",
+            undefined,
+        );
+    });
+
+    it("skips playlist aggregates when no playlists exist", async () => {
+        await handleGetPlaylists(buildReq({}), buildRes());
+
+        expect(mockTrackAggregate).not.toHaveBeenCalled();
+        expect(mockPlaylistItemFindMany).not.toHaveBeenCalled();
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            { playlists: { playlist: [] } },
             "json",
             undefined,
         );

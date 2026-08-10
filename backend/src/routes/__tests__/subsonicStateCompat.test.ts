@@ -31,6 +31,7 @@ jest.mock("../../utils/db", () => ({
         track: {
             findUnique: jest.fn(),
             findMany: jest.fn(),
+            groupBy: jest.fn(),
         },
         album: {
             findMany: jest.fn(),
@@ -123,6 +124,7 @@ describe("subsonic state/admin compatibility handlers", () => {
     const mockBookmarkDeleteMany = bookmarkModel.deleteMany as jest.Mock;
     const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
+    const mockTrackGroupBy = prisma.track.groupBy as jest.Mock;
     const mockAlbumFindMany = prisma.album.findMany as jest.Mock;
     const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
     const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
@@ -142,6 +144,7 @@ describe("subsonic state/admin compatibility handlers", () => {
         mockBookmarkDeleteMany.mockResolvedValue({ count: 0 });
         mockTrackFindUnique.mockResolvedValue(null);
         mockTrackFindMany.mockResolvedValue([]);
+        mockTrackGroupBy.mockResolvedValue([]);
         mockAlbumFindMany.mockResolvedValue([]);
         mockArtistFindMany.mockResolvedValue([]);
         mockLikedTrackFindMany.mockResolvedValue([]);
@@ -648,7 +651,6 @@ describe("subsonic state/admin compatibility handlers", () => {
                     id: "artist-2",
                     name: "Artist Two",
                 },
-                tracks: [{ duration: 210 }],
             },
             {
                 id: "album-1",
@@ -661,7 +663,6 @@ describe("subsonic state/admin compatibility handlers", () => {
                     id: "artist-1",
                     name: "Artist One",
                 },
-                tracks: [{ duration: 180 }],
             },
         ]);
         mockArtistFindMany.mockResolvedValue([
@@ -669,17 +670,47 @@ describe("subsonic state/admin compatibility handlers", () => {
                 id: "artist-2",
                 name: "Artist Two",
                 heroUrl: null,
-                albums: [{ id: "album-2" }],
+                _count: { albums: 1 },
             },
             {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: null,
-                albums: [{ id: "album-1" }],
+                _count: { albums: 1 },
+            },
+        ]);
+        mockTrackGroupBy.mockResolvedValue([
+            {
+                albumId: "album-2",
+                _count: { _all: 2 },
+                _sum: { duration: 420 },
+            },
+            {
+                albumId: "album-1",
+                _count: { _all: 1 },
+                _sum: { duration: 180 },
             },
         ]);
 
         await handleGetStarred2(buildReq({}), buildRes());
+
+        const albumQuery = mockAlbumFindMany.mock.calls[0][0];
+        expect(albumQuery.select).not.toHaveProperty("tracks");
+        const artistQuery = mockArtistFindMany.mock.calls[0][0];
+        expect(artistQuery.select).toMatchObject({
+            _count: {
+                select: {
+                    albums: { where: { location: "LIBRARY" } },
+                },
+            },
+        });
+        expect(artistQuery.select).not.toHaveProperty("albums");
+        expect(mockTrackGroupBy).toHaveBeenCalledWith({
+            by: ["albumId"],
+            where: { albumId: { in: ["album-2", "album-1"] } },
+            _count: { _all: true },
+            _sum: { duration: true },
+        });
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
@@ -696,6 +727,8 @@ describe("subsonic state/admin compatibility handlers", () => {
                     album: [
                         expect.objectContaining({
                             id: "al-album-2",
+                            songCount: 2,
+                            duration: 420,
                         }),
                         expect.objectContaining({
                             id: "al-album-1",

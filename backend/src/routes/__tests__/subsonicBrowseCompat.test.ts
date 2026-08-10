@@ -397,13 +397,13 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "artist-1",
                 name: "Artist One",
                 heroUrl: "https://example.test/artist.jpg",
-                albums: [{ id: "album-1" }, { id: "album-2" }],
+                _count: { albums: 2 },
             },
             {
                 id: "artist-2",
                 name: "Artist Two",
                 heroUrl: null,
-                albums: [{ id: "album-3" }],
+                _count: { albums: 1 },
             },
         ]);
 
@@ -413,6 +413,16 @@ describe("subsonic browse compatibility handlers", () => {
             }),
             buildRes(),
         );
+
+        const artistQuery = mockArtistFindMany.mock.calls[0][0];
+        expect(artistQuery.select).toMatchObject({
+            _count: {
+                select: {
+                    albums: { where: { location: "LIBRARY" } },
+                },
+            },
+        });
+        expect(artistQuery.select).not.toHaveProperty("albums");
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),

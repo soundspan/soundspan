@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Subsonic getPlaylists (and the root directory/starred count paths) no longer
+  hydrate every playlist item/track/album row (or album-id/track-duration rows)
+  just to compute songCount/duration/coverArt — they now use bounded Prisma
+  aggregates; response shapes unchanged.
 - TIDAL stream proxying now handles upstream stream errors after headers are
   sent instead of crashing the entire backend via an uncaught exception; a
   mid-playback sidecar disconnect now ends only that response.
