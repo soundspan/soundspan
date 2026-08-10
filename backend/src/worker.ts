@@ -119,9 +119,7 @@ function startHealthServer() {
     });
 
     healthServer.listen(workerHealthPort, "0.0.0.0", () => {
-        log.debug(
-            `Health server listening on port ${workerHealthPort}`,
-        );
+        log.debug(`Health server listening on port ${workerHealthPort}`);
     });
 }
 

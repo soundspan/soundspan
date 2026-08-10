@@ -187,9 +187,7 @@ describe("organizeSingles worker", () => {
         const { module, logger } = loadOrganizeSingles();
         await module.queueOrganizeSingles();
 
-        expect(logger.debug).toHaveBeenCalledWith(
-            "Organization complete",
-        );
+        expect(logger.debug).toHaveBeenCalledWith("Organization complete");
     });
 
     it("swallows legacy cleanup lookup failures and logs warning", async () => {

@@ -24,9 +24,7 @@ export async function processImageOptimization(
     const jobLog = log.child(`Job ${job.id}`);
     const { imageUrl, coverId, type } = job.data;
 
-    jobLog.debug(
-        `Processing ${type} for cover ${coverId}`,
-    );
+    jobLog.debug(`Processing ${type} for cover ${coverId}`);
 
     await job.progress(0);
 

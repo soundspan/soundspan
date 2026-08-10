@@ -35,10 +35,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            log.debug(
-                "Failed to write migration marker (no soulseek dir)",
-                e,
-            );
+            log.debug("Failed to write migration marker (no soulseek dir)", e);
         }
         return;
     }
@@ -87,10 +84,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            log.debug(
-                "Failed to write migration marker (no audio files)",
-                e,
-            );
+            log.debug("Failed to write migration marker (no audio files)", e);
         }
         return;
     }

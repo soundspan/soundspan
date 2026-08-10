@@ -183,9 +183,7 @@ export async function processScan(
     } = job.data;
 
     jobLog.debug(`\n═══════════════════════════════════════════════`);
-    jobLog.debug(
-        `Starting library scan for user ${userId}`,
-    );
+    jobLog.debug(`Starting library scan for user ${userId}`);
     if (source) {
         jobLog.debug(`Scan source: ${source}`);
     }
@@ -277,10 +275,7 @@ export async function processScan(
                         });
                     }
                 } catch (error) {
-                    jobLog.error(
-                        `  Failed to trigger enrichment:`,
-                        error,
-                    );
+                    jobLog.error(`  Failed to trigger enrichment:`, error);
                 }
             }
 
@@ -365,10 +360,7 @@ export async function processScan(
                         });
                     }
                 } catch (error) {
-                    jobLog.error(
-                        `  Failed to trigger enrichment:`,
-                        error,
-                    );
+                    jobLog.error(`  Failed to trigger enrichment:`, error);
                 }
             }
 
@@ -406,9 +398,7 @@ export async function processScan(
                 await discoverWeeklyService.buildFinalPlaylist(
                     discoveryBatchId,
                 );
-                jobLog.debug(
-                    `Discovery Weekly playlist complete!`,
-                );
+                jobLog.debug(`Discovery Weekly playlist complete!`);
             } catch (error: any) {
                 jobLog.error(
                     ` Failed to build Discovery playlist:`,
@@ -428,9 +418,7 @@ export async function processScan(
                 await spotifyImportService.buildPlaylistAfterScan(
                     spotifyImportJobId,
                 );
-                jobLog.debug(
-                    `Spotify Import playlist complete!`,
-                );
+                jobLog.debug(`Spotify Import playlist complete!`);
             } catch (error: any) {
                 jobLog.error(
                     ` Failed to build Spotify Import playlist:`,
@@ -471,10 +459,7 @@ export async function processScan(
                     `Added ${result.tracksAdded} tracks, updated ${result.tracksUpdated}, removed ${result.tracksRemoved}`,
                 );
             } catch (error) {
-                jobLog.error(
-                    `Failed to send notification:`,
-                    error,
-                );
+                jobLog.error(`Failed to send notification:`, error);
             }
         }
 
@@ -514,15 +499,10 @@ export async function processScan(
                         }
                     }
                 } else {
-                    jobLog.debug(
-                        `No pending tracks to reconcile`,
-                    );
+                    jobLog.debug(`No pending tracks to reconcile`);
                 }
             } catch (error) {
-                jobLog.error(
-                    `Failed to reconcile pending tracks:`,
-                    error,
-                );
+                jobLog.error(`Failed to reconcile pending tracks:`, error);
             }
         }
 
@@ -544,10 +524,7 @@ export async function processScan(
                     );
                 }
             } catch (error) {
-                jobLog.error(
-                    "Discovery Weekly reconciliation failed:",
-                    error,
-                );
+                jobLog.error("Discovery Weekly reconciliation failed:", error);
             }
         }
 
@@ -564,10 +541,7 @@ export async function processScan(
                     );
                 }
             } catch (error) {
-                jobLog.error(
-                    `TrackMapping reconciliation failed:`,
-                    error,
-                );
+                jobLog.error(`TrackMapping reconciliation failed:`, error);
             }
         }
 
@@ -610,10 +584,7 @@ export async function processScan(
                             }
                         })
                         .catch((err) => {
-                            jobLog.error(
-                                `Mood tag enrichment failed:`,
-                                err,
-                            );
+                            jobLog.error(`Mood tag enrichment failed:`, err);
                         });
                 } else {
                     jobLog.debug(
@@ -621,10 +592,7 @@ export async function processScan(
                     );
                 }
             } catch (error) {
-                jobLog.error(
-                    `Failed to check for mood tag enrichment:`,
-                    error,
-                );
+                jobLog.error(`Failed to check for mood tag enrichment:`, error);
             }
         }
 

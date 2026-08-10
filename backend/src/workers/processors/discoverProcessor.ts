@@ -121,9 +121,7 @@ export async function processDiscoverWeekly(
         Math.ceil(DISCOVER_PROCESSOR_LOCK_TTL_MS / 1000),
     );
 
-    jobLog.debug(
-        `Generating Discover Weekly for user ${userId}`,
-    );
+    jobLog.debug(`Generating Discover Weekly for user ${userId}`);
 
     await job.progress(10);
 
@@ -185,10 +183,7 @@ export async function processDiscoverWeekly(
             batchId: result.batchId,
         };
     } catch (error: any) {
-        jobLog.error(
-            `Generation failed with exception:`,
-            error,
-        );
+        jobLog.error(`Generation failed with exception:`, error);
         jobLog.error(`Stack trace:`, error.stack);
 
         // Re-throw so Bull marks the job failed and applies its retry/backoff and

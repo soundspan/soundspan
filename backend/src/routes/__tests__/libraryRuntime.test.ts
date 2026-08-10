@@ -23,14 +23,17 @@ jest.mock("../../middleware/rateLimiter", () => ({
     apiLimiter: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const logger = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+        child: jest.fn(),
+    };
+    logger.child.mockReturnValue(logger);
+    return { logger };
+});
 
 jest.mock("../../utils/db", () => ({
     prisma: {

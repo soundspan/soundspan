@@ -1,11 +1,14 @@
 export {};
 
 const mockLoggerError = jest.fn();
+const mockLogger = {
+    error: (...args: unknown[]) => mockLoggerError(...args),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        error: (...args: unknown[]) => mockLoggerError(...args),
-    },
+    logger: mockLogger,
 }));
 
 describe("asyncHandler", () => {

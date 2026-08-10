@@ -172,9 +172,7 @@ describe("worker entrypoint behavior", () => {
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
             if (
                 logger.info.mock.calls.some(
-                    ([message]) =>
-                        message ===
-                        "Worker runtime initialized",
+                    ([message]) => message === "Worker runtime initialized",
                 )
             ) {
                 return;

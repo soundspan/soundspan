@@ -56,17 +56,12 @@ async function runTrackMappingStalenessCheck(): Promise<void> {
                 await trackMappingService.markStale(mapping.id);
                 markedStale += 1;
             } catch (error) {
-                log.warn(
-                    `Failed to mark stale mapping ${mapping.id}`,
-                    error,
-                );
+                log.warn(`Failed to mark stale mapping ${mapping.id}`, error);
             }
         }
 
         if (markedStale > 0) {
-            log.info(
-                `Marked ${markedStale} stale track mappings`,
-            );
+            log.info(`Marked ${markedStale} stale track mappings`);
         }
     } catch (error) {
         log.error("Staleness check failed", error);
@@ -89,9 +84,7 @@ export function startTrackMappingStalenessWorker(): void {
         stalenessInterval.unref();
     }
     void runTrackMappingStalenessCheck();
-    log.info(
-        `Worker started (intervalMs=${intervalMs})`,
-    );
+    log.info(`Worker started (intervalMs=${intervalMs})`);
 }
 
 /**

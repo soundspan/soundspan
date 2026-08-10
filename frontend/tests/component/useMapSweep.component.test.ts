@@ -60,7 +60,10 @@ const stubLogger = {
     child: () => stubLogger,
 };
 mock.module("@/lib/logger", {
-    namedExports: { frontendLogger: stubLogger },
+    namedExports: {
+        frontendLogger: stubLogger,
+        createFrontendLogger: () => stubLogger,
+    },
 });
 
 const toasts: { success: string[]; warning: string[]; error: string[] } = {

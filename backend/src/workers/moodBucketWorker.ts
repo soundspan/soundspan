@@ -116,10 +116,7 @@ async function processNewlyAnalyzedTracksClaimed(
             return 0;
         }
     } catch (error) {
-        log.error(
-            `Failed to claim ${operationName}; skipping cycle`,
-            error,
-        );
+        log.error(`Failed to claim ${operationName}; skipping cycle`, error);
         return 0;
     }
 

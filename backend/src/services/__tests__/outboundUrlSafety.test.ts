@@ -52,10 +52,7 @@ function lookupAll(hostname: string): Promise<dns.LookupAddress[]> {
     });
 }
 
-function lookupOne(
-    hostname: string,
-    family?: number,
-): Promise<LookupResult> {
+function lookupOne(hostname: string, family?: number): Promise<LookupResult> {
     return new Promise((resolve, reject) => {
         const callback = (
             error: NodeJS.ErrnoException | null,
@@ -149,7 +146,9 @@ describe("outboundUrlSafety", () => {
             async (address) => {
                 mockLookup.mockResolvedValue([{ address, family: 4 }]);
                 expect(
-                    await resolveSafeOutboundUrl("https://reserved.example.com"),
+                    await resolveSafeOutboundUrl(
+                        "https://reserved.example.com",
+                    ),
                 ).toBeNull();
             },
         );
@@ -228,9 +227,7 @@ describe("outboundUrlSafety", () => {
                 { address: "93.184.216.34", family: 4 },
             ]);
             __testHooks.setBaseLookup(
-                createBaseLookup(() => [
-                    { address: "127.0.0.1", family: 4 },
-                ]),
+                createBaseLookup(() => [{ address: "127.0.0.1", family: 4 }]),
             );
             const vettedUrl = await resolveSafeOutboundUrl(
                 `http://rebind.test:${serverPort(localServer)}/`,
@@ -245,9 +242,7 @@ describe("outboundUrlSafety", () => {
         it("passes public connect-time addresses through unchanged", async () => {
             const publicAddress = { address: "93.184.216.34", family: 4 };
             mockLookup.mockResolvedValue([publicAddress]);
-            __testHooks.setBaseLookup(
-                createBaseLookup(() => [publicAddress]),
-            );
+            __testHooks.setBaseLookup(createBaseLookup(() => [publicAddress]));
             await resolveSafeOutboundUrl("https://public.test/");
 
             await expect(lookupAll("public.test")).resolves.toEqual([
@@ -267,9 +262,7 @@ describe("outboundUrlSafety", () => {
                 { address: "93.184.216.34", family: 4 },
             ]);
             __testHooks.setBaseLookup(
-                createBaseLookup(() => [
-                    { address: "127.0.0.1", family: 4 },
-                ]),
+                createBaseLookup(() => [{ address: "127.0.0.1", family: 4 }]),
             );
             await resolveSafeOutboundUrl("https://vetted.test/");
 
@@ -287,9 +280,7 @@ describe("outboundUrlSafety", () => {
                 { address: "93.184.216.34", family: 4 },
             ]);
             __testHooks.setBaseLookup(
-                createBaseLookup(() => [
-                    { address: "127.0.0.1", family: 4 },
-                ]),
+                createBaseLookup(() => [{ address: "127.0.0.1", family: 4 }]),
             );
             await resolveSafeOutboundUrl("https://expiring.test/");
 
@@ -377,12 +368,12 @@ describe("outboundUrlSafety", () => {
             expect(normalizeSafeOutboundUrl(url)).toBe(url);
         });
 
-        it.each([
-            "http://100.64.1.2.example/",
-            "http://198.18.example/",
-        ])("does not parse malformed dotted-quad hostname %s", (url) => {
-            expect(normalizeSafeOutboundUrl(url)).toBe(url);
-        });
+        it.each(["http://100.64.1.2.example/", "http://198.18.example/"])(
+            "does not parse malformed dotted-quad hostname %s",
+            (url) => {
+                expect(normalizeSafeOutboundUrl(url)).toBe(url);
+            },
+        );
 
         it("rejects an ipv4-mapped ipv6 reserved destination", () => {
             expect(

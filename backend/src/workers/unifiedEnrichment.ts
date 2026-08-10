@@ -374,10 +374,7 @@ async function runEnrichmentCycleClaimed(
             return emptyResult;
         }
     } catch (error) {
-        log.error(
-            `Failed to claim ${operationName}; skipping cycle`,
-            error,
-        );
+        log.error(`Failed to claim ${operationName}; skipping cycle`, error);
         return emptyResult;
     }
 
@@ -414,9 +411,7 @@ async function setupControlChannel() {
 
         controlSubscriber.on("message", (channel, message) => {
             if (channel === "enrichment:control") {
-                log.debug(
-                    `Received control message: ${message}`,
-                );
+                log.debug(`Received control message: ${message}`);
 
                 if (message === "pause") {
                     isPaused = true;
@@ -1035,15 +1030,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     });
                     log.debug("Completion notification sent");
                 } catch (error) {
-                    log.error(
-                        "Failed to send completion notification:",
-                        error,
-                    );
+                    log.error("Failed to send completion notification:", error);
                 }
             } else {
-                log.debug(
-                    "Completion notification already sent, skipping",
-                );
+                log.debug("Completion notification already sent, skipping");
             }
         }
     } catch (error) {
@@ -1066,9 +1056,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         error instanceof Error ? error.message : String(error),
                     errorCode: "SYSTEM_ERROR",
                 })
-                .catch((err) =>
-                    log.error("Failed to record failure:", err),
-                );
+                .catch((err) => log.error("Failed to record failure:", err));
         } else {
             log.error(
                 `Circuit breaker triggered - ${consecutiveSystemFailures} consecutive system failures. ` +
@@ -1296,9 +1284,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
                     await new Promise((resolve) => setTimeout(resolve, 200));
                     return track.title;
                 } catch (error: any) {
-                    log.error(
-                        `✗ ${track.title}: ${error?.message || error}`,
-                    );
+                    log.error(`✗ ${track.title}: ${error?.message || error}`);
 
                     // Collect failure for batch reporting
                     currentBatchFailures.tracks.push({
@@ -1544,9 +1530,7 @@ async function executeAudioPhase(): Promise<number> {
     }
 
     if (audioAnalysisCleanupService.isCircuitOpen()) {
-        log.warn(
-            "Audio analysis circuit breaker OPEN - skipping queue",
-        );
+        log.warn("Audio analysis circuit breaker OPEN - skipping queue");
         return 0;
     }
 
@@ -1576,9 +1560,7 @@ async function executePodcastRefreshPhase(): Promise<number> {
 
     if (stalePodcasts.length === 0) return 0;
 
-    log.debug(
-        `Refreshing ${stalePodcasts.length} podcast feeds...`,
-    );
+    log.debug(`Refreshing ${stalePodcasts.length} podcast feeds...`);
 
     const { refreshPodcastFeed } = await import("../routes/podcasts");
     let refreshed = 0;
@@ -1648,9 +1630,7 @@ async function executeVibePhase(): Promise<number> {
 
     const { reset } = await vibeAnalysisCleanupService.cleanupStaleProcessing();
     if (reset > 0) {
-        log.debug(
-            `Cleaned up ${reset} stale vibe processing entries`,
-        );
+        log.debug(`Cleaned up ${reset} stale vibe processing entries`);
     }
 
     const result = await queueVibeEmbeddings();
@@ -1865,9 +1845,7 @@ export async function reRunArtistsOnly(): Promise<{ count: number }> {
 
     const result = await resetArtistsOnly();
 
-    log.debug(
-        "Starting sequential enrichment from artists phase...",
-    );
+    log.debug("Starting sequential enrichment from artists phase...");
     isPaused = false;
     immediateEnrichmentRequested = true;
 
@@ -1889,9 +1867,7 @@ export async function reRunMoodTagsOnly(): Promise<{ count: number }> {
 
     const result = await resetMoodTagsOnly();
 
-    log.debug(
-        "Starting sequential enrichment from mood tags phase...",
-    );
+    log.debug("Starting sequential enrichment from mood tags phase...");
     isPaused = false;
     immediateEnrichmentRequested = true;
 
@@ -1917,9 +1893,7 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
         select: { id: true },
     });
 
-    log.debug(
-        `Found ${tracks.length} tracks pending audio analysis`,
-    );
+    log.debug(`Found ${tracks.length} tracks pending audio analysis`);
 
     const queued = await queueAudioAnalysis();
 

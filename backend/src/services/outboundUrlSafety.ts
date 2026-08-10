@@ -83,9 +83,7 @@ function isBlockedIpv6Hostname(hostname: string): boolean {
 
     if (normalized.startsWith("::ffff:")) {
         const mappedHostname = normalized.slice("::ffff:".length);
-        return isBlockedIpv4Hostname(
-            decodeMappedIpv4Hostname(mappedHostname),
-        );
+        return isBlockedIpv4Hostname(decodeMappedIpv4Hostname(mappedHostname));
     }
 
     return (
@@ -99,9 +97,7 @@ function isBlockedIpv6Hostname(hostname: string): boolean {
  * Returns whether an IP address is denied by the shared outbound SSRF policy.
  */
 export function isBlockedAddress(address: string): boolean {
-    return (
-        isBlockedIpv4Hostname(address) || isBlockedIpv6Hostname(address)
-    );
+    return isBlockedIpv4Hostname(address) || isBlockedIpv6Hostname(address);
 }
 
 function isBlockedHostname(hostname: string): boolean {
@@ -221,8 +217,8 @@ function createBlockedLookupError(hostname: string): NodeJS.ErrnoException {
 
 function hasBlockedLookupResult(result: unknown): boolean {
     if (Array.isArray(result)) {
-        return result.some(
-            (entry: dns.LookupAddress) => isBlockedAddress(entry.address),
+        return result.some((entry: dns.LookupAddress) =>
+            isBlockedAddress(entry.address),
         );
     }
     return typeof result === "string" && isBlockedAddress(result);
@@ -245,7 +241,11 @@ function guardedLookup(hostname: string, ...args: unknown[]): void {
         }
         callback(...callbackArgs);
     };
-    Reflect.apply(delegate, dns, [hostname, ...args.slice(0, -1), guardedCallback]);
+    Reflect.apply(delegate, dns, [
+        hostname,
+        ...args.slice(0, -1),
+        guardedCallback,
+    ]);
 }
 
 function installLookupGuard(): void {

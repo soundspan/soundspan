@@ -35,9 +35,7 @@ export function createIORedisClient(
                 BASE_RETRY_DELAY_MS * Math.pow(2, times - 1),
                 MAX_RETRY_DELAY_MS,
             );
-            log.debug(
-                `Reconnect attempt ${times} – retrying in ${delay}ms`,
-            );
+            log.debug(`Reconnect attempt ${times} – retrying in ${delay}ms`);
             return delay;
         },
 

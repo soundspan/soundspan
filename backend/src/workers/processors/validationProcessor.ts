@@ -31,9 +31,7 @@ export async function processValidation(
 
     await job.progress(100);
 
-    jobLog.debug(
-        `Validation complete: ${result.tracksRemoved} tracks removed`,
-    );
+    jobLog.debug(`Validation complete: ${result.tracksRemoved} tracks removed`);
 
     return result;
 }

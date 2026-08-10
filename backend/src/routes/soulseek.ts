@@ -450,11 +450,7 @@ router.post(
                     filePath: result.filePath,
                 });
             } else {
-                sendRouteError(
-                    res,
-                    404,
-                    result.error || "Download failed",
-                );
+                sendRouteError(res, 404, result.error || "Download failed");
             }
         } catch (error: any) {
             logger.error("Soulseek download error:", error.message);
