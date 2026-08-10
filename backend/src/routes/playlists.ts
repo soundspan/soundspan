@@ -13,6 +13,10 @@ import { resolvePlaylistItemsForUser } from "../services/playlistTrackResolution
 
 const router = Router();
 
+const PLAYLISTS_MAX_LIMIT = 1000;
+const PLAYLISTS_DEFAULT_LIMIT = 500;
+const PLAYLIST_PREVIEW_ITEMS = 12;
+
 router.use(requireAuthOrToken);
 
 const createPlaylistSchema = z.object({
@@ -168,15 +172,37 @@ function unavailablePlaybackForReason(reason: string): {
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 500
+ *           maximum: 1000
+ *         description: Maximum number of playlists to return (clamped to 1000)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of playlists to skip
  *     responses:
  *       200:
- *         description: List of playlists with track counts and ownership info
+ *         description: List of playlists with authoritative track counts, ownership info, and bounded cover-art item previews
  *         content:
  *           application/json:
  *             schema:
  *               type: array
  *               items:
  *                 type: object
+ *                 properties:
+ *                   trackCount:
+ *                     type: integer
+ *                     description: Authoritative count of all items in the playlist
+ *                   items:
+ *                     type: array
+ *                     maxItems: 12
+ *                     description: Bounded cover-art preview; use the playlist detail endpoint for the full item list
  *       401:
  *         description: Not authenticated
  */
@@ -187,6 +213,14 @@ router.get("/", async (req, res) => {
             return res.status(401).json({ error: "Unauthorized" });
         }
         const userId = req.user.id;
+        const { limit: limitParam = "500", offset: offsetParam = "0" } =
+            req.query;
+        const parsedLimit = parseInt(limitParam as string, 10);
+        const limit = Math.min(
+            parsedLimit > 0 ? parsedLimit : PLAYLISTS_DEFAULT_LIMIT,
+            PLAYLISTS_MAX_LIMIT,
+        );
+        const offset = parseInt(offsetParam as string, 10) || 0;
 
         // Get user's hidden playlists
         const hiddenPlaylists = await prisma.hiddenPlaylist.findMany({
@@ -202,52 +236,58 @@ router.get("/", async (req, res) => {
                 OR: [{ userId }, { isPublic: true }],
             },
             orderBy: { createdAt: "desc" },
+            take: limit,
+            skip: offset,
             include: {
                 user: {
                     select: {
                         username: true,
                     },
                 },
+                _count: {
+                    select: {
+                        items: true,
+                    },
+                },
                 items: {
-                    include: {
+                    select: {
+                        id: true,
+                        sort: true,
                         track: {
-                            include: {
+                            select: {
                                 album: {
-                                    include: {
-                                        artist: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                            },
-                                        },
+                                    select: {
+                                        coverUrl: true,
                                     },
                                 },
                             },
                         },
                     },
                     orderBy: { sort: "asc" },
+                    take: PLAYLIST_PREVIEW_ITEMS,
                 },
             },
         });
 
-        const playlistsWithCounts = playlists.map((playlist) => ({
-            ...playlist,
-            trackCount: playlist.items.length,
-            isOwner: playlist.userId === userId,
-            isHidden: hiddenPlaylistIds.has(playlist.id),
-            items: playlist.items.map((item) => ({
-                ...item,
-                track: item.track
-                    ? {
-                          ...item.track,
-                          album: {
-                              ...item.track.album,
-                              coverArt: item.track.album.coverUrl,
-                          },
-                      }
-                    : null,
-            })),
-        }));
+        const playlistsWithCounts = playlists.map((playlist) => {
+            const { _count, ...playlistFields } = playlist;
+            return {
+                ...playlistFields,
+                trackCount: _count.items,
+                isOwner: playlist.userId === userId,
+                isHidden: hiddenPlaylistIds.has(playlist.id),
+                items: playlist.items.map((item) => ({
+                    id: item.id,
+                    track: item.track
+                        ? {
+                              album: {
+                                  coverArt: item.track.album.coverUrl,
+                              },
+                          }
+                        : null,
+                })),
+            };
+        });
 
         // Debug: log shared playlists with user info
         const sharedPlaylists = playlistsWithCounts.filter((p) => !p.isOwner);

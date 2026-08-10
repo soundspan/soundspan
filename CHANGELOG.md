@@ -292,6 +292,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Playlists list endpoint no longer hydrates every track of every visible playlist: it now paginates (limit/offset, clamped) and returns a database-side track count plus a bounded cover-art preview per playlist.
 - **Sidecar event-loop offload for OAuth onboarding and search.** The
   `tidal-downloader` (`/auth/device`, `/auth/token`, `/auth/refresh`, `/search`)
   and `ytmusic-streamer` (`/auth/device-code`, `/auth/device-code/poll`) async

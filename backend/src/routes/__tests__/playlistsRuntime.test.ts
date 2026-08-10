@@ -316,18 +316,29 @@ describe("playlists route runtime", () => {
                 userId: "u1",
                 name: "Mine",
                 user: { username: "owner" },
-                items: [{ id: "i-1" }],
+                _count: { items: 7 },
+                items: [
+                    {
+                        id: "i-1",
+                        sort: 0,
+                        track: {
+                            album: { coverUrl: "/covers/album.jpg" },
+                        },
+                    },
+                    { id: "i-2", sort: 1, track: null },
+                ],
             },
             {
                 id: "pl-2",
                 userId: "u2",
                 name: "Shared",
                 user: { username: "friend" },
+                _count: { items: 0 },
                 items: [],
             },
         ]);
 
-        const req = { user: { id: "u1" } } as any;
+        const req = { user: { id: "u1" }, query: {} } as any;
         const res = createRes();
         await listPlaylists(req, res);
 
@@ -337,7 +348,16 @@ describe("playlists route runtime", () => {
                 id: "pl-1",
                 isOwner: true,
                 isHidden: false,
-                trackCount: 1,
+                trackCount: 7,
+                items: [
+                    {
+                        id: "i-1",
+                        track: {
+                            album: { coverArt: "/covers/album.jpg" },
+                        },
+                    },
+                    { id: "i-2", track: null },
+                ],
             }),
             expect.objectContaining({
                 id: "pl-2",
@@ -346,6 +366,55 @@ describe("playlists route runtime", () => {
                 trackCount: 0,
             }),
         ]);
+        expect(res.body[0]).not.toHaveProperty("_count");
+    });
+
+    it("uses bounded playlist pages and lightweight cover previews by default", async () => {
+        const req = { user: { id: "u1" }, query: {} } as any;
+        const res = createRes();
+
+        await listPlaylists(req, res);
+
+        expect(prisma.playlist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                take: 500,
+                skip: 0,
+                include: {
+                    user: { select: { username: true } },
+                    _count: { select: { items: true } },
+                    items: {
+                        select: {
+                            id: true,
+                            sort: true,
+                            track: {
+                                select: {
+                                    album: { select: { coverUrl: true } },
+                                },
+                            },
+                        },
+                        orderBy: { sort: "asc" },
+                        take: 12,
+                    },
+                },
+            }),
+        );
+    });
+
+    it.each([
+        ["clamps oversized limits", { limit: "99999" }, 1000, 0],
+        ["defaults invalid limits", { limit: "abc" }, 500, 0],
+        ["applies offsets", { offset: "5" }, 500, 5],
+        ["defaults zero limits", { limit: "0" }, 500, 0],
+        ["defaults negative limits", { limit: "-1" }, 500, 0],
+    ])("%s", async (_description, query, take, skip) => {
+        const req = { user: { id: "u1" }, query } as any;
+        const res = createRes();
+
+        await listPlaylists(req, res);
+
+        expect(prisma.playlist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take, skip }),
+        );
     });
 
     it("returns 500 when playlist listing throws", async () => {
