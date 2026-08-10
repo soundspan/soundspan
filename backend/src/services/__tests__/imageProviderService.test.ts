@@ -7,6 +7,14 @@ jest.mock("../../utils/logger", () => ({
     logger,
 }));
 
+const mockConfig = { secretsDbOnly: false };
+jest.mock("../../config", () => ({ config: mockConfig }));
+
+const mockGetSystemSettings = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
+}));
+
 const mockNormalizeQuotes = jest.fn((value: string) => value);
 const mockNormalizeFullwidth = jest.fn((value: string) => value);
 jest.mock("../../utils/stringNormalization", () => ({
@@ -63,6 +71,8 @@ describe("image provider service behavior", () => {
         mockAxiosGet.mockResolvedValue({ data: {} });
         mockAxiosIsAxiosError.mockReturnValue(false);
         lastFmService.getArtistInfo.mockResolvedValue(null);
+        mockConfig.secretsDbOnly = false;
+        mockGetSystemSettings.mockResolvedValue(null);
 
         mockNormalizeQuotes.mockImplementation((value: string) => value);
         mockNormalizeFullwidth.mockImplementation((value: string) => value);
@@ -166,6 +176,66 @@ describe("image provider service behavior", () => {
             service.getArtistImage("No Key Artist", "mbid"),
         ).resolves.toBeNull();
         expect(fanartSpy).not.toHaveBeenCalled();
+    });
+
+    it("uses the env Fanart key when DB-only mode is off", async () => {
+        process.env.FANART_API_KEY = "env-key-456";
+        const service = new ImageProviderService();
+        jest.spyOn(
+            service as any,
+            "getArtistImageFromDeezer",
+        ).mockResolvedValue(null);
+        mockAxiosGet.mockResolvedValueOnce({
+            data: {
+                artistthumb: [{ url: "https://fanart/env-artist.jpg" }],
+            },
+        });
+
+        await expect(
+            service.getArtistImage("Env Artist", "env-mbid"),
+        ).resolves.toEqual({
+            url: "https://fanart/env-artist.jpg",
+            source: "fanart",
+        });
+        expect(mockGetSystemSettings).not.toHaveBeenCalled();
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://webservice.fanart.tv/v3/music/env-mbid",
+            expect.objectContaining({
+                params: { api_key: "env-key-456" },
+            }),
+        );
+    });
+
+    it("resolves the stored Fanart key in DB-only mode", async () => {
+        process.env.FANART_API_KEY = "env-key-456";
+        mockConfig.secretsDbOnly = true;
+        mockGetSystemSettings.mockResolvedValue({
+            fanartEnabled: true,
+            fanartApiKey: "db-key-123",
+        });
+        const service = new ImageProviderService();
+        jest.spyOn(
+            service as any,
+            "getArtistImageFromDeezer",
+        ).mockResolvedValue(null);
+        mockAxiosGet.mockResolvedValueOnce({
+            data: {
+                artistthumb: [{ url: "https://fanart/db-artist.jpg" }],
+            },
+        });
+
+        await expect(
+            service.getArtistImage("DB Artist", "db-mbid"),
+        ).resolves.toEqual({
+            url: "https://fanart/db-artist.jpg",
+            source: "fanart",
+        });
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://webservice.fanart.tv/v3/music/db-mbid",
+            expect.objectContaining({
+                params: { api_key: "db-key-123" },
+            }),
+        );
     });
 
     it("resolves album covers with Deezer-first ordering and fallbacks", async () => {

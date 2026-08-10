@@ -4,6 +4,7 @@ import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
+import { assertSecretsDbOnlyReady } from "./utils/systemSettings";
 
 const log = logger.child("WorkerStartup");
 
@@ -202,6 +203,10 @@ async function checkRedisConnection() {
 async function startWorkerRuntime() {
     await checkPostgresConnection();
     await checkRedisConnection();
+    await assertSecretsDbOnlyReady().catch((error) => {
+        log.error(String(error?.message ?? error));
+        process.exit(1);
+    });
     await dependencyReadiness.probe(true);
 
     log.info(

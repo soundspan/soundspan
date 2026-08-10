@@ -3,6 +3,10 @@ import crypto from "crypto";
 import fs from "fs";
 import { logger } from "./logger";
 import path from "path";
+import {
+    DB_ONLY_SECRET_ENV_KEYS,
+    isSecretsDbOnlyEnabled,
+} from "../config/secretsPolicy";
 
 const log = logger.child("EnvWriter");
 
@@ -102,6 +106,7 @@ export async function writeEnvFile(
     variables: Record<string, string | null | undefined>,
 ): Promise<void> {
     const envPath = resolveEnvPath();
+    const secretsDbOnly = isSecretsDbOnlyEnabled();
     const skipReason = shouldSkipEnvSync(envPath);
     if (skipReason) {
         log.debug(`Skipping .env sync: ${skipReason}`);
@@ -134,8 +139,22 @@ export async function writeEnvFile(
         existingVars.delete(key);
     });
 
+    if (secretsDbOnly) {
+        DB_ONLY_SECRET_ENV_KEYS.forEach((key) => {
+            existingVars.delete(key);
+        });
+    }
+
     // Update with new values
     Object.entries(variables).forEach(([key, value]) => {
+        if (
+            secretsDbOnly &&
+            DB_ONLY_SECRET_ENV_KEYS.includes(
+                key as (typeof DB_ONLY_SECRET_ENV_KEYS)[number],
+            )
+        ) {
+            return;
+        }
         if (value !== null && value !== undefined) {
             existingVars.set(key, value);
         }

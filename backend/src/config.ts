@@ -10,9 +10,12 @@ import {
     parseEnvFloat,
     parseEnvInt,
 } from "./utils/envParsers";
+import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
+
+const secretsDbOnly = isSecretsDbOnlyEnabled();
 
 // Lenient positive-int env read with a numeric fallback (matches the historical
 // `Number.parseInt(value || `${fallback}`, 10)` then `>0 ? : fallback` idiom).
@@ -129,6 +132,11 @@ export const config = {
         process.env.SETTINGS_DECRYPT_FAIL_CLOSED,
     ),
 
+    // Integration secrets remain env-fallback compatible by default. When
+    // true, reads are DB-only, envWriter omits those keys, and startup asserts
+    // the settings layer is readable; see docs/ENVIRONMENT_VARIABLES.md.
+    secretsDbOnly,
+
     // Session cookie `secure` flag. Defaults to true in production (cookies
     // should only travel over HTTPS); HTTP-only local-network deploys must set
     // SECURE_COOKIES=false explicitly. An explicit SECURE_COOKIES is honored in
@@ -196,24 +204,24 @@ export const config = {
     lidarr: isEnvFlagEnabled(process.env.LIDARR_ENABLED)
         ? {
               url: process.env.LIDARR_URL!,
-              apiKey: process.env.LIDARR_API_KEY!,
+              apiKey: secretsDbOnly ? "" : process.env.LIDARR_API_KEY!,
               enabled: true,
           }
         : undefined,
 
     // Last.fm - operator-provided via env or system settings
     lastfm: {
-        apiKey: process.env.LASTFM_API_KEY || "",
+        apiKey: secretsDbOnly ? "" : process.env.LASTFM_API_KEY || "",
     },
 
     // OpenAI - reads from database
     openai: {
-        apiKey: process.env.OPENAI_API_KEY || "", // Fallback to DB
+        apiKey: secretsDbOnly ? "" : process.env.OPENAI_API_KEY || "", // Fallback to DB
     },
 
     // Deezer - reads from database
     deezer: {
-        apiKey: process.env.DEEZER_API_KEY || "", // Fallback to DB
+        apiKey: secretsDbOnly ? "" : process.env.DEEZER_API_KEY || "", // Fallback to DB
     },
 
     discover: {
@@ -305,6 +313,7 @@ export const config = {
     },
 
     get audiobookshelf(): { url: string; apiKey: string } | undefined {
+        if (secretsDbOnly) return undefined;
         const url = process.env.AUDIOBOOKSHELF_URL;
         const apiKey = process.env.AUDIOBOOKSHELF_API_KEY;
         return url && apiKey ? { url, apiKey } : undefined;

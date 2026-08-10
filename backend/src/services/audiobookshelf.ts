@@ -50,8 +50,19 @@ class AudiobookshelfService {
             if (error.message === "Audiobookshelf is disabled in settings") {
                 throw error;
             }
+            if (config.secretsDbOnly) {
+                throw new Error(
+                    "SECRETS_DB_ONLY: system settings unreadable; Audiobookshelf credentials unavailable (no .env fallback)",
+                );
+            }
             logger.debug(
                 "  Could not load Audiobookshelf from database, checking .env",
+            );
+        }
+
+        if (config.secretsDbOnly) {
+            throw new Error(
+                "SECRETS_DB_ONLY requires Audiobookshelf credentials in system settings",
             );
         }
 

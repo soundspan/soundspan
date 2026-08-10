@@ -102,7 +102,9 @@ class LidarrService {
         // Initial check from .env (for backwards compatibility)
         this.enabled = config.lidarr?.enabled || false;
 
-        if (this.enabled && config.lidarr) {
+        // Under SECRETS_DB_ONLY the env-sourced apiKey is blanked at the
+        // config boundary, so no env-based client is constructed.
+        if (this.enabled && config.lidarr && !config.secretsDbOnly) {
             this.client = axios.create({
                 baseURL: config.lidarr.url,
                 timeout: 30000,
@@ -135,20 +137,39 @@ class LidarrService {
                     });
                     this.enabled = true;
                 } else {
-                    logger.warn("  Lidarr enabled but missing URL or API key");
+                    logger.warn(
+                        config.secretsDbOnly
+                            ? "SECRETS_DB_ONLY: Lidarr enabled but missing URL or API key in system settings"
+                            : "  Lidarr enabled but missing URL or API key",
+                    );
                     this.enabled = false;
+                    this.client = null;
                 }
-            } else if (config.lidarr) {
+            } else if (config.lidarr && !config.secretsDbOnly) {
                 // Fallback to .env
                 logger.debug("Lidarr configured from .env");
                 this.enabled = true;
+            } else if (config.secretsDbOnly) {
+                logger.debug(
+                    "SECRETS_DB_ONLY: Lidarr is not configured in system settings (no .env fallback)",
+                );
+                this.enabled = false;
+                this.client = null;
             } else {
                 logger.debug("  Lidarr not enabled");
                 this.enabled = false;
             }
         } catch (error) {
-            logger.error("Failed to load Lidarr settings:", error);
-            // Keep .env config if database fails
+            if (config.secretsDbOnly) {
+                logger.error(
+                    "SECRETS_DB_ONLY: system settings unreadable; Lidarr disabled (no .env fallback)",
+                );
+                this.enabled = false;
+                this.client = null;
+            } else {
+                logger.error("Failed to load Lidarr settings:", error);
+                // Keep .env config if database fails
+            }
         }
 
         this.initialized = true;

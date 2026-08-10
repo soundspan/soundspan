@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- With `SECRETS_DB_ONLY=true`, decrypted integration API keys are no longer written to the on-disk `.env` file by the settings sync, reducing plaintext secret exposure on the host filesystem. The flag is off by default; enabling it requires the database to be initialized and readable before backend/worker services start.
 - Audiobook cover sync/download now routes Audiobookshelf cover paths through
   the shared cover-path allowlist, so a traversal-bearing item id can no longer
   pivot the admin-token fetch onto arbitrary ABS API paths.
 
 ### Added
 
+- Added an opt-in `SECRETS_DB_ONLY` flag (default `false`). When enabled, integration secrets (Last.fm, Fanart.tv, Lidarr, OpenAI, Deezer, Audiobookshelf API keys) are read exclusively from encrypted system settings — the `.env` fallback for those keys is ignored and the settings-driven `.env` sync omits them. Startup fails fast if the settings layer is not readable before services start. Default behavior is unchanged.
 - Added repo-wide Prettier and EditorConfig conventions, applied through
   mechanical per-package formatting commits. The six formatting-only commits
   are excluded from blame through `.git-blame-ignore-revs`.

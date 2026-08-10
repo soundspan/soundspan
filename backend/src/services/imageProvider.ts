@@ -15,6 +15,8 @@ import {
     normalizeFullwidth,
     normalizeQuotes,
 } from "../utils/stringNormalization";
+import { config } from "../config";
+import { getSystemSettings } from "../utils/systemSettings";
 
 export interface ImageSearchOptions {
     preferredSize?: "small" | "medium" | "large" | "extralarge" | "mega";
@@ -34,9 +36,35 @@ export class ImageProviderService {
     private readonly FANART_API_KEY = process.env.FANART_API_KEY;
     private readonly DEEZER_API_URL = "https://api.deezer.com";
     private readonly FANART_API_URL = "https://webservice.fanart.tv/v3";
+    private fanartSettingsWarningShown = false;
 
     private normalizeLookupValue(value: string): string {
         return normalizeFullwidth(normalizeQuotes(value));
+    }
+
+    private async resolveFanartApiKey(): Promise<string | undefined> {
+        if (!config.secretsDbOnly) {
+            return this.FANART_API_KEY;
+        }
+
+        try {
+            const settings = await getSystemSettings();
+            if (settings?.fanartEnabled && settings?.fanartApiKey) {
+                return settings.fanartApiKey;
+            }
+            this.warnFanartKeyUnavailable("key unavailable in system settings");
+        } catch {
+            this.warnFanartKeyUnavailable("system settings unreadable");
+        }
+        return undefined;
+    }
+
+    private warnFanartKeyUnavailable(reason: string): void {
+        if (this.fanartSettingsWarningShown) {
+            return;
+        }
+        logger.warn(`SECRETS_DB_ONLY: Fanart.tv ${reason} (no .env fallback)`);
+        this.fanartSettingsWarningShown = true;
     }
 
     /**
@@ -70,7 +98,7 @@ export class ImageProviderService {
         }
 
         // Try Fanart.tv if we have API key and MBID
-        if (this.FANART_API_KEY && mbid) {
+        if ((await this.resolveFanartApiKey()) && mbid) {
             try {
                 const fanartImage = await this.getArtistImageFromFanart(
                     mbid,
@@ -168,7 +196,7 @@ export class ImageProviderService {
         }
 
         // Try Fanart.tv if we have API key and MBID
-        if (this.FANART_API_KEY && rgMbid) {
+        if ((await this.resolveFanartApiKey()) && rgMbid) {
             try {
                 const fanartCover = await this.getAlbumCoverFromFanart(
                     rgMbid,
@@ -252,13 +280,14 @@ export class ImageProviderService {
         mbid: string,
         timeout: number,
     ): Promise<ImageResult | null> {
-        if (!this.FANART_API_KEY) {
+        const fanartApiKey = await this.resolveFanartApiKey();
+        if (!fanartApiKey) {
             return null;
         }
 
         const response = await rateLimiter.execute("fanart", () =>
             axios.get(`${this.FANART_API_URL}/music/${mbid}`, {
-                params: { api_key: this.FANART_API_KEY },
+                params: { api_key: fanartApiKey },
                 timeout,
             }),
         );
@@ -285,13 +314,14 @@ export class ImageProviderService {
         rgMbid: string,
         timeout: number,
     ): Promise<ImageResult | null> {
-        if (!this.FANART_API_KEY) {
+        const fanartApiKey = await this.resolveFanartApiKey();
+        if (!fanartApiKey) {
             return null;
         }
 
         const response = await rateLimiter.execute("fanart", () =>
             axios.get(`${this.FANART_API_URL}/music/albums/${rgMbid}`, {
-                params: { api_key: this.FANART_API_KEY },
+                params: { api_key: fanartApiKey },
                 timeout,
             }),
         );

@@ -3432,8 +3432,9 @@ router.get<{ id?: string }>(
                     "";
                 const audiobookshelfApiKey =
                     settings?.audiobookshelfApiKey ||
-                    process.env.AUDIOBOOKSHELF_API_KEY ||
-                    "";
+                    (config.secretsDbOnly
+                        ? ""
+                        : process.env.AUDIOBOOKSHELF_API_KEY || "");
                 const audiobookshelfBaseUrl = audiobookshelfUrl.replace(
                     /\/$/,
                     "",
@@ -3662,8 +3663,9 @@ router.get<{ id?: string }>(
                     "";
                 const audiobookshelfApiKey =
                     settings?.audiobookshelfApiKey ||
-                    process.env.AUDIOBOOKSHELF_API_KEY ||
-                    "";
+                    (config.secretsDbOnly
+                        ? ""
+                        : process.env.AUDIOBOOKSHELF_API_KEY || "");
                 const audiobookshelfBaseUrl = audiobookshelfUrl.replace(
                     /\/$/,
                     "",

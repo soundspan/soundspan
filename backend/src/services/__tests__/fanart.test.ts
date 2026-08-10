@@ -13,14 +13,18 @@ jest.mock("axios", () => ({
 
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
+const mockLoggerWarn = jest.fn();
 jest.mock("../../utils/logger", () => ({
     logger: {
         debug: (...args: unknown[]) => mockLoggerDebug(...args),
         info: jest.fn(),
-        warn: jest.fn(),
+        warn: (...args: unknown[]) => mockLoggerWarn(...args),
         error: (...args: unknown[]) => mockLoggerError(...args),
     },
 }));
+
+const mockConfig = { secretsDbOnly: false };
+jest.mock("../../config", () => ({ config: mockConfig }));
 
 const redisClient = {
     isOpen: false,
@@ -54,6 +58,7 @@ describe("fanart service", () => {
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
         mockGetSystemSettings.mockResolvedValue(null);
+        mockConfig.secretsDbOnly = false;
 
         const service = fanartService as any;
         service.initialized = false;
@@ -113,6 +118,17 @@ describe("fanart service", () => {
             7 * 24 * 60 * 60,
             "https://assets.fanart.tv/fanart/music/mbid-bg/artistbackground/background-file.jpg",
         );
+    });
+
+    it("ignores the env key when DB-only mode has no stored key", async () => {
+        mockConfig.secretsDbOnly = true;
+        process.env.FANART_API_KEY = "env-key-456";
+        mockGetSystemSettings.mockResolvedValueOnce(null);
+
+        await expect(
+            fanartService.getArtistImage("mbid-db-only"),
+        ).resolves.toBeNull();
+        expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 
     it("falls back from artistthumb to hdmusiclogo", async () => {

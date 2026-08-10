@@ -120,6 +120,45 @@ describe("config module", () => {
         ]);
     });
 
+    it("retains integration secret env fallbacks by default", async () => {
+        const { config } = await loadConfigModule({
+            SECRETS_DB_ONLY: undefined,
+            LASTFM_API_KEY: "env-key-456",
+            AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
+            AUDIOBOOKSHELF_API_KEY: "env-abs-key-456",
+        });
+
+        expect(config.secretsDbOnly).toBe(false);
+        expect(config.lastfm.apiKey).toBe("env-key-456");
+        expect(config.audiobookshelf).toEqual({
+            url: "http://audiobookshelf:13378",
+            apiKey: "env-abs-key-456",
+        });
+    });
+
+    it("blanks integration secret env values in DB-only mode", async () => {
+        const { config } = await loadConfigModule({
+            SECRETS_DB_ONLY: "true",
+            LASTFM_API_KEY: "env-lastfm-key-456",
+            OPENAI_API_KEY: "env-openai-key-456",
+            DEEZER_API_KEY: "env-deezer-key-456",
+            AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
+            AUDIOBOOKSHELF_API_KEY: "env-abs-key-456",
+            LIDARR_ENABLED: "true",
+            LIDARR_URL: "http://lidarr:8686",
+            // Deliberately low-entropy synthetic fixture (gitleaks-safe).
+            LIDARR_API_KEY: "env-lidarr-fixture",
+        });
+
+        expect(config.secretsDbOnly).toBe(true);
+        expect(config.lastfm.apiKey).toBe("");
+        expect(config.openai.apiKey).toBe("");
+        expect(config.deezer.apiKey).toBe("");
+        expect(config.audiobookshelf).toBeUndefined();
+        expect(config.lidarr?.apiKey).toBe("");
+        expect(config.lidarr?.url).toBe("http://lidarr:8686");
+    });
+
     it("uses allowedOrigins fallbacks for development and production", async () => {
         const devModule = await loadConfigModule({
             NODE_ENV: "development",

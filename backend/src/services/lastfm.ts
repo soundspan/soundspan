@@ -36,7 +36,7 @@ class LastFmService {
         if (this.initialized) return;
 
         // Priority: 1) User settings from DB, 2) env var, 3) disabled
-        this.apiKey = this.envApiKey;
+        this.apiKey = config.secretsDbOnly ? "" : this.envApiKey;
         try {
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
@@ -46,15 +46,23 @@ class LastFmService {
                 logger.debug("Last.fm configured from user settings");
             } else if (this.apiKey) {
                 logger.debug("Last.fm configured from env");
+            } else if (config.secretsDbOnly) {
+                logger.warn(
+                    "SECRETS_DB_ONLY: Last.fm key unavailable in system settings (no .env fallback)",
+                );
             }
         } catch (err) {
             // DB not ready yet, use env key when provided
-            if (this.apiKey) {
+            if (config.secretsDbOnly) {
+                logger.warn(
+                    "SECRETS_DB_ONLY: system settings unreadable; Last.fm key unavailable (no .env fallback)",
+                );
+            } else if (this.apiKey) {
                 logger.debug("Last.fm configured from env");
             }
         }
 
-        if (!this.apiKey) {
+        if (!this.apiKey && !config.secretsDbOnly) {
             logger.warn("Last.fm API key not available");
         }
 

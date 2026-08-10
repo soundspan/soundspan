@@ -4,6 +4,8 @@ const mockFindUnique = jest.fn();
 const mockDecrypt = jest.fn();
 const mockEncryptField = jest.fn();
 const mockLoggerWarn = jest.fn();
+const mockLoggerError = jest.fn();
+const mockIsSecretsDbOnlyEnabled = jest.fn();
 
 jest.mock("../db", () => ({
     prisma: {
@@ -22,7 +24,12 @@ jest.mock("../encryption", () => ({
 jest.mock("../logger", () => ({
     logger: {
         warn: (...args: unknown[]) => mockLoggerWarn(...args),
+        error: (...args: unknown[]) => mockLoggerError(...args),
     },
+}));
+
+jest.mock("../../config/secretsPolicy", () => ({
+    isSecretsDbOnlyEnabled: () => mockIsSecretsDbOnlyEnabled(),
 }));
 
 function makeSettings(overrides: Record<string, unknown> = {}) {
@@ -46,6 +53,7 @@ describe("systemSettings utilities", () => {
         jest.clearAllMocks();
         mockDecrypt.mockImplementation((value: string) => `dec:${value}`);
         mockEncryptField.mockImplementation((value: unknown) => `enc:${value}`);
+        mockIsSecretsDbOnlyEnabled.mockReturnValue(false);
     });
 
     async function loadModule() {
@@ -150,5 +158,37 @@ describe("systemSettings utilities", () => {
 
         expect(encryptField("abc")).toBe("enc:abc");
         expect(mockEncryptField).toHaveBeenCalledWith("abc");
+    });
+
+    it("skips the settings readiness read when DB-only mode is off", async () => {
+        const { assertSecretsDbOnlyReady } = await loadModule();
+
+        await expect(assertSecretsDbOnlyReady()).resolves.toBeUndefined();
+        expect(mockFindUnique).not.toHaveBeenCalled();
+    });
+
+    it("accepts an absent settings row in DB-only mode", async () => {
+        mockIsSecretsDbOnlyEnabled.mockReturnValue(true);
+        mockFindUnique.mockResolvedValueOnce(null);
+        const { assertSecretsDbOnlyReady } = await loadModule();
+
+        await expect(assertSecretsDbOnlyReady()).resolves.toBeUndefined();
+        expect(mockFindUnique).toHaveBeenCalledWith({
+            where: { id: "default" },
+        });
+    });
+
+    it("fails with a clean message when DB-only settings are unreadable", async () => {
+        mockIsSecretsDbOnlyEnabled.mockReturnValue(true);
+        const underlying = new Error("postgresql://user:password@db/soundspan");
+        mockFindUnique.mockRejectedValueOnce(underlying);
+        const { assertSecretsDbOnlyReady } = await loadModule();
+
+        await expect(assertSecretsDbOnlyReady()).rejects.toThrow(
+            "SECRETS_DB_ONLY=true but system settings are not readable; the database/settings layer must be initialized before services start",
+        );
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            "SECRETS_DB_ONLY readiness check failed",
+        );
     });
 });

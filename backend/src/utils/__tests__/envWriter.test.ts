@@ -36,6 +36,7 @@ describe("envWriter", () => {
         delete process.env.ENABLE_ENV_FILE_SYNC;
         delete process.env.KUBERNETES_SERVICE_HOST;
         delete process.env.ENV_FILE_PATH;
+        delete process.env.SECRETS_DB_ONLY;
     });
 
     afterAll(() => {
@@ -132,6 +133,66 @@ describe("envWriter", () => {
         expect(written).toContain("PORT=3006");
         expect(written).toContain("# Other Variables");
         expect(written).toContain("EXTERNAL_API_URL=https://api.example");
+    });
+
+    it("writes integration secret keys when DB-only mode is off", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        mockReadFileSync.mockImplementation(() => {
+            throw new Error("ENOENT");
+        });
+
+        await writeEnvFile({
+            FANART_API_KEY: "env-key-456",
+            OPENAI_API_KEY: "env-openai-key-456",
+        });
+
+        const written = String(mockWriteFileSync.mock.calls[0][1]);
+        expect(written).toContain("FANART_API_KEY=env-key-456");
+        expect(written).toContain("OPENAI_API_KEY=env-openai-key-456");
+    });
+
+    it("omits incoming integration secret keys in DB-only mode", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        process.env.SECRETS_DB_ONLY = "true";
+        mockReadFileSync.mockImplementation(() => {
+            throw new Error("ENOENT");
+        });
+
+        await writeEnvFile({
+            FANART_API_KEY: "env-key-456",
+            OPENAI_API_KEY: "env-openai-key-456",
+            DATABASE_URL: "postgresql://db/soundspan",
+        });
+
+        const written = String(mockWriteFileSync.mock.calls[0][1]);
+        expect(written).not.toContain("FANART_API_KEY=");
+        expect(written).not.toContain("OPENAI_API_KEY=");
+        expect(written).toContain("DATABASE_URL=postgresql://db/soundspan");
+    });
+
+    it("drops existing integration secrets but preserves URLs and database config in DB-only mode", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        process.env.SECRETS_DB_ONLY = "true";
+        mockReadFileSync.mockReturnValue(
+            [
+                "FANART_API_KEY=old-fanart-key-456",
+                "AUDIOBOOKSHELF_API_KEY=old-abs-key-456",
+                "AUDIOBOOKSHELF_URL=http://audiobookshelf:13378",
+                "LIDARR_URL=http://lidarr:8686",
+                "DATABASE_URL=postgresql://db/soundspan",
+            ].join("\n"),
+        );
+
+        await writeEnvFile({});
+
+        const written = String(mockWriteFileSync.mock.calls[0][1]);
+        expect(written).not.toContain("FANART_API_KEY=");
+        expect(written).not.toContain("AUDIOBOOKSHELF_API_KEY=");
+        expect(written).toContain(
+            "AUDIOBOOKSHELF_URL=http://audiobookshelf:13378",
+        );
+        expect(written).toContain("LIDARR_URL=http://lidarr:8686");
+        expect(written).toContain("DATABASE_URL=postgresql://db/soundspan");
     });
 
     it("parses existing values, preserves uncategorized keys, and updates non-null values", async () => {

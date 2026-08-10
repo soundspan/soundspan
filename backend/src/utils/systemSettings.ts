@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { logger } from "./logger";
 import { encrypt, decrypt, encryptField } from "./encryption";
+import { isSecretsDbOnlyEnabled } from "../config/secretsPolicy";
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -88,4 +89,20 @@ export async function getSystemSettings(forceRefresh = false) {
     cachedSettings = decrypted;
     cacheExpiry = now + CACHE_TTL_MS;
     return { ...decrypted };
+}
+
+/** Under SECRETS_DB_ONLY, verifies the settings layer is readable before services start. */
+export async function assertSecretsDbOnlyReady(): Promise<void> {
+    if (!isSecretsDbOnlyEnabled()) {
+        return;
+    }
+
+    try {
+        await getSystemSettings(true);
+    } catch {
+        logger.error("SECRETS_DB_ONLY readiness check failed");
+        throw new Error(
+            "SECRETS_DB_ONLY=true but system settings are not readable; the database/settings layer must be initialized before services start",
+        );
+    }
 }

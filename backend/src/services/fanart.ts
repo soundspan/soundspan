@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { getSystemSettings } from "../utils/systemSettings";
 import { BRAND_USER_AGENT } from "../config/brand";
+import { config } from "../config";
 
 /**
  * Fanart.tv API Service
@@ -45,7 +46,25 @@ class FanartService {
                 return;
             }
         } catch (error) {
+            if (config.secretsDbOnly) {
+                logger.warn(
+                    "SECRETS_DB_ONLY: system settings unreadable; Fanart.tv key unavailable (no .env fallback)",
+                );
+                this.initialized = true;
+                return;
+            }
             // Silently continue to check .env
+        }
+
+        if (config.secretsDbOnly) {
+            if (!this.noKeyWarningShown) {
+                logger.warn(
+                    "SECRETS_DB_ONLY: Fanart.tv key unavailable in system settings (no .env fallback)",
+                );
+                this.noKeyWarningShown = true;
+            }
+            this.initialized = true;
+            return;
         }
 
         // Fallback to .env
