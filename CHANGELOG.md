@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Widened the route-error leak ratchet to catch `String(err)`, bare `${err}`,
   `.toString()`, `.name`, `JSON.stringify(err)`, plural `.errors`, and Axios
   `.response.data` interpolation idioms outside logger calls.
+- The ytmusic-streamer auth endpoints (`/auth/restore`, `/auth/clear`, and the
+  device-code poll success path) now offload credential-file writes and removals
+  to the asyncio thread pool, matching the sidecar's established
+  `asyncio.to_thread` pattern for blocking work.
 - Replaced the three source-scraping `audioAnalyzer*Contract` Jest suites with
   behavioral pytest coverage in `services/audio-analyzer/tests/` for queue claim
   alignment, process-pool crash recovery, stale-failure resolution, and

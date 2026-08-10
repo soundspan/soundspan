@@ -122,3 +122,103 @@ async def test_device_code_poll_offloaded_to_worker_thread(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"status": "pending", "error": "authorization_pending"}
     assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_auth_restore_offloaded_to_worker_thread(client, monkeypatch, tmp_path):
+    """Credential restoration writes should execute in an asyncio worker thread."""
+    import app
+
+    captured = []
+    original_write = app._write_private_file
+
+    def recording_write(path, content):
+        captured.append(threading.current_thread().name)
+        original_write(path, content)
+
+    monkeypatch.setattr(app, "DATA_PATH", tmp_path)
+    monkeypatch.setattr(app, "_write_private_file", recording_write)
+
+    response = await client.post(
+        "/auth/restore?user_id=u1",
+        json={
+            "oauth_json": '{"token": "value"}',
+            "client_id": "cid",
+            "client_secret": "secret",
+        },
+    )
+
+    assert response.status_code == 200
+    assert app._oauth_file("u1").exists()
+    assert app._client_creds_file("u1").exists()
+    assert captured
+    assert all(thread_name != "MainThread" for thread_name in captured)
+
+
+@pytest.mark.anyio
+async def test_auth_clear_offloaded_to_worker_thread(client, monkeypatch, tmp_path):
+    """Credential removal should execute in an asyncio worker thread."""
+    import app
+
+    monkeypatch.setattr(app, "DATA_PATH", tmp_path)
+    oauth_path = app._oauth_file("u1")
+    creds_path = app._client_creds_file("u1")
+    oauth_path.write_text("{}")
+    creds_path.write_text("{}")
+
+    captured = []
+    original_unlink = app._unlink_if_exists
+
+    def recording_unlink(path):
+        captured.append(threading.current_thread().name)
+        original_unlink(path)
+
+    monkeypatch.setattr(app, "_unlink_if_exists", recording_unlink)
+
+    response = await client.post("/auth/clear?user_id=u1")
+
+    assert response.status_code == 200
+    assert not oauth_path.exists()
+    assert not creds_path.exists()
+    assert captured
+    assert all(thread_name != "MainThread" for thread_name in captured)
+
+
+@pytest.mark.anyio
+async def test_device_code_poll_success_write_offloaded_to_worker_thread(
+    client, monkeypatch, tmp_path
+):
+    """Successful device polling writes should execute in an asyncio worker thread."""
+    import app
+
+    class SuccessfulOAuthCredentials:
+        """Return a deterministic successful device-code token."""
+
+        def __init__(self, client_id, client_secret):
+            pass
+
+        def token_from_code(self, device_code):
+            return {"access_token": "at", "refresh_token": "rt"}
+
+    captured = []
+    original_write = app._write_private_file
+
+    def recording_write(path, content):
+        captured.append(threading.current_thread().name)
+        original_write(path, content)
+
+    monkeypatch.setattr(app, "DATA_PATH", tmp_path)
+    monkeypatch.setattr(app, "OAuthCredentials", SuccessfulOAuthCredentials)
+    monkeypatch.setattr(app, "_write_private_file", recording_write)
+
+    response = await client.post(
+        "/auth/device-code/poll?user_id=u1",
+        json={"client_id": "cid", "client_secret": "secret", "device_code": "dc"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert app._oauth_file("u1").exists()
+    assert app._client_creds_file("u1").exists()
+    assert captured
+    assert all(thread_name != "MainThread" for thread_name in captured)

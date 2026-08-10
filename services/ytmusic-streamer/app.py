@@ -351,6 +351,12 @@ def _write_private_file(path: Path, content: str) -> None:
     os.chmod(path, 0o600)
 
 
+def _unlink_if_exists(path: Path) -> None:
+    """Remove a credential file if present (blocking; call via asyncio.to_thread)."""
+    if path.exists():
+        path.unlink()
+
+
 def _sanitized_http_error(
     operation: str,
     exc: Exception,
@@ -1466,15 +1472,16 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON in oauth_json")
 
-    DATA_PATH.mkdir(parents=True, exist_ok=True)
-    _write_private_file(_oauth_file(user_id), oauth_json)
+    await asyncio.to_thread(DATA_PATH.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(_write_private_file, _oauth_file(user_id), oauth_json)
 
     # Save client credentials if provided
     client_id = body.get("client_id")
     client_secret = body.get("client_secret")
     if client_id and client_secret:
         creds_path = _client_creds_file(user_id)
-        _write_private_file(
+        await asyncio.to_thread(
+            _write_private_file,
             creds_path,
             json.dumps(
                 {
@@ -1496,11 +1503,9 @@ async def auth_clear(user_id: str = Query(...)):
     _invalidate_ytmusic(user_id)
     _clear_user_search_fallback(user_id)
     oauth_path = _oauth_file(user_id)
-    if oauth_path.exists():
-        oauth_path.unlink()
+    await asyncio.to_thread(_unlink_if_exists, oauth_path)
     creds_path = _client_creds_file(user_id)
-    if creds_path.exists():
-        creds_path.unlink()
+    await asyncio.to_thread(_unlink_if_exists, creds_path)
     log.info(f"OAuth credentials cleared for user {user_id}")
     return {"status": "ok", "message": "OAuth credentials removed"}
 
@@ -1573,13 +1578,14 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
             return {"status": "error", "error": friendly}
 
         # Success — we have a token. Save it for this user.
-        DATA_PATH.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(DATA_PATH.mkdir, parents=True, exist_ok=True)
         token_json = json.dumps(dict(token), indent=True)
-        _write_private_file(_oauth_file(user_id), token_json)
+        await asyncio.to_thread(_write_private_file, _oauth_file(user_id), token_json)
 
         # Save client credentials alongside so _get_ytmusic can use them
         creds_path = _client_creds_file(user_id)
-        _write_private_file(
+        await asyncio.to_thread(
+            _write_private_file,
             creds_path,
             json.dumps(
                 {
