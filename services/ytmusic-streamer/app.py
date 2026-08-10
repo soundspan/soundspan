@@ -21,6 +21,7 @@ import random
 import re
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -214,6 +215,7 @@ YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
 _search_cache: dict[str, dict] = {}
+_search_cache_lock = threading.Lock()
 SEARCH_CACHE_TTL = env_int("YTMUSIC_SEARCH_CACHE_TTL", "300")  # 5 minutes
 SEARCH_CACHE_MAX = env_int("YTMUSIC_SEARCH_CACHE_MAX", "1024")
 SEARCH_MODE = (os.getenv("YTMUSIC_SEARCH_MODE", "auto") or "auto").strip().lower()
@@ -248,6 +250,7 @@ _ALLOWED_STREAM_QUALITIES = {"LOW", "MEDIUM", "HIGH", "LOSSLESS"}
 # ── Stream URL cache (in-memory, URLs expire after ~6h) ────────────
 # Keys are "{user_id}:{video_id}" to isolate per-user sessions
 _stream_cache: dict[str, dict] = {}
+_stream_cache_lock = threading.Lock()
 STREAM_CACHE_TTL = 5 * 60 * 60  # 5 hours (YouTube URLs expire at ~6h)
 STREAM_CACHE_MAX = env_int("YTMUSIC_STREAM_CACHE_MAX", "1024")
 TV_CLIENT_NAME = "TVHTML5"
@@ -255,7 +258,7 @@ TV_CLIENT_VERSION = "7.20250101.00.00"
 
 
 def _bound_cache(cache: dict, max_size: int) -> None:
-    """Evict oldest entries until an insertion-ordered cache is bounded."""
+    """Evict oldest entries; callers must hold the owning cache's lock."""
     while len(cache) > max_size:
         cache.pop(next(iter(cache)))
 
@@ -264,11 +267,12 @@ def _bound_cache(cache: dict, max_size: int) -> None:
 # Per-user authenticated clients are used for user-private operations
 # (library, stream auth checks, browse calls).
 _ytmusic_instances: dict[str, YTMusic] = {}
-_ytmusic_lock = asyncio.Lock()
+_ytmusic_instances_lock = threading.Lock()
 _ytmusic_auto_tv_fallback_users: set[str] = set()
 # Public unauthenticated clients are used for search/matching so queries do not
 # run under a user's OAuth session.
 _public_ytmusic_instances: dict[Literal["tv", "native"], YTMusic] = {}
+_public_ytmusic_lock = threading.Lock()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -407,20 +411,23 @@ def _get_public_ytmusic(strategy: Literal["tv", "native"]) -> YTMusic:
     """
     Get or create an unauthenticated YTMusic instance for public search.
     """
-    existing = _public_ytmusic_instances.get(strategy)
+    with _public_ytmusic_lock:
+        existing = _public_ytmusic_instances.get(strategy)
     if existing:
         return existing
 
     yt = YTMusic(language=YTMUSIC_LANGUAGE)
     if strategy == "tv":
         _apply_tv_client_context(yt)
-    _public_ytmusic_instances[strategy] = yt
+    with _public_ytmusic_lock:
+        _public_ytmusic_instances[strategy] = yt
     return yt
 
 
 def _invalidate_public_ytmusic(strategy: Literal["tv", "native"]):
     """Force re-creation of a public search client on next use."""
-    _public_ytmusic_instances.pop(strategy, None)
+    with _public_ytmusic_lock:
+        _public_ytmusic_instances.pop(strategy, None)
 
 
 def _parse_duration_text_value(value: Any) -> int:
@@ -542,8 +549,10 @@ def _native_search(
 
 def _get_ytmusic(user_id: str) -> YTMusic:
     """Get or create an authenticated YTMusic instance for a specific user."""
-    if user_id in _ytmusic_instances:
-        return _ytmusic_instances[user_id]
+    with _ytmusic_instances_lock:
+        existing = _ytmusic_instances.get(user_id)
+    if existing:
+        return existing
 
     oauth_path = _oauth_file(user_id)
     if oauth_path.exists():
@@ -584,7 +593,8 @@ def _get_ytmusic(user_id: str) -> YTMusic:
                 _apply_tv_client_context(yt)
                 # ── WORKAROUND(#813) END ────────────────────────────────
 
-            _ytmusic_instances[user_id] = yt
+            with _ytmusic_instances_lock:
+                _ytmusic_instances[user_id] = yt
             log.info(
                 "Loaded YTMusic for user %s (search_strategy=%s, configured_mode=%s)",
                 user_id,
@@ -607,7 +617,8 @@ def _get_ytmusic(user_id: str) -> YTMusic:
 
 def _invalidate_ytmusic(user_id: str):
     """Force re-creation of a user's YTMusic instance on next use."""
-    _ytmusic_instances.pop(user_id, None)
+    with _ytmusic_instances_lock:
+        _ytmusic_instances.pop(user_id, None)
 
 
 def _is_oauth_auth_error(err: Exception) -> bool:
@@ -791,7 +802,8 @@ def _extract_stream_info(
     """
     import yt_dlp
 
-    cached = _stream_cache.get(cache_key)
+    with _stream_cache_lock:
+        cached = _stream_cache.get(cache_key)
     if cached and cached.get("expires_at", 0) > time.time():
         log.debug(f"Stream URL cache hit for {cache_key}")
         return cached
@@ -814,9 +826,12 @@ def _extract_stream_info(
                 "abr": info.get("abr", 0),
                 "acodec": info.get("acodec", ""),
             }
-            _stream_cache[cache_key] = result
-            _clean_stream_cache()
-            _bound_cache(_stream_cache, STREAM_CACHE_MAX)
+            with _stream_cache_lock:
+                _stream_cache[cache_key] = result
+                expired_count = _clean_stream_cache_locked()
+                _bound_cache(_stream_cache, STREAM_CACHE_MAX)
+            if expired_count:
+                log.debug(f"Cleaned {expired_count} expired stream cache entries")
             log.debug(
                 "Extracted stream URL for %s: %s @ %skbps",
                 cache_key,
@@ -1181,14 +1196,21 @@ def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 
     return normalized[:limit]
 
 
-def _clean_stream_cache():
-    """Remove expired entries from stream cache."""
+def _clean_stream_cache_locked() -> int:
+    """Remove expired stream entries while the owning lock is held."""
     now = time.time()
     expired = [k for k, v in _stream_cache.items() if v.get("expires_at", 0) <= now]
     for k in expired:
         del _stream_cache[k]
-    if expired:
-        log.debug(f"Cleaned {len(expired)} expired stream cache entries")
+    return len(expired)
+
+
+def _clean_stream_cache():
+    """Remove expired entries from stream cache."""
+    with _stream_cache_lock:
+        expired_count = _clean_stream_cache_locked()
+    if expired_count:
+        log.debug(f"Cleaned {expired_count} expired stream cache entries")
 
 
 def _search_cache_key(
@@ -1211,12 +1233,14 @@ def _get_cached_search(
 ) -> list | None:
     """Return cached search results if still valid, else None."""
     key = _search_cache_key(user_id, query, filter_, limit, strategy)
-    entry = _search_cache.get(key)
+    with _search_cache_lock:
+        entry = _search_cache.get(key)
+        if entry and entry.get("expires_at", 0) <= time.time():
+            del _search_cache[key]
+            entry = None
     if entry and entry.get("expires_at", 0) > time.time():
         log.debug(f"Search cache hit: {key}")
         return entry["results"]
-    if entry:
-        del _search_cache[key]
     return None
 
 
@@ -1230,12 +1254,15 @@ def _set_cached_search(
 ):
     """Store search results in cache with TTL."""
     key = _search_cache_key(user_id, query, filter_, limit, strategy)
-    _search_cache[key] = {
-        "results": results,
-        "expires_at": time.time() + SEARCH_CACHE_TTL,
-    }
-    _clean_search_cache()
-    _bound_cache(_search_cache, SEARCH_CACHE_MAX)
+    with _search_cache_lock:
+        _search_cache[key] = {
+            "results": results,
+            "expires_at": time.time() + SEARCH_CACHE_TTL,
+        }
+        expired_count = _clean_search_cache_locked()
+        _bound_cache(_search_cache, SEARCH_CACHE_MAX)
+    if expired_count:
+        log.debug(f"Cleaned {expired_count} expired search cache entries")
 
 
 def _search_once(
@@ -1360,14 +1387,21 @@ def _search_with_mode_fallback(
         )
 
 
-def _clean_search_cache():
-    """Remove expired entries from search cache."""
+def _clean_search_cache_locked() -> int:
+    """Remove expired search entries while the owning lock is held."""
     now = time.time()
     expired = [k for k, v in _search_cache.items() if v.get("expires_at", 0) <= now]
     for k in expired:
         del _search_cache[k]
-    if expired:
-        log.debug(f"Cleaned {len(expired)} expired search cache entries")
+    return len(expired)
+
+
+def _clean_search_cache():
+    """Remove expired entries from search cache."""
+    with _search_cache_lock:
+        expired_count = _clean_search_cache_locked()
+    if expired_count:
+        log.debug(f"Cleaned {expired_count} expired search cache entries")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -3050,7 +3084,8 @@ def _parse_duration(duration_str: str) -> int:
 async def shutdown():
     _clean_stream_cache()
     _clean_search_cache()
-    _ytmusic_instances.clear()
+    with _ytmusic_instances_lock:
+        _ytmusic_instances.clear()
     log.info("YouTube Music Streamer shutting down")
 
 

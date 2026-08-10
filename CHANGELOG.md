@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hydrate every playlist item/track/album row (or album-id/track-duration rows)
   just to compute songCount/duration/coverArt — they now use bounded Prisma
   aggregates; response shapes unchanged.
+- YT Music sidecar: the stream-URL and search caches (plus the per-user and public YTMusic client maps) are now guarded by locks — concurrent playback/search could previously hit "dictionary changed size during iteration" on the lock-free caches shared across worker threads, surfacing as intermittent 500s on stream extraction and search.
 - TIDAL stream proxying now handles upstream stream errors after headers are
   sent instead of crashing the entire backend via an uncaught exception; a
   mid-playback sidecar disconnect now ends only that response.
