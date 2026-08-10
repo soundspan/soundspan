@@ -304,6 +304,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema before any outbound fetch; a previously accepted malformed `feedUrl`
   or non-string `itunesId` now returns **400** instead of reaching the RSS fetch
   path.
+- Added connect-time IP re-validation to the outbound SSRF guard, closing the
+  DNS-rebinding time-of-check/time-of-use window for vetted outbound requests;
+  the shared outbound policy now also blocks RFC 6598 CGNAT/shared address space
+  (`100.64.0.0/10`) and RFC 2544 benchmarking space (`198.18.0.0/15`).
 - Confined the Audiobookshelf cover-art proxy to the ABS `items/` resource
   namespace, closing an authenticated SSRF and admin-credential-reuse class.
   The library `cover-art` handler (both the `?url=` and `:id` branches) and the

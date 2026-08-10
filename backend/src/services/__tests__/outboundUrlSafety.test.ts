@@ -1,18 +1,130 @@
+import * as dns from "dns";
+import * as http from "http";
+
 const mockLookup = jest.fn();
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
 }));
 
 import {
+    __testHooks,
     normalizeSafeOutboundRedirectTarget,
     normalizeSafeOutboundUrl,
     resolveSafeOutboundUrl,
     resolveSafeOutboundRedirectTarget,
 } from "../outboundUrlSafety";
 
+type LookupResult = dns.LookupAddress | dns.LookupAddress[];
+
+function createBaseLookup(
+    resolveAddress: (hostname: string) => dns.LookupAddress[],
+): typeof dns.lookup {
+    return ((
+        hostname: string,
+        optionsOrCallback: dns.LookupOptions | number | Function,
+        possibleCallback?: Function,
+    ) => {
+        const callback =
+            typeof optionsOrCallback === "function"
+                ? optionsOrCallback
+                : possibleCallback;
+        const all =
+            typeof optionsOrCallback === "object" &&
+            optionsOrCallback.all === true;
+        const addresses = resolveAddress(hostname);
+        if (all) {
+            callback?.(null, addresses);
+            return;
+        }
+        callback?.(null, addresses[0].address, addresses[0].family);
+    }) as unknown as typeof dns.lookup;
+}
+
+function lookupAll(hostname: string): Promise<dns.LookupAddress[]> {
+    return new Promise((resolve, reject) => {
+        dns.lookup(hostname, { all: true }, (error, addresses) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve(addresses);
+        });
+    });
+}
+
+function lookupOne(
+    hostname: string,
+    family?: number,
+): Promise<LookupResult> {
+    return new Promise((resolve, reject) => {
+        const callback = (
+            error: NodeJS.ErrnoException | null,
+            address: string,
+            resultFamily: number,
+        ) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve({ address, family: resultFamily });
+        };
+        if (family === undefined) {
+            dns.lookup(hostname, callback);
+            return;
+        }
+        dns.lookup(hostname, family, callback);
+    });
+}
+
+async function startLocalServer(): Promise<http.Server> {
+    const server = http.createServer((_request, response) => {
+        response.end("local response");
+    });
+    await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", resolve);
+    });
+    return server;
+}
+
+function serverPort(server: http.Server): number {
+    const address = server.address();
+    if (!address || typeof address === "string") {
+        throw new Error("Expected local TCP server address");
+    }
+    return address.port;
+}
+
+async function closeServer(server: http.Server | null): Promise<void> {
+    if (!server) {
+        return;
+    }
+    await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
 describe("outboundUrlSafety", () => {
+    let localServer: http.Server | null = null;
+
     beforeEach(() => {
         mockLookup.mockReset();
+        __testHooks.uninstall();
+        __testHooks.resetRegistry();
+        jest.useRealTimers();
+    });
+
+    afterEach(async () => {
+        __testHooks.uninstall();
+        __testHooks.resetRegistry();
+        jest.useRealTimers();
+        await closeServer(localServer);
+        localServer = null;
     });
 
     describe("resolveSafeOutboundUrl (DNS-resolving guard)", () => {
@@ -31,6 +143,16 @@ describe("outboundUrlSafety", () => {
                 await resolveSafeOutboundUrl("https://internal.example.com"),
             ).toBeNull();
         });
+
+        it.each(["100.64.1.2", "198.18.5.5"])(
+            "rejects a host that resolves to reserved address %s",
+            async (address) => {
+                mockLookup.mockResolvedValue([{ address, family: 4 }]);
+                expect(
+                    await resolveSafeOutboundUrl("https://reserved.example.com"),
+                ).toBeNull();
+            },
+        );
 
         it("rejects when ANY resolved address is private (DNS multi-record)", async () => {
             mockLookup.mockResolvedValue([
@@ -99,6 +221,102 @@ describe("outboundUrlSafety", () => {
                 "http://110.1.2.3/",
             );
         });
+
+        it("blocks a private address returned by connect-time DNS rebinding", async () => {
+            localServer = await startLocalServer();
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+            ]);
+            __testHooks.setBaseLookup(
+                createBaseLookup(() => [
+                    { address: "127.0.0.1", family: 4 },
+                ]),
+            );
+            const vettedUrl = await resolveSafeOutboundUrl(
+                `http://rebind.test:${serverPort(localServer)}/`,
+            );
+
+            expect(vettedUrl).not.toBeNull();
+            await expect(fetch(vettedUrl!)).rejects.toMatchObject({
+                cause: { code: "EOUTBOUNDBLOCKED" },
+            });
+        });
+
+        it("passes public connect-time addresses through unchanged", async () => {
+            const publicAddress = { address: "93.184.216.34", family: 4 };
+            mockLookup.mockResolvedValue([publicAddress]);
+            __testHooks.setBaseLookup(
+                createBaseLookup(() => [publicAddress]),
+            );
+            await resolveSafeOutboundUrl("https://public.test/");
+
+            await expect(lookupAll("public.test")).resolves.toEqual([
+                publicAddress,
+            ]);
+            await expect(lookupOne("public.test")).resolves.toEqual(
+                publicAddress,
+            );
+            await expect(lookupOne("public.test", 4)).resolves.toEqual(
+                publicAddress,
+            );
+        });
+
+        it("leaves unregistered private-host traffic untouched", async () => {
+            localServer = await startLocalServer();
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+            ]);
+            __testHooks.setBaseLookup(
+                createBaseLookup(() => [
+                    { address: "127.0.0.1", family: 4 },
+                ]),
+            );
+            await resolveSafeOutboundUrl("https://vetted.test/");
+
+            const response = await fetch(
+                `http://internal-service.test:${serverPort(localServer)}/`,
+            );
+            expect(response.status).toBe(200);
+            await expect(response.text()).resolves.toBe("local response");
+        });
+
+        it("fails open after the vetted-host TTL expires", async () => {
+            jest.useFakeTimers();
+            jest.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+            ]);
+            __testHooks.setBaseLookup(
+                createBaseLookup(() => [
+                    { address: "127.0.0.1", family: 4 },
+                ]),
+            );
+            await resolveSafeOutboundUrl("https://expiring.test/");
+
+            jest.advanceTimersByTime(30_001);
+
+            await expect(lookupOne("expiring.test")).resolves.toEqual({
+                address: "127.0.0.1",
+                family: 4,
+            });
+        });
+
+        it("blocks when any connect-time address is private", async () => {
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+            ]);
+            __testHooks.setBaseLookup(
+                createBaseLookup(() => [
+                    { address: "93.184.216.34", family: 4 },
+                    { address: "10.0.0.5", family: 4 },
+                ]),
+            );
+            await resolveSafeOutboundUrl("https://mixed.test/");
+
+            await expect(lookupAll("mixed.test")).rejects.toMatchObject({
+                code: "EOUTBOUNDBLOCKED",
+            });
+        });
     });
 
     describe("resolveSafeOutboundRedirectTarget", () => {
@@ -138,6 +356,37 @@ describe("outboundUrlSafety", () => {
             ).toBeNull();
             expect(
                 normalizeSafeOutboundUrl("http://192.168.1.9/feed"),
+            ).toBeNull();
+        });
+
+        it.each([
+            "http://100.64.1.2/x",
+            "http://100.127.255.255/",
+            "http://198.18.0.1/",
+            "http://198.19.255.254/",
+        ])("rejects reserved ipv4 destination %s", (url) => {
+            expect(normalizeSafeOutboundUrl(url)).toBeNull();
+        });
+
+        it.each([
+            "http://100.63.255.255/",
+            "http://100.128.0.0/",
+            "http://198.17.255.255/",
+            "http://198.20.0.1/",
+        ])("allows public address outside reserved boundaries %s", (url) => {
+            expect(normalizeSafeOutboundUrl(url)).toBe(url);
+        });
+
+        it.each([
+            "http://100.64.1.2.example/",
+            "http://198.18.example/",
+        ])("does not parse malformed dotted-quad hostname %s", (url) => {
+            expect(normalizeSafeOutboundUrl(url)).toBe(url);
+        });
+
+        it("rejects an ipv4-mapped ipv6 reserved destination", () => {
+            expect(
+                normalizeSafeOutboundUrl("http://[::ffff:100.64.1.2]/"),
             ).toBeNull();
         });
 

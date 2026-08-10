@@ -1,7 +1,14 @@
+import dns = require("dns");
 import { lookup } from "dns/promises";
 
 const IPV4_PRIVATE_172_RE = /^172\.(1[6-9]|2[0-9]|3[0-1])\./;
+const IPV4_DOTTED_QUAD_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const IPV6_LINK_LOCAL_RE = /^fe[89ab]/i;
+const VETTED_HOSTNAME_TTL_MS = 30_000;
+const MAX_VETTED_HOSTNAMES = 256;
+const vettedHostnames = new Map<string, number>();
+let originalLookup: typeof dns.lookup | null = null;
+let baseLookupOverride: typeof dns.lookup | null = null;
 
 function stripIpv6Brackets(hostname: string): string {
     if (hostname.startsWith("[") && hostname.endsWith("]")) {
@@ -9,6 +16,35 @@ function stripIpv6Brackets(hostname: string): string {
     }
 
     return hostname;
+}
+
+function parseIpv4Octets(
+    hostname: string,
+): [number, number, number, number] | null {
+    const match = IPV4_DOTTED_QUAD_RE.exec(hostname);
+    if (!match) {
+        return null;
+    }
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const third = Number(match[3]);
+    const fourth = Number(match[4]);
+    if (first > 255 || second > 255 || third > 255 || fourth > 255) {
+        return null;
+    }
+    return [first, second, third, fourth];
+}
+
+function isBlockedReservedIpv4Hostname(hostname: string): boolean {
+    const octets = parseIpv4Octets(hostname);
+    if (!octets) {
+        return false;
+    }
+    const [first, second] = octets;
+    return (
+        (first === 100 && second >= 64 && second <= 127) ||
+        (first === 198 && second >= 18 && second <= 19)
+    );
 }
 
 function isBlockedIpv4Hostname(hostname: string): boolean {
@@ -23,8 +59,19 @@ function isBlockedIpv4Hostname(hostname: string): boolean {
         hostname.startsWith("10.") ||
         hostname.startsWith("192.168.") ||
         hostname.startsWith("169.254.") ||
-        IPV4_PRIVATE_172_RE.test(hostname)
+        IPV4_PRIVATE_172_RE.test(hostname) ||
+        isBlockedReservedIpv4Hostname(hostname)
     );
+}
+
+function decodeMappedIpv4Hostname(hostname: string): string {
+    const match = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(hostname);
+    if (!match) {
+        return hostname;
+    }
+    const high = Number.parseInt(match[1], 16);
+    const low = Number.parseInt(match[2], 16);
+    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
 }
 
 function isBlockedIpv6Hostname(hostname: string): boolean {
@@ -35,13 +82,25 @@ function isBlockedIpv6Hostname(hostname: string): boolean {
     }
 
     if (normalized.startsWith("::ffff:")) {
-        return isBlockedIpv4Hostname(normalized.slice("::ffff:".length));
+        const mappedHostname = normalized.slice("::ffff:".length);
+        return isBlockedIpv4Hostname(
+            decodeMappedIpv4Hostname(mappedHostname),
+        );
     }
 
     return (
         IPV6_LINK_LOCAL_RE.test(normalized) ||
         normalized.startsWith("fc") ||
         normalized.startsWith("fd")
+    );
+}
+
+/**
+ * Returns whether an IP address is denied by the shared outbound SSRF policy.
+ */
+export function isBlockedAddress(address: string): boolean {
+    return (
+        isBlockedIpv4Hostname(address) || isBlockedIpv6Hostname(address)
     );
 }
 
@@ -103,11 +162,9 @@ export function normalizeSafeOutboundRedirectTarget(
  * (decimal `2130706433`, hex `0x7f000001`, octal, `127.1`) and by DNS names that
  * point at an internal address; resolving via getaddrinfo normalizes those
  * encodings and exposes the real target IPs, which are then range-checked.
- * Returns true only if every resolved address is public.
- *
- * Note: this checks at resolve time; a DNS-rebinding attacker could in theory
- * return a different address to the subsequent fetch. Pinning the resolved IP
- * into the request agent would close that and is a larger follow-up.
+ * Returns true only if every resolved address is public. Successful validation
+ * also enables a short-lived connect-time lookup check using this same policy,
+ * closing the DNS-rebinding gap while the vetted-hostname entry remains live.
  */
 async function hasOnlyPublicResolvedAddresses(
     hostname: string,
@@ -118,15 +175,107 @@ async function hasOnlyPublicResolvedAddresses(
         if (addresses.length === 0) {
             return false;
         }
-        return addresses.every(
-            ({ address }) =>
-                !isBlockedIpv4Hostname(address) &&
-                !isBlockedIpv6Hostname(address),
-        );
+        return addresses.every(({ address }) => !isBlockedAddress(address));
     } catch {
         return false;
     }
 }
+
+function normalizeHostname(hostname: string): string {
+    return stripIpv6Brackets(hostname).toLowerCase();
+}
+
+function registerVettedHostname(hostname: string): void {
+    const normalized = normalizeHostname(hostname);
+    vettedHostnames.delete(normalized);
+    if (vettedHostnames.size >= MAX_VETTED_HOSTNAMES) {
+        const oldest = vettedHostnames.keys().next().value;
+        if (oldest !== undefined) {
+            vettedHostnames.delete(oldest);
+        }
+    }
+    vettedHostnames.set(normalized, Date.now() + VETTED_HOSTNAME_TTL_MS);
+}
+
+function isVettedHostname(hostname: string): boolean {
+    const normalized = normalizeHostname(hostname);
+    const expiry = vettedHostnames.get(normalized);
+    if (expiry === undefined) {
+        return false;
+    }
+    if (expiry <= Date.now()) {
+        // Expiry and eviction intentionally fail open to pre-pinning behavior.
+        vettedHostnames.delete(normalized);
+        return false;
+    }
+    return true;
+}
+
+function createBlockedLookupError(hostname: string): NodeJS.ErrnoException {
+    const error = new Error(
+        `Outbound request blocked: connect-time DNS for ${hostname} returned a private, loopback, or link-local address`,
+    ) as NodeJS.ErrnoException;
+    error.code = "EOUTBOUNDBLOCKED";
+    return error;
+}
+
+function hasBlockedLookupResult(result: unknown): boolean {
+    if (Array.isArray(result)) {
+        return result.some(
+            (entry: dns.LookupAddress) => isBlockedAddress(entry.address),
+        );
+    }
+    return typeof result === "string" && isBlockedAddress(result);
+}
+
+function guardedLookup(hostname: string, ...args: unknown[]): void {
+    const delegate = baseLookupOverride ?? originalLookup;
+    if (!delegate) {
+        throw new Error("Outbound DNS lookup guard is not installed");
+    }
+    const callback = args.at(-1);
+    if (!isVettedHostname(hostname) || typeof callback !== "function") {
+        Reflect.apply(delegate, dns, [hostname, ...args]);
+        return;
+    }
+    const guardedCallback = (...callbackArgs: unknown[]) => {
+        if (!callbackArgs[0] && hasBlockedLookupResult(callbackArgs[1])) {
+            callback(createBlockedLookupError(hostname));
+            return;
+        }
+        callback(...callbackArgs);
+    };
+    Reflect.apply(delegate, dns, [hostname, ...args.slice(0, -1), guardedCallback]);
+}
+
+function installLookupGuard(): void {
+    if (originalLookup) {
+        return;
+    }
+    originalLookup = dns.lookup;
+    (dns as { lookup: typeof dns.lookup }).lookup =
+        guardedLookup as unknown as typeof dns.lookup;
+}
+
+/**
+ * Test-only controls for resetting global guard state and supplying deterministic
+ * callback-style DNS lookup behavior without using the host network.
+ */
+export const __testHooks = {
+    resetRegistry(): void {
+        vettedHostnames.clear();
+    },
+    setBaseLookup(baseLookup: typeof dns.lookup): void {
+        baseLookupOverride = baseLookup;
+    },
+    uninstall(): void {
+        if (originalLookup) {
+            (dns as { lookup: typeof dns.lookup }).lookup = originalLookup;
+        }
+        originalLookup = null;
+        baseLookupOverride = null;
+    },
+};
 
 /**
  * Like `normalizeSafeOutboundUrl`, but additionally resolves the hostname via
@@ -142,7 +291,12 @@ export async function resolveSafeOutboundUrl(
         return null;
     }
     const { hostname } = new URL(normalized);
-    return (await hasOnlyPublicResolvedAddresses(hostname)) ? normalized : null;
+    if (!(await hasOnlyPublicResolvedAddresses(hostname))) {
+        return null;
+    }
+    installLookupGuard();
+    registerVettedHostname(hostname);
+    return normalized;
 }
 
 /**
