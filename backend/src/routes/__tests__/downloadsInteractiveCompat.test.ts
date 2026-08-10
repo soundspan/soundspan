@@ -3,6 +3,13 @@ import { Request, Response } from "express";
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
+    // downloads.ts mounts requireAdmin on /clear-lidarr-queue at module
+    // scope; without this key the incomplete mock hands Router.post()
+    // undefined and the suite dies at load. Passthrough is correct here —
+    // this suite pins the interactive compat surface, not auth
+    // (downloadsRuntime.test.ts owns admin enforcement with the real
+    // middleware).
+    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({
