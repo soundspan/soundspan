@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a blocking Python quality gate for Ruff lint/format checks and mypy
   analysis across all four sidecars.
 
+- CI visibility now includes a `Python Sidecar Tests` matrix job in
+  `quality-visibility.yml`, running the `pytest` suites for all four sidecars
+  (tidal-downloader, ytmusic-streamer, audio-analyzer, and audio-analyzer-clap),
+  including their internal-auth and security coverage, on every pull request.
+  A new root `npm run verify:python` command runs the four suites locally, and
+  both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
+
 ### Accessibility
 
 - The player seek slider now exposes screen-reader slider semantics and supports
@@ -113,6 +120,176 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `error` string and HTTP status are unchanged; the frontend reads only `error`,
   so no client action is required.
 
+- Frontend playback context split for playback re-render hygiene: the single
+  `AudioPlaybackContext` is now served as two contexts by the same
+  `AudioPlaybackProvider` — a high-frequency progress context (`currentTime`,
+  read via the new `usePlaybackProgress()` hook) and a low-frequency status
+  context (`isPlaying`, `duration`, `streamProfile`, seek/buffer flags, and all
+  setters, read via the new `usePlaybackStatus()` hook). Status-only consumers
+  (the album/playlist/discover pages, `LibraryTracksList`, and the playback
+  quality badge) were migrated to `usePlaybackStatus()` so they no longer
+  re-render on every ~1 Hz clock tick during playback. `useAudioPlayback()` is
+  retained unchanged as a deprecated composite (same shape, same referential
+  stability, same out-of-provider error) for the remaining consumers; no
+  playback behavior changed. Prefer the two granular hooks going forward.
+- The artist page's Start Radio action now uses the in-app confirmation dialog
+  before adding tracks to a Listen Together group's shared queue, instead of the
+  native browser confirmation prompt.
+- Discover settings now uses the in-app confirmation dialog when clearing the
+  Discovery playlist instead of the native browser confirmation prompt.
+- Removed seven unused frontend API client methods (`testNzbget`,
+  `testQbittorrent`, `testListenNotes`, `testDeezer`, `trackPlayback`,
+  `getPodcastEpisode`, and `getSlskdDownloads`) that targeted non-existent
+  backend routes. The onboarding page now checks status through the shared API
+  boundary (`api.getOnboardingStatus`) instead of calling `fetch` directly.
+- Enrichment `GET /api/enrichment/status` now returns a complete zeroed
+  `EnrichmentState` when idle instead of a partial object, and the frontend
+  `enrichmentApi.getStatus` return type is now non-null.
+- Media-source contract: the hand-copied `local`/`tidal`/`youtube`/`youtube-direct`
+  source unions scattered across the frontend and backend now derive from
+  `CanonicalMediaSource` in `@soundspan/media-metadata-contract` instead of being
+  re-typed by hand. Two documented derived types were added —
+  `RemoteMediaSource` (`Exclude<CanonicalMediaSource, "local">`, for stream-source
+  hints) and `ResolvedMediaSource` (`Exclude<CanonicalMediaSource, "youtube-direct">`,
+  for resolved/origin sources, since `youtube-direct` is a container variant of
+  `youtube` and never an independent resolution target) — and every exported symbol
+  in the contract package is now documented. No allowed string value changed and
+  there is no runtime behavior change; this only removes drift risk between the
+  copies. Consumers updated: `trackRef.ts`, `audio-state-context.tsx`,
+  `listen-together-socket.ts`, `api.ts` (annotations only), `listenTogetherManager.ts`,
+  `listenTogetherResolution.ts`, and `playlistImportService.ts`.
+- Helm chart: the individual-mode audio-analyzer and CLAP-analyzer Deployments
+  now have liveness/readiness probes (exec `pgrep`, mirroring the compose
+  healthcheck), closing the compose/chart probe-parity gap. Both are
+  configurable via `audioAnalyzer.livenessProbe`/`readinessProbe` and the CLAP
+  equivalents (set to `null` to disable).
+- Helm chart: `aio.gpu.enabled`, `audioAnalyzer.gpu.enabled`, and
+  `audioAnalyzerClap.gpu.enabled` are now wired — previously no-ops. When
+  enabled they add an `nvidia.com/gpu: <gpu.count>` resource limit (default 1)
+  and an optional pod `runtimeClassName` (`gpu.runtimeClassName`) for clusters
+  requiring a non-default GPU runtime. Requires the NVIDIA device plugin.
+- Helm chart: the AIO default memory request/limit was raised from `1Gi`/`4Gi`
+  to `2Gi`/`8Gi`. The AIO image bundles the backend, frontend, Postgres, Redis,
+  and (by default) the Essentia + CLAP analyzers in one container, whose models
+  alone peak well above the old 4Gi ceiling.
+- Helm chart: the frontend pod now runs as UID/GID `1001` (the published image's
+  `nextjs` user) via a `frontend.podSecurityContext` override merged over the
+  chart-wide `1000`, fixing the UID/file-ownership mismatch until the image is
+  realigned.
+- Frontend (refactor slice P25, frontend-dedup): mechanical duplication
+  collapse across the frontend, no user-visible behavior change.
+  - YouTube Music account linking (`YouTubeMusicSection`) now uses the shared
+    `useDeviceAuthPolling` hook instead of a third hand-rolled device-code
+    polling/expiry/countdown state machine, matching the Tidal sections. This
+    inherits the hook's bounded, race-safe polling, tracked timers with
+    deterministic cleanup, and generation-guarded cancellation.
+  - Extracted the duplicated device-code linking UI shared by the TIDAL and
+    YouTube Music settings sections into one presentational component
+    (`features/settings/components/ui/DeviceAuthLinkPanel`).
+  - Extracted the copy-pasted Explore media card (square thumbnail + title +
+    subtitle) into a shared `features/explore/components/BrowseCard`, adopted by
+    the featured-shelves and mixes sections for both TIDAL and YouTube Music.
+  - Consolidated nine local time/duration re-implementations onto
+    `utils/formatTime`, adding a documented `formatRelativeTime` helper for the
+    activity tabs (History, Notifications, Active Downloads).
+  - Replaced index-based React keys with stable content-derived keys in
+    `PreviewEpisodes` and `SyncedLyrics`.
+- Backend: began consolidating scattered `process.env` reads behind the
+  `backend/src/config.ts` boundary mandated by `AGENTS.md`. Added typed config
+  sections (`jwtSecret`, `docsPublic`, `adminResetPassword`,
+  `settingsDecryptFailClosed`, `ytmusicRegion`, `tidal`, `listenTogether`,
+  `readiness`, `segmentedStreaming`, and an `audiobookshelf` getter) and migrated
+  the streaming services (Tidal download/streaming sidecar URL and decrypt-fail-
+  closed flag), the segmented-streaming session-token secret, the Audiobookshelf
+  env fallback, and the API docs-public/admin-reset entrypoint gates to read from
+  it. The segmented session token, `middleware/auth`, and these services now share
+  the single `config.jwtSecret` derivation (`JWT_SECRET` else `SESSION_SECRET`)
+  instead of re-deriving it independently. A new backend guard test enforces the
+  boundary as a ratchet: only `config.ts`/`config/**` may read `process.env`
+  (build-metadata `npm_package_version` excepted); every other reader must stay on
+  an allowlist that can only shrink. No runtime behavior changed. Remaining
+  subsystems (segmented-streaming, Listen Together socket, dependency-readiness,
+  browse, and the `BACKEND_PROCESS_ROLE`/`worker.ts` split) remain on the
+  allowlist and are tracked for follow-up migration.
+- Backend: fixed a dead `config.audiobookshelf` block that read the unused
+  `AUDIOBOOKSHELF_TOKEN` variable instead of the `AUDIOBOOKSHELF_API_KEY` the live
+  Audiobookshelf service actually consumes; `AUDIOBOOKSHELF_TOKEN` (never read by
+  any code path) is removed from the environment-variable reference.
+- Digest-pinned all base images by `@sha256:` alongside their existing tags:
+  the backend, frontend, tidal-downloader, ytmusic-streamer, and
+  audio-analyzer-clap Dockerfiles plus the pgvector/redis images in
+  `docker-compose.yml` and `docker-bake.json`. Dependabot's Docker ecosystem
+  keeps the pins fresh.
+- **BREAKING (frontend image runtime UID changed 1001 -> 1000):** the frontend
+  production image now runs as the base Node image's built-in `node` user
+  (UID/GID 1000), matching the chart's `runAsUser: 1000`. Existing `.next/cache`
+  or other frontend volumes owned by UID 1001 must be re-chowned to 1000 (or
+  recreated). See `docs/UPGRADING.md`.
+- The backend `api-runtime` image now ships compiled JavaScript
+  (`node dist/index.js`) with pruned production dependencies instead of the full
+  development tree plus `tsx`; the entrypoint still runs
+  `npx prisma migrate deploy` via a locally reinstalled Prisma CLI.
+- Backend and frontend runtime artifacts now use `COPY --chown` instead of a
+  duplicated recursive `chown -R /app` layer.
+- Docs/contract sync (refactor slice): `AGENTS.md` now scopes the "no raw SQL"
+  rule to the three query classes Prisma cannot express (pgvector similarity/ANN,
+  PostgreSQL full-text search, and row/advisory locking) with a parameterized-only
+  constraint, records that the Subsonic `/rest` surface is contract-documented in
+  `docs/OPENSUBSONIC_COMPATIBILITY.md` instead of per-endpoint OpenAPI, documents
+  the `logger.child` scope and file naming/placement conventions, deprecates the
+  source-scraping `*Contract` test pattern, and indexes the `components/vibe`
+  location as a recognized (owner-decision-pending) exception in
+  `frontend/features/README.md`. The two trivially-expressible profile-picture
+  presence checks in `routes/settings.ts` (`$queryRaw COUNT(*)` → `prisma.user.count`)
+  and `routes/social.ts` (two `$queryRaw SELECT id` → `prisma.user.findMany`) were
+  migrated to Prisma with no behavior change (the profile-picture blob is still not
+  loaded).
+- Backend: introduced a single consolidated, typed Lidarr HTTP client
+  (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
+  for outbound Lidarr calls. It wraps one reusable axios instance with bounded
+  reliability the previous scattered call-sites lacked: a consistent request
+  timeout, capped exponential-backoff retries (idempotent methods and classified
+  transient failures only — 408/425/429/5xx/network/timeout; `POST` is not
+  retried unless explicitly opted in; `Retry-After` is honored and capped), a
+  concurrency limiter, a typed `LidarrHttpError` (status/method/path/attempts/
+  isTransient) that never leaks the API key or host, connection resolution from
+  system settings with `.env` fallback and URL validation, and the shared
+  logger. The discovery album-lifecycle deletion path now routes through this
+  client; remaining Lidarr consumers (the `lidarr.ts` queue/history helper
+  functions, `downloadQueue`, `simpleDownloadManager`, `discoverWeekly`, and the
+  discover/system-settings/onboarding routes) will be migrated onto it
+  incrementally to keep each change no-regression.
+- AIO analyzer tuning from `aio.env` is now passed through to the MusicCNN and
+  CLAP runtimes instead of being dropped or overwritten by supervisord defaults.
+- AIO image build/startup hygiene: apt update/install steps are consolidated,
+  and the redundant frontend `sleep 10` startup delay is removed.
+- Removed the non-functional `HF_TOKEN` BuildKit secret path from the AIO and
+  CLAP image builds; the public model download remains SHA-256 verified.
+- Backend: moved six `@types/*` packages from production dependencies to
+  devDependencies and removed `@types/speakeasy`, slimming the pruned worker
+  image's production `node_modules`.
+- Frontend: removed the deprecated `@types/dompurify` stub; `dompurify` 3.x and
+  later ship their own type definitions.
+- Backend: the 13 curated daily "vibe" mixes (Sad Girl Sundays, Main Character
+  Energy, Villain Era, 3AM Thoughts, Hot Girl Walk, Rage Cleaning, Golden Hour,
+  Shower Karaoke, In My Feelings, Midnight Drive, Romanticize Your Life, That
+  Girl Era, Unhinged) are now data-driven: their filters, names, descriptions,
+  colors, pool sizes, and weekday gates live in a single declarative catalog
+  (`backend/src/services/curatedVibeMixDefinitions.ts`) consumed by one shared
+  generator, replacing ~13 near-identical hardcoded methods (net −433 lines in
+  `programmaticPlaylists.ts`). Behavior, mix ids/types, and the public
+  `generate*` method surface are unchanged; artist-diversity selection is
+  preserved.
+- Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
+  when an analysis batch hits `BATCH_ANALYSIS_TIMEOUT_SECONDS`, tracks that
+  never started running are now re-queued as `pending` WITHOUT consuming any
+  retry budget, and tracks that were genuinely in flight fail non-permanently
+  (consuming exactly one retry unit, retried up to `MAX_RETRIES`). Previously
+  every unfinished track in a timed-out batch was failed permanently — a single
+  slow batch could silently and irreversibly shrink the analyzed library.
+  Results that completed just as the timeout fired are now drained and saved
+  instead of being dropped.
+
 ### Fixed
 
 - **Sidecar event-loop offload for OAuth onboarding and search.** The
@@ -138,6 +315,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   override was removed so the pod inherits the chart-wide UID/GID 1000 pod
   security context, matching the realigned frontend image (`USER node`) and
   fixing `.next/cache` write failures in individual deployment mode.
+
+- Lidarr queue/history helper HTTP calls are now bounded. The module-level
+  `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,
+  `getQueue`, and `isDownloadActive` helpers in `backend/src/services/lidarr.ts`
+  previously issued bare `axios` requests with no `timeout`, inheriting axios's
+  unbounded default (`0`). Because `QueueCleaner.runCleanup` only reschedules its
+  30s reconcile/clean loop after its awaits resolve, a single hung Lidarr call
+  could stall the loop indefinitely. Each call now carries an explicit
+  `timeout: 30000`, matching the class client on the same module.
+- AIO image builds no longer fail while removing the base image's `node` user:
+  `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
+  holders are renamed and reused instead of failing `groupadd` or `useradd`.
+- OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
+  no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
+  API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,
+  and search routes were documented without the mounted `/api` prefix, so the
+  spec published paths such as `/auth/login` and `/mixes` that 404 on the server
+  while the real `/api/...` URLs went undocumented. The keys now match the
+  mounted routes. `openapiSupplement.ts` — previously a shim that re-documented
+  those same endpoints under their correct prefixes — is reduced to the only
+  endpoints defined directly in `index.ts` with no route module (the
+  `/health`, `/api/health` liveness/readiness probes and `/api/docs.json`).
+  Documentation only; no runtime route behavior changed.
+- OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
+  `backend/package.json` at load time (currently `1.9.0`) so the published
+  contract tracks the shipping release.
+- MetadataEditor's "Reset to Original" action now uses the in-app
+  `ConfirmDialog` instead of the browser's native confirmation prompt.
+- Frontend token refresh is now single-flight, so simultaneous 401 responses
+  share one `/auth/refresh` request instead of racing refresh-token rotation
+  and forcing a logout.
+- Audio-state polling now detects expired sessions from HTTP 401 status without
+  permanently stopping after a transient failure, and audiobook/podcast
+  restore failures are logged instead of surfacing as unhandled rejections.
+- Backend reliability hardening (no behavior change for healthy paths):
+  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
+    forever when an album title cannot be resolved. The previous re-query
+    pagination re-fetched the same `albumId: null` rows on every iteration
+    (latching `isRunning` and inflating the processed counter without bound);
+    both the Tidal and YouTube Music phases now use id-cursor pagination so
+    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
+    safety bound.
+  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
+    **all** logging. Unrecognized values now fall back to the environment
+    default (`warn` in production, `debug` otherwise) and emit a one-time
+    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
+    matching is also hardened against prototype keys (`constructor`, `toString`).
+  - The music-library scanner's recursive directory walk was replaced with a
+    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
+    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
+    pathological trees.
+  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
+    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
+    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
+    no longer hang a worker or request indefinitely.
+  - Untracked module-scope cleanup intervals (Soulseek search-session and
+    failed-user pruning) are now `unref()`'d so they never keep the process or a
+    Jest worker alive, and the worker scheduler / discover-processor ioredis
+    lock clients now connect lazily under Jest to stop background reconnect
+    loops from logging after test teardown.
+- Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
+  monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
+  `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
+  worker scheduler; discovery cleanup runs via `staleJobCleanup`).
+- Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
+  use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
+  `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without
+  leaking internals, and nested error payloads (e.g. `age_restricted`) keep
+  their existing fields. The Node backend only branches on status codes, so no
+  backend change was needed.
+- ytmusic-streamer stream proxying no longer leaks an httpx connection when the
+  upstream Range request fails before streaming starts, and the `/yt/proxy`
+  route no longer forwards upstream `Content-Length` (which crashed the ASGI
+  app with an h11 protocol error whenever the CDN dropped a stream mid-read);
+  both proxy routes now share one hardened range/full-proxy helper.
+- tidal-downloader album-track pagination can no longer loop forever when the
+  TIDAL API echoes a zero/missing page `limit`; the loop advances by the real
+  page length under a fixed hard cap.
+- ytmusic-streamer rate pacing is now genuinely thread-safe (a shared
+  monotonic-clock pacer replaces a never-acquired asyncio.Lock and racy global
+  timestamp), the in-memory stream/search caches are bounded
+  (`YTMUSIC_STREAM_CACHE_MAX` / `YTMUSIC_SEARCH_CACHE_MAX`, default 1024, oldest
+  evicted), and the two near-duplicate yt-dlp extraction paths were merged into
+  one shared core.
+- ytmusic-streamer route handlers no longer run blocking ytmusicapi network
+  calls on the asyncio event loop (a slow YouTube call stalled every concurrent
+  request); search, album/artist/song, library, charts, moods, home, browse,
+  and playlist handlers now offload to worker threads.
+- ytmusic-streamer stream-URL extraction now has an overall per-request
+  deadline (`YTMUSIC_EXTRACT_TIMEOUT`, default 60s, HTTP 504 on expiry) and a
+  configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
+  20s) covering extraction and downloads, so a stalled extraction can no longer
+  hang a request or strand its worker thread forever.
+- The `audio-analyzer` sidecar now measures its own elapsed durations and
+  scheduling intervals (idle-model-unload timeout, worker-resize debounce, DB
+  reconciliation cadence, batch-rate logging) with `time.monotonic()` instead
+  of wall-clock `time.time()`, so an NTP step or manual clock change can no
+  longer prematurely unload models, mis-fire a resize, or corrupt the reported
+  throughput. The cross-process `audio:worker:heartbeat` timestamp remains
+  wall-clock epoch milliseconds by design.
+- `scripts/k8s-rollout-slo-check.sh` sampled SLO warning logs from only one pod
+  per Deployment (`kubectl logs deploy/...`), so reconnect/scheduler SLO
+  breaches emitted by other replicas in an HA deployment were missed and the
+  gate could pass when it should fail. It now aggregates `--since` logs across
+  every backend and backend-worker pod (by `app.kubernetes.io/component` label,
+  with a name-prefix fallback).
+- The three backend audio-analyzer source-contract suites
+  (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
+  `audioAnalyzerFailureResolutionContract`) were updated in step with the
+  analyzer reliability refactor: the marker strings they scrape from
+  `analyzer.py` moved into the new `_claim_tracks_for_processing` /
+  `_consume_batch_results` helpers and the module-level
+  `_RESOLVE_AUDIO_FAILURES_SQL` constant, so the tests now assert against
+  those boundaries (and additionally prove `_save_results` executes the
+  failure-resolution SQL).
+- Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
+  module import. Because the service uses multiprocessing spawn mode, every
+  spawned worker process re-imported the module and re-executed that query;
+  worker-count resolution now happens once, explicitly, at service startup in
+  the parent process.
+- CLAP sidecar idle monitor no longer leaks a new Redis connection pool on
+  every idle-check iteration; it now reuses a single injected client that is
+  deterministically closed on shutdown (as is the idle DB connection, which
+  previously stayed open if the main loop exited via an exception).
+- CLAP sidecar worker/text-embed/control daemon threads are now supervised:
+  if any thread dies, the service logs a critical error, stops cleanly, and
+  exits non-zero so the container orchestrator restarts it instead of leaving
+  a zombie pod that consumes no work.
+- CLAP model unload/inference race fixed: idle unloading and embedding
+  inference now serialize on one re-entrant lock, and embedding calls reload
+  the model under that lock if an idle unload wins the race — previously the
+  race raised mid-call, spuriously failing the track and burning its vibe
+  retry budget.
+- Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
+  timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
+- Backend Jest suites no longer leave Redis's live reconnect loop running in
+  test workers: `utils/redis.ts` skips its eager module-load connection under
+  Jest, preventing `Cannot log after tests are done` noise and flakiness, while
+  tests continue to cover the production eager-connect behavior.
+- Backend Jest's default `maxWorkers` is now 2 instead of 8, matching the
+  documented low-memory constraint and the existing explicit CI limit.
+- Sidecar requirement-lock tests now assert that the Uvicorn manifest floor is
+  at least the 0.52.0 security baseline instead of requiring that stale exact
+  literal, so Dependabot floor increases such as 0.52.1 remain valid.
+- Two orphaned frontend player tests now live under `frontend/tests/unit`, so
+  `test:unit` and `test:coverage` discover them; the frontend unit suite now
+  runs 845 tests.
+- Frontend test-script globs are now quoted so Node's test runner consistently
+  expands them instead of relying on partial shell expansion.
+- `playwright.config.ts` no longer duplicates its environment fallback
+  expressions.
+- The predeploy logout E2E test now follows the deterministic User-menu path
+  instead of conditionally discovering a logout element.
+- `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
+  `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
+  previous fail-open path.
+- Frontend polling hygiene: album/track preview playback no longer resumes the
+  main player over an active preview (a cleanup effect fired on every state
+  change, also destroying cached preview audio elements), and both preview
+  hooks now share one behavior — when a preview ends, errors, or unmounts, the
+  main player resumes only if the preview paused it.
+- TIDAL device-code authentication (both settings sections) now runs through a
+  shared `useDeviceAuthPolling` hook: re-clicking authenticate no longer leaks
+  the previous poll interval, the expiry timer is tracked and cleared on
+  success/cancel/unmount, and code expiry surfaces its error message instead
+  of being hidden by a stale-state closure.
+- Download status polling no longer forks a permanent extra poll chain each
+  time a `download-status-changed` event fires; all scheduling now flows
+  through a single tracked timer. `addPendingDownload` no longer performs side
+  effects inside its React state updater (StrictMode-safe).
+- Raw `setInterval` pollers (feature flags, presence heartbeat, active listen
+  sessions, job status, listen-together lobby discovery, device-link status)
+  now pause while the tab is hidden and refresh once on return to visibility
+  via a shared `useVisibilityGatedInterval` hook. The features provider also
+  no longer double-fetches on tab return (duplicate `focus` +
+  `visibilitychange` listeners). Presence heartbeats stop while a tab is
+  hidden, so backgrounded tabs no longer report the user as actively present.
+- Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
+  `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
+  at nonexistent `postgres`/`redis` services (the services are
+  `postgres-local`/`redis-local`), and the `docker-compose.dev.yml` compatibility
+  shim's `extends` targets referenced the same stale names, so
+  `docker compose config` failed for both. `scripts/dev-setup.sh` now runs under
+  `set -euo pipefail`, resolves the repo root from its own location, checks for
+  `nc` and `.env.example` before using them, and references the correct
+  `postgres-local`/`redis-local` service names.
+- TIDAL admin credentials no longer travel in sidecar URL query strings: the backend now sends the access token as `Authorization: Bearer <token>` and the user ID/country code as `x-tidal-user-id`/`x-tidal-country-code` headers for `POST /search`, `/download/track`, and `/download/album`. The TIDAL sidecar accepts both the new headers and legacy query parameters for this release, logging a deprecation warning when query credentials are used; query-parameter support will be removed in the next release. Requests without an access token now return **401** with `access_token required`.
+- The TIDAL and YouTube Music FastAPI sidecars no longer expose internal exception text in HTTP responses. Client-facing errors now use short generic messages while full exception details and tracebacks remain in service logs; this also changes TIDAL album downloads' per-track `errors[].error` value to `Download failed`, with the root cause available in the TIDAL sidecar logs.
+- YouTube Music OAuth credential files (`/data/oauth_<user>.json` and `/data/client_creds_<user>.json`) are now written with owner-only mode `0600`; the next write also tightens permissions on pre-existing files with looser modes.
+- The YouTube Music streamer image no longer makes `/data` world-writable with `chmod 777`. A new entrypoint repairs `/data` ownership and drops from root to the `ytmusic` user for plain Docker/Compose starts, while explicitly non-root deployments continue directly under their configured user and rely on existing volume permissions such as the Helm chart's unchanged `runAsUser: 1000`/`fsGroup: 1000` security context.
+- YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
 
 ### Security
 
@@ -347,382 +715,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **or** equal to that known default, restoring parity with the FastAPI sidecar guard
   (`sidecar_runtime_utils.py`) and the fail-fast-on-default posture of
   `encryption.ts`.
-
-### Added
-
-- CI visibility now includes a `Python Sidecar Tests` matrix job in
-  `quality-visibility.yml`, running the `pytest` suites for all four sidecars
-  (tidal-downloader, ytmusic-streamer, audio-analyzer, and audio-analyzer-clap),
-  including their internal-auth and security coverage, on every pull request.
-  A new root `npm run verify:python` command runs the four suites locally, and
-  both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
-
-### Changed
-
-- Frontend playback context split for playback re-render hygiene: the single
-  `AudioPlaybackContext` is now served as two contexts by the same
-  `AudioPlaybackProvider` — a high-frequency progress context (`currentTime`,
-  read via the new `usePlaybackProgress()` hook) and a low-frequency status
-  context (`isPlaying`, `duration`, `streamProfile`, seek/buffer flags, and all
-  setters, read via the new `usePlaybackStatus()` hook). Status-only consumers
-  (the album/playlist/discover pages, `LibraryTracksList`, and the playback
-  quality badge) were migrated to `usePlaybackStatus()` so they no longer
-  re-render on every ~1 Hz clock tick during playback. `useAudioPlayback()` is
-  retained unchanged as a deprecated composite (same shape, same referential
-  stability, same out-of-provider error) for the remaining consumers; no
-  playback behavior changed. Prefer the two granular hooks going forward.
-- The artist page's Start Radio action now uses the in-app confirmation dialog
-  before adding tracks to a Listen Together group's shared queue, instead of the
-  native browser confirmation prompt.
-- Discover settings now uses the in-app confirmation dialog when clearing the
-  Discovery playlist instead of the native browser confirmation prompt.
-- Removed seven unused frontend API client methods (`testNzbget`,
-  `testQbittorrent`, `testListenNotes`, `testDeezer`, `trackPlayback`,
-  `getPodcastEpisode`, and `getSlskdDownloads`) that targeted non-existent
-  backend routes. The onboarding page now checks status through the shared API
-  boundary (`api.getOnboardingStatus`) instead of calling `fetch` directly.
-- Enrichment `GET /api/enrichment/status` now returns a complete zeroed
-  `EnrichmentState` when idle instead of a partial object, and the frontend
-  `enrichmentApi.getStatus` return type is now non-null.
-- Media-source contract: the hand-copied `local`/`tidal`/`youtube`/`youtube-direct`
-  source unions scattered across the frontend and backend now derive from
-  `CanonicalMediaSource` in `@soundspan/media-metadata-contract` instead of being
-  re-typed by hand. Two documented derived types were added —
-  `RemoteMediaSource` (`Exclude<CanonicalMediaSource, "local">`, for stream-source
-  hints) and `ResolvedMediaSource` (`Exclude<CanonicalMediaSource, "youtube-direct">`,
-  for resolved/origin sources, since `youtube-direct` is a container variant of
-  `youtube` and never an independent resolution target) — and every exported symbol
-  in the contract package is now documented. No allowed string value changed and
-  there is no runtime behavior change; this only removes drift risk between the
-  copies. Consumers updated: `trackRef.ts`, `audio-state-context.tsx`,
-  `listen-together-socket.ts`, `api.ts` (annotations only), `listenTogetherManager.ts`,
-  `listenTogetherResolution.ts`, and `playlistImportService.ts`.
-- Helm chart: the individual-mode audio-analyzer and CLAP-analyzer Deployments
-  now have liveness/readiness probes (exec `pgrep`, mirroring the compose
-  healthcheck), closing the compose/chart probe-parity gap. Both are
-  configurable via `audioAnalyzer.livenessProbe`/`readinessProbe` and the CLAP
-  equivalents (set to `null` to disable).
-- Helm chart: `aio.gpu.enabled`, `audioAnalyzer.gpu.enabled`, and
-  `audioAnalyzerClap.gpu.enabled` are now wired — previously no-ops. When
-  enabled they add an `nvidia.com/gpu: <gpu.count>` resource limit (default 1)
-  and an optional pod `runtimeClassName` (`gpu.runtimeClassName`) for clusters
-  requiring a non-default GPU runtime. Requires the NVIDIA device plugin.
-- Helm chart: the AIO default memory request/limit was raised from `1Gi`/`4Gi`
-  to `2Gi`/`8Gi`. The AIO image bundles the backend, frontend, Postgres, Redis,
-  and (by default) the Essentia + CLAP analyzers in one container, whose models
-  alone peak well above the old 4Gi ceiling.
-- Helm chart: the frontend pod now runs as UID/GID `1001` (the published image's
-  `nextjs` user) via a `frontend.podSecurityContext` override merged over the
-  chart-wide `1000`, fixing the UID/file-ownership mismatch until the image is
-  realigned.
-- Frontend (refactor slice P25, frontend-dedup): mechanical duplication
-  collapse across the frontend, no user-visible behavior change.
-  - YouTube Music account linking (`YouTubeMusicSection`) now uses the shared
-    `useDeviceAuthPolling` hook instead of a third hand-rolled device-code
-    polling/expiry/countdown state machine, matching the Tidal sections. This
-    inherits the hook's bounded, race-safe polling, tracked timers with
-    deterministic cleanup, and generation-guarded cancellation.
-  - Extracted the duplicated device-code linking UI shared by the TIDAL and
-    YouTube Music settings sections into one presentational component
-    (`features/settings/components/ui/DeviceAuthLinkPanel`).
-  - Extracted the copy-pasted Explore media card (square thumbnail + title +
-    subtitle) into a shared `features/explore/components/BrowseCard`, adopted by
-    the featured-shelves and mixes sections for both TIDAL and YouTube Music.
-  - Consolidated nine local time/duration re-implementations onto
-    `utils/formatTime`, adding a documented `formatRelativeTime` helper for the
-    activity tabs (History, Notifications, Active Downloads).
-  - Replaced index-based React keys with stable content-derived keys in
-    `PreviewEpisodes` and `SyncedLyrics`.
-- Backend: began consolidating scattered `process.env` reads behind the
-  `backend/src/config.ts` boundary mandated by `AGENTS.md`. Added typed config
-  sections (`jwtSecret`, `docsPublic`, `adminResetPassword`,
-  `settingsDecryptFailClosed`, `ytmusicRegion`, `tidal`, `listenTogether`,
-  `readiness`, `segmentedStreaming`, and an `audiobookshelf` getter) and migrated
-  the streaming services (Tidal download/streaming sidecar URL and decrypt-fail-
-  closed flag), the segmented-streaming session-token secret, the Audiobookshelf
-  env fallback, and the API docs-public/admin-reset entrypoint gates to read from
-  it. The segmented session token, `middleware/auth`, and these services now share
-  the single `config.jwtSecret` derivation (`JWT_SECRET` else `SESSION_SECRET`)
-  instead of re-deriving it independently. A new backend guard test enforces the
-  boundary as a ratchet: only `config.ts`/`config/**` may read `process.env`
-  (build-metadata `npm_package_version` excepted); every other reader must stay on
-  an allowlist that can only shrink. No runtime behavior changed. Remaining
-  subsystems (segmented-streaming, Listen Together socket, dependency-readiness,
-  browse, and the `BACKEND_PROCESS_ROLE`/`worker.ts` split) remain on the
-  allowlist and are tracked for follow-up migration.
-- Backend: fixed a dead `config.audiobookshelf` block that read the unused
-  `AUDIOBOOKSHELF_TOKEN` variable instead of the `AUDIOBOOKSHELF_API_KEY` the live
-  Audiobookshelf service actually consumes; `AUDIOBOOKSHELF_TOKEN` (never read by
-  any code path) is removed from the environment-variable reference.
-- Digest-pinned all base images by `@sha256:` alongside their existing tags:
-  the backend, frontend, tidal-downloader, ytmusic-streamer, and
-  audio-analyzer-clap Dockerfiles plus the pgvector/redis images in
-  `docker-compose.yml` and `docker-bake.json`. Dependabot's Docker ecosystem
-  keeps the pins fresh.
-- **BREAKING (frontend image runtime UID changed 1001 -> 1000):** the frontend
-  production image now runs as the base Node image's built-in `node` user
-  (UID/GID 1000), matching the chart's `runAsUser: 1000`. Existing `.next/cache`
-  or other frontend volumes owned by UID 1001 must be re-chowned to 1000 (or
-  recreated). See `docs/UPGRADING.md`.
-- The backend `api-runtime` image now ships compiled JavaScript
-  (`node dist/index.js`) with pruned production dependencies instead of the full
-  development tree plus `tsx`; the entrypoint still runs
-  `npx prisma migrate deploy` via a locally reinstalled Prisma CLI.
-- Backend and frontend runtime artifacts now use `COPY --chown` instead of a
-  duplicated recursive `chown -R /app` layer.
-- Docs/contract sync (refactor slice): `AGENTS.md` now scopes the "no raw SQL"
-  rule to the three query classes Prisma cannot express (pgvector similarity/ANN,
-  PostgreSQL full-text search, and row/advisory locking) with a parameterized-only
-  constraint, records that the Subsonic `/rest` surface is contract-documented in
-  `docs/OPENSUBSONIC_COMPATIBILITY.md` instead of per-endpoint OpenAPI, documents
-  the `logger.child` scope and file naming/placement conventions, deprecates the
-  source-scraping `*Contract` test pattern, and indexes the `components/vibe`
-  location as a recognized (owner-decision-pending) exception in
-  `frontend/features/README.md`. The two trivially-expressible profile-picture
-  presence checks in `routes/settings.ts` (`$queryRaw COUNT(*)` → `prisma.user.count`)
-  and `routes/social.ts` (two `$queryRaw SELECT id` → `prisma.user.findMany`) were
-  migrated to Prisma with no behavior change (the profile-picture blob is still not
-  loaded).
-- Backend: introduced a single consolidated, typed Lidarr HTTP client
-  (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
-  for outbound Lidarr calls. It wraps one reusable axios instance with bounded
-  reliability the previous scattered call-sites lacked: a consistent request
-  timeout, capped exponential-backoff retries (idempotent methods and classified
-  transient failures only — 408/425/429/5xx/network/timeout; `POST` is not
-  retried unless explicitly opted in; `Retry-After` is honored and capped), a
-  concurrency limiter, a typed `LidarrHttpError` (status/method/path/attempts/
-  isTransient) that never leaks the API key or host, connection resolution from
-  system settings with `.env` fallback and URL validation, and the shared
-  logger. The discovery album-lifecycle deletion path now routes through this
-  client; remaining Lidarr consumers (the `lidarr.ts` queue/history helper
-  functions, `downloadQueue`, `simpleDownloadManager`, `discoverWeekly`, and the
-  discover/system-settings/onboarding routes) will be migrated onto it
-  incrementally to keep each change no-regression.
-- AIO analyzer tuning from `aio.env` is now passed through to the MusicCNN and
-  CLAP runtimes instead of being dropped or overwritten by supervisord defaults.
-- AIO image build/startup hygiene: apt update/install steps are consolidated,
-  and the redundant frontend `sleep 10` startup delay is removed.
-- Removed the non-functional `HF_TOKEN` BuildKit secret path from the AIO and
-  CLAP image builds; the public model download remains SHA-256 verified.
-- Backend: moved six `@types/*` packages from production dependencies to
-  devDependencies and removed `@types/speakeasy`, slimming the pruned worker
-  image's production `node_modules`.
-- Frontend: removed the deprecated `@types/dompurify` stub; `dompurify` 3.x and
-  later ship their own type definitions.
-- Backend: the 13 curated daily "vibe" mixes (Sad Girl Sundays, Main Character
-  Energy, Villain Era, 3AM Thoughts, Hot Girl Walk, Rage Cleaning, Golden Hour,
-  Shower Karaoke, In My Feelings, Midnight Drive, Romanticize Your Life, That
-  Girl Era, Unhinged) are now data-driven: their filters, names, descriptions,
-  colors, pool sizes, and weekday gates live in a single declarative catalog
-  (`backend/src/services/curatedVibeMixDefinitions.ts`) consumed by one shared
-  generator, replacing ~13 near-identical hardcoded methods (net −433 lines in
-  `programmaticPlaylists.ts`). Behavior, mix ids/types, and the public
-  `generate*` method surface are unchanged; artist-diversity selection is
-  preserved.
-- Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
-  when an analysis batch hits `BATCH_ANALYSIS_TIMEOUT_SECONDS`, tracks that
-  never started running are now re-queued as `pending` WITHOUT consuming any
-  retry budget, and tracks that were genuinely in flight fail non-permanently
-  (consuming exactly one retry unit, retried up to `MAX_RETRIES`). Previously
-  every unfinished track in a timed-out batch was failed permanently — a single
-  slow batch could silently and irreversibly shrink the analyzed library.
-  Results that completed just as the timeout fired are now drained and saved
-  instead of being dropped.
-
-### Fixed
-
-- Lidarr queue/history helper HTTP calls are now bounded. The module-level
-  `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,
-  `getQueue`, and `isDownloadActive` helpers in `backend/src/services/lidarr.ts`
-  previously issued bare `axios` requests with no `timeout`, inheriting axios's
-  unbounded default (`0`). Because `QueueCleaner.runCleanup` only reschedules its
-  30s reconcile/clean loop after its awaits resolve, a single hung Lidarr call
-  could stall the loop indefinitely. Each call now carries an explicit
-  `timeout: 30000`, matching the class client on the same module.
-- AIO image builds no longer fail while removing the base image's `node` user:
-  `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
-  holders are renamed and reused instead of failing `groupadd` or `useradd`.
-- OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
-  no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
-  API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,
-  and search routes were documented without the mounted `/api` prefix, so the
-  spec published paths such as `/auth/login` and `/mixes` that 404 on the server
-  while the real `/api/...` URLs went undocumented. The keys now match the
-  mounted routes. `openapiSupplement.ts` — previously a shim that re-documented
-  those same endpoints under their correct prefixes — is reduced to the only
-  endpoints defined directly in `index.ts` with no route module (the
-  `/health`, `/api/health` liveness/readiness probes and `/api/docs.json`).
-  Documentation only; no runtime route behavior changed.
-- OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
-  `backend/package.json` at load time (currently `1.9.0`) so the published
-  contract tracks the shipping release.
-- MetadataEditor's "Reset to Original" action now uses the in-app
-  `ConfirmDialog` instead of the browser's native confirmation prompt.
-- Frontend token refresh is now single-flight, so simultaneous 401 responses
-  share one `/auth/refresh` request instead of racing refresh-token rotation
-  and forcing a logout.
-- Audio-state polling now detects expired sessions from HTTP 401 status without
-  permanently stopping after a transient failure, and audiobook/podcast
-  restore failures are logged instead of surfacing as unhandled rejections.
-- Backend reliability hardening (no behavior change for healthy paths):
-  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
-    forever when an album title cannot be resolved. The previous re-query
-    pagination re-fetched the same `albumId: null` rows on every iteration
-    (latching `isRunning` and inflating the processed counter without bound);
-    both the Tidal and YouTube Music phases now use id-cursor pagination so
-    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
-    safety bound.
-  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
-    **all** logging. Unrecognized values now fall back to the environment
-    default (`warn` in production, `debug` otherwise) and emit a one-time
-    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
-    matching is also hardened against prototype keys (`constructor`, `toString`).
-  - The music-library scanner's recursive directory walk was replaced with a
-    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
-    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
-    pathological trees.
-  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
-    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
-    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
-    no longer hang a worker or request indefinitely.
-  - Untracked module-scope cleanup intervals (Soulseek search-session and
-    failed-user pruning) are now `unref()`'d so they never keep the process or a
-    Jest worker alive, and the worker scheduler / discover-processor ioredis
-    lock clients now connect lazily under Jest to stop background reconnect
-    loops from logging after test teardown.
-- Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
-  monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
-  `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
-  worker scheduler; discovery cleanup runs via `staleJobCleanup`).
-- Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
-  use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
-  `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without
-  leaking internals, and nested error payloads (e.g. `age_restricted`) keep
-  their existing fields. The Node backend only branches on status codes, so no
-  backend change was needed.
-- ytmusic-streamer stream proxying no longer leaks an httpx connection when the
-  upstream Range request fails before streaming starts, and the `/yt/proxy`
-  route no longer forwards upstream `Content-Length` (which crashed the ASGI
-  app with an h11 protocol error whenever the CDN dropped a stream mid-read);
-  both proxy routes now share one hardened range/full-proxy helper.
-- tidal-downloader album-track pagination can no longer loop forever when the
-  TIDAL API echoes a zero/missing page `limit`; the loop advances by the real
-  page length under a fixed hard cap.
-- ytmusic-streamer rate pacing is now genuinely thread-safe (a shared
-  monotonic-clock pacer replaces a never-acquired asyncio.Lock and racy global
-  timestamp), the in-memory stream/search caches are bounded
-  (`YTMUSIC_STREAM_CACHE_MAX` / `YTMUSIC_SEARCH_CACHE_MAX`, default 1024, oldest
-  evicted), and the two near-duplicate yt-dlp extraction paths were merged into
-  one shared core.
-- ytmusic-streamer route handlers no longer run blocking ytmusicapi network
-  calls on the asyncio event loop (a slow YouTube call stalled every concurrent
-  request); search, album/artist/song, library, charts, moods, home, browse,
-  and playlist handlers now offload to worker threads.
-- ytmusic-streamer stream-URL extraction now has an overall per-request
-  deadline (`YTMUSIC_EXTRACT_TIMEOUT`, default 60s, HTTP 504 on expiry) and a
-  configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
-  20s) covering extraction and downloads, so a stalled extraction can no longer
-  hang a request or strand its worker thread forever.
-- The `audio-analyzer` sidecar now measures its own elapsed durations and
-  scheduling intervals (idle-model-unload timeout, worker-resize debounce, DB
-  reconciliation cadence, batch-rate logging) with `time.monotonic()` instead
-  of wall-clock `time.time()`, so an NTP step or manual clock change can no
-  longer prematurely unload models, mis-fire a resize, or corrupt the reported
-  throughput. The cross-process `audio:worker:heartbeat` timestamp remains
-  wall-clock epoch milliseconds by design.
-- `scripts/k8s-rollout-slo-check.sh` sampled SLO warning logs from only one pod
-  per Deployment (`kubectl logs deploy/...`), so reconnect/scheduler SLO
-  breaches emitted by other replicas in an HA deployment were missed and the
-  gate could pass when it should fail. It now aggregates `--since` logs across
-  every backend and backend-worker pod (by `app.kubernetes.io/component` label,
-  with a name-prefix fallback).
-- The three backend audio-analyzer source-contract suites
-  (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
-  `audioAnalyzerFailureResolutionContract`) were updated in step with the
-  analyzer reliability refactor: the marker strings they scrape from
-  `analyzer.py` moved into the new `_claim_tracks_for_processing` /
-  `_consume_batch_results` helpers and the module-level
-  `_RESOLVE_AUDIO_FAILURES_SQL` constant, so the tests now assert against
-  those boundaries (and additionally prove `_save_results` executes the
-  failure-resolution SQL).
-- Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
-  module import. Because the service uses multiprocessing spawn mode, every
-  spawned worker process re-imported the module and re-executed that query;
-  worker-count resolution now happens once, explicitly, at service startup in
-  the parent process.
-- CLAP sidecar idle monitor no longer leaks a new Redis connection pool on
-  every idle-check iteration; it now reuses a single injected client that is
-  deterministically closed on shutdown (as is the idle DB connection, which
-  previously stayed open if the main loop exited via an exception).
-- CLAP sidecar worker/text-embed/control daemon threads are now supervised:
-  if any thread dies, the service logs a critical error, stops cleanly, and
-  exits non-zero so the container orchestrator restarts it instead of leaving
-  a zombie pod that consumes no work.
-- CLAP model unload/inference race fixed: idle unloading and embedding
-  inference now serialize on one re-entrant lock, and embedding calls reload
-  the model under that lock if an idle unload wins the race — previously the
-  race raised mid-call, spuriously failing the track and burning its vibe
-  retry budget.
-- Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
-  timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
-- Backend Jest suites no longer leave Redis's live reconnect loop running in
-  test workers: `utils/redis.ts` skips its eager module-load connection under
-  Jest, preventing `Cannot log after tests are done` noise and flakiness, while
-  tests continue to cover the production eager-connect behavior.
-- Backend Jest's default `maxWorkers` is now 2 instead of 8, matching the
-  documented low-memory constraint and the existing explicit CI limit.
-- Sidecar requirement-lock tests now assert that the Uvicorn manifest floor is
-  at least the 0.52.0 security baseline instead of requiring that stale exact
-  literal, so Dependabot floor increases such as 0.52.1 remain valid.
-- Two orphaned frontend player tests now live under `frontend/tests/unit`, so
-  `test:unit` and `test:coverage` discover them; the frontend unit suite now
-  runs 845 tests.
-- Frontend test-script globs are now quoted so Node's test runner consistently
-  expands them instead of relying on partial shell expansion.
-- `playwright.config.ts` no longer duplicates its environment fallback
-  expressions.
-- The predeploy logout E2E test now follows the deterministic User-menu path
-  instead of conditionally discovering a logout element.
-- `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
-  `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
-  previous fail-open path.
-- Frontend polling hygiene: album/track preview playback no longer resumes the
-  main player over an active preview (a cleanup effect fired on every state
-  change, also destroying cached preview audio elements), and both preview
-  hooks now share one behavior — when a preview ends, errors, or unmounts, the
-  main player resumes only if the preview paused it.
-- TIDAL device-code authentication (both settings sections) now runs through a
-  shared `useDeviceAuthPolling` hook: re-clicking authenticate no longer leaks
-  the previous poll interval, the expiry timer is tracked and cleared on
-  success/cancel/unmount, and code expiry surfaces its error message instead
-  of being hidden by a stale-state closure.
-- Download status polling no longer forks a permanent extra poll chain each
-  time a `download-status-changed` event fires; all scheduling now flows
-  through a single tracked timer. `addPendingDownload` no longer performs side
-  effects inside its React state updater (StrictMode-safe).
-- Raw `setInterval` pollers (feature flags, presence heartbeat, active listen
-  sessions, job status, listen-together lobby discovery, device-link status)
-  now pause while the tab is hidden and refresh once on return to visibility
-  via a shared `useVisibilityGatedInterval` hook. The features provider also
-  no longer double-fetches on tab return (duplicate `focus` +
-  `visibilitychange` listeners). Presence heartbeats stop while a tab is
-  hidden, so backgrounded tabs no longer report the user as actively present.
-- Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
-  `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
-  at nonexistent `postgres`/`redis` services (the services are
-  `postgres-local`/`redis-local`), and the `docker-compose.dev.yml` compatibility
-  shim's `extends` targets referenced the same stale names, so
-  `docker compose config` failed for both. `scripts/dev-setup.sh` now runs under
-  `set -euo pipefail`, resolves the repo root from its own location, checks for
-  `nc` and `.env.example` before using them, and references the correct
-  `postgres-local`/`redis-local` service names.
-- TIDAL admin credentials no longer travel in sidecar URL query strings: the backend now sends the access token as `Authorization: Bearer <token>` and the user ID/country code as `x-tidal-user-id`/`x-tidal-country-code` headers for `POST /search`, `/download/track`, and `/download/album`. The TIDAL sidecar accepts both the new headers and legacy query parameters for this release, logging a deprecation warning when query credentials are used; query-parameter support will be removed in the next release. Requests without an access token now return **401** with `access_token required`.
-- The TIDAL and YouTube Music FastAPI sidecars no longer expose internal exception text in HTTP responses. Client-facing errors now use short generic messages while full exception details and tracebacks remain in service logs; this also changes TIDAL album downloads' per-track `errors[].error` value to `Download failed`, with the root cause available in the TIDAL sidecar logs.
-- YouTube Music OAuth credential files (`/data/oauth_<user>.json` and `/data/client_creds_<user>.json`) are now written with owner-only mode `0600`; the next write also tightens permissions on pre-existing files with looser modes.
-- The YouTube Music streamer image no longer makes `/data` world-writable with `chmod 777`. A new entrypoint repairs `/data` ownership and drops from root to the `ytmusic` user for plain Docker/Compose starts, while explicitly non-root deployments continue directly under their configured user and rely on existing volume permissions such as the Helm chart's unchanged `runAsUser: 1000`/`fsGroup: 1000` security context.
-- YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
-
-### Security
 
 - Every third-party GitHub Action across the six CI workflows is pinned to a full
   commit SHA with a `# vX.Y.Z` comment; Dependabot still bumps those pins.

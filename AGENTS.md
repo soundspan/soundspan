@@ -33,7 +33,7 @@ Repository contract for soundspan.
   - **Row-level & advisory locking** — `FOR UPDATE SKIP LOCKED` job claiming and `pg_advisory_*` locks (e.g. `backend/src/routes/downloads.ts`, worker claim loops).
 
   Constraints on any permitted raw SQL: use Prisma tagged-template `$queryRaw`/`$executeRaw` so every value is bound as a parameter; **never** `$queryRawUnsafe`/`$executeRawUnsafe` with interpolated external input (dynamic identifiers must come from code-owned allowlists); back it with a behavioral test against real PostgreSQL, not a source-text assertion (see Testing below). Anything a Prisma query can express — plain filters, counts, existence checks — must use Prisma, not raw SQL.
-- **Logging helpers:** Use shared logging helpers in runtime code, and scope logs with `logger.child({ scope: "..." })` rather than ad hoc `[bracket-tag]` message prefixes so scope is a structured field:
+- **Logging helpers:** Use shared logging helpers in runtime code, and scope logs with `logger.child("Scope")` rather than ad hoc `[bracket-tag]` message prefixes so scope is a structured field:
   - frontend: `frontend/lib/logger.ts`
   - backend: `backend/src/utils/logger.ts`
   - python sidecars: `services/common/logging_utils.py`
@@ -51,7 +51,7 @@ There is **no root install** — `backend/`, `frontend/`, and `packages/media-me
 
 - **Node.js ≥ 24** — the custom frontend proxy requires Node 24 and every Node-based image and CI job runs Node 24. Match the `.nvmrc` locally.
 - **npm 9+** — each package commits its own lockfile; use `npm ci` for reproducible installs.
-- **Python 3.11+** — only when changing the `services/**` sidecars.
+- **Python 3.13+** — only when changing the `services/**` sidecars (the tidal-downloader toolchain's `tiddl` dependency requires Python >=3.13; ruff/mypy still check Python 3.11 semantics via `pyproject.toml`).
 
 ### First-time setup (from the repo root)
 
@@ -78,7 +78,7 @@ npm --prefix frontend install
 
 ### Reproduce the CI gates locally (run before every PR)
 
-**`npm run verify:ci`** (from the repo root) reproduces every CI gate, including the Python gates (requires Python 3.11+ with each sidecar's `requirements-test.txt` and `services/requirements-quality.txt` installed). When you are not touching `services/**`, **`npm run verify`** runs the Node + Helm subset. Per-gate equivalents:
+**`npm run verify:ci`** (from the repo root) reproduces every CI gate, including the Python gates (requires Python 3.13+ with each sidecar's `requirements-test.txt` and `services/requirements-quality.txt` installed). When you are not touching `services/**`, **`npm run verify`** runs the Node + Helm subset. Per-gate equivalents:
 
 | CI job (`quality-visibility.yml`) | Blocking? | Local command | Catches |
 | --- | --- | --- | --- |
