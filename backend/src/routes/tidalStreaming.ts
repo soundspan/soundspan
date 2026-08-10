@@ -362,11 +362,14 @@ router.post(
                 username: tokens.username,
                 country_code: tokens.country_code,
             });
-        } catch (err: any) {
-            logger.error("[TIDAL-STREAM] Poll auth failed:", err.message);
+        } catch (err: unknown) {
+            logger.error(
+                "[TIDAL-STREAM] Poll auth failed:",
+                err instanceof Error ? err.message : String(err),
+            );
             res.status(500).json({
                 status: "error",
-                error: err.message,
+                error: "Device-code poll failed",
             });
         }
     },

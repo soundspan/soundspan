@@ -849,6 +849,39 @@ describe("tidal streaming service", () => {
                 ],
             );
         });
+
+        it("chunks album match searches into sequential batches of at most 25", async () => {
+            const tracks = Array.from({ length: 60 }, (_, index) => ({
+                artist: `Artist ${index}`,
+                title: `Track ${index}`,
+            }));
+            mockClient.post.mockImplementation((_url, body) =>
+                Promise.resolve({
+                    data: {
+                        results: body.map((query: { query: string }) => ({
+                            query: query.query,
+                            results: [],
+                        })),
+                    },
+                }),
+            );
+
+            const result = await tidalStreamingService.findMatchesForAlbum(
+                "user-1",
+                tracks,
+            );
+
+            expect(mockClient.post).toHaveBeenCalledTimes(3);
+            expect(
+                mockClient.post.mock.calls.map(([, body]) => body.length),
+            ).toEqual([25, 25, 10]);
+            for (const [url, body] of mockClient.post.mock.calls) {
+                expect(url).toBe("/user/search/batch?user_id=user-1");
+                expect(body.length).toBeLessThanOrEqual(25);
+            }
+            expect(result).toHaveLength(60);
+            expect(result.every((match) => match === null)).toBe(true);
+        });
     });
 
     describe("quality preferences", () => {

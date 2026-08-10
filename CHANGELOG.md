@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/downloads/clear-lidarr-queue` to administrators.
 - Capped batch TIDAL search requests at 50 queries and limited concurrent
   searches against each shared per-user TIDAL session to 5.
+- Sanitized the TIDAL device-code poll 500 response to a static message (raw
+  failure detail is now server-log only), widened the route error-canon leak
+  ratchet to catch bare `err`/`e`/`ex` catch-variable leaks across routes and
+  top-level services (freezing pre-existing instances in the baseline), and
+  chunked TIDAL batch match-search calls to at most 25 queries per sidecar
+  request.
 
 ### Changed
 

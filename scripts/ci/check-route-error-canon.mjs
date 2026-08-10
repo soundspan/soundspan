@@ -61,15 +61,45 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/auth.ts": 2,
     "backend/src/routes/discover.ts": 0,
     "backend/src/routes/downloads.ts": 0,
+    // library.ts remaining 1: admin-only Lidarr connection-test diagnostics (~L5740 lidarrError = err?.message) returned in an admin settings probe response, not a general-user 500 leak.
+    "backend/src/routes/library.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
     "backend/src/routes/notifications.ts": 0,
     "backend/src/routes/playbackState.ts": 0,
+    // playlistImport.ts remaining 2: substring-guarded 400 echoes of playlistImportService's own thrown validation messages (~L434 preview, ~L516 "Invalid track reference" execute); code-owned text, not raw transport errors.
+    "backend/src/routes/playlistImport.ts": 2,
     // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); the scanError sessionLog instance was sanitized (fixed, not frozen).
     "backend/src/routes/playlists.ts": 1,
     // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.
     "backend/src/routes/podcasts.ts": 2,
+    // settings.ts remaining 1: multer MulterError.message in a 400 upload-validation response (~L307), behind an instanceof MulterError guard; library-owned validation text.
+    "backend/src/routes/settings.ts": 1,
     // streaming.ts remaining 7: segmentedError.message from toSegmentedSessionError() (~L493); typed SegmentedSessionError domain errors with static code-owned messages/status codes, not raw caught errors.
     "backend/src/routes/streaming.ts": 7,
+    // acquisitionService.ts remaining 3: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard.
+    "backend/src/services/acquisitionService.ts": 3,
+    // audioStreaming.ts remaining 3: internal ffmpeg-error classification (~L285) plus transcode-failure AppError messages (~L303, ~L347); frozen under the slice-E scope guard — AppError messages are echoed by errorHandler, flagged for follow-up sanitization.
+    "backend/src/services/audioStreaming.ts": 3,
+    // audiobookCache.ts remaining 2: sync-failure detail string recorded server-side (~L104) and an internal thrown sync-error message (~L398); frozen under the slice-E scope guard.
+    "backend/src/services/audiobookCache.ts": 2,
+    // discoverWeekly.ts remaining 3: error-classification const (~L51), discoveryLogger line (~L564), and internal transaction-failure message (~L1484); server-side generation pipeline, frozen under the slice-E scope guard.
+    "backend/src/services/discoverWeekly.ts": 3,
+    // lidarr.ts remaining 3: { success, message } Lidarr client results (~L1651, ~L1732, ~L2152) consumed by admin Lidarr management flows; frozen under the slice-E scope guard.
+    "backend/src/services/lidarr.ts": 3,
+    // moodBucketService.ts remaining 1: error-classification const (~L185), never a response body; frozen under the slice-E scope guard.
+    "backend/src/services/moodBucketService.ts": 1,
+    // musicScanner.ts remaining 1: per-file scan-error detail stored in scan progress/health records (~L211); server-side scan state, admin-only surface.
+    "backend/src/services/musicScanner.ts": 1,
+    // podcastCache.ts remaining 2: cover-sync failure strings recorded server-side (~L90, ~L172); frozen under the slice-E scope guard.
+    "backend/src/services/podcastCache.ts": 2,
+    // podcastDownload.ts remaining 1: error-classification const (~L92), never a response body; frozen under the slice-E scope guard.
+    "backend/src/services/podcastDownload.ts": 1,
+    // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
+    "backend/src/services/simpleDownloadManager.ts": 4,
+    // soulseek.ts remaining 13: sessionLog(...) server-side log lines and { success:false, error } download-result objects consumed by the admin-only Soulseek download path; frozen under the slice-E scope guard.
+    "backend/src/services/soulseek.ts": 13,
+    // spotifyImport.ts remaining 4: error-classification const (~L48), import-job error fields (~L1521, ~L1768), and a non-logger import log line (~L1723); admin-visible import-job state, frozen under the slice-E scope guard.
+    "backend/src/services/spotifyImport.ts": 4,
 });
 
 export function countPattern(source) {
@@ -101,7 +131,7 @@ export function stripLoggerCalls(source) {
 }
 
 export function countLeakPattern(source) {
-    const ERROR_ID = String.raw`(?:[A-Za-z_$][\w$]*Error|error)`;
+    const ERROR_ID = String.raw`(?<![\w$.])(?:[A-Za-z_$][\w$]*Error|error|err|ex|e)(?![\w$])`;
     const stripped = stripLoggerCalls(source).replace(
         new RegExp(String.raw`\(\s*(${ERROR_ID})\s+as\s+[^()]*\)`, "g"),
         "$1",
@@ -145,10 +175,14 @@ function routeFiles(directory) {
         .map((entry) => path.join(directory, entry.name));
 }
 
-function collectCounts(repoRoot, counter = countPattern) {
-    const routesDirectory = path.join(repoRoot, "backend/src/routes");
+function collectCounts(
+    repoRoot,
+    counter = countPattern,
+    relativeDirectory = "backend/src/routes",
+) {
+    const directory = path.join(repoRoot, relativeDirectory);
     return Object.fromEntries(
-        routeFiles(routesDirectory)
+        routeFiles(directory)
             .sort()
             .map((filePath) => {
                 const relativePath = path
@@ -193,8 +227,15 @@ function runCli() {
         collectCounts(repoRoot),
         BASELINE,
     );
+    // The leak ratchet covers routes + top-level services modules.
+    const routesCounts = collectCounts(repoRoot, countLeakPattern);
+    const servicesCounts = collectCounts(
+        repoRoot,
+        countLeakPattern,
+        "backend/src/services",
+    );
     const leakResult = analyzeRouteErrorCanon(
-        collectCounts(repoRoot, countLeakPattern),
+        { ...routesCounts, ...servicesCounts },
         LEAK_BASELINE,
     );
 

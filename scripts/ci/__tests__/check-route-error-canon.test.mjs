@@ -143,3 +143,25 @@ test("countLeakPattern exempts suffixed-error details logged server-side", () =>
 test("countLeakPattern ignores message access on non-error identifiers", () => {
     assert.equal(countLeakPattern("res.json({ msg: payload.message })"), 0);
 });
+
+test("countLeakPattern flags bare err response leaks", () => {
+    const source =
+        'res.status(500).json({ status: "error", error: err.message });';
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern flags bare e and ex response leaks", () => {
+    assert.equal(countLeakPattern("res.json({ error: e.message })"), 1);
+    assert.equal(countLeakPattern("res.send(`x: ${ex.message}`);"), 1);
+});
+
+test("countLeakPattern exempts bare err details logged server-side", () => {
+    const source =
+        'logger.error("[TIDAL-STREAM] Poll auth failed:", err.message);';
+    assert.equal(countLeakPattern(source), 0);
+});
+
+test("countLeakPattern ignores identifiers ending in e", () => {
+    assert.equal(countLeakPattern("res.json({ detail: response.message })"), 0);
+    assert.equal(countLeakPattern("res.send(`${resource.message}`);"), 0);
+});

@@ -292,6 +292,37 @@ describe("tidal streaming route runtime", () => {
         expect(tidalStreamingService.restoreOAuth).toHaveBeenCalled();
     });
 
+    it("sanitizes device auth poll failures", async () => {
+        const req = {
+            user: { id: "u1" },
+            body: { deviceCode: "device-code" },
+        } as any;
+
+        tidalStreamingService.pollDeviceAuth.mockRejectedValueOnce(
+            new Error("connect ECONNREFUSED 10.0.0.5:9999"),
+        );
+        const errorRes = createRes();
+        await pollHandler(req, errorRes);
+
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({
+            status: "error",
+            error: "Device-code poll failed",
+        });
+        expect(JSON.stringify(errorRes.body)).not.toContain("ECONNREFUSED");
+
+        tidalStreamingService.pollDeviceAuth.mockRejectedValueOnce(
+            "string-failure",
+        );
+        const stringErrorRes = createRes();
+        await expect(pollHandler(req, stringErrorRes)).resolves.toBeUndefined();
+        expect(stringErrorRes.statusCode).toBe(500);
+        expect(stringErrorRes.body).toEqual({
+            status: "error",
+            error: "Device-code poll failed",
+        });
+    });
+
     it("saves and clears auth tokens", async () => {
         const invalidSaveReq = { user: { id: "u1" }, body: {} } as any;
         const invalidSaveRes = createRes();

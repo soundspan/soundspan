@@ -152,6 +152,7 @@ class TidalStreamingService {
         "re-recorded",
         "rerecorded",
     ];
+    private static readonly MATCH_BATCH_CHUNK_SIZE = 25;
 
     constructor() {
         this.sidecarUrl = config.tidal.sidecarUrl;
@@ -716,6 +717,26 @@ class TidalStreamingService {
         };
     }
 
+    private async searchBatchChunked(
+        userId: string,
+        queries: Array<{ query: string; limit: number }>,
+    ): Promise<Array<{ query: string; results: any[] }>> {
+        const results: Array<{ query: string; results: any[] }> = [];
+        for (
+            let start = 0;
+            start < queries.length;
+            start += TidalStreamingService.MATCH_BATCH_CHUNK_SIZE
+        ) {
+            const chunk = queries.slice(
+                start,
+                start + TidalStreamingService.MATCH_BATCH_CHUNK_SIZE,
+            );
+            const response = await this.searchBatch(userId, chunk);
+            results.push(...response.results);
+        }
+        return results;
+    }
+
     /**
      * Find a TIDAL match for a single track.
      */
@@ -756,7 +777,7 @@ class TidalStreamingService {
 
     /**
      * Batch-match multiple tracks against TIDAL.
-     * Uses searchBatch for performance.
+     * Uses searchBatch in sequential chunks of at most 25 queries for performance.
      */
     async findMatchesForAlbum(
         userId: string,
@@ -768,7 +789,7 @@ class TidalStreamingService {
                 limit: 8,
             }));
 
-            const { results } = await this.searchBatch(userId, queries);
+            const results = await this.searchBatchChunked(userId, queries);
             return results.map((r, idx) => {
                 const sourceTrack = tracks[idx];
                 const candidates = r?.results || [];
