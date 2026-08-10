@@ -588,6 +588,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is removed from those error bodies (the frontend keys on `error`), and the
   admin clear-Lidarr-queue response now reports an error count instead of
   echoing raw Lidarr error strings.
+- Browse, discover, and releases routes now share one bounded-integer query
+  parser; `limit` and day-range query params are clamped to safe maximums
+  (limit <= 100, day ranges <= 365) instead of accepting unbounded values.
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
   Quality, Enforcement Gates, and Backend/Frontend Typecheck jobs) and added a
   `verify:ci` npm script that reproduces all gates locally, including the Python

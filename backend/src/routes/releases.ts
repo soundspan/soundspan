@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 import { Router } from "express";
 import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
+import { parseBoundedInt } from "../utils/queryParams";
 import { requireAuth } from "../middleware/auth";
 import {
     mapCalendarReleaseToRadarItem,
@@ -65,8 +66,8 @@ interface ReleaseRadarResponse {
 router.get("/radar", async (req, res) => {
     try {
         const now = new Date();
-        const daysBack = parseInt(req.query.daysBack as string) || 30;
-        const daysAhead = parseInt(req.query.daysAhead as string) || 90;
+        const daysBack = parseBoundedInt(req.query.daysBack, 30, 1, 365);
+        const daysAhead = parseBoundedInt(req.query.daysAhead, 90, 1, 365);
 
         // Calculate date range
         const startDate = new Date(now);
@@ -189,7 +190,7 @@ router.get("/radar", async (req, res) => {
  */
 router.get("/upcoming", async (req, res) => {
     try {
-        const daysAhead = parseInt(req.query.days as string) || 90;
+        const daysAhead = parseBoundedInt(req.query.days, 90, 1, 365);
 
         const now = new Date();
         const endDate = new Date(now);
@@ -235,7 +236,7 @@ router.get("/upcoming", async (req, res) => {
  */
 router.get("/recent", async (req, res) => {
     try {
-        const daysBack = parseInt(req.query.days as string) || 30;
+        const daysBack = parseBoundedInt(req.query.days, 30, 1, 365);
 
         const now = new Date();
         const startDate = new Date(now);

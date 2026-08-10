@@ -7,6 +7,7 @@ import { deezerService } from "../services/deezer";
 import { ytMusicService } from "../services/youtubeMusic";
 import { tidalStreamingService } from "../services/tidalStreaming";
 import { getSystemSettings } from "../utils/systemSettings";
+import { parseBoundedInt } from "../utils/queryParams";
 import {
     browseImageCacheKey,
     getBrowseImageFromCache,
@@ -62,24 +63,6 @@ function pruneExpiredCacheEntries(now = Date.now()): void {
             ytBrowseCache.delete(key);
         }
     }
-}
-
-function parseBoundedInt(
-    value: unknown,
-    fallback: number,
-    min: number,
-    max: number,
-): number {
-    if (typeof value !== "string") {
-        return fallback;
-    }
-
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) {
-        return fallback;
-    }
-
-    return Math.min(max, Math.max(min, parsed));
 }
 
 function parseMoodParams(value: unknown): string | null {

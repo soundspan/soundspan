@@ -12,6 +12,7 @@ import { config } from "../config";
 // Static imports for performance
 import { discoverQueue, scanQueue } from "../workers/queues";
 import { getSystemSettings } from "../utils/systemSettings";
+import { parseBoundedInt } from "../utils/queryParams";
 import { lidarrService } from "../services/lidarr";
 import { discoveryRecommendationsService } from "../services/discovery";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
@@ -1034,7 +1035,7 @@ router.patch("/config", async (req, res) => {
  */
 router.get("/popular-artists", async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit as string) || 20;
+        const limit = parseBoundedInt(req.query.limit, 20, 1, 100);
 
         const artists = await lastFmService.getTopChartArtists(limit);
 
