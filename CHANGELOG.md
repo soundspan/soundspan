@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Pinned the remaining mutable GitHub Actions tags in
+  `image-security-scanning.yml` (`actions/checkout`, `docker/login-action`,
+  `github/codeql-action/upload-sarif`) and `compose-config-check.yml`
+  (`actions/checkout`) to the repo-standard full commit SHAs.
 - Sanitized playback-state 500 responses and persisted download-job errors so
   raw failure details remain server-log only, and restricted
   `POST /api/downloads/clear-lidarr-queue` to administrators.
