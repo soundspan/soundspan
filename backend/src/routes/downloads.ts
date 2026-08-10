@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -924,17 +924,18 @@ async function processTidalDownload(
         logger.debug(
             `[TIDAL] Scan queued for: ${result.artist} - ${result.album_title}`,
         );
-    } catch (error: any) {
+    } catch (error: unknown) {
         logger.error(
             `[TIDAL] Download failed for job ${jobId}:`,
-            error.message,
+            error instanceof Error ? error.message : error,
         );
 
         await prisma.downloadJob.update({
             where: { id: jobId },
             data: {
                 status: "failed",
-                error: error.message,
+                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
+                error: "TIDAL download failed",
                 completedAt: new Date(),
                 metadata: {
                     ...existingMetadata,
@@ -1006,9 +1007,11 @@ router.delete("/clear-all", async (req, res) => {
  *         description: Number of removed items and any errors
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 // POST /downloads/clear-lidarr-queue - Clear stuck/failed items from Lidarr's queue
-router.post("/clear-lidarr-queue", async (req, res) => {
+router.post("/clear-lidarr-queue", requireAdmin, async (req, res) => {
     try {
         const result = await simpleDownloadManager.clearLidarrQueue();
         res.json({

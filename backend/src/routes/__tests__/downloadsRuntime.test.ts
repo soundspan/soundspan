@@ -1,8 +1,11 @@
 import { Request, Response } from "express";
 
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret";
+
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
+    requireAdmin: jest.requireActual("../../middleware/auth").requireAdmin,
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -195,9 +198,14 @@ describe("downloads routes runtime", () => {
     const availabilityHandler = getRouteHandler("/availability", "get");
     const createJobHandler = getRouteHandler("/", "post");
     const clearAllHandler = getRouteHandler("/clear-all", "delete");
+    const clearLidarrQueueAdmin = getRouteHandler(
+        "/clear-lidarr-queue",
+        "post",
+    );
     const clearLidarrQueueHandler = getRouteHandler(
         "/clear-lidarr-queue",
         "post",
+        1,
     );
     const failedListHandler = getRouteHandler("/failed", "get");
     const failedDismissHandler = getRouteHandler("/failed/:id", "delete");
@@ -725,12 +733,28 @@ describe("downloads routes runtime", () => {
         expect(res.body).toEqual({ error: "Failed to clear downloads" });
     });
 
-    it("clears Lidarr queue entries", async () => {
+    it("rejects non-admin users before clearing Lidarr queue entries", async () => {
+        const req = { user: { id: "user-1", role: "user" } } as any;
+        const res = createRes();
+        const next = jest.fn();
+
+        await clearLidarrQueueAdmin(req, res, next);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(next).not.toHaveBeenCalled();
+        expect(mockClearLidarrQueue).not.toHaveBeenCalled();
+    });
+
+    it("allows admins to clear Lidarr queue entries", async () => {
         mockClearLidarrQueue.mockResolvedValueOnce({ removed: 4, errors: 1 });
 
-        const req = {} as any;
+        const req = { user: { id: "admin-1", role: "admin" } } as any;
         const res = createRes();
+        const next = jest.fn();
 
+        await clearLidarrQueueAdmin(req, res, next);
+        expect(next).toHaveBeenCalledTimes(1);
         await clearLidarrQueueHandler(req, res);
 
         expect(res.statusCode).toBe(200);
@@ -742,7 +766,7 @@ describe("downloads routes runtime", () => {
             new Error("lidarr queue timeout"),
         );
 
-        const req = {} as any;
+        const req = { user: { id: "admin-1", role: "admin" } } as any;
         const res = createRes();
 
         await clearLidarrQueueHandler(req, res);
@@ -1858,6 +1882,75 @@ describe("downloads routes runtime", () => {
         );
     });
 
+    it("persists a sanitized error when a tidal download throws", async () => {
+        const rawError =
+            "ECONNREFUSED http://tidal-internal:9999 token=secret123";
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+            primaryFailureFallback: "none",
+        });
+        mockTidalAvailable.mockResolvedValue(true);
+        mockTidalFindAlbum.mockResolvedValueOnce({
+            albumId: 321,
+            title: "Album",
+            artist: "Artist",
+            numberOfTracks: 10,
+        });
+        mockTidalDownloadAlbum.mockRejectedValueOnce(new Error(rawError));
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                $queryRaw: jest.fn().mockResolvedValue([]),
+                downloadJob: {
+                    create: jest.fn().mockResolvedValue({
+                        id: "job-tidal-error",
+                        status: "pending",
+                    }),
+                },
+            }),
+        );
+        let findUniqueCall = 0;
+        mockDownloadFindUnique.mockImplementation(async () => {
+            findUniqueCall += 1;
+            if (findUniqueCall === 1) {
+                return {
+                    id: "job-tidal-error",
+                    userId: "user-1",
+                    metadata: {},
+                };
+            }
+            return { metadata: { albumMbid: "rg-tidal-error" } };
+        });
+
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-tidal-error",
+                subject: "Artist - Album",
+                artistName: "Artist",
+                albumTitle: "Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        const failedUpdate = mockDownloadUpdate.mock.calls.find(
+            ([call]) => call.data?.status === "failed",
+        )?.[0];
+        expect(failedUpdate).toEqual(
+            expect.objectContaining({
+                where: { id: "job-tidal-error" },
+                data: expect.objectContaining({
+                    error: "TIDAL download failed",
+                }),
+            }),
+        );
+        expect(JSON.stringify(failedUpdate)).not.toContain(rawError);
+    });
+
     it("falls back when tidal cannot find album and reports fallback failures", async () => {
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
@@ -1985,9 +2078,12 @@ describe("downloads routes runtime", () => {
                 where: { id: "job-tidal-fail" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: expect.stringContaining("Album not found on TIDAL"),
+                    error: "TIDAL download failed",
                 }),
             }),
+        );
+        expect(JSON.stringify(mockDownloadUpdate.mock.calls)).not.toContain(
+            "Album not found on TIDAL",
         );
     });
 
@@ -2057,9 +2153,12 @@ describe("downloads routes runtime", () => {
                 where: { id: "job-tidal-zero" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: "All 8 tracks failed to download",
+                    error: "TIDAL download failed",
                 }),
             }),
+        );
+        expect(JSON.stringify(mockDownloadUpdate.mock.calls)).not.toContain(
+            "All 8 tracks failed to download",
         );
     });
 

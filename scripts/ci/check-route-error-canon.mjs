@@ -60,10 +60,10 @@ const LEAK_BASELINE = Object.freeze({
     // auth.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L813 and ~L1247); code-owned schema messages, not raw errors.
     "backend/src/routes/auth.ts": 2,
     "backend/src/routes/discover.ts": 0,
-    "backend/src/routes/downloads.ts": 1,
+    "backend/src/routes/downloads.ts": 0,
     "backend/src/routes/listenTogether.ts": 1,
-    "backend/src/routes/notifications.ts": 2,
-    "backend/src/routes/playbackState.ts": 1,
+    "backend/src/routes/notifications.ts": 0,
+    "backend/src/routes/playbackState.ts": 0,
     // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); the scanError sessionLog instance was sanitized (fixed, not frozen).
     "backend/src/routes/playlists.ts": 1,
     // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.

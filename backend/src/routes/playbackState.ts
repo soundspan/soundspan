@@ -436,11 +436,8 @@ router.post("/", requireAuth, async (req, res) => {
         if (error?.meta) {
             logger.error("[PlaybackState] Prisma meta:", error.meta);
         }
-        // Return more specific error for debugging
-        res.status(500).json({
-            error: "Internal server error",
-            details: error?.message || "Unknown error",
-        });
+        // Raw failure detail is available only in the server logs above.
+        res.status(500).json({ error: "Failed to save playback state" });
     }
 });
 

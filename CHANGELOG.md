@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   during invalidation iteration could raise `RuntimeError` and abort
   stream/refresh requests.
 
+### Security
+
+- Sanitized playback-state 500 responses and persisted download-job errors so
+  raw failure details remain server-log only, and restricted
+  `POST /api/downloads/clear-lidarr-queue` to administrators.
+
 ### Changed
 
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python

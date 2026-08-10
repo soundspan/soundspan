@@ -520,7 +520,7 @@ describe("playbackState routes runtime", () => {
         expect(res.statusCode).toBe(200);
     });
 
-    it("returns 500 with details when save fails", async () => {
+    it("returns a sanitized 500 when save fails", async () => {
         mockUpsert.mockRejectedValueOnce(new Error("write failed"));
 
         const req = {
@@ -533,10 +533,8 @@ describe("playbackState routes runtime", () => {
         await postState(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({
-            error: "Internal server error",
-            details: "write failed",
-        });
+        expect(res.body).toEqual({ error: "Failed to save playback state" });
+        expect(JSON.stringify(res.body)).not.toContain("write failed");
     });
 
     it("deletes state for the current device and handles failures", async () => {

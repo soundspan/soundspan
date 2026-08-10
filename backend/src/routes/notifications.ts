@@ -706,11 +706,13 @@ router.post(
                         }
                     })
                     .catch(async (error) => {
+                        logger.error(`[Retry] Download error:`, error);
                         await prisma.downloadJob.update({
                             where: { id: newJobRecord.id },
                             data: {
                                 status: "failed",
-                                error: error?.message || "Download exception",
+                                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
+                                error: "Download exception",
                                 completedAt: new Date(),
                             },
                         });
@@ -883,7 +885,8 @@ router.post(
                             where: { id: newJobRecord.id },
                             data: {
                                 status: "failed",
-                                error: error?.message || "Soulseek error",
+                                // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
+                                error: "Soulseek error",
                                 completedAt: new Date(),
                             },
                         });

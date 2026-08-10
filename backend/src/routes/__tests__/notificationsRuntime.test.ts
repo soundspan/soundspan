@@ -679,8 +679,10 @@ describe("notifications route runtime", () => {
             found: true,
             allMatches: [{ id: "m1" }],
         });
+        const pendingRawError =
+            "ECONNRESET soulseek-internal token=pending-secret";
         soulseekService.downloadBestMatch.mockRejectedValueOnce(
-            new Error("socket closed"),
+            new Error(pendingRawError),
         );
 
         const throwReq = {
@@ -696,10 +698,13 @@ describe("notifications route runtime", () => {
                 where: { id: "job-new-throw" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: "socket closed",
+                    error: "Download exception",
                 }),
             }),
         );
+        expect(
+            JSON.stringify(prisma.downloadJob.update.mock.calls),
+        ).not.toContain(pendingRawError);
     });
 
     it("validates spotify_import retries and generic retries", async () => {
@@ -953,8 +958,10 @@ describe("notifications route runtime", () => {
             metadata: {},
         });
         getSystemSettings.mockResolvedValueOnce({ musicPath: "/music" });
+        const spotifyRawError =
+            "ECONNREFUSED soulseek-internal token=spotify-secret";
         soulseekService.searchAndDownloadBatch.mockRejectedValueOnce(
-            new Error("soulseek crashed"),
+            new Error(spotifyRawError),
         );
 
         const catchReq = {
@@ -970,10 +977,13 @@ describe("notifications route runtime", () => {
                 where: { id: "job-new-spotify-catch" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: "soulseek crashed",
+                    error: "Soulseek error",
                 }),
             }),
         );
+        expect(
+            JSON.stringify(prisma.downloadJob.update.mock.calls),
+        ).not.toContain(spotifyRawError);
     });
 
     it("returns 500 when retry handler throws unexpectedly", async () => {
