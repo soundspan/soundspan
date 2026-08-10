@@ -742,6 +742,7 @@ describe("podcasts core runtime behavior", () => {
             "https://itunes.apple.com/lookup",
             expect.objectContaining({
                 params: { id: "4455", entity: "podcast" },
+                timeout: 10000,
             }),
         );
         expect(prisma.podcast.create).toHaveBeenCalledWith(

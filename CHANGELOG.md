@@ -318,6 +318,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clamp `limit` query params on plays, downloads, and listening-state list
   endpoints via the shared bounded-int parser (previously unbounded;
   non-numeric values caused 500s).
+- Audiobook cover downloads now cancel non-success response bodies, podcast
+  iTunes subscription lookups now use the shared 10-second timeout, and the
+  optional Lidarr service image is pinned to a release digest.
 - Outbound image fetches (external image proxy and podcast cover cache) now
   cancel undici response bodies on non-success, redirect, and retry paths so
   pooled connections are released promptly instead of waiting for GC.
@@ -569,6 +572,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Share-link single-track streaming now confines resolved media paths to the
+  configured music directory, matching the ZIP download branch's traversal
+  defense.
 - With `SECRETS_DB_ONLY=true`, decrypted integration API keys are no longer written to the on-disk `.env` file by the settings sync, reducing plaintext secret exposure on the host filesystem. The flag is off by default; enabling it requires the database to be initialized and readable before backend/worker services start.
 - Audiobook cover sync/download now routes Audiobookshelf cover paths through
   the shared cover-path allowlist, so a traversal-bearing item id can no longer

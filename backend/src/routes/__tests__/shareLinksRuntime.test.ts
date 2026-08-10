@@ -672,6 +672,40 @@ describe("shareLinks routes runtime", () => {
             });
         });
 
+        it("returns 404 for a track path outside the music directory", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce({
+                id: "share-1",
+                token: "valid-token",
+                resourceType: "track",
+                resourceId: "track-1",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: null,
+                playCount: 0,
+            });
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "track-1",
+                title: "Track",
+                filePath: "../../etc/passwd",
+                fileModified: new Date(),
+            });
+
+            const req = createReq({
+                params: { token: "valid-token", trackId: "track-1" },
+                query: {},
+                headers: {},
+            });
+            const res = createRes();
+            await getSharedStream(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({
+                error: "Track not available for streaming",
+            });
+            expect(mockGetStreamFilePath).not.toHaveBeenCalled();
+            expect(mockStreamFileWithRangeSupport).not.toHaveBeenCalled();
+        });
+
         it("sets Content-Disposition for download=true", async () => {
             mockShareLinkFindUnique.mockResolvedValueOnce({
                 id: "share-1",

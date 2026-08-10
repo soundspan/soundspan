@@ -315,14 +315,17 @@ describe("audiobook cache service behavior", () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             audiobookshelfApiKey: "api-key",
         });
+        const cancel = jest.fn().mockResolvedValue(undefined);
         fetchMock.mockResolvedValueOnce({
             ok: false,
             status: 403,
             statusText: "Forbidden",
+            body: { cancel },
         });
         await expect(
             (service as any).downloadCover("book-c", "http://abs.local/c.jpg"),
         ).resolves.toBeNull();
+        expect(cancel).toHaveBeenCalledTimes(1);
 
         mockGetSystemSettings.mockResolvedValueOnce({
             audiobookshelfApiKey: "api-key",

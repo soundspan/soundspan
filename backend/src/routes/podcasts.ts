@@ -923,6 +923,7 @@ router.post("/subscribe", async (req, res) => {
                 "https://itunes.apple.com/lookup",
                 {
                     params: { id: itunesId, entity: "podcast" },
+                    timeout: ITUNES_DISCOVER_TIMEOUT_MS,
                 },
             );
 

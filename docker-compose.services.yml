@@ -21,7 +21,7 @@
 services:
     # Lidarr - Music collection manager
     lidarr:
-        image: lscr.io/linuxserver/lidarr:latest
+        image: lscr.io/linuxserver/lidarr:3.1.0.4875-ls38@sha256:bfec0ec2dc351fa5928379d785b08be395886f109393b9040ed7973bd1008060
         container_name: ${SOUNDSPAN_LIDARR_CONTAINER_NAME:-soundspan_lidarr}
         environment:
             - PUID=${PUID:-1000}

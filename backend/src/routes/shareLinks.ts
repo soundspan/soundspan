@@ -545,10 +545,15 @@ router.get("/access/:token/stream/:trackId", async (req, res) => {
         });
 
         const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-        const absolutePath = path.join(
+        const absolutePath = safeResolvePath(
             config.music.musicPath,
             normalizedFilePath,
         );
+        if (!absolutePath) {
+            return res
+                .status(404)
+                .json({ error: "Track not available for streaming" });
+        }
 
         const streamingService = new AudioStreamingService(
             config.music.musicPath,
