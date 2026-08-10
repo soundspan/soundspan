@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
+import { parseBoundedInt } from "../utils/queryParams";
 import { z } from "zod";
 import { trackMappingService } from "../services/trackMappingService";
 import { resolveRemoteTrackMetadataForRequest } from "../services/remoteTrackMetadataResolver";
@@ -367,6 +368,8 @@ router.post("/", async (req, res) => {
  *         schema:
  *           type: integer
  *           default: 50
+ *           minimum: 1
+ *           maximum: 200
  *     responses:
  *       200:
  *         description: List of recent plays with track details
@@ -377,12 +380,12 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const { limit = "50" } = req.query;
+        const limit = parseBoundedInt(req.query.limit, 50, 1, 200);
 
         const plays = await prisma.play.findMany({
             where: { userId },
             orderBy: { playedAt: "desc" },
-            take: parseInt(limit as string, 10),
+            take: limit,
             include: {
                 track: {
                     include: {

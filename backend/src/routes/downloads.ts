@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
+import { parseBoundedInt } from "../utils/queryParams";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
@@ -1587,6 +1588,8 @@ router.delete("/:id", async (req, res) => {
  *         schema:
  *           type: integer
  *           default: 50
+ *           minimum: 1
+ *           maximum: 200
  *         description: Maximum number of jobs to return
  *       - in: query
  *         name: includeDiscovery
@@ -1614,10 +1617,10 @@ router.get("/", async (req, res) => {
         const userId = req.user!.id;
         const {
             status,
-            limit = "50",
             includeDiscovery = "false",
             includeCleared = "false",
         } = req.query;
+        const limit = parseBoundedInt(req.query.limit, 50, 1, 200);
 
         const where: any = { userId };
         if (status) {
@@ -1631,7 +1634,7 @@ router.get("/", async (req, res) => {
         const jobs = await prisma.downloadJob.findMany({
             where,
             orderBy: { createdAt: "desc" },
-            take: parseInt(limit as string, 10),
+            take: limit,
         });
 
         // Filter out discovery downloads unless explicitly requested

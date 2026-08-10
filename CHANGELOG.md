@@ -315,6 +315,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths, and the debug search endpoint, now offload blocking ytmusicapi calls
   to the asyncio thread pool instead of stalling the event loop, and batch
   search now rejects requests with more than 50 queries.
+- Clamp `limit` query params on plays, downloads, and listening-state list
+  endpoints via the shared bounded-int parser (previously unbounded;
+  non-numeric values caused 500s).
 - Outbound image fetches (external image proxy and podcast cover cache) now
   cancel undici response bodies on non-success, redirect, and retry paths so
   pooled connections are released promptly instead of waiting for GC.

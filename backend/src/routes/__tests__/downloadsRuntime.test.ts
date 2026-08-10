@@ -1117,6 +1117,27 @@ describe("downloads routes runtime", () => {
         expect(res.body).toHaveLength(2);
     });
 
+    it.each([
+        ["99999999", 200],
+        ["abc", 50],
+        ["25", 25],
+    ])("bounds the download-job limit %s to %i", async (queryLimit, take) => {
+        const req = {
+            query: { limit: queryLimit },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await listJobsHandler(req, res);
+
+        expect(mockDownloadFindMany).toHaveBeenLastCalledWith({
+            where: { userId: "user-1", cleared: false },
+            orderBy: { createdAt: "desc" },
+            take,
+        });
+        expect(res.statusCode).toBe(200);
+    });
+
     it("validates keep-track payload", async () => {
         const req = {
             body: {},

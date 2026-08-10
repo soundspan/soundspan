@@ -278,6 +278,28 @@ describe("listeningState routes runtime", () => {
         expect(customRes.statusCode).toBe(200);
     });
 
+    it.each([
+        ["99999999", 200],
+        ["abc", 10],
+        ["25", 25],
+    ])("bounds the recent-state limit %s to %i", async (queryLimit, take) => {
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            query: { limit: queryLimit },
+        } as any;
+        const res = createRes();
+
+        await getRecent(req, res);
+
+        expect(mockFindMany).toHaveBeenLastCalledWith({
+            where: { userId: "u1" },
+            orderBy: { updatedAt: "desc" },
+            take,
+        });
+        expect(res.statusCode).toBe(200);
+    });
+
     it("scopes /recent to the authenticated user, not a hardcoded id", async () => {
         // Regression guard for the req.session.userId! bug (roadmap F11 step 1):
         // a second, differently-authenticated user must see their OWN userId

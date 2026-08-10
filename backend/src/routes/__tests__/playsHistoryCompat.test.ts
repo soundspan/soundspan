@@ -485,4 +485,27 @@ describe("plays history compatibility", () => {
         expect(errRes.statusCode).toBe(500);
         expect(errRes.body).toEqual({ error: "Failed to get plays" });
     });
+
+    it.each([
+        ["99999999", 200],
+        ["abc", 50],
+        ["25", 25],
+    ])("bounds the recent-plays limit %s to %i", async (queryLimit, take) => {
+        const req = {
+            session: { userId: "user-1" },
+            user: { id: "user-1" },
+            query: { limit: queryLimit },
+        } as any;
+        const res = createRes();
+
+        await listPlaysHandler(req, res);
+
+        expect(mockPlayFindMany).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                where: { userId: "user-1" },
+                take,
+            }),
+        );
+        expect(res.statusCode).toBe(200);
+    });
 });

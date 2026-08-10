@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
+import { parseBoundedInt } from "../utils/queryParams";
 import { z } from "zod";
 
 const router = Router();
@@ -169,6 +170,8 @@ router.get("/", async (req, res) => {
  *         schema:
  *           type: integer
  *           default: 10
+ *           minimum: 1
+ *           maximum: 200
  *     responses:
  *       200:
  *         description: List of recent listening states ordered by last update
@@ -179,12 +182,12 @@ router.get("/", async (req, res) => {
 router.get("/recent", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const { limit = "10" } = req.query;
+        const limit = parseBoundedInt(req.query.limit, 10, 1, 200);
 
         const states = await prisma.listeningState.findMany({
             where: { userId },
             orderBy: { updatedAt: "desc" },
-            take: parseInt(limit as string, 10),
+            take: limit,
         });
 
         res.json(states);
