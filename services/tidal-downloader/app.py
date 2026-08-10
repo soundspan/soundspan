@@ -1168,6 +1168,13 @@ def _get_album_tracks(api: TidalAPI, album_id: int) -> list[Any]:
     return tracks
 
 
+def _get_album_with_tracks(api: TidalAPI, album_id: int) -> tuple[Any, list[Any]]:
+    """Fetch album metadata and its paginated tracks synchronously."""
+    album = api.get_album(album_id)
+    tracks = _get_album_tracks(api, album_id)
+    return album, tracks
+
+
 async def _download_album_tracks(
     api: TidalAPI,
     tracks: list[Any],
@@ -1246,8 +1253,7 @@ async def download_album(
     """Download using bearer-header auth or the one-release query fallback."""
     api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
-        album = api.get_album(req.album_id)
-        tracks = _get_album_tracks(api, req.album_id)
+        album, tracks = await asyncio.to_thread(_get_album_with_tracks, api, req.album_id)
         results, errors = await _download_album_tracks(api, tracks, req)
         return {
             "album_id": req.album_id,
@@ -1818,7 +1824,7 @@ async def user_browse_home(
 ):
     """Get personalized TIDAL home page shelves."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(session.home)
         shelves = _serialize_page(page)
         return {"shelves": shelves[:limit]}
@@ -1839,7 +1845,7 @@ async def user_browse_explore(
 ):
     """Get TIDAL editorial/new releases shelves."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(session.explore)
         shelves = _serialize_page(page)
         return {"shelves": shelves[:limit]}
@@ -1858,7 +1864,7 @@ async def user_browse_explore(
 async def user_browse_genres(user_id: str = Query(...), quality: str | None = Query(None)):
     """Get TIDAL genre categories."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(session.genres)
         genres = _extract_page_links(page)
         return {"genres": genres}
@@ -1877,7 +1883,7 @@ async def user_browse_genres(user_id: str = Query(...), quality: str | None = Qu
 async def user_browse_moods(user_id: str = Query(...), quality: str | None = Query(None)):
     """Get TIDAL mood categories."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(session.moods)
         moods = _extract_page_links(page)
         return {"moods": moods}
@@ -1896,7 +1902,7 @@ async def user_browse_moods(user_id: str = Query(...), quality: str | None = Que
 async def user_browse_mixes(user_id: str = Query(...), quality: str | None = Query(None)):
     """Get personal TIDAL mixes (daily discovery, etc.)."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(session.mixes)
         mixes = []
         for cat in page.categories or []:
@@ -1927,7 +1933,7 @@ async def user_browse_genre_playlists(
     if not re.match(r"^[a-zA-Z0-9_\-/]+$", path) or ".." in path:
         raise HTTPException(status_code=400, detail="Invalid genre path")
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         page = await asyncio.to_thread(lambda: session.page.get(f"pages/{path}"))
         shelves = _serialize_page(page)
         # Flatten all shelf contents into a single playlist list
@@ -1987,7 +1993,7 @@ async def user_browse_playlist(
 ):
     """Get TIDAL playlist details with tracks."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         playlist = await asyncio.to_thread(session.playlist, playlist_uuid)
         result = await asyncio.to_thread(_serialize_playlist_detail, playlist)
         if limit and len(result.get("tracks", [])) > limit:
@@ -2010,7 +2016,7 @@ async def user_browse_mix(
 ):
     """Get TIDAL mix details with tracks."""
     try:
-        session = _build_browse_session(user_id, quality)
+        session = await asyncio.to_thread(_build_browse_session, user_id, quality)
         mix = await asyncio.to_thread(session.mix, mix_id)
         tracks = await asyncio.to_thread(mix.items)
         return {

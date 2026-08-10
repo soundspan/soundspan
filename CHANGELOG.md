@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TIDAL stream proxying now handles upstream stream errors after headers are
   sent instead of crashing the entire backend via an uncaught exception; a
   mid-playback sidecar disconnect now ends only that response.
+- TIDAL sidecar: album downloads and browse endpoints no longer block the event
+  loop — album metadata/pagination and browse-session creation now run in worker
+  threads, keeping streaming, search, and health responsive during large operations.
 - Podcast cover downloads now time out after 15 seconds so an unresponsive
   image host can no longer stall the cover-sync loops.
 - Fixed the tidal-downloader stream-URL cache race where concurrent mutation
