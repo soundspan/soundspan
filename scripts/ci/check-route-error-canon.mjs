@@ -62,8 +62,10 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/listenTogether.ts": 1,
     "backend/src/routes/notifications.ts": 2,
     "backend/src/routes/playbackState.ts": 1,
-    "backend/src/routes/playlists.ts": 4,
-    "backend/src/routes/podcasts.ts": 3,
+    // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904).
+    "backend/src/routes/playlists.ts": 1,
+    // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.
+    "backend/src/routes/podcasts.ts": 2,
 });
 
 export function countPattern(source) {

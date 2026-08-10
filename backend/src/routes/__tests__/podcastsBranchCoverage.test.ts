@@ -837,6 +837,10 @@ describe("podcasts branch coverage additions", () => {
             }),
         );
         expect(body.results).toHaveLength(2);
+        expect((body.results[1] as { error?: string }).error).toBe(
+            "Failed to refresh feed",
+        );
+        expect(JSON.stringify(res.body)).not.toContain("feed parse failed");
     });
 
     it("refresh-all route returns 500 when refresh-all pipeline throws", async () => {
@@ -852,7 +856,7 @@ describe("podcasts branch coverage additions", () => {
         expect(res.body).toEqual({ error: "Failed to refresh podcasts" });
     });
 
-    it("refresh-all reports 'Unknown error' for non-Error feed failures", async () => {
+    it("refresh-all reports a static error for feed failures", async () => {
         (
             prisma.podcastSubscription.findMany as jest.Mock
         ).mockResolvedValueOnce([{ podcastId: "pod-unknown-error" }]);
@@ -875,6 +879,6 @@ describe("podcasts branch coverage additions", () => {
         };
         expect(res.statusCode).toBe(200);
         expect(body.failed).toBe(1);
-        expect(body.results[0].error).toBe("Unknown error");
+        expect(body.results[0].error).toBe("Failed to refresh feed");
     });
 });

@@ -2395,9 +2395,14 @@ describe("playlists route runtime", () => {
                 where: { id: "job-failed-throw" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: "socket closed",
+                    error: "Download exception",
                 }),
             }),
+        );
+        const sessionLogMock = jest.requireMock("../../utils/playlistLogger")
+            .sessionLog as jest.Mock;
+        expect(JSON.stringify(sessionLogMock.mock.calls)).not.toContain(
+            "socket closed",
         );
     });
 
@@ -2468,6 +2473,11 @@ describe("playlists route runtime", () => {
         expect(res.body).toEqual({
             error: "Failed to retry download",
         });
+        const sessionLogMock = jest.requireMock("../../utils/playlistLogger")
+            .sessionLog as jest.Mock;
+        expect(JSON.stringify(sessionLogMock.mock.calls)).not.toContain(
+            "db exploded",
+        );
     });
 
     it("handles reconcile preconditions and unexpected reconcile errors", async () => {

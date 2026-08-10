@@ -1692,9 +1692,10 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
             })
             .catch((error) => {
                 logger.error(`[Retry] Download error:`, error);
+                // The session log is returned verbatim to any authenticated caller via GET /api/spotify/import/session-log, so raw error text must not be written to it.
                 sessionLog(
                     "PENDING-RETRY",
-                    `Download exception: ${error?.message || error}`,
+                    "Download exception (raw detail in server log)",
                     "ERROR",
                 );
 
@@ -1703,7 +1704,8 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
                         where: { id: downloadJob.id },
                         data: {
                             status: "failed",
-                            error: error?.message || "Download exception",
+                            // downloadJob rows (incl. error) are returned to the owning user via GET /api/downloads
+                            error: "Download exception",
                             completedAt: new Date(),
                         },
                     })
@@ -1713,7 +1715,7 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
         logger.error("Retry pending track error:", error);
         sessionLog(
             "PENDING-RETRY",
-            `Handler error: ${error?.message || error}`,
+            "Handler error (raw detail in server log)",
             "ERROR",
         );
         res.status(500).json({

@@ -141,6 +141,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stopped returning raw caught-error text to clients from the playlist
+  pending-track retry path and podcast refresh-all: the retry handler wrote
+  `error.message` into the session log (returned verbatim to any authenticated
+  caller via `GET /api/spotify/import/session-log`) and into the stored
+  `downloadJob.error` field (returned via `GET /api/downloads`), and
+  `refreshAllPodcastFeeds` echoed per-feed `error.message` in the
+  `POST /api/podcasts/refresh-all` response. All three now use static client
+  messages with raw detail kept in server-side logs only, and the
+  `check-route-error-canon` leak-ratchet baselines were lowered
+  (`playlists.ts` 4→1, `podcasts.ts` 3→2); the remaining counts are
+  server-side-only or code-owned validation text, documented in the checker.
 - Closed a `discover.ts` follow-up gap left by the route error-disclosure
   hardening: the legacy `POST /api/discover/cleanup-lidarr` handler built a
   per-artist failure string via a template literal

@@ -1552,8 +1552,11 @@ describe("podcasts core runtime behavior", () => {
             expect.objectContaining({
                 podcastId: "pod-broken",
                 success: false,
-                error: expect.stringMatching(/not found/),
+                error: "Failed to refresh feed",
             }),
+        );
+        expect(JSON.stringify(result)).not.toContain(
+            "Podcast pod-broken not found",
         );
     });
 

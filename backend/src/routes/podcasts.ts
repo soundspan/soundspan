@@ -2359,7 +2359,7 @@ export async function refreshAllPodcastFeeds(
                 podcastId: sub.podcastId,
                 success: false,
                 newEpisodesCount: 0,
-                error: error.message || "Unknown error",
+                error: "Failed to refresh feed",
             });
         }
     }
