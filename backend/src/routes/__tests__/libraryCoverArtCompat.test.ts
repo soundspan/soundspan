@@ -1175,29 +1175,6 @@ describe("library cover-art proxy compatibility", () => {
         );
     });
 
-    it("rejects a confined audiobook cover when ABS DNS resolves to loopback", async () => {
-        const fetchMock = jest.fn();
-        (global as any).fetch = fetchMock;
-        mockLookup.mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }]);
-        mockGetSystemSettings.mockResolvedValueOnce({
-            audiobookshelfUrl: "https://audiobooks.example",
-            audiobookshelfApiKey: "abs-key",
-        });
-
-        const req = {
-            query: { url: "audiobook__items/abc123/cover" },
-            params: {},
-            headers: {},
-        } as any;
-        const res = createRes();
-
-        await coverArtHandler(req, res);
-
-        expect(res.statusCode).toBe(400);
-        expect(res.body.error).toBeDefined();
-        expect(fetchMock).not.toHaveBeenCalled();
-    });
-
     it("returns 404 when audiobook query-url fetch fails", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: false,

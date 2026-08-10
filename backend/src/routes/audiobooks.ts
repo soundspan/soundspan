@@ -6,7 +6,7 @@ import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
-import { resolveSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
+import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 
 const router = Router();
 
@@ -667,7 +667,7 @@ router.get<{ id: string }>(
                         /\/$/,
                         "",
                     );
-                    const coverApiUrl = await resolveSafeAudiobookCoverUrl(
+                    const coverApiUrl = buildSafeAudiobookCoverUrl(
                         audiobook.coverUrl,
                         baseUrl,
                     );

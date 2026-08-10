@@ -42,7 +42,7 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
 } from "../services/imageProxy";
-import { resolveSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
+import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 import {
     negotiateCoverArtFormat,
     resizeCoverArt,
@@ -3439,7 +3439,7 @@ router.get<{ id?: string }>(
                     "",
                 );
 
-                const safeCoverUrl = await resolveSafeAudiobookCoverUrl(
+                const safeCoverUrl = buildSafeAudiobookCoverUrl(
                     audiobookPath,
                     audiobookshelfBaseUrl,
                 );
@@ -3669,7 +3669,7 @@ router.get<{ id?: string }>(
                     "",
                 );
 
-                const safeCoverUrl = await resolveSafeAudiobookCoverUrl(
+                const safeCoverUrl = buildSafeAudiobookCoverUrl(
                     audiobookPath,
                     audiobookshelfBaseUrl,
                 );

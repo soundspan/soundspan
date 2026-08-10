@@ -282,17 +282,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Confined the Audiobookshelf cover-art proxy to the `items/<id>/cover`
-  endpoint shape and routed its outbound fetch through the shared
-  DNS-resolving outbound URL policy, closing an authenticated SSRF and
-  admin-credential-reuse class. The library `cover-art` handler (both the
-  `?url=` and `:id` branches) and the audiobooks `:id/cover` fallback
-  concatenated a caller/DB-supplied path segment raw into
-  `${audiobookshelfBaseUrl}/api/<path>` and fetched it with the stored admin
-  API key; a `..` segment (WHATWG-URL normalized) let any authenticated
-  non-admin user reach arbitrary Audiobookshelf admin-API endpoints. Unsafe
-  paths and private/loopback/link-local hosts are now rejected before any
-  outbound request.
+- Confined the Audiobookshelf cover-art proxy to the ABS `items/` resource
+  namespace, closing an authenticated SSRF and admin-credential-reuse class.
+  The library `cover-art` handler (both the `?url=` and `:id` branches) and the
+  audiobooks `:id/cover` fallback concatenated a caller/DB-supplied path segment
+  raw into `${audiobookshelfBaseUrl}/api/<path>` and fetched it with the stored
+  admin API key; a `..` segment (WHATWG-URL normalized) let any authenticated
+  non-admin user reach arbitrary Audiobookshelf admin-API endpoints such as
+  `/api/me`. The proxy now rejects traversal (`..`), backslashes, leading
+  slashes, and any path outside the `items/` namespace before issuing the
+  outbound request, while still allowing operator-configured internal/LAN ABS
+  hosts.
 - Required authentication on the audiobook cover endpoint like the rest of the
   audiobooks API, and validated and contained the cover-cache fallback path,
   closing an unauthenticated arbitrary-image read and path traversal; existing
