@@ -217,6 +217,16 @@ router.get(
                     res.end();
                 }
             });
+            // Clean up upstream stream when client disconnects
+            res.on("close", () => {
+                if (
+                    proxyRes.data &&
+                    typeof proxyRes.data.destroy === "function" &&
+                    !proxyRes.data.destroyed
+                ) {
+                    proxyRes.data.destroy();
+                }
+            });
             proxyRes.data.pipe(res);
         } catch (error: any) {
             // If user's OAuth failed, retry with public
@@ -248,6 +258,16 @@ router.get(
                             });
                         } else {
                             res.end();
+                        }
+                    });
+                    // Clean up upstream stream when client disconnects
+                    res.on("close", () => {
+                        if (
+                            proxyRes.data &&
+                            typeof proxyRes.data.destroy === "function" &&
+                            !proxyRes.data.destroyed
+                        ) {
+                            proxyRes.data.destroy();
                         }
                     });
                     proxyRes.data.pipe(res);

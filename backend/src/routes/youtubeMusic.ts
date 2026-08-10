@@ -956,6 +956,16 @@ router.get(
                     res.end();
                 }
             });
+            // Clean up upstream stream when client disconnects
+            res.on("close", () => {
+                if (
+                    proxyRes.data &&
+                    typeof proxyRes.data.destroy === "function" &&
+                    !proxyRes.data.destroyed
+                ) {
+                    proxyRes.data.destroy();
+                }
+            });
             proxyRes.data.pipe(res);
         } catch (err: any) {
             if (err.response?.status === 404) {
@@ -1409,6 +1419,16 @@ router.get(
                     res.status(502).json({ error: "Upstream stream failed" });
                 } else {
                     res.end();
+                }
+            });
+            // Clean up upstream stream when client disconnects
+            res.on("close", () => {
+                if (
+                    proxyRes.data &&
+                    typeof proxyRes.data.destroy === "function" &&
+                    !proxyRes.data.destroyed
+                ) {
+                    proxyRes.data.destroy();
                 }
             });
             proxyRes.data.pipe(res);

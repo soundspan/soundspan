@@ -129,6 +129,7 @@ function createRes() {
             return res;
         }),
         end: jest.fn(),
+        on: jest.fn(),
     };
     return res;
 }
@@ -382,6 +383,38 @@ describe("artists preview (YT Music) routes", () => {
             );
         });
 
+        it("destroys the primary upstream stream when the client disconnects", async () => {
+            mockFindUniqueUserSettings.mockResolvedValueOnce(null);
+            const data = {
+                pipe: jest.fn(),
+                on: jest.fn(),
+                destroy: jest.fn(),
+                destroyed: false,
+            };
+            mockGetStreamProxy.mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                data,
+            });
+            const res = createRes();
+
+            await getPreviewStream(
+                buildReq("vid-primary", { userId: "user-no-oauth" }),
+                res,
+            );
+
+            const closeHandler = res.on.mock.calls.find(
+                ([event]: [string]) => event === "close",
+            )?.[1];
+            expect(closeHandler).toEqual(expect.any(Function));
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
+
+            data.destroyed = true;
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
+        });
+
         it("streams with __public__ when req.user is undefined", async () => {
             const mockStream = createMockStreamResponse();
             mockGetStreamProxy.mockResolvedValueOnce(mockStream);
@@ -479,6 +512,43 @@ describe("artists preview (YT Music) routes", () => {
                 undefined,
             );
             expect(res.statusCode).toBe(200);
+        });
+
+        it("destroys the fallback upstream stream when the client disconnects", async () => {
+            const oauthError: any = new Error("OAuth expired");
+            oauthError.response = { status: 401 };
+            mockGetStreamProxy.mockRejectedValueOnce(oauthError);
+            const data = {
+                pipe: jest.fn(),
+                on: jest.fn(),
+                destroy: jest.fn(),
+                destroyed: false,
+            };
+            mockGetStreamProxy.mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                data,
+            });
+            mockFindUniqueUserSettings.mockResolvedValueOnce({
+                ytMusicOAuthJson: '{"token":"expired"}',
+            });
+            const res = createRes();
+
+            await getPreviewStream(
+                buildReq("vid-fallback-close", { userId: "user-expired" }),
+                res,
+            );
+
+            const closeHandler = res.on.mock.calls.find(
+                ([event]: [string]) => event === "close",
+            )?.[1];
+            expect(closeHandler).toEqual(expect.any(Function));
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
+
+            data.destroyed = true;
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
         });
 
         it("returns 500 when stream proxy fails (non-401)", async () => {

@@ -97,6 +97,7 @@ function createRes() {
             headers[key] = value;
             return res;
         }),
+        on: jest.fn(),
     };
     return res;
 }
@@ -487,6 +488,39 @@ describe("tidal streaming route runtime", () => {
             "bytes 0-100/200",
         );
         expect(pipeMock).toHaveBeenCalledWith(res);
+    });
+
+    it("destroys the upstream stream when the client disconnects", async () => {
+        const data = {
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+            destroyed: false,
+        };
+        tidalStreamingService.getStreamProxy.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data,
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { trackId: "99" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        const closeHandler = res.on.mock.calls.find(
+            ([event]: [string]) => event === "close",
+        )?.[1];
+        expect(closeHandler).toEqual(expect.any(Function));
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
+
+        data.destroyed = true;
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
     });
 
     it("initiates device auth and maps initiation errors", async () => {

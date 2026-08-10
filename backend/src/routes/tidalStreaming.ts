@@ -945,6 +945,16 @@ router.get(
                 res.setHeader(key, value);
             });
 
+            // Clean up upstream stream when client disconnects
+            res.on("close", () => {
+                if (
+                    stream.data &&
+                    typeof stream.data.destroy === "function" &&
+                    !stream.data.destroyed
+                ) {
+                    stream.data.destroy();
+                }
+            });
             stream.data.pipe(res);
         } catch (err: any) {
             if (err?.response?.status === 401) {

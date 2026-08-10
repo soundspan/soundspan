@@ -136,6 +136,7 @@ function createRes() {
             res.headersSent = true;
             return res;
         }),
+        on: jest.fn(),
     };
     return res;
 }
@@ -155,6 +156,10 @@ describe("youtube music route runtime behavior", () => {
     const songHandler = getLastHandler("/song/:videoId", "get");
     const streamInfoHandler = getLastHandler("/stream-info/:videoId", "get");
     const streamHandler = getLastHandler("/stream/:videoId", "get");
+    const publicStreamHandler = getLastHandler(
+        "/stream-public/:videoId",
+        "get",
+    );
     const librarySongsHandler = getLastHandler("/library/songs", "get");
     const libraryAlbumsHandler = getLastHandler("/library/albums", "get");
     const matchHandler = getLastHandler("/match", "post");
@@ -865,6 +870,73 @@ describe("youtube music route runtime behavior", () => {
         await streamHandler(reqBase, errorRes);
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({ error: "Failed to stream audio" });
+    });
+
+    it("destroys the authenticated upstream stream when the client disconnects", async () => {
+        const data = {
+            pipe: jest.fn(),
+            on: jest.fn(),
+            destroy: jest.fn(),
+            destroyed: false,
+        };
+        ytMusicService.getStreamProxy.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data,
+        });
+        const req = {
+            user: { id: "user-1" },
+            params: { videoId: "vid-close" },
+            query: { quality: "high" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        const closeHandler = res.on.mock.calls.find(
+            ([event]: [string]) => event === "close",
+        )?.[1];
+        expect(closeHandler).toEqual(expect.any(Function));
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
+
+        data.destroyed = true;
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("destroys the public upstream stream when the client disconnects", async () => {
+        const data = {
+            pipe: jest.fn(),
+            on: jest.fn(),
+            destroy: jest.fn(),
+            destroyed: false,
+        };
+        ytMusicService.getStreamProxy.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data,
+        });
+        const req = {
+            params: { videoId: "vid-public-close" },
+            query: { quality: "high" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await publicStreamHandler(req, res);
+
+        const closeHandler = res.on.mock.calls.find(
+            ([event]: [string]) => event === "close",
+        )?.[1];
+        expect(closeHandler).toEqual(expect.any(Function));
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
+
+        data.destroyed = true;
+        closeHandler();
+        expect(data.destroy).toHaveBeenCalledTimes(1);
     });
 
     it("handles library songs and albums retrieval with fallback errors", async () => {

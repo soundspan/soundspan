@@ -352,6 +352,8 @@ describe("youtubeMusic routes branch coverage", () => {
             pipe: () => {
                 earlyOnError?.(new Error("upstream dropped"));
             },
+            destroy: jest.fn(),
+            destroyed: false,
         };
         ytMusicService.getStreamProxy.mockResolvedValueOnce({
             status: 200,
@@ -374,6 +376,8 @@ describe("youtubeMusic routes branch coverage", () => {
                 res.write("x");
                 onError?.(new Error("late upstream error"));
             },
+            destroy: jest.fn(),
+            destroyed: false,
         };
         ytMusicService.getStreamProxy.mockResolvedValueOnce({
             status: 200,
@@ -384,6 +388,11 @@ describe("youtubeMusic routes branch coverage", () => {
             "/api/ytmusic/stream-public/video-2",
         );
         expect(headersSentRes.status).toBe(200);
+
+        // The route's close-handler destroys the upstream once the client
+        // response closes.
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(syntheticStream.destroy).toHaveBeenCalled();
 
         ytMusicService.getStreamProxy.mockRejectedValueOnce({
             response: { status: 404 },

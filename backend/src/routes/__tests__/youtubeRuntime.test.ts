@@ -42,6 +42,7 @@ import {
 
 const mockGetVideoInfo = youtubeDownloadService.getVideoInfo as jest.Mock;
 const mockGetPlaylistInfo = youtubeDownloadService.getPlaylistInfo as jest.Mock;
+const mockGetStreamProxy = youtubeDownloadService.getStreamProxy as jest.Mock;
 const mockStartDownload = youtubeDownloadService.startDownload as jest.Mock;
 const mockGetDownloadJobStatus =
     youtubeDownloadService.getDownloadJobStatus as jest.Mock;
@@ -109,9 +110,12 @@ function getHandler(path: string, method: "get" | "post" | "delete") {
 }
 
 function createRes() {
+    const headers: Record<string, string> = {};
     const res: any = {
         statusCode: 200,
         body: undefined as unknown,
+        headersSent: false,
+        headers,
         status: jest.fn(function (code: number) {
             res.statusCode = code;
             return res;
@@ -120,6 +124,12 @@ function createRes() {
             res.body = payload;
             return res;
         }),
+        setHeader: jest.fn(function (key: string, value: string) {
+            headers[key] = value;
+            return res;
+        }),
+        end: jest.fn(),
+        on: jest.fn(),
     };
     return res;
 }
@@ -133,6 +143,7 @@ function sidecarError(status: number, detail?: string) {
 describe("youtube routes runtime", () => {
     const infoHandler = getHandler("/info", "get");
     const playlistInfoHandler = getHandler("/playlist-info", "get");
+    const streamHandler = getHandler("/stream/:videoId", "get");
     const downloadHandler = getHandler("/download", "post");
     const statusHandler = getHandler("/download/:jobId", "get");
     const downloadsListHandler = getHandler("/downloads", "get");
@@ -311,6 +322,41 @@ describe("youtube routes runtime", () => {
             expect(res.body).toEqual({
                 error: "Failed to enumerate playlist or channel",
             });
+        });
+    });
+
+    describe("GET /stream/:videoId", () => {
+        it("destroys the upstream stream when the client disconnects", async () => {
+            const data = {
+                pipe: jest.fn(),
+                on: jest.fn(),
+                destroy: jest.fn(),
+                destroyed: false,
+            };
+            mockGetStreamProxy.mockResolvedValueOnce({
+                status: 200,
+                headers: {},
+                data,
+            });
+            const req = {
+                params: { videoId: "video-1" },
+                query: {},
+                headers: {},
+            } as any;
+            const res = createRes();
+
+            await streamHandler(req, res);
+
+            const closeHandler = res.on.mock.calls.find(
+                ([event]: [string]) => event === "close",
+            )?.[1];
+            expect(closeHandler).toEqual(expect.any(Function));
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
+
+            data.destroyed = true;
+            closeHandler();
+            expect(data.destroy).toHaveBeenCalledTimes(1);
         });
     });
 
