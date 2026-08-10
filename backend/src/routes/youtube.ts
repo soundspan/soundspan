@@ -29,6 +29,7 @@ import {
     watchYouTubeDownloadJobUntilTerminal,
 } from "../services/youtubeDownload";
 import { logger } from "../utils/logger";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -225,11 +226,11 @@ router.get(
                 return res.status(404).json({ error: "Stream not found" });
             }
             if (err.response?.status === 451) {
-                return res.status(451).json({
-                    error: "age_restricted",
-                    message:
-                        "This content requires age verification and cannot be streamed.",
-                });
+                return sendRouteError(
+                    res,
+                    451,
+                    "This content requires age verification and cannot be streamed.",
+                );
             }
             logger.error("[YouTube Route] Stream proxy failed:", err.message);
             return res.status(500).json({ error: "Failed to stream audio" });

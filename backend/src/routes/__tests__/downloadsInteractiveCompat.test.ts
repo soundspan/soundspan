@@ -225,11 +225,9 @@ describe("downloads interactive release compatibility", () => {
             false,
         );
         expect(res.statusCode).toBe(404);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                error: "Album not found in Lidarr",
-            }),
-        );
+        expect(res.body).toEqual({
+            error: "Album not found in Lidarr. Could not find or add this album to Lidarr; the album may not be available in Lidarr metadata.",
+        });
     });
 
     it("returns formatted interactive releases when album lookup succeeds", async () => {
@@ -351,11 +349,9 @@ describe("downloads interactive release compatibility", () => {
 
         expect(mockLidarrAddArtist).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(404);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                error: "Album not found in Lidarr",
-            }),
-        );
+        expect(res.body).toEqual({
+            error: "Album not found in Lidarr. Could not find or add this album to Lidarr; the album may not be available in Lidarr metadata.",
+        });
     });
 
     it("returns 500 when interactive release lookup throws unexpectedly", async () => {

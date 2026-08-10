@@ -612,8 +612,7 @@ describe("enrichment metadata compatibility", () => {
 
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({
-            error: "Track not found",
-            message: "The track may have been deleted",
+            error: "Track not found (the track may have been deleted)",
         });
         expect(mockTrackUpdate).not.toHaveBeenCalled();
     });

@@ -326,6 +326,23 @@ describe("youtube routes runtime", () => {
     });
 
     describe("GET /stream/:videoId", () => {
+        it("returns a canonical 451 error for age-restricted content", async () => {
+            mockGetStreamProxy.mockRejectedValueOnce(sidecarError(451));
+            const req = {
+                params: { videoId: "age-gated-video" },
+                query: {},
+                headers: {},
+            } as any;
+            const res = createRes();
+
+            await streamHandler(req, res);
+
+            expect(res.statusCode).toBe(451);
+            expect(res.body).toEqual({
+                error: "This content requires age verification and cannot be streamed.",
+            });
+        });
+
         it("destroys the upstream stream when the client disconnects", async () => {
             const data = {
                 pipe: jest.fn(),

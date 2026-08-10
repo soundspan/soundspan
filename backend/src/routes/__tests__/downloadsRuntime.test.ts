@@ -117,6 +117,7 @@ import { musicBrainzService } from "../../services/musicbrainz";
 import { lastFmService } from "../../services/lastfm";
 import { simpleDownloadManager } from "../../services/simpleDownloadManager";
 import { scanQueue } from "../../workers/queues";
+import { logger } from "../../utils/logger";
 
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
 
@@ -137,6 +138,7 @@ const mockStartDownload = simpleDownloadManager.startDownload as jest.Mock;
 const mockClearLidarrQueue =
     simpleDownloadManager.clearLidarrQueue as jest.Mock;
 const mockScanQueueAdd = scanQueue.add as jest.Mock;
+const mockLogger = logger as jest.Mocked<typeof logger>;
 
 const mockDownloadFindUnique = prisma.downloadJob.findUnique as jest.Mock;
 const mockDownloadFindMany = prisma.downloadJob.findMany as jest.Mock;
@@ -268,7 +270,7 @@ describe("downloads routes runtime", () => {
         mockAlbumFindFirst.mockResolvedValue(null);
 
         mockStartDownload.mockResolvedValue({ success: true });
-        mockClearLidarrQueue.mockResolvedValue({ removed: 2, errors: 0 });
+        mockClearLidarrQueue.mockResolvedValue({ removed: 2, errors: [] });
         mockScanQueueAdd.mockResolvedValue(undefined);
 
         mockTransaction.mockImplementation(async (callback: any) =>
@@ -747,7 +749,10 @@ describe("downloads routes runtime", () => {
     });
 
     it("allows admins to clear Lidarr queue entries", async () => {
-        mockClearLidarrQueue.mockResolvedValueOnce({ removed: 4, errors: 1 });
+        mockClearLidarrQueue.mockResolvedValueOnce({
+            removed: 4,
+            errors: ["raw lidarr failure detail"],
+        });
 
         const req = { user: { id: "admin-1", role: "admin" } } as any;
         const res = createRes();
@@ -759,6 +764,16 @@ describe("downloads routes runtime", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ success: true, removed: 4, errors: 1 });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "raw lidarr failure detail",
+        );
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            "Clear Lidarr queue completed with errors",
+            {
+                errorCount: 1,
+                errors: ["raw lidarr failure detail"],
+            },
+        );
     });
 
     it("returns 500 when clearing Lidarr queue fails", async () => {

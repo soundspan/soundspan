@@ -1518,8 +1518,7 @@ describe("enrichment route runtime behavior", () => {
 
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({
-            error: "Track not found",
-            message: "The track may have been deleted",
+            error: "Track not found (the track may have been deleted)",
         });
     });
 
@@ -1583,8 +1582,7 @@ describe("enrichment route runtime behavior", () => {
 
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({
-            error: "Artist not found",
-            message: "The artist may have been deleted",
+            error: "Artist not found (the artist may have been deleted)",
         });
     });
 

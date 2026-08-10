@@ -458,7 +458,6 @@ describe("soulseek runtime routes", () => {
 
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({
-            success: false,
             error: "track not available",
         });
     });

@@ -570,6 +570,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backend/src/services/rssParser.ts` to match the repo-wide camelCase service
   naming convention; imports, tests, and the service index were updated with no
   behavior change.
+- Route error responses for Soulseek direct download, enrichment metadata 404s,
+  downloads interactive releases, and the YouTube age-restriction case now use
+  the canonical single-field `{ error }` envelope; the secondary `message` key
+  is removed from those error bodies (the frontend keys on `error`), and the
+  admin clear-Lidarr-queue response now reports an error count instead of
+  echoing raw Lidarr error strings.
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
   Quality, Enforcement Gates, and Backend/Frontend Typecheck jobs) and added a
   `verify:ci` npm script that reproduces all gates locally, including the Python

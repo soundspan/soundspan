@@ -1004,7 +1004,7 @@ router.delete("/clear-all", async (req, res) => {
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Number of removed items and any errors
+ *         description: Number of removed items and error count
  *       401:
  *         description: Not authenticated
  *       403:
@@ -1014,10 +1014,16 @@ router.delete("/clear-all", async (req, res) => {
 router.post("/clear-lidarr-queue", requireAdmin, async (req, res) => {
     try {
         const result = await simpleDownloadManager.clearLidarrQueue();
+        if (result.errors.length > 0) {
+            logger.warn("Clear Lidarr queue completed with errors", {
+                errorCount: result.errors.length,
+                errors: result.errors,
+            });
+        }
         res.json({
             success: true,
             removed: result.removed,
-            errors: result.errors,
+            errors: result.errors.length,
         });
     } catch (error: any) {
         logger.error("Clear Lidarr queue error:", error);
@@ -1227,11 +1233,11 @@ router.get("/releases/:albumMbid", async (req, res) => {
         }
 
         if (!lidarrAlbumId) {
-            return res.status(404).json({
-                error: "Album not found in Lidarr",
-                message:
-                    "Could not find or add this album to Lidarr. The album may not be available in Lidarr metadata.",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Album not found in Lidarr. Could not find or add this album to Lidarr; the album may not be available in Lidarr metadata.",
+            );
         }
 
         const releases = await lidarrService.getAlbumReleases(lidarrAlbumId);

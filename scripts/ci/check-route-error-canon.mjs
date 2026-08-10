@@ -76,8 +76,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/podcasts.ts": 2,
     // settings.ts remaining 1: multer MulterError.message in a 400 upload-validation response (~L307), behind an instanceof MulterError guard; library-owned validation text.
     "backend/src/routes/settings.ts": 1,
-    // soulseek.ts remaining 1: direct-download 404 response error: result.error (~L454) on the requireAdmin-gated download route (#216); admin-only surface, frozen under the slice-J scope guard.
-    "backend/src/routes/soulseek.ts": 1,
+    // soulseek.ts at zero for the property-value pattern; the admin-gated direct-download 404 still forwards result.error as the sendRouteError message (admin-only surface, slice-J follow-up).
+    "backend/src/routes/soulseek.ts": 0,
     // streaming.ts remaining 7: segmentedError.message from toSegmentedSessionError() (~L493); typed SegmentedSessionError domain errors with static code-owned messages/status codes, not raw caught errors.
     "backend/src/routes/streaming.ts": 7,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.

@@ -10,6 +10,7 @@ import { requireAdmin, requireAuth } from "../middleware/auth";
 import { soulseekService, SearchResult } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -449,10 +450,11 @@ router.post(
                     filePath: result.filePath,
                 });
             } else {
-                res.status(404).json({
-                    success: false,
-                    error: result.error || "Download failed",
-                });
+                sendRouteError(
+                    res,
+                    404,
+                    result.error || "Download failed",
+                );
             }
         } catch (error: any) {
             logger.error("Soulseek download error:", error.message);

@@ -27,6 +27,7 @@ import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -1453,10 +1454,11 @@ router.put("/artists/:id/metadata", async (req, res) => {
                 });
 
                 if (!existingArtist) {
-                    return res.status(404).json({
-                        error: "Artist not found",
-                        message: "The artist may have been deleted",
-                    });
+                    return sendRouteError(
+                        res,
+                        404,
+                        "Artist not found (the artist may have been deleted)",
+                    );
                 }
 
                 if (
@@ -1635,10 +1637,11 @@ router.put("/albums/:id/metadata", async (req, res) => {
             });
 
             if (!existingAlbum) {
-                return res.status(404).json({
-                    error: "Album not found",
-                    message: "The album may have been deleted",
-                });
+                return sendRouteError(
+                    res,
+                    404,
+                    "Album not found (the album may have been deleted)",
+                );
             }
 
             if (existingAlbum.rgMbid !== normalizedRgMbid) {
@@ -1860,10 +1863,11 @@ router.post("/artists/:id/reset", async (req, res) => {
         });
 
         if (!existingArtist) {
-            return res.status(404).json({
-                error: "Artist not found",
-                message: "The artist may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Artist not found (the artist may have been deleted)",
+            );
         }
 
         const artist = await prisma.artist.update({
@@ -1901,10 +1905,11 @@ router.post("/artists/:id/reset", async (req, res) => {
     } catch (error: any) {
         // Handle P2025 specifically in case of race condition
         if (error.code === "P2025") {
-            return res.status(404).json({
-                error: "Artist not found",
-                message: "The artist may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Artist not found (the artist may have been deleted)",
+            );
         }
         logger.error("Reset artist metadata error:", error);
         res.status(500).json({
@@ -1952,10 +1957,11 @@ router.post("/albums/:id/reset", async (req, res) => {
         });
 
         if (!existingAlbum) {
-            return res.status(404).json({
-                error: "Album not found",
-                message: "The album may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Album not found (the album may have been deleted)",
+            );
         }
 
         const album = await prisma.album.update({
@@ -1992,10 +1998,11 @@ router.post("/albums/:id/reset", async (req, res) => {
     } catch (error: any) {
         // Handle P2025 specifically in case of race condition
         if (error.code === "P2025") {
-            return res.status(404).json({
-                error: "Album not found",
-                message: "The album may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Album not found (the album may have been deleted)",
+            );
         }
         logger.error("Reset album metadata error:", error);
         res.status(500).json({
@@ -2043,10 +2050,11 @@ router.post("/tracks/:id/reset", async (req, res) => {
         });
 
         if (!existingTrack) {
-            return res.status(404).json({
-                error: "Track not found",
-                message: "The track may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Track not found (the track may have been deleted)",
+            );
         }
 
         const track = await prisma.track.update({
@@ -2079,10 +2087,11 @@ router.post("/tracks/:id/reset", async (req, res) => {
     } catch (error: any) {
         // Handle P2025 specifically in case of race condition
         if (error.code === "P2025") {
-            return res.status(404).json({
-                error: "Track not found",
-                message: "The track may have been deleted",
-            });
+            return sendRouteError(
+                res,
+                404,
+                "Track not found (the track may have been deleted)",
+            );
         }
         logger.error("Reset track metadata error:", error);
         res.status(500).json({
