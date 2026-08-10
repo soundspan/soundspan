@@ -50,6 +50,10 @@ All development happens on the `main` branch:
 
 Please open an issue to discuss before starting work.
 
+## Coding Standards
+
+All contributions must follow the [coding-handbook](https://github.com/BonzTM/coding-handbook): the `typescript/` module for TS/JS and the `python/` module for the `services/**` sidecars. See **Coding Standards & Handbook** in [AGENTS.md](AGENTS.md) for the full policy and precedence — that section is the authority.
+
 ## Code Style
 
 ### Frontend

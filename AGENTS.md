@@ -14,6 +14,20 @@ Repository contract for soundspan.
 - Follow this file first.
 - `CLAUDE.md` and `.claude/awm-broker/**` are tool-specific companions. If they disagree with this file, this file wins.
 
+## Coding Standards & Handbook
+
+- The canonical external engineering-standards baseline for soundspan is the [coding-handbook](https://github.com/BonzTM/coding-handbook) repo (local sibling checkout at `~/git/coding-handbook` when available).
+- All contributors and AI agents — including any tools they drive (e.g. codex) — must follow the handbook's language module for the code they touch:
+  - `typescript/` for TS/JS (backend, frontend, packages)
+  - `python/` for the `services/**` sidecars
+- Precedence, so this composes with the rules below:
+  1. This AGENTS.md and its repository-specific rules win.
+  2. Then the coding-handbook language module.
+  3. Then general industry best practice.
+
+  Handbook guidance that conflicts with an explicit rule in this file defers to this file.
+- The handbook is the baseline the codebase's enterprise-standards refactor was aligned to; new work must not regress below it.
+
 ## Working Rules
 
 - **Read before edit.** Read the full relevant source before making changes. Do not guess at file contents or structure.
