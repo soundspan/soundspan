@@ -35,7 +35,7 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
-import { rssParserService, RSSFeedNotModifiedError } from "../rss-parser";
+import { rssParserService, RSSFeedNotModifiedError } from "../rssParser";
 
 function mockFeedResponse(
     feed: Record<string, unknown>,

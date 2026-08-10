@@ -98,7 +98,7 @@ const rssParserService = {
     ),
 };
 
-jest.mock("../../services/rss-parser", () => ({
+jest.mock("../../services/rssParser", () => ({
     rssParserService,
     RSSFeedNotModifiedError: MockRSSFeedNotModifiedError,
 }));

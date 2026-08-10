@@ -71,7 +71,7 @@ const rssParserService = {
         feedMetadata: {} as { etag?: string; lastModified?: string },
     })),
 };
-jest.mock("../../services/rss-parser", () => ({
+jest.mock("../../services/rssParser", () => ({
     rssParserService,
 }));
 
@@ -545,6 +545,40 @@ describe("podcasts core runtime behavior", () => {
 
         expect(res.statusCode).toBe(400);
         expect(res.body).toEqual({ error: "feedUrl or itunesId is required" });
+    });
+
+    it("rejects malformed feedUrl values before outbound requests", async () => {
+        const req = {
+            body: { feedUrl: "not-a-url" },
+            user: { id: "user-1", username: "alice" },
+        } as any;
+        const res = createRes();
+
+        await subscribeHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Valid feedUrl or itunesId is required",
+        });
+        expect(rssParserService.parseFeed).not.toHaveBeenCalled();
+        expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it("rejects non-string itunesId values", async () => {
+        const req = {
+            body: { itunesId: 4455 },
+            user: { id: "user-1", username: "alice" },
+        } as any;
+        const res = createRes();
+
+        await subscribeHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Valid feedUrl or itunesId is required",
+        });
+        expect(rssParserService.parseFeed).not.toHaveBeenCalled();
+        expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 
     it("returns already subscribed when podcast exists and subscription is present", async () => {

@@ -282,6 +282,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- POST `/api/podcasts/subscribe` now validates `feedUrl`/`itunesId` with a Zod
+  schema before any outbound fetch; a previously accepted malformed `feedUrl`
+  or non-string `itunesId` now returns **400** instead of reaching the RSS fetch
+  path.
 - Confined the Audiobookshelf cover-art proxy to the ABS `items/` resource
   namespace, closing an authenticated SSRF and admin-credential-reuse class.
   The library `cover-art` handler (both the `?url=` and `:id` branches) and the
@@ -548,6 +552,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed the backend RSS parser service file to
+  `backend/src/services/rssParser.ts` to match the repo-wide camelCase service
+  naming convention; imports, tests, and the service index were updated with no
+  behavior change.
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
   Quality, Enforcement Gates, and Backend/Frontend Typecheck jobs) and added a
   `verify:ci` npm script that reproduces all gates locally, including the Python

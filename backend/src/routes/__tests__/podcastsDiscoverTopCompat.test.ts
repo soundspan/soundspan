@@ -31,7 +31,7 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-jest.mock("../../services/rss-parser", () => ({
+jest.mock("../../services/rssParser", () => ({
     rssParserService: {},
 }));
 

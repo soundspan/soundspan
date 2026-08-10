@@ -208,7 +208,7 @@
       },
       "backend": {
         "routes": ["podcasts.ts"],
-        "services": ["podcastCache.ts", "podcastDownload.ts", "rss-parser.ts", "itunes.ts"]
+        "services": ["podcastCache.ts", "podcastDownload.ts", "rssParser.ts", "itunes.ts"]
       },
       "tests": {
         "backend_route": ["podcastsCoreRuntime.test.ts", "podcastsDiscoveryRuntime.test.ts", "podcastsStreamingRuntime.test.ts", "podcastsDiscoverTopCompat.test.ts", "podcastsRefreshPrismaRetryCompat.test.ts"],

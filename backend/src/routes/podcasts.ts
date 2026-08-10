@@ -1,11 +1,12 @@
 import { Router } from "express";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
 import {
     rssParserService,
     RSSFeedNotModifiedError,
-} from "../services/rss-parser";
+} from "../services/rssParser";
 import { podcastCacheService } from "../services/podcastCache";
 import { parseRangeHeader } from "../utils/rangeParser";
 import {
@@ -20,6 +21,22 @@ const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
 const PODCAST_PRISMA_RETRY_ATTEMPTS = 3;
 const MAX_AUDIO_REDIRECTS = 5;
+
+const subscribeSchema = z
+    .object({
+        feedUrl: z.string().url().optional(),
+        itunesId: z.string().min(1).optional(),
+    })
+    .refine((body) => Boolean(body.feedUrl) || Boolean(body.itunesId), {
+        message: "feedUrl or itunesId is required",
+    });
+
+function areSubscribeIdentifiersAbsent(body: unknown): boolean {
+    if (!body || typeof body !== "object") return true;
+    const feedUrl = "feedUrl" in body ? body.feedUrl : undefined;
+    const itunesId = "itunesId" in body ? body.itunesId : undefined;
+    return feedUrl === undefined && itunesId === undefined;
+}
 
 class PodcastEgressBlockedError extends Error {
     constructor(url: string) {
@@ -870,7 +887,7 @@ router.get("/:id", async (req, res) => {
  *       200:
  *         description: Subscribed successfully
  *       400:
- *         description: feedUrl or itunesId is required
+ *         description: A valid feedUrl or itunesId is required
  *       404:
  *         description: Podcast not found in iTunes
  *       401:
@@ -882,13 +899,14 @@ router.get("/:id", async (req, res) => {
  */
 router.post("/subscribe", async (req, res) => {
     try {
-        const { feedUrl, itunesId } = req.body;
-
-        if (!feedUrl && !itunesId) {
-            return res
-                .status(400)
-                .json({ error: "feedUrl or itunesId is required" });
+        const parsed = subscribeSchema.safeParse(req.body);
+        if (!parsed.success) {
+            const error = areSubscribeIdentifiersAbsent(req.body)
+                ? "feedUrl or itunesId is required"
+                : "Valid feedUrl or itunesId is required";
+            return res.status(400).json({ error });
         }
+        const { feedUrl, itunesId } = parsed.data;
 
         logger.debug(
             `\n [PODCAST] Subscribe request from ${req.user!.username}`,
@@ -919,6 +937,12 @@ router.post("/subscribe", async (req, res) => {
 
             finalFeedUrl = itunesResponse.data.results[0].feedUrl;
             logger.debug(`   Found feed URL: ${finalFeedUrl}`);
+        }
+
+        if (!finalFeedUrl) {
+            return res
+                .status(400)
+                .json({ error: "Valid feedUrl or itunesId is required" });
         }
 
         const safeFeedUrl = normalizeSafeOutboundUrl(finalFeedUrl);

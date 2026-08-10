@@ -43,7 +43,7 @@ const mockParseFeed = jest.fn(async () => ({
     podcast: {},
     episodes: [] as any[],
 }));
-jest.mock("../../services/rss-parser", () => ({
+jest.mock("../../services/rssParser", () => ({
     rssParserService: {
         parseFeed: mockParseFeed as any,
     },
