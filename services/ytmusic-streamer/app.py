@@ -196,6 +196,10 @@ YT_PLAYLIST_MAX_ENTRIES = max(1, env_int("YT_PLAYLIST_MAX_ENTRIES", "200"))
 # keeping usage respectful and within reasonable limits.
 # Tune them via environment variables to balance speed vs. safety.
 
+# Max queries accepted in a single batch search request.
+# Oversized batches are rejected with a 422 before any work starts.
+_BATCH_SEARCH_MAX_QUERIES = 50
+
 # Max concurrent InnerTube search requests in a batch (default: 3).
 # Prevents firing 50 simultaneous requests that look bot-like.
 BATCH_CONCURRENCY = env_int("YTMUSIC_BATCH_CONCURRENCY", "3")
@@ -1677,6 +1681,11 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
     Rate-pacing: requests are throttled via _batch_semaphore and
     inter-request delays instead of firing all N simultaneously.
     """
+    if len(req.queries) > _BATCH_SEARCH_MAX_QUERIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Batch search accepts at most {_BATCH_SEARCH_MAX_QUERIES} queries",
+        )
 
     async def _run_one(q: BatchSearchQuery) -> dict:
         """Execute and sanitize one query in the batch."""
@@ -1733,7 +1742,7 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
     if req.filter == "songs":
         body["params"] = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
     try:
-        raw = yt._send_request("search", body)
+        raw = await asyncio.to_thread(yt._send_request, "search", body)
         return {"raw": raw}
     except Exception as e:
         raise _sanitized_http_error("Debug search", e, 500, "Debug search failed") from e
@@ -2958,9 +2967,11 @@ async def get_playlist(
                     user_id,
                     auth_err,
                 )
-                playlist = _get_public_ytmusic("native").get_playlist(playlist_id, limit=limit)
+                yt = _get_public_ytmusic("native")
+                playlist = await asyncio.to_thread(yt.get_playlist, playlist_id, limit=limit)
         else:
-            playlist = _get_public_ytmusic("native").get_playlist(playlist_id, limit=limit)
+            yt = _get_public_ytmusic("native")
+            playlist = await asyncio.to_thread(yt.get_playlist, playlist_id, limit=limit)
 
         tracks = []
         for t in playlist.get("tracks", []):

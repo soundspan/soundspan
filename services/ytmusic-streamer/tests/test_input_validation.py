@@ -138,3 +138,47 @@ async def test_song_accepts_valid_video_id(client, monkeypatch):
     response = await client.get(f"/song/{VALID_ID}?user_id=__public__")
     assert response.status_code == 200
     assert response.json()["videoId"] == VALID_ID
+
+
+@pytest.mark.anyio
+async def test_batch_search_rejects_more_than_50_queries(client, monkeypatch):
+    """Batch search rejects oversized requests before search work starts."""
+    import app
+
+    calls = []
+
+    def fake_search(*args, **kwargs):
+        calls.append("called")
+        return [], "native"
+
+    monkeypatch.setattr(app, "_search_with_mode_fallback", fake_search)
+    queries = [{"query": f"query-{index}"} for index in range(51)]
+
+    response = await client.post("/search/batch?user_id=u1", json={"queries": queries})
+
+    assert response.status_code == 422
+    assert response.json() == {"error": "Batch search accepts at most 50 queries"}
+    assert calls == []
+
+
+@pytest.mark.anyio
+async def test_batch_search_accepts_50_queries(client, monkeypatch):
+    """Batch search accepts requests at the configured query cap."""
+    import app
+
+    calls = []
+
+    def fake_search(*args, **kwargs):
+        calls.append("called")
+        return [], "native"
+
+    monkeypatch.setattr(app, "_search_with_mode_fallback", fake_search)
+    monkeypatch.setattr(app, "BATCH_DELAY_MIN", 0)
+    monkeypatch.setattr(app, "BATCH_DELAY_MAX", 0)
+    queries = [{"query": f"query-{index}"} for index in range(50)]
+
+    response = await client.post("/search/batch?user_id=u1", json={"queries": queries})
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 50
+    assert len(calls) == 50

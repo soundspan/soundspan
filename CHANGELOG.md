@@ -311,6 +311,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The ytmusic-streamer playlist endpoint's public-browse and auth-fallback
+  paths, and the debug search endpoint, now offload blocking ytmusicapi calls
+  to the asyncio thread pool instead of stalling the event loop, and batch
+  search now rejects requests with more than 50 queries.
 - Outbound image fetches (external image proxy and podcast cover cache) now
   cancel undici response bodies on non-success, redirect, and retry paths so
   pooled connections are released promptly instead of waiting for GC.

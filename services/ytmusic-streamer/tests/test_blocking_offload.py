@@ -65,6 +65,71 @@ async def test_charts_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_public_playlist_offloaded_to_worker_thread(client, monkeypatch):
+    """Public playlist work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def get_playlist(playlist_id, limit):
+        captured["t"] = threading.current_thread().name
+        return {"id": playlist_id, "title": "t", "tracks": []}
+
+    public_client = types.SimpleNamespace(get_playlist=get_playlist)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.get("/playlist/x")
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_playlist_auth_fallback_offloaded_to_worker_thread(client, monkeypatch):
+    """Public playlist fallback work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def fail_authenticated_fetch(*args, **kwargs):
+        raise RuntimeError("authenticated fetch failed")
+
+    def get_playlist(playlist_id, limit):
+        captured["t"] = threading.current_thread().name
+        return {"id": playlist_id, "title": "t", "tracks": []}
+
+    public_client = types.SimpleNamespace(get_playlist=get_playlist)
+    monkeypatch.setattr(app, "_run_ytmusic_with_auth_retry", fail_authenticated_fetch)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.get("/playlist/x?user_id=u1")
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_debug_search_offloaded_to_worker_thread(client, monkeypatch):
+    """Debug-search work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def send_request(endpoint, body):
+        captured["t"] = threading.current_thread().name
+        return {}
+
+    public_client = types.SimpleNamespace(_send_request=send_request)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.post("/search/debug?user_id=u1", json={"query": "x"})
+
+    assert response.status_code == 200
+    assert response.json() == {"raw": {}}
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
 async def test_device_code_offloaded_to_worker_thread(client, monkeypatch):
     """OAuth device-code initiation should run in an asyncio worker thread."""
     import app
