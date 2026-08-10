@@ -5,6 +5,7 @@ import { audiobookCacheService } from "../services/audiobookCache";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 const router = Router();
 
@@ -567,6 +568,9 @@ router.options("/:id/cover", (req, res) => {
  *   get:
  *     summary: Serve audiobook cover image
  *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -582,6 +586,10 @@ router.options("/:id/cover", (req, res) => {
  *             schema:
  *               type: string
  *               format: binary
+ *       400:
+ *         description: Invalid audiobook ID
+ *       401:
+ *         description: Not authenticated
  *       404:
  *         description: Cover not found
  */
@@ -590,112 +598,132 @@ router.options("/:id/cover", (req, res) => {
  * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
  * NO RATE LIMITING - These are static files served from disk with aggressive caching
  */
-router.get("/:id/cover", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const fs = await import("fs");
-        const path = await import("path");
-        const { config } = await import("../config");
-
-        const audiobook = await prisma.audiobook.findUnique({
-            where: { id },
-            select: { localCoverPath: true, coverUrl: true },
-        });
-
-        let coverPath = audiobook?.localCoverPath;
-
-        // Fallback: check if cover exists on disk even if DB path is empty
-        if (!coverPath) {
-            const fallbackPath = path.join(
-                config.music.musicPath,
-                "cover-cache",
-                "audiobooks",
-                `${id}.jpg`,
-            );
-            if (fs.existsSync(fallbackPath)) {
-                coverPath = fallbackPath;
-                // Update database with the correct path
-                await prisma.audiobook
-                    .update({
-                        where: { id },
-                        data: { localCoverPath: fallbackPath },
-                    })
-                    .catch(() => {}); // Ignore errors if audiobook doesn't exist
+router.get<{ id: string }>(
+    "/:id/cover",
+    requireAuthOrToken,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+                return res.status(400).json({ error: "Invalid audiobook ID" });
             }
-        }
 
-        // If local cover exists, serve it
-        if (coverPath && fs.existsSync(coverPath)) {
-            const origin = req.headers.origin || "http://localhost:3030";
-            res.setHeader(
-                "Cache-Control",
-                "public, max-age=31536000, immutable",
-            );
-            res.setHeader("Access-Control-Allow-Origin", origin);
-            res.setHeader("Access-Control-Allow-Credentials", "true");
-            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(coverPath);
-        }
+            const fs = await import("fs");
+            const path = await import("path");
+            const { config } = await import("../config");
 
-        // Fallback: proxy from Audiobookshelf if coverUrl is available
-        if (audiobook?.coverUrl) {
-            const { getSystemSettings } =
-                await import("../utils/systemSettings");
-            const settings = await getSystemSettings();
+            const audiobook = await prisma.audiobook.findUnique({
+                where: { id },
+                select: { localCoverPath: true, coverUrl: true },
+            });
 
-            if (settings?.audiobookshelfUrl && settings?.audiobookshelfApiKey) {
-                const baseUrl = settings.audiobookshelfUrl.replace(/\/$/, "");
-                const coverApiUrl = `${baseUrl}/api/${audiobook.coverUrl}`;
+            let coverPath = audiobook?.localCoverPath;
 
-                try {
-                    const response = await fetch(coverApiUrl, {
-                        headers: {
-                            Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
-                        },
-                        signal: AbortSignal.timeout(15000),
-                    });
-
-                    if (response.ok) {
-                        const origin =
-                            req.headers.origin || "http://localhost:3030";
-                        res.setHeader(
-                            "Content-Type",
-                            response.headers.get("content-type") ||
-                                "image/jpeg",
-                        );
-                        res.setHeader("Cache-Control", "public, max-age=86400"); // 24 hours for proxied
-                        res.setHeader("Access-Control-Allow-Origin", origin);
-                        res.setHeader(
-                            "Access-Control-Allow-Credentials",
-                            "true",
-                        );
-                        res.setHeader(
-                            "Cross-Origin-Resource-Policy",
-                            "cross-origin",
-                        );
-
-                        // Stream the response body to client
-                        const buffer = await response.arrayBuffer();
-                        return res.send(Buffer.from(buffer));
-                    }
-                } catch (proxyError: any) {
-                    logger.error(
-                        `[Audiobook Cover] Proxy error for ${id}:`,
-                        proxyError.message,
-                    );
+            // Fallback: check if cover exists on disk even if DB path is empty
+            if (!coverPath) {
+                const coverDir = path.join(
+                    config.music.musicPath,
+                    "cover-cache",
+                    "audiobooks",
+                );
+                const fallbackPath = safeResolvePath(coverDir, `${id}.jpg`);
+                if (fallbackPath && fs.existsSync(fallbackPath)) {
+                    coverPath = fallbackPath;
+                    // Update database with the correct path
+                    await prisma.audiobook
+                        .update({
+                            where: { id },
+                            data: { localCoverPath: fallbackPath },
+                        })
+                        .catch(() => {}); // Ignore errors if audiobook doesn't exist
                 }
             }
-        }
 
-        // No cover available
-        return res.status(404).json({ error: "Cover not found" });
-    } catch (error: any) {
-        logger.error("Error serving cover:", error);
-        res.status(500).json({
-            error: "Failed to serve cover",
-        });
-    }
-});
+            // If local cover exists, serve it
+            if (coverPath && fs.existsSync(coverPath)) {
+                const origin = req.headers.origin || "http://localhost:3030";
+                res.setHeader(
+                    "Cache-Control",
+                    "public, max-age=31536000, immutable",
+                );
+                res.setHeader("Access-Control-Allow-Origin", origin);
+                res.setHeader("Access-Control-Allow-Credentials", "true");
+                res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+                return res.sendFile(coverPath);
+            }
+
+            // Fallback: proxy from Audiobookshelf if coverUrl is available
+            if (audiobook?.coverUrl) {
+                const { getSystemSettings } =
+                    await import("../utils/systemSettings");
+                const settings = await getSystemSettings();
+
+                if (
+                    settings?.audiobookshelfUrl &&
+                    settings?.audiobookshelfApiKey
+                ) {
+                    const baseUrl = settings.audiobookshelfUrl.replace(
+                        /\/$/,
+                        "",
+                    );
+                    const coverApiUrl = `${baseUrl}/api/${audiobook.coverUrl}`;
+
+                    try {
+                        const response = await fetch(coverApiUrl, {
+                            headers: {
+                                Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
+                            },
+                            signal: AbortSignal.timeout(15000),
+                        });
+
+                        if (response.ok) {
+                            const origin =
+                                req.headers.origin || "http://localhost:3030";
+                            res.setHeader(
+                                "Content-Type",
+                                response.headers.get("content-type") ||
+                                    "image/jpeg",
+                            );
+                            res.setHeader(
+                                "Cache-Control",
+                                "public, max-age=86400",
+                            ); // 24 hours for proxied
+                            res.setHeader(
+                                "Access-Control-Allow-Origin",
+                                origin,
+                            );
+                            res.setHeader(
+                                "Access-Control-Allow-Credentials",
+                                "true",
+                            );
+                            res.setHeader(
+                                "Cross-Origin-Resource-Policy",
+                                "cross-origin",
+                            );
+
+                            // Stream the response body to client
+                            const buffer = await response.arrayBuffer();
+                            return res.send(Buffer.from(buffer));
+                        }
+                    } catch (proxyError: any) {
+                        logger.error(
+                            `[Audiobook Cover] Proxy error for ${id}:`,
+                            proxyError.message,
+                        );
+                    }
+                }
+            }
+
+            // No cover available
+            return res.status(404).json({ error: "Cover not found" });
+        } catch (error: any) {
+            logger.error("Error serving cover:", error);
+            res.status(500).json({
+                error: "Failed to serve cover",
+            });
+        }
+    },
+);
 
 /**
  * @openapi
