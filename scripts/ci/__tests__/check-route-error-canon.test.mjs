@@ -165,3 +165,50 @@ test("countLeakPattern ignores identifiers ending in e", () => {
     assert.equal(countLeakPattern("res.json({ detail: response.message })"), 0);
     assert.equal(countLeakPattern("res.send(`${resource.message}`);"), 0);
 });
+
+test("countLeakPattern flags result.error forwarded in a response body", () => {
+    assert.equal(
+        countLeakPattern(
+            "res.json({ success: result.success, error: result.error });",
+        ),
+        1,
+    );
+});
+
+test("countLeakPattern flags result.error interpolated into a session log push", () => {
+    const source =
+        'sessionLog("PENDING-RETRY", `Download failed: ${result.error || "unknown error"}`, "WARN");';
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern flags chained optional sidecar detail in a response", () => {
+    assert.equal(
+        countLeakPattern(
+            'res.status(502).json({ error: err.response?.data?.detail || "Download failed" });',
+        ),
+        1,
+    );
+});
+
+test("countLeakPattern exempts result.error inside logger calls", () => {
+    const source =
+        'logger.warn("retry failed:", result.error);\n' +
+        "logger.debug(`[Retry] Download failed: ${result.error}`);";
+    assert.equal(countLeakPattern(source), 0);
+});
+
+test("countLeakPattern ignores derived access on .error", () => {
+    const source =
+        "res.status(400).json({ details: parsedBody.error.issues });\n" +
+        "res.status(400).json({ details: parsedBody.error.flatten() });";
+    assert.equal(countLeakPattern(source), 0);
+});
+
+test("countLeakPattern flags an intermediate const assigned from a result error", () => {
+    assert.equal(
+        countLeakPattern(
+            'const errorMsg = downloadResult.error || "Unknown error";',
+        ),
+        1,
+    );
+});

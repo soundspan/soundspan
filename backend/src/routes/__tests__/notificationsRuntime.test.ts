@@ -799,6 +799,39 @@ describe("notifications route runtime", () => {
             newJobId: "job-new-generic",
             error: null,
         });
+
+        prisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "job-generic-failed",
+            userId: "u1",
+            subject: "Artist - Album",
+            type: "album",
+            targetMbid: "mbid-generic-failed",
+            artistMbid: "artist-mbid",
+            metadata: { albumTitle: "Album" },
+        });
+        prisma.downloadJob.create.mockResolvedValueOnce({
+            id: "job-new-generic-failed",
+            metadata: {},
+        });
+        simpleDownloadManager.startDownload.mockResolvedValueOnce({
+            success: false,
+            error: "raw lidarr detail xyz",
+        });
+        const genericFailedReq = {
+            user: { id: "u1" },
+            params: { id: "job-generic-failed" },
+        } as any;
+        const genericFailedRes = createRes();
+        await retryDownload(genericFailedReq, genericFailedRes);
+        expect(genericFailedRes.statusCode).toBe(200);
+        expect(genericFailedRes.body).toEqual({
+            success: false,
+            newJobId: "job-new-generic-failed",
+            error: "Download failed (details in server log)",
+        });
+        expect(JSON.stringify(genericFailedRes.body)).not.toContain(
+            "raw lidarr detail",
+        );
     });
 
     it("handles spotify_import retry async success/fallback/catch branches", async () => {

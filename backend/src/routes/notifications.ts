@@ -947,10 +947,18 @@ router.post(
                 false, // isDiscovery
             );
 
+            if (!result.success) {
+                logger.warn(
+                    `[Retry] Download failed for job ${newJobRecord.id}: ${result.error}`,
+                );
+            }
             res.json({
                 success: result.success,
                 newJobId: newJobRecord.id,
-                error: result.error,
+                // startDownload result.error carries raw downstream error text; return a static message (raw detail in server log).
+                error: result.success
+                    ? null
+                    : "Download failed (details in server log)",
             });
         } catch (error: any) {
             logger.error("Error retrying download:", error);

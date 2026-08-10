@@ -55,7 +55,8 @@ const BASELINE = Object.freeze({
 });
 
 // Raw error details can disclose internal implementation data to clients (OWASP).
-// This independent ratchet prevents new error.message/error.stack response leaks.
+// This independent ratchet prevents new error.message/error.stack response leaks
+// and terminal .error/.detail property values assigned or interpolated outside logger calls.
 const LEAK_BASELINE = Object.freeze({
     // auth.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L813 and ~L1247); code-owned schema messages, not raw errors.
     "backend/src/routes/auth.ts": 2,
@@ -64,26 +65,37 @@ const LEAK_BASELINE = Object.freeze({
     // library.ts remaining 1: admin-only Lidarr connection-test diagnostics (~L5740 lidarrError = err?.message) returned in an admin settings probe response, not a general-user 500 leak.
     "backend/src/routes/library.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
-    "backend/src/routes/notifications.ts": 0,
+    // notifications.ts remaining 2: stored downloadJob.error strings from the soulseek retry result (~L702) and Lidarr fallback (~L864); stored-then-returned to the owning user via GET /api/downloads — client-reachable, flagged for follow-up sanitization under the slice-J scope guard (the POST retry response leak itself was sanitized).
+    "backend/src/routes/notifications.ts": 2,
     "backend/src/routes/playbackState.ts": 0,
     // playlistImport.ts remaining 2: substring-guarded 400 echoes of playlistImportService's own thrown validation messages (~L434 preview, ~L516 "Invalid track reference" execute); code-owned text, not raw transport errors.
     "backend/src/routes/playlistImport.ts": 2,
-    // playlists.ts remaining 1: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); the scanError sessionLog instance was sanitized (fixed, not frozen).
-    "backend/src/routes/playlists.ts": 1,
+    // playlists.ts remaining 2: prefix-guarded ensureRemoteTrack validation message (code-owned 400 detail, ~L904); plus stored downloadJob.error from the soulseek retry result (~L1725), stored-then-returned to the owning user via GET /api/downloads — flagged for follow-up sanitization under the slice-J scope guard (the sessionLog WARN leak was sanitized).
+    "backend/src/routes/playlists.ts": 2,
     // podcasts.ts remaining 2: Prisma-retry classification helper (~L83) and logger-only describeAxiosError (~L133); neither reaches a response body.
     "backend/src/routes/podcasts.ts": 2,
     // settings.ts remaining 1: multer MulterError.message in a 400 upload-validation response (~L307), behind an instanceof MulterError guard; library-owned validation text.
     "backend/src/routes/settings.ts": 1,
+    // soulseek.ts remaining 1: direct-download 404 response error: result.error (~L454) on the requireAdmin-gated download route (#216); admin-only surface, frozen under the slice-J scope guard.
+    "backend/src/routes/soulseek.ts": 1,
     // streaming.ts remaining 7: segmentedError.message from toSegmentedSessionError() (~L493); typed SegmentedSessionError domain errors with static code-owned messages/status codes, not raw caught errors.
     "backend/src/routes/streaming.ts": 7,
-    // acquisitionService.ts remaining 3: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard.
-    "backend/src/services/acquisitionService.ts": 3,
+    // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
+    "backend/src/routes/youtube.ts": 4,
+    // youtubeMusic.ts remaining 11: ytmusic sidecar err.response?.data?.detail echoes (10x) plus one result.error response (~L434); same sidecar-detail class as youtube.ts, frozen under the slice-J scope guard, flagged for follow-up.
+    "backend/src/routes/youtubeMusic.ts": 11,
+    // acquisitionService.ts remaining 4: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard; plus a result.error passthrough in a { success:false, error } result object (~L748); frozen under the slice-J scope guard.
+    "backend/src/services/acquisitionService.ts": 4,
     // audioStreaming.ts remaining 3: internal ffmpeg-error classification (~L285) plus transcode-failure AppError messages (~L303, ~L347); frozen under the slice-E scope guard — AppError messages are echoed by errorHandler, flagged for follow-up sanitization.
     "backend/src/services/audioStreaming.ts": 3,
     // audiobookCache.ts remaining 2: sync-failure detail string recorded server-side (~L104) and an internal thrown sync-error message (~L398); frozen under the slice-E scope guard.
     "backend/src/services/audiobookCache.ts": 2,
-    // discoverWeekly.ts remaining 3: error-classification const (~L51), discoveryLogger line (~L564), and internal transaction-failure message (~L1484); server-side generation pipeline, frozen under the slice-E scope guard.
-    "backend/src/services/discoverWeekly.ts": 3,
+    // discoverWeekly.ts remaining 6: error-classification const (~L51), discoveryLogger line (~L564), and internal transaction-failure message (~L1484); server-side generation pipeline, frozen under the slice-E scope guard; plus discoveryLogger/discoveryBatchLogger interpolations (~L481, ~L496) and a stored job error field (~L489) in the server-side generation pipeline; frozen under the slice-J scope guard.
+    "backend/src/services/discoverWeekly.ts": 6,
+    // genericImportJobRunner.ts remaining 1: latestJob.error passthrough on user cancel (~L91); import-job state plumbing, frozen under the slice-J scope guard.
+    "backend/src/services/genericImportJobRunner.ts": 1,
+    // importJobStore.ts remaining 1: persisted input.error passthrough (~L192); job-state plumbing, frozen under the slice-J scope guard.
+    "backend/src/services/importJobStore.ts": 1,
     // lidarr.ts remaining 3: { success, message } Lidarr client results (~L1651, ~L1732, ~L2152) consumed by admin Lidarr management flows; frozen under the slice-E scope guard.
     "backend/src/services/lidarr.ts": 3,
     // moodBucketService.ts remaining 1: error-classification const (~L185), never a response body; frozen under the slice-E scope guard.
@@ -96,10 +108,12 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/podcastDownload.ts": 1,
     // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
     "backend/src/services/simpleDownloadManager.ts": 4,
-    // soulseek.ts remaining 13: sessionLog(...) server-side log lines and { success:false, error } download-result objects consumed by the admin-only Soulseek download path; frozen under the slice-E scope guard.
-    "backend/src/services/soulseek.ts": 13,
-    // spotifyImport.ts remaining 4: error-classification const (~L48), import-job error fields (~L1521, ~L1768), and a non-logger import log line (~L1723); admin-visible import-job state, frozen under the slice-E scope guard.
-    "backend/src/services/spotifyImport.ts": 4,
+    // soulseek.ts remaining 17: sessionLog(...) server-side log lines and { success:false, error } download-result objects consumed by the admin-only Soulseek download path; frozen under the slice-E scope guard; plus downloadResult.error consts/interpolations (~L1008, ~L1090, ~L1186) and per-peer result.error batch error strings (~L1248); frozen under the slice-J scope guard.
+    "backend/src/services/soulseek.ts": 17,
+    // spotifyImport.ts remaining 9: error-classification const (~L48), import-job error fields (~L1521, ~L1768), and a non-logger import log line (~L1723); admin-visible import-job state, frozen under the slice-E scope guard; plus job.error/dbJob.error status-object passthroughs (~L289, ~L298, ~L364, ~L2655) and an errorMsg assigned from result.error (~L1694); frozen under the slice-J scope guard.
+    "backend/src/services/spotifyImport.ts": 9,
+    // youtubeDownload.ts remaining 1: sidecar status mapping data.error (~L329); job-state plumbing, frozen under the slice-J scope guard.
+    "backend/src/services/youtubeDownload.ts": 1,
 });
 
 export function countPattern(source) {
@@ -147,7 +161,25 @@ export function countLeakPattern(source) {
         String.raw`(?::\s*|=\s*|\$\{[^}]*?)${ERROR_ID}\??\.(?:message|stack)\b`,
         "g",
     );
-    return normalizedSource.match(pattern)?.length ?? 0;
+    const messageCount = normalizedSource.match(pattern)?.length ?? 0;
+    return messageCount + countErrorPropertyLeaks(stripped);
+}
+
+// Widened leak class: `.error` / `.detail` property values on any object chain
+// (result.error, err.response?.data?.detail, ...) assigned or interpolated
+// outside logger.* calls. Derived access (parsedBody.error.issues,
+// .error.flatten(), .error[...]) is excluded — only terminal values leak.
+function countErrorPropertyLeaks(strippedSource) {
+    const CHAIN = String.raw`(?<![\w$.])[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*`;
+    const normalized = strippedSource.replace(
+        new RegExp(String.raw`(${CHAIN})\s*(\??)\s*\.\s*(error|detail)\b`, "g"),
+        "$1$2.$3",
+    );
+    const pattern = new RegExp(
+        String.raw`(?::\s*|=\s*|\$\{[^}]*?)${CHAIN}\??\.(?:error|detail)\b(?!\s*[.(\[])`,
+        "g",
+    );
+    return normalized.match(pattern)?.length ?? 0;
 }
 
 export function analyzeRouteErrorCanon(counts, baseline) {

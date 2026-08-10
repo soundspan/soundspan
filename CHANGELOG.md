@@ -266,6 +266,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stopped forwarding raw download-failure text to clients from the playlist
+  pending-track retry session log and the notifications download-retry
+  response (static messages; raw detail stays in the server log), and widened
+  the route error-canon leak ratchet to also catch `.error`/`.detail`
+  property values (e.g. `result.error`, `err.response?.data?.detail`) outside
+  logger calls, freezing and documenting the pre-existing instances in the
+  baseline.
 - Pinned the remaining mutable GitHub Actions tags in
   `image-security-scanning.yml` (`actions/checkout`, `docker/login-action`,
   `github/codeql-action/upload-sarif`) and `compose-config-check.yml`

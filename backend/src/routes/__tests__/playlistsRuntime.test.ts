@@ -2456,7 +2456,7 @@ describe("playlists route runtime", () => {
         });
         soulseekService.downloadBestMatch.mockResolvedValueOnce({
             success: false,
-            error: "download failed",
+            error: "peer xyz123 connection reset",
         });
 
         const req = {
@@ -2473,9 +2473,19 @@ describe("playlists route runtime", () => {
                 where: { id: "job-failed-result" },
                 data: expect.objectContaining({
                     status: "failed",
-                    error: "download failed",
+                    error: "peer xyz123 connection reset",
                 }),
             }),
+        );
+        const sessionLogMock = jest.requireMock("../../utils/playlistLogger")
+            .sessionLog as jest.Mock;
+        expect(JSON.stringify(sessionLogMock.mock.calls)).not.toContain(
+            "peer xyz123",
+        );
+        expect(sessionLogMock).toHaveBeenCalledWith(
+            "PENDING-RETRY",
+            "Download failed (raw detail in server log)",
+            "WARN",
         );
     });
 
