@@ -4,6 +4,11 @@ const mockChmodSync = jest.fn();
 const mockRenameSync = jest.fn();
 const mockUnlinkSync = jest.fn();
 const mockLoggerDebug = jest.fn();
+const mockLogger = {
+    debug: (...args: unknown[]) => mockLoggerDebug(...args),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("fs", () => ({
     __esModule: true,
@@ -17,9 +22,7 @@ jest.mock("fs", () => ({
 }));
 
 jest.mock("../logger", () => ({
-    logger: {
-        debug: (...args: unknown[]) => mockLoggerDebug(...args),
-    },
+    logger: mockLogger,
 }));
 
 import { EnvFileSyncSkippedError, writeEnvFile } from "../envWriter";
@@ -50,7 +53,7 @@ describe("envWriter", () => {
             }),
         );
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ENV] Skipping .env sync: disabled by ENABLE_ENV_FILE_SYNC=false",
+            "Skipping .env sync: disabled by ENABLE_ENV_FILE_SYNC=false",
         );
         expect(mockWriteFileSync).not.toHaveBeenCalled();
         expect(mockChmodSync).not.toHaveBeenCalled();

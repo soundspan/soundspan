@@ -19,7 +19,9 @@ describe("moodBucketWorker", () => {
             debug: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const resolvedClaimResult =
             options &&
@@ -206,7 +208,7 @@ describe("moodBucketWorker", () => {
         module.stopMoodBucketWorker();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Mood Bucket] Worker error:",
+            "Worker error:",
             expect.any(Error),
         );
     });

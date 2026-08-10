@@ -65,7 +65,9 @@ describe("scanProcessor runtime behavior", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const scanResult: ScanResult = options.scanResult ?? {
             tracksAdded: 0,
@@ -766,7 +768,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(job);
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1]  Failed to build Discovery playlist:",
+            " Failed to build Discovery playlist:",
             "dw-build-failed",
         );
     });
@@ -792,7 +794,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(job);
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1]  Failed to build Spotify Import playlist:",
+            " Failed to build Spotify Import playlist:",
             "spotify-build-failed",
         );
     });
@@ -845,7 +847,7 @@ describe("scanProcessor runtime behavior", () => {
             }),
         );
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1] Failed to send notification:",
+            "Failed to send notification:",
             expect.any(Error),
         );
     });
@@ -876,7 +878,7 @@ describe("scanProcessor runtime behavior", () => {
             spotifyImportService.reconcilePendingTracks,
         ).toHaveBeenCalledTimes(1);
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ScanJob job-1] ✓ Reconciled 3 pending tracks to 2 playlists",
+            "✓ Reconciled 3 pending tracks to 2 playlists",
         );
         expect(notificationService.notifySystem).toHaveBeenCalledWith(
             "user-1",
@@ -906,7 +908,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(job);
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1] Failed to reconcile pending tracks:",
+            "Failed to reconcile pending tracks:",
             expect.any(Error),
         );
     });
@@ -936,7 +938,7 @@ describe("scanProcessor runtime behavior", () => {
             discoverWeeklyService.reconcileDiscoveryTracks,
         ).toHaveBeenCalledTimes(1);
         expect(logger.info).toHaveBeenCalledWith(
-            "[SCAN] Discovery Weekly reconciliation: 4 tracks added across 2 batches",
+            "Discovery Weekly reconciliation: 4 tracks added across 2 batches",
         );
     });
 
@@ -961,7 +963,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(job);
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[SCAN] Discovery Weekly reconciliation failed:",
+            "Discovery Weekly reconciliation failed:",
             expect.any(Error),
         );
     });
@@ -996,10 +998,10 @@ describe("scanProcessor runtime behavior", () => {
             },
         });
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ScanJob job-1] Found 2 tracks needing mood tags, triggering enrichment...",
+            "Found 2 tracks needing mood tags, triggering enrichment...",
         );
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ScanJob job-1] Mood tag enrichment completed: 7 tracks enriched",
+            "Mood tag enrichment completed: 7 tracks enriched",
         );
     });
 
@@ -1019,7 +1021,7 @@ describe("scanProcessor runtime behavior", () => {
 
         expect(prisma.track.count).toHaveBeenCalledTimes(1);
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ScanJob job-1] No tracks need immediate mood tag enrichment",
+            "No tracks need immediate mood tag enrichment",
         );
         expect(triggerEnrichmentNow).not.toHaveBeenCalled();
     });
@@ -1041,7 +1043,7 @@ describe("scanProcessor runtime behavior", () => {
         await flushPromises();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1] Mood tag enrichment failed:",
+            "Mood tag enrichment failed:",
             expect.any(Error),
         );
     });
@@ -1061,7 +1063,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(createJob());
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1] Failed to check for mood tag enrichment:",
+            "Failed to check for mood tag enrichment:",
             expect.any(Error),
         );
     });
@@ -1093,7 +1095,7 @@ describe("scanProcessor runtime behavior", () => {
         await module.processScan(job);
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1]   Failed to trigger enrichment:",
+            "  Failed to trigger enrichment:",
             expect.any(Error),
         );
     });
@@ -1108,9 +1110,6 @@ describe("scanProcessor runtime behavior", () => {
         await expect(module.processScan(job)).rejects.toThrow("scan exploded");
         expect(job.progress).toHaveBeenCalledWith(0);
         expect(job.progress).not.toHaveBeenCalledWith(100);
-        expect(logger.error).toHaveBeenCalledWith(
-            "[ScanJob job-1] Scan failed:",
-            scanError,
-        );
+        expect(logger.error).toHaveBeenCalledWith("Scan failed:", scanError);
     });
 });

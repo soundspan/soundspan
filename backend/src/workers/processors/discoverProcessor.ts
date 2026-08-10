@@ -7,6 +7,8 @@ import { discoveryRecommendationsService } from "../../services/discovery";
 import { config } from "../../config";
 import { createIORedisClient } from "../../utils/ioredis";
 
+const log = logger.child("DiscoverProcessor");
+
 export interface DiscoverJobData {
     userId: string;
 }
@@ -74,8 +76,8 @@ async function withDiscoverLockRedisRetry<T>(
             throw error;
         }
 
-        logger.warn(
-            `[DiscoverProcessor] ${operationName} failed due to Redis connection closure; recreating client and retrying once`,
+        log.warn(
+            `${operationName} failed due to Redis connection closure; recreating client and retrying once`,
             error,
         );
         recreateDiscoverLockRedisClient();
@@ -96,8 +98,8 @@ export async function shutdownDiscoverProcessor(): Promise<void> {
             discoverProcessorLockRedis.quit(),
         );
     } catch (error) {
-        logger.warn(
-            "[DiscoverProcessor] Failed to gracefully close lock Redis client; disconnecting forcefully",
+        log.warn(
+            "Failed to gracefully close lock Redis client; disconnecting forcefully",
             error,
         );
         discoverProcessorLockRedis.disconnect();
@@ -110,6 +112,7 @@ export async function shutdownDiscoverProcessor(): Promise<void> {
 export async function processDiscoverWeekly(
     job: Job<DiscoverJobData>,
 ): Promise<DiscoverJobResult> {
+    const jobLog = log.child(`Job ${job.id}`);
     const { userId } = job.data;
     const lockKey = getDiscoverLockKey(userId);
     const lockToken = `${discoverProcessorNodeId}:${Date.now()}:${job.id}`;
@@ -118,8 +121,8 @@ export async function processDiscoverWeekly(
         Math.ceil(DISCOVER_PROCESSOR_LOCK_TTL_MS / 1000),
     );
 
-    logger.debug(
-        `[DiscoverJob ${job.id}] Generating Discover Weekly for user ${userId}`,
+    jobLog.debug(
+        `Generating Discover Weekly for user ${userId}`,
     );
 
     await job.progress(10);
@@ -138,8 +141,8 @@ export async function processDiscoverWeekly(
         );
 
         if (claimResult !== "OK") {
-            logger.warn(
-                `[DiscoverJob ${job.id}] Skipping generation for user ${userId}; processor claim is held by another worker`,
+            jobLog.warn(
+                `Skipping generation for user ${userId}; processor claim is held by another worker`,
             );
             await job.progress(100);
             return {
@@ -154,8 +157,8 @@ export async function processDiscoverWeekly(
         // For now, we'll just report progress at key stages
         await job.progress(20); // Starting generation
 
-        logger.debug(
-            `[DiscoverJob ${job.id}] Starting discovery generation (mode=${config.discover.mode})...`,
+        jobLog.debug(
+            `Starting discovery generation (mode=${config.discover.mode})...`,
         );
         const result =
             config.discover.mode === "legacy"
@@ -164,7 +167,7 @@ export async function processDiscoverWeekly(
                       userId,
                   );
 
-        logger.debug(`[DiscoverJob ${job.id}] Result:`, {
+        jobLog.debug(`Result:`, {
             success: result.success,
             playlistName: result.playlistName,
             songCount: result.songCount,
@@ -173,7 +176,7 @@ export async function processDiscoverWeekly(
 
         await job.progress(100); // Complete
 
-        logger.debug(`[DiscoverJob ${job.id}] Generation complete: SUCCESS`);
+        jobLog.debug(`Generation complete: SUCCESS`);
 
         return {
             success: result.success,
@@ -182,11 +185,11 @@ export async function processDiscoverWeekly(
             batchId: result.batchId,
         };
     } catch (error: any) {
-        logger.error(
-            `[DiscoverJob ${job.id}] Generation failed with exception:`,
+        jobLog.error(
+            `Generation failed with exception:`,
             error,
         );
-        logger.error(`[DiscoverJob ${job.id}] Stack trace:`, error.stack);
+        jobLog.error(`Stack trace:`, error.stack);
 
         // Re-throw so Bull marks the job failed and applies its retry/backoff and
         // dead-letter handling. Returning a {success:false} payload here resolves
@@ -206,8 +209,8 @@ export async function processDiscoverWeekly(
                     ),
             );
         } catch (releaseError) {
-            logger.warn(
-                `[DiscoverJob ${job.id}] Failed to release processor claim for user ${userId}`,
+            jobLog.warn(
+                `Failed to release processor claim for user ${userId}`,
                 releaseError,
             );
         }

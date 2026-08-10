@@ -29,6 +29,8 @@ import { featureDetection } from "../services/featureDetection";
 import { moodBucketService } from "../services/moodBucketService";
 import pLimit from "p-limit";
 
+const log = logger.child("Enrichment");
+
 // Configuration
 const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
@@ -243,8 +245,8 @@ async function withEnrichmentQueueRedisRetry<T>(
             throw error;
         }
 
-        logger.warn(
-            `[Enrichment/Redis] ${operationName} failed due to Redis connection closure; recreating queue client and retrying once`,
+        log.warn(
+            `${operationName} failed due to Redis connection closure; recreating queue client and retrying once`,
             error,
         );
         recreateEnrichmentQueueRedisClient();
@@ -263,8 +265,8 @@ async function withEnrichmentClaimRedisRetry<T>(
             throw error;
         }
 
-        logger.warn(
-            `[Enrichment/Redis] ${operationName} failed due to Redis connection closure; recreating claim client and retrying once`,
+        log.warn(
+            `${operationName} failed due to Redis connection closure; recreating claim client and retrying once`,
             error,
         );
         recreateEnrichmentClaimRedisClient();
@@ -323,8 +325,8 @@ async function withEnrichmentPrismaRetry<T>(
                 throw error;
             }
 
-            logger.warn(
-                `[Enrichment/Prisma] ${operationName} failed (attempt ${attempt}/${ENRICHMENT_PRISMA_RETRY_ATTEMPTS}), retrying`,
+            log.warn(
+                `${operationName} failed (attempt ${attempt}/${ENRICHMENT_PRISMA_RETRY_ATTEMPTS}), retrying`,
                 error,
             );
 
@@ -366,14 +368,14 @@ async function runEnrichmentCycleClaimed(
         );
 
         if (acquired !== "OK") {
-            logger.debug(
-                `[Enrichment] Skipping ${operationName}; cycle claim is held by another worker`,
+            log.debug(
+                `Skipping ${operationName}; cycle claim is held by another worker`,
             );
             return emptyResult;
         }
     } catch (error) {
-        logger.error(
-            `[Enrichment] Failed to claim ${operationName}; skipping cycle`,
+        log.error(
+            `Failed to claim ${operationName}; skipping cycle`,
             error,
         );
         return emptyResult;
@@ -394,8 +396,8 @@ async function runEnrichmentCycleClaimed(
                     ),
             );
         } catch (error) {
-            logger.warn(
-                `[Enrichment] Failed to release cycle claim for ${operationName}`,
+            log.warn(
+                `Failed to release cycle claim for ${operationName}`,
                 error,
             );
         }
@@ -412,28 +414,28 @@ async function setupControlChannel() {
 
         controlSubscriber.on("message", (channel, message) => {
             if (channel === "enrichment:control") {
-                logger.debug(
-                    `[Enrichment] Received control message: ${message}`,
+                log.debug(
+                    `Received control message: ${message}`,
                 );
 
                 if (message === "pause") {
                     isPaused = true;
-                    logger.debug("[Enrichment] Paused");
+                    log.debug("Paused");
                 } else if (message === "resume") {
                     isPaused = false;
-                    logger.debug("[Enrichment] Resumed");
+                    log.debug("Resumed");
                 } else if (message === "stop") {
                     isStopping = true;
                     isPaused = true;
-                    logger.debug(
-                        "[Enrichment] Stopping gracefully - completing current item...",
+                    log.debug(
+                        "Stopping gracefully - completing current item...",
                     );
                     // DO NOT override state - let enrichmentStateService.stop() handle it
                 }
             }
         });
 
-        logger.debug("[Enrichment] Subscribed to control channel");
+        log.debug("Subscribed to control channel");
     }
 }
 
@@ -441,14 +443,14 @@ async function setupControlChannel() {
  * Start the unified enrichment worker (incremental mode)
  */
 export async function startUnifiedEnrichmentWorker() {
-    logger.debug("\n=== Starting Unified Enrichment Worker ===");
-    logger.debug(`   Artist batch: ${ARTIST_BATCH_SIZE}`);
-    logger.debug(`   Track batch: ${TRACK_BATCH_SIZE}`);
-    logger.debug(`   Interval: ${ENRICHMENT_INTERVAL_MS / 1000}s`);
-    logger.debug("");
+    log.debug("\n=== Starting Unified Enrichment Worker ===");
+    log.debug(`   Artist batch: ${ARTIST_BATCH_SIZE}`);
+    log.debug(`   Track batch: ${TRACK_BATCH_SIZE}`);
+    log.debug(`   Interval: ${ENRICHMENT_INTERVAL_MS / 1000}s`);
+    log.debug("");
 
     if (!config.features.audioAnalysis) {
-        logger.info(
+        log.info(
             "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); enrichment skips audio/vibe queueing phases (steps 3-4)",
         );
     }
@@ -495,8 +497,8 @@ async function waitForActiveCycleToStop(
     }
 
     if (isRunning) {
-        logger.warn(
-            `[Enrichment] Stop wait exceeded ${maxWaitMs}ms while a cycle was still running; proceeding with teardown`,
+        log.warn(
+            `Stop wait exceeded ${maxWaitMs}ms while a cycle was still running; proceeding with teardown`,
         );
     }
 }
@@ -512,7 +514,7 @@ export async function stopUnifiedEnrichmentWorker() {
     if (enrichmentInterval) {
         clearInterval(enrichmentInterval);
         enrichmentInterval = null;
-        logger.debug("[Enrichment] Worker stopped");
+        log.debug("Worker stopped");
     }
 
     await waitForActiveCycleToStop();
@@ -523,7 +525,7 @@ export async function stopUnifiedEnrichmentWorker() {
             currentPhase: null,
         });
     } catch (err) {
-        logger.error("[Enrichment] Failed to update state:", err);
+        log.error("Failed to update state:", err);
     } finally {
         isStopping = false;
     }
@@ -554,7 +556,7 @@ export async function runFullEnrichment(options?: {
     tracks: number;
     audioQueued: number;
 }> {
-    logger.debug("\n=== FULL ENRICHMENT: Re-enriching everything ===\n");
+    log.debug("\n=== FULL ENRICHMENT: Re-enriching everything ===\n");
 
     const forceVibeRebuild = options?.forceVibeRebuild === true;
     const forceMoodBucketBackfill = options?.forceMoodBucketBackfill === true;
@@ -594,14 +596,14 @@ export async function runFullEnrichment(options?: {
 
         await enrichmentFailureService.clearAllFailures("vibe");
 
-        logger.info(
-            "[Enrichment] forceVibeRebuild enabled: cleared CLAP embeddings and reset vibe analysis state to pending",
+        log.info(
+            "forceVibeRebuild enabled: cleared CLAP embeddings and reset vibe analysis state to pending",
         );
     }
 
     if (forceMoodBucketBackfill) {
-        logger.info(
-            "[Enrichment] forceMoodBucketBackfill enabled: mood bucket full backfill will run after enrichment reaches fully complete state",
+        log.info(
+            "forceMoodBucketBackfill enabled: mood bucket full backfill will run after enrichment reaches fully complete state",
         );
     }
 
@@ -619,7 +621,7 @@ export async function runFullEnrichment(options?: {
  * Used when user wants to re-fetch artist metadata without touching track data
  */
 export async function resetArtistsOnly(): Promise<{ count: number }> {
-    logger.debug("[Enrichment] Resetting ONLY artist enrichment status...");
+    log.debug("Resetting ONLY artist enrichment status...");
 
     const result = await prisma.artist.updateMany({
         where: { enrichmentStatus: "completed" },
@@ -629,7 +631,7 @@ export async function resetArtistsOnly(): Promise<{ count: number }> {
         },
     });
 
-    logger.debug(`[Enrichment] Reset ${result.count} artists to pending`);
+    log.debug(`Reset ${result.count} artists to pending`);
     return { count: result.count };
 }
 
@@ -638,13 +640,13 @@ export async function resetArtistsOnly(): Promise<{ count: number }> {
  * Used when user wants to re-fetch Last.fm mood tags without touching other enrichment
  */
 export async function resetMoodTagsOnly(): Promise<{ count: number }> {
-    logger.debug("[Enrichment] Resetting ONLY mood tags...");
+    log.debug("Resetting ONLY mood tags...");
 
     const result = await prisma.track.updateMany({
         data: { lastfmTags: [] },
     });
 
-    logger.debug(`[Enrichment] Reset mood tags for ${result.count} tracks`);
+    log.debug(`Reset mood tags for ${result.count} tracks`);
     return { count: result.count };
 }
 
@@ -733,8 +735,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             }
         }
     } catch (error) {
-        logger.warn(
-            "[Enrichment] Failed to read starting progress, defaulting to notification-safe mode:",
+        log.warn(
+            "Failed to read starting progress, defaulting to notification-safe mode:",
             error,
         );
     }
@@ -796,22 +798,22 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         ) {
             try {
                 const progress = await getEnrichmentProgress();
-                logger.debug(`\n[Enrichment Progress]`);
-                logger.debug(
+                log.debug(`\nEnrichment Progress`);
+                log.debug(
                     `   Artists: ${progress.artists.completed}/${progress.artists.total} (${progress.artists.progress}%)`,
                 );
-                logger.debug(
+                log.debug(
                     `   Track Tags: ${progress.trackTags.enriched}/${progress.trackTags.total} (${progress.trackTags.progress}%)`,
                 );
-                logger.debug(
+                log.debug(
                     `   Audio Analysis: ${progress.audioAnalysis.completed}/${progress.audioAnalysis.total} (${progress.audioAnalysis.progress}%) [background]`,
                 );
                 if (features.vibeEmbeddings) {
-                    logger.debug(
+                    log.debug(
                         `   Vibe Embeddings: ${progress.clapEmbeddings.completed}/${progress.clapEmbeddings.total} (${progress.clapEmbeddings.progress}%) [background]`,
                     );
                 }
-                logger.debug("");
+                log.debug("");
 
                 // Update state with progress
                 await enrichmentStateService.updateState({
@@ -834,8 +836,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     completionNotificationSent: false, // Reset flag when new work is processed
                 });
             } catch (error) {
-                logger.warn(
-                    "[Enrichment] Failed to read/update enrichment progress after processing batch; continuing cycle:",
+                log.warn(
+                    "Failed to read/update enrichment progress after processing batch; continuing cycle:",
                     error,
                 );
             }
@@ -857,8 +859,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         try {
             progress = await getEnrichmentProgress();
         } catch (error) {
-            logger.warn(
-                "[Enrichment] Failed to read completion progress snapshot; skipping completion-specific post-processing for this cycle:",
+            log.warn(
+                "Failed to read completion progress snapshot; skipping completion-specific post-processing for this cycle:",
                 error,
             );
             return {
@@ -877,16 +879,16 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     const mixKeys = await redisInstance.keys("mixes:*");
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
-                        logger.info(
-                            `[Enrichment] Cleared ${mixKeys.length} mix cache entries after core enrichment complete`,
+                        log.info(
+                            `Cleared ${mixKeys.length} mix cache entries after core enrichment complete`,
                         );
                     }
                     await enrichmentStateService.updateState({
                         coreCacheCleared: true,
                     });
                 } catch (error) {
-                    logger.error(
-                        "[Enrichment] Failed to clear mix cache on core complete:",
+                    log.error(
+                        "Failed to clear mix cache on core complete:",
                         error,
                     );
                 }
@@ -910,13 +912,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         moodBucketBackfillInProgress: true,
                     });
 
-                    logger.info(
-                        "[Enrichment] Running automatic mood bucket backfill after full enrichment completion...",
+                    log.info(
+                        "Running automatic mood bucket backfill after full enrichment completion...",
                     );
                     const backfillResult =
                         await moodBucketService.backfillAllTracks();
-                    logger.info(
-                        `[Enrichment] Mood bucket backfill complete: processed=${backfillResult.processed}, assigned=${backfillResult.assigned}`,
+                    log.info(
+                        `Mood bucket backfill complete: processed=${backfillResult.processed}, assigned=${backfillResult.assigned}`,
                     );
 
                     await enrichmentStateService.updateState({
@@ -924,8 +926,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                         moodBucketBackfillInProgress: false,
                     });
                 } catch (error) {
-                    logger.error(
-                        "[Enrichment] Automatic mood bucket backfill failed (will retry on next fully-complete cycle):",
+                    log.error(
+                        "Automatic mood bucket backfill failed (will retry on next fully-complete cycle):",
                         error,
                     );
                     await enrichmentStateService.updateState({
@@ -942,16 +944,16 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     const mixKeys = await redisInstance.keys("mixes:*");
                     if (mixKeys.length > 0) {
                         await redisInstance.del(...mixKeys);
-                        logger.info(
-                            `[Enrichment] Cleared ${mixKeys.length} mix cache entries after full enrichment complete`,
+                        log.info(
+                            `Cleared ${mixKeys.length} mix cache entries after full enrichment complete`,
                         );
                     }
                     await enrichmentStateService.updateState({
                         fullCacheCleared: true,
                     });
                 } catch (error) {
-                    logger.error(
-                        "[Enrichment] Failed to clear mix cache on full complete:",
+                    log.error(
+                        "Failed to clear mix cache on full complete:",
                         error,
                     );
                 }
@@ -978,8 +980,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     await enrichmentStateService.updateState({
                         completionNotificationSent: true,
                     });
-                    logger.debug(
-                        "[Enrichment] Skipped completion notification (already complete at cycle start, no new work)",
+                    log.debug(
+                        "Skipped completion notification (already complete at cycle start, no new work)",
                     );
                     return {
                         artists: artistsProcessed,
@@ -1031,22 +1033,22 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     await enrichmentStateService.updateState({
                         completionNotificationSent: true,
                     });
-                    logger.debug("[Enrichment] Completion notification sent");
+                    log.debug("Completion notification sent");
                 } catch (error) {
-                    logger.error(
-                        "[Enrichment] Failed to send completion notification:",
+                    log.error(
+                        "Failed to send completion notification:",
                         error,
                     );
                 }
             } else {
-                logger.debug(
-                    "[Enrichment] Completion notification already sent, skipping",
+                log.debug(
+                    "Completion notification already sent, skipping",
                 );
             }
         }
     } catch (error) {
         cycleHadError = true;
-        logger.error("[Enrichment] Cycle error:", error);
+        log.error("Cycle error:", error);
 
         // Increment system failure counter
         consecutiveSystemFailures++;
@@ -1065,11 +1067,11 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     errorCode: "SYSTEM_ERROR",
                 })
                 .catch((err) =>
-                    logger.error("[Enrichment] Failed to record failure:", err),
+                    log.error("Failed to record failure:", err),
                 );
         } else {
-            logger.error(
-                `[Enrichment] Circuit breaker triggered - ${consecutiveSystemFailures} consecutive system failures. ` +
+            log.error(
+                `Circuit breaker triggered - ${consecutiveSystemFailures} consecutive system failures. ` +
                     `Suppressing further error recording to prevent infinite loop.`,
             );
         }
@@ -1115,7 +1117,7 @@ async function enrichArtistsBatch(): Promise<number> {
 
     if (artists.length === 0) return 0;
 
-    logger.debug(
+    log.debug(
         `[Artists] Processing ${artists.length} artists (concurrency: ${concurrency})...`,
     );
 
@@ -1145,10 +1147,10 @@ async function enrichArtistsBatch(): Promise<number> {
                         60000, // 60 second max per artist
                         `Timeout enriching artist: ${artist.name}`,
                     );
-                    logger.debug(`✓ ${artist.name}`);
+                    log.debug(`✓ ${artist.name}`);
                     return artist.name;
                 } catch (error) {
-                    logger.error(`✗ ${artist.name}:`, error);
+                    log.error(`✗ ${artist.name}:`, error);
 
                     // Collect failure for batch reporting
                     currentBatchFailures.artists.push({
@@ -1187,7 +1189,7 @@ async function enrichArtistsBatch(): Promise<number> {
     const processed = results.filter((r) => r.status === "fulfilled").length;
 
     if (processed > 0) {
-        logger.debug(
+        log.debug(
             `[Artists] Successfully enriched ${processed}/${artists.length} artists`,
         );
     }
@@ -1228,7 +1230,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
 
     if (tracks.length === 0) return 0;
 
-    logger.debug(
+    log.debug(
         `[Track Tags] Processing ${tracks.length} tracks (concurrency: ${concurrency})...`,
     );
 
@@ -1277,7 +1279,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
                         });
 
                         if (moodTags.length > 0) {
-                            logger.debug(
+                            log.debug(
                                 `   ✓ ${track.title}: [${moodTags
                                     .slice(0, 3)
                                     .join(", ")}...]`,
@@ -1294,7 +1296,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
                     await new Promise((resolve) => setTimeout(resolve, 200));
                     return track.title;
                 } catch (error: any) {
-                    logger.error(
+                    log.error(
                         `✗ ${track.title}: ${error?.message || error}`,
                     );
 
@@ -1328,7 +1330,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
     const processed = results.filter((r) => r.status === "fulfilled").length;
 
     if (processed > 0) {
-        logger.debug(
+        log.debug(
             `[Track Tags] Successfully enriched ${processed}/${tracks.length} tracks`,
         );
     }
@@ -1358,7 +1360,7 @@ async function queueAudioAnalysis(): Promise<number> {
 
     if (tracks.length === 0) return 0;
 
-    logger.debug(
+    log.debug(
         `[Audio Analysis] Queueing ${tracks.length} tracks for Essentia...`,
     );
 
@@ -1391,12 +1393,12 @@ async function queueAudioAnalysis(): Promise<number> {
 
             queued++;
         } catch (error) {
-            logger.error(`   Failed to queue ${track.title}:`, error);
+            log.error(`   Failed to queue ${track.title}:`, error);
         }
     }
 
     if (queued > 0) {
-        logger.debug(` Queued ${queued} tracks for audio analysis`);
+        log.debug(` Queued ${queued} tracks for audio analysis`);
     }
 
     return queued;
@@ -1458,7 +1460,7 @@ async function queueVibeEmbeddings(): Promise<number> {
 
             queued++;
         } catch (error) {
-            logger.error(
+            log.error(
                 `   Failed to queue vibe embedding for ${track.id}:`,
                 error,
             );
@@ -1525,8 +1527,8 @@ async function executeAudioPhase(): Promise<number> {
     const cleanupResult =
         await audioAnalysisCleanupService.cleanupStaleProcessing();
     if (cleanupResult.reset > 0 || cleanupResult.permanentlyFailed > 0) {
-        logger.debug(
-            `[Enrichment] Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed, ${cleanupResult.recovered} recovered`,
+        log.debug(
+            `Audio analysis cleanup: ${cleanupResult.reset} reset, ${cleanupResult.permanentlyFailed} permanently failed, ${cleanupResult.recovered} recovered`,
         );
     }
 
@@ -1542,8 +1544,8 @@ async function executeAudioPhase(): Promise<number> {
     }
 
     if (audioAnalysisCleanupService.isCircuitOpen()) {
-        logger.warn(
-            "[Enrichment] Audio analysis circuit breaker OPEN - skipping queue",
+        log.warn(
+            "Audio analysis circuit breaker OPEN - skipping queue",
         );
         return 0;
     }
@@ -1574,8 +1576,8 @@ async function executePodcastRefreshPhase(): Promise<number> {
 
     if (stalePodcasts.length === 0) return 0;
 
-    logger.debug(
-        `[Enrichment] Refreshing ${stalePodcasts.length} podcast feeds...`,
+    log.debug(
+        `Refreshing ${stalePodcasts.length} podcast feeds...`,
     );
 
     const { refreshPodcastFeed } = await import("../routes/podcasts");
@@ -1591,13 +1593,13 @@ async function executePodcastRefreshPhase(): Promise<number> {
                 `Timeout refreshing podcast: ${podcast.title}`,
             );
             if (result.newEpisodesCount > 0) {
-                logger.debug(
+                log.debug(
                     `   [Podcast] ${podcast.title}: ${result.newEpisodesCount} new episodes`,
                 );
             }
             refreshed++;
         } catch (error) {
-            logger.error(
+            log.error(
                 `   [Podcast] Failed to refresh ${podcast.title}:`,
                 error,
             );
@@ -1605,7 +1607,7 @@ async function executePodcastRefreshPhase(): Promise<number> {
     }
 
     if (refreshed > 0) {
-        logger.debug(`[Enrichment] Refreshed ${refreshed} podcast feeds`);
+        log.debug(`Refreshed ${refreshed} podcast feeds`);
     }
 
     return refreshed;
@@ -1631,29 +1633,29 @@ async function executeVibePhase(): Promise<number> {
             () => getRedis().llen("audio:analysis:queue"),
         );
     } catch (error) {
-        logger.warn(
-            "[Enrichment] Unable to read audio analysis queue length; skipping vibe phase this cycle",
+        log.warn(
+            "Unable to read audio analysis queue length; skipping vibe phase this cycle",
             error,
         );
         return 0;
     }
     if (audioProcessing > 0 || audioQueue > 0) {
-        logger.debug(
-            `[Enrichment] Skipping vibe phase - audio still running (${audioProcessing} processing, ${audioQueue} queued)`,
+        log.debug(
+            `Skipping vibe phase - audio still running (${audioProcessing} processing, ${audioQueue} queued)`,
         );
         return 0;
     }
 
     const { reset } = await vibeAnalysisCleanupService.cleanupStaleProcessing();
     if (reset > 0) {
-        logger.debug(
-            `[ENRICHMENT] Cleaned up ${reset} stale vibe processing entries`,
+        log.debug(
+            `Cleaned up ${reset} stale vibe processing entries`,
         );
     }
 
     const result = await queueVibeEmbeddings();
     if (result > 0) {
-        logger.debug(`[ENRICHMENT] Queued ${result} tracks for vibe embedding`);
+        log.debug(`Queued ${result} tracks for vibe embedding`);
     }
 
     return result;
@@ -1737,8 +1739,8 @@ export async function getEnrichmentProgress() {
             () => getRedis().llen("audio:clap:queue"),
         );
     } catch (error) {
-        logger.warn(
-            "[Enrichment] Failed to read CLAP queue length while computing progress; assuming 0 for this sample",
+        log.warn(
+            "Failed to read CLAP queue length while computing progress; assuming 0 for this sample",
             error,
         );
     }
@@ -1843,7 +1845,7 @@ export async function triggerEnrichmentNow(): Promise<{
     tracks: number;
     audioQueued: number;
 }> {
-    logger.debug("[Enrichment] Triggering immediate enrichment cycle...");
+    log.debug("Triggering immediate enrichment cycle...");
 
     // Reset pause state when triggering enrichment
     isPaused = false;
@@ -1859,12 +1861,12 @@ export async function triggerEnrichmentNow(): Promise<{
  * Resets artist statuses and starts sequential enrichment from Phase 1
  */
 export async function reRunArtistsOnly(): Promise<{ count: number }> {
-    logger.debug("[Enrichment] Re-running artist enrichment only...");
+    log.debug("Re-running artist enrichment only...");
 
     const result = await resetArtistsOnly();
 
-    logger.debug(
-        "[Enrichment] Starting sequential enrichment from artists phase...",
+    log.debug(
+        "Starting sequential enrichment from artists phase...",
     );
     isPaused = false;
     immediateEnrichmentRequested = true;
@@ -1883,12 +1885,12 @@ export async function reRunArtistsOnly(): Promise<{ count: number }> {
  * Resets mood tags and starts sequential enrichment from Phase 1
  */
 export async function reRunMoodTagsOnly(): Promise<{ count: number }> {
-    logger.debug("[Enrichment] Re-running mood tags only...");
+    log.debug("Re-running mood tags only...");
 
     const result = await resetMoodTagsOnly();
 
-    logger.debug(
-        "[Enrichment] Starting sequential enrichment from mood tags phase...",
+    log.debug(
+        "Starting sequential enrichment from mood tags phase...",
     );
     isPaused = false;
     immediateEnrichmentRequested = true;
@@ -1906,7 +1908,7 @@ export async function reRunMoodTagsOnly(): Promise<{ count: number }> {
  * Cleans up stale jobs and queues for audio analysis
  */
 export async function reRunAudioAnalysisOnly(): Promise<number> {
-    logger.debug("[Enrichment] Re-running audio analysis only...");
+    log.debug("Re-running audio analysis only...");
 
     await audioAnalysisCleanupService.cleanupStaleProcessing();
 
@@ -1915,13 +1917,13 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
         select: { id: true },
     });
 
-    logger.debug(
-        `[Enrichment] Found ${tracks.length} tracks pending audio analysis`,
+    log.debug(
+        `Found ${tracks.length} tracks pending audio analysis`,
     );
 
     const queued = await queueAudioAnalysis();
 
-    logger.debug(`[Enrichment] Queued ${queued} tracks for audio analysis`);
+    log.debug(`Queued ${queued} tracks for audio analysis`);
 
     return queued;
 }
@@ -1931,11 +1933,11 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
  * Cleans up stale jobs and queues for vibe embeddings
  */
 export async function reRunVibeEmbeddingsOnly(): Promise<number> {
-    logger.debug("[Enrichment] Re-running vibe embeddings only...");
+    log.debug("Re-running vibe embeddings only...");
 
     const features = await featureDetection.getFeatures();
     if (!features.vibeEmbeddings) {
-        logger.debug("[Enrichment] Vibe embeddings not available, skipping");
+        log.debug("Vibe embeddings not available, skipping");
         return 0;
     }
 
@@ -1943,7 +1945,7 @@ export async function reRunVibeEmbeddingsOnly(): Promise<number> {
 
     const queued = await queueVibeEmbeddings();
 
-    logger.debug(`[Enrichment] Queued ${queued} tracks for vibe embeddings`);
+    log.debug(`Queued ${queued} tracks for vibe embeddings`);
 
     return queued;
 }

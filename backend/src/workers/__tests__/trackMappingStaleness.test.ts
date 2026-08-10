@@ -23,7 +23,9 @@ describe("trackMappingStaleness worker", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
         const findMany = jest.fn();
         const markStale = jest.fn();
 
@@ -105,10 +107,10 @@ describe("trackMappingStaleness worker", () => {
         expect(markStale).toHaveBeenCalledTimes(1);
         expect(markStale).toHaveBeenCalledWith("mapping-stale");
         expect(logger.info).toHaveBeenCalledWith(
-            "[TrackMappingStaleness] Marked 1 stale track mappings",
+            "Marked 1 stale track mappings",
         );
         expect(logger.info).toHaveBeenCalledWith(
-            "[TrackMappingStaleness] Worker started (intervalMs=1500)",
+            "Worker started (intervalMs=1500)",
         );
 
         module.stopTrackMappingStalenessWorker();
@@ -209,11 +211,11 @@ describe("trackMappingStaleness worker", () => {
 
         expect(markStale).toHaveBeenCalledTimes(2);
         expect(logger.warn).toHaveBeenCalledWith(
-            "[TrackMappingStaleness] Failed to mark stale mapping mapping-1",
+            "Failed to mark stale mapping mapping-1",
             staleError,
         );
         expect(logger.info).toHaveBeenCalledWith(
-            "[TrackMappingStaleness] Marked 1 stale track mappings",
+            "Marked 1 stale track mappings",
         );
 
         module.stopTrackMappingStalenessWorker();

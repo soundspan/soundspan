@@ -19,7 +19,9 @@ describe("discoverProcessor", () => {
             debug: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const resolvedClaimResult =
             options &&
@@ -198,7 +200,7 @@ describe("discoverProcessor", () => {
         lockClient.quit.mockRejectedValueOnce(new Error("quit-failed"));
         await module.shutdownDiscoverProcessor();
         expect(logger.warn).toHaveBeenCalledWith(
-            "[DiscoverProcessor] Failed to gracefully close lock Redis client; disconnecting forcefully",
+            "Failed to gracefully close lock Redis client; disconnecting forcefully",
             expect.any(Error),
         );
         expect(lockClient.disconnect).toHaveBeenCalled();

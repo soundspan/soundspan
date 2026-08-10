@@ -98,7 +98,9 @@ describe("worker entrypoint behavior", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
         const createDependencyReadinessTracker = jest.fn(
             () => dependencyReadiness,
         );
@@ -172,7 +174,7 @@ describe("worker entrypoint behavior", () => {
                 logger.info.mock.calls.some(
                     ([message]) =>
                         message ===
-                        "[Worker Startup] Worker runtime initialized",
+                        "Worker runtime initialized",
                 )
             ) {
                 return;
@@ -218,7 +220,7 @@ describe("worker entrypoint behavior", () => {
         expect(() => require("../worker")).toThrow("exit-1");
         expect(exitMock).toHaveBeenCalledWith(1);
         expect(logger.error).toHaveBeenCalledWith(
-            '[Worker Startup] BACKEND_PROCESS_ROLE="api" is invalid for worker entrypoint.',
+            'BACKEND_PROCESS_ROLE="api" is invalid for worker entrypoint.',
         );
         expect(createServer).not.toHaveBeenCalled();
     });
@@ -234,7 +236,7 @@ describe("worker entrypoint behavior", () => {
         await Promise.resolve();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            '[Worker Startup] Invalid BACKEND_PROCESS_ROLE="invalid-role", defaulting to "worker"',
+            'Invalid BACKEND_PROCESS_ROLE="invalid-role", defaulting to "worker"',
         );
     });
 
@@ -254,7 +256,7 @@ describe("worker entrypoint behavior", () => {
             expect.any(Function),
         );
         expect(logger.warn).toHaveBeenCalledWith(
-            '[Worker Startup] Invalid WORKER_HEALTH_PORT="bad-port", defaulting to 3010',
+            'Invalid WORKER_HEALTH_PORT="bad-port", defaulting to 3010',
         );
     });
 
@@ -356,7 +358,7 @@ describe("worker entrypoint behavior", () => {
             "Content-Type": "application/json",
         });
         expect(logger.error).toHaveBeenCalledWith(
-            "[Worker Startup] readiness probe failed:",
+            "readiness probe failed:",
             expect.any(Error),
         );
     });
@@ -408,7 +410,7 @@ describe("worker entrypoint behavior", () => {
         errorHandler?.(new Error("health-server-failed"));
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Worker Startup] Health server error:",
+            "Health server error:",
             expect.any(Error),
         );
     });

@@ -2,6 +2,8 @@ import * as fs from "fs";
 import { logger } from "../utils/logger";
 import * as path from "path";
 
+const log = logger.child("Discovery");
+
 /**
  * Discovery Logger - Creates detailed log files for each discovery playlist generation
  */
@@ -22,6 +24,11 @@ class DiscoveryLogger {
      * Start a new log file for a discovery generation
      */
     start(userId: string, jobId?: number): string {
+        if (this.currentStream) {
+            this.currentStream.end();
+            this.currentStream = null;
+        }
+
         // Ensure log directory exists
         if (!fs.existsSync(this.logDir)) {
             fs.mkdirSync(this.logDir, { recursive: true });
@@ -63,7 +70,7 @@ class DiscoveryLogger {
         }
 
         // Also write to console for real-time visibility
-        logger.debug(message);
+        log.debug(message);
     }
 
     /**

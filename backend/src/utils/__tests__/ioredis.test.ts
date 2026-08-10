@@ -3,6 +3,12 @@ export {};
 const mockRedisConstructor = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
+const mockLogger = {
+    debug: (...args: unknown[]) => mockLoggerDebug(...args),
+    error: (...args: unknown[]) => mockLoggerError(...args),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("ioredis", () => ({
     __esModule: true,
@@ -12,10 +18,7 @@ jest.mock("ioredis", () => ({
 }));
 
 jest.mock("../logger", () => ({
-    logger: {
-        debug: (...args: unknown[]) => mockLoggerDebug(...args),
-        error: (...args: unknown[]) => mockLoggerError(...args),
-    },
+    logger: mockLogger,
 }));
 
 jest.mock("../../config", () => ({
@@ -67,10 +70,10 @@ describe("createIORedisClient", () => {
         expect(options.retryStrategy(2)).toBe(500);
         expect(options.retryStrategy(9)).toBe(30000);
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ioredis:sync] Reconnect attempt 1 – retrying in 250ms",
+            "Reconnect attempt 1 – retrying in 250ms",
         );
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ioredis:sync] Reconnect attempt 9 – retrying in 30000ms",
+            "Reconnect attempt 9 – retrying in 30000ms",
         );
     });
 
@@ -91,15 +94,11 @@ describe("createIORedisClient", () => {
         handlers.reconnecting(1500);
         handlers.ready();
 
-        expect(mockLoggerError).toHaveBeenCalledWith(
-            "[ioredis:events] Error: boom",
-        );
+        expect(mockLoggerError).toHaveBeenCalledWith("Error: boom");
+        expect(mockLoggerDebug).toHaveBeenCalledWith("Connection closed");
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ioredis:events] Connection closed",
+            "Reconnecting in 1500ms...",
         );
-        expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ioredis:events] Reconnecting in 1500ms...",
-        );
-        expect(mockLoggerDebug).toHaveBeenCalledWith("[ioredis:events] Ready");
+        expect(mockLoggerDebug).toHaveBeenCalledWith("Ready");
     });
 });

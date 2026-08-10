@@ -2,6 +2,8 @@ import { Job } from "bull";
 import { logger } from "../../utils/logger";
 import { FileValidatorService } from "../../services/fileValidator";
 
+const log = logger.child("ValidationProcessor");
+
 export interface ValidationJobData {
     // Empty for now - could add options later
 }
@@ -19,7 +21,8 @@ export interface ValidationJobResult {
 export async function processValidation(
     job: Job<ValidationJobData>,
 ): Promise<ValidationJobResult> {
-    logger.debug(`[ValidationJob ${job.id}] Starting file validation`);
+    const jobLog = log.child(`Job ${job.id}`);
+    jobLog.debug(`Starting file validation`);
 
     await job.progress(0);
 
@@ -28,8 +31,8 @@ export async function processValidation(
 
     await job.progress(100);
 
-    logger.debug(
-        `[ValidationJob ${job.id}] Validation complete: ${result.tracksRemoved} tracks removed`,
+    jobLog.debug(
+        `Validation complete: ${result.tracksRemoved} tracks removed`,
     );
 
     return result;

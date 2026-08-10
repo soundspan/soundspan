@@ -30,9 +30,21 @@ describe("discoveryLogger", () => {
         const unlinkSync = jest.fn();
         const streamWrite = jest.fn();
         const streamEnd = jest.fn();
-        const createWriteStream = jest.fn().mockReturnValue({
+        const firstStream = {
             write: streamWrite,
             end: streamEnd,
+        };
+        const createdStreams: Array<{
+            write: jest.Mock;
+            end: jest.Mock;
+        }> = [];
+        const createWriteStream = jest.fn().mockImplementation(() => {
+            const stream =
+                createdStreams.length === 0
+                    ? firstStream
+                    : { write: jest.fn(), end: jest.fn() };
+            createdStreams.push(stream);
+            return stream;
         });
 
         const logger = {
@@ -40,7 +52,9 @@ describe("discoveryLogger", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("fs", () => ({
             existsSync,
@@ -69,6 +83,7 @@ describe("discoveryLogger", () => {
             createWriteStream,
             streamWrite,
             streamEnd,
+            createdStreams,
             logger,
         };
     }
@@ -127,6 +142,22 @@ describe("discoveryLogger", () => {
         );
         expect(mkdirSync).not.toHaveBeenCalled();
         expect(createWriteStream).toHaveBeenCalledWith(logPath, { flags: "a" });
+    });
+
+    it("closes the previous stream before opening a new log file", () => {
+        const { mod, existsSync, createWriteStream, createdStreams } =
+            loadDiscoveryLoggerModule();
+        existsSync.mockReturnValue(true);
+
+        mod.discoveryLogger.start("user-1", 1);
+        mod.discoveryLogger.start("user-2", 2);
+
+        expect(createdStreams).toHaveLength(2);
+        expect(createdStreams[0].end).toHaveBeenCalledTimes(1);
+        expect(createdStreams[1].end).not.toHaveBeenCalled();
+        expect(createdStreams[0].end.mock.invocationCallOrder[0]).toBeLessThan(
+            createWriteStream.mock.invocationCallOrder[1],
+        );
     });
 
     it("writes section and convenience helper messages with expected prefixes", () => {

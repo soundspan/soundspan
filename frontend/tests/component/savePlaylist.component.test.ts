@@ -43,7 +43,7 @@ mock.module("@/lib/api", {
 
 mock.module("@/lib/logger", {
     namedExports: {
-        frontendLogger: stubLogger,
+        createFrontendLogger: () => stubLogger,
     },
 });
 

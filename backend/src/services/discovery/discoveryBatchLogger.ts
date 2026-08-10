@@ -7,6 +7,8 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 
+const log = logger.child("DiscoveryBatch");
+
 export interface BatchLogEntry {
     timestamp: string;
     level: "info" | "warn" | "error";
@@ -47,7 +49,7 @@ export class DiscoveryBatchLogger {
                 data: { logs: trimmedLogs as any },
             });
         } catch (error) {
-            logger.error("Failed to add batch log:", error);
+            log.error("Failed to add batch log:", error);
         }
     }
 

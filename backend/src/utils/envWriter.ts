@@ -4,6 +4,8 @@ import fs from "fs";
 import { logger } from "./logger";
 import path from "path";
 
+const log = logger.child("EnvWriter");
+
 const STALE_ENV_SYNC_KEYS = [
     "SOULSEEK_USERNAME",
     "SOULSEEK_PASSWORD",
@@ -82,7 +84,7 @@ function atomicWriteFileSecret(targetPath: string, content: string): void {
             fs.unlinkSync(tempPath);
         } catch (cleanupError) {
             if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
-                logger.debug(
+                log.debug(
                     "Failed to clean up temporary .env file",
                     cleanupError,
                 );
@@ -102,7 +104,7 @@ export async function writeEnvFile(
     const envPath = resolveEnvPath();
     const skipReason = shouldSkipEnvSync(envPath);
     if (skipReason) {
-        logger.debug(`[ENV] Skipping .env sync: ${skipReason}`);
+        log.debug(`Skipping .env sync: ${skipReason}`);
         throw new EnvFileSyncSkippedError(skipReason);
     }
 
@@ -124,7 +126,7 @@ export async function writeEnvFile(
             }
         });
     } catch (error) {
-        logger.debug("No existing .env file, creating new one");
+        log.debug("No existing .env file, creating new one");
     }
 
     // Remove env keys that are no longer consumed at runtime.
@@ -193,5 +195,5 @@ export async function writeEnvFile(
     lines.push(""); // Trailing newline
 
     atomicWriteFileSecret(envPath, lines.join("\n"));
-    logger.debug(`.env file updated with ${existingVars.size} variables`);
+    log.debug(`.env file updated with ${existingVars.size} variables`);
 }

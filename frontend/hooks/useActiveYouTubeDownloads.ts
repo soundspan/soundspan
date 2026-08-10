@@ -12,7 +12,7 @@ import type {
     YouTubeDownloadJobState,
 } from "@/lib/youtube-bulk-download";
 
-const logger = createFrontendLogger("hooks.useActiveYouTubeDownloads");
+const logger = createFrontendLogger("Hooks.useActiveYouTubeDownloads");
 
 /** Non-terminal states — these are the jobs the downloads view surfaces. */
 const ACTIVE_STATES: readonly YouTubeDownloadJobState[] = [

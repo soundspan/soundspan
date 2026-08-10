@@ -27,6 +27,7 @@ export function createIORedisClient(
     label: string,
     overrides: Partial<RedisOptions> = {},
 ): Redis {
+    const log = logger.child("ioredis").child(label);
     const client = new Redis(config.redisUrl, {
         // Exponential backoff: 250ms → 500ms → 1s → 2s → … capped at 30s
         retryStrategy(times: number) {
@@ -34,8 +35,8 @@ export function createIORedisClient(
                 BASE_RETRY_DELAY_MS * Math.pow(2, times - 1),
                 MAX_RETRY_DELAY_MS,
             );
-            logger.debug(
-                `[ioredis:${label}] Reconnect attempt ${times} – retrying in ${delay}ms`,
+            log.debug(
+                `Reconnect attempt ${times} – retrying in ${delay}ms`,
             );
             return delay;
         },
@@ -49,19 +50,19 @@ export function createIORedisClient(
     });
 
     client.on("error", (err) => {
-        logger.error(`[ioredis:${label}] Error: ${err.message}`);
+        log.error(`Error: ${err.message}`);
     });
 
     client.on("close", () => {
-        logger.debug(`[ioredis:${label}] Connection closed`);
+        log.debug("Connection closed");
     });
 
     client.on("reconnecting", (ms: number) => {
-        logger.debug(`[ioredis:${label}] Reconnecting in ${ms}ms...`);
+        log.debug(`Reconnecting in ${ms}ms...`);
     });
 
     client.on("ready", () => {
-        logger.debug(`[ioredis:${label}] Ready`);
+        log.debug("Ready");
     });
 
     return client;

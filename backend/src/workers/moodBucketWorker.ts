@@ -17,6 +17,8 @@ import { prisma } from "../utils/db";
 import { moodBucketService } from "../services/moodBucketService";
 import { createIORedisClient } from "../utils/ioredis";
 
+const log = logger.child("MoodBucket");
+
 // Configuration
 const BATCH_SIZE = 50;
 const WORKER_INTERVAL_MS = 30 * 1000; // Run every 30 seconds
@@ -79,8 +81,8 @@ async function withMoodBucketClaimRedisRetry<T>(
             throw error;
         }
 
-        logger.warn(
-            `[Mood Bucket] ${operationName} failed due to Redis connection closure; recreating client and retrying once`,
+        log.warn(
+            `${operationName} failed due to Redis connection closure; recreating client and retrying once`,
             error,
         );
         recreateMoodBucketClaimRedisClient();
@@ -108,14 +110,14 @@ async function processNewlyAnalyzedTracksClaimed(
         );
 
         if (acquired !== "OK") {
-            logger.debug(
-                `[Mood Bucket] Skipping ${operationName}; cycle claim is held by another worker`,
+            log.debug(
+                `Skipping ${operationName}; cycle claim is held by another worker`,
             );
             return 0;
         }
     } catch (error) {
-        logger.error(
-            `[Mood Bucket] Failed to claim ${operationName}; skipping cycle`,
+        log.error(
+            `Failed to claim ${operationName}; skipping cycle`,
             error,
         );
         return 0;
@@ -136,8 +138,8 @@ async function processNewlyAnalyzedTracksClaimed(
                     ),
             );
         } catch (error) {
-            logger.warn(
-                `[Mood Bucket] Failed to release cycle claim for ${operationName}`,
+            log.warn(
+                `Failed to release cycle claim for ${operationName}`,
                 error,
             );
         }
@@ -148,10 +150,10 @@ async function processNewlyAnalyzedTracksClaimed(
  * Start the mood bucket worker
  */
 export async function startMoodBucketWorker() {
-    logger.debug("\n=== Starting Mood Bucket Worker ===");
-    logger.debug(`   Batch size: ${BATCH_SIZE}`);
-    logger.debug(`   Interval: ${WORKER_INTERVAL_MS / 1000}s`);
-    logger.debug("");
+    log.debug("\n=== Starting Mood Bucket Worker ===");
+    log.debug(`   Batch size: ${BATCH_SIZE}`);
+    log.debug(`   Interval: ${WORKER_INTERVAL_MS / 1000}s`);
+    log.debug("");
 
     // Run immediately
     await processNewlyAnalyzedTracksClaimed("startup mood-bucket cycle");
@@ -169,7 +171,7 @@ export function stopMoodBucketWorker() {
     if (workerInterval) {
         clearInterval(workerInterval);
         workerInterval = null;
-        logger.debug("[Mood Bucket] Worker stopped");
+        log.debug("Worker stopped");
     }
     if (moodBucketClaimRedis) {
         moodBucketClaimRedis.disconnect();
@@ -210,8 +212,8 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
             return 0;
         }
 
-        logger.debug(
-            `[Mood Bucket] Processing ${tracksNeedingBuckets.length} tracks needing mood bucket reconciliation...`,
+        log.debug(
+            `Processing ${tracksNeedingBuckets.length} tracks needing mood bucket reconciliation...`,
         );
 
         let assigned = 0;
@@ -222,20 +224,20 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
                 );
                 if (moods.length > 0) {
                     assigned++;
-                    logger.debug(` ${track.title}: [${moods.join(", ")}]`);
+                    log.debug(` ${track.title}: [${moods.join(", ")}]`);
                 }
             } catch (error: any) {
-                logger.error(`   ✗ ${track.title}: ${error?.message || error}`);
+                log.error(`   ✗ ${track.title}: ${error?.message || error}`);
             }
         }
 
-        logger.debug(
-            `[Mood Bucket] Assigned ${assigned}/${tracksNeedingBuckets.length} tracks to mood buckets`,
+        log.debug(
+            `Assigned ${assigned}/${tracksNeedingBuckets.length} tracks to mood buckets`,
         );
 
         return assigned;
     } catch (error) {
-        logger.error("[Mood Bucket] Worker error:", error);
+        log.error("Worker error:", error);
         return 0;
     } finally {
         isRunning = false;

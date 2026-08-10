@@ -150,7 +150,9 @@ describe("unified enrichment runtime behavior", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
         const moodBucketService = {
             backfillAllTracks: jest.fn(async () => ({
                 processed: 0,
@@ -1173,7 +1175,7 @@ describe("unified enrichment runtime behavior", () => {
         expect(claimRedisPrimary.disconnect).not.toHaveBeenCalled();
         expect(logger.error).toHaveBeenCalledWith(
             expect.stringContaining(
-                "[Enrichment] Failed to claim immediate enrichment cycle; skipping cycle",
+                "Failed to claim immediate enrichment cycle; skipping cycle",
             ),
             expect.any(Error),
         );
@@ -1197,10 +1199,10 @@ describe("unified enrichment runtime behavior", () => {
         messageHandler("enrichment:control", "resume");
         messageHandler("enrichment:control", "stop");
 
-        expect(logger.debug).toHaveBeenCalledWith("[Enrichment] Paused");
-        expect(logger.debug).toHaveBeenCalledWith("[Enrichment] Resumed");
+        expect(logger.debug).toHaveBeenCalledWith("Paused");
+        expect(logger.debug).toHaveBeenCalledWith("Resumed");
         expect(logger.debug).toHaveBeenCalledWith(
-            "[Enrichment] Stopping gracefully - completing current item...",
+            "Stopping gracefully - completing current item...",
         );
 
         await enrichment.stopUnifiedEnrichmentWorker();
@@ -1377,7 +1379,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Failed to send completion notification:",
+            "Failed to send completion notification:",
             expect.any(Error),
         );
     });
@@ -1409,7 +1411,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Failed to read completion progress snapshot; skipping completion-specific post-processing for this cycle:",
+            "Failed to read completion progress snapshot; skipping completion-specific post-processing for this cycle:",
             expect.any(Error),
         );
     });
@@ -1472,7 +1474,7 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(notificationService.notifySystem).not.toHaveBeenCalled();
         expect(logger.debug).toHaveBeenCalledWith(
-            "[Enrichment] Completion notification already sent, skipping",
+            "Completion notification already sent, skipping",
         );
     });
 
@@ -1507,7 +1509,7 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(enrichmentFailureService.recordFailure).toHaveBeenCalledTimes(5);
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Cycle error:",
+            "Cycle error:",
             expect.any(Error),
         );
     });
@@ -1591,7 +1593,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Failed to read/update enrichment progress after processing batch; continuing cycle:",
+            "Failed to read/update enrichment progress after processing batch; continuing cycle:",
             expect.any(Error),
         );
     });
@@ -1650,7 +1652,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Failed to clear mix cache on core complete:",
+            "Failed to clear mix cache on core complete:",
             expect.any(Error),
         );
     });
@@ -1689,7 +1691,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.triggerEnrichmentNow();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Failed to release cycle claim for immediate enrichment cycle",
+            "Failed to release cycle claim for immediate enrichment cycle",
             expect.any(Error),
         );
     });
@@ -1724,7 +1726,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Failed to record failure:",
+            "Failed to record failure:",
             expect.any(Error),
         );
     });
@@ -1787,7 +1789,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Unable to read audio analysis queue length; skipping vibe phase this cycle",
+            "Unable to read audio analysis queue length; skipping vibe phase this cycle",
             expect.any(Error),
         );
     });
@@ -1852,7 +1854,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Automatic mood bucket backfill failed (will retry on next fully-complete cycle):",
+            "Automatic mood bucket backfill failed (will retry on next fully-complete cycle):",
             expect.any(Error),
         );
         expect(enrichmentStateService.updateState).toHaveBeenCalledWith({
@@ -1917,7 +1919,7 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(queueRedisPrimary.keys).toHaveBeenCalledWith("mixes:*");
         expect(logger.error).toHaveBeenCalledWith(
-            "[Enrichment] Failed to clear mix cache on full complete:",
+            "Failed to clear mix cache on full complete:",
             expect.any(Error),
         );
     });
@@ -1998,13 +2000,13 @@ describe("unified enrichment runtime behavior", () => {
         const result = await enrichment.runFullEnrichment();
 
         expect(logger.debug).toHaveBeenCalledWith(
-            "[Enrichment] Audio analysis cleanup: 1 reset, 1 permanently failed, 0 recovered",
+            "Audio analysis cleanup: 1 reset, 1 permanently failed, 0 recovered",
         );
         expect(audioAnalysisCleanupService.recordSuccess).toHaveBeenCalledTimes(
             1,
         );
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Audio analysis circuit breaker OPEN - skipping queue",
+            "Audio analysis circuit breaker OPEN - skipping queue",
         );
         expect(result.audioQueued).toBe(0);
     });
@@ -2169,10 +2171,10 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ENRICHMENT] Cleaned up 2 stale vibe processing entries",
+            "Cleaned up 2 stale vibe processing entries",
         );
         expect(logger.debug).toHaveBeenCalledWith(
-            "[ENRICHMENT] Queued 1 tracks for vibe embedding",
+            "Queued 1 tracks for vibe embedding",
         );
     });
 
@@ -2214,7 +2216,7 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Failed to read starting progress, defaulting to notification-safe mode:",
+            "Failed to read starting progress, defaulting to notification-safe mode:",
             expect.any(Error),
         );
     });
@@ -2278,7 +2280,7 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(enrichmentFailureService.recordFailure).toHaveBeenCalledTimes(5);
         expect(logger.error).toHaveBeenCalledWith(
-            expect.stringContaining("[Enrichment] Circuit breaker triggered -"),
+            expect.stringContaining("Circuit breaker triggered -"),
         );
     });
 
@@ -2310,7 +2312,7 @@ describe("unified enrichment runtime behavior", () => {
         await waitPromise;
 
         expect(logger.warn).toHaveBeenCalledWith(
-            "[Enrichment] Stop wait exceeded 1ms while a cycle was still running; proceeding with teardown",
+            "Stop wait exceeded 1ms while a cycle was still running; proceeding with teardown",
         );
         enrichment.__unifiedEnrichmentTestables.__setRuntimeStateForTests({
             isRunning: false,
@@ -2649,10 +2651,10 @@ describe("unified enrichment runtime behavior", () => {
         messageHandler("other:channel", "pause");
         messageHandler("enrichment:control", "unknown-command");
 
-        expect(logger.debug).not.toHaveBeenCalledWith("[Enrichment] Paused");
-        expect(logger.debug).not.toHaveBeenCalledWith("[Enrichment] Resumed");
+        expect(logger.debug).not.toHaveBeenCalledWith("Paused");
+        expect(logger.debug).not.toHaveBeenCalledWith("Resumed");
         expect(logger.debug).not.toHaveBeenCalledWith(
-            "[Enrichment] Stopping gracefully - completing current item...",
+            "Stopping gracefully - completing current item...",
         );
 
         await enrichment.stopUnifiedEnrichmentWorker();
@@ -3252,7 +3254,7 @@ describe("unified enrichment runtime behavior", () => {
         expect(claimRedisPrimary.disconnect).not.toHaveBeenCalled();
         expect(logger.error).toHaveBeenCalledWith(
             expect.stringContaining(
-                "[Enrichment] Failed to claim immediate enrichment cycle; skipping cycle",
+                "Failed to claim immediate enrichment cycle; skipping cycle",
             ),
             undefined,
         );

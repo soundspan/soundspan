@@ -16,9 +16,9 @@
  */
 
 import { api } from "@/lib/api";
-import { frontendLogger } from "@/lib/logger";
+import { createFrontendLogger } from "@/lib/logger";
 
-const logger = frontendLogger.child("vibe:savePlaylist");
+const logger = createFrontendLogger("Vibe.savePlaylist");
 
 export interface SaveTracksAsPlaylistResult {
     id: string;

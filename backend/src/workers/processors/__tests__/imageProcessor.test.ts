@@ -1,12 +1,15 @@
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
 
-jest.mock("../../../utils/logger", () => ({
-    logger: {
+jest.mock("../../../utils/logger", () => {
+    const logger = {
         debug: (...args: unknown[]) => mockLoggerDebug(...args),
         error: (...args: unknown[]) => mockLoggerError(...args),
-    },
-}));
+        child: jest.fn(),
+    };
+    logger.child.mockReturnValue(logger);
+    return { logger };
+});
 
 import { processImageOptimization } from "../imageProcessor";
 
@@ -33,10 +36,10 @@ describe("imageProcessor", () => {
         expect(job.progress).toHaveBeenNthCalledWith(2, 50);
         expect(job.progress).toHaveBeenNthCalledWith(3, 100);
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ImageJob image-1] Processing thumbnail for cover cover-1",
+            "Processing thumbnail for cover cover-1",
         );
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ImageJob image-1] Image optimization complete",
+            "Image optimization complete",
         );
         expect(result).toEqual({ success: true, paths: [] });
     });
@@ -58,7 +61,7 @@ describe("imageProcessor", () => {
         const result = await processImageOptimization(job);
 
         expect(mockLoggerError).toHaveBeenCalledWith(
-            "[ImageJob image-2] Optimization failed:",
+            "Optimization failed:",
             expect.any(Error),
         );
         expect(result).toEqual({

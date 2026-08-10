@@ -4,11 +4,14 @@ const mockFileValidatorService = jest.fn(() => ({
     validateLibrary: mockValidateLibrary,
 }));
 
-jest.mock("../../../utils/logger", () => ({
-    logger: {
+jest.mock("../../../utils/logger", () => {
+    const logger = {
         debug: (...args: unknown[]) => mockLoggerDebug(...args),
-    },
-}));
+        child: jest.fn(),
+    };
+    logger.child.mockReturnValue(logger);
+    return { logger };
+});
 
 jest.mock("../../../services/fileValidator", () => ({
     FileValidatorService: mockFileValidatorService,
@@ -44,10 +47,10 @@ describe("validationProcessor", () => {
         expect(job.progress).toHaveBeenNthCalledWith(1, 0);
         expect(job.progress).toHaveBeenNthCalledWith(2, 100);
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ValidationJob validation-1] Starting file validation",
+            "Starting file validation",
         );
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[ValidationJob validation-1] Validation complete: 4 tracks removed",
+            "Validation complete: 4 tracks removed",
         );
         expect(actual).toEqual(result);
     });

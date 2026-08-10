@@ -5,6 +5,8 @@ import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 
+const log = logger.child("WorkerStartup");
+
 type WorkerProcessRole = "worker" | "all";
 
 function resolveWorkerProcessRole(): WorkerProcessRole {
@@ -17,14 +19,14 @@ function resolveWorkerProcessRole(): WorkerProcessRole {
     }
 
     if (raw === "api") {
-        logger.error(
-            '[Worker Startup] BACKEND_PROCESS_ROLE="api" is invalid for worker entrypoint.',
+        log.error(
+            'BACKEND_PROCESS_ROLE="api" is invalid for worker entrypoint.',
         );
         process.exit(1);
     }
 
-    logger.warn(
-        `[Worker Startup] Invalid BACKEND_PROCESS_ROLE="${process.env.BACKEND_PROCESS_ROLE}", defaulting to "worker"`,
+    log.warn(
+        `Invalid BACKEND_PROCESS_ROLE="${process.env.BACKEND_PROCESS_ROLE}", defaulting to "worker"`,
     );
     return "worker";
 }
@@ -48,8 +50,8 @@ const workerHealthPort =
         : DEFAULT_WORKER_HEALTH_PORT;
 
 if (workerHealthPort !== parsedWorkerHealthPort) {
-    logger.warn(
-        `[Worker Startup] Invalid WORKER_HEALTH_PORT="${process.env.WORKER_HEALTH_PORT}", defaulting to ${DEFAULT_WORKER_HEALTH_PORT}`,
+    log.warn(
+        `Invalid WORKER_HEALTH_PORT="${process.env.WORKER_HEALTH_PORT}", defaulting to ${DEFAULT_WORKER_HEALTH_PORT}`,
     );
 }
 
@@ -92,7 +94,7 @@ function startHealthServer() {
                 }
                 sendHealth(res, 200);
             } catch (error) {
-                logger.error("[Worker Startup] readiness probe failed:", error);
+                log.error("readiness probe failed:", error);
                 sendHealth(res, 503);
             }
         };
@@ -113,12 +115,12 @@ function startHealthServer() {
     });
 
     healthServer.on("error", (error) => {
-        logger.error("[Worker Startup] Health server error:", error);
+        log.error("Health server error:", error);
     });
 
     healthServer.listen(workerHealthPort, "0.0.0.0", () => {
-        logger.debug(
-            `[Worker Startup] Health server listening on port ${workerHealthPort}`,
+        log.debug(
+            `Health server listening on port ${workerHealthPort}`,
         );
     });
 }
@@ -138,18 +140,18 @@ async function stopHealthServer() {
 async function checkPostgresConnection() {
     try {
         await prisma.$queryRaw`SELECT 1`;
-        logger.debug("✓ PostgreSQL connection verified");
+        log.debug("✓ PostgreSQL connection verified");
     } catch (error) {
-        logger.error("✗ PostgreSQL connection failed:", {
+        log.error("✗ PostgreSQL connection failed:", {
             error: error instanceof Error ? error.message : String(error),
             databaseUrl: config.databaseUrl?.replace(/:[^:@]+@/, ":***@"),
         });
-        logger.error("Unable to connect to PostgreSQL. Please ensure:");
-        logger.error(
+        log.error("Unable to connect to PostgreSQL. Please ensure:");
+        log.error(
             "  1. PostgreSQL is running on the correct port (default: 5433)",
         );
-        logger.error("  2. DATABASE_URL in .env is correct");
-        logger.error("  3. Database credentials are valid");
+        log.error("  2. DATABASE_URL in .env is correct");
+        log.error("  3. Database credentials are valid");
         process.exit(1);
     }
 }
@@ -168,7 +170,7 @@ async function checkRedisConnection() {
             }
 
             await redisClient.ping();
-            logger.debug("✓ Redis connection verified");
+            log.debug("✓ Redis connection verified");
             return;
         } catch (error) {
             const errorMsg =
@@ -179,20 +181,20 @@ async function checkRedisConnection() {
                     BASE_DELAY_MS * Math.pow(2, attempt - 1),
                     MAX_DELAY_MS,
                 );
-                logger.warn(
+                log.warn(
                     `Redis connection attempt ${attempt}/${MAX_RETRIES} failed: ${errorMsg} – retrying in ${delay}ms`,
                 );
                 await new Promise((resolve) => setTimeout(resolve, delay));
             } else {
-                logger.error("✗ Redis connection failed after all retries:", {
+                log.error("✗ Redis connection failed after all retries:", {
                     error: errorMsg,
                     redisUrl: config.redisUrl?.replace(/:[^:@]+@/, ":***@"),
                 });
-                logger.error("Unable to connect to Redis. Please ensure:");
-                logger.error(
+                log.error("Unable to connect to Redis. Please ensure:");
+                log.error(
                     "  1. Redis is running on the correct port (default: 6379)",
                 );
-                logger.error("  2. REDIS_URL in .env is correct");
+                log.error("  2. REDIS_URL in .env is correct");
                 process.exit(1);
             }
         }
@@ -204,8 +206,8 @@ async function startWorkerRuntime() {
     await checkRedisConnection();
     await dependencyReadiness.probe(true);
 
-    logger.info(
-        `[Worker Startup] BACKEND_PROCESS_ROLE=${workerProcessRole} (api=false, worker=true)`,
+    log.info(
+        `BACKEND_PROCESS_ROLE=${workerProcessRole} (api=false, worker=true)`,
     );
 
     const { initializeMusicConfig } = await import("./config");
@@ -221,26 +223,26 @@ async function startWorkerRuntime() {
     const { config } = await import("./config");
     startWorkerEventLoopMonitor(config.workerEventLoop);
 
-    logger.debug(
+    log.debug(
         "Background enrichment enabled for owned content (genres, MBIDs, etc.)",
     );
-    logger.debug(
+    log.debug(
         "Startup maintenance jobs are queue-claimed (cache warmup, podcast cleanup, audiobook sync, download reconciliation, backfills)",
     );
 
-    logger.info("[Worker Startup] Worker runtime initialized");
+    log.info("Worker runtime initialized");
     isStartupComplete = true;
 }
 
 async function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
-        logger.debug("Shutdown already in progress...");
+        log.debug("Shutdown already in progress...");
         return;
     }
 
     isShuttingDown = true;
     isDraining = true;
-    logger.debug(`\nReceived ${signal}. Starting graceful worker shutdown...`);
+    log.debug(`\nReceived ${signal}. Starting graceful worker shutdown...`);
 
     try {
         if (workersInitialized) {
@@ -249,17 +251,17 @@ async function gracefulShutdown(signal: string) {
         }
 
         // node-redis v5+ replaced quit() with close()
-        logger.debug("Closing Redis connection...");
+        log.debug("Closing Redis connection...");
         await redisClient.close();
 
-        logger.debug("Closing database connection...");
+        log.debug("Closing database connection...");
         await prisma.$disconnect();
 
         await stopHealthServer();
-        logger.debug("Graceful worker shutdown complete");
+        log.debug("Graceful worker shutdown complete");
         process.exit(0);
     } catch (error) {
-        logger.error("Error during worker shutdown:", error);
+        log.error("Error during worker shutdown:", error);
         process.exit(1);
     }
 }
@@ -268,14 +270,14 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 process.on("unhandledRejection", (reason) => {
-    logger.error("Unhandled Promise Rejection:", {
+    log.error("Unhandled Promise Rejection:", {
         reason: reason instanceof Error ? reason.message : String(reason),
         stack: reason instanceof Error ? reason.stack : undefined,
     });
 });
 
 process.on("uncaughtException", (error) => {
-    logger.error("Uncaught Exception - initiating graceful worker shutdown:", {
+    log.error("Uncaught Exception - initiating graceful worker shutdown:", {
         message: error.message,
         stack: error.stack,
     });
@@ -289,7 +291,7 @@ setInterval(async () => {
     try {
         const dependencySnapshot = await dependencyReadiness.probe(true);
         if (!dependencySnapshot.overallHealthy) {
-            logger.error("Worker readiness dependency check failed:", {
+            log.error("Worker readiness dependency check failed:", {
                 postgres: dependencySnapshot.postgres,
                 redis: dependencySnapshot.redis,
             });
@@ -298,10 +300,10 @@ setInterval(async () => {
                 try {
                     await prisma.$disconnect();
                     await prisma.$connect();
-                    logger.debug("Worker database connection recovered");
+                    log.debug("Worker database connection recovered");
                     await dependencyReadiness.probe(true);
                 } catch (reconnectError) {
-                    logger.error(
+                    log.error(
                         "Worker failed to recover database connection:",
                         reconnectError,
                     );
@@ -309,7 +311,7 @@ setInterval(async () => {
             }
         }
     } catch (error) {
-        logger.error("Worker health check failed - connections may be stale:", {
+        log.error("Worker health check failed - connections may be stale:", {
             error: error instanceof Error ? error.message : String(error),
         });
     }
@@ -319,7 +321,7 @@ startHealthServer();
 
 startWorkerRuntime().catch(async (error) => {
     isDraining = true;
-    logger.error("[Worker Startup] Fatal startup error:", error);
+    log.error("Fatal startup error:", error);
     await stopHealthServer();
     process.exit(1);
 });

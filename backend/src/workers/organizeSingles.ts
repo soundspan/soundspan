@@ -13,6 +13,8 @@ import fs from "fs";
 import { sessionLog } from "../utils/playlistLogger";
 import { prisma } from "../utils/db";
 
+const log = logger.child("OrganizeSingles");
+
 /**
  * Migrate existing files from Soulseek/ directory to Singles/Artist/Album/ structure
  * This is a one-time migration that runs on first organize after update
@@ -33,7 +35,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            logger.debug(
+            log.debug(
                 "Failed to write migration marker (no soulseek dir)",
                 e,
             );
@@ -73,7 +75,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                 }
             }
         } catch (e) {
-            logger.warn(`Failed to read directory ${dir}`, e);
+            log.warn(`Failed to read directory ${dir}`, e);
         }
         return files;
     }
@@ -85,7 +87,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            logger.debug(
+            log.debug(
                 "Failed to write migration marker (no audio files)",
                 e,
             );
@@ -193,14 +195,14 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             sessionLog("ORGANIZE", "Removed empty Soulseek folder");
         }
     } catch (e) {
-        logger.warn("Failed to clean up empty Soulseek directories", e);
+        log.warn("Failed to clean up empty Soulseek directories", e);
     }
 
     // Mark migration as complete
     try {
         fs.writeFileSync(migrationMarker, new Date().toISOString());
     } catch (e) {
-        logger.warn("Failed to write migration complete marker", e);
+        log.warn("Failed to write migration complete marker", e);
     }
 
     sessionLog(
@@ -276,7 +278,7 @@ export async function organizeSingles(): Promise<void> {
                 musicPath = match[1].trim().replace(/^["']|["']$/g, "");
             }
         } catch (error) {
-            logger.debug("Could not read .env file for MUSIC_PATH", error);
+            log.debug("Could not read .env file for MUSIC_PATH", error);
         }
     }
 
@@ -302,12 +304,12 @@ export async function organizeSingles(): Promise<void> {
  * With direct slsk-client, this is a simple one-shot task
  */
 export async function queueOrganizeSingles(): Promise<void> {
-    logger.debug("[ORGANIZE] Running organization task...");
+    log.debug("Running organization task...");
 
     try {
         await organizeSingles();
-        logger.debug("[ORGANIZE] Organization complete");
+        log.debug("Organization complete");
     } catch (err: any) {
-        logger.error("[ORGANIZE] Organization failed:", err.message);
+        log.error("Organization failed:", err.message);
     }
 }

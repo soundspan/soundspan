@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/user/auth/clear` serializes with the per-user refresh lock and a refresh
   aborts its re-insert if the session was cleared during its awaited calls, so
   `/user/auth/status` can no longer report authenticated after an explicit logout.
+- The discovery generation logger now closes any previously open log stream
+  when a new generation starts, fixing a latent file-descriptor leak.
 - Subsonic getPlaylists (and the root directory/starred count paths) no longer
   hydrate every playlist item/track/album row (or album-id/track-duration rows)
   just to compute songCount/duration/coverArt — they now use bounded Prisma
@@ -606,6 +608,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browse, discover, and releases routes now share one bounded-integer query
   parser; `limit` and day-range query params are clamped to safe maximums
   (limit <= 100, day ranges <= 365) instead of accepting unbounded values.
+- Worker, background-processor, file-logger, middleware, and remaining frontend
+  logging now uses the shared scoped `logger.child` helpers instead of ad-hoc
+  `[bracket-tag]` message prefixes, so log scope is a structured field across
+  tiers.
 - Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
   Quality, Enforcement Gates, and Backend/Frontend Typecheck jobs) and added a
   `verify:ci` npm script that reproduces all gates locally, including the Python

@@ -65,7 +65,9 @@ describe("dependency readiness tracker behavior", () => {
             warn: jest.fn(),
             error: jest.fn(),
             debug: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("../db", () => ({
             prisma: {

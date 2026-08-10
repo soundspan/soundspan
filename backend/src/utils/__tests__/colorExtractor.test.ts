@@ -3,6 +3,11 @@ const mockResize = jest.fn();
 const mockRaw = jest.fn();
 const mockToBuffer = jest.fn();
 const mockLoggerError = jest.fn();
+const mockLogger = {
+    error: (...args: unknown[]) => mockLoggerError(...args),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("sharp", () => ({
     __esModule: true,
@@ -10,9 +15,7 @@ jest.mock("sharp", () => ({
 }));
 
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        error: (...args: unknown[]) => mockLoggerError(...args),
-    },
+    logger: mockLogger,
 }));
 
 import { extractColorsFromImage } from "../colorExtractor";
@@ -150,7 +153,7 @@ describe("colorExtractor", () => {
         const result = await extractColorsFromImage(Buffer.from([1, 2, 3]));
 
         expect(mockLoggerError).toHaveBeenCalledWith(
-            "[ColorExtractor] Failed to extract colors:",
+            "Failed to extract colors:",
             expect.any(Error),
         );
         expect(result).toEqual({

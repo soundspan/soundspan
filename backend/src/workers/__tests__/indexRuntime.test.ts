@@ -40,7 +40,9 @@ describe("workers runtime behavior", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const startUnifiedEnrichmentWorker = jest.fn(async () => undefined);
         const stopUnifiedEnrichmentWorker = jest.fn(async () => undefined);
@@ -513,7 +515,7 @@ describe("workers runtime behavior", () => {
         });
 
         expect(mocks.logger.warn).not.toHaveBeenCalledWith(
-            expect.stringContaining("[SchedulerClaim/SLO]"),
+            expect.stringContaining("data integrity check skipped"),
         );
     });
 
@@ -724,7 +726,7 @@ describe("workers runtime behavior", () => {
         });
 
         expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "[STARTUP] Audiobookshelf is disabled or unconfigured - skipping auto-sync",
+            "Audiobookshelf is disabled or unconfigured - skipping auto-sync",
         );
         expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
     });
@@ -756,7 +758,7 @@ describe("workers runtime behavior", () => {
         });
 
         expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "[STARTUP] Audiobook cache has 3 entries - skipping auto-sync",
+            "Audiobook cache has 3 entries - skipping auto-sync",
         );
         expect(mocks.audiobookCacheService.syncAll).not.toHaveBeenCalled();
     });
@@ -792,10 +794,10 @@ describe("workers runtime behavior", () => {
         });
 
         expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "[STARTUP] Artist counts already populated",
+            "Artist counts already populated",
         );
         expect(mocks.logger.debug).toHaveBeenCalledWith(
-            "[STARTUP] All images already stored locally",
+            "All images already stored locally",
         );
         expect(mocks.backfillAllArtistCounts).not.toHaveBeenCalled();
         expect(mocks.backfillAllImages).not.toHaveBeenCalled();
@@ -883,9 +885,7 @@ describe("workers runtime behavior", () => {
         expect(mocks.runDataIntegrityCheck).not.toHaveBeenCalled();
         expect(mocks.schedulerLockRedis.disconnect).toHaveBeenCalled();
         expect(mocks.logger.error).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "[SchedulerClaim] Failed to claim data integrity check",
-            ),
+            expect.stringContaining("Failed to claim data integrity check"),
             expect.any(Error),
         );
     });
@@ -922,7 +922,7 @@ describe("workers runtime behavior", () => {
         expect(mocks.runDataIntegrityCheck).toHaveBeenCalled();
         expect(mocks.logger.warn).toHaveBeenCalledWith(
             expect.stringContaining(
-                "[SchedulerClaim] Failed to release claim for data integrity check",
+                "Failed to release claim for data integrity check",
             ),
             expect.any(Error),
         );
@@ -980,9 +980,7 @@ describe("workers runtime behavior", () => {
 
         expect(mocks.runDataIntegrityCheck).toHaveBeenCalledTimes(4);
         expect(mocks.logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "[SchedulerClaim] claim acquire for data integrity check",
-            ),
+            expect.stringContaining("claim acquire for data integrity check"),
             expect.anything(),
         );
     });
@@ -1057,6 +1055,11 @@ describe("workers runtime behavior", () => {
         expect(mocks.logger.error).toHaveBeenCalledWith(
             expect.stringContaining("Scheduler job job-1 failed"),
             "sched-failed",
+        );
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            expect.stringMatching(
+                /workerId=.* event=failed queue=worker-scheduler count=\d+/,
+            ),
         );
     });
 
@@ -1371,7 +1374,7 @@ describe("workers runtime behavior", () => {
         setTimeoutSpy.mockRestore();
 
         expect(mocks.logger.debug).not.toHaveBeenCalledWith(
-            expect.stringContaining("[STARTUP] Audiobook auto-sync complete:"),
+            expect.stringContaining("Audiobook auto-sync complete:"),
         );
         expect(mocks.logger.debug).not.toHaveBeenCalledWith(
             expect.stringContaining("Download queue reconciled:"),
@@ -1380,7 +1383,7 @@ describe("workers runtime behavior", () => {
             expect.stringContaining("Artist counts backfill complete:"),
         );
         expect(mocks.logger.info).not.toHaveBeenCalledWith(
-            "[STARTUP] Image backfill complete",
+            "Image backfill complete",
         );
     });
 
@@ -1411,12 +1414,20 @@ describe("workers runtime behavior", () => {
         }
 
         expect(mocks.logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "[SchedulerClaim/SLO] data integrity check skipped",
-            ),
+            expect.stringContaining("data integrity check skipped"),
         );
-        expect(mocks.logger.info).toHaveBeenCalledWith(
-            expect.stringContaining("[SchedulerClaim/Observability]"),
+        const claimObservabilityMessage = mocks.logger.info.mock.calls
+            .map(([message]) => message)
+            .find(
+                (message) =>
+                    typeof message === "string" &&
+                    message.includes("acquired="),
+            );
+        expect(claimObservabilityMessage).toEqual(
+            expect.stringContaining("workerId="),
+        );
+        expect(claimObservabilityMessage).toEqual(
+            expect.stringContaining("acquired="),
         );
     });
 

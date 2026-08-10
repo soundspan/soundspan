@@ -3,6 +3,8 @@ import { logger } from "../utils/logger";
 import { AppError, ErrorCategory } from "../utils/errors";
 import { config } from "../config";
 
+const log = logger.child("ErrorHandler");
+
 /** Maps application/runtime errors to consistent HTTP responses and logging. */
 export function errorHandler(
     err: Error,
@@ -33,7 +35,7 @@ export function errorHandler(
             }
         }
 
-        logger.error(`[AppError] ${err.code}: ${err.message}`, err.details);
+        log.error(`AppError ${err.code}: ${err.message}`, err.details);
 
         return res.status(statusCode).json({
             error: err.message,
@@ -46,7 +48,7 @@ export function errorHandler(
     // Log stack trace for unhandled errors. Include req.method + req.path so
     // the log line still identifies the failing route once callers migrate
     // to asyncHandler and lose their per-site try/catch log context (F1).
-    logger.error("Unhandled error:", `${req.method} ${req.path}`, err.stack);
+    log.error("Unhandled error:", `${req.method} ${req.path}`, err.stack);
 
     // In production, hide stack traces and internal details
     if (config.nodeEnv === "production") {

@@ -2,6 +2,8 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { trackMappingService } from "../services/trackMappingService";
 
+const log = logger.child("TrackMappingStaleness");
+
 const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_SAMPLE_SIZE = 100;
 
@@ -54,20 +56,20 @@ async function runTrackMappingStalenessCheck(): Promise<void> {
                 await trackMappingService.markStale(mapping.id);
                 markedStale += 1;
             } catch (error) {
-                logger.warn(
-                    `[TrackMappingStaleness] Failed to mark stale mapping ${mapping.id}`,
+                log.warn(
+                    `Failed to mark stale mapping ${mapping.id}`,
                     error,
                 );
             }
         }
 
         if (markedStale > 0) {
-            logger.info(
-                `[TrackMappingStaleness] Marked ${markedStale} stale track mappings`,
+            log.info(
+                `Marked ${markedStale} stale track mappings`,
             );
         }
     } catch (error) {
-        logger.error("[TrackMappingStaleness] Staleness check failed", error);
+        log.error("Staleness check failed", error);
     } finally {
         stalenessRunInFlight = false;
     }
@@ -87,8 +89,8 @@ export function startTrackMappingStalenessWorker(): void {
         stalenessInterval.unref();
     }
     void runTrackMappingStalenessCheck();
-    logger.info(
-        `[TrackMappingStaleness] Worker started (intervalMs=${intervalMs})`,
+    log.info(
+        `Worker started (intervalMs=${intervalMs})`,
     );
 }
 

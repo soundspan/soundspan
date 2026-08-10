@@ -1,11 +1,14 @@
 export {};
 
 const mockLoggerError = jest.fn();
+const mockLogger = {
+    error: (...args: unknown[]) => mockLoggerError(...args),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        error: (...args: unknown[]) => mockLoggerError(...args),
-    },
+    logger: mockLogger,
 }));
 
 describe("errorHandler middleware", () => {
@@ -57,7 +60,7 @@ describe("errorHandler middleware", () => {
             details: { hint: "fix input" },
         });
         expect(mockLoggerError).toHaveBeenCalledWith(
-            `[AppError] ${ErrorCode.INVALID_CONFIG}: recoverable issue`,
+            `AppError ${ErrorCode.INVALID_CONFIG}: recoverable issue`,
             { hint: "fix input" },
         );
 

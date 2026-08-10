@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { redisClient } from "./redis";
-import { logger } from "./logger";
+import { logger, type Logger } from "./logger";
 
 const DEFAULT_DEPENDENCY_CHECK_INTERVAL_MS = 5_000;
 const DEFAULT_DEPENDENCY_CHECK_TIMEOUT_MS = 2_000;
@@ -135,8 +135,11 @@ async function probeRedis(timeoutMs: number): Promise<DependencyStatus> {
 export class DependencyReadinessTracker {
     private snapshot: DependencyReadinessSnapshot = initialSnapshot();
     private inFlightProbe: Promise<DependencyReadinessSnapshot> | null = null;
+    private readonly log: Logger;
 
-    constructor(private readonly label: string) {}
+    constructor(label: string) {
+        this.log = logger.child("Readiness").child(label);
+    }
 
     getSnapshot(): DependencyReadinessSnapshot {
         return { ...this.snapshot };
@@ -192,11 +195,11 @@ export class DependencyReadinessTracker {
             };
 
             if (previousHealthy && !overallHealthy) {
-                logger.warn(
-                    `[Readiness/${this.label}] Dependencies unhealthy (postgres=${postgres.ok}, redis=${redis.ok})`,
+                this.log.warn(
+                    `Dependencies unhealthy (postgres=${postgres.ok}, redis=${redis.ok})`,
                 );
             } else if (!previousHealthy && overallHealthy) {
-                logger.info(`[Readiness/${this.label}] Dependencies recovered`);
+                this.log.info("Dependencies recovered");
             }
 
             return this.getSnapshot();

@@ -33,7 +33,9 @@ describe("playlist logger utilities", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("fs", () => ({
             mkdirSync,
@@ -138,8 +140,8 @@ describe("playlist logger utilities", () => {
             sessionPath,
             expect.stringContaining("[IMPORT] [ERROR] failed"),
         );
-        expect(logger.debug).toHaveBeenCalledWith("[SLSKD]", "ready");
-        expect(logger.error).toHaveBeenCalledWith("[IMPORT]", "failed");
+        expect(logger.debug).toHaveBeenCalledWith("SLSKD: ready");
+        expect(logger.error).toHaveBeenCalledWith("IMPORT: failed");
     });
 
     it("logs session header initialization failures and swallows append failures", () => {
@@ -159,7 +161,7 @@ describe("playlist logger utilities", () => {
             "Failed to initialize session log:",
             initError,
         );
-        expect(logger.debug).toHaveBeenCalledWith("[IMPORT]", "startup");
+        expect(logger.debug).toHaveBeenCalledWith("IMPORT: startup");
     });
 
     it("writes structured lifecycle messages to per-job logs", () => {
@@ -248,7 +250,7 @@ describe("playlist logger utilities", () => {
 
         playlistLogger.info("this write should fail");
         expect(logger.error).toHaveBeenCalledWith(
-            `[Playlist Logger] Failed to write to ${logFile}:`,
+            `Failed to write to ${logFile}:`,
             fileWriteError,
         );
 
@@ -261,7 +263,7 @@ describe("playlist logger utilities", () => {
         });
 
         mod.logPlaylistEvent("one-off event");
-        expect(logger.debug).toHaveBeenCalledWith("[Playlist] one-off event");
+        expect(logger.debug).toHaveBeenCalledWith("one-off event");
         expect(logger.error).toHaveBeenCalledWith(
             "Failed to write to events log:",
             eventsWriteError,
@@ -281,6 +283,6 @@ describe("playlist logger utilities", () => {
             eventsFile,
             expect.stringContaining("[INFO] queued import"),
         );
-        expect(logger.debug).toHaveBeenCalledWith("[Playlist] queued import");
+        expect(logger.debug).toHaveBeenCalledWith("queued import");
     });
 });

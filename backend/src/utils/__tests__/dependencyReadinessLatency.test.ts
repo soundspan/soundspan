@@ -51,7 +51,9 @@ describe("dependency readiness tracker latency", () => {
             warn: jest.fn(),
             error: jest.fn(),
             debug: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("../db", () => ({
             prisma: {

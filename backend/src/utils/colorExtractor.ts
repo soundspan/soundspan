@@ -1,6 +1,8 @@
 import sharp from "sharp";
 import { logger } from "./logger";
 
+const log = logger.child("ColorExtractor");
+
 interface ColorPalette {
     vibrant: string;
     darkVibrant: string;
@@ -222,7 +224,7 @@ export async function extractColorsFromImage(
             ),
         };
     } catch (error) {
-        logger.error("[ColorExtractor] Failed to extract colors:", error);
+        log.error("Failed to extract colors:", error);
         // Return fallback colors
         return {
             vibrant: "#1db954",
