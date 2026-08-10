@@ -6,6 +6,7 @@ import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
+import { resolveSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 
 const router = Router();
 
@@ -666,7 +667,18 @@ router.get<{ id: string }>(
                         /\/$/,
                         "",
                     );
-                    const coverApiUrl = `${baseUrl}/api/${audiobook.coverUrl}`;
+                    const coverApiUrl = await resolveSafeAudiobookCoverUrl(
+                        audiobook.coverUrl,
+                        baseUrl,
+                    );
+                    if (!coverApiUrl) {
+                        logger.warn(
+                            `[Audiobook Cover] Blocked unsafe cover path for ${id}: ${audiobook.coverUrl}`,
+                        );
+                        return res
+                            .status(404)
+                            .json({ error: "Cover not found" });
+                    }
 
                     try {
                         const response = await fetch(coverApiUrl, {

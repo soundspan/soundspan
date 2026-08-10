@@ -1,5 +1,11 @@
 import { Request, Response } from "express";
 
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
@@ -50,6 +56,14 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings,
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        music: {
+            musicPath: "/music",
+        },
+    },
+}));
+
 const prisma = {
     audiobook: {
         findMany: jest.fn(),
@@ -93,6 +107,15 @@ function createRes() {
             res.body = payload;
             return res;
         }),
+        send: jest.fn(function (payload: unknown) {
+            res.body = payload;
+            return res;
+        }),
+        sendFile: jest.fn(function (filePath: string) {
+            res.body = filePath;
+            return res;
+        }),
+        setHeader: jest.fn(),
     };
     return res;
 }
@@ -103,9 +126,12 @@ describe("audiobooks route runtime", () => {
     const searchHandler = getHandler("/search", "get");
     const listHandler = getHandler("/", "get");
     const seriesHandler = getHandler("/series/:seriesName", "get");
+    const coverHandler = getHandler("/:id/cover", "get");
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLookup.mockReset();
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
 
         getSystemSettings.mockResolvedValue({
             audiobookshelfEnabled: true,
@@ -253,6 +279,31 @@ describe("audiobooks route runtime", () => {
         expect(res.body).toEqual({
             error: "Sync failed",
         });
+    });
+
+    it("rejects an unsafe cached ABS cover path before proxy fetch", async () => {
+        const existsSpy = jest.spyOn(require("fs"), "existsSync");
+        existsSpy.mockReturnValue(false);
+        const fetchMock = jest.fn();
+        (global as any).fetch = fetchMock;
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            localCoverPath: null,
+            coverUrl: "items/../../api/me",
+        });
+        getSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = { params: { id: "book-1" } } as any;
+        const res = createRes();
+
+        await coverHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Cover not found" });
+        expect(fetchMock).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
     });
 
     it("validates search query input", async () => {

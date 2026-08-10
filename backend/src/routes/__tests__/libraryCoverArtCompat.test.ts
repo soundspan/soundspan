@@ -1,6 +1,12 @@
 import { Request, Response } from "express";
 import fs from "fs";
 
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
@@ -323,6 +329,8 @@ describe("library cover-art proxy compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLookup.mockReset();
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
         mockRedisGet.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
         mockCoverArtGetCoverArt.mockResolvedValue(null);
@@ -1091,6 +1099,105 @@ describe("library cover-art proxy compatibility", () => {
         );
     });
 
+    it("rejects traversal in an audiobook query cover before fetch", async () => {
+        const fetchMock = jest.fn();
+        (global as any).fetch = fetchMock;
+        mockGetSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = {
+            query: { url: "audiobook__items/../../api/me" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBeDefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects traversal in an audiobook id cover before fetch", async () => {
+        const fetchMock = jest.fn();
+        (global as any).fetch = fetchMock;
+        mockGetSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = {
+            query: {},
+            params: { id: "audiobook__../api/me" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBeDefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("allows a confined audiobook query cover on a public ABS host", async () => {
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            arrayBuffer: async () => Uint8Array.from([7, 8, 9]).buffer,
+            headers: { get: jest.fn().mockReturnValue("image/jpeg") },
+        });
+        (global as any).fetch = fetchMock;
+        mockGetSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = {
+            query: { url: "audiobook__items/abc123/cover" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://audiobooks.example/api/items/abc123/cover",
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    Authorization: "Bearer abs-key",
+                }),
+            }),
+        );
+    });
+
+    it("rejects a confined audiobook cover when ABS DNS resolves to loopback", async () => {
+        const fetchMock = jest.fn();
+        (global as any).fetch = fetchMock;
+        mockLookup.mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }]);
+        mockGetSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = {
+            query: { url: "audiobook__items/abc123/cover" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBeDefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it("returns 404 when audiobook query-url fetch fails", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: false,
@@ -1357,7 +1464,7 @@ describe("library cover-art proxy compatibility", () => {
 
         const audiobookReq = {
             query: {},
-            params: { id: "audiobook__items/id-cover" },
+            params: { id: "audiobook__items/idcover/cover" },
             headers: {},
         } as any;
         const audiobookRes = createRes();
@@ -1647,7 +1754,7 @@ describe("library cover-art proxy compatibility", () => {
 
         const audiobookReq = {
             query: {},
-            params: { id: "audiobook__items/missing-id" },
+            params: { id: "audiobook__items/missingid/cover" },
             headers: {},
         } as any;
         const audiobookRes = createRes();
@@ -1655,7 +1762,7 @@ describe("library cover-art proxy compatibility", () => {
         await coverArtHandler(audiobookReq, audiobookRes);
 
         expect(fetchMock).toHaveBeenCalledWith(
-            "https://audiobooks.example/api/items/missing-id",
+            "https://audiobooks.example/api/items/missingid/cover",
             expect.objectContaining({
                 headers: expect.objectContaining({
                     Authorization: "Bearer abs-key",

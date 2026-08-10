@@ -42,6 +42,7 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
 } from "../services/imageProxy";
+import { resolveSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 import {
     negotiateCoverArtFormat,
     resizeCoverArt,
@@ -3438,7 +3439,19 @@ router.get<{ id?: string }>(
                     "",
                 );
 
-                coverUrl = `${audiobookshelfBaseUrl}/api/${audiobookPath}`;
+                const safeCoverUrl = await resolveSafeAudiobookCoverUrl(
+                    audiobookPath,
+                    audiobookshelfBaseUrl,
+                );
+                if (!safeCoverUrl) {
+                    logger.warn(
+                        `[COVER-ART] Blocked unsafe audiobook cover path: ${audiobookPath}`,
+                    );
+                    return res
+                        .status(400)
+                        .json({ error: "Invalid audiobook cover path" });
+                }
+                coverUrl = safeCoverUrl;
 
                 // Fetch with authentication
                 logger.debug(
@@ -3656,7 +3669,19 @@ router.get<{ id?: string }>(
                     "",
                 );
 
-                coverUrl = `${audiobookshelfBaseUrl}/api/${audiobookPath}`;
+                const safeCoverUrl = await resolveSafeAudiobookCoverUrl(
+                    audiobookPath,
+                    audiobookshelfBaseUrl,
+                );
+                if (!safeCoverUrl) {
+                    logger.warn(
+                        `[COVER-ART] Blocked unsafe audiobook cover path: ${audiobookPath}`,
+                    );
+                    return res
+                        .status(400)
+                        .json({ error: "Invalid audiobook cover path" });
+                }
+                coverUrl = safeCoverUrl;
 
                 // Fetch with authentication
                 logger.debug(

@@ -5,6 +5,11 @@ const mockStreamGetStreamFilePath = jest.fn();
 const mockStreamWithRangeSupport = jest.fn();
 const mockStreamDestroy = jest.fn();
 const mockParseFile = jest.fn();
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
@@ -1390,6 +1395,8 @@ describe("library catalog list runtime coverage", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLookup.mockReset();
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
         mockTrackFindUnique.mockReset();
         mockTrackFindMany.mockReset();
         mockTrackCount.mockReset();
@@ -4506,7 +4513,7 @@ describe("library catalog list runtime coverage", () => {
         try {
             const queryAudiobookReq = {
                 params: {},
-                query: { url: "audiobook__release-42" },
+                query: { url: "audiobook__items/release-42/cover" },
                 headers: { origin: "https://app.example" },
             } as any;
             const queryAudiobookRes = createRes();
@@ -4524,7 +4531,7 @@ describe("library catalog list runtime coverage", () => {
                 "public, max-age=7776000, immutable",
             );
             expect(fetchSpy).toHaveBeenCalledWith(
-                "https://ab.example/api/release-42",
+                "https://ab.example/api/items/release-42/cover",
                 expect.objectContaining({
                     headers: expect.objectContaining({
                         Authorization: "Bearer token-123",
@@ -4553,7 +4560,7 @@ describe("library catalog list runtime coverage", () => {
 
         const queryAudiobookReq = {
             params: {},
-            query: { url: "audiobook__missing-release" },
+            query: { url: "audiobook__items/missing-release/cover" },
             headers: {},
         } as any;
         const queryAudiobookRes = createRes();
@@ -4565,7 +4572,7 @@ describe("library catalog list runtime coverage", () => {
             error: "Audiobook cover art not found",
         });
         expect(fetchSpy).toHaveBeenCalledWith(
-            "https://ab.example/api/missing-release",
+            "https://ab.example/api/items/missing-release/cover",
             expect.objectContaining({
                 headers: expect.objectContaining({
                     Authorization: "Bearer token-456",
