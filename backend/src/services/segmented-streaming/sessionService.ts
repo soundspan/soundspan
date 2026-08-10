@@ -6,6 +6,7 @@ import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { config } from "../../config";
 import { logger } from "../../utils/logger";
+import { coalesceInFlightByKey as coalesceByKey } from "../../utils/singleflight";
 import {
     segmentedManifestService,
     type SegmentedManifestQuality,
@@ -642,25 +643,12 @@ class SegmentedSessionService {
         waitFactory: () => Promise<void>,
         traceFields: Record<string, unknown> = {},
     ): Promise<void> {
-        const existingPromise = inFlightMap.get(key);
-        if (existingPromise) {
-            logSegmentedStreamingTrace("session.readiness.coalesced_wait", {
-                ...traceFields,
-            });
-            await existingPromise;
-            return;
-        }
-
-        const inFlightPromise = Promise.resolve()
-            .then(waitFactory)
-            .finally(() => {
-                if (inFlightMap.get(key) === inFlightPromise) {
-                    inFlightMap.delete(key);
-                }
-            });
-
-        inFlightMap.set(key, inFlightPromise);
-        await inFlightPromise;
+        await coalesceByKey(inFlightMap, key, waitFactory, {
+            onCoalescedWait: () =>
+                logSegmentedStreamingTrace("session.readiness.coalesced_wait", {
+                    ...traceFields,
+                }),
+        });
     }
 
     private hasReadinessMicrocacheHit(

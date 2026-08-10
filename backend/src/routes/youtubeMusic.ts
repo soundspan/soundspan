@@ -26,6 +26,7 @@ import {
     ytMusicSearchLimiter,
     ytMusicStreamLimiter,
 } from "../middleware/rateLimiter";
+import { coalesceInFlightByKey } from "../utils/singleflight";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
@@ -111,64 +112,46 @@ async function ensureUserOAuth(userId: string): Promise<boolean> {
         return cached;
     }
 
-    const existingInFlight = ytOauthRestoreInFlight.get(userId);
-    if (existingInFlight) {
-        return existingInFlight;
-    }
+    return coalesceInFlightByKey(ytOauthRestoreInFlight, userId, () =>
+        restoreYtUserOAuth(userId),
+    );
+}
 
-    const restorePromise = (async () => {
-        try {
-            // Quick check — is the sidecar already aware of this user?
-            const status = await ytMusicService.getAuthStatus(userId);
-            if (status.authenticated) {
-                setYtOAuthCache(userId, true);
-                return true;
-            }
-
-            // Not authenticated in sidecar — try restoring from DB
-            const userSettings = await prisma.userSettings.findUnique({
-                where: { userId },
-                select: { ytMusicOAuthJson: true },
-            });
-
-            if (!userSettings?.ytMusicOAuthJson) {
-                setYtOAuthCache(userId, false);
-                return false;
-            }
-
-            const oauthJson = decrypt(userSettings.ytMusicOAuthJson);
-            if (!oauthJson) {
-                setYtOAuthCache(userId, false);
-                return false;
-            }
-
-            // Also pass client credentials so the sidecar can build OAuthCredentials
-            const systemSettings = await getSystemSettings();
-            await ytMusicService.restoreOAuthWithCredentials(
-                userId,
-                oauthJson,
-                systemSettings?.ytMusicClientId || undefined,
-                systemSettings?.ytMusicClientSecret || undefined,
-            );
-            logger.info(
-                `[YTMusic] Restored OAuth credentials for user ${userId}`,
-            );
+async function restoreYtUserOAuth(userId: string): Promise<boolean> {
+    try {
+        const status = await ytMusicService.getAuthStatus(userId);
+        if (status.authenticated) {
             setYtOAuthCache(userId, true);
             return true;
-        } catch (err) {
-            logger.debug(
-                `[YTMusic] OAuth restore failed for user ${userId}:`,
-                err,
-            );
+        }
+        const userSettings = await prisma.userSettings.findUnique({
+            where: { userId },
+            select: { ytMusicOAuthJson: true },
+        });
+        if (!userSettings?.ytMusicOAuthJson) {
             setYtOAuthCache(userId, false);
             return false;
         }
-    })().finally(() => {
-        ytOauthRestoreInFlight.delete(userId);
-    });
-
-    ytOauthRestoreInFlight.set(userId, restorePromise);
-    return restorePromise;
+        const oauthJson = decrypt(userSettings.ytMusicOAuthJson);
+        if (!oauthJson) {
+            setYtOAuthCache(userId, false);
+            return false;
+        }
+        const systemSettings = await getSystemSettings();
+        await ytMusicService.restoreOAuthWithCredentials(
+            userId,
+            oauthJson,
+            systemSettings?.ytMusicClientId || undefined,
+            systemSettings?.ytMusicClientSecret || undefined,
+        );
+        logger.info(`[YTMusic] Restored OAuth credentials for user ${userId}`);
+        setYtOAuthCache(userId, true);
+        return true;
+    } catch (err) {
+        logger.debug(`[YTMusic] OAuth restore failed for user ${userId}:`, err);
+        setYtOAuthCache(userId, false);
+        return false;
+    }
 }
 
 async function requireUserOAuth(
@@ -221,6 +204,16 @@ const getRequestedStreamQuality = (rawQuality: unknown): string | undefined => {
     }
     const trimmed = rawQuality.trim();
     return trimmed.length > 0 ? trimmed : undefined;
+};
+
+/** Parse a query limit into a bounded integer in [1, 100]; falls back to 100. */
+const parseBoundedLimit = (raw: unknown): number => {
+    // A shared parseBoundedInt utility may supersede this route-local parser.
+    const parsed = typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(parsed)) {
+        return 100;
+    }
+    return Math.min(100, Math.max(1, parsed));
 };
 
 async function resolveYtMusicStreamQuality(
@@ -1002,6 +995,8 @@ router.get(
  *         name: limit
  *         schema:
  *           type: integer
+ *           minimum: 1
+ *           maximum: 100
  *           default: 100
  *         description: Maximum number of songs to return
  *     responses:
@@ -1020,7 +1015,7 @@ router.get(
         try {
             const userId = req.user!.id;
             if (!(await requireUserOAuth(userId, res))) return;
-            const limit = parseInt(req.query.limit as string) || 100;
+            const limit = parseBoundedLimit(req.query.limit);
             const songs = await ytMusicService.getLibrarySongs(userId, limit);
             res.json({ songs });
         } catch (err: any) {
@@ -1047,6 +1042,8 @@ router.get(
  *         name: limit
  *         schema:
  *           type: integer
+ *           minimum: 1
+ *           maximum: 100
  *           default: 100
  *         description: Maximum number of albums to return
  *     responses:
@@ -1065,7 +1062,7 @@ router.get(
         try {
             const userId = req.user!.id;
             if (!(await requireUserOAuth(userId, res))) return;
-            const limit = parseInt(req.query.limit as string) || 100;
+            const limit = parseBoundedLimit(req.query.limit);
             const albums = await ytMusicService.getLibraryAlbums(userId, limit);
             res.json({ albums });
         } catch (err: any) {

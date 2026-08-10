@@ -39,6 +39,7 @@ import {
 import { fetchEmbeddingsByTrackIds } from "../services/trackEmbeddings";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
+import { coalesceInFlightByKey } from "../utils/singleflight";
 
 const router = Router();
 
@@ -1450,23 +1451,16 @@ async function getCachedOrComputeCalibration(
         });
     }
 
-    let compute = calibrationInFlight.get(cacheKey);
-    if (!compute) {
-        compute = computeCalibration()
-            .then(async (payload) => {
-                await redisClient.setEx(
-                    cacheKey,
-                    CALIBRATION_CACHE_TTL_SECONDS,
-                    JSON.stringify(payload),
-                );
-                return payload;
-            })
-            .finally(() => {
-                calibrationInFlight.delete(cacheKey);
-            });
-        calibrationInFlight.set(cacheKey, compute);
-    }
-    return compute;
+    return coalesceInFlightByKey(calibrationInFlight, cacheKey, () =>
+        computeCalibration().then(async (payload) => {
+            await redisClient.setEx(
+                cacheKey,
+                CALIBRATION_CACHE_TTL_SECONDS,
+                JSON.stringify(payload),
+            );
+            return payload;
+        }),
+    );
 }
 
 async function getCalibrationResponse() {

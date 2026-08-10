@@ -230,6 +230,38 @@ describe("tidal streaming route runtime", () => {
         );
     });
 
+    it("coalesces concurrent missing-oauth lookups and preserves the unauthorized response", async () => {
+        let resolveAuthStatus!: (authenticated: boolean) => void;
+        tidalStreamingService.checkSidecarAuthStatus.mockReturnValueOnce(
+            new Promise<boolean>((resolve) => {
+                resolveAuthStatus = resolve;
+            }),
+        );
+        prisma.userSettings.findUnique.mockResolvedValueOnce(null);
+        const req = {
+            user: { id: "concurrent-no-oauth" },
+            body: { query: "hello" },
+        } as any;
+        const firstRes = createRes();
+        const secondRes = createRes();
+
+        const firstRequest = searchHandler(req, firstRes);
+        const secondRequest = searchHandler(req, secondRes);
+        await Promise.resolve();
+        expect(
+            tidalStreamingService.checkSidecarAuthStatus,
+        ).toHaveBeenCalledTimes(1);
+
+        resolveAuthStatus(false);
+        await Promise.all([firstRequest, secondRequest]);
+
+        expect(prisma.userSettings.findUnique).toHaveBeenCalledTimes(1);
+        expect(firstRes.statusCode).toBe(401);
+        expect(secondRes.statusCode).toBe(401);
+        expect(firstRes.body).toEqual({ error: "Not authenticated to TIDAL" });
+        expect(secondRes.body).toEqual(firstRes.body);
+    });
+
     it("evaluates the tidal-enabled middleware for 404, 503, and success", async () => {
         const layer = getRouteLayer("/auth/device-code", "post");
         const middleware = layer.route.stack[1].handle;

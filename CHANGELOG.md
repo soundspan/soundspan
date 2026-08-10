@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Promoted the segmented-streaming session service's identity-guarded
+  keyed-singleflight into a shared backend helper and rethreaded transcode
+  caching, vibe calibration, and both the YouTube Music and TIDAL OAuth-restore
+  paths onto it, unifying the short-TTL negative-cache policy for OAuth restores
+  and bounding the YouTube Music library limit params.
 - Replaced the three source-scraping `audioAnalyzer*Contract` Jest suites with
   behavioral pytest coverage in `services/audio-analyzer/tests/` for queue claim
   alignment, process-pool crash recovery, stale-failure resolution, and

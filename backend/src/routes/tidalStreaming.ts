@@ -27,9 +27,12 @@ import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
 import { trackMappingService } from "../services/trackMappingService";
+import { coalesceInFlightByKey } from "../utils/singleflight";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
+const OAUTH_NEGATIVE_CACHE_TTL_MS =
+    process.env.NODE_ENV === "test" ? 0 : 15_000;
 const tidalOauthSessionCache = new Map<
     string,
     { authenticated: boolean; expiresAt: number }
@@ -40,8 +43,18 @@ const setTidalOAuthCache = (
     authenticated: boolean,
     ttlMs = OAUTH_CACHE_TTL_MS,
 ) => {
-    if (!authenticated || ttlMs <= 0) {
+    if (ttlMs <= 0) {
         tidalOauthSessionCache.delete(userId);
+        return;
+    }
+    if (!authenticated) {
+        // Cache negative results with a shorter TTL so non-linked users
+        // don't hit sidecar/DB on every browse/stream request, while still
+        // picking up new OAuth links within a reasonable window.
+        tidalOauthSessionCache.set(userId, {
+            authenticated: false,
+            expiresAt: Date.now() + OAUTH_NEGATIVE_CACHE_TTL_MS,
+        });
         return;
     }
     tidalOauthSessionCache.set(userId, {
@@ -103,56 +116,47 @@ async function ensureUserOAuth(userId: string): Promise<boolean> {
         return cached;
     }
 
-    const existingInFlight = tidalOauthRestoreInFlight.get(userId);
-    if (existingInFlight) {
-        return existingInFlight;
+    return coalesceInFlightByKey(tidalOauthRestoreInFlight, userId, () =>
+        restoreTidalUserOAuth(userId),
+    );
+}
+
+async function restoreTidalUserOAuth(userId: string): Promise<boolean> {
+    // This authenticated client carries the internal secret; a bare request
+    // would 403 and be misread as a missing sidecar session.
+    try {
+        const authenticated =
+            await tidalStreamingService.checkSidecarAuthStatus(userId);
+        if (authenticated) {
+            setTidalOAuthCache(userId, true);
+            return true;
+        }
+    } catch {
+        // Sidecar might not have the session, try to restore.
     }
 
-    const restorePromise = (async () => {
-        // Check if sidecar already has this user's session. Goes through the
-        // authenticated service client (F31) so it carries the internal secret
-        // — a bare axios.get here would 403 forever after auth landed and be
-        // misread as "sidecar has no session".
-        try {
-            const authenticated =
-                await tidalStreamingService.checkSidecarAuthStatus(userId);
-            if (authenticated) {
-                setTidalOAuthCache(userId, true);
-                return true;
-            }
-        } catch {
-            // Sidecar might not have the session, try to restore
-        }
-
-        // Load from DB and restore
-        const userSettings = await prisma.userSettings.findUnique({
-            where: { userId },
-            select: { tidalOAuthJson: true },
-        });
-        if (!userSettings?.tidalOAuthJson) {
-            setTidalOAuthCache(userId, false);
-            return false;
-        }
-
-        let oauthJson: string;
-        try {
-            oauthJson = decrypt(userSettings.tidalOAuthJson);
-        } catch {
-            oauthJson = userSettings.tidalOAuthJson;
-        }
-
-        const restored = await tidalStreamingService.restoreOAuth(
-            userId,
-            oauthJson,
-        );
-        setTidalOAuthCache(userId, restored);
-        return restored;
-    })().finally(() => {
-        tidalOauthRestoreInFlight.delete(userId);
+    const userSettings = await prisma.userSettings.findUnique({
+        where: { userId },
+        select: { tidalOAuthJson: true },
     });
+    if (!userSettings?.tidalOAuthJson) {
+        setTidalOAuthCache(userId, false);
+        return false;
+    }
 
-    tidalOauthRestoreInFlight.set(userId, restorePromise);
-    return restorePromise;
+    let oauthJson: string;
+    try {
+        oauthJson = decrypt(userSettings.tidalOAuthJson);
+    } catch {
+        oauthJson = userSettings.tidalOAuthJson;
+    }
+
+    const restored = await tidalStreamingService.restoreOAuth(
+        userId,
+        oauthJson,
+    );
+    setTidalOAuthCache(userId, restored);
+    return restored;
 }
 
 // ── Routes ─────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { parseRangeHeader } from "../utils/rangeParser";
 import { parseFile } from "music-metadata";
 import { isOriginAllowed } from "../utils/cors";
 import { config } from "../config";
+import { coalesceInFlightByKey } from "../utils/singleflight";
 
 // Set FFmpeg path to bundled binary
 ffmpeg.setFfmpegPath(ffmpegPath.path);
@@ -227,25 +228,18 @@ export class AudioStreamingService {
         sourceModified: Date,
     ): Promise<string> {
         const dedupeKey = `${trackId}-${quality}`;
-        const inflight = this.inflightTranscodes.get(dedupeKey);
-        if (inflight) {
-            logger.debug(
-                `[STREAM] Joining in-flight transcode for ${dedupeKey}`,
-            );
-            return inflight;
-        }
-
-        const promise = this.doTranscode(
-            trackId,
-            quality,
-            sourcePath,
-            sourceModified,
-        ).finally(() => {
-            this.inflightTranscodes.delete(dedupeKey);
-        });
-
-        this.inflightTranscodes.set(dedupeKey, promise);
-        return promise;
+        return coalesceInFlightByKey(
+            this.inflightTranscodes,
+            dedupeKey,
+            () =>
+                this.doTranscode(trackId, quality, sourcePath, sourceModified),
+            {
+                onCoalescedWait: () =>
+                    logger.debug(
+                        `[STREAM] Joining in-flight transcode for ${dedupeKey}`,
+                    ),
+            },
+        );
     }
 
     /**

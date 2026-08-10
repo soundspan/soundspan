@@ -315,6 +315,34 @@ describe("youtube music route runtime behavior", () => {
         expect(errorRes.statusCode).toBe(500);
     });
 
+    it("coalesces concurrent missing-oauth lookups", async () => {
+        let resolveAuthStatus!: (status: { authenticated: boolean }) => void;
+        ytMusicService.getAuthStatus.mockReturnValueOnce(
+            new Promise<{ authenticated: boolean }>((resolve) => {
+                resolveAuthStatus = resolve;
+            }),
+        );
+        prisma.userSettings.findUnique.mockResolvedValueOnce(null);
+        const req = {
+            user: { id: "concurrent-no-oauth" },
+            query: {},
+        } as any;
+        const firstRes = createRes();
+        const secondRes = createRes();
+
+        const firstRequest = librarySongsHandler(req, firstRes);
+        const secondRequest = librarySongsHandler(req, secondRes);
+        await Promise.resolve();
+        expect(ytMusicService.getAuthStatus).toHaveBeenCalledTimes(1);
+
+        resolveAuthStatus({ authenticated: false });
+        await Promise.all([firstRequest, secondRequest]);
+
+        expect(prisma.userSettings.findUnique).toHaveBeenCalledTimes(1);
+        expect(firstRes.statusCode).toBe(401);
+        expect(secondRes.statusCode).toBe(401);
+    });
+
     it("validates and initiates device auth with error fallback", async () => {
         const req = { user: { id: "user-1" } } as any;
 
@@ -960,6 +988,26 @@ describe("youtube music route runtime behavior", () => {
         expect(ytMusicService.getLibraryAlbums).toHaveBeenCalledWith(
             "user-1",
             100,
+        );
+
+        const boundedSongsRes = createRes();
+        await librarySongsHandler(
+            { ...reqBase, query: { limit: "500" } } as any,
+            boundedSongsRes,
+        );
+        expect(ytMusicService.getLibrarySongs).toHaveBeenLastCalledWith(
+            "user-1",
+            100,
+        );
+
+        const boundedAlbumsRes = createRes();
+        await libraryAlbumsHandler(
+            { ...reqBase, query: { limit: "-10" } } as any,
+            boundedAlbumsRes,
+        );
+        expect(ytMusicService.getLibraryAlbums).toHaveBeenLastCalledWith(
+            "user-1",
+            1,
         );
 
         ytMusicService.getLibrarySongs.mockRejectedValueOnce({
