@@ -74,7 +74,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { createFeatureDisabledHandler } from "./utils/featureGate";
 import { requireAuth, requireAdmin } from "./middleware/auth";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
-import { assertSecretsDbOnlyReady } from "./utils/systemSettings";
+import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 import {
     authLimiter,
     apiLimiter,
@@ -525,10 +525,16 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
     // Verify database connections before proceeding
     await checkPostgresConnection();
     await checkRedisConnection();
-    await assertSecretsDbOnlyReady().catch((error) => {
-        logger.error(String(error?.message ?? error));
-        process.exit(1);
-    });
+    if (isSecretsDbOnlyEnabled()) {
+        // Lazy import keeps the entrypoint free of the settings/encryption
+        // module chain unless the DB-only secrets flag is enabled.
+        const { assertSecretsDbOnlyReady } =
+            await import("./utils/systemSettings");
+        await assertSecretsDbOnlyReady().catch((error) => {
+            logger.error(String(error?.message ?? error));
+            process.exit(1);
+        });
+    }
     await dependencyReadiness.probe(true);
 
     // Check for admin password reset

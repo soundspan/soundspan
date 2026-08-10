@@ -4,7 +4,7 @@ import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
-import { assertSecretsDbOnlyReady } from "./utils/systemSettings";
+import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 
 const log = logger.child("WorkerStartup");
 
@@ -203,10 +203,16 @@ async function checkRedisConnection() {
 async function startWorkerRuntime() {
     await checkPostgresConnection();
     await checkRedisConnection();
-    await assertSecretsDbOnlyReady().catch((error) => {
-        log.error(String(error?.message ?? error));
-        process.exit(1);
-    });
+    if (isSecretsDbOnlyEnabled()) {
+        // Lazy import keeps the entrypoint free of the settings/encryption
+        // module chain unless the DB-only secrets flag is enabled.
+        const { assertSecretsDbOnlyReady } =
+            await import("./utils/systemSettings");
+        await assertSecretsDbOnlyReady().catch((error) => {
+            log.error(String(error?.message ?? error));
+            process.exit(1);
+        });
+    }
     await dependencyReadiness.probe(true);
 
     log.info(
