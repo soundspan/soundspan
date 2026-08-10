@@ -624,14 +624,17 @@ router.put("/settings", async (req, res) => {
  *         description: Enrichment is not enabled
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  *       404:
  *         description: No enrichment data found
  */
 /**
  * POST /enrichment/artist/:id
  * Enrich a single artist
+ * Admin only - applies results library-wide and makes outbound metadata API calls
  */
-router.post("/artist/:id", async (req, res) => {
+router.post<{ id: string }>("/artist/:id", requireAdmin, async (req, res) => {
     try {
         const userId = req.user!.id;
         const settings = await enrichmentService.getSettings(userId);
@@ -692,14 +695,17 @@ router.post("/artist/:id", async (req, res) => {
  *         description: Enrichment is not enabled
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  *       404:
  *         description: No enrichment data found
  */
 /**
  * POST /enrichment/album/:id
  * Enrich a single album
+ * Admin only - applies results library-wide and makes outbound metadata API calls
  */
-router.post("/album/:id", async (req, res) => {
+router.post<{ id: string }>("/album/:id", requireAdmin, async (req, res) => {
     try {
         const userId = req.user!.id;
         const settings = await enrichmentService.getSettings(userId);

@@ -17,26 +17,6 @@ export function WithEnrichment<TBase extends ApiClientConstructor>(
             });
         }
 
-        async enrichArtist(artistId: string) {
-            return this.request<{
-                success: boolean;
-                confidence: number;
-                data: ApiData;
-            }>(`/enrichment/artist/${artistId}`, {
-                method: "POST",
-            });
-        }
-
-        async enrichAlbum(albumId: string) {
-            return this.request<{
-                success: boolean;
-                confidence: number;
-                data: ApiData;
-            }>(`/enrichment/album/${albumId}`, {
-                method: "POST",
-            });
-        }
-
         async startLibraryEnrichment() {
             return this.request<{ success: boolean; message: string }>(
                 "/enrichment/start",

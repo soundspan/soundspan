@@ -52,8 +52,6 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "downloadFromSoulseek",
     "downloadYouTube",
     "endListenGroup",
-    "enrichAlbum",
-    "enrichArtist",
     "executePlaylistImport",
     "generateDiscoverWeekly",
     "generateMoodMix",
@@ -293,5 +291,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 273);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 271);
 });

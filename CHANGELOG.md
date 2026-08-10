@@ -545,6 +545,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependency Review and Trivy remain non-blocking; the recommended ratchet —
   Dependency Review with `fail-on-severity: high` first, then Trivy — is
   documented in-workflow as a deliberate owner decision.
+- Require admin on `POST /api/enrichment/artist/:id` and
+  `POST /api/enrichment/album/:id` — single-item enrichment applies results
+  library-wide and makes outbound metadata API calls; removed the unused
+  `enrichArtist`/`enrichAlbum` frontend client methods.
 
 ### Changed
 

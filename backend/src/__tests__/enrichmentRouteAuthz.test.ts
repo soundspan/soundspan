@@ -5,6 +5,8 @@
  * admin-gated siblings (/full, /pause, /resume, /stop, resets):
  *   - POST /api/enrichment/sync  (only UI caller is the admin page)
  *   - POST /api/enrichment/start (same worker as the admin-gated /full)
+ *   - POST /api/enrichment/artist/:id and /album/:id (apply enrichment
+ *     results library-wide and make outbound API calls)
  *
  * Deliberately NOT admin-gated (user-facing by design):
  *   - GET/PUT /settings (per-user settings)
@@ -17,6 +19,10 @@ export {};
 
 const mockTriggerEnrichmentNow = jest.fn(async () => ({ triggered: true }));
 const mockRunFullEnrichment = jest.fn(async () => undefined);
+const mockEnrichArtist = jest.fn(async () => ({ confidence: 0.9 }));
+const mockEnrichAlbum = jest.fn(async () => ({ confidence: 0.9 }));
+const mockApplyArtistEnrichment = jest.fn(async () => undefined);
+const mockApplyAlbumEnrichment = jest.fn(async () => undefined);
 const mockSystemSettingsFindUnique = jest.fn(async () => ({
     autoEnrichMetadata: true,
 }));
@@ -42,6 +48,10 @@ jest.mock("../services/enrichment", () => ({
     enrichmentService: {
         getSettings: jest.fn(async () => ({ enabled: true })),
         updateSettings: jest.fn(async () => ({ enabled: true })),
+        enrichArtist: mockEnrichArtist,
+        enrichAlbum: mockEnrichAlbum,
+        applyArtistEnrichment: mockApplyArtistEnrichment,
+        applyAlbumEnrichment: mockApplyAlbumEnrichment,
     },
 }));
 
@@ -173,5 +183,43 @@ describe("enrichment router authorization", () => {
 
         expect(response.status).toBe(200);
         expect(mockRunFullEnrichment).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects non-admin users on POST /artist/:id", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/artist/artist-1")
+            .set("x-test-role", "user");
+
+        expect(response.status).toBe(403);
+        expect(mockEnrichArtist).not.toHaveBeenCalled();
+    });
+
+    it("allows admins on POST /artist/:id", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/artist/artist-1")
+            .set("x-test-role", "admin");
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(mockEnrichArtist).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects non-admin users on POST /album/:id", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/album/album-1")
+            .set("x-test-role", "user");
+
+        expect(response.status).toBe(403);
+        expect(mockEnrichAlbum).not.toHaveBeenCalled();
+    });
+
+    it("allows admins on POST /album/:id", async () => {
+        const response = await request(buildApp())
+            .post("/api/enrichment/album/album-1")
+            .set("x-test-role", "admin");
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(mockEnrichAlbum).toHaveBeenCalledTimes(1);
     });
 });
