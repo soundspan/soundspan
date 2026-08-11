@@ -13,6 +13,7 @@ import { config } from "../config";
 import { discoverQueue, scanQueue } from "../workers/queues";
 import { getSystemSettings } from "../utils/systemSettings";
 import { parseBoundedInt } from "../utils/queryParams";
+import { safeResolvePath } from "../utils/safeResolvePath";
 import { lidarrService } from "../services/lidarr";
 import { discoveryRecommendationsService } from "../services/discovery";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
@@ -1375,17 +1376,18 @@ router.delete("/clear", async (req, res) => {
                         );
                         // Try common folder structures: /discovery/Artist/Album or /discovery/Artist - Album
                         const possiblePaths = [
-                            path.join(
+                            safeResolvePath(
                                 discoveryPath,
-                                album.artistName,
-                                album.albumTitle,
+                                path.join(album.artistName, album.albumTitle),
                             ),
-                            path.join(discoveryPath, album.artistName),
-                            path.join(
+                            safeResolvePath(discoveryPath, album.artistName),
+                            safeResolvePath(
                                 discoveryPath,
                                 `${album.artistName} - ${album.albumTitle}`,
                             ),
-                        ];
+                        ].filter((candidatePath): candidatePath is string =>
+                            Boolean(candidatePath),
+                        );
 
                         for (const albumPath of possiblePaths) {
                             if (fs.existsSync(albumPath)) {

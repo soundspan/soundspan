@@ -208,8 +208,13 @@ const normalizeStreamingQuality = (value: unknown): StreamingQuality | null => {
     return null;
 };
 
-const resolveAudioInfoAbsolutePath = (relativeFilePath: string): string =>
-    path.join(config.music.musicPath, relativeFilePath.replace(/\\/g, "/"));
+const resolveAudioInfoAbsolutePath = (
+    relativeFilePath: string,
+): string | null =>
+    safeResolvePath(
+        config.music.musicPath,
+        relativeFilePath.replace(/\\/g, "/"),
+    );
 
 const readAudioInfoPayload = async (
     absolutePath: string,
@@ -5217,7 +5222,7 @@ router.get<{ id: string }>(
             }
 
             const absolutePath = resolveAudioInfoAbsolutePath(track.filePath);
-            if (!fs.existsSync(absolutePath)) {
+            if (!absolutePath || !fs.existsSync(absolutePath)) {
                 return sendRouteError(res, 404, "File not found on disk");
             }
 
@@ -5713,10 +5718,18 @@ router.delete<{ id: string }>(
 
             // Also try deleting from common music folder paths (in case tracks weren't indexed)
             const commonPaths = [
-                path.join(config.music.musicPath, artist.name),
-                path.join(config.music.musicPath, "Soulseek", artist.name),
-                path.join(config.music.musicPath, "discovery", artist.name),
-            ];
+                safeResolvePath(config.music.musicPath, artist.name),
+                safeResolvePath(
+                    config.music.musicPath,
+                    path.join("Soulseek", artist.name),
+                ),
+                safeResolvePath(
+                    config.music.musicPath,
+                    path.join("discovery", artist.name),
+                ),
+            ].filter((candidatePath): candidatePath is string =>
+                Boolean(candidatePath),
+            );
 
             for (const commonPath of commonPaths) {
                 if (

@@ -1004,6 +1004,28 @@ describe("library branch coverage focus", () => {
         existsSpy.mockRestore();
     });
 
+    it("returns 404 without probing audio metadata for an out-of-root source path", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        mockTrackFindUnique.mockResolvedValue({
+            filePath: "../secrets.flac",
+            fileModified: new Date("2026-01-01T00:00:00.000Z"),
+        });
+        const req = {
+            params: { id: "track-traversal" },
+            query: {},
+            user: { id: "u1" },
+        } as any;
+        const res = createRes();
+
+        await audioInfoHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "File not found on disk" });
+        expect(existsSpy).not.toHaveBeenCalled();
+        expect(mockParseFile).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
     it("covers artists fallback filtering when denormalized counts are not ready", async () => {
         const txArtistFindMany = jest.fn().mockResolvedValue([]);
         const txArtistCount = jest.fn().mockResolvedValue(0);

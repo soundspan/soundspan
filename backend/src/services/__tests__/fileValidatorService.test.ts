@@ -84,6 +84,11 @@ describe("FileValidatorService", () => {
                 title: "Traversal",
             },
             {
+                id: "prefix-collision",
+                filePath: "../music-evil/x.flac",
+                title: "Prefix Collision",
+            },
+            {
                 id: "missing",
                 filePath: "missing.mp3",
                 title: "Missing",
@@ -105,9 +110,13 @@ describe("FileValidatorService", () => {
 
         const result = await service.validateLibrary();
 
-        expect(result.tracksChecked).toBe(102);
+        expect(result.tracksChecked).toBe(103);
         expect(result.tracksRemoved).toBe(0);
-        expect(result.tracksMissing.sort()).toEqual(["missing", "traversal"]);
+        expect(result.tracksMissing.sort()).toEqual([
+            "missing",
+            "prefix-collision",
+            "traversal",
+        ]);
         expect(result.duration).toBeGreaterThanOrEqual(0);
         const missingRecordCall = mockLibraryHealthUpsert.mock.calls.find(
             ([arg]) => arg.where?.trackId === "missing",
@@ -149,6 +158,9 @@ describe("FileValidatorService", () => {
         });
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "[FileValidator] Path traversal attempt detected: ../../etc/passwd",
+        );
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "[FileValidator] Path traversal attempt detected: ../music-evil/x.flac",
         );
         expect(mockLoggerError).toHaveBeenCalledWith(
             "[FileValidator] Error checking undefined:",
@@ -203,11 +215,11 @@ describe("FileValidatorService", () => {
         expect(mockLibraryHealthDeleteMany).not.toHaveBeenCalled();
     });
 
-    it("marks validateTrack path traversal tracks as missing-from-disk health issues with detail", async () => {
+    it("marks validateTrack prefix-collision paths as missing-from-disk health issues with detail", async () => {
         const service = new FileValidatorService();
         mockFindUnique.mockResolvedValueOnce({
             id: "track-1",
-            filePath: "../escape.mp3",
+            filePath: "../music-evil/x.flac",
             title: "Escape",
         });
 
@@ -216,18 +228,18 @@ describe("FileValidatorService", () => {
             where: { trackId: "track-1" },
             update: {
                 status: "MISSING_FROM_DISK",
-                filePath: "../escape.mp3",
+                filePath: "../music-evil/x.flac",
                 detail: "Path traversal attempt detected during validation",
             },
             create: {
                 trackId: "track-1",
                 status: "MISSING_FROM_DISK",
-                filePath: "../escape.mp3",
+                filePath: "../music-evil/x.flac",
                 detail: "Path traversal attempt detected during validation",
             },
         });
         expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "[FileValidator] Path traversal attempt detected: ../escape.mp3",
+            "[FileValidator] Path traversal attempt detected: ../music-evil/x.flac",
         );
     });
 

@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
-import * as path from "path";
 import { prisma } from "../utils/db";
 import { config } from "../config";
+import { safeResolvePath } from "../utils/safeResolvePath";
 import PQueue from "p-queue";
 
 type LibraryHealthRecordDelegate = {
@@ -98,16 +98,13 @@ export class FileValidatorService {
         for (const track of tracks) {
             await this.validationQueue.add(async () => {
                 try {
-                    const absolutePath = path.normalize(
-                        path.join(config.music.musicPath, track.filePath),
+                    const absolutePath = safeResolvePath(
+                        config.music.musicPath,
+                        track.filePath,
                     );
 
                     // Prevent path traversal attacks
-                    if (
-                        !absolutePath.startsWith(
-                            path.normalize(config.music.musicPath),
-                        )
-                    ) {
+                    if (!absolutePath) {
                         logger.warn(
                             `[FileValidator] Path traversal attempt detected: ${track.filePath}`,
                         );
@@ -210,12 +207,13 @@ export class FileValidatorService {
             return false;
         }
 
-        const absolutePath = path.normalize(
-            path.join(config.music.musicPath, track.filePath),
+        const absolutePath = safeResolvePath(
+            config.music.musicPath,
+            track.filePath,
         );
 
         // Prevent path traversal attacks
-        if (!absolutePath.startsWith(path.normalize(config.music.musicPath))) {
+        if (!absolutePath) {
             logger.warn(
                 `[FileValidator] Path traversal attempt detected: ${track.filePath}`,
             );

@@ -307,6 +307,39 @@ describe("segmentedStreamingSessionService local quality handling", () => {
             "cache-2-cross-pod",
         );
     });
+
+    it.each(["../../etc/passwd", "/etc/passwd"])(
+        "rejects an out-of-root local source path before filesystem or DASH access: %s",
+        async (filePath) => {
+            const { segmentedStreamingSessionService, mocks } =
+                await resolveSessionService();
+
+            mocks.mockUserSettingsFindUnique.mockResolvedValueOnce({
+                playbackQuality: "medium",
+            });
+            mocks.mockTrackFindUnique.mockResolvedValueOnce({
+                id: "track-outside-root",
+                filePath,
+                fileModified: new Date("2026-02-20T00:00:00.000Z"),
+            });
+
+            await expect(
+                segmentedStreamingSessionService.createLocalSession({
+                    userId: "user-1",
+                    trackId: "track-outside-root",
+                    desiredQuality: "medium",
+                }),
+            ).rejects.toMatchObject({
+                code: "TRACK_SOURCE_MISSING",
+                statusCode: 404,
+            });
+
+            expect(mocks.mockFsAccess).not.toHaveBeenCalled();
+            expect(
+                mocks.mockManifestGetOrCreateLocalDashAsset,
+            ).not.toHaveBeenCalled();
+        },
+    );
 });
 
 describe("segmentedStreamingSessionService token validation", () => {
@@ -820,6 +853,44 @@ describe("segmentedStreamingSessionService playback error repair", () => {
             }),
         ).resolves.toBeUndefined();
 
+        expect(mocks.mockForceRegenerateDashSegments).not.toHaveBeenCalled();
+    });
+
+    it("skips playback repair when the track source escapes the media root", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        jest.spyOn(
+            segmentedStreamingSessionService,
+            "getAuthorizedSession",
+        ).mockResolvedValue({
+            sessionId: "session-traversal-repair",
+            userId: "user-1",
+            trackId: "track-traversal-repair",
+            cacheKey: "cache-traversal-repair",
+            quality: "medium",
+            sourceType: "local",
+            manifestProfile: "startup_single",
+            manifestPath: "/tmp/assets/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2026-02-20T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValue({
+            id: "track-traversal-repair",
+            filePath: "../../etc/passwd",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+
+        await expect(
+            (
+                segmentedStreamingSessionService as any
+            ).repairPlaybackErrorSessionCache({
+                userId: "user-1",
+                sessionId: "session-traversal-repair",
+            }),
+        ).resolves.toBeUndefined();
+
+        expect(mocks.mockFsAccess).not.toHaveBeenCalled();
         expect(mocks.mockForceRegenerateDashSegments).not.toHaveBeenCalled();
     });
 
@@ -1636,6 +1707,41 @@ describe("segmentedStreamingSessionService manifest startup readiness", () => {
         expect(
             mocks.mockManifestGetOrCreateLocalDashAsset,
         ).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not self-heal a track source that escapes the media root", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        const session = {
+            sessionId: "session-traversal-self-heal",
+            userId: "user-1",
+            trackId: "track-traversal-self-heal",
+            cacheKey: "cache-traversal-self-heal",
+            quality: "medium",
+            sourceType: "local",
+            manifestProfile: "startup_single",
+            manifestPath: "/tmp/assets/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2026-02-20T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+        } as const;
+        mocks.mockTrackFindUnique.mockResolvedValue({
+            id: "track-traversal-self-heal",
+            filePath: "../../etc/passwd",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+
+        await expect(
+            (segmentedStreamingSessionService as any).trySelfHealMissingAsset(
+                session,
+                "manifest",
+            ),
+        ).resolves.toBe(false);
+
+        expect(mocks.mockFsAccess).not.toHaveBeenCalled();
+        expect(
+            mocks.mockManifestGetOrCreateLocalDashAsset,
+        ).not.toHaveBeenCalled();
     });
 
     it("waits through cross-pod grace polling when no in-flight build exists yet", async () => {

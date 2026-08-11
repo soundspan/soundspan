@@ -572,6 +572,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Enforced media-root containment through the shared `safeResolvePath` helper
+  for segmented-streaming session creation, self-heal, and playback repair;
+  library audio-info probes; file-validator checks; and artist/discovery
+  deletion fallbacks. Traversal or absolute database paths now use each flow's
+  existing 404 or skip behavior instead of reaching the filesystem or ffmpeg.
 - Share-link single-track streaming now confines resolved media paths to the
   configured music directory, matching the ZIP download branch's traversal
   defense.

@@ -6,6 +6,7 @@ import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { config } from "../../config";
 import { logger } from "../../utils/logger";
+import { safeResolvePath } from "../../utils/safeResolvePath";
 import { coalesceInFlightByKey as coalesceByKey } from "../../utils/singleflight";
 import {
     segmentedManifestService,
@@ -50,6 +51,9 @@ const SEGMENTED_SOURCE_TYPE_VALUES: ReadonlyArray<SegmentedStreamingSourceType> 
     ["local"];
 const DEFAULT_SEGMENTED_SESSION_MANIFEST_PROFILE: SegmentedSessionManifestProfile =
     "steady_state_dual";
+
+const resolveLocalSourcePath = (filePath: string): string | null =>
+    safeResolvePath(config.music.musicPath, filePath.replace(/\\/g, "/"));
 
 export type SegmentedSessionQuality = (typeof SEGMENTED_QUALITY_VALUES)[number];
 export type SegmentedSessionManifestProfile =
@@ -211,13 +215,19 @@ class SegmentedSessionService {
                 );
             }
 
-            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const sourcePath = path.join(
-                config.music.musicPath,
-                normalizedFilePath,
-            );
             phase = "source_access";
             const sourceAccessStartedAtMs = Date.now();
+            const sourcePath = resolveLocalSourcePath(track.filePath);
+            if (!sourcePath) {
+                sourceAccessMs = segmentedTraceDurationMs(
+                    sourceAccessStartedAtMs,
+                );
+                throw new SegmentedSessionError(
+                    "Track source file was not found on disk",
+                    404,
+                    "TRACK_SOURCE_MISSING",
+                );
+            }
 
             try {
                 await fsPromises.access(sourcePath);
@@ -1171,11 +1181,10 @@ class SegmentedSessionService {
                 return false;
             }
 
-            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const sourcePath = path.join(
-                config.music.musicPath,
-                normalizedFilePath,
-            );
+            const sourcePath = resolveLocalSourcePath(track.filePath);
+            if (!sourcePath) {
+                return false;
+            }
             await fsPromises.access(sourcePath);
 
             await segmentedManifestService.getOrCreateLocalDashAsset({
@@ -1266,11 +1275,20 @@ class SegmentedSessionService {
                 return;
             }
 
-            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const sourcePath = path.join(
-                config.music.musicPath,
-                normalizedFilePath,
-            );
+            const sourcePath = resolveLocalSourcePath(track.filePath);
+            if (!sourcePath) {
+                logSegmentedStreamingTrace(
+                    "session.asset.playback_error_repair_skipped",
+                    {
+                        sessionId: session.sessionId,
+                        trackId: session.trackId,
+                        cacheKey: session.cacheKey,
+                        reason: "source_outside_media_root",
+                        totalMs: segmentedTraceDurationMs(startedAtMs),
+                    },
+                );
+                return;
+            }
             await fsPromises.access(sourcePath);
             await segmentedSegmentService.forceRegenerateDashSegments({
                 trackId: track.id,
