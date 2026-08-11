@@ -791,12 +791,90 @@ router.delete("/:id", async (req, res) => {
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - trackId
- *             properties:
- *               trackId:
- *                 type: string
+ *             oneOf:
+ *               - type: object
+ *                 required: [trackId]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [tidalTrackId]
+ *                     - required: [youtubeVideoId]
+ *                 properties:
+ *                   trackId:
+ *                     type: string
+ *                     minLength: 1
+ *                     description: Local library track ID
+ *               - type: object
+ *                 required: [tidalTrackId, title, artist, album, duration]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [trackId]
+ *                     - required: [youtubeVideoId]
+ *                 properties:
+ *                   tidalTrackId:
+ *                     type: integer
+ *                     minimum: 1
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                   artist:
+ *                     type: string
+ *                     minLength: 1
+ *                   album:
+ *                     type: string
+ *                     minLength: 1
+ *                   duration:
+ *                     type: integer
+ *                     minimum: 0
+ *                     description: Track duration in seconds
+ *                   isrc:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 64
+ *                   quality:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 64
+ *                   explicit:
+ *                     type: boolean
+ *                   thumbnailUrl:
+ *                     type: string
+ *                     minLength: 1
+ *               - type: object
+ *                 required: [youtubeVideoId, title, artist, album, duration]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [trackId]
+ *                     - required: [tidalTrackId]
+ *                 properties:
+ *                   youtubeVideoId:
+ *                     type: string
+ *                     minLength: 1
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                   artist:
+ *                     type: string
+ *                     minLength: 1
+ *                   album:
+ *                     type: string
+ *                     minLength: 1
+ *                   duration:
+ *                     type: integer
+ *                     minimum: 0
+ *                     description: Track duration in seconds
+ *                   isrc:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 64
+ *                   quality:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 64
+ *                   explicit:
+ *                     type: boolean
+ *                   thumbnailUrl:
+ *                     type: string
+ *                     minLength: 1
  *     responses:
  *       200:
  *         description: Track added to playlist (or already exists)
@@ -1068,19 +1146,25 @@ router.delete("/:id/items/:trackId", async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - trackIds
  *             properties:
+ *               itemIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Playlist item IDs in the desired order. Use for remote or mixed-source playlists; preferred when both arrays are present.
  *               trackIds:
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: Array of track IDs in the desired order
+ *                 description: Legacy local-library track IDs in the desired order
+ *             anyOf:
+ *               - required: [itemIds]
+ *               - required: [trackIds]
  *     responses:
  *       200:
  *         description: Playlist reordered
  *       400:
- *         description: trackIds must be an array
+ *         description: itemIds or trackIds must be an array
  *       403:
  *         description: Access denied
  *       404:

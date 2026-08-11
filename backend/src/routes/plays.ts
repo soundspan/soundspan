@@ -235,12 +235,70 @@ router.delete("/history", async (req, res) => {
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - trackId
- *             properties:
- *               trackId:
- *                 type: string
+ *             oneOf:
+ *               - type: object
+ *                 required: [trackId]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [tidalTrackId]
+ *                     - required: [youtubeVideoId]
+ *                 properties:
+ *                   trackId:
+ *                     type: string
+ *                     minLength: 1
+ *                     description: Local library track ID
+ *               - type: object
+ *                 required: [tidalTrackId, title, artist, album, duration]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [trackId]
+ *                     - required: [youtubeVideoId]
+ *                 properties:
+ *                   tidalTrackId:
+ *                     type: integer
+ *                     minimum: 1
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                   artist:
+ *                     type: string
+ *                     minLength: 1
+ *                   album:
+ *                     type: string
+ *                     minLength: 1
+ *                   duration:
+ *                     type: integer
+ *                     minimum: 0
+ *                     description: Track duration in seconds
+ *                   thumbnailUrl:
+ *                     type: string
+ *                     minLength: 1
+ *               - type: object
+ *                 required: [youtubeVideoId, title, artist, album, duration]
+ *                 not:
+ *                   anyOf:
+ *                     - required: [trackId]
+ *                     - required: [tidalTrackId]
+ *                 properties:
+ *                   youtubeVideoId:
+ *                     type: string
+ *                     minLength: 1
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                   artist:
+ *                     type: string
+ *                     minLength: 1
+ *                   album:
+ *                     type: string
+ *                     minLength: 1
+ *                   duration:
+ *                     type: integer
+ *                     minimum: 0
+ *                     description: Track duration in seconds
+ *                   thumbnailUrl:
+ *                     type: string
+ *                     minLength: 1
  *     responses:
  *       200:
  *         description: Play logged successfully
