@@ -201,12 +201,14 @@ class SoulseekService {
         try {
             this.client?.removeAllListeners?.("error");
             this.client?.destroy?.();
-        } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
+        } catch (teardownError) {
+            log.warn(
+                "Client teardown failed; continuing state reset",
+                teardownError,
+            );
             sessionLog(
                 "SOULSEEK",
-                `Client teardown failed: ${message}`,
+                "Client teardown failed; continuing state reset",
                 "WARN",
             );
         }
