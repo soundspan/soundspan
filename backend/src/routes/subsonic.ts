@@ -5195,26 +5195,30 @@ async function resolveStarMutationTrackIds(input: {
 async function getPlaylistDurations(
     playlists: Array<{ id: string; _count: { items: number } }>,
 ): Promise<Map<string, number>> {
-    const nonEmptyPlaylists = playlists.filter(
-        (playlist) => playlist._count.items > 0,
-    );
-    const durationRows = await Promise.all(
-        nonEmptyPlaylists.map(async (playlist) => ({
-            playlistId: playlist.id,
-            aggregate: await prisma.track.aggregate({
-                where: {
-                    playlistItems: { some: { playlistId: playlist.id } },
-                },
-                _sum: { duration: true },
-            }),
-        })),
-    );
-    return new Map(
-        durationRows.map(({ playlistId, aggregate }) => [
-            playlistId,
-            aggregate._sum.duration ?? 0,
-        ]),
-    );
+    const nonEmptyIds = playlists
+        .filter((playlist) => playlist._count.items > 0)
+        .map((playlist) => playlist.id);
+    if (nonEmptyIds.length === 0) {
+        return new Map();
+    }
+    const rows = await prisma.playlistItem.findMany({
+        where: {
+            playlistId: { in: nonEmptyIds },
+            trackId: { not: null },
+        },
+        select: {
+            playlistId: true,
+            track: { select: { duration: true } },
+        },
+    });
+    const durations = new Map<string, number>();
+    for (const row of rows) {
+        durations.set(
+            row.playlistId,
+            (durations.get(row.playlistId) ?? 0) + (row.track?.duration ?? 0),
+        );
+    }
+    return durations;
 }
 
 async function getPlaylistCoverFlags(

@@ -958,10 +958,21 @@ describe("subsonic Tier B handlers", () => {
                 },
             },
         ]);
-        mockTrackAggregate.mockResolvedValue({ _sum: { duration: 165 } });
-        mockPlaylistItemFindMany.mockResolvedValue([
-            { playlistId: "playlist-1" },
-        ]);
+        mockPlaylistItemFindMany.mockImplementation((args) => {
+            if (args.where.trackId) {
+                return Promise.resolve([
+                    {
+                        playlistId: "playlist-1",
+                        track: { duration: 100 },
+                    },
+                    {
+                        playlistId: "playlist-1",
+                        track: { duration: 65 },
+                    },
+                ]);
+            }
+            return Promise.resolve([{ playlistId: "playlist-1" }]);
+        });
 
         await handleGetPlaylists(buildReq({}), buildRes());
 
@@ -972,16 +983,18 @@ describe("subsonic Tier B handlers", () => {
             include: { _count: { select: { items: true } } },
         });
         expect(playlistQuery.include).not.toHaveProperty("items");
-        expect(mockTrackAggregate).toHaveBeenCalledTimes(1);
-        expect(mockTrackAggregate).toHaveBeenCalledWith({
+        expect(mockTrackAggregate).not.toHaveBeenCalled();
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(2);
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
             where: {
-                playlistItems: {
-                    some: { playlistId: "playlist-1" },
-                },
+                playlistId: { in: ["playlist-1"] },
+                trackId: { not: null },
             },
-            _sum: { duration: true },
+            select: {
+                playlistId: true,
+                track: { select: { duration: true } },
+            },
         });
-        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(1);
         expect(mockPlaylistItemFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 distinct: ["playlistId"],

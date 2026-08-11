@@ -199,10 +199,21 @@ describe("subsonic collections/core compatibility handlers", () => {
                 },
             },
         ]);
-        mockTrackAggregate.mockResolvedValue({ _sum: { duration: 300 } });
-        mockPlaylistItemFindMany.mockResolvedValue([
-            { playlistId: "playlist-1" },
-        ]);
+        mockPlaylistItemFindMany.mockImplementation((args) => {
+            if (args.where.trackId) {
+                return Promise.resolve([
+                    {
+                        playlistId: "playlist-1",
+                        track: { duration: 120 },
+                    },
+                    {
+                        playlistId: "playlist-1",
+                        track: { duration: 180 },
+                    },
+                ]);
+            }
+            return Promise.resolve([{ playlistId: "playlist-1" }]);
+        });
 
         await handleGetPlaylists(buildReq({}), buildRes());
 
@@ -213,16 +224,18 @@ describe("subsonic collections/core compatibility handlers", () => {
             include: { _count: { select: { items: true } } },
         });
         expect(playlistQuery.include).not.toHaveProperty("items");
-        expect(mockTrackAggregate).toHaveBeenCalledTimes(1);
-        expect(mockTrackAggregate).toHaveBeenCalledWith({
+        expect(mockTrackAggregate).not.toHaveBeenCalled();
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(2);
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
             where: {
-                playlistItems: {
-                    some: { playlistId: "playlist-1" },
-                },
+                playlistId: { in: ["playlist-1"] },
+                trackId: { not: null },
             },
-            _sum: { duration: true },
+            select: {
+                playlistId: true,
+                track: { select: { duration: true } },
+            },
         });
-        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(1);
         expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
             where: {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
@@ -265,6 +278,68 @@ describe("subsonic collections/core compatibility handlers", () => {
         );
     });
 
+    it("loads all playlist durations with one query", async () => {
+        mockPlaylistFindMany.mockResolvedValue([
+            {
+                id: "playlist-a",
+                name: "Playlist A",
+                isPublic: false,
+                createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                _count: { items: 2 },
+            },
+            {
+                id: "playlist-b",
+                name: "Playlist B",
+                isPublic: false,
+                createdAt: new Date("2026-01-02T00:00:00.000Z"),
+                _count: { items: 1 },
+            },
+            {
+                id: "playlist-c",
+                name: "Playlist C",
+                isPublic: false,
+                createdAt: new Date("2026-01-03T00:00:00.000Z"),
+                _count: { items: 0 },
+            },
+        ]);
+        mockPlaylistItemFindMany.mockImplementation((args) => {
+            if (args.where.trackId) {
+                return Promise.resolve([
+                    { playlistId: "playlist-a", track: { duration: 100 } },
+                    { playlistId: "playlist-a", track: { duration: 150 } },
+                    { playlistId: "playlist-b", track: { duration: 40 } },
+                    { playlistId: "playlist-b", track: null },
+                ]);
+            }
+            return Promise.resolve([]);
+        });
+
+        await handleGetPlaylists(buildReq({}), buildRes());
+
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledTimes(2);
+        expect(mockTrackAggregate).not.toHaveBeenCalled();
+        expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
+            where: {
+                playlistId: { in: ["playlist-a", "playlist-b"] },
+                trackId: { not: null },
+            },
+            select: {
+                playlistId: true,
+                track: { select: { duration: true } },
+            },
+        });
+        const playlists = (
+            mockSendSuccess.mock.calls[0][1] as {
+                playlists: { playlist: Array<Record<string, unknown>> };
+            }
+        ).playlists.playlist;
+        expect(playlists).toEqual([
+            expect.objectContaining({ id: "pl-playlist-a", duration: 250 }),
+            expect.objectContaining({ id: "pl-playlist-b", duration: 40 }),
+            expect.objectContaining({ id: "pl-playlist-c", duration: 0 }),
+        ]);
+    });
+
     it("returns generic error when getPlaylists query fails", async () => {
         mockPlaylistFindMany.mockResolvedValueOnce([
             {
@@ -275,7 +350,12 @@ describe("subsonic collections/core compatibility handlers", () => {
                 _count: { items: 1 },
             },
         ]);
-        mockTrackAggregate.mockRejectedValueOnce(new Error("boom"));
+        mockPlaylistItemFindMany.mockImplementation((args) => {
+            if (args.where.trackId) {
+                return Promise.reject(new Error("boom"));
+            }
+            return Promise.resolve([]);
+        });
 
         await handleGetPlaylists(buildReq({}), buildRes());
 

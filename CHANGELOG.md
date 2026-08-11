@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Subsonic `getPlaylists` endpoint now computes playlist durations with a
+  single query over playlist items instead of one aggregate query per playlist,
+  removing an unbounded N+1 fan-out that could saturate the database connection
+  pool for users with many playlists.
 - Promoted the segmented-streaming session service's identity-guarded
   keyed-singleflight into a shared backend helper and rethreaded transcode
   caching, vibe calibration, and both the YouTube Music and TIDAL OAuth-restore
