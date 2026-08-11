@@ -70,11 +70,13 @@ class FakeAudioEngine {
     public pauseCalls = 0;
     public stopCalls = 0;
     public reloadCalls = 0;
+    public notifyTrackEndedCalls = 0;
 
     public currentTime = 0;
     public actualCurrentTime = 0;
     public duration = 240;
     public playing = false;
+    public trackEnded = false;
 
     private handlers = new Map<string, Set<(payload?: unknown) => void>>();
 
@@ -90,10 +92,12 @@ class FakeAudioEngine {
         this.pauseCalls = 0;
         this.stopCalls = 0;
         this.reloadCalls = 0;
+        this.notifyTrackEndedCalls = 0;
         this.currentTime = 0;
         this.actualCurrentTime = 0;
         this.duration = 240;
         this.playing = false;
+        this.trackEnded = false;
         this.handlers.clear();
     }
 
@@ -160,6 +164,14 @@ class FakeAudioEngine {
 
     isPlaying(): boolean {
         return this.playing;
+    }
+
+    hasTrackEnded(): boolean {
+        return this.trackEnded;
+    }
+
+    notifyTrackEnded(): void {
+        this.notifyTrackEndedCalls += 1;
     }
 
     // Mirrors HybridRuntimeAudioEngine.getActiveEngineDescriptor() (GH #42
@@ -484,6 +496,37 @@ const loggerCalls = {
     info: [] as Array<unknown[]>,
     warn: [] as Array<unknown[]>,
     error: [] as Array<unknown[]>,
+};
+
+class FakeVisibilityDocument {
+    public visibilityState: "hidden" | "visible" = "visible";
+    private readonly listeners = new Set<() => void>();
+
+    addEventListener(event: string, listener: () => void): void {
+        if (event === "visibilitychange") {
+            this.listeners.add(listener);
+        }
+    }
+
+    removeEventListener(event: string, listener: () => void): void {
+        if (event === "visibilitychange") {
+            this.listeners.delete(listener);
+        }
+    }
+
+    dispatchVisibility(state: "hidden" | "visible"): void {
+        this.visibilityState = state;
+        for (const listener of this.listeners) {
+            listener();
+        }
+    }
+}
+
+const installVisibilityDocument = (): FakeVisibilityDocument => {
+    const fakeDocument = new FakeVisibilityDocument();
+    (globalThis as unknown as { document: FakeVisibilityDocument }).document =
+        fakeDocument;
+    return fakeDocument;
 };
 
 const makeTrack = (id: string, overrides: Partial<Track> = {}): Track => ({
@@ -1174,17 +1217,21 @@ mock.module("sonner", {
 
 mock.module("@/lib/logger", {
     exports: {
-        frontendLogger: {
-            info: (...args: unknown[]) => {
-                loggerCalls.info.push(args);
-            },
-            warn: (...args: unknown[]) => {
-                loggerCalls.warn.push(args);
-            },
-            error: (...args: unknown[]) => {
-                loggerCalls.error.push(args);
-            },
-        },
+        frontendLogger: (() => {
+            const logger = {
+                info: (...args: unknown[]) => {
+                    loggerCalls.info.push(args);
+                },
+                warn: (...args: unknown[]) => {
+                    loggerCalls.warn.push(args);
+                },
+                error: (...args: unknown[]) => {
+                    loggerCalls.error.push(args);
+                },
+                child: () => logger,
+            };
+            return logger;
+        })(),
     },
 });
 
@@ -1225,6 +1272,7 @@ beforeEach(() => {
 afterEach(() => {
     hookRuntime.unmount();
     delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { document?: unknown }).document;
     try {
         mock.timers.reset();
     } catch {
@@ -1271,6 +1319,181 @@ const getClientMetricEvents = (
             ),
         );
 };
+
+const emitFatalLoadError = async (): Promise<void> => {
+    engine.emit("loaderror", {
+        error: new Error("fatal decode failure"),
+        code: "MEDIA_ERR_DECODE",
+        recoverable: false,
+    });
+    await flushAsync(10);
+};
+
+test("recoverable autoplay rejection preserves the track without scheduling a skip", async () => {
+    mock.timers.enable();
+    playbackState.isPlaying = true;
+    const currentTrack = makeTrack("autoplay-blocked");
+    audioState.currentTrack = currentTrack;
+    audioState.queue = [currentTrack, makeTrack("autoplay-next")];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    await flushAsync();
+
+    engine.playing = false;
+    engine.emit("playerror", {
+        error: new DOMException("Play requires a gesture", "NotAllowedError"),
+        code: "NotAllowedError",
+        recoverable: true,
+    });
+    await flushAsync(10);
+
+    assert.equal(audioState.currentTrack?.id, "autoplay-blocked");
+    assert.equal(playbackState.isPlaying, false);
+    assert.equal(playbackState.isBuffering, true);
+    assert.notEqual(playbackMachine.state, "ERROR");
+
+    mock.timers.tick(1_201);
+    await flushAsync();
+    assert.equal(controlCalls.next, 0);
+
+    engine.playing = true;
+    engine.emit("play");
+    await flushAsync();
+    assert.equal(playbackMachine.state, "PLAYING");
+    assert.equal(playbackState.isPlaying, true);
+});
+
+test("foreground visibility reset re-enables fatal-error skips after the breaker trips", async () => {
+    mock.timers.enable();
+    const visibilityDocument = installVisibilityDocument();
+    const tracks = [
+        makeTrack("breaker-1"),
+        makeTrack("breaker-2"),
+        makeTrack("breaker-3"),
+        makeTrack("breaker-4"),
+    ];
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+    assert.equal(controlCalls.next, 1);
+
+    audioState.currentTrack = tracks[1];
+    audioState.currentIndex = 1;
+    rerenderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+    assert.equal(controlCalls.next, 2);
+
+    audioState.currentTrack = tracks[2];
+    audioState.currentIndex = 2;
+    rerenderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+    assert.equal(controlCalls.next, 2);
+
+    visibilityDocument.dispatchVisibility("hidden");
+    visibilityDocument.dispatchVisibility("visible");
+
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+    assert.equal(controlCalls.next, 3);
+});
+
+test("foreground recovery directly advances an unhandled ended music track", async () => {
+    const visibilityDocument = installVisibilityDocument();
+    audioState.playbackType = null;
+    audioState.currentTrack = null;
+    audioState.queue = [];
+
+    renderOrchestrator();
+    await flushAsync();
+
+    const endedTrack = makeTrack("background-ended");
+    audioState.playbackType = "track";
+    audioState.currentTrack = endedTrack;
+    audioState.queue = [endedTrack, makeTrack("background-next")];
+    playbackState.isPlaying = true;
+    rerenderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    await flushAsync();
+
+    visibilityDocument.dispatchVisibility("hidden");
+    engine.trackEnded = true;
+    engine.playing = false;
+    visibilityDocument.dispatchVisibility("visible");
+    await flushAsync();
+
+    assert.equal(controlCalls.next, 1);
+    assert.equal(engine.notifyTrackEndedCalls, 0);
+});
+
+test("newly loaded source can end immediately after an advance", async () => {
+    const tracks = [
+        makeTrack("immediate-end-1"),
+        makeTrack("immediate-end-2"),
+        makeTrack("immediate-end-3"),
+    ];
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.emit("end");
+    assert.equal(controlCalls.next, 1);
+
+    audioState.currentTrack = tracks[1];
+    audioState.currentIndex = 1;
+    rerenderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.emit("end");
+
+    assert.equal(controlCalls.next, 2);
+});
+
+test("startup playback watchdog does not reload for a listen-together follower", async () => {
+    mock.timers.enable();
+    playbackState.isPlaying = true;
+    listenTogetherSnapshot = {
+        groupId: "lt-startup-follower",
+        isHost: false,
+    };
+    const track = makeTrack("lt-startup-track");
+    audioState.currentTrack = track;
+    audioState.queue = [track];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    mock.timers.tick(1_500);
+    await flushAsync();
+
+    assert.equal(engine.reloadCalls, 0);
+});
 
 test("loads direct track, applies output state, and syncs play/pause transitions", async () => {
     playbackState.isPlaying = true;

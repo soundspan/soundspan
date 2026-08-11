@@ -16,6 +16,7 @@ import {
     resolveStreamingEngineMode,
 } from "@/lib/audio-engine/engineMode";
 import type {
+    AudioEngineErrorPayload,
     AudioEngineManifestStallPayload,
     AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
@@ -398,6 +399,9 @@ const AUDIO_ENGINE_MANIFEST_STALL_EVENTS = [
     "manifest-stall",
 ] as const;
 const audioEngine = createRuntimeAudioEngine();
+const orchestratorLogger = sharedFrontendLogger.child(
+    "AudioPlaybackOrchestrator",
+);
 
 interface ActiveSegmentedSessionSnapshot {
     sessionId: string;
@@ -700,6 +704,7 @@ export const AudioPlaybackOrchestrator = memo(
         );
         const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
         const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
+        const trackErrorAdvanceFromTrackIdRef = useRef<string | null>(null);
         const consecutiveErrorBreakerRef = useRef(
             createConsecutiveErrorBreaker(),
         );
@@ -718,6 +723,8 @@ export const AudioPlaybackOrchestrator = memo(
         const playbackTypeRef = useRef(playbackType);
         const lastLoggedRemotePlayKeyRef = useRef<string | null>(null);
         const activeEngineTrackIdRef = useRef<string | null>(null);
+        const activeEngineLoadIdRef = useRef<number>(-1);
+        const recoverablePlayErrorPendingRef = useRef<boolean>(false);
         const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
         const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(
             null,
@@ -2099,6 +2106,14 @@ export const AudioPlaybackOrchestrator = memo(
                     if (playbackTypeRef.current !== "track") return;
                     if (!lastPlayingStateRef.current) return;
                     if (currentTrackRef.current?.id !== trackId) return;
+                    const listenTogetherSession =
+                        getListenTogetherSessionSnapshot();
+                    if (
+                        listenTogetherSession?.groupId &&
+                        !listenTogetherSession.isHost
+                    ) {
+                        return;
+                    }
 
                     const startupStability =
                         segmentedStartupStabilityRef.current;
@@ -2156,6 +2171,14 @@ export const AudioPlaybackOrchestrator = memo(
                         if (!lastPlayingStateRef.current) return;
                         if (currentTrackRef.current?.id !== trackId) return;
                         if (audioEngine.isPlaying()) return;
+                        const listenTogetherSession =
+                            getListenTogetherSessionSnapshot();
+                        if (
+                            listenTogetherSession?.groupId &&
+                            !listenTogetherSession.isHost
+                        ) {
+                            return;
+                        }
 
                         audioEngine.play();
                     };
@@ -2338,6 +2361,8 @@ export const AudioPlaybackOrchestrator = memo(
 
                     lastTrackIdRef.current = null;
                     isLoadingRef.current = false;
+                    trackErrorAdvanceFromTrackIdRef.current = failedTrackId;
+                    advancePlayIntentAtMsRef.current = Date.now();
                     next();
                 }, TRACK_ERROR_SKIP_DELAY_MS);
             },
@@ -4492,8 +4517,6 @@ export const AudioPlaybackOrchestrator = memo(
 
         // Subscribe to runtime audio engine events
         useEffect(() => {
-            const effectLoadId = loadIdRef.current;
-
             const handleTimeUpdate = (data: {
                 timeSec: number;
                 time?: number;
@@ -4538,6 +4561,7 @@ export const AudioPlaybackOrchestrator = memo(
                         loadTimeoutRetryCountRef.current = 0;
                         isLoadingRef.current = false;
                         activeEngineTrackIdRef.current = liveTrackId;
+                        activeEngineLoadIdRef.current = loadIdRef.current;
                         logPlaybackClientMetric(
                             "session.startup_timeout_skip",
                             {
@@ -4649,11 +4673,23 @@ export const AudioPlaybackOrchestrator = memo(
                 );
                 if (playbackType === "track") {
                     if (isLoadingRef.current) {
+                        orchestratorLogger.warn("Rejected track end event", {
+                            reason: "engine_source_loading",
+                            currentTrackId: currentTrackRef.current?.id ?? null,
+                            activeLoadId: activeEngineLoadIdRef.current,
+                            currentLoadId: loadIdRef.current,
+                        });
                         return;
                     }
 
                     // Guard: stale end event from a previous load cycle
-                    if (effectLoadId !== loadIdRef.current) {
+                    if (activeEngineLoadIdRef.current !== loadIdRef.current) {
+                        orchestratorLogger.warn("Rejected track end event", {
+                            reason: "stale_engine_load",
+                            currentTrackId: currentTrackRef.current?.id ?? null,
+                            activeLoadId: activeEngineLoadIdRef.current,
+                            currentLoadId: loadIdRef.current,
+                        });
                         return;
                     }
                     const currentTrackId = currentTrackRef.current?.id ?? null;
@@ -4663,13 +4699,12 @@ export const AudioPlaybackOrchestrator = memo(
                         activeEngineTrackId &&
                         currentTrackId !== activeEngineTrackId
                     ) {
-                        sharedFrontendLogger.warn(
-                            "[AudioPlaybackOrchestrator] Ignoring stale Listen Together track end event",
-                            {
-                                currentTrackId,
-                                activeEngineTrackId,
-                            },
-                        );
+                        orchestratorLogger.warn("Rejected track end event", {
+                            reason: "stale_engine_track",
+                            currentTrackId,
+                            activeEngineTrackId,
+                            activeLoadId: activeEngineLoadIdRef.current,
+                        });
                         return;
                     }
 
@@ -4683,9 +4718,10 @@ export const AudioPlaybackOrchestrator = memo(
                             lastHandled.loadId === activeLoadId &&
                             now - lastHandled.handledAtMs < 1500
                         ) {
-                            sharedFrontendLogger.warn(
-                                "[AudioPlaybackOrchestrator] Ignoring duplicate track end event",
+                            orchestratorLogger.warn(
+                                "Rejected track end event",
                                 {
+                                    reason: "duplicate_end",
                                     currentTrackId,
                                     activeLoadId,
                                     sinceLastHandledMs:
@@ -4841,7 +4877,28 @@ export const AudioPlaybackOrchestrator = memo(
                 }
             };
 
-            const handleError = async (data: { error: unknown }) => {
+            const handleError = async (data: AudioEngineErrorPayload) => {
+                const isRecoverablePlayError =
+                    data.code === "NotAllowedError" ||
+                    data.recoverable === true;
+                if (isRecoverablePlayError) {
+                    orchestratorLogger.warn(
+                        "Playback deferred for browser-owned recovery",
+                        {
+                            code: data.code ?? null,
+                            recoverable: data.recoverable === true,
+                            trackId: currentTrackRef.current?.id ?? null,
+                        },
+                    );
+                    howlerLoadStartMsRef.current = 0;
+                    recoverablePlayErrorPendingRef.current = true;
+                    isUserInitiatedRef.current = false;
+                    playbackStateMachine.forceTransition("LOADING");
+                    setIsPlaying(false);
+                    setIsBuffering(true);
+                    return;
+                }
+
                 sharedFrontendLogger.error(
                     "[AudioPlaybackOrchestrator] Playback error:",
                     data.error,
@@ -4983,6 +5040,7 @@ export const AudioPlaybackOrchestrator = memo(
                 emitSegmentedStartupTimeline("playback_error", {
                     error: errorMessage,
                 });
+                recoverablePlayErrorPendingRef.current = false;
                 isUserInitiatedRef.current = false;
                 heartbeatRef.current?.stop();
                 clearTransientTrackRecovery(true);
@@ -5217,6 +5275,10 @@ export const AudioPlaybackOrchestrator = memo(
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
                 clearTransientTrackRecovery(true);
+                if (recoverablePlayErrorPendingRef.current) {
+                    recoverablePlayErrorPendingRef.current = false;
+                    setIsBuffering(false);
+                }
                 if (playbackTypeRef.current === "track") {
                     lastTrackTimeUpdateAtMsRef.current = Date.now();
                 }
@@ -5571,6 +5633,8 @@ export const AudioPlaybackOrchestrator = memo(
                     return;
                 }
 
+                consecutiveErrorBreakerRef.current.reset();
+
                 const decision = resolveForegroundRecoveryDecision({
                     isVisible: true,
                     wasPlayingWhenHidden: wasPlayingWhenHiddenRef.current,
@@ -5590,7 +5654,7 @@ export const AudioPlaybackOrchestrator = memo(
                 // Detect whether the track finished while backgrounded.
                 // This check runs before the throttle gate so that a
                 // completed track is never suppressed by cooldown timing.
-                if (playbackType === "track") {
+                if (playbackTypeRef.current === "track") {
                     const trackEnded =
                         typeof audioEngine.hasTrackEnded === "function"
                             ? audioEngine.hasTrackEnded()
@@ -5600,12 +5664,35 @@ export const AudioPlaybackOrchestrator = memo(
                                   return d > 0 && p >= d - 0.1;
                               })();
                     if (trackEnded) {
-                        sharedFrontendLogger.info(
-                            "[AudioPlaybackOrchestrator] Foreground recovery: track ended while backgrounded, synthesizing end event",
-                            { trackId: currentMediaId },
-                        );
-                        audioEngine.notifyTrackEnded();
-                        return;
+                        const currentLoadId = loadIdRef.current;
+                        const lastHandled = lastHandledTrackEndRef.current;
+                        const endWasAlreadyHandled =
+                            lastHandled.trackId === currentMediaId &&
+                            lastHandled.loadId === currentLoadId;
+                        const engineSourceMatchesCurrentTrack =
+                            activeEngineTrackIdRef.current === currentMediaId &&
+                            activeEngineLoadIdRef.current === currentLoadId;
+                        if (
+                            !endWasAlreadyHandled &&
+                            engineSourceMatchesCurrentTrack
+                        ) {
+                            const now = Date.now();
+                            lastHandledTrackEndRef.current = {
+                                trackId: currentMediaId,
+                                loadId: currentLoadId,
+                                handledAtMs: now,
+                            };
+                            advancePlayIntentAtMsRef.current = now;
+                            orchestratorLogger.info(
+                                "Foreground recovery advancing ended track",
+                                {
+                                    trackId: currentMediaId,
+                                    loadId: currentLoadId,
+                                },
+                            );
+                            next();
+                            return;
+                        }
                     }
                 }
 
@@ -5645,7 +5732,7 @@ export const AudioPlaybackOrchestrator = memo(
                     clearTimeout(recoveryTimeoutId);
                 }
             };
-        }, [currentAudiobook?.id, currentPodcast?.id, setIsBuffering]);
+        }, [currentAudiobook?.id, currentPodcast?.id, next, setIsBuffering]);
 
         // Load and play audio when track changes
         useEffect(() => {
@@ -5761,9 +5848,22 @@ export const AudioPlaybackOrchestrator = memo(
 
             isLoadingRef.current = true;
             activeEngineTrackIdRef.current = null;
+            activeEngineLoadIdRef.current = -1;
             lastTrackIdRef.current = currentMediaId;
             loadIdRef.current += 1;
             const thisLoadId = loadIdRef.current;
+            const hasAdvancePlayIntent = isAdvancePlayIntentFresh(
+                advancePlayIntentAtMsRef.current,
+                Date.now(),
+            );
+            advancePlayIntentAtMsRef.current = null;
+            if (
+                playbackType === "track" &&
+                previousMediaId !== null &&
+                !hasAdvancePlayIntent
+            ) {
+                consecutiveErrorBreakerRef.current.reset();
+            }
             loadTimeoutRetryCountRef.current = 0;
             segmentedStartupRetryCountRef.current = 0;
             segmentedStartupStageAttemptsRef.current =
@@ -5891,15 +5991,6 @@ export const AudioPlaybackOrchestrator = memo(
             if (streamUrl) {
                 setCurrentTime(Math.max(0, startTime));
                 const wasEnginePlayingBeforeLoad = audioEngine.isPlaying();
-                // Consume a declared auto-advance play intent (stamped by the
-                // track-end handler). Captured once so the load-time and the
-                // deferred (handleLoaded) autoplay decisions agree.
-                const hasAdvancePlayIntent = isAdvancePlayIntentFresh(
-                    advancePlayIntentAtMsRef.current,
-                    Date.now(),
-                );
-                advancePlayIntentAtMsRef.current = null;
-
                 const fallbackDuration =
                     currentTrack?.duration ||
                     currentAudiobook?.duration ||
@@ -6728,6 +6819,10 @@ export const AudioPlaybackOrchestrator = memo(
                             playbackType === "track" && currentTrack
                                 ? currentTrack.id
                                 : null;
+                        activeEngineLoadIdRef.current =
+                            playbackType === "track" && currentTrack
+                                ? thisLoadId
+                                : -1;
 
                         if (startTime > 0) {
                             audioEngine.seek(startTime);
@@ -7262,6 +7357,17 @@ export const AudioPlaybackOrchestrator = memo(
             isUserInitiatedRef.current = true;
 
             if (isPlaying) {
+                const errorAdvanceFromTrackId =
+                    trackErrorAdvanceFromTrackIdRef.current;
+                const isTrackErrorAdvance =
+                    playbackType === "track" &&
+                    errorAdvanceFromTrackId !== null &&
+                    (currentTrack?.id !== errorAdvanceFromTrackId ||
+                        repeatMode === "one");
+                trackErrorAdvanceFromTrackIdRef.current = null;
+                if (!isTrackErrorAdvance) {
+                    consecutiveErrorBreakerRef.current.reset();
+                }
                 applyCurrentOutputState();
                 audioEngine.play();
                 if (playbackType === "track" && currentTrack?.id) {
@@ -7275,6 +7381,7 @@ export const AudioPlaybackOrchestrator = memo(
             isPlaying,
             playbackType,
             currentTrack?.id,
+            repeatMode,
             applyCurrentOutputState,
             scheduleStartupPlaybackRecovery,
             clearStartupPlaybackRecovery,
