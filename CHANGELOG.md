@@ -326,6 +326,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Soulseek: public disconnect() now destroys the client and removes its error listener before dropping the reference, closing a socket/listener leak on reconnect cycles (sibling of #331).
+- Promoted the backend LIKE-pattern escaper to the shared
+  `backend/src/utils/likePattern.ts` utility and applied it to the multi-seed
+  radio builder's genre-expansion fallback, where user-editable `%` and `_`
+  characters previously acted as wildcards and could flood the radio queue; all
+  genre LIKE sites now use an explicit `ESCAPE '\'` clause.
 - Dedicated Redis BLPOP connection is now closed when its initial connect fails,
   instead of leaking a reconnecting client.
 - Worker health-check interval is now captured, unref'd, and cleared during

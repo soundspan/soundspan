@@ -70,6 +70,7 @@ import { shuffleArray } from "../utils/shuffle";
 import { separateArtists } from "../utils/separateArtists";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { parseBoundedInt } from "../utils/queryParams";
+import { escapeLikePattern } from "../utils/likePattern";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -138,10 +139,6 @@ const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_T
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
-
-/** Escape LIKE metacharacters so user input matches literally (PG default escape '\'). */
-const escapeLikePattern = (value: string): string =>
-    value.replace(/[\\%_]/g, (character) => `\\${character}`);
 
 const moodPoolCondition = (moodValue: string): Prisma.Sql => {
     switch (moodValue) {
@@ -6199,11 +6196,11 @@ router.get(
                     FROM "Track" t
                     WHERE EXISTS (
                         SELECT 1 FROM unnest(t."lastfmTags") AS tag(name)
-                        WHERE LOWER(tag.name) LIKE ${genrePattern}
+                        WHERE LOWER(tag.name) LIKE ${genrePattern} ESCAPE '\\'
                     )
                     OR EXISTS (
                         SELECT 1 FROM unnest(t."essentiaGenres") AS eg(name)
-                        WHERE LOWER(eg.name) LIKE ${genrePattern}
+                        WHERE LOWER(eg.name) LIKE ${genrePattern} ESCAPE '\\'
                     )
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
@@ -6223,12 +6220,12 @@ router.get(
                         WHERE (
                             (ar.genres IS NOT NULL AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-                                WHERE LOWER(g.genre) LIKE ${genrePattern}
+                                WHERE LOWER(g.genre) LIKE ${genrePattern} ESCAPE '\\'
                             ))
                             OR
                             (ar."userGenres" IS NOT NULL AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
-                                WHERE LOWER(ug.genre) LIKE ${genrePattern}
+                                WHERE LOWER(ug.genre) LIKE ${genrePattern} ESCAPE '\\'
                             ))
                         )
                         ORDER BY sort_key

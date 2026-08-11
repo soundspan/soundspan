@@ -8,6 +8,7 @@ import { applyTrackPreferenceSimilarityBias } from "./trackPreference";
 import { buildTrackPreferenceScoreMapForUser } from "./libraryTrackPreferences";
 import { getMergedGenres } from "../utils/metadataOverrides";
 import { shuffleArray } from "../utils/shuffle";
+import { escapeLikePattern } from "../utils/likePattern";
 
 export const getRadioArtistCapForLimit = (limit: number): number => {
     if (!Number.isFinite(limit) || limit <= 0) return 2;
@@ -272,7 +273,7 @@ export const buildMultiTrackRadio = async (
                 (g) =>
                     Prisma.sql`EXISTS (
                         SELECT 1 FROM jsonb_array_elements_text("Artist"."genres") AS g
-                        WHERE LOWER(g) LIKE ${`%${g}%`}
+                        WHERE LOWER(g) LIKE ${`%${escapeLikePattern(g)}%`} ESCAPE '\\'
                     )`,
             );
             const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
