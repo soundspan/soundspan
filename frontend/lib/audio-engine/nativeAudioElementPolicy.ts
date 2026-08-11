@@ -883,10 +883,17 @@ const handlePageRestored = (
 };
 
 const handleForceEnded = (state: State, nowMs: number): Transition => {
-    if (state.status !== "playing") {
+    const canSynthesizeEnd =
+        state.status === "playing" ||
+        state.status === "ended" ||
+        (state.status === "paused" && state.pauseClassification === "external");
+    if (!state.hasSource || !canSynthesizeEnd) {
         return noChange(state);
     }
-    return handleElementEnded(state, nowMs);
+    return {
+        state: { ...state, status: "ended", pausedAtMs: nowMs },
+        effects: [{ kind: "stopTicker" }, { kind: "emitEnd" }],
+    };
 };
 
 /**

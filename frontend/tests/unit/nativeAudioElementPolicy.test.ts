@@ -561,19 +561,54 @@ test("ELEMENT_ENDED emits end exactly once", () => {
     assert.deepEqual(second.effects, []);
 });
 
-test("FORCE_ENDED synthesizes end only while playing", () => {
-    const playing = transitionNativeEngine(playingState(), {
-        type: "FORCE_ENDED",
+test("FORCE_ENDED re-emits a naturally consumed end", () => {
+    const naturallyEnded = transitionNativeEngine(playingState(), {
+        type: "ELEMENT_ENDED",
         nowMs: 5_000,
     });
-    assert.ok(kinds(playing.effects).includes("emitEnd"));
-    assert.equal(playing.state.status, "ended");
+    const recovered = transitionNativeEngine(naturallyEnded.state, {
+        type: "FORCE_ENDED",
+        nowMs: 5_001,
+    });
+    assert.ok(kinds(recovered.effects).includes("emitEnd"));
+    assert.equal(recovered.state.status, "ended");
+});
 
-    const paused = transitionNativeEngine(loadedState(), {
+test("FORCE_ENDED synthesizes end from an external pause", () => {
+    const externallyPaused = loadedState({ pauseClassification: "external" });
+    const recovered = transitionNativeEngine(externallyPaused, {
         type: "FORCE_ENDED",
         nowMs: 5_000,
     });
-    assert.deepEqual(paused.effects, []);
+    assert.ok(kinds(recovered.effects).includes("emitEnd"));
+    assert.equal(recovered.state.status, "ended");
+});
+
+test("FORCE_ENDED with no source is a no-op", () => {
+    const { effects } = transitionNativeEngine(
+        createInitialNativeEngineState(),
+        { type: "FORCE_ENDED", nowMs: 5_000 },
+    );
+    assert.deepEqual(effects, []);
+});
+
+test("a fresh load prevents FORCE_ENDED from re-emitting for the prior source", () => {
+    const forced = transitionNativeEngine(playingState(), {
+        type: "FORCE_ENDED",
+        nowMs: 5_000,
+    });
+    const freshLoad = transitionNativeEngine(forced.state, {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: null,
+        nowMs: 5_001,
+    });
+    const staleForce = transitionNativeEngine(freshLoad.state, {
+        type: "FORCE_ENDED",
+        nowMs: 5_002,
+    });
+    assert.equal(freshLoad.state.status, "loading");
+    assert.deepEqual(staleForce.effects, []);
 });
 
 // ---------------------------------------------------------------------------

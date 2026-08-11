@@ -159,13 +159,13 @@ class HowlerEngine {
                 this.isLoading = false;
                 this.state.duration = this.howl.duration() || 0;
 
-                // Use setTimeout to emit after caller registers listeners
-                setTimeout(() => {
+                // Use a microtask to emit after caller registers listeners
+                queueMicrotask(() => {
                     this.emit("load", { duration: this.state.duration });
                     if (autoplay) {
                         this.play();
                     }
-                }, 0);
+                });
                 return;
             }
         }
@@ -692,11 +692,11 @@ class HowlerEngine {
 
     /**
      * Synthesize a track-end event. Used by foreground recovery when
-     * the track finished while the page was hidden and neither Howler's
-     * timer-polled onend nor the native fallback fired.
+     * the track finished while the page was hidden but its earlier end
+     * delivery was not handled by the orchestrator.
      */
     notifyTrackEnded(): void {
-        if (!this.state.isPlaying) return;
+        if (!this.hasTrackEnded()) return;
         this.state.isPlaying = false;
         this.stopTimeUpdates();
         this.emit("end");
