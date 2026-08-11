@@ -173,9 +173,11 @@ async function verifyArtistName(
  *         description: Missing required fields or no download service configured
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 // POST /downloads - Create download job
-router.post("/", async (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
     try {
         const {
             type,
@@ -1145,13 +1147,18 @@ router.delete("/failed/:id", async (req, res) => {
  *         description: Missing albumMbid or Lidarr not configured
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  *       404:
  *         description: Album not found in Lidarr
  */
 // GET /downloads/releases/:albumMbid - Get available releases for an album (interactive search)
-router.get("/releases/:albumMbid", async (req, res) => {
+router.get("/releases/:albumMbid", requireAdmin, async (req, res) => {
     try {
-        const { albumMbid } = req.params;
+        const albumMbidParam = req.params.albumMbid;
+        const albumMbid = Array.isArray(albumMbidParam)
+            ? albumMbidParam[0]
+            : albumMbidParam;
         const artistName = String(req.query.artistName || "").trim();
         const albumTitle = String(req.query.albumTitle || "").trim();
 
@@ -1297,9 +1304,11 @@ router.get("/releases/:albumMbid", async (req, res) => {
  *         description: Missing required fields or Lidarr not configured
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 // POST /downloads/grab - Grab a specific release from interactive search
-router.post("/grab", async (req, res) => {
+router.post("/grab", requireAdmin, async (req, res) => {
     try {
         const {
             guid,
@@ -1654,6 +1663,47 @@ router.get("/", async (req, res) => {
     }
 });
 
+async function keepDiscoveryTrack(
+    userId: string,
+    discoveryTrackId: string,
+    createDownloadJob: boolean,
+) {
+    return prisma.$transaction(async (tx) => {
+        const discoveryTrack = await tx.discoveryTrack.findFirst({
+            where: {
+                id: discoveryTrackId,
+                discoveryAlbum: { userId },
+            },
+            include: { discoveryAlbum: true },
+        });
+
+        if (!discoveryTrack) {
+            return { found: false } as const;
+        }
+
+        await tx.discoveryTrack.update({
+            where: { id: discoveryTrack.id },
+            data: { userKept: true },
+        });
+
+        if (!createDownloadJob) {
+            return { found: true, downloadJobId: null } as const;
+        }
+
+        const job = await tx.downloadJob.create({
+            data: {
+                userId,
+                subject: `${discoveryTrack.discoveryAlbum.albumTitle} by ${discoveryTrack.discoveryAlbum.artistName}`,
+                type: "album",
+                targetMbid: discoveryTrack.discoveryAlbum.rgMbid,
+                status: "pending",
+            },
+        });
+
+        return { found: true, downloadJobId: job.id } as const;
+    });
+}
+
 /**
  * @openapi
  * /api/downloads/keep-track:
@@ -1680,11 +1730,13 @@ router.get("/", async (req, res) => {
  *         description: Missing discoveryTrackId
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  *       404:
  *         description: Discovery track not found
  */
 // POST /downloads/keep-track - Keep a discovery track (move to permanent library)
-router.post("/keep-track", async (req, res) => {
+router.post("/keep-track", requireAdmin, async (req, res) => {
     try {
         const { discoveryTrackId } = req.body;
         const userId = req.user!.id;
@@ -1693,41 +1745,23 @@ router.post("/keep-track", async (req, res) => {
             return sendRouteError(res, 400, "Missing discoveryTrackId");
         }
 
-        const discoveryTrack = await prisma.discoveryTrack.findUnique({
-            where: { id: discoveryTrackId },
-            include: {
-                discoveryAlbum: true,
-            },
-        });
+        const lidarrEnabled = await lidarrService.isEnabled();
+        const result = await keepDiscoveryTrack(
+            userId,
+            discoveryTrackId,
+            lidarrEnabled,
+        );
 
-        if (!discoveryTrack) {
+        if (!result.found) {
             return sendRouteError(res, 404, "Discovery track not found");
         }
 
-        // Mark as kept
-        await prisma.discoveryTrack.update({
-            where: { id: discoveryTrackId },
-            data: { userKept: true },
-        });
-
-        // If Lidarr enabled, create job to download full album to permanent library
-        const lidarrEnabled = await lidarrService.isEnabled();
-        if (lidarrEnabled) {
-            const job = await prisma.downloadJob.create({
-                data: {
-                    userId,
-                    subject: `${discoveryTrack.discoveryAlbum.albumTitle} by ${discoveryTrack.discoveryAlbum.artistName}`,
-                    type: "album",
-                    targetMbid: discoveryTrack.discoveryAlbum.rgMbid,
-                    status: "pending",
-                },
-            });
-
+        if (result.downloadJobId) {
             return res.json({
                 success: true,
                 message:
                     "Track marked as kept. Full album will be downloaded to permanent library.",
-                downloadJobId: job.id,
+                downloadJobId: result.downloadJobId,
             });
         }
 

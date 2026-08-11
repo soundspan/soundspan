@@ -3,12 +3,9 @@ import { Request, Response } from "express";
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
-    // downloads.ts mounts requireAdmin on /clear-lidarr-queue at module
-    // scope; without this key the incomplete mock hands Router.post()
-    // undefined and the suite dies at load. Passthrough is correct here —
-    // this suite pins the interactive compat surface, not auth
-    // (downloadsRuntime.test.ts owns admin enforcement with the real
-    // middleware).
+    // downloads.ts mounts requireAdmin on shared download-control routes.
+    // Passthrough is correct here because downloadsRuntime.test.ts owns
+    // enforcement with the real middleware.
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
@@ -157,8 +154,8 @@ function createRes() {
 }
 
 describe("downloads interactive release compatibility", () => {
-    const releasesHandler = getRouteHandler("/releases/:albumMbid", "get");
-    const grabHandler = getRouteHandler("/grab", "post");
+    const releasesHandler = getRouteHandler("/releases/:albumMbid", "get", 1);
+    const grabHandler = getRouteHandler("/grab", "post", 1);
 
     beforeEach(() => {
         jest.clearAllMocks();

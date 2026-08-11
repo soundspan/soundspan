@@ -96,7 +96,6 @@ jest.mock("../../utils/db", () => ({
             delete: jest.fn(),
         },
         discoveryTrack: {
-            findUnique: jest.fn(),
             update: jest.fn(),
         },
         album: {
@@ -123,6 +122,7 @@ const mockGetSystemSettings = getSystemSettings as jest.Mock;
 
 const mockLidarrIsEnabled = lidarrService.isEnabled as jest.Mock;
 const mockLidarrAddArtist = lidarrService.addArtist as jest.Mock;
+const mockLidarrSearchAlbum = lidarrService.searchAlbum as jest.Mock;
 const mockLidarrGrabRelease = lidarrService.grabRelease as jest.Mock;
 
 const mockSoulseekAvailable = soulseekService.isAvailable as jest.Mock;
@@ -151,7 +151,6 @@ const mockUnavailableFindMany = prisma.unavailableAlbum.findMany as jest.Mock;
 const mockUnavailableFindFirst = prisma.unavailableAlbum.findFirst as jest.Mock;
 const mockUnavailableDelete = prisma.unavailableAlbum.delete as jest.Mock;
 
-const mockDiscoveryFindUnique = prisma.discoveryTrack.findUnique as jest.Mock;
 const mockDiscoveryUpdate = prisma.discoveryTrack.update as jest.Mock;
 const mockAlbumFindFirst = prisma.album.findFirst as jest.Mock;
 const mockTransaction = prisma.$transaction as jest.Mock;
@@ -171,6 +170,22 @@ function getRouteHandler(
     }
 
     return layer.route.stack[stackIndex].handle;
+}
+
+function getFinalRouteHandler(
+    path: string,
+    method: "get" | "post" | "delete" | "patch",
+) {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === path && entry.route?.methods?.[method],
+    );
+
+    if (!layer) {
+        throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
+    }
+
+    return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
 function createRes() {
@@ -198,7 +213,8 @@ async function flushAsyncWork() {
 
 describe("downloads routes runtime", () => {
     const availabilityHandler = getRouteHandler("/availability", "get");
-    const createJobHandler = getRouteHandler("/", "post");
+    const createJobAdmin = getRouteHandler("/", "post");
+    const createJobHandler = getFinalRouteHandler("/", "post");
     const clearAllHandler = getRouteHandler("/clear-all", "delete");
     const clearLidarrQueueAdmin = getRouteHandler(
         "/clear-lidarr-queue",
@@ -211,15 +227,19 @@ describe("downloads routes runtime", () => {
     );
     const failedListHandler = getRouteHandler("/failed", "get");
     const failedDismissHandler = getRouteHandler("/failed/:id", "delete");
-    const grabHandler = getRouteHandler("/grab", "post");
+    const releasesAdmin = getRouteHandler("/releases/:albumMbid", "get");
+    const grabAdmin = getRouteHandler("/grab", "post");
+    const grabHandler = getFinalRouteHandler("/grab", "post");
     const getJobHandler = getRouteHandler("/:id", "get");
     const patchJobHandler = getRouteHandler("/:id", "patch");
     const deleteJobHandler = getRouteHandler("/:id", "delete");
     const listJobsHandler = getRouteHandler("/", "get");
-    const keepTrackHandler = getRouteHandler("/keep-track", "post");
+    const keepTrackAdmin = getRouteHandler("/keep-track", "post");
+    const keepTrackHandler = getFinalRouteHandler("/keep-track", "post");
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockTransaction.mockReset();
 
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
@@ -229,6 +249,7 @@ describe("downloads routes runtime", () => {
 
         mockLidarrIsEnabled.mockResolvedValue(true);
         mockLidarrAddArtist.mockResolvedValue({ id: 101 });
+        mockLidarrSearchAlbum.mockResolvedValue([]);
         mockLidarrGrabRelease.mockResolvedValue(true);
 
         mockSoulseekAvailable.mockResolvedValue(true);
@@ -264,7 +285,6 @@ describe("downloads routes runtime", () => {
         mockUnavailableFindFirst.mockResolvedValue(null);
         mockUnavailableDelete.mockResolvedValue({ id: "failed-1" });
 
-        mockDiscoveryFindUnique.mockResolvedValue(null);
         mockDiscoveryUpdate.mockResolvedValue({});
 
         mockAlbumFindFirst.mockResolvedValue(null);
@@ -318,6 +338,109 @@ describe("downloads routes runtime", () => {
             error: "Failed to check download availability",
         });
     });
+
+    it.each([
+        [
+            "ordinary session",
+            "creating a download job",
+            createJobAdmin,
+            {
+                session: { userId: "user-1" },
+                user: { id: "user-1", role: "user" },
+                body: {},
+            },
+        ],
+        [
+            "ordinary API key",
+            "creating a download job",
+            createJobAdmin,
+            {
+                headers: { "x-api-key": "ordinary-user-key" },
+                user: { id: "user-1", role: "user" },
+                body: {},
+            },
+        ],
+        [
+            "ordinary session",
+            "mutating Lidarr during release lookup",
+            releasesAdmin,
+            {
+                session: { userId: "user-1" },
+                user: { id: "user-1", role: "user" },
+                params: { albumMbid: "rg-1" },
+                query: {},
+            },
+        ],
+        [
+            "ordinary API key",
+            "mutating Lidarr during release lookup",
+            releasesAdmin,
+            {
+                headers: { "x-api-key": "ordinary-user-key" },
+                user: { id: "user-1", role: "user" },
+                params: { albumMbid: "rg-1" },
+                query: {},
+            },
+        ],
+        [
+            "ordinary session",
+            "grabbing a release",
+            grabAdmin,
+            {
+                session: { userId: "user-1" },
+                user: { id: "user-1", role: "user" },
+                body: {},
+            },
+        ],
+        [
+            "ordinary API key",
+            "grabbing a release",
+            grabAdmin,
+            {
+                headers: { "x-api-key": "ordinary-user-key" },
+                user: { id: "user-1", role: "user" },
+                body: {},
+            },
+        ],
+        [
+            "ordinary session",
+            "keeping a discovery track",
+            keepTrackAdmin,
+            {
+                session: { userId: "user-1" },
+                user: { id: "user-1", role: "user" },
+                body: { discoveryTrackId: "disc-track-1" },
+            },
+        ],
+        [
+            "ordinary API key",
+            "keeping a discovery track",
+            keepTrackAdmin,
+            {
+                headers: { "x-api-key": "ordinary-user-key" },
+                user: { id: "user-1", role: "user" },
+                body: { discoveryTrackId: "disc-track-1" },
+            },
+        ],
+    ])(
+        "rejects an %s before %s",
+        async (_credentialType, _operation, adminMiddleware, request) => {
+            const res = createRes();
+            const next = jest.fn();
+
+            await adminMiddleware(request as any, res, next);
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body).toEqual({ error: "Admin access required" });
+            expect(next).not.toHaveBeenCalled();
+            expect(mockGetSystemSettings).not.toHaveBeenCalled();
+            expect(mockLidarrIsEnabled).not.toHaveBeenCalled();
+            expect(mockLidarrSearchAlbum).not.toHaveBeenCalled();
+            expect(mockLidarrGrabRelease).not.toHaveBeenCalled();
+            expect(mockTransaction).not.toHaveBeenCalled();
+            expect(mockDownloadCreate).not.toHaveBeenCalled();
+        },
+    );
 
     it("returns 400 for missing create-job required fields", async () => {
         const req = {
@@ -1152,44 +1275,128 @@ describe("downloads routes runtime", () => {
     });
 
     it("returns 404 when keep-track target is missing", async () => {
-        mockDiscoveryFindUnique.mockResolvedValueOnce(null);
+        const txDiscoveryFindFirst = jest.fn().mockResolvedValueOnce(null);
+        const txDiscoveryUpdate = jest.fn();
+        const txDownloadCreate = jest.fn();
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                discoveryTrack: {
+                    findFirst: txDiscoveryFindFirst,
+                    update: txDiscoveryUpdate,
+                },
+                downloadJob: { create: txDownloadCreate },
+            }),
+        );
 
         const req = {
             body: { discoveryTrackId: "disc-track-1" },
-            user: { id: "user-1" },
+            user: { id: "user-1", role: "admin" },
         } as any;
         const res = createRes();
 
         await keepTrackHandler(req, res);
 
+        expect(txDiscoveryFindFirst).toHaveBeenCalledWith({
+            where: {
+                id: "disc-track-1",
+                discoveryAlbum: { userId: "user-1" },
+            },
+            include: { discoveryAlbum: true },
+        });
+        expect(txDiscoveryUpdate).not.toHaveBeenCalled();
+        expect(txDownloadCreate).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Discovery track not found" });
+    });
+
+    it("does not mutate a discovery track owned by another user", async () => {
+        const txDiscoveryFindFirst = jest.fn().mockResolvedValueOnce(null);
+        const txDiscoveryUpdate = jest.fn();
+        const txDownloadCreate = jest.fn();
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                discoveryTrack: {
+                    findFirst: txDiscoveryFindFirst,
+                    update: txDiscoveryUpdate,
+                },
+                downloadJob: { create: txDownloadCreate },
+            }),
+        );
+
+        const req = {
+            body: { discoveryTrackId: "other-user-track" },
+            user: { id: "attacker-admin", role: "admin" },
+        } as any;
+        const res = createRes();
+
+        await keepTrackHandler(req, res);
+
+        expect(txDiscoveryFindFirst).toHaveBeenCalledWith({
+            where: {
+                id: "other-user-track",
+                discoveryAlbum: { userId: "attacker-admin" },
+            },
+            include: { discoveryAlbum: true },
+        });
+        expect(txDiscoveryUpdate).not.toHaveBeenCalled();
+        expect(txDownloadCreate).not.toHaveBeenCalled();
+        expect(mockDiscoveryUpdate).not.toHaveBeenCalled();
+        expect(mockDownloadCreate).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({ error: "Discovery track not found" });
     });
 
     it("creates follow-up album download when keeping a track and Lidarr is enabled", async () => {
-        mockDiscoveryFindUnique.mockResolvedValueOnce({
+        const discoveryTrack = {
             id: "disc-track-1",
             discoveryAlbum: {
                 albumTitle: "Discovery Album",
                 artistName: "Discovery Artist",
                 rgMbid: "rg-disc-1",
             },
-        });
+        };
+        const txDiscoveryFindFirst = jest
+            .fn()
+            .mockResolvedValueOnce(discoveryTrack);
+        const txDiscoveryUpdate = jest.fn().mockResolvedValueOnce({});
+        const txDownloadCreate = jest
+            .fn()
+            .mockResolvedValueOnce({ id: "keep-job-1" });
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                discoveryTrack: {
+                    findFirst: txDiscoveryFindFirst,
+                    update: txDiscoveryUpdate,
+                },
+                downloadJob: { create: txDownloadCreate },
+            }),
+        );
         mockLidarrIsEnabled.mockResolvedValueOnce(true);
-        mockDownloadCreate.mockResolvedValueOnce({ id: "keep-job-1" });
 
         const req = {
             body: { discoveryTrackId: "disc-track-1" },
-            user: { id: "user-1" },
+            user: { id: "user-1", role: "admin" },
         } as any;
         const res = createRes();
 
         await keepTrackHandler(req, res);
 
-        expect(mockDiscoveryUpdate).toHaveBeenCalledWith({
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
+        expect(txDiscoveryUpdate).toHaveBeenCalledWith({
             where: { id: "disc-track-1" },
             data: { userKept: true },
         });
+        expect(txDownloadCreate).toHaveBeenCalledWith({
+            data: {
+                userId: "user-1",
+                subject: "Discovery Album by Discovery Artist",
+                type: "album",
+                targetMbid: "rg-disc-1",
+                status: "pending",
+            },
+        });
+        expect(mockDiscoveryUpdate).not.toHaveBeenCalled();
+        expect(mockDownloadCreate).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             success: true,
@@ -1200,7 +1407,7 @@ describe("downloads routes runtime", () => {
     });
 
     it("returns manual follow-up message when keeping a track without Lidarr", async () => {
-        mockDiscoveryFindUnique.mockResolvedValueOnce({
+        const txDiscoveryFindFirst = jest.fn().mockResolvedValueOnce({
             id: "disc-track-2",
             discoveryAlbum: {
                 albumTitle: "Discovery Album",
@@ -1208,16 +1415,32 @@ describe("downloads routes runtime", () => {
                 rgMbid: "rg-disc-2",
             },
         });
+        const txDiscoveryUpdate = jest.fn().mockResolvedValueOnce({});
+        const txDownloadCreate = jest.fn();
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                discoveryTrack: {
+                    findFirst: txDiscoveryFindFirst,
+                    update: txDiscoveryUpdate,
+                },
+                downloadJob: { create: txDownloadCreate },
+            }),
+        );
         mockLidarrIsEnabled.mockResolvedValueOnce(false);
 
         const req = {
             body: { discoveryTrackId: "disc-track-2" },
-            user: { id: "user-1" },
+            user: { id: "user-1", role: "admin" },
         } as any;
         const res = createRes();
 
         await keepTrackHandler(req, res);
 
+        expect(txDiscoveryUpdate).toHaveBeenCalledWith({
+            where: { id: "disc-track-2" },
+            data: { userKept: true },
+        });
+        expect(txDownloadCreate).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             success: true,
@@ -2284,7 +2507,7 @@ describe("downloads routes runtime", () => {
     });
 
     it("returns 500 when keep-track persistence fails", async () => {
-        mockDiscoveryFindUnique.mockResolvedValueOnce({
+        const txDiscoveryFindFirst = jest.fn().mockResolvedValueOnce({
             id: "disc-track-3",
             discoveryAlbum: {
                 albumTitle: "Discovery Album",
@@ -2292,11 +2515,23 @@ describe("downloads routes runtime", () => {
                 rgMbid: "rg-disc-3",
             },
         });
-        mockDiscoveryUpdate.mockRejectedValueOnce(new Error("update failed"));
+        const txDiscoveryUpdate = jest
+            .fn()
+            .mockRejectedValueOnce(new Error("update failed"));
+        const txDownloadCreate = jest.fn();
+        mockTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                discoveryTrack: {
+                    findFirst: txDiscoveryFindFirst,
+                    update: txDiscoveryUpdate,
+                },
+                downloadJob: { create: txDownloadCreate },
+            }),
+        );
 
         const req = {
             body: { discoveryTrackId: "disc-track-3" },
-            user: { id: "user-1" },
+            user: { id: "user-1", role: "admin" },
         } as any;
         const res = createRes();
 
@@ -2304,5 +2539,6 @@ describe("downloads routes runtime", () => {
 
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to keep track" });
+        expect(txDownloadCreate).not.toHaveBeenCalled();
     });
 });

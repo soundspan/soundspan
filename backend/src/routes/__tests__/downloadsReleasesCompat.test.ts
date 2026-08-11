@@ -9,8 +9,8 @@ jest.mock("../../middleware/auth", () => ({
     // downloads/releases compat surface, not auth (releasesRuntime.test.ts
     // owns auth enforcement with the real middleware).
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
-    // downloads.ts likewise mounts requireAdmin on /clear-lidarr-queue at
-    // module scope (downloadsRuntime.test.ts owns admin enforcement).
+    // downloads.ts mounts requireAdmin on shared download-control routes;
+    // downloadsRuntime.test.ts owns enforcement with the real middleware.
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
