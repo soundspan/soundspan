@@ -4,6 +4,8 @@ export const SUBSONIC_API_VERSION = "1.16.1";
 export const SUBSONIC_SERVER_TYPE = "soundspan";
 export const SUBSONIC_SERVER_VERSION = "1.0.0";
 
+const JSONP_CALLBACK_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$.]{0,63}$/;
+
 export enum SubsonicErrorCode {
     GENERIC = 0,
     MISSING_PARAMETER = 10,
@@ -36,6 +38,13 @@ interface SubsonicResponseBody {
         serverVersion: string;
         openSubsonic: boolean;
     } & SubsonicPayload;
+}
+
+/**
+ * Reports whether a JSONP callback is a bounded JavaScript identifier path.
+ */
+export function isValidJsonpCallback(callback: string): boolean {
+    return JSONP_CALLBACK_PATTERN.test(callback);
 }
 
 /**
@@ -123,10 +132,13 @@ function sendResponse(
 ): void {
     if (format === "json" || format === "jsonp") {
         const json = JSON.stringify(response);
-        if (format === "jsonp" && callback) {
-            res.type("application/javascript");
-            res.send(`${callback}(${json})`);
-            return;
+        if (format === "jsonp") {
+            res.set("X-Content-Type-Options", "nosniff");
+            if (callback && isValidJsonpCallback(callback)) {
+                res.type("application/javascript");
+                res.send(`${callback}(${json})`);
+                return;
+            }
         }
         res.type("application/json");
         res.send(json);

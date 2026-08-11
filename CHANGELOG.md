@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Security
+
+- Subsonic JSONP callback parameters are now validated against a strict
+  JavaScript identifier pattern, with a nosniff plain-JSON fallback for missing
+  or invalid callbacks.
+
 ### Added
 
 - Added an opt-in `SECRETS_DB_ONLY` flag (default `false`). When enabled, integration secrets (Last.fm, Fanart.tv, Lidarr, OpenAI, Deezer, Audiobookshelf API keys) are read exclusively from encrypted system settings — the `.env` fallback for those keys is ignored and the settings-driven `.env` sync omits them. Startup fails fast if the settings layer is not readable before services start. Default behavior is unchanged.
