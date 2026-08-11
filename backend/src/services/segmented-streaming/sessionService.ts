@@ -41,6 +41,22 @@ const ASSET_CROSS_POD_GRACE_MS = 5_000;
 const READINESS_MICROCACHE_TTL_MS = 1_500;
 const STARTUP_MIN_TIMELINE_SEGMENTS = 3;
 const STARTUP_SEGMENT_EXTENSIONS = ["m4s", "webm"] as const;
+const TRANSIENT_BUILD_FAILURE_PATTERNS = [
+    /\bEAGAIN\b/i,
+    /\bECONNRESET\b/i,
+    /\bECONNREFUSED\b/i,
+    /\bEPIPE\b/i,
+    /\bETIMEDOUT\b/i,
+    /\bENET(?:DOWN|UNREACH)\b/i,
+    /\bEHOSTUNREACH\b/i,
+    /\btimed out\b/i,
+    /\btimeout\b/i,
+    /resource temporarily unavailable/i,
+    /temporar(?:y|ily) unavailable/i,
+] as const;
+
+const isTransientBuildFailureDetail = (detail: string): boolean =>
+    TRANSIENT_BUILD_FAILURE_PATTERNS.some((pattern) => pattern.test(detail));
 
 const SEGMENTED_QUALITY_VALUES = ["original", "high", "medium", "low"] as const;
 const SEGMENTED_SESSION_MANIFEST_PROFILE_VALUES = [
@@ -131,11 +147,18 @@ export interface SegmentedSessionHandoffResponse extends SegmentedSessionRespons
 export class SegmentedSessionError extends Error {
     statusCode: number;
     code: string;
+    readonly transient: boolean;
 
-    constructor(message: string, statusCode: number, code: string) {
+    constructor(
+        message: string,
+        statusCode: number,
+        code: string,
+        options?: { transient?: boolean },
+    ) {
         super(message);
         this.statusCode = statusCode;
         this.code = code;
+        this.transient = options?.transient === true;
     }
 }
 
@@ -924,11 +947,7 @@ class SegmentedSessionService {
                 session.cacheKey,
             );
             if (buildFailure) {
-                throw new SegmentedSessionError(
-                    `Streaming ${assetType} build failed: ${buildFailure.message}`,
-                    502,
-                    "STREAMING_ASSET_BUILD_FAILED",
-                );
+                this.throwBuildFailure(session, assetType, buildFailure);
             }
 
             if (await pathExists(assetPath)) {
@@ -1014,11 +1033,7 @@ class SegmentedSessionService {
                 session.cacheKey,
             );
             if (buildFailure) {
-                throw new SegmentedSessionError(
-                    `Streaming startup window build failed: ${buildFailure.message}`,
-                    502,
-                    "STREAMING_ASSET_BUILD_FAILED",
-                );
+                this.throwBuildFailure(session, "startup_window", buildFailure);
             }
 
             if (await this.hasStartupWindowReady(session)) {
@@ -1071,6 +1086,33 @@ class SegmentedSessionService {
             "Manifest startup window is still being prepared",
             503,
             "STREAMING_ASSET_NOT_READY",
+        );
+    }
+
+    private throwBuildFailure(
+        session: SegmentedSessionRecord,
+        assetType: "manifest" | "segment" | "startup_window",
+        buildFailure: Error,
+    ): never {
+        logger.error("[SegmentedStreaming] DASH asset build failed", {
+            trackId: session.trackId,
+            cacheKey: session.cacheKey,
+            assetType,
+            detail: buildFailure.message,
+        });
+
+        const message =
+            assetType === "startup_window"
+                ? "Streaming startup window build failed"
+                : assetType === "manifest"
+                  ? "Streaming manifest build failed"
+                  : "Streaming segment build failed";
+        const transient = isTransientBuildFailureDetail(buildFailure.message);
+        throw new SegmentedSessionError(
+            message,
+            502,
+            "STREAMING_ASSET_BUILD_FAILED",
+            { transient },
         );
     }
 

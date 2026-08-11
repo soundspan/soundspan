@@ -314,8 +314,9 @@ class DashSegmentGenerationError extends Error {
     readonly stderr: string;
 
     constructor(exitCode: number | null, stderr: string) {
+        const stderrSummary = summarizeStderr(stderr);
         super(
-            `DASH segment generation failed with exit code ${exitCode}: ${stderr.trim() || "no stderr output"}`,
+            `DASH segment generation failed with exit code ${exitCode}: ${stderrSummary || "no stderr output"}`,
         );
         this.name = "DashSegmentGenerationError";
         this.exitCode = exitCode;

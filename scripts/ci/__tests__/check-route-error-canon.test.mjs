@@ -1,12 +1,53 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
     analyzeRouteErrorCanon,
+    collectCounts,
     countPattern,
     countLeakPattern,
     stripLoggerCalls,
 } from "../check-route-error-canon.mjs";
+
+test("collectCounts recurses into services while excluding test files", () => {
+    const fixtureRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "route-error-canon-"),
+    );
+    const serviceDirectory = path.join(fixtureRoot, "backend/src/services/sub");
+    const nestedTestDirectory = path.join(serviceDirectory, "__tests__");
+
+    try {
+        fs.mkdirSync(nestedTestDirectory, { recursive: true });
+        fs.writeFileSync(
+            path.join(serviceDirectory, "leaky.ts"),
+            "const detail = err.message;\n",
+        );
+        fs.writeFileSync(
+            path.join(nestedTestDirectory, "x.test.ts"),
+            "const detail = err.message;\n",
+        );
+        fs.writeFileSync(
+            path.join(serviceDirectory, "thing.test.ts"),
+            "const detail = err.message;\n",
+        );
+
+        assert.deepEqual(
+            collectCounts(
+                fixtureRoot,
+                countLeakPattern,
+                "backend/src/services",
+            ),
+            {
+                "backend/src/services/sub/leaky.ts": 1,
+            },
+        );
+    } finally {
+        fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+});
 
 test("countPattern counts occurrences and tolerates whitespace", () => {
     const source = `

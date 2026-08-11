@@ -1,3 +1,20 @@
+const BUILD_FAILURE_DETAIL =
+    "ffmpeg exited: /music/private/Artist/01 Track.flac: No such file or directory (os error 2)";
+
+const createBuildFailureSession = (assetType: string) => ({
+    sessionId: `session-${assetType}-build-failure`,
+    userId: "user-1",
+    trackId: "track-private",
+    cacheKey: `cache-${assetType}-build-failure`,
+    quality: "medium" as const,
+    sourceType: "local" as const,
+    manifestProfile: "startup_single" as const,
+    manifestPath: "/tmp/assets/manifest.mpd",
+    assetDir: "/tmp/assets",
+    createdAt: "2026-02-20T00:00:00.000Z",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+});
+
 const resolveSessionService = async () => {
     jest.resetModules();
 
@@ -25,6 +42,7 @@ const resolveSessionService = async () => {
     const mockGetBuildFailure = jest.fn();
     const mockForceRegenerateDashSegments = jest.fn();
     const mockIsCacheMarkedInvalid = jest.fn((_cacheKey?: string) => false);
+    const mockLoggerError = jest.fn();
 
     jest.doMock("fs", () => ({
         promises: {
@@ -70,7 +88,7 @@ const resolveSessionService = async () => {
             debug: jest.fn(),
             info: jest.fn(),
             warn: jest.fn(),
-            error: jest.fn(),
+            error: (...args: unknown[]) => mockLoggerError(...args),
         },
     }));
 
@@ -129,6 +147,7 @@ const resolveSessionService = async () => {
             mockGetBuildFailure,
             mockForceRegenerateDashSegments,
             mockIsCacheMarkedInvalid,
+            mockLoggerError,
         },
     };
 };
@@ -1045,6 +1064,119 @@ describe("segmentedStreamingSessionService manifest startup readiness", () => {
         jest.dontMock("../manifestService");
         jest.dontMock("../cacheService");
         jest.dontMock("../segmentService");
+    });
+
+    it.each([
+        ["manifest", "Streaming manifest build failed"],
+        ["segment", "Streaming segment build failed"],
+    ] as const)(
+        "returns a static %s build failure while logging server-side detail",
+        async (assetType, expectedMessage) => {
+            const { segmentedStreamingSessionService, mocks } =
+                await resolveSessionService();
+            const session = createBuildFailureSession(assetType);
+
+            mocks.mockFsAccess.mockRejectedValue(
+                Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+            );
+            mocks.mockGetBuildFailure.mockReturnValue(
+                new Error(BUILD_FAILURE_DETAIL),
+            );
+
+            const waitPromise = (
+                segmentedStreamingSessionService as any
+            ).waitForAssetFile(
+                session,
+                assetType === "manifest"
+                    ? session.manifestPath
+                    : `${session.assetDir}/chunk-0-00001.m4s`,
+                assetType,
+            );
+
+            await expect(waitPromise).rejects.toMatchObject({
+                statusCode: 502,
+                code: "STREAMING_ASSET_BUILD_FAILED",
+                message: expectedMessage,
+                transient: false,
+            });
+            await expect(waitPromise).rejects.not.toThrow(
+                /\/music|01 Track|os error/,
+            );
+            expect(mocks.mockLoggerError).toHaveBeenCalledWith(
+                "[SegmentedStreaming] DASH asset build failed",
+                expect.objectContaining({
+                    trackId: session.trackId,
+                    cacheKey: session.cacheKey,
+                    assetType,
+                    detail: BUILD_FAILURE_DETAIL,
+                }),
+            );
+        },
+    );
+
+    it("marks a transient segment build failure without exposing its detail", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        const session = createBuildFailureSession("segment-transient");
+
+        mocks.mockFsAccess.mockRejectedValue(
+            Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+        );
+        mocks.mockGetBuildFailure.mockReturnValue(
+            new Error("ffmpeg failed: spawn EAGAIN"),
+        );
+
+        const waitPromise = (
+            segmentedStreamingSessionService as any
+        ).waitForAssetFile(
+            session,
+            `${session.assetDir}/chunk-0-00001.m4s`,
+            "segment",
+        );
+
+        await expect(waitPromise).rejects.toMatchObject({
+            statusCode: 502,
+            code: "STREAMING_ASSET_BUILD_FAILED",
+            message: "Streaming segment build failed",
+            transient: true,
+        });
+        await expect(waitPromise).rejects.not.toThrow(/EAGAIN/);
+    });
+
+    it("returns a static startup-window build failure while logging server-side detail", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        const session = createBuildFailureSession("startup");
+
+        mocks.mockFsReadFile.mockRejectedValue(
+            Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+        );
+        mocks.mockGetBuildFailure.mockReturnValue(
+            new Error(BUILD_FAILURE_DETAIL),
+        );
+
+        const waitPromise = (
+            segmentedStreamingSessionService as any
+        ).waitForStartupWindowReady(session);
+
+        await expect(waitPromise).rejects.toMatchObject({
+            statusCode: 502,
+            code: "STREAMING_ASSET_BUILD_FAILED",
+            message: "Streaming startup window build failed",
+            transient: false,
+        });
+        await expect(waitPromise).rejects.not.toThrow(
+            /\/music|01 Track|os error/,
+        );
+        expect(mocks.mockLoggerError).toHaveBeenCalledWith(
+            "[SegmentedStreaming] DASH asset build failed",
+            expect.objectContaining({
+                trackId: session.trackId,
+                cacheKey: session.cacheKey,
+                assetType: "startup_window",
+                detail: BUILD_FAILURE_DETAIL,
+            }),
+        );
     });
 
     it("waits for startup timeline plus first three chunks before serving manifest", async () => {

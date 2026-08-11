@@ -731,6 +731,47 @@ describe("segmentedSegmentService", () => {
         expect(mocks.mockSpawn).toHaveBeenCalledTimes(1);
     });
 
+    it("bounds ffmpeg stderr in recorded build errors while retaining the raw buffer", async () => {
+        const { segmentedSegmentService, mocks } =
+            await resolveSegmentService();
+        const ffmpegProcess = createMockFfmpegProcess();
+        const cacheKey = "cache-bounded-stderr";
+        const privatePathDetail =
+            "/music/private/Artist/01 Track.flac: No such file or directory (os error 2)";
+        const stderr = `${"ffmpeg diagnostic ".repeat(70)}${privatePathDetail}`;
+
+        mocks.mockBuildDashCacheKey.mockReturnValue(cacheKey);
+        mocks.mockGetDashAssetPaths.mockReturnValue({
+            cacheKey,
+            outputDir: `/tmp/${cacheKey}`,
+            manifestPath: `/tmp/${cacheKey}/manifest.mpd`,
+        });
+        mocks.mockHasDashManifest.mockResolvedValue(false);
+        mocks.mockEnsureDashAssetDirectory.mockResolvedValue(undefined);
+        mocks.mockSpawn.mockReturnValue(ffmpegProcess);
+
+        await segmentedSegmentService.ensureLocalDashSegments({
+            trackId: "track-bounded-stderr",
+            sourcePath: "/music/track-bounded-stderr.flac",
+            sourceModified: new Date("2026-02-20T00:00:00.000Z"),
+            quality: "medium",
+        });
+        await wait(0);
+
+        ffmpegProcess.stderr.emit("data", Buffer.from(stderr));
+        ffmpegProcess.emit("close", 1);
+        await wait(0);
+
+        const failure = segmentedSegmentService.getBuildFailure(cacheKey) as
+            | (Error & { stderr?: string })
+            | null;
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure?.message.length).toBeLessThan(400);
+        expect(failure?.message).not.toContain(stderr);
+        expect(failure?.message).not.toContain(privatePathDetail);
+        expect(failure?.stderr).toBe(stderr);
+    });
+
     it("keeps existing DASH assets available until staged force-regenerate promote", async () => {
         const { segmentedSegmentService, mocks } =
             await resolveSegmentService();

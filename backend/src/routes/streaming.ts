@@ -128,36 +128,10 @@ interface SegmentedStartupHintProfile {
 const SEGMENTED_STARTUP_DEFAULT_RETRY_AFTER_MS = 1_000;
 const SEGMENTED_STARTUP_ASSET_BUILD_FAILED_REASON = "asset_build_failed";
 
-const SEGMENTED_STARTUP_TRANSIENT_ASSET_BUILD_FAILURE_PATTERNS = [
-    /\bEAGAIN\b/i,
-    /\bECONNRESET\b/i,
-    /\bECONNREFUSED\b/i,
-    /\bEPIPE\b/i,
-    /\bETIMEDOUT\b/i,
-    /\bENET(?:DOWN|UNREACH)\b/i,
-    /\bEHOSTUNREACH\b/i,
-    /\btimed out\b/i,
-    /\btimeout\b/i,
-    /resource temporarily unavailable/i,
-    /temporar(?:y|ily) unavailable/i,
-] as const;
-
-const isTransientAssetBuildFailureMessage = (
-    errorMessage: string | undefined,
-): boolean => {
-    if (!errorMessage) {
-        return false;
-    }
-
-    return SEGMENTED_STARTUP_TRANSIENT_ASSET_BUILD_FAILURE_PATTERNS.some(
-        (pattern) => pattern.test(errorMessage),
-    );
-};
-
 const resolveAssetBuildFailedStartupHintProfile = (
-    errorMessage: string | undefined,
+    transient: boolean,
 ): SegmentedStartupHintProfile =>
-    isTransientAssetBuildFailureMessage(errorMessage)
+    transient
         ? {
               state: "waiting",
               transient: true,
@@ -287,18 +261,18 @@ const resolveSegmentedStartupHint = ({
     statusCode,
     code,
     reason,
-    errorMessage,
+    transient,
 }: {
     stage: SegmentedStartupHintStage;
     statusCode: number;
     code?: string;
     reason?: string;
-    errorMessage?: string;
+    transient?: boolean;
 }): SegmentedStartupHint => {
     const normalizedReason = normalizeSegmentedStartupReason(reason);
     const profileByCode =
         code === "STREAMING_ASSET_BUILD_FAILED"
-            ? resolveAssetBuildFailedStartupHintProfile(errorMessage)
+            ? resolveAssetBuildFailedStartupHintProfile(transient === true)
             : code
               ? SEGMENTED_STARTUP_HINT_BY_CODE[code]
               : undefined;
@@ -349,6 +323,7 @@ const respondWithSegmentedStartupError = ({
     code,
     reason,
     details,
+    transient,
 }: {
     res: express.Response;
     stage: SegmentedStartupHintStage;
@@ -357,13 +332,14 @@ const respondWithSegmentedStartupError = ({
     code?: string;
     reason?: string;
     details?: unknown;
+    transient?: boolean;
 }): express.Response => {
     const startupHint = resolveSegmentedStartupHint({
         stage,
         statusCode,
         code,
         reason,
-        errorMessage: error,
+        transient,
     });
     if (
         startupHint.transient &&
@@ -630,6 +606,7 @@ const handleSegmentedSendFileError = ({
             statusCode: segmentedError.statusCode,
             error: segmentedError.message,
             code: segmentedError.code,
+            transient: segmentedError.transient === true,
         });
     }
 
@@ -776,6 +753,7 @@ const handleSegmentFetch = async (
                 statusCode: segmentedError.statusCode,
                 error: segmentedError.message,
                 code: segmentedError.code,
+                transient: segmentedError.transient === true,
             });
         }
 
@@ -939,6 +917,7 @@ router.post("/v1/sessions", requireAuth, async (req, res) => {
                 statusCode: segmentedError.statusCode,
                 error: segmentedError.message,
                 code: segmentedError.code,
+                transient: segmentedError.transient === true,
             });
         }
 
@@ -1096,6 +1075,7 @@ router.get(
                     statusCode: segmentedError.statusCode,
                     error: segmentedError.message,
                     code: segmentedError.code,
+                    transient: segmentedError.transient === true,
                 });
             }
 

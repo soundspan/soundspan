@@ -16,11 +16,18 @@ jest.mock("../../utils/logger", () => ({
 class MockSegmentedSessionError extends Error {
     statusCode: number;
     code: string;
+    readonly transient: boolean;
 
-    constructor(message: string, statusCode: number, code: string) {
+    constructor(
+        message: string,
+        statusCode: number,
+        code: string,
+        options?: { transient?: boolean },
+    ) {
         super(message);
         this.statusCode = statusCode;
         this.code = code;
+        this.transient = options?.transient === true;
     }
 }
 
@@ -1162,9 +1169,10 @@ describe("streaming route runtime", () => {
         mockGetAuthorizedSession.mockResolvedValueOnce(session);
         mockWaitForSegmentReady.mockImplementationOnce(() => {
             throw new SegmentedSessionError(
-                "Streaming segment build failed: spawn EAGAIN",
+                "Streaming segment build failed",
                 502,
                 "STREAMING_ASSET_BUILD_FAILED",
+                { transient: true },
             );
         });
 
@@ -1182,7 +1190,7 @@ describe("streaming route runtime", () => {
 
         expect(res.statusCode).toBe(502);
         expect(res.body).toEqual({
-            error: "Streaming segment build failed: spawn EAGAIN",
+            error: "Streaming segment build failed",
             code: "STREAMING_ASSET_BUILD_FAILED",
             startupHint: {
                 stage: "segment",
@@ -1193,6 +1201,7 @@ describe("streaming route runtime", () => {
             },
         });
         expect(res.headers.get("Retry-After")).toBe("1");
+        expect(JSON.stringify(res.body)).not.toContain("EAGAIN");
     });
 
     it("returns non-transient startup hint for permanent segment asset build failures", async () => {
@@ -1210,9 +1219,10 @@ describe("streaming route runtime", () => {
         mockGetAuthorizedSession.mockResolvedValueOnce(session);
         mockWaitForSegmentReady.mockImplementationOnce(() => {
             throw new SegmentedSessionError(
-                "Streaming segment build failed: invalid data found when processing input",
+                "Streaming segment build failed",
                 502,
                 "STREAMING_ASSET_BUILD_FAILED",
+                { transient: false },
             );
         });
 
@@ -1230,7 +1240,7 @@ describe("streaming route runtime", () => {
 
         expect(res.statusCode).toBe(502);
         expect(res.body).toEqual({
-            error: "Streaming segment build failed: invalid data found when processing input",
+            error: "Streaming segment build failed",
             code: "STREAMING_ASSET_BUILD_FAILED",
             startupHint: {
                 stage: "segment",
@@ -1241,6 +1251,7 @@ describe("streaming route runtime", () => {
             },
         });
         expect(res.headers.get("Retry-After")).toBeUndefined();
+        expect(JSON.stringify(res.body)).not.toContain("invalid data");
     });
 
     it("maps invalid segment name errors", async () => {

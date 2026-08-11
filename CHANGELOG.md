@@ -900,6 +900,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation (Arrow/Home/End to move focus between visible tracks, Enter/Space
   to explore the focused track) alongside the existing pointer interactions.
 
+### Security
+
+- Segmented-streaming DASH build failures no longer include raw ffmpeg stderr
+  (absolute library/cache paths and errno detail) in 502 responses; clients now
+  receive a static message and error code while full detail is logged
+  server-side only. The route-error leak ratchet now recurses into
+  `backend/src/services/` subdirectories. Retry semantics are preserved by
+  carrying the server-computed transient-vs-permanent build-failure
+  classification as a flag instead of deriving it from the previously
+  detail-bearing client message.
+
 ## [1.9.0] - 2026-08-08
 
 ### Added

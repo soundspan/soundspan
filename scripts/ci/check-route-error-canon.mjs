@@ -79,7 +79,7 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/settings.ts": 1,
     // soulseek.ts at zero for the property-value pattern; the admin-gated direct-download 404 still forwards result.error as the sendRouteError message (admin-only surface, slice-J follow-up).
     "backend/src/routes/soulseek.ts": 0,
-    // streaming.ts remaining 7: segmentedError.message from toSegmentedSessionError() (~L493); typed SegmentedSessionError domain errors with static code-owned messages/status codes, not raw caught errors.
+    // streaming.ts remaining 7: forwards typed SegmentedSessionError messages that are static code-owned text; segmented build-failure detail is logged server-side in sessionService.
     "backend/src/routes/streaming.ts": 7,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
     "backend/src/routes/youtube.ts": 4,
@@ -258,21 +258,51 @@ export function analyzeRouteErrorCanon(counts, baseline) {
     return { ok: violations.length === 0, violations, tightenable };
 }
 
-function routeFiles(directory) {
-    return fs
-        .readdirSync(directory, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-        .map((entry) => path.join(directory, entry.name));
+const MAX_SCANNED_DIRECTORIES = 10_000;
+
+function typescriptSourceFiles(directory) {
+    const pendingDirectories = [directory];
+    const sourceFiles = [];
+    let scannedDirectories = 0;
+
+    while (
+        pendingDirectories.length > 0 &&
+        scannedDirectories < MAX_SCANNED_DIRECTORIES
+    ) {
+        const currentDirectory = pendingDirectories.pop();
+        scannedDirectories += 1;
+        for (const entry of fs.readdirSync(currentDirectory, {
+            withFileTypes: true,
+        })) {
+            const entryPath = path.join(currentDirectory, entry.name);
+            if (entry.isDirectory() && entry.name !== "__tests__") {
+                pendingDirectories.push(entryPath);
+            } else if (
+                entry.isFile() &&
+                entry.name.endsWith(".ts") &&
+                !entry.name.endsWith(".test.ts")
+            ) {
+                sourceFiles.push(entryPath);
+            }
+        }
+    }
+
+    if (pendingDirectories.length > 0) {
+        throw new Error(
+            `Route error scan exceeded ${MAX_SCANNED_DIRECTORIES} directories`,
+        );
+    }
+    return sourceFiles;
 }
 
-function collectCounts(
+export function collectCounts(
     repoRoot,
     counter = countPattern,
     relativeDirectory = "backend/src/routes",
 ) {
     const directory = path.join(repoRoot, relativeDirectory);
     return Object.fromEntries(
-        routeFiles(directory)
+        typescriptSourceFiles(directory)
             .sort()
             .map((filePath) => {
                 const relativePath = path
@@ -317,7 +347,7 @@ function runCli() {
         collectCounts(repoRoot),
         BASELINE,
     );
-    // The leak ratchet covers routes + top-level services modules.
+    // The leak ratchet covers production route and service modules recursively.
     const routesCounts = collectCounts(repoRoot, countLeakPattern);
     const servicesCounts = collectCounts(
         repoRoot,
