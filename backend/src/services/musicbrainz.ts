@@ -8,6 +8,23 @@ import {
 } from "../utils/stringNormalization";
 import { BRAND_USER_AGENT } from "../config/brand";
 
+const MBID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type MbidEntity = "artist" | "release group" | "release";
+
+function validateMbid(value: unknown, entity: MbidEntity): string {
+    if (typeof value !== "string" || !MBID_PATTERN.test(value)) {
+        throw new TypeError(`Invalid ${entity} MBID`);
+    }
+
+    return value;
+}
+
+function encodeMbidPathSegment(value: unknown, entity: MbidEntity): string {
+    return encodeURIComponent(validateMbid(value, entity));
+}
+
 class MusicBrainzService {
     private client: AxiosInstance;
 
@@ -130,17 +147,21 @@ class MusicBrainzService {
     }
 
     async getArtist(mbid: string, includes: string[] = ["url-rels", "tags"]) {
-        const cacheKey = `mb:artist:${mbid}:${includes.join(",")}`;
+        const artistMbid = encodeMbidPathSegment(mbid, "artist");
+        const cacheKey = `mb:artist:${artistMbid}:${includes.join(",")}`;
 
         return this.cachedRequest(
             cacheKey,
             async () => {
-                const response = await this.client.get(`/artist/${mbid}`, {
-                    params: {
-                        inc: includes.join("+"),
-                        fmt: "json",
+                const response = await this.client.get(
+                    `/artist/${artistMbid}`,
+                    {
+                        params: {
+                            inc: includes.join("+"),
+                            fmt: "json",
+                        },
                     },
-                });
+                );
                 return response.data;
             },
             2592000,
@@ -153,14 +174,15 @@ class MusicBrainzService {
         types: string[] = ["album", "ep"],
         limit = 100,
     ) {
-        const cacheKey = `mb:rg:${artistMbid}:${types.join(",")}:${limit}`;
+        const validatedArtistMbid = validateMbid(artistMbid, "artist");
+        const cacheKey = `mb:rg:${validatedArtistMbid}:${types.join(",")}:${limit}`;
 
         return this.cachedRequest(
             cacheKey,
             async () => {
                 const response = await this.client.get("/release-group", {
                     params: {
-                        artist: artistMbid,
+                        artist: validatedArtistMbid,
                         type: types.join("|"),
                         limit,
                         fmt: "json",
@@ -174,13 +196,14 @@ class MusicBrainzService {
     }
 
     async getReleaseGroup(rgMbid: string) {
-        const cacheKey = `mb:rg:${rgMbid}`;
+        const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
+        const cacheKey = `mb:rg:${releaseGroupMbid}`;
 
         return this.cachedRequest(
             cacheKey,
             async () => {
                 const response = await this.client.get(
-                    `/release-group/${rgMbid}`,
+                    `/release-group/${releaseGroupMbid}`,
                     {
                         params: {
                             inc: "artist-credits+releases",
@@ -196,13 +219,14 @@ class MusicBrainzService {
     }
 
     async getReleaseGroupDetails(rgMbid: string) {
-        const cacheKey = `mb:rg:details:${rgMbid}`;
+        const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
+        const cacheKey = `mb:rg:details:${releaseGroupMbid}`;
 
         return this.cachedRequest(
             cacheKey,
             async () => {
                 const response = await this.client.get(
-                    `/release-group/${rgMbid}`,
+                    `/release-group/${releaseGroupMbid}`,
                     {
                         params: {
                             inc: "artist-credits+releases+labels",
@@ -218,13 +242,17 @@ class MusicBrainzService {
     }
 
     async getRelease(releaseMbid: string) {
-        const cacheKey = `mb:release:${releaseMbid}`;
+        const validatedReleaseMbid = encodeMbidPathSegment(
+            releaseMbid,
+            "release",
+        );
+        const cacheKey = `mb:release:${validatedReleaseMbid}`;
 
         return this.cachedRequest(
             cacheKey,
             async () => {
                 const response = await this.client.get(
-                    `/release/${releaseMbid}`,
+                    `/release/${validatedReleaseMbid}`,
                     {
                         params: {
                             inc: "recordings+artist-credits+labels",
@@ -804,13 +832,14 @@ class MusicBrainzService {
     async getAlbumTracks(
         rgMbid: string,
     ): Promise<Array<{ title: string; position?: number; duration?: number }>> {
-        const cacheKey = `mb:albumtracks:${rgMbid}`;
+        const releaseGroupMbid = encodeMbidPathSegment(rgMbid, "release group");
+        const cacheKey = `mb:albumtracks:${releaseGroupMbid}`;
 
         return this.cachedRequest(cacheKey, async () => {
             try {
                 // Step 1: Get releases from the release group
                 const rgResponse = await this.client.get(
-                    `/release-group/${rgMbid}`,
+                    `/release-group/${releaseGroupMbid}`,
                     {
                         params: {
                             inc: "releases",
@@ -822,7 +851,7 @@ class MusicBrainzService {
                 const releases = rgResponse.data?.releases || [];
                 if (releases.length === 0) {
                     logger.debug(
-                        `[MusicBrainz] No releases found for release group ${rgMbid}`,
+                        `[MusicBrainz] No releases found for release group ${releaseGroupMbid}`,
                     );
                     return [];
                 }
@@ -831,10 +860,14 @@ class MusicBrainzService {
                 const release =
                     releases.find((r: any) => r.status === "Official") ||
                     releases[0];
+                const releaseMbid = encodeMbidPathSegment(
+                    release.id,
+                    "release",
+                );
 
                 // Step 2: Get full release details with recordings
                 const releaseResponse = await this.client.get(
-                    `/release/${release.id}`,
+                    `/release/${releaseMbid}`,
                     {
                         params: {
                             inc: "recordings",
@@ -861,7 +894,7 @@ class MusicBrainzService {
                 }
 
                 logger.debug(
-                    `[MusicBrainz] Found ${tracks.length} tracks for release group ${rgMbid}`,
+                    `[MusicBrainz] Found ${tracks.length} tracks for release group ${releaseGroupMbid}`,
                 );
                 return tracks;
             } catch (error: any) {

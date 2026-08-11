@@ -1,3 +1,5 @@
+import { format } from "node:util";
+
 const originalEnv = { ...process.env };
 
 describe("logger", () => {
@@ -134,8 +136,8 @@ describe("logger", () => {
 
         expect(consoleDebug).not.toHaveBeenCalled();
         expect(consoleInfo).not.toHaveBeenCalled();
-        expect(consoleWarn).toHaveBeenCalledWith("[WARN] warn call");
-        expect(consoleError).toHaveBeenCalledWith("[ERROR] error call");
+        expect(consoleWarn).toHaveBeenCalledWith("%s", "[WARN] warn call");
+        expect(consoleError).toHaveBeenCalledWith("%s", "[ERROR] error call");
     });
 
     it("uses development defaults when LOG_LEVEL is unset and NODE_ENV is not production", () => {
@@ -147,10 +149,10 @@ describe("logger", () => {
         logger.warn("warn call");
         logger.error("error call");
 
-        expect(consoleDebug).toHaveBeenCalledWith("[DEBUG] debug call");
-        expect(consoleInfo).toHaveBeenCalledWith("[INFO] info call");
-        expect(consoleWarn).toHaveBeenCalledWith("[WARN] warn call");
-        expect(consoleError).toHaveBeenCalledWith("[ERROR] error call");
+        expect(consoleDebug).toHaveBeenCalledWith("%s", "[DEBUG] debug call");
+        expect(consoleInfo).toHaveBeenCalledWith("%s", "[INFO] info call");
+        expect(consoleWarn).toHaveBeenCalledWith("%s", "[WARN] warn call");
+        expect(consoleError).toHaveBeenCalledWith("%s", "[ERROR] error call");
     });
 
     it("uses the environment default and warns once when LOG_LEVEL is unknown", () => {
@@ -196,8 +198,14 @@ describe("logger", () => {
                 scenario.expected.info ? 1 : 0,
             );
             expect(consoleWarn).toHaveBeenCalledTimes(2);
-            expect(consoleWarn).toHaveBeenLastCalledWith("[WARN] warn call");
-            expect(consoleError).toHaveBeenCalledWith("[ERROR] error call");
+            expect(consoleWarn).toHaveBeenLastCalledWith(
+                "%s",
+                "[WARN] warn call",
+            );
+            expect(consoleError).toHaveBeenCalledWith(
+                "%s",
+                "[ERROR] error call",
+            );
         }
     });
 
@@ -214,22 +222,42 @@ describe("logger", () => {
         logger.error("failed", new Error("nope"));
 
         expect(consoleDebug).toHaveBeenCalledWith(
+            "%s",
             "[DEBUG] starting",
             context,
             payload,
         );
         expect(consoleInfo).toHaveBeenCalledWith(
+            "%s",
             "[INFO] running",
             1,
             "two",
             context,
         );
-        expect(consoleWarn).toHaveBeenCalledWith("[WARN] almost", payload);
-        expect(consoleError).toHaveBeenCalledWith("[ERROR] failed", {
+        expect(consoleWarn).toHaveBeenCalledWith(
+            "%s",
+            "[WARN] almost",
+            payload,
+        );
+        expect(consoleError).toHaveBeenCalledWith("%s", "[ERROR] failed", {
             name: "Error",
             message: "nope",
             stack: expect.any(String),
         });
+    });
+
+    it("logs percent placeholders literally without consuming following arguments", () => {
+        const { logger, consoleInfo } = loadLoggerModule({ logLevel: "info" });
+        const rendered: string[] = [];
+        consoleInfo.mockImplementation((...args: unknown[]) => {
+            rendered.push(format(...args));
+        });
+
+        logger.info("requested %s track", "following-argument");
+
+        expect(rendered).toEqual([
+            "[INFO] requested %s track following-argument",
+        ]);
     });
 
     it("creates scoped child loggers with dotted scope names", () => {
@@ -243,6 +271,7 @@ describe("logger", () => {
         child.info("started", { jobId: "42" });
 
         expect(consoleInfo).toHaveBeenCalledWith(
+            "%s",
             "[INFO] [Worker.Scan] started",
             { jobId: "42" },
         );
@@ -262,17 +291,19 @@ describe("logger", () => {
 
         expect(result).toBe("ok");
         expect(consoleDebug).toHaveBeenCalledTimes(2);
-        expect(consoleDebug.mock.calls[0][0]).toBe(
+        expect(consoleDebug.mock.calls[0][0]).toBe("%s");
+        expect(consoleDebug.mock.calls[0][1]).toBe(
             "[DEBUG] refresh-cache started",
         );
-        expect(consoleDebug.mock.calls[0][1]).toEqual({ cacheKey: "abc" });
-        expect(consoleDebug.mock.calls[1][0]).toBe(
+        expect(consoleDebug.mock.calls[0][2]).toEqual({ cacheKey: "abc" });
+        expect(consoleDebug.mock.calls[1][0]).toBe("%s");
+        expect(consoleDebug.mock.calls[1][1]).toBe(
             "[DEBUG] refresh-cache completed",
         );
-        expect(consoleDebug.mock.calls[1][1]).toMatchObject({
+        expect(consoleDebug.mock.calls[1][2]).toMatchObject({
             cacheKey: "abc",
         });
-        expect(typeof consoleDebug.mock.calls[1][1].durationMs).toBe("number");
+        expect(typeof consoleDebug.mock.calls[1][2].durationMs).toBe("number");
     });
 
     it("withLogTiming records failure context and rethrows", async () => {
@@ -292,13 +323,14 @@ describe("logger", () => {
         ).rejects.toThrow("boom");
 
         expect(consoleError).toHaveBeenCalledTimes(1);
-        expect(consoleError.mock.calls[0][0]).toBe(
+        expect(consoleError.mock.calls[0][0]).toBe("%s");
+        expect(consoleError.mock.calls[0][1]).toBe(
             "[ERROR] refresh-cache failed",
         );
-        expect(consoleError.mock.calls[0][1]).toMatchObject({
+        expect(consoleError.mock.calls[0][2]).toMatchObject({
             cacheKey: "abc",
         });
-        expect(consoleError.mock.calls[0][1].error).toMatchObject({
+        expect(consoleError.mock.calls[0][2].error).toMatchObject({
             message: "boom",
             name: "Error",
         });
@@ -313,7 +345,7 @@ describe("logger", () => {
             jobId: "job-1",
         });
 
-        expect(consoleError).toHaveBeenCalledWith("[ERROR] job failed", {
+        expect(consoleError).toHaveBeenCalledWith("%s", "[ERROR] job failed", {
             jobId: "job-1",
             error: expect.objectContaining({
                 message: "nope",

@@ -41,6 +41,9 @@ const mockRedisKeys = redisClient.keys as jest.Mock;
 const mockRateLimiterExecute = rateLimiter.execute as jest.Mock;
 const mockLoggerWarn = logger.warn as jest.Mock;
 const mockLoggerError = logger.error as jest.Mock;
+const VALID_ARTIST_MBID = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3";
+const VALID_RELEASE_GROUP_MBID = "6b9a9e04-abd7-4666-86ba-bb220ef4c3b2";
+const VALID_RELEASE_MBID = "189002e7-3285-4e2e-92a3-7f6c30d407a2";
 
 describe("musicBrainzService", () => {
     let mockHttpGet: jest.Mock;
@@ -102,6 +105,21 @@ describe("musicBrainzService", () => {
             2592000,
             JSON.stringify(artists),
         );
+    });
+
+    it("keeps free-text searches in Axios query params instead of the request path", async () => {
+        const query = "../artist?fmt=xml & alias";
+        mockHttpGet.mockResolvedValueOnce({ data: { artists: [] } });
+
+        await musicBrainzService.searchArtist(query, 5);
+
+        expect(mockHttpGet).toHaveBeenCalledWith("/artist", {
+            params: {
+                query,
+                limit: 5,
+                fmt: "json",
+            },
+        });
     });
 
     it("returns fallback [] on non-404 artist lookup failures and short-caches fallback", async () => {
@@ -185,11 +203,11 @@ describe("musicBrainzService", () => {
     it("caches successful null responses with 1-hour TTL", async () => {
         mockHttpGet.mockResolvedValueOnce({ data: null });
 
-        const result = await musicBrainzService.getArtist("artist-null");
+        const result = await musicBrainzService.getArtist(VALID_ARTIST_MBID);
 
         expect(result).toBeNull();
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "mb:artist:artist-null:url-rels,tags",
+            `mb:artist:${VALID_ARTIST_MBID}:url-rels,tags`,
             3600,
             "null",
         );
@@ -198,11 +216,11 @@ describe("musicBrainzService", () => {
     it("returns fallback null for non-404 getArtist errors and short-caches fallback", async () => {
         mockRateLimiterExecute.mockRejectedValueOnce(new Error("network down"));
 
-        const result = await musicBrainzService.getArtist("artist-broken");
+        const result = await musicBrainzService.getArtist(VALID_ARTIST_MBID);
 
         expect(result).toBeNull();
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "mb:artist:artist-broken:url-rels,tags",
+            `mb:artist:${VALID_ARTIST_MBID}:url-rels,tags`,
             120,
             "null",
         );
@@ -214,9 +232,9 @@ describe("musicBrainzService", () => {
         });
         mockRateLimiterExecute.mockRejectedValueOnce(notFoundError);
 
-        await expect(musicBrainzService.getArtist("artist-404")).rejects.toBe(
-            notFoundError,
-        );
+        await expect(
+            musicBrainzService.getArtist(VALID_ARTIST_MBID),
+        ).rejects.toBe(notFoundError);
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
@@ -267,13 +285,17 @@ describe("musicBrainzService", () => {
             .mockResolvedValueOnce({ data: { id: "release-detail" } });
 
         const groups = await musicBrainzService.getReleaseGroups(
-            "artist-mbid",
+            VALID_ARTIST_MBID,
             ["album", "single"],
             25,
         );
-        const group = await musicBrainzService.getReleaseGroup("rg-1");
-        const details = await musicBrainzService.getReleaseGroupDetails("rg-1");
-        const release = await musicBrainzService.getRelease("rel-1");
+        const group = await musicBrainzService.getReleaseGroup(
+            VALID_RELEASE_GROUP_MBID,
+        );
+        const details = await musicBrainzService.getReleaseGroupDetails(
+            VALID_RELEASE_GROUP_MBID,
+        );
+        const release = await musicBrainzService.getRelease(VALID_RELEASE_MBID);
 
         expect(groups).toEqual([{ id: "rg-a" }]);
         expect(group).toEqual({ id: "rg-detail" });
@@ -281,30 +303,82 @@ describe("musicBrainzService", () => {
         expect(release).toEqual({ id: "release-detail" });
         expect(mockHttpGet).toHaveBeenNthCalledWith(1, "/release-group", {
             params: {
-                artist: "artist-mbid",
+                artist: VALID_ARTIST_MBID,
                 type: "album|single",
                 limit: 25,
                 fmt: "json",
             },
         });
-        expect(mockHttpGet).toHaveBeenNthCalledWith(2, "/release-group/rg-1", {
-            params: {
-                inc: "artist-credits+releases",
-                fmt: "json",
+        expect(mockHttpGet).toHaveBeenNthCalledWith(
+            2,
+            `/release-group/${VALID_RELEASE_GROUP_MBID}`,
+            {
+                params: {
+                    inc: "artist-credits+releases",
+                    fmt: "json",
+                },
             },
-        });
-        expect(mockHttpGet).toHaveBeenNthCalledWith(3, "/release-group/rg-1", {
-            params: {
-                inc: "artist-credits+releases+labels",
-                fmt: "json",
+        );
+        expect(mockHttpGet).toHaveBeenNthCalledWith(
+            3,
+            `/release-group/${VALID_RELEASE_GROUP_MBID}`,
+            {
+                params: {
+                    inc: "artist-credits+releases+labels",
+                    fmt: "json",
+                },
             },
-        });
-        expect(mockHttpGet).toHaveBeenNthCalledWith(4, "/release/rel-1", {
-            params: {
-                inc: "recordings+artist-credits+labels",
-                fmt: "json",
+        );
+        expect(mockHttpGet).toHaveBeenNthCalledWith(
+            4,
+            `/release/${VALID_RELEASE_MBID}`,
+            {
+                params: {
+                    inc: "recordings+artist-credits+labels",
+                    fmt: "json",
+                },
             },
-        });
+        );
+    });
+
+    it.each([
+        ["artist", () => musicBrainzService.getArtist("../artist")],
+        [
+            "artist browse",
+            () => musicBrainzService.getReleaseGroups("artist?limit=100"),
+        ],
+        [
+            "release group",
+            () => musicBrainzService.getReleaseGroup("group?fmt=json"),
+        ],
+        [
+            "release group details",
+            () => musicBrainzService.getReleaseGroupDetails("../group"),
+        ],
+        ["release", () => musicBrainzService.getRelease("../release")],
+        [
+            "album tracks",
+            () => musicBrainzService.getAlbumTracks("group?inc=releases"),
+        ],
+    ])(
+        "rejects a malformed %s MBID before outbound work",
+        async (_name, run) => {
+            await expect(run()).rejects.toThrow(/Invalid .* MBID/);
+            expect(mockRateLimiterExecute).not.toHaveBeenCalled();
+            expect(mockHttpGet).not.toHaveBeenCalled();
+        },
+    );
+
+    it("allows a valid UUID MBID through to the fixed MusicBrainz origin", async () => {
+        mockHttpGet.mockResolvedValueOnce({ data: { id: VALID_ARTIST_MBID } });
+
+        await expect(
+            musicBrainzService.getArtist(VALID_ARTIST_MBID),
+        ).resolves.toEqual({ id: VALID_ARTIST_MBID });
+        expect(mockHttpGet).toHaveBeenCalledWith(
+            `/artist/${VALID_ARTIST_MBID}`,
+            expect.any(Object),
+        );
     });
 
     it("returns first-hit result from searchAlbum strategy 1", async () => {
@@ -878,7 +952,7 @@ describe("musicBrainzService", () => {
                 data: {
                     releases: [
                         { id: "bootleg-1", status: "Bootleg" },
-                        { id: "official-1", status: "Official" },
+                        { id: VALID_RELEASE_MBID, status: "Official" },
                     ],
                 },
             })
@@ -905,7 +979,9 @@ describe("musicBrainzService", () => {
                 },
             });
 
-        const result = await musicBrainzService.getAlbumTracks("rg-tracks");
+        const result = await musicBrainzService.getAlbumTracks(
+            VALID_RELEASE_GROUP_MBID,
+        );
 
         expect(result).toEqual([
             { title: "Track 1", position: 1, duration: 180000 },
@@ -913,7 +989,7 @@ describe("musicBrainzService", () => {
         ]);
         expect(mockHttpGet).toHaveBeenNthCalledWith(
             1,
-            "/release-group/rg-tracks",
+            `/release-group/${VALID_RELEASE_GROUP_MBID}`,
             {
                 params: {
                     inc: "releases",
@@ -921,23 +997,30 @@ describe("musicBrainzService", () => {
                 },
             },
         );
-        expect(mockHttpGet).toHaveBeenNthCalledWith(2, "/release/official-1", {
-            params: {
-                inc: "recordings",
-                fmt: "json",
+        expect(mockHttpGet).toHaveBeenNthCalledWith(
+            2,
+            `/release/${VALID_RELEASE_MBID}`,
+            {
+                params: {
+                    inc: "recordings",
+                    fmt: "json",
+                },
             },
-        });
+        );
     });
 
     it("returns [] for albums with no releases and on getAlbumTracks errors", async () => {
         mockHttpGet.mockResolvedValueOnce({ data: { releases: [] } });
 
-        const noReleaseTracks =
-            await musicBrainzService.getAlbumTracks("rg-empty");
+        const noReleaseTracks = await musicBrainzService.getAlbumTracks(
+            VALID_RELEASE_GROUP_MBID,
+        );
         expect(noReleaseTracks).toEqual([]);
 
         mockHttpGet.mockRejectedValueOnce(new Error("album tracks failed"));
-        const errorTracks = await musicBrainzService.getAlbumTracks("rg-error");
+        const errorTracks = await musicBrainzService.getAlbumTracks(
+            VALID_RELEASE_GROUP_MBID,
+        );
         expect(errorTracks).toEqual([]);
         expect(mockLoggerError).toHaveBeenCalledWith(
             "MusicBrainz getAlbumTracks error: album tracks failed",

@@ -210,6 +210,7 @@ app.use((req, res, next) => {
 // client can't spoof X-Forwarded-For to evade per-IP rate limits.
 app.set("trust proxy", config.trustProxy);
 
+// codeql[js/missing-token-validation] Session cookies are SameSite=Lax, while API-key and bearer alternatives require explicit headers, blocking classic cross-site unsafe requests.
 app.use(
     session({
         store: new RedisStore({

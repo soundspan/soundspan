@@ -119,11 +119,11 @@ function emit(
                 : console.error;
 
     if (context) {
-        method(prefix, context, ...passthrough);
+        method("%s", prefix, context, ...passthrough);
         return;
     }
 
-    method(prefix, ...passthrough);
+    method("%s", prefix, ...passthrough);
 }
 
 /**

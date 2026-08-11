@@ -326,6 +326,7 @@ describe("api entrypoint runtime behavior", () => {
             shutdownWorkers,
             compressionMiddleware,
             compressionFilter,
+            sessionMiddleware,
         };
     }
 
@@ -434,6 +435,34 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(processOnSpy).toHaveBeenCalled();
         expect(setIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("configures the session cookie with explicit SameSite=Lax protection", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(process, "on").mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout,
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        expect(mocks.sessionMiddleware).toHaveBeenCalledWith(
+            expect.objectContaining({
+                cookie: expect.objectContaining({
+                    httpOnly: true,
+                    sameSite: "lax",
+                }),
+            }),
+        );
     });
 
     it("mounts FEATURE_DISABLED 404 handlers for gated prefixes when flags are off", async () => {
