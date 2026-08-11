@@ -34,7 +34,7 @@ spec:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
         - name: ytmusic
-          image: "{{ .Values.ytmusicStreamer.image.repository }}:{{ .Values.ytmusicStreamer.image.tag }}"
+          image: {{ include "soundspan.image" .Values.ytmusicStreamer.image | quote }}
           imagePullPolicy: {{ .Values.ytmusicStreamer.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}

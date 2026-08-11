@@ -35,11 +35,12 @@ spec:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
         - name: audio-analyzer
-          image: "{{ .Values.audioAnalyzer.image.repository }}:{{ .Values.audioAnalyzer.image.tag }}"
+          image: {{ include "soundspan.image" .Values.audioAnalyzer.image | quote }}
           imagePullPolicy: {{ .Values.audioAnalyzer.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
           {{- $audioAnalyzerEnv := .Values.audioAnalyzer.env | default (dict) }}
+          {{- $audioAnalyzerHasPostgresSecretEnv := or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
           {{- $audioAnalyzerExplicitEnvKeys := dict
             "POSTGRES_USER" true
             "POSTGRES_PASSWORD" true
@@ -53,7 +54,7 @@ spec:
             {{- if hasKey $audioAnalyzerEnv "POSTGRES_USER" }}
             - name: POSTGRES_USER
               value: {{ index $audioAnalyzerEnv "POSTGRES_USER" | quote }}
-            {{- else }}
+            {{- else if $audioAnalyzerHasPostgresSecretEnv }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -63,7 +64,7 @@ spec:
             {{- if hasKey $audioAnalyzerEnv "POSTGRES_PASSWORD" }}
             - name: POSTGRES_PASSWORD
               value: {{ index $audioAnalyzerEnv "POSTGRES_PASSWORD" | quote }}
-            {{- else }}
+            {{- else if $audioAnalyzerHasPostgresSecretEnv }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -73,7 +74,7 @@ spec:
             {{- if hasKey $audioAnalyzerEnv "POSTGRES_DB" }}
             - name: POSTGRES_DB
               value: {{ index $audioAnalyzerEnv "POSTGRES_DB" | quote }}
-            {{- else }}
+            {{- else if $audioAnalyzerHasPostgresSecretEnv }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:

@@ -74,6 +74,22 @@ Secret name
 {{- end }}
 
 {{/*
+Application image reference. A digest takes precedence over the mutable tag.
+Usage: include "soundspan.image" .Values.backend.image
+*/}}
+{{- define "soundspan.image" -}}
+{{- $digest := .digest | default "" -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+{{- fail (printf "image.digest must use sha256:<64 lowercase hexadecimal characters>; got %q" $digest) -}}
+{{- end -}}
+{{- printf "%s@%s" .repository $digest -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 PostgreSQL connection URL
 */}}
 {{- define "soundspan.databaseUrl" -}}

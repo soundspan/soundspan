@@ -39,7 +39,7 @@ spec:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
         - name: backend-worker
-          image: "{{ .Values.backendWorker.image.repository }}:{{ .Values.backendWorker.image.tag }}"
+          image: {{ include "soundspan.image" .Values.backendWorker.image | quote }}
           imagePullPolicy: {{ .Values.backendWorker.image.pullPolicy }}
           ports:
             - name: health

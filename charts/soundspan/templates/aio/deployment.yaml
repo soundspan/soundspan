@@ -41,7 +41,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.aio.terminationGracePeriodSeconds | default 45 }}
       containers:
         - name: soundspan
-          image: "{{ .Values.aio.image.repository }}:{{ .Values.aio.image.tag }}"
+          image: {{ include "soundspan.image" .Values.aio.image | quote }}
           imagePullPolicy: {{ .Values.aio.image.pullPolicy }}
           lifecycle:
             preStop:
@@ -59,6 +59,8 @@ spec:
             "TZ" true
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
+            "INTERNAL_API_SECRET" true
+            "POSTGRES_PASSWORD" true
             "ALLOWED_ORIGINS" true
             "LOG_LEVEL" true
             "DOCS_PUBLIC" true
@@ -103,6 +105,29 @@ spec:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: SETTINGS_ENCRYPTION_KEY
+            {{- end }}
+            {{- if hasKey $aioEnv "INTERNAL_API_SECRET" }}
+            - name: INTERNAL_API_SECRET
+              value: {{ index $aioEnv "INTERNAL_API_SECRET" | quote }}
+            {{- else }}
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: INTERNAL_API_SECRET
+            {{- end }}
+            {{- if hasKey $aioEnv "POSTGRES_PASSWORD" }}
+            - name: POSTGRES_PASSWORD
+              value: {{ index $aioEnv "POSTGRES_PASSWORD" | quote }}
+            {{- else }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_PASSWORD
+                  {{- if .Values.secrets.existingSecret }}
+                  optional: true
+                  {{- end }}
             {{- end }}
             {{- if hasKey $aioEnv "ALLOWED_ORIGINS" }}
             - name: ALLOWED_ORIGINS

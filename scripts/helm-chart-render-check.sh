@@ -34,16 +34,39 @@ assert_service_selectors_isolated() {
   fi
 }
 
+assert_deployment_image() {
+  local render_name="$1"
+  local manifest_file="$2"
+  local deployment_name="$3"
+  local expected_image="$4"
+
+  if ! DEPLOYMENT_NAME="$deployment_name" EXPECTED_IMAGE="$expected_image" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc =~ /^          image: "\Q$ENV{EXPECTED_IMAGE}\E"$/m;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${render_name} missing digest-bound image ${expected_image}" >&2
+    exit 1
+  fi
+}
+
 tmp_aio="$(mktemp)"
 tmp_aio_sidecars="$(mktemp)"
+tmp_aio_rotated_secrets="$(mktemp)"
+tmp_aio_secret_overrides="$(mktemp)"
+tmp_aio_digests="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
+tmp_individual_external_database="$(mktemp)"
+tmp_individual_digests="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_individual_ha" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -59,6 +82,73 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   exit 1
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
+
+for key in INTERNAL_API_SECRET POSTGRES_PASSWORD; do
+  if ! perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: '"$RELEASE_NAME"'$/m;
+          exit 0 if $doc =~ /name:\s+'"$key"'\s+valueFrom:\s+secretKeyRef:\s+name:\s+'"$RELEASE_NAME"'\s+key:\s+'"$key"'/s;
+      }
+      exit 1' "$tmp_aio"; then
+    echo "[ERROR] AIO Deployment missing ${key} secretKeyRef" >&2
+    exit 1
+  fi
+done
+
+echo "[CHECK] render AIO secret rotations with optional HTTP sidecars"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set secrets.internalApiSecret=rotated-internal-secret \
+  --set secrets.postgresPassword=rotated-postgres-password \
+  --set tidalSidecar.enabled=true \
+  --set ytmusicStreamer.enabled=true \
+  >"$tmp_aio_rotated_secrets"
+
+for expected_secret in \
+  'INTERNAL_API_SECRET: "rotated-internal-secret"' \
+  'POSTGRES_PASSWORD: "rotated-postgres-password"'; do
+  if ! line_match "^  ${expected_secret}$" "$tmp_aio_rotated_secrets"; then
+    echo "[ERROR] explicit Secret rotation missing ${expected_secret}" >&2
+    exit 1
+  fi
+done
+for deployment in "$RELEASE_NAME" "${RELEASE_NAME}-tidal" "${RELEASE_NAME}-ytmusic"; do
+  if ! DEPLOYMENT_NAME="$deployment" SECRET_NAME="$RELEASE_NAME" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc =~ /name:\s+INTERNAL_API_SECRET\s+valueFrom:\s+secretKeyRef:\s+name:\s+\Q$ENV{SECRET_NAME}\E\s+key:\s+INTERNAL_API_SECRET/s;
+      }
+      exit 1' "$tmp_aio_rotated_secrets"; then
+    echo "[ERROR] ${deployment} does not consume the rotated chart INTERNAL_API_SECRET" >&2
+    exit 1
+  fi
+done
+
+echo "[CHECK] render explicit AIO secret env overrides"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set aio.env.INTERNAL_API_SECRET=aio-internal-override \
+  --set aio.env.POSTGRES_PASSWORD=aio-postgres-override \
+  >"$tmp_aio_secret_overrides"
+
+for expected_override in \
+  'INTERNAL_API_SECRET\s+value:\s+"aio-internal-override"' \
+  'POSTGRES_PASSWORD\s+value:\s+"aio-postgres-override"'; do
+  if ! perl -0777 -ne 'exit(/name:\s+'"$expected_override"'/s ? 0 : 1)' "$tmp_aio_secret_overrides"; then
+    echo "[ERROR] AIO explicit env override missing for ${expected_override%%\\*}" >&2
+    exit 1
+  fi
+done
+if ! perl -0777 -ne '
+    for my $doc (split /^---/m, $_) {
+        next unless $doc =~ /kind:\s*Deployment/;
+        next unless $doc =~ /^  name: '"$RELEASE_NAME"'$/m;
+        exit 0 if $doc !~ /name:\s+(?:INTERNAL_API_SECRET|POSTGRES_PASSWORD)\s+valueFrom:/s;
+    }
+    exit 1' "$tmp_aio_secret_overrides"; then
+  echo "[ERROR] AIO explicit secret env overrides rendered duplicate secretKeyRefs" >&2
+  exit 1
+fi
 
 echo "[CHECK] render AIO mode with HTTP sidecars for Service selector isolation"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
@@ -91,6 +181,80 @@ if ! perl -0777 -ne 'exit((/name:\s+LISTEN_TOGETHER_STATE_STORE_ENABLED\s+value:
   exit 1
 fi
 assert_service_selectors_isolated "HA individual" "$tmp_individual_ha"
+
+echo "[CHECK] render analyzers with external DATABASE_URL and core-only existing Secret"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set postgresql.enabled=false \
+  --set postgresql.external.url='postgresql://external-user:external-password@database.example.com:5432/soundspan?sslmode=require' \
+  --set secrets.existingSecret=core-only-secret \
+  --set audioAnalyzer.enabled=true \
+  --set audioAnalyzerClap.enabled=true \
+  >"$tmp_individual_external_database"
+
+for analyzer in audio-analyzer audio-analyzer-clap; do
+  if ! perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: '"$RELEASE_NAME"'-'"$analyzer"'$/m;
+          next if $doc =~ /name:\s+POSTGRES_(?:USER|PASSWORD|DB)\b/;
+          exit 0 if $doc =~ /name:\s+DATABASE_URL\s+value:\s+"postgresql:\/\/external-user:external-password\@database\.example\.com:5432\/soundspan\?sslmode=require"/s;
+      }
+      exit 1' "$tmp_individual_external_database"; then
+    echo "[ERROR] ${analyzer} must use external DATABASE_URL without POSTGRES_* secret refs" >&2
+    exit 1
+  fi
+done
+
+digest_aio="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+digest_backend="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+digest_worker="sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+digest_frontend="sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+digest_tidal="sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+digest_ytmusic="sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+digest_analyzer="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+digest_clap="sha256:2222222222222222222222222222222222222222222222222222222222222222"
+
+echo "[CHECK] render AIO application image by digest"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set aio.image.digest="$digest_aio" \
+  >"$tmp_aio_digests"
+assert_deployment_image \
+  "AIO Deployment" \
+  "$tmp_aio_digests" \
+  "$RELEASE_NAME" \
+  "ghcr.io/soundspan/soundspan@${digest_aio}"
+
+echo "[CHECK] render every individual application image by digest"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set tidalSidecar.enabled=true \
+  --set ytmusicStreamer.enabled=true \
+  --set audioAnalyzer.enabled=true \
+  --set audioAnalyzerClap.enabled=true \
+  --set backend.image.digest="$digest_backend" \
+  --set backendWorker.image.digest="$digest_worker" \
+  --set frontend.image.digest="$digest_frontend" \
+  --set tidalSidecar.image.digest="$digest_tidal" \
+  --set ytmusicStreamer.image.digest="$digest_ytmusic" \
+  --set audioAnalyzer.image.digest="$digest_analyzer" \
+  --set audioAnalyzerClap.image.digest="$digest_clap" \
+  >"$tmp_individual_digests"
+
+assert_deployment_image "backend Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-backend" "ghcr.io/soundspan/soundspan-backend@${digest_backend}"
+assert_deployment_image "backend-worker Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-backend-worker" "ghcr.io/soundspan/soundspan-backend-worker@${digest_worker}"
+assert_deployment_image "frontend Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-frontend" "ghcr.io/soundspan/soundspan-frontend@${digest_frontend}"
+assert_deployment_image "TIDAL Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-tidal" "ghcr.io/soundspan/soundspan-tidal-downloader@${digest_tidal}"
+assert_deployment_image "YT Music Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-ytmusic" "ghcr.io/soundspan/soundspan-ytmusic-streamer@${digest_ytmusic}"
+assert_deployment_image "audio analyzer Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-audio-analyzer" "ghcr.io/soundspan/soundspan-audio-analyzer@${digest_analyzer}"
+assert_deployment_image "CLAP analyzer Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-audio-analyzer-clap" "ghcr.io/soundspan/soundspan-audio-analyzer-clap@${digest_clap}"
+
+echo "[CHECK] reject malformed application image digests"
+if helm template "$RELEASE_NAME" "$CHART_PATH" --set aio.image.digest=sha256:not-a-digest >/dev/null 2>&1; then
+  echo "[ERROR] malformed application image digest was accepted" >&2
+  exit 1
+fi
 
 echo "[CHECK] render global.env config map + envFrom wiring"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
@@ -174,6 +338,16 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   >"$tmp_secret_existing"
 if line_match '^kind: Secret$' "$tmp_secret_existing"; then
   echo "[ERROR] existingSecret set but chart still rendered a managed Secret" >&2
+  exit 1
+fi
+if ! perl -0777 -ne '
+    for my $doc (split /^---/m, $_) {
+        next unless $doc =~ /kind:\s*Deployment/;
+        next unless $doc =~ /^  name: '"$RELEASE_NAME"'$/m;
+        exit 0 if $doc =~ /name:\s+POSTGRES_PASSWORD\s+valueFrom:\s+secretKeyRef:\s+name:\s+external-secret\s+key:\s+POSTGRES_PASSWORD\s+optional:\s+true/s;
+    }
+    exit 1' "$tmp_secret_existing"; then
+  echo "[ERROR] AIO existingSecret POSTGRES_PASSWORD reference must remain optional" >&2
   exit 1
 fi
 

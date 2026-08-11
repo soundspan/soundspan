@@ -90,6 +90,8 @@ aio:
   image:
     repository: ghcr.io/soundspan/soundspan
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: IfNotPresent
   # Grace window + preStop sleep to drain requests before pod shutdown.
   terminationGracePeriodSeconds: 45
@@ -148,6 +150,8 @@ backend:
   image:
     repository: ghcr.io/soundspan/soundspan-backend
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   # -- Backend process role. Leave empty for auto:
   #    - "all" when backendWorker is disabled
@@ -223,6 +227,8 @@ backendWorker:
   image:
     repository: ghcr.io/soundspan/soundspan-backend-worker
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   # -- Worker process role override. Defaults to "worker".
   processRole: ""
@@ -276,6 +282,8 @@ frontend:
   image:
     repository: ghcr.io/soundspan/soundspan-frontend
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   replicas: 1
   strategy:
@@ -404,6 +412,8 @@ tidalSidecar:
   image:
     repository: ghcr.io/soundspan/soundspan-tidal-downloader
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   port: 8585
   resources:
@@ -431,6 +441,8 @@ ytmusicStreamer:
   image:
     repository: ghcr.io/soundspan/soundspan-ytmusic-streamer
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   port: 8586
   resources:
@@ -500,6 +512,8 @@ audioAnalyzer:
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   resources:
     requests:
@@ -556,6 +570,8 @@ audioAnalyzerClap:
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer-clap
     tag: 1.9.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
     pullPolicy: Always
   resources:
     requests:
@@ -798,12 +814,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
-
-
-
-
-
-
-
-

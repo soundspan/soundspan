@@ -34,7 +34,7 @@ spec:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
         - name: tidal
-          image: "{{ .Values.tidalSidecar.image.repository }}:{{ .Values.tidalSidecar.image.tag }}"
+          image: {{ include "soundspan.image" .Values.tidalSidecar.image | quote }}
           imagePullPolicy: {{ .Values.tidalSidecar.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
