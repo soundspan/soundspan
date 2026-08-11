@@ -51,4 +51,31 @@ if (!runningUnderJest) {
     });
 }
 
+/**
+ * Run a blocking BLPOP on a short-lived dedicated connection so the blocking
+ * wait never parks the shared client's socket (which also serves the session
+ * store and all caches). The dedicated connection is closed on every path.
+ */
+export async function blockingBlPop(
+    key: string,
+    timeoutSeconds: number,
+): Promise<{ key: string; element: string } | null> {
+    const dedicated = redisClient.duplicate();
+    await dedicated.connect();
+    try {
+        return await dedicated.blPop(key, timeoutSeconds);
+    } finally {
+        try {
+            await dedicated.close();
+        } catch (closeError) {
+            logger.debug(
+                "Failed to close dedicated Redis connection:",
+                closeError instanceof Error
+                    ? closeError.message
+                    : String(closeError),
+            );
+        }
+    }
+}
+
 export { redisClient };

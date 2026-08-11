@@ -34,9 +34,9 @@ jest.mock("../../utils/db", () => ({
 }));
 
 jest.mock("../../utils/redis", () => ({
+    blockingBlPop: jest.fn(),
     redisClient: {
         xAdd: jest.fn(),
-        blPop: jest.fn(),
         del: jest.fn(),
     },
 }));
@@ -75,11 +75,11 @@ jest.mock("../../services/vibeVocabulary", () => ({
 }));
 
 import router from "../vibe";
-import { redisClient } from "../../utils/redis";
+import { blockingBlPop, redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
 
 const mockRedisXAdd = redisClient.xAdd as jest.Mock;
-const mockRedisBlPop = redisClient.blPop as jest.Mock;
+const mockBlockingBlPop = blockingBlPop as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
 
@@ -147,7 +147,7 @@ describe("vibe canonical error response shape", () => {
     });
 
     it("returns only the canonical error field when text embedding times out", async () => {
-        mockRedisBlPop.mockResolvedValue(null);
+        mockBlockingBlPop.mockResolvedValue(null);
         const req = {
             body: { query: "quiet focus" },
             user: { id: "user-1" },

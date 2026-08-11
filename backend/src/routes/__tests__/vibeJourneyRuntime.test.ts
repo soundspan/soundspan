@@ -38,9 +38,9 @@ jest.mock("../../utils/db", () => ({
 }));
 
 jest.mock("../../utils/redis", () => ({
+    blockingBlPop: jest.fn(),
     redisClient: {
         xAdd: jest.fn(),
-        blPop: jest.fn(),
         del: jest.fn(),
     },
 }));

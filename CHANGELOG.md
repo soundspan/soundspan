@@ -311,6 +311,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Vibe text search now runs its blocking Redis response wait on a dedicated
+  connection, so a slow CLAP sidecar cannot stall the shared Redis client used
+  by sessions and caches.
 - The ytmusic-streamer playlist endpoint's public-browse and auth-fallback
   paths, and the debug search endpoint, now offload blocking ytmusicapi calls
   to the asyncio thread pool instead of stalling the event loop, and batch

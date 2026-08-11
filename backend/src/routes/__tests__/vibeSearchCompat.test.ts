@@ -34,9 +34,9 @@ jest.mock("../../utils/db", () => ({
 }));
 
 jest.mock("../../utils/redis", () => ({
+    blockingBlPop: jest.fn(),
     redisClient: {
         xAdd: jest.fn(),
-        blPop: jest.fn(),
         del: jest.fn(),
     },
 }));
@@ -81,7 +81,7 @@ jest.mock("../../services/vibeVocabulary", () => ({
 
 import router from "../vibe";
 import { prisma } from "../../utils/db";
-import { redisClient } from "../../utils/redis";
+import { blockingBlPop, redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
 import { runAnnQuery } from "../../utils/annQuery";
 import { computeMapProjection } from "../../services/umapProjection";
@@ -97,7 +97,7 @@ const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
 const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockRedisXAdd = redisClient.xAdd as jest.Mock;
-const mockRedisBlPop = redisClient.blPop as jest.Mock;
+const mockBlockingBlPop = blockingBlPop as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
 const mockRunAnnQuery = runAnnQuery as jest.Mock;
@@ -386,7 +386,7 @@ describe("vibe search transport compatibility", () => {
     });
 
     it("uses stream request + response list and returns search results", async () => {
-        mockRedisBlPop.mockResolvedValue({
+        mockBlockingBlPop.mockResolvedValue({
             key: "audio:text:embed:response:req-123",
             element: JSON.stringify({
                 requestId: "req-123",
@@ -450,7 +450,7 @@ describe("vibe search transport compatibility", () => {
                 responseKey: "audio:text:embed:response:req-123",
             }),
         );
-        expect(mockRedisBlPop).toHaveBeenCalledWith(
+        expect(mockBlockingBlPop).toHaveBeenCalledWith(
             "audio:text:embed:response:req-123",
             30,
         );
@@ -460,7 +460,7 @@ describe("vibe search transport compatibility", () => {
     });
 
     it("returns 504 when no embedding response arrives before timeout", async () => {
-        mockRedisBlPop.mockResolvedValue(null);
+        mockBlockingBlPop.mockResolvedValue(null);
 
         const req = {
             body: {
@@ -500,7 +500,7 @@ describe("vibe search transport compatibility", () => {
             error: "Query must be at least 2 characters",
         });
 
-        mockRedisBlPop.mockResolvedValueOnce({
+        mockBlockingBlPop.mockResolvedValueOnce({
             key: "audio:text:embed:response:req-123",
             element: "not-json",
         });
@@ -515,7 +515,7 @@ describe("vibe search transport compatibility", () => {
             error: "Failed to search tracks by vibe",
         });
 
-        mockRedisBlPop.mockResolvedValueOnce({
+        mockBlockingBlPop.mockResolvedValueOnce({
             key: "audio:text:embed:response:req-123",
             element: JSON.stringify({
                 requestId: "req-123",
@@ -536,7 +536,7 @@ describe("vibe search transport compatibility", () => {
             error: "Failed to search tracks by vibe",
         });
 
-        mockRedisBlPop.mockResolvedValueOnce({
+        mockBlockingBlPop.mockResolvedValueOnce({
             key: "audio:text:embed:response:req-123",
             element: JSON.stringify({
                 requestId: "req-123",
@@ -558,7 +558,7 @@ describe("vibe search transport compatibility", () => {
     });
 
     it("expands and reranks vibe search results when vocabulary matches exist", async () => {
-        mockRedisBlPop.mockResolvedValueOnce({
+        mockBlockingBlPop.mockResolvedValueOnce({
             key: "audio:text:embed:response:req-123",
             element: JSON.stringify({
                 requestId: "req-123",

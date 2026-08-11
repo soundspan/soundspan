@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { runAnnQuery } from "../utils/annQuery";
-import { redisClient } from "../utils/redis";
+import { blockingBlPop, redisClient } from "../utils/redis";
 import { parseEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -1191,7 +1191,7 @@ router.post(
                 });
 
                 // Wait for response from the CLAP worker.
-                const response = await redisClient.blPop(
+                const response = await blockingBlPop(
                     responseKey,
                     TEXT_EMBED_TIMEOUT_SECONDS,
                 );

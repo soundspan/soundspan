@@ -5,6 +5,18 @@ type RedisClient = {
         (event: string, handler: (...args: unknown[]) => void) => RedisClient
     >;
     connect: jest.MockedFunction<() => Promise<void>>;
+    duplicate: jest.MockedFunction<() => DedicatedRedisClient>;
+};
+
+type DedicatedRedisClient = {
+    connect: jest.MockedFunction<() => Promise<void>>;
+    blPop: jest.MockedFunction<
+        (
+            key: string,
+            timeoutSeconds: number,
+        ) => Promise<{ key: string; element: string } | null>
+    >;
+    close: jest.MockedFunction<() => Promise<void>>;
 };
 
 const mockCreateClient = jest.fn<(...args: unknown[]) => RedisClient>();
@@ -31,6 +43,7 @@ jest.mock("../../config", () => ({
 describe("redisClient", () => {
     let handlers: Record<string, (...args: unknown[]) => void>;
     let client: RedisClient;
+    let dedicatedClient: DedicatedRedisClient;
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -45,6 +58,12 @@ describe("redisClient", () => {
             },
         );
         client.connect = jest.fn(async () => undefined);
+        dedicatedClient = {
+            connect: jest.fn(async () => undefined),
+            blPop: jest.fn(async () => null),
+            close: jest.fn(async () => undefined),
+        };
+        client.duplicate = jest.fn(() => dedicatedClient);
 
         mockCreateClient.mockReturnValue(client);
     });
@@ -160,5 +179,50 @@ describe("redisClient", () => {
         } finally {
             process.env.JEST_WORKER_ID = jestWorkerId;
         }
+    });
+
+    it("runs blocking BLPOP on a dedicated connection", async () => {
+        const value = { key: "k", element: "payload" };
+        dedicatedClient.blPop.mockResolvedValue(value);
+        const { blockingBlPop } = await import("../redis");
+
+        await expect(blockingBlPop("k", 30)).resolves.toEqual(value);
+
+        expect(client.duplicate).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.connect).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.blPop).toHaveBeenCalledWith("k", 30);
+        expect(
+            dedicatedClient.connect.mock.invocationCallOrder[0],
+        ).toBeLessThan(dedicatedClient.blPop.mock.invocationCallOrder[0]);
+        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the dedicated connection after a BLPOP timeout", async () => {
+        const { blockingBlPop } = await import("../redis");
+
+        await expect(blockingBlPop("k", 30)).resolves.toBeNull();
+
+        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the dedicated connection after a BLPOP error", async () => {
+        const error = new Error("BLPOP failed");
+        dedicatedClient.blPop.mockRejectedValue(error);
+        const { blockingBlPop } = await import("../redis");
+
+        await expect(blockingBlPop("k", 30)).rejects.toBe(error);
+
+        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("swallows close failures after a successful BLPOP", async () => {
+        const value = { key: "k", element: "payload" };
+        dedicatedClient.blPop.mockResolvedValue(value);
+        dedicatedClient.close.mockRejectedValue(new Error("close failed"));
+        const { blockingBlPop } = await import("../redis");
+
+        await expect(blockingBlPop("k", 30)).resolves.toEqual(value);
+
+        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
     });
 });
