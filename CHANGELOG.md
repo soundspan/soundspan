@@ -319,6 +319,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Podcast feeds and enclosures are size-bounded to prevent authenticated
+  resource exhaustion (#352).
+- YouTube Music metadata extraction is bounded by an overall deadline and a
+  socket timeout so stalled extractions cannot retain worker threads (#355).
+- Expired TIDAL stream manifests are evicted from a bounded LRU cache instead of
+  accumulating indefinitely (#354).
+- Audiobook cover-art fetch failures now cancel the upstream response body,
+  preventing connection-pool exhaustion (#357).
+- Helm: the AIO deployment consumes chart-managed internal and PostgreSQL
+  secrets, analyzer deployments omit unused PostgreSQL keys under an external
+  DATABASE_URL, and application images support opt-in digest pinning (#358).
+- Build tooling (contract TypeScript, analyzer pip) is pinned instead of
+  resolved live at build time (#359).
+- Generic import jobs run durably on the worker queue with startup recovery and
+  deduplication instead of an API-local timer (#361).
+- The queue-cleaner maintenance loop no longer runs inside API replicas; it is
+  dispatched as a claimed worker job (#363).
+- Published OpenAPI playlist and play schemas document the supported
+  remote-media (TIDAL, YouTube, mixed-source itemIds) request contracts (#360).
+
 - Helm: the AIO entrypoint Service now selects only its own component's pods,
   so enabling a streaming sidecar no longer routes app/ingress traffic to the
   internal sidecar port; the chart render check asserts Service selector
@@ -674,6 +694,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
 
 ### Security
+
+- Shared-library download routes (create, release lookup, grab, keep-track) now
+  require admin, and keep-track is scoped to the owning DiscoveryAlbum, closing
+  an authorization gap and a cross-user IDOR (#351).
+- The Spotify import session-log endpoint is admin-only and no longer returns
+  server filesystem paths (#353).
+- Podcast episode cache paths are containment-checked and ownership-verified
+  before any filesystem access, closing a path-traversal arbitrary-file delete
+  (#352).
+- TIDAL download output-template paths are validated to stay within MUSIC_PATH
+  (#354).
+- Encryption and internal-auth secrets now require a 32-character minimum,
+  validated fail-closed at startup. **BREAKING:** deployments configured with
+  weak secrets must strengthen them before upgrading (#356).
+- Resolved pre-existing code-scanning alerts: log format-string handling,
+  MusicBrainz identifier path validation, and session-cookie CSRF hardening
+  (#362).
 
 - Subsonic JSONP callback parameters are now validated against a strict
   JavaScript identifier pattern, with a nosniff plain-JSON fallback for missing
