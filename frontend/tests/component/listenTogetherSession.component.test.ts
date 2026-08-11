@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, mock, test } from "node:test";
+import React from "react";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
     enqueueLatestListenTogetherHostTrackOperation,
     LISTEN_TOGETHER_MEMBERSHIP_PENDING_STORAGE_KEY,
@@ -17,6 +19,11 @@ import {
 import { listenTogetherSocket } from "../../lib/listen-together-socket";
 import { api } from "@/lib/api";
 
+GlobalRegistrator.register();
+(
+    globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
 type StorageLike = {
     getItem: (key: string) => string | null;
     setItem: (key: string, value: string) => void;
@@ -32,6 +39,14 @@ const globalScope = globalThis as GlobalScope;
 
 let previousWindow: unknown;
 let previousLocalStorage: unknown;
+
+after(() => {
+    try {
+        GlobalRegistrator.unregister();
+    } catch {
+        // Best-effort teardown.
+    }
+});
 
 function installStorage(
     initial?: Record<string, string>,
@@ -685,4 +700,611 @@ test("createSegmentedStreamingSession omits startup headers for invalid inputs",
         }),
         headers: {},
     });
+});
+
+type MockTrack = {
+    id: string;
+    title: string;
+    duration: number;
+    artist: { id: string; name: string };
+    album: { id: string; title: string; coverArt?: string };
+    mediaSource?: "local" | "tidal" | "youtube";
+    streamSource?: "tidal" | "youtube" | "youtube-direct";
+    youtubeVideoId?: string;
+};
+
+type MockGroupSnapshot = {
+    id: string;
+    name: string;
+    joinCode: string;
+    groupType: "host-follower";
+    visibility: "private";
+    isActive: boolean;
+    hostUserId: string;
+    syncState: "playing" | "waiting";
+    playback: {
+        queue: MockTrack[];
+        currentIndex: number;
+        isPlaying: boolean;
+        positionMs: number;
+        serverTime: number;
+        stateVersion: number;
+        trackId: string | null;
+    };
+    members: Array<{
+        userId: string;
+        username: string;
+        isHost: boolean;
+        joinedAt: string;
+        isConnected: boolean;
+    }>;
+};
+
+type ListenTogetherCallbacks = {
+    onPlaybackDelta: (delta: {
+        isPlaying: boolean;
+        positionMs: number;
+        serverTime: number;
+        stateVersion: number;
+        currentIndex: number;
+        trackId: string | null;
+    }) => void;
+    onAvailability: (data: {
+        availability: Array<{
+            queueIndex: number;
+            available: boolean;
+            source?: "local" | "tidal" | "youtube";
+            localTrackId?: string;
+        }>;
+        stateVersion: number;
+    }) => void;
+    onWaiting: (data: {
+        trackId: string | null;
+        currentIndex: number;
+    }) => void;
+    onPlayAt: (data: {
+        positionMs: number;
+        serverTime: number;
+        stateVersion: number;
+    }) => void;
+    onConnect: () => void;
+};
+
+const providerAuthState = {
+    userId: "host-id",
+};
+const providerApiState: { group: MockGroupSnapshot | null } = {
+    group: null,
+};
+const providerSocketState = {
+    callbacks: null as ListenTogetherCallbacks | null,
+    seekCalls: [] as number[],
+    reportReadyCalls: 0,
+};
+const providerEngineState = {
+    currentTime: 0,
+    duration: 180,
+    playing: false,
+    listeners: new Map<string, Set<() => void>>(),
+};
+const providerControlCalls = {
+    seek: [] as number[],
+    resume: 0,
+    pause: 0,
+};
+const providerAudioState = {
+    queue: [] as MockTrack[],
+    currentIndex: 0,
+    currentTrack: null as MockTrack | null,
+    playbackType: "track",
+    setPlaybackType: (value: string) => {
+        providerAudioState.playbackType = value;
+    },
+    setQueue: (queue: MockTrack[]) => {
+        providerAudioState.queue = queue;
+    },
+    setCurrentIndex: (index: number) => {
+        providerAudioState.currentIndex = index;
+        providerAudioStateCalls.currentIndex.push(index);
+    },
+    setCurrentTrack: (track: MockTrack | null) => {
+        providerAudioState.currentTrack = track;
+        providerAudioStateCalls.currentTrack.push(track);
+    },
+    setCurrentAudiobook: () => undefined,
+    setCurrentPodcast: () => undefined,
+    setIsShuffle: () => undefined,
+    setVibeMode: () => undefined,
+};
+const providerAudioStateCalls = {
+    currentIndex: [] as number[],
+    currentTrack: [] as Array<MockTrack | null>,
+};
+
+const providerPlaybackEngine = {
+    on: (event: string, listener: () => void) => {
+        const listeners =
+            providerEngineState.listeners.get(event) ?? new Set<() => void>();
+        listeners.add(listener);
+        providerEngineState.listeners.set(event, listeners);
+    },
+    off: (event: string, listener: () => void) => {
+        providerEngineState.listeners.get(event)?.delete(listener);
+    },
+    getCurrentTime: () => providerEngineState.currentTime,
+    getDuration: () => providerEngineState.duration,
+    isPlaying: () => providerEngineState.playing,
+    reload: () => undefined,
+};
+
+const providerControls = {
+    seek: (positionSec: number) => {
+        providerControlCalls.seek.push(positionSec);
+        providerEngineState.currentTime = positionSec;
+    },
+    resume: () => {
+        providerControlCalls.resume += 1;
+        providerEngineState.playing = true;
+    },
+    pause: () => {
+        providerControlCalls.pause += 1;
+        providerEngineState.playing = false;
+    },
+};
+
+const providerSocket = {
+    isConnected: false,
+    probeRoute: async () => ({ ok: true }),
+    connect: (callbacks: ListenTogetherCallbacks) => {
+        providerSocketState.callbacks = callbacks;
+    },
+    disconnect: () => {
+        providerSocket.isConnected = false;
+    },
+    joinGroup: async () => undefined,
+    reportReady: async () => {
+        providerSocketState.reportReadyCalls += 1;
+    },
+    play: async () => undefined,
+    pause: async () => undefined,
+    seek: async (positionMs: number) => {
+        providerSocketState.seekCalls.push(positionMs);
+    },
+    next: async () => undefined,
+    previous: async () => undefined,
+    setTrack: async () => undefined,
+    addToQueue: async () => undefined,
+    removeFromQueue: async () => undefined,
+    clearQueue: async () => undefined,
+};
+
+mock.module("@/lib/auth-context", {
+    namedExports: {
+        useAuth: () => ({
+            isAuthenticated: true,
+            user: { id: providerAuthState.userId },
+        }),
+    },
+});
+mock.module("@/lib/audio-state-context", {
+    namedExports: { useAudioState: () => providerAudioState },
+});
+mock.module("@/lib/audio-controls-context", {
+    namedExports: { useAudioControls: () => providerControls },
+});
+mock.module("@/lib/audio-engine", {
+    namedExports: {
+        createRuntimeAudioEngine: () => providerPlaybackEngine,
+    },
+});
+mock.module("@/lib/logger", {
+    namedExports: {
+        frontendLogger: {
+            error: () => undefined,
+            info: () => undefined,
+            warn: () => undefined,
+        },
+    },
+});
+
+const originalProviderSocketMethods = {
+    probeRoute: listenTogetherSocket.probeRoute,
+    connect: listenTogetherSocket.connect,
+    disconnect: listenTogetherSocket.disconnect,
+    joinGroup: listenTogetherSocket.joinGroup,
+    reportReady: listenTogetherSocket.reportReady,
+    play: listenTogetherSocket.play,
+    pause: listenTogetherSocket.pause,
+    seek: listenTogetherSocket.seek,
+    next: listenTogetherSocket.next,
+    previous: listenTogetherSocket.previous,
+    setTrack: listenTogetherSocket.setTrack,
+    addToQueue: listenTogetherSocket.addToQueue,
+    removeFromQueue: listenTogetherSocket.removeFromQueue,
+    clearQueue: listenTogetherSocket.clearQueue,
+};
+const originalProviderSocketConnectedDescriptor = Object.getOwnPropertyDescriptor(
+    listenTogetherSocket,
+    "isConnected",
+);
+const providerApi = api as unknown as {
+    getMyListenGroup: () => Promise<MockGroupSnapshot | null>;
+};
+const originalGetMyListenGroup = providerApi.getMyListenGroup;
+let providerBoundaryStubsInstalled = false;
+
+function installProviderBoundaryStubs(): void {
+    if (providerBoundaryStubsInstalled) return;
+    providerBoundaryStubsInstalled = true;
+    const socket = listenTogetherSocket as unknown as typeof providerSocket;
+    socket.probeRoute = providerSocket.probeRoute;
+    socket.connect = providerSocket.connect;
+    socket.disconnect = providerSocket.disconnect;
+    socket.joinGroup = providerSocket.joinGroup;
+    socket.reportReady = providerSocket.reportReady;
+    socket.play = providerSocket.play;
+    socket.pause = providerSocket.pause;
+    socket.seek = providerSocket.seek;
+    socket.next = providerSocket.next;
+    socket.previous = providerSocket.previous;
+    socket.setTrack = providerSocket.setTrack;
+    socket.addToQueue = providerSocket.addToQueue;
+    socket.removeFromQueue = providerSocket.removeFromQueue;
+    socket.clearQueue = providerSocket.clearQueue;
+    Object.defineProperty(listenTogetherSocket, "isConnected", {
+        configurable: true,
+        get: () => providerSocket.isConnected,
+    });
+    providerApi.getMyListenGroup = async () => providerApiState.group;
+}
+
+after(() => {
+    if (!providerBoundaryStubsInstalled) return;
+    const socket = listenTogetherSocket as unknown as typeof providerSocket;
+    socket.probeRoute = originalProviderSocketMethods.probeRoute.bind(
+        listenTogetherSocket,
+    );
+    socket.connect = originalProviderSocketMethods.connect.bind(
+        listenTogetherSocket,
+    );
+    socket.disconnect = originalProviderSocketMethods.disconnect.bind(
+        listenTogetherSocket,
+    );
+    socket.joinGroup = originalProviderSocketMethods.joinGroup.bind(
+        listenTogetherSocket,
+    );
+    socket.reportReady = originalProviderSocketMethods.reportReady.bind(
+        listenTogetherSocket,
+    );
+    socket.play = originalProviderSocketMethods.play.bind(listenTogetherSocket);
+    socket.pause = originalProviderSocketMethods.pause.bind(
+        listenTogetherSocket,
+    );
+    socket.seek = originalProviderSocketMethods.seek.bind(listenTogetherSocket);
+    socket.next = originalProviderSocketMethods.next.bind(listenTogetherSocket);
+    socket.previous = originalProviderSocketMethods.previous.bind(
+        listenTogetherSocket,
+    );
+    socket.setTrack = originalProviderSocketMethods.setTrack.bind(
+        listenTogetherSocket,
+    );
+    socket.addToQueue = originalProviderSocketMethods.addToQueue.bind(
+        listenTogetherSocket,
+    );
+    socket.removeFromQueue = originalProviderSocketMethods.removeFromQueue.bind(
+        listenTogetherSocket,
+    );
+    socket.clearQueue = originalProviderSocketMethods.clearQueue.bind(
+        listenTogetherSocket,
+    );
+    if (originalProviderSocketConnectedDescriptor) {
+        Object.defineProperty(
+            listenTogetherSocket,
+            "isConnected",
+            originalProviderSocketConnectedDescriptor,
+        );
+    } else {
+        delete (listenTogetherSocket as unknown as { isConnected?: boolean })
+            .isConnected;
+    }
+    providerApi.getMyListenGroup = originalGetMyListenGroup;
+});
+mock.module("sonner", {
+    namedExports: {
+        toast: {
+            error: () => undefined,
+            info: () => undefined,
+            success: () => undefined,
+        },
+    },
+});
+
+function makeTrack(id: string): MockTrack {
+    return {
+        id,
+        title: `Track ${id}`,
+        duration: 180,
+        artist: { id: "artist-id", name: "Artist" },
+        album: { id: "album-id", title: "Album" },
+        mediaSource: "youtube",
+        streamSource: "youtube",
+        youtubeVideoId: `video-${id}`,
+    };
+}
+
+function makeGroup(isHost: boolean, currentIndex: number): MockGroupSnapshot {
+    const queue = [makeTrack("remote-0"), makeTrack("remote-1")];
+    return {
+        id: "group-provider",
+        name: "Provider group",
+        joinCode: "ABC123",
+        groupType: "host-follower",
+        visibility: "private",
+        isActive: true,
+        hostUserId: "host-id",
+        syncState: "playing",
+        playback: {
+            queue,
+            currentIndex,
+            isPlaying: true,
+            positionMs: 0,
+            serverTime: Date.now(),
+            stateVersion: 1,
+            trackId: queue[currentIndex]?.id ?? null,
+        },
+        members: [
+            {
+                userId: "host-id",
+                username: "Host",
+                isHost: true,
+                joinedAt: "2026-01-01T00:00:00.000Z",
+                isConnected: true,
+            },
+            {
+                userId: "guest-id",
+                username: "Guest",
+                isHost: false,
+                joinedAt: "2026-01-01T00:00:00.000Z",
+                isConnected: true,
+            },
+        ],
+    };
+}
+
+function resetProviderHarness(isHost: boolean, currentIndex: number): void {
+    const group = makeGroup(isHost, currentIndex);
+    providerAuthState.userId = isHost ? "host-id" : "guest-id";
+    providerApiState.group = group;
+    providerSocket.isConnected = false;
+    providerSocketState.callbacks = null;
+    providerSocketState.seekCalls = [];
+    providerSocketState.reportReadyCalls = 0;
+    providerEngineState.currentTime = 0;
+    providerEngineState.duration = 180;
+    providerEngineState.playing = false;
+    providerEngineState.listeners.clear();
+    providerControlCalls.seek = [];
+    providerControlCalls.resume = 0;
+    providerControlCalls.pause = 0;
+    providerAudioState.queue = group.playback.queue;
+    providerAudioState.currentIndex = currentIndex;
+    providerAudioState.currentTrack = group.playback.queue[currentIndex] ?? null;
+    providerAudioState.playbackType = "track";
+    providerAudioStateCalls.currentIndex = [];
+    providerAudioStateCalls.currentTrack = [];
+}
+
+function restoreBrowserGlobals(): void {
+    (globalScope as any).window = previousWindow;
+    (globalScope as any).localStorage = previousLocalStorage;
+}
+
+function emitProviderEngineLoad(): void {
+    const listeners = [
+        ...(providerEngineState.listeners.get("load") ?? new Set()),
+    ];
+    for (const listener of listeners) {
+        listener();
+    }
+}
+
+type ListenTogetherApi = ReturnType<
+    typeof import("../../lib/listen-together-context").useListenTogether
+>;
+
+async function mountListenTogetherProvider(
+    isHost: boolean,
+    currentIndex: number,
+) {
+    installProviderBoundaryStubs();
+    resetProviderHarness(isHost, currentIndex);
+    restoreBrowserGlobals();
+    const { ListenTogetherProvider, useListenTogether } =
+        await import("../../lib/listen-together-context");
+    const { createRoot } = await import("react-dom/client");
+    const latestRef: { current: ListenTogetherApi | null } = { current: null };
+
+    function Probe() {
+        latestRef.current = useListenTogether();
+        return null;
+    }
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await React.act(async () => {
+        root.render(
+            React.createElement(
+                ListenTogetherProvider,
+                null,
+                React.createElement(Probe),
+            ),
+        );
+    });
+    await React.act(async () => {
+        await waitFor(
+            () => providerSocketState.callbacks !== null,
+            "provider socket callbacks were not registered",
+        );
+    });
+    providerSocket.isConnected = true;
+    await React.act(async () => {
+        providerSocketState.callbacks?.onConnect();
+    });
+
+    return {
+        latest: () => {
+            assert.ok(latestRef.current, "listen-together context did not render");
+            return latestRef.current;
+        },
+        callbacks: () => {
+            assert.ok(providerSocketState.callbacks, "socket callbacks missing");
+            return providerSocketState.callbacks;
+        },
+        act: async (action: () => void | Promise<void>) => {
+            await React.act(async () => {
+                await action();
+            });
+        },
+        unmount: async () => {
+            await React.act(async () => root.unmount());
+            container.remove();
+        },
+    };
+}
+
+test("host play-at echoes do not restart an optimistic track, while guests still synchronize", async () => {
+    const host = await mountListenTogetherProvider(true, 0);
+    await host.act(() => host.latest().syncSetTrack(1));
+    providerEngineState.playing = true;
+    providerEngineState.currentTime = 2.5;
+    providerControlCalls.seek = [];
+    providerControlCalls.resume = 0;
+
+    await host.act(() =>
+        host.callbacks().onPlayAt({
+            positionMs: 0,
+            serverTime: Date.now() + 1_000,
+            stateVersion: 2,
+        }),
+    );
+
+    assert.deepEqual(providerControlCalls.seek, []);
+    assert.equal(providerControlCalls.resume, 0);
+    assert.equal(providerEngineState.currentTime, 2.5);
+    await host.unmount();
+
+    const guest = await mountListenTogetherProvider(false, 1);
+    providerEngineState.playing = false;
+    providerEngineState.currentTime = 2.5;
+
+    await guest.act(() =>
+        guest.callbacks().onPlayAt({
+            positionMs: 0,
+            serverTime: Date.now() + 1_000,
+            stateVersion: 2,
+        }),
+    );
+
+    assert.deepEqual(providerControlCalls.seek, [0]);
+    assert.equal(providerControlCalls.resume, 1);
+    assert.equal(providerEngineState.currentTime, 0);
+    await guest.unmount();
+});
+
+test("remote-apply guards clear without animation frames so host heartbeats continue", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = () =>
+        0 as unknown as ReturnType<typeof requestAnimationFrame>;
+    t.after(() => {
+        globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    });
+    const host = await mountListenTogetherProvider(true, 0);
+    t.after(host.unmount);
+    providerEngineState.playing = true;
+    providerEngineState.currentTime = 12.5;
+
+    await host.act(() =>
+        host.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 12_500,
+            serverTime: Date.now(),
+            stateVersion: 2,
+            currentIndex: 0,
+            trackId: "remote-0",
+        }),
+    );
+    t.mock.timers.tick(5_000);
+
+    assert.deepEqual(providerSocketState.seekCalls, [12_500]);
+});
+
+test("availability remaps update queue identity idempotently and preserve swap position", async (t) => {
+    const host = await mountListenTogetherProvider(true, 0);
+    t.after(host.unmount);
+    providerAudioState.currentTrack = {
+        ...makeTrack("local-0"),
+        mediaSource: "local",
+        streamSource: undefined,
+    };
+    providerAudioStateCalls.currentIndex = [];
+    providerAudioStateCalls.currentTrack = [];
+
+    await host.act(() =>
+        host.callbacks().onAvailability({
+            availability: [
+                {
+                    queueIndex: 0,
+                    available: true,
+                    source: "local",
+                    localTrackId: "local-0",
+                },
+            ],
+            stateVersion: 1,
+        }),
+    );
+
+    assert.equal(providerAudioState.queue[0]?.id, "local-0");
+    assert.deepEqual(providerAudioStateCalls.currentIndex, []);
+    assert.deepEqual(providerAudioStateCalls.currentTrack, []);
+
+    providerEngineState.currentTime = 37.25;
+    providerControlCalls.seek = [];
+    await host.act(() =>
+        host.callbacks().onAvailability({
+            availability: [
+                {
+                    queueIndex: 0,
+                    available: true,
+                    source: "local",
+                    localTrackId: "local-1",
+                },
+            ],
+            stateVersion: 1,
+        }),
+    );
+
+    assert.equal(providerAudioState.currentTrack?.id, "local-1");
+    assert.deepEqual(providerControlCalls.seek, []);
+    await host.act(() => emitProviderEngineLoad());
+    assert.deepEqual(providerControlCalls.seek, [37.25]);
+});
+
+test("engine load reports ready without waiting for the polling timer", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const host = await mountListenTogetherProvider(true, 0);
+    t.after(host.unmount);
+
+    await host.act(() =>
+        host.callbacks().onWaiting({
+            trackId: "remote-0",
+            currentIndex: 0,
+        }),
+    );
+    assert.equal(providerSocketState.reportReadyCalls, 0);
+
+    await host.act(() => emitProviderEngineLoad());
+
+    assert.equal(providerSocketState.reportReadyCalls, 1);
 });

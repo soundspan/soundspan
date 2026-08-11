@@ -339,10 +339,17 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const activeGroupRef = useRef<GroupSnapshot | null>(null);
     const lastAppliedVersionRef = useRef(0);
     const isApplyingRemoteRef = useRef(false);
+    const pendingHostTrackIndexRef = useRef<number | null>(null);
     const awaitingInitialStateRef = useRef(true);
     const readyReportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
     );
+    const readyReportLoadListenerRef = useRef<(() => void) | null>(null);
+    const readyReportTargetRef = useRef<{
+        currentIndex: number;
+        trackId: string | null;
+    } | null>(null);
+    const availabilitySwapLoadListenerRef = useRef<(() => void) | null>(null);
     const routeRecheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
     );
@@ -361,6 +368,39 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     );
     const trackAvailabilityStateVersionRef = useRef<number | null>(null);
     const lastLoadedTrackIdRef = useRef<string | null>(null);
+
+    const clearReadyReportLoadListener = useCallback(() => {
+        const listener = readyReportLoadListenerRef.current;
+        if (listener) {
+            playbackEngine.off("load", listener);
+            readyReportLoadListenerRef.current = null;
+        }
+        readyReportTargetRef.current = null;
+    }, []);
+
+    const clearObsoleteReadyReportLoadListener = useCallback(
+        (nextTrackIndex: number, nextTrackId: string | null) => {
+            const target = readyReportTargetRef.current;
+            const trackChanged = Boolean(
+                target &&
+                (target.currentIndex !== nextTrackIndex ||
+                    (target.trackId &&
+                        nextTrackId &&
+                        target.trackId !== nextTrackId)),
+            );
+            if (trackChanged) {
+                clearReadyReportLoadListener();
+            }
+        },
+        [clearReadyReportLoadListener],
+    );
+
+    const clearAvailabilitySwapLoadListener = useCallback(() => {
+        const listener = availabilitySwapLoadListenerRef.current;
+        if (!listener) return;
+        playbackEngine.off("load", listener);
+        availabilitySwapLoadListenerRef.current = null;
+    }, []);
 
     // Keep refs in sync
     useEffect(() => {
@@ -388,6 +428,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     }, []);
     useEffect(() => {
         return () => {
+            clearReadyReportLoadListener();
+            clearAvailabilitySwapLoadListener();
             if (readyReportTimerRef.current) {
                 clearTimeout(readyReportTimerRef.current);
                 readyReportTimerRef.current = null;
@@ -405,7 +447,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 disconnectGraceTimerRef.current = null;
             }
         };
-    }, []);
+    }, [clearAvailabilitySwapLoadListener, clearReadyReportLoadListener]);
 
     useEffect(() => {
         return () => {
@@ -465,6 +507,16 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         const state = audioStateRef.current;
         const ctrl = controlsRef.current;
 
+        if (
+            pendingHostTrackIndexRef.current !== null &&
+            pendingHostTrackIndexRef.current !== safeIndex
+        ) {
+            pendingHostTrackIndexRef.current = null;
+        }
+        clearObsoleteReadyReportLoadListener(
+            safeIndex,
+            pb.queue[safeIndex]?.id ?? null,
+        );
         isApplyingRemoteRef.current = true;
 
         // Pause before switching tracks to prevent buffered audio from
@@ -527,10 +579,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             ctrl.pause({ suppressListenTogetherBroadcast: true });
         }
 
-        requestAnimationFrame(() => {
+        queueMicrotask(() => {
             isApplyingRemoteRef.current = false;
         });
-    }, []);
+    }, [clearObsoleteReadyReportLoadListener]);
 
     const applyDeltaToPlayer = useCallback((delta: PlaybackDelta) => {
         // Ignore deltas while a reconnect audio recovery is in progress.
@@ -556,6 +608,16 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             const effectiveTrack =
                 queueItem && !isEpisodeQueueItem(queueItem) ? queueItem : null;
             trackChanged = effectiveTrack?.id !== state.currentTrack?.id;
+            if (
+                pendingHostTrackIndexRef.current !== null &&
+                pendingHostTrackIndexRef.current !== safeIdx
+            ) {
+                pendingHostTrackIndexRef.current = null;
+            }
+            clearObsoleteReadyReportLoadListener(
+                safeIdx,
+                delta.trackId,
+            );
             if (trackChanged) {
                 // Pause before switching to prevent buffered audio from the old
                 // track replaying during the async transition.
@@ -612,10 +674,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             ctrl.pause({ suppressListenTogetherBroadcast: true });
         }
 
-        requestAnimationFrame(() => {
+        queueMicrotask(() => {
             isApplyingRemoteRef.current = false;
         });
-    }, []);
+    }, [clearObsoleteReadyReportLoadListener]);
 
     const recoverAudioAfterReconnect = useCallback(
         (snapshot: GroupSnapshot) => {
@@ -813,6 +875,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                   )
                 : 0;
 
+        if (
+            pendingHostTrackIndexRef.current !== null &&
+            pendingHostTrackIndexRef.current !== safeIndex
+        ) {
+            pendingHostTrackIndexRef.current = null;
+        }
+        clearObsoleteReadyReportLoadListener(safeIndex, delta.trackId);
         isApplyingRemoteRef.current = true;
         const aState = audioStateRef.current;
 
@@ -830,7 +899,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         setTimeout(() => {
             isApplyingRemoteRef.current = false;
         }, 100);
-    }, []);
+    }, [clearObsoleteReadyReportLoadListener]);
 
     // -----------------------------------------------------------------------
     // Socket.IO lifecycle
@@ -881,13 +950,42 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                               )
                             : 0;
                     const state = audioStateRef.current;
+                    const targetTrack = mappedQueue[safeIndex] ?? null;
+                    const loadedTrackId = state.currentTrack?.id ?? null;
                     startTransition(() => {
                         state.setQueue(mappedQueue);
+                    });
+                    if ((targetTrack?.id ?? null) === loadedTrackId) return;
+
+                    const currentTimeSec = playbackEngine.getCurrentTime();
+                    const resumePositionSec = Number.isFinite(currentTimeSec)
+                        ? Math.max(0, currentTimeSec)
+                        : 0;
+                    clearAvailabilitySwapLoadListener();
+                    const onSwappedTrackLoaded = () => {
+                        if (
+                            audioStateRef.current.currentTrack?.id !==
+                            targetTrack?.id
+                        ) {
+                            return;
+                        }
+                        clearAvailabilitySwapLoadListener();
+                        controlsRef.current.seek(resumePositionSec, {
+                            allowListenTogetherFollower: true,
+                            suppressListenTogetherBroadcast: true,
+                        });
+                    };
+                    availabilitySwapLoadListenerRef.current =
+                        onSwappedTrackLoaded;
+                    playbackEngine.on("load", onSwappedTrackLoaded);
+
+                    startTransition(() => {
                         state.setCurrentIndex(safeIndex);
-                        state.setCurrentTrack(mappedQueue[safeIndex] ?? null);
+                        state.setCurrentTrack(targetTrack);
                     });
                 },
                 onWaiting: (data: WaitingEvent) => {
+                    clearReadyReportLoadListener();
                     if (readyReportTimerRef.current) {
                         clearTimeout(readyReportTimerRef.current);
                         readyReportTimerRef.current = null;
@@ -915,8 +1013,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     }
 
                     // The server says "buffer this track and report ready".
-                    // Wait for track match + media load readiness before reporting
-                    // ready, with a bounded timeout fallback to avoid hard deadlocks.
+                    // Report on the matching engine load event, while retaining
+                    // bounded polling as a fallback when no load event arrives.
                     const startedAt = Date.now();
                     let terminalRetryAttempted = false;
                     let recoveryTriggered = false;
@@ -1021,6 +1119,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         if (hasTrackMatch && (mediaReady || timedOut)) {
                             readyReportTimerRef.current = setTimeout(() => {
                                 readyReportTimerRef.current = null;
+                                clearReadyReportLoadListener();
                                 listenTogetherSocket
                                     .reportReady()
                                     .catch((error) => {
@@ -1076,6 +1175,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                         if (timedOut) {
                             readyReportTimerRef.current = null;
+                            clearReadyReportLoadListener();
                             triggerReadyReportRecovery(
                                 "[ListenTogether] ready report timed out before local media was ready",
                                 {
@@ -1095,6 +1195,25 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         );
                     };
 
+                    const onTargetTrackLoaded = () => {
+                        clearReadyReportLoadListener();
+                        if (readyReportTimerRef.current) {
+                            clearTimeout(readyReportTimerRef.current);
+                            readyReportTimerRef.current = null;
+                        }
+                        void listenTogetherSocket.reportReady().catch(() => {
+                            readyReportTimerRef.current = setTimeout(
+                                tryReportReady,
+                                LT_READY_REPORT_RETRY_DELAY_MS,
+                            );
+                        });
+                    };
+                    readyReportTargetRef.current = {
+                        currentIndex: data.currentIndex,
+                        trackId: data.trackId,
+                    };
+                    readyReportLoadListenerRef.current = onTargetTrackLoaded;
+                    playbackEngine.on("load", onTargetTrackLoaded);
                     tryReportReady();
                 },
                 onPlayAt: (data: PlayAtEvent) => {
@@ -1133,6 +1252,31 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         ? Math.min(targetSec, track.duration)
                         : targetSec;
 
+                    const pendingHostTrackIndex =
+                        pendingHostTrackIndexRef.current;
+                    const group = activeGroupRef.current;
+                    const isCurrentClientHost =
+                        canIssueListenTogetherHostPlaybackCommand({
+                            activeGroupId: group?.id,
+                            hostUserId: group?.hostUserId,
+                            userId: user?.id,
+                            snapshot: getListenTogetherSessionSnapshot(),
+                        });
+                    const suppressHostPlayAtEcho = Boolean(
+                        isCurrentClientHost &&
+                        pendingHostTrackIndex !== null &&
+                        state.currentIndex === pendingHostTrackIndex &&
+                        playbackEngine.isPlaying(),
+                    );
+                    pendingHostTrackIndexRef.current = null;
+
+                    if (suppressHostPlayAtEcho) {
+                        queueMicrotask(() => {
+                            isApplyingRemoteRef.current = false;
+                        });
+                        return;
+                    }
+
                     ctrl.seek(Math.max(0, clampedSec), {
                         allowListenTogetherFollower: true,
                         suppressListenTogetherBroadcast: true,
@@ -1144,7 +1288,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         listenTogetherServerTimeMs: data.serverTime,
                     });
 
-                    requestAnimationFrame(() => {
+                    queueMicrotask(() => {
                         isApplyingRemoteRef.current = false;
                     });
                 },
@@ -1214,6 +1358,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     trackAvailabilityStateVersionRef.current = null;
                     setHasConnectedOnce(false);
                     lastAppliedVersionRef.current = 0;
+                    pendingHostTrackIndexRef.current = null;
+                    clearReadyReportLoadListener();
                     setListenTogetherMembershipPending(false);
                     toast.info("Listen Together session ended");
                     listenTogetherSocket.disconnect();
@@ -1308,6 +1454,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             applyGroupState,
             applyPlaybackDelta,
             applyQueueDelta,
+            clearAvailabilitySwapLoadListener,
+            clearReadyReportLoadListener,
             recoverAudioAfterReconnect,
             scheduleRouteRecheck,
             user?.id,
@@ -1468,6 +1616,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             const targetTrack = queue[safeIndex] ?? null;
             // Listen Together queues are music-only; ignore episode entries.
             if (!targetTrack || isEpisodeQueueItem(targetTrack)) return false;
+            pendingHostTrackIndexRef.current = safeIndex;
+            clearObsoleteReadyReportLoadListener(
+                safeIndex,
+                targetTrack.id,
+            );
             const optimisticSelectionPolicy =
                 getListenTogetherOptimisticTrackSelectionPolicy();
             if (optimisticSelectionPolicy.guardRemoteApply) {
@@ -1494,13 +1647,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 suppressListenTogetherBroadcast: true,
             });
             if (optimisticSelectionPolicy.guardRemoteApply) {
-                requestAnimationFrame(() => {
+                queueMicrotask(() => {
                     isApplyingRemoteRef.current = false;
                 });
             }
             return true;
         },
-        [],
+        [clearObsoleteReadyReportLoadListener],
     );
 
     const resolveAdjacentHostTrackIndex = useCallback(
@@ -1689,6 +1842,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         trackAvailabilityStateVersionRef.current = null;
         setHasConnectedOnce(false);
         lastAppliedVersionRef.current = 0;
+        pendingHostTrackIndexRef.current = null;
+        clearReadyReportLoadListener();
 
         try {
             await api.leaveListenGroup(group.id);
@@ -1699,7 +1854,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             setError(message);
             toast.error(`Leave request failed in background: ${message}`);
         }
-    }, []);
+    }, [clearReadyReportLoadListener]);
 
     const clearError = useCallback(() => setError(null), []);
 
