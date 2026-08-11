@@ -554,7 +554,7 @@ test("native ended event emits end exactly once and stops the ticker", () => {
     assert.equal(harness.engine.hasTrackEnded(), true);
 });
 
-test("notifyTrackEnded synthesizes end only while playing (foreground recovery)", () => {
+test("notifyTrackEnded emits while playing, re-emits after end, and no-ops without a source", () => {
     const harness = createHarness();
     harness.engine.load("https://stream.example/track.flac", {
         autoplay: true,
@@ -568,7 +568,14 @@ test("notifyTrackEnded synthesizes end only while playing (foreground recovery)"
     harness.engine.notifyTrackEnded();
     assert.equal(
         harness.events.filter((event) => event.type === "end").length,
-        1,
+        2,
+    );
+
+    const unloadedHarness = createHarness();
+    unloadedHarness.engine.notifyTrackEnded();
+    assert.equal(
+        unloadedHarness.events.filter((event) => event.type === "end").length,
+        0,
     );
 });
 
