@@ -141,9 +141,13 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             try {
                 fs.mkdirSync(destDir, { recursive: true });
             } catch (err: any) {
+                log.warn("Failed to create migration destination directory", {
+                    destDir,
+                    error: err,
+                });
                 sessionLog(
                     "ORGANIZE",
-                    `Failed to create directory ${destDir}: ${err.message}`,
+                    "Failed to create directory (detail in server log)",
                     "WARN",
                 );
                 continue; // Skip this file, try next
@@ -159,9 +163,13 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                 `Migrated: ${filename} -> Singles/${artist}/${album}/`,
             );
         } catch (err: any) {
+            log.warn("Failed to migrate Soulseek file", {
+                filePath,
+                error: err,
+            });
             sessionLog(
                 "ORGANIZE",
-                `Failed to migrate ${filePath}: ${err.message}`,
+                "Failed to migrate file (detail in server log)",
                 "WARN",
             );
         }
@@ -244,9 +252,10 @@ async function cleanupLegacySlskdJobs(): Promise<void> {
             }
         }
     } catch (err: any) {
+        log.warn("Failed to clean up legacy jobs", err);
         sessionLog(
             "ORGANIZE",
-            `Failed to clean up legacy jobs: ${err.message}`,
+            "Failed to clean up legacy jobs (detail in server log)",
             "WARN",
         );
     }
@@ -282,7 +291,7 @@ export async function organizeSingles(): Promise<void> {
         throw new Error(error);
     }
 
-    sessionLog("ORGANIZE", `Music path: ${musicPath.replace(/\\/g, "/")}`);
+    sessionLog("ORGANIZE", "Music path configured");
 
     // Run one-time migration of existing Soulseek files
     await migrateExistingSoulseekFiles(musicPath);
@@ -304,6 +313,6 @@ export async function queueOrganizeSingles(): Promise<void> {
         await organizeSingles();
         log.debug("Organization complete");
     } catch (err: any) {
-        log.error("Organization failed:", err.message);
+        log.error("Organization failed", err);
     }
 }

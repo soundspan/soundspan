@@ -158,9 +158,10 @@ class SoulseekService {
                 },
                 (err: Error | null, client: SlskClient) => {
                     if (err) {
+                        log.error("Soulseek connection failed", err);
                         sessionLog(
                             "SOULSEEK",
-                            `Connection failed: ${err.message}`,
+                            "Connection failed (detail in server log)",
                             "ERROR",
                         );
                         return reject(err);
@@ -169,9 +170,13 @@ class SoulseekService {
                     // Prevent crash on unhandled socket errors
                     if ((client as any).on) {
                         (client as any).on("error", (error: Error) => {
+                            log.error(
+                                "Soulseek client connection error",
+                                error,
+                            );
                             sessionLog(
                                 "SOULSEEK",
-                                `Client connection error: ${error.message}`,
+                                "Client connection error (detail in server log)",
                                 "ERROR",
                             );
                         });
@@ -337,9 +342,13 @@ class SoulseekService {
         try {
             await this.ensureConnected();
         } catch (err: any) {
+            log.error("Soulseek search connection failed", {
+                searchId,
+                error: err,
+            });
             sessionLog(
                 "SOULSEEK",
-                `[Search #${searchId}] Connection error: ${err.message}`,
+                `[Search #${searchId}] Connection failed (detail in server log)`,
                 "ERROR",
             );
             return { found: false, bestMatch: null, allMatches: [] };
@@ -393,9 +402,14 @@ class SoulseekService {
                         );
 
                         if (err) {
+                            log.error("Soulseek search failed", {
+                                searchId,
+                                searchDuration,
+                                error: err,
+                            });
                             sessionLog(
                                 "SOULSEEK",
-                                `[Search #${searchId}] Search error after ${searchDuration}ms: ${err.message}`,
+                                `[Search #${searchId}] Search failed after ${searchDuration}ms (detail in server log)`,
                                 "ERROR",
                             );
                             this.consecutiveEmptySearches++;
@@ -555,9 +569,13 @@ class SoulseekService {
                     },
                 );
             } catch (syncError: any) {
+                log.error("Soulseek search threw synchronously", {
+                    searchId,
+                    error: syncError,
+                });
                 sessionLog(
                     "SOULSEEK",
-                    `[Search #${searchId}] Synchronous error: ${syncError.message}`,
+                    `[Search #${searchId}] Search failed synchronously (detail in server log)`,
                     "ERROR",
                 );
                 resolve({
@@ -838,9 +856,13 @@ class SoulseekService {
         try {
             await mkdir(destDir, { recursive: true });
         } catch (err: any) {
+            log.error("Failed to create Soulseek destination directory", {
+                destDir,
+                error: err,
+            });
             sessionLog(
                 "SOULSEEK",
-                `Failed to create directory ${destDir}: ${err.message}`,
+                "Failed to create directory (detail in server log)",
                 "ERROR",
             );
             this.activeDownloads--;
@@ -852,7 +874,7 @@ class SoulseekService {
 
         sessionLog(
             "SOULSEEK",
-            `Downloading from ${match.username}: ${match.filename} -> ${destPath}`,
+            `Downloading from ${match.username}: ${match.filename}`,
         );
 
         return new Promise((resolve) => {
@@ -906,9 +928,15 @@ class SoulseekService {
 
                         if (err) {
                             const errorInfo = this.categorizeError(err);
+                            log.error("Soulseek download failed", {
+                                username: match.username,
+                                filename: match.filename,
+                                errorType: errorInfo.type,
+                                error: err,
+                            });
                             sessionLog(
                                 "SOULSEEK",
-                                `Download failed (${errorInfo.type}): ${err.message}`,
+                                "Download failed (detail in server log)",
                                 "ERROR",
                             );
 
@@ -950,9 +978,14 @@ class SoulseekService {
                 clearTimeout(timeoutId); // Clear timeout to prevent double-resolve
                 resolved = true;
                 this.activeDownloads--;
+                log.error("Soulseek download threw synchronously", {
+                    username: match.username,
+                    filename: match.filename,
+                    error: syncError,
+                });
                 sessionLog(
                     "SOULSEEK",
-                    `Download synchronous error: ${syncError.message}`,
+                    "Download failed synchronously (detail in server log)",
                     "ERROR",
                 );
                 resolve({
@@ -1027,11 +1060,15 @@ class SoulseekService {
             // Log failure and try next user
             const errorMsg = downloadResult.error || "Unknown error";
             errors.push(`${match.username}: ${errorMsg}`);
+            log.warn("Soulseek download attempt failed", {
+                attempt: attempt + 1,
+                username: match.username,
+                filename: match.filename,
+                error: errorMsg,
+            });
             sessionLog(
                 "SOULSEEK",
-                `Attempt ${
-                    attempt + 1
-                } failed: ${errorMsg}, trying next user...`,
+                `Attempt ${attempt + 1} failed, trying next user (detail in server log)`,
                 "WARN",
             );
         }
@@ -1109,9 +1146,15 @@ class SoulseekService {
             // Log failure and try next user
             const errorMsg = downloadResult.error || "Unknown error";
             errors.push(`${match.username}: ${errorMsg}`);
+            log.warn("Soulseek download attempt failed", {
+                attempt: attempt + 1,
+                username: match.username,
+                filename: match.filename,
+                error: errorMsg,
+            });
             sessionLog(
                 "SOULSEEK",
-                `Attempt ${attempt + 1} failed: ${errorMsg}`,
+                `Attempt ${attempt + 1} failed (detail in server log)`,
                 "WARN",
             );
         }

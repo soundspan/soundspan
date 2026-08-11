@@ -10,6 +10,9 @@ const mockFsUnlinkSync = jest.fn();
 const mockMkdir = jest.fn();
 const mockRm = jest.fn();
 const mockStat = jest.fn();
+const mockLogInfo = jest.fn();
+const mockLogWarn = jest.fn();
+const mockLogError = jest.fn();
 
 jest.mock("slsk-client", () => ({
     __esModule: true,
@@ -24,6 +27,16 @@ jest.mock("../../utils/systemSettings", () => ({
 
 jest.mock("../../utils/playlistLogger", () => ({
     sessionLog: (...args: unknown[]) => mockSessionLog(...args),
+}));
+
+jest.mock("../../utils/logger", () => ({
+    logger: {
+        child: () => ({
+            info: (...args: unknown[]) => mockLogInfo(...args),
+            warn: (...args: unknown[]) => mockLogWarn(...args),
+            error: (...args: unknown[]) => mockLogError(...args),
+        }),
+    },
 }));
 
 jest.mock("fs", () => ({
@@ -199,6 +212,24 @@ describe("soulseek service", () => {
                 "error",
                 expect.any(Function),
             );
+
+            const clientErrorHandler = clientOnSpy.mock.calls[0][1] as (
+                error: Error,
+            ) => void;
+            clientErrorHandler(new Error("socket path /srv/music/private"));
+
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "/srv/music/private",
+            );
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                "Client connection error (detail in server log)",
+                "ERROR",
+            );
+            expect(mockLogError).toHaveBeenCalledWith(
+                "Soulseek client connection error",
+                expect.any(Error),
+            );
         });
 
         it("connect forwards slsk client errors", async () => {
@@ -220,6 +251,18 @@ describe("soulseek service", () => {
                 "connection refused",
             );
             expect(service.client).toBeNull();
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "connection refused",
+            );
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                "Connection failed (detail in server log)",
+                "ERROR",
+            );
+            expect(mockLogError).toHaveBeenCalledWith(
+                "Soulseek connection failed",
+                expect.any(Error),
+            );
         });
 
         it("ensureConnected returns without reconnecting when already connected", async () => {
@@ -693,6 +736,16 @@ describe("soulseek service", () => {
             bestMatch: null,
             allMatches: [],
         });
+        expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+            "Timed out",
+        );
+        expect(mockLogError).toHaveBeenCalledWith(
+            "Soulseek search failed",
+            expect.objectContaining({
+                error: expect.any(Error),
+                searchId: 1,
+            }),
+        );
     });
 
     it("searchTrack handles synchronous search API failures", async () => {
@@ -712,6 +765,16 @@ describe("soulseek service", () => {
             bestMatch: null,
             allMatches: [],
         });
+        expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+            "Search API sync failure",
+        );
+        expect(mockLogError).toHaveBeenCalledWith(
+            "Soulseek search threw synchronously",
+            expect.objectContaining({
+                error: expect.any(Error),
+                searchId: 1,
+            }),
+        );
     });
 
     it("searchTrack ignores non-audio results", async () => {
@@ -1200,6 +1263,14 @@ describe("soulseek service", () => {
             success: false,
             error: "All 2 attempts failed: primary-user: timeout; fallback-user: user offline",
         });
+        expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+            "user offline",
+        );
+        expect(mockSessionLog).toHaveBeenCalledWith(
+            "SOULSEEK",
+            "Attempt 2 failed, trying next user (detail in server log)",
+            "WARN",
+        );
     });
 
     it("searchAndDownload retries secondary matches and succeeds on later attempt", async () => {
@@ -1288,7 +1359,9 @@ describe("soulseek service", () => {
                 search: jest.fn(),
                 download: jest.fn(),
             };
-            mockMkdir.mockRejectedValueOnce(new Error("EACCES"));
+            mockMkdir.mockRejectedValueOnce(
+                new Error("EACCES: denied /music/folder"),
+            );
 
             const result = await soulseekService.downloadTrack(
                 makeTrackMatch(),
@@ -1297,8 +1370,23 @@ describe("soulseek service", () => {
 
             expect(result).toEqual({
                 success: false,
-                error: "Cannot create destination directory: EACCES",
+                error: "Cannot create destination directory: EACCES: denied /music/folder",
             });
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "/music/folder",
+            );
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                "Failed to create directory (detail in server log)",
+                "ERROR",
+            );
+            expect(mockLogError).toHaveBeenCalledWith(
+                "Failed to create Soulseek destination directory",
+                expect.objectContaining({
+                    destDir: "/music/folder",
+                    error: expect.any(Error),
+                }),
+            );
         });
 
         it("times out download attempts and records cleanup for partial files", async () => {
@@ -1358,6 +1446,17 @@ describe("soulseek service", () => {
             );
 
             expect(result).toEqual({ success: false, error: "user offline" });
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "user offline",
+            );
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "/music/offline.flac",
+            );
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                "Download failed (detail in server log)",
+                "ERROR",
+            );
             expect(
                 (soulseekService as any).failedUsers.get("offline-user"),
             ).toEqual(expect.objectContaining({ failures: 1 }));
@@ -1384,6 +1483,14 @@ describe("soulseek service", () => {
                 success: false,
                 error: "Synchronous error: sync download failure",
             });
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "sync download failure",
+            );
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                "Download failed synchronously (detail in server log)",
+                "ERROR",
+            );
         });
 
         it("returns error when downloaded file is not written to disk", async () => {

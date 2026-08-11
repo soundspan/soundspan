@@ -6,11 +6,40 @@ import path from "node:path";
 
 import {
     analyzeRouteErrorCanon,
+    collectLeakCounts,
     collectCounts,
     countPattern,
     countLeakPattern,
     stripLoggerCalls,
 } from "../check-route-error-canon.mjs";
+
+test("collectLeakCounts scans every production backend root", () => {
+    const fixtureRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "route-error-canon-roots-"),
+    );
+    const sourceRoots = ["routes", "services", "workers", "jobs", "middleware"];
+
+    try {
+        for (const sourceRoot of sourceRoots) {
+            const directory = path.join(fixtureRoot, "backend/src", sourceRoot);
+            fs.mkdirSync(directory, { recursive: true });
+            fs.writeFileSync(
+                path.join(directory, `${sourceRoot}.ts`),
+                "const detail = err.message;\n",
+            );
+        }
+
+        assert.deepEqual(collectLeakCounts(fixtureRoot), {
+            "backend/src/jobs/jobs.ts": 1,
+            "backend/src/middleware/middleware.ts": 1,
+            "backend/src/routes/routes.ts": 1,
+            "backend/src/services/services.ts": 1,
+            "backend/src/workers/workers.ts": 1,
+        });
+    } finally {
+        fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+});
 
 test("collectCounts recurses into services while excluding test files", () => {
     const fixtureRoot = fs.mkdtempSync(

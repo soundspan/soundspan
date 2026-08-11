@@ -136,8 +136,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/segmented-streaming/trace.ts": 1,
     // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
     "backend/src/services/simpleDownloadManager.ts": 4,
-    // soulseek.ts remaining 17: sessionLog(...) server-side log lines and { success:false, error } download-result objects consumed by the admin-only Soulseek download path; frozen under the slice-E scope guard; plus downloadResult.error consts/interpolations (~L1008, ~L1090, ~L1186) and per-peer result.error batch error strings (~L1248); frozen under the slice-J scope guard.
-    "backend/src/services/soulseek.ts": 17,
+    // soulseek.ts remaining 9: download-result error objects and downstream aggregations/passthroughs in Soulseek orchestration; the session log is client-visible and its raw error/path entries are sanitized rather than frozen.
+    "backend/src/services/soulseek.ts": 9,
     // spotify.ts +1: track-scraper error detail const consumed only by logger.debug (~L663); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
     // spotify.ts +1: the same logger-only detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/spotify.ts": 2,
@@ -147,6 +147,26 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/spotifyImport.ts": 14,
     // youtubeDownload.ts remaining 1: sidecar status mapping data.error (~L329); job-state plumbing, frozen under the slice-J scope guard.
     "backend/src/services/youtubeDownload.ts": 1,
+    // queueCleaner.ts remaining 2: Prisma/retry error classification used only to decide whether the internal cleanup job retries.
+    "backend/src/jobs/queueCleaner.ts": 2,
+    // errorHandler.ts remaining 5: typed AppError fields plus development-only unknown-error detail; this is an existing transport-boundary policy exception frozen as the middleware root enters the ratchet.
+    "backend/src/middleware/errorHandler.ts": 5,
+    // dataIntegrity.ts remaining 2: Prisma/retry error classification used only by internal worker retry decisions.
+    "backend/src/workers/dataIntegrity.ts": 2,
+    // index.ts remaining 4: one scheduler retry classifier, one numeric error counter, and two worker-result details used only in scoped server logs.
+    "backend/src/workers/index.ts": 4,
+    // moodBucketWorker.ts remaining 2: internal retry classification and a scoped server-log diagnostic.
+    "backend/src/workers/moodBucketWorker.ts": 2,
+    // organizeSingles.ts is explicitly frozen at zero after sanitizing its client-visible session-log errors and absolute paths.
+    "backend/src/workers/organizeSingles.ts": 0,
+    // discoverProcessor.ts remaining 1: Redis retry classification used only by the internal worker.
+    "backend/src/workers/processors/discoverProcessor.ts": 1,
+    // imageProcessor.ts remaining 1: an existing internal queue-result error field returned to its Bull processor.
+    "backend/src/workers/processors/imageProcessor.ts": 1,
+    // umapWorker.ts remaining 2: error normalization and an internal parent-worker message.
+    "backend/src/workers/umapWorker.ts": 2,
+    // unifiedEnrichment.ts remaining 13: retry classifiers, scoped worker diagnostics, and internal failure/batch-state records.
+    "backend/src/workers/unifiedEnrichment.ts": 13,
 });
 
 export function countPattern(source) {
@@ -339,6 +359,23 @@ export function collectCounts(
     );
 }
 
+const LEAK_SCAN_DIRECTORIES = Object.freeze([
+    "backend/src/routes",
+    "backend/src/services",
+    "backend/src/workers",
+    "backend/src/jobs",
+    "backend/src/middleware",
+]);
+
+export function collectLeakCounts(repoRoot) {
+    return Object.assign(
+        {},
+        ...LEAK_SCAN_DIRECTORIES.map((relativeDirectory) =>
+            collectCounts(repoRoot, countLeakPattern, relativeDirectory),
+        ),
+    );
+}
+
 function printReport(label, result) {
     console.log(`${label}:`);
     if (result.ok) {
@@ -369,15 +406,8 @@ function runCli() {
         collectCounts(repoRoot),
         BASELINE,
     );
-    // The leak ratchet covers production route and service modules recursively.
-    const routesCounts = collectCounts(repoRoot, countLeakPattern);
-    const servicesCounts = collectCounts(
-        repoRoot,
-        countLeakPattern,
-        "backend/src/services",
-    );
     const leakResult = analyzeRouteErrorCanon(
-        { ...routesCounts, ...servicesCounts },
+        collectLeakCounts(repoRoot),
         LEAK_BASELINE,
     );
 
