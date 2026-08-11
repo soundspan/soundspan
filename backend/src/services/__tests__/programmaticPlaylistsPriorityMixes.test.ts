@@ -337,6 +337,7 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
             },
         }));
 
+        (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue([]);
         (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(
             rediscoverTracks,
         );
@@ -354,6 +355,78 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
         expect(
             countMaxPerArtist(mix!.trackIds, tracksById),
         ).toBeLessThanOrEqual(2);
+    });
+
+    it("generateRediscoverMix bounds the candidate pool and never loads the whole track table", async () => {
+        const rediscoverTracks = Array.from({ length: 40 }, (_, i) => ({
+            id: `bounded-rediscover-track-${i + 1}`,
+            _count: { plays: i % 3 },
+            album: {
+                coverUrl: `bounded-rediscover-cover-${i + 1}.jpg`,
+                artist: { id: `bounded-rediscover-artist-${i + 1}` },
+            },
+        }));
+
+        (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue([
+            { trackId: "overplayed-1", _count: { trackId: 5 } },
+            { trackId: null, _count: { trackId: 4 } },
+            { trackId: "overplayed-2", _count: { trackId: 9 } },
+        ]);
+        (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(
+            rediscoverTracks,
+        );
+
+        const mix = await service.generateRediscoverMix("user-1", "2026-02-13");
+
+        expect(mockPrisma.play.groupBy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                by: ["trackId"],
+                where: expect.objectContaining({ userId: "user-1" }),
+                having: expect.anything(),
+            }),
+        );
+        expect(mockPrisma.track.findMany).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    id: { notIn: ["overplayed-1", "overplayed-2"] },
+                },
+                orderBy: { id: "asc" },
+                take: 1000,
+            }),
+        );
+        expect(mix).not.toBeNull();
+        expect(mix!.trackIds).toHaveLength(20);
+        expect(mix!.trackIds).not.toContain("overplayed-1");
+        expect(mix!.trackIds).not.toContain("overplayed-2");
+    });
+
+    it("generateRediscoverMix omits the notIn filter when the user has no overplayed tracks", async () => {
+        const rediscoverTracks = Array.from({ length: 40 }, (_, i) => ({
+            id: `unplayed-rediscover-track-${i + 1}`,
+            _count: { plays: i % 3 },
+            album: {
+                coverUrl: `unplayed-rediscover-cover-${i + 1}.jpg`,
+                artist: { id: `unplayed-rediscover-artist-${i + 1}` },
+            },
+        }));
+
+        (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(
+            rediscoverTracks,
+        );
+
+        const mix = await service.generateRediscoverMix("user-1", "2026-02-13");
+
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: undefined,
+                orderBy: { id: "asc" },
+                take: 1000,
+            }),
+        );
+        expect(mix).not.toBeNull();
+        expect(mix!.trackIds).toHaveLength(20);
     });
 
     it("generatePartyMix applies artist diversity and returns target size", async () => {

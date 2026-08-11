@@ -772,6 +772,7 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
                 }) as TrackLike & { _count: { plays: number } },
         );
 
+        (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue([]);
         (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
         const mix = await service.generateRediscoverMix("user-1", "2026-02-17");

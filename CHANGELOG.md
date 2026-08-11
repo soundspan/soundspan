@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Rediscover daily mix now builds its candidates from a bounded, indexed
+  pool (overplayed tracks excluded via a grouped play query, then a capped track
+  fetch) instead of loading and counting plays for the entire track library on
+  every cache miss.
 - The Subsonic `getPlaylists` endpoint now computes playlist durations with a
   single query over playlist items instead of one aggregate query per playlist,
   removing an unbounded N+1 fan-out that could saturate the database connection

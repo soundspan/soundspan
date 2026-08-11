@@ -1121,14 +1121,29 @@ export class ProgrammaticPlaylistService {
     }
 
     /**
-     * Generate "Rediscover" mix with daily rotation
+     * Generate "Rediscover" mix with daily rotation from a bounded candidate pool
      */
     async generateRediscoverMix(
         userId: string,
         today: string,
     ): Promise<ProgrammaticMix | null> {
-        // Get tracks with low play count (0-2 plays)
-        const allTracks = await prisma.track.findMany({
+        const overplayed = await prisma.play.groupBy({
+            by: ["trackId"],
+            where: { userId, trackId: { not: null } },
+            _count: { trackId: true },
+            having: { trackId: { _count: { gt: 2 } } },
+        });
+        const overplayedIds = overplayed
+            .map((row) => row.trackId)
+            .filter(
+                (trackId): trackId is string => typeof trackId === "string",
+            );
+
+        const candidateTracks = await prisma.track.findMany({
+            where:
+                overplayedIds.length > 0
+                    ? { id: { notIn: overplayedIds } }
+                    : undefined,
             include: {
                 _count: {
                     select: {
@@ -1142,9 +1157,13 @@ export class ProgrammaticPlaylistService {
                     },
                 },
             },
+            orderBy: { id: "asc" },
+            take: this.TRACK_LIMIT * 50,
         });
 
-        const underplayedTracks = allTracks.filter((t) => t._count.plays <= 2);
+        const underplayedTracks = candidateTracks.filter(
+            (t) => t._count.plays <= 2,
+        );
 
         if (underplayedTracks.length < 5) return null;
 
