@@ -1,6 +1,14 @@
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: any, _res: any, next: () => void) => next(),
+    requireAdmin: (req: any, res: any, next: () => void) => {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
+
+const mockSessionLogError = jest.fn();
 
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -8,6 +16,13 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: mockSessionLogError,
+            child: jest.fn(),
+        })),
     },
 }));
 
@@ -42,11 +57,9 @@ jest.mock("../../services/deezer", () => ({
 }));
 
 const readSessionLog = jest.fn();
-const getSessionLogPath = jest.fn();
 
 jest.mock("../../utils/playlistLogger", () => ({
     readSessionLog: (...args: any[]) => readSessionLog(...args),
-    getSessionLogPath: (...args: any[]) => getSessionLogPath(...args),
 }));
 
 import router from "../spotify";
@@ -62,6 +75,42 @@ function getHandler(path: string, method: "get" | "post") {
     }
 
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+const MAX_ROUTE_HANDLERS = 3;
+
+async function invokeRouteStack(
+    path: string,
+    method: "get" | "post",
+    req: any,
+    res: any,
+) {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === path && entry.route?.methods?.[method],
+    );
+
+    if (!layer) {
+        throw new Error(`${method.toUpperCase()} route not found: ${path}`);
+    }
+    if (layer.route.stack.length > MAX_ROUTE_HANDLERS) {
+        throw new Error(`Too many route handlers: ${layer.route.stack.length}`);
+    }
+
+    for (let index = 0; index < MAX_ROUTE_HANDLERS; index += 1) {
+        const entry = layer.route.stack[index];
+        if (!entry) {
+            return;
+        }
+
+        let nextCalled = false;
+        await entry.handle(req, res, () => {
+            nextCalled = true;
+        });
+        if (!nextCalled) {
+            return;
+        }
+    }
 }
 
 function createRes() {
@@ -98,7 +147,6 @@ describe("spotify route runtime", () => {
     const importsHandler = getHandler("/imports", "get");
     const refreshHandler = getHandler("/import/:jobId/refresh", "post");
     const cancelHandler = getHandler("/import/:jobId/cancel", "post");
-    const sessionLogHandler = getHandler("/import/session-log", "get");
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -145,7 +193,6 @@ describe("spotify route runtime", () => {
         });
 
         readSessionLog.mockReturnValue("session content");
-        getSessionLogPath.mockReturnValue("/tmp/session.log");
     });
 
     describe("POST /parse", () => {
@@ -847,36 +894,72 @@ describe("spotify route runtime", () => {
     });
 
     describe("GET /import/session-log", () => {
-        it("returns log path and content", async () => {
-            readSessionLog.mockReturnValueOnce("log contents");
-            getSessionLogPath.mockReturnValueOnce("/tmp/playlist-session.log");
-
-            const req = {} as any;
+        it("denies session log access to authenticated non-admin users", async () => {
+            const req = { user: { id: "u1", role: "user" } } as any;
             const res = createRes();
 
-            await sessionLogHandler(req, res);
+            await invokeRouteStack("/import/session-log", "get", req, res);
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body).toEqual({ error: "Admin access required" });
+            expect(readSessionLog).not.toHaveBeenCalled();
+        });
+
+        it("returns log content to admins without disclosing its host path", async () => {
+            readSessionLog.mockReturnValueOnce("log contents");
+
+            const req = { user: { id: "admin-1", role: "admin" } } as any;
+            const res = createRes();
+
+            await invokeRouteStack("/import/session-log", "get", req, res);
 
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({
-                path: "/tmp/playlist-session.log",
                 content: "log contents",
             });
         });
 
-        it("returns 500 when reading session log fails", async () => {
-            readSessionLog.mockImplementationOnce(() => {
-                throw new Error("session read failed");
-            });
+        it("maps filesystem read failures to a static 500", async () => {
+            const rawError =
+                "Error reading session log: EACCES: /srv/soundspan/private/playlist-session.log";
+            readSessionLog.mockReturnValueOnce(rawError);
 
-            const req = {} as any;
+            const req = { user: { id: "admin-1", role: "admin" } } as any;
             const res = createRes();
 
-            await sessionLogHandler(req, res);
+            await invokeRouteStack("/import/session-log", "get", req, res);
 
             expect(res.statusCode).toBe(500);
             expect(res.body).toEqual({
                 error: "Failed to read session log",
             });
+            expect(JSON.stringify(res.body)).not.toContain(rawError);
+            expect(mockSessionLogError).toHaveBeenCalledWith(
+                "Session log reader reported a failure",
+                { error: rawError },
+            );
+        });
+
+        it("returns a static 500 when the session log reader throws", async () => {
+            const rawError = "Unexpected session reader failure";
+            readSessionLog.mockImplementationOnce(() => {
+                throw new Error(rawError);
+            });
+
+            const req = { user: { id: "admin-1", role: "admin" } } as any;
+            const res = createRes();
+
+            await invokeRouteStack("/import/session-log", "get", req, res);
+
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({
+                error: "Failed to read session log",
+            });
+            expect(JSON.stringify(res.body)).not.toContain(rawError);
+            expect(mockSessionLogError).toHaveBeenCalledWith(
+                "Failed to read session log",
+                { error: expect.objectContaining({ message: rawError }) },
+            );
         });
     });
 });

@@ -1,13 +1,20 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { z } from "zod";
 import { spotifyService } from "../services/spotify";
 import { spotifyImportService } from "../services/spotifyImport";
 import { deezerService } from "../services/deezer";
-import { readSessionLog, getSessionLogPath } from "../utils/playlistLogger";
+import { readSessionLog } from "../utils/playlistLogger";
+import { sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
+const sessionLogRouteLogger = logger.child("SpotifySessionLogRoute");
+const SESSION_LOG_READ_FAILURE_PREFIX = "Error reading session log:";
+
+function isSessionLogReadFailure(content: string): boolean {
+    return content.startsWith(SESSION_LOG_READ_FAILURE_PREFIX);
+}
 
 // All routes require authentication
 router.use(requireAuthOrToken);
@@ -511,35 +518,42 @@ router.post("/import/:jobId/cancel", async (req, res) => {
  * @openapi
  * /api/spotify/import/session-log:
  *   get:
- *     summary: Get the current session log for debugging import issues
+ *     summary: Get the current session log for administrative diagnostics
  *     tags: [Spotify]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Session log content and file path
+ *         description: Session log content
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 /**
  * GET /api/spotify/import/session-log
- * Get the current session log for debugging import issues
+ * Get the current session log for administrative diagnostics
  */
-router.get("/import/session-log", async (req, res) => {
+router.get("/import/session-log", requireAdmin, async (_req, res) => {
     try {
         const log = readSessionLog();
-        const logPath = getSessionLogPath();
+        if (isSessionLogReadFailure(log)) {
+            sessionLogRouteLogger.error(
+                "Session log reader reported a failure",
+                { error: log },
+            );
+            return sendInternalRouteError(res, "Failed to read session log");
+        }
 
         res.json({
-            path: logPath,
             content: log,
         });
-    } catch (error: any) {
-        logger.error("Session log error:", error);
-        res.status(500).json({
-            error: "Failed to read session log",
+    } catch (error: unknown) {
+        sessionLogRouteLogger.error("Failed to read session log", {
+            error,
         });
+        sendInternalRouteError(res, "Failed to read session log");
     }
 });
 
