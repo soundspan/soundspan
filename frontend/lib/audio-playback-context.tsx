@@ -615,11 +615,27 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
             // Read queue/currentIndex/isShuffle from ref for stable callback identity
             const currentAudioState = audioStateRef.current;
-            const limitedQueue = currentAudioState.queue?.slice(0, 100) || [];
-            const adjustedIndex = Math.min(
-                currentAudioState.currentIndex,
-                limitedQueue.length > 0 ? limitedQueue.length - 1 : 0,
+            const queueWindowStart = Math.max(
+                0,
+                currentAudioState.currentIndex - 10,
             );
+            const limitedQueue =
+                currentAudioState.queue?.slice(
+                    queueWindowStart,
+                    queueWindowStart + 100,
+                ) || [];
+            const adjustedIndex =
+                currentAudioState.currentIndex - queueWindowStart;
+            const hasConsistentQueuePosition =
+                invocationSnapshot.playbackType !== "track" ||
+                limitedQueue[adjustedIndex]?.id === invocationSnapshot.trackId;
+
+            const queuePositionPayload = hasConsistentQueuePosition
+                ? {
+                      queue: limitedQueue,
+                      currentIndex: adjustedIndex,
+                  }
+                : {};
 
             progressSaveInFlightRef.current = true;
             try {
@@ -629,8 +645,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     trackId: invocationSnapshot.trackId ?? undefined,
                     audiobookId: invocationSnapshot.audiobookId ?? undefined,
                     podcastId: invocationSnapshot.podcastId ?? undefined,
-                    queue: limitedQueue,
-                    currentIndex: adjustedIndex,
+                    ...queuePositionPayload,
                     isShuffle: currentAudioState.isShuffle,
                     isPlaying,
                     currentTime: clampNonNegativePlaybackTime(
