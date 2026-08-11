@@ -29,6 +29,7 @@ interface DownloadProgress {
 }
 const downloadProgress = new Map<string, DownloadProgress>();
 const PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS = 3;
+const PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MAX_PODCAST_DOWNLOAD_REDIRECTS = 5;
 
 class PodcastDownloadBlockedError extends Error {
@@ -40,6 +41,7 @@ class PodcastDownloadBlockedError extends Error {
 
 async function openSafePodcastDownloadStream(
     rawUrl: string,
+    signal?: AbortSignal,
 ): Promise<import("axios").AxiosResponse> {
     let current = await resolveSafeOutboundUrl(rawUrl);
     if (!current) throw new PodcastDownloadBlockedError(rawUrl);
@@ -48,6 +50,7 @@ async function openSafePodcastDownloadStream(
         const response = await axios.get(current, {
             responseType: "stream",
             timeout: 600000,
+            signal,
             maxRedirects: 0,
             headers: { "User-Agent": BRAND_USER_AGENT },
             decompress: false,
@@ -348,7 +351,11 @@ async function performDownload(
         await fs.unlink(tempPath).catch(() => {});
 
         // Download the file with longer timeout for large podcasts
-        const response = await openSafePodcastDownloadStream(audioUrl);
+        const controller = new AbortController();
+        const response = await openSafePodcastDownloadStream(
+            audioUrl,
+            controller.signal,
+        );
 
         // axios >=1.18 types indexed header access as a union; coerce to string.
         const contentLength = parseInt(
@@ -438,7 +445,41 @@ async function performDownload(
         let lastLogTime = Date.now();
 
         await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+            const clearIdleTimer = () => {
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = undefined;
+            };
+            const settle = (error?: Error) => {
+                if (settled) return;
+                settled = true;
+                clearIdleTimer();
+                if (error) reject(error);
+                else resolve();
+            };
+            const resetIdleTimer = () => {
+                clearIdleTimer();
+                idleTimer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    clearIdleTimer();
+                    controller.abort();
+                    response.data.destroy();
+                    writeStream.destroy();
+                    reject(
+                        new Error(
+                            `Download idle timeout after ${PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS}ms`,
+                        ),
+                    );
+                }, PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS);
+                idleTimer.unref?.();
+            };
+
+            resetIdleTimer();
             response.data.on("data", (chunk: Buffer) => {
+                resetIdleTimer();
                 bytesDownloaded += chunk.length;
                 downloadProgress.set(episodeId, {
                     bytesDownloaded,
@@ -462,25 +503,25 @@ async function performDownload(
             });
 
             response.data.on("end", () => {
-                writeStream.end(() => resolve());
+                writeStream.end(() => settle());
             });
 
             response.data.pipe(writeStream, { end: false });
 
             writeStream.on("error", (err) => {
+                settle(err);
                 response.data.destroy();
-                reject(err);
             });
 
             response.data.on("error", (err: Error) => {
+                settle(err);
                 writeStream.destroy();
-                reject(err);
             });
 
             // Handle aborted connections
             response.data.on("aborted", () => {
+                settle(new Error("Download aborted by server"));
                 writeStream.destroy();
-                reject(new Error("Download aborted by server"));
             });
         });
 

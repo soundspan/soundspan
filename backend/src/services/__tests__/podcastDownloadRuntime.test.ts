@@ -115,11 +115,14 @@ describe("podcast download runtime behavior", () => {
     function mockImmediateTimers() {
         return jest.spyOn(global, "setTimeout").mockImplementation(((
             handler: (...args: any[]) => void,
+            timeout?: number,
         ) => {
-            if (typeof handler === "function") {
+            if (typeof handler === "function" && (timeout ?? 0) < 120_000) {
                 handler();
             }
-            return 0 as unknown as ReturnType<typeof setTimeout>;
+            return {
+                unref: jest.fn(),
+            } as unknown as ReturnType<typeof setTimeout>;
         }) as typeof setTimeout);
     }
 
@@ -911,6 +914,151 @@ describe("podcast download runtime behavior", () => {
         expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalledTimes(1);
         expect(writeStream.destroy).toHaveBeenCalledTimes(1);
         setTimeoutSpy.mockRestore();
+    });
+
+    it("aborts stalled download streams after the idle timeout", async () => {
+        jest.useFakeTimers({ doNotFake: ["setImmediate"] });
+        const mocks = setupPodcastDownloadMocks();
+        const idleTimeoutMs = 120_000;
+        const streamControls: Array<
+            Record<string, (...args: any[]) => void>
+        > = [];
+        const dataStreams: Array<{ destroy: jest.Mock }> = [];
+        const writeStreams = Array.from({ length: 3 }, () =>
+            (mocks.fsModule.createWriteStream as jest.Mock)(),
+        );
+
+        (mocks.fsModule.createWriteStream as jest.Mock).mockReset();
+        for (const writeStream of writeStreams) {
+            (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValueOnce(
+                writeStream,
+            );
+        }
+        (mocks.axiosGet as jest.Mock).mockImplementation(async () => {
+            const control: Record<string, (...args: any[]) => void> = {};
+            const dataStream = {
+                on: jest.fn(
+                    (event: string, cb: (...args: any[]) => void) => {
+                        control[event] = cb;
+                    },
+                ),
+                pipe: jest.fn(),
+                destroy: jest.fn(),
+            };
+            streamControls.push(control);
+            dataStreams.push(dataStream);
+            return {
+                status: 200,
+                headers: { "content-length": "3" },
+                data: dataStream,
+            };
+        });
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-idle-timeout",
+            "https://example.com/episode-idle-timeout.mp3",
+            "user-1",
+        );
+
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(streamControls).toHaveLength(attempt + 1);
+            await jest.advanceTimersByTimeAsync(idleTimeoutMs);
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            if (attempt < 2) {
+                await jest.advanceTimersByTimeAsync(5_000);
+            }
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(mocks.axiosGet).toHaveBeenCalledTimes(3);
+        for (const axiosCall of (mocks.axiosGet as jest.Mock).mock.calls) {
+            expect(axiosCall[1]).toEqual(
+                expect.objectContaining({ signal: expect.any(Object) }),
+            );
+            expect(axiosCall[1].signal.aborted).toBe(true);
+        }
+        for (const dataStream of dataStreams) {
+            expect(dataStream.destroy).toHaveBeenCalledTimes(1);
+        }
+        for (const writeStream of writeStreams) {
+            expect(writeStream.destroy).toHaveBeenCalledTimes(1);
+        }
+        expect(podcastDownload.isDownloading("episode-idle-timeout")).toBe(
+            false,
+        );
+        expect(
+            podcastDownload.getDownloadProgress("episode-idle-timeout"),
+        ).toBeNull();
+        expect(mocks.fsPromises.unlink).toHaveBeenCalledWith(
+            "/music/.soundspan/podcast-audio/episode-idle-timeout.tmp",
+        );
+    });
+
+    it("resets the download idle timeout when data arrives", async () => {
+        jest.useFakeTimers({ doNotFake: ["setImmediate"] });
+        const mocks = setupPodcastDownloadMocks();
+        const idleTimeoutMs = 120_000;
+        const streamControls: Record<string, (...args: any[]) => void> = {};
+        const dataStream = {
+            on: jest.fn((event: string, cb: (...args: any[]) => void) => {
+                streamControls[event] = cb;
+            }),
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+        };
+        const writeStream = (mocks.fsModule.createWriteStream as jest.Mock)();
+
+        (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValue(
+            writeStream,
+        );
+        (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
+            headers: { "content-length": "3" },
+            data: dataStream,
+        });
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.fsPromises.stat as jest.Mock).mockImplementation(
+            async (targetPath: string) =>
+                targetPath.endsWith(".tmp")
+                    ? { size: 3 }
+                    : { size: 1_048_576 },
+        );
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
+            { fileSize: 3 },
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-idle-reset",
+            "https://example.com/episode-idle-reset.mp3",
+            "user-1",
+        );
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await jest.advanceTimersByTimeAsync(idleTimeoutMs - 1);
+        streamControls.data?.(Buffer.from("abc"));
+        await jest.advanceTimersByTimeAsync(idleTimeoutMs - 1);
+
+        const requestOptions = (mocks.axiosGet as jest.Mock).mock.calls[0][1];
+        expect(requestOptions).toEqual(
+            expect.objectContaining({ signal: expect.any(Object) }),
+        );
+        expect(requestOptions.signal.aborted).toBe(false);
+        expect(dataStream.destroy).not.toHaveBeenCalled();
+        expect(writeStream.destroy).not.toHaveBeenCalled();
+
+        streamControls.end?.();
+        for (let i = 0; i < 4; i += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalledTimes(1);
+        expect(podcastDownload.isDownloading("episode-idle-reset")).toBe(false);
     });
 
     it("retries an incomplete download before succeeding", async () => {

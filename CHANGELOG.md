@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Clamp `GET /api/enrichment/failures` `limit`/`offset` through the shared bounded-int parser so oversized or non-numeric values can no longer trigger whole-table loads or Prisma 500s.
+- Podcast background downloads now abort after 2 minutes of stream inactivity,
+  preventing leaked file handles/sockets and permanently stuck "already
+  downloading" episodes when a host stalls mid-transfer.
 - Bounded the missing-track health-record writes in the scanner and file
   validator so an unavailable music mount no longer fans out one concurrent
   upsert per track and exhausts the worker database pool (hardens the #319
