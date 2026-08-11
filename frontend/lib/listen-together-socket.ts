@@ -187,6 +187,9 @@ const LISTEN_TOGETHER_ALLOW_POLLING =
     process.env.NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING === "true";
 const LISTEN_TOGETHER_SOCKET_TRANSPORTS: Array<"websocket" | "polling"> =
     LISTEN_TOGETHER_ALLOW_POLLING ? ["websocket", "polling"] : ["websocket"];
+const CLOCK_OFFSET_SAMPLE_INTERVAL_MS = 60_000;
+const CLOCK_OFFSET_SAMPLE_LIMIT = 5;
+const MAX_ABSOLUTE_CLOCK_OFFSET_MS = 5 * 60_000;
 const TRANSIENT_CONFLICT_MAX_RETRIES = 3;
 const TRANSIENT_CONFLICT_BASE_DELAY_MS = 60;
 const TRANSIENT_CONFLICT_MAX_DELAY_MS = 300;
@@ -218,6 +221,60 @@ const TRANSIENT_CONFLICT_RETRY_POLICY: EmitRetryPolicy = {
     jitterFactor: TRANSIENT_CONFLICT_JITTER_FACTOR,
 };
 
+interface ListenTogetherSocketDependencies {
+    createSocket: typeof io;
+    getToken: () => string | null;
+    now: () => number;
+    setInterval: (
+        callback: () => void,
+        intervalMs: number,
+    ) => ReturnType<typeof setInterval>;
+    clearInterval: (handle: ReturnType<typeof setInterval>) => void;
+}
+
+const DEFAULT_SOCKET_DEPENDENCIES: ListenTogetherSocketDependencies = {
+    createSocket: io,
+    getToken: () => api.getToken(),
+    now: () => Date.now(),
+    setInterval: (callback, intervalMs) =>
+        globalThis.setInterval(callback, intervalMs),
+    clearInterval: (handle) => globalThis.clearInterval(handle),
+};
+
+let serverClockOffsetSamplesMs: number[] = [];
+let serverClockOffsetMs = 0;
+
+function resetServerClockOffset(): void {
+    serverClockOffsetSamplesMs = [];
+    serverClockOffsetMs = 0;
+}
+
+function recordServerClockOffsetSample(serverMinusClientMs: number): void {
+    if (!Number.isFinite(serverMinusClientMs)) return;
+    const clientMinusServerMs = -serverMinusClientMs;
+    const boundedSampleMs = Math.max(
+        -MAX_ABSOLUTE_CLOCK_OFFSET_MS,
+        Math.min(MAX_ABSOLUTE_CLOCK_OFFSET_MS, clientMinusServerMs),
+    );
+    serverClockOffsetSamplesMs = [
+        ...serverClockOffsetSamplesMs,
+        boundedSampleMs,
+    ].slice(-CLOCK_OFFSET_SAMPLE_LIMIT);
+    const sortedSamples = [...serverClockOffsetSamplesMs].sort(
+        (left, right) => left - right,
+    );
+    const middleIndex = Math.floor(sortedSamples.length / 2);
+    serverClockOffsetMs =
+        sortedSamples.length % 2 === 0
+            ? (sortedSamples[middleIndex - 1] + sortedSamples[middleIndex]) / 2
+            : sortedSamples[middleIndex];
+}
+
+/** Return how far the client wall clock is ahead of the server clock. */
+export function getServerClockOffsetMs(): number {
+    return serverClockOffsetMs;
+}
+
 /**
  * Represents the ListenTogetherSocket class.
  */
@@ -230,6 +287,17 @@ export class ListenTogetherSocket {
         result: SocketRouteProbeResult;
     } | null = null;
     private routeProbeInFlight: Promise<SocketRouteProbeResult> | null = null;
+    private clockOffsetInterval: ReturnType<typeof setInterval> | null = null;
+    private clockOffsetSamplingGeneration = 0;
+    private clockOffsetSampleInFlightGeneration: number | null = null;
+    private readonly dependencies: ListenTogetherSocketDependencies;
+
+    constructor(dependencies: Partial<ListenTogetherSocketDependencies> = {}) {
+        this.dependencies = {
+            ...DEFAULT_SOCKET_DEPENDENCIES,
+            ...dependencies,
+        };
+    }
 
     async probeRoute(force: boolean = false): Promise<SocketRouteProbeResult> {
         if (typeof window === "undefined") return { ok: true };
@@ -256,7 +324,7 @@ export class ListenTogetherSocket {
 
     connect(callbacks: ListenTogetherSocketCallbacks): void {
         this.callbacks = callbacks;
-        const token = api.getToken();
+        const token = this.dependencies.getToken();
         if (!token) {
             callbacks.onError(new Error("No auth token available"));
             return;
@@ -274,7 +342,7 @@ export class ListenTogetherSocket {
 
         const url = getSocketUrl();
 
-        this.socket = io(`${url}/listen-together`, {
+        this.socket = this.dependencies.createSocket(`${url}/listen-together`, {
             path: "/socket.io/listen-together",
             auth: { token },
             transports: LISTEN_TOGETHER_SOCKET_TRANSPORTS,
@@ -287,6 +355,7 @@ export class ListenTogetherSocket {
         });
 
         this.socket.on("connect", () => {
+            this.restartClockOffsetSampling();
             this.callbacks?.onConnect();
             // Re-join group on reconnect
             if (this.currentGroupId) {
@@ -295,6 +364,7 @@ export class ListenTogetherSocket {
         });
 
         this.socket.on("disconnect", (reason) => {
+            this.stopClockOffsetSampling();
             this.callbacks?.onDisconnect(reason);
         });
 
@@ -510,6 +580,8 @@ export class ListenTogetherSocket {
 
     disconnect(): void {
         this.currentGroupId = null;
+        this.stopClockOffsetSampling();
+        resetServerClockOffset();
         if (this.socket) {
             this.socket.removeAllListeners();
             this.socket.disconnect();
@@ -643,7 +715,14 @@ export class ListenTogetherSocket {
                 "lt-ping",
                 (res: { serverTime?: number; error?: string }) => {
                     if (res?.error) reject(new Error(res.error));
-                    else resolve(res?.serverTime ?? Date.now());
+                    else if (
+                        typeof res?.serverTime === "number" &&
+                        Number.isFinite(res.serverTime)
+                    ) {
+                        resolve(res.serverTime);
+                    } else {
+                        reject(new Error("Invalid Listen Together ping ack"));
+                    }
                 },
             );
         });
@@ -652,6 +731,49 @@ export class ListenTogetherSocket {
     // -----------------------------------------------------------------------
     // Internal
     // -----------------------------------------------------------------------
+
+    private restartClockOffsetSampling(): void {
+        this.stopClockOffsetSampling();
+        resetServerClockOffset();
+        const generation = this.clockOffsetSamplingGeneration;
+        void this.sampleServerClockOffset(generation);
+        this.clockOffsetInterval = this.dependencies.setInterval(() => {
+            void this.sampleServerClockOffset(generation);
+        }, CLOCK_OFFSET_SAMPLE_INTERVAL_MS);
+    }
+
+    private stopClockOffsetSampling(): void {
+        this.clockOffsetSamplingGeneration += 1;
+        this.clockOffsetSampleInFlightGeneration = null;
+        if (this.clockOffsetInterval === null) return;
+        this.dependencies.clearInterval(this.clockOffsetInterval);
+        this.clockOffsetInterval = null;
+    }
+
+    private async sampleServerClockOffset(generation: number): Promise<void> {
+        if (this.clockOffsetSampleInFlightGeneration === generation) return;
+        this.clockOffsetSampleInFlightGeneration = generation;
+        const sendTimeMs = this.dependencies.now();
+        try {
+            const serverTimeMs = await this.ping();
+            const receiveTimeMs = this.dependencies.now();
+            if (
+                generation !== this.clockOffsetSamplingGeneration ||
+                receiveTimeMs < sendTimeMs
+            ) {
+                return;
+            }
+            const clientMidpointMs =
+                sendTimeMs + (receiveTimeMs - sendTimeMs) / 2;
+            recordServerClockOffsetSample(serverTimeMs - clientMidpointMs);
+        } catch {
+            // The next periodic sample or reconnect will retry.
+        } finally {
+            if (this.clockOffsetSampleInFlightGeneration === generation) {
+                this.clockOffsetSampleInFlightGeneration = null;
+            }
+        }
+    }
 
     private async emit(
         event: string,

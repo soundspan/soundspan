@@ -20,6 +20,7 @@ import { useAudioPlayback } from "./audio-playback-context";
 import { api } from "@/lib/api";
 import { audioSeekEmitter } from "./audio-seek-emitter";
 import {
+    getServerClockOffsetMs,
     listenTogetherSocket,
     type QueueTrackInput,
 } from "./listen-together-socket";
@@ -967,7 +968,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     ltSession.playback.serverTime;
 
                 const elapsedMs = syncIsPlaying
-                    ? Math.max(0, Date.now() - syncServerTimeMs)
+                    ? Math.max(
+                          0,
+                          Date.now() -
+                              getServerClockOffsetMs() -
+                              syncServerTimeMs,
+                      )
                     : 0;
                 const targetSec = (syncPositionMs + elapsedMs) / 1000;
                 const mediaDuration =
