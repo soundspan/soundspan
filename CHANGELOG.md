@@ -319,6 +319,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audiobook cover proxy routes now cancel non-success upstream response bodies
+  so undici can promptly return their sockets to the connection pool.
 - Clamp `GET /api/enrichment/failures` `limit`/`offset` through the shared bounded-int parser so oversized or non-numeric values can no longer trigger whole-table loads or Prisma 500s.
 - Podcast background downloads now abort after 2 minutes of stream inactivity,
   preventing leaked file handles/sockets and permanently stuck "already
@@ -623,6 +625,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retaining status and detail in server logs. The route-error leak ratchet now
   also detects ternary-consequent leaks, plural `.details`, and identifiers
   ending in `Err`.
+- Operator-supplied `JWT_SECRET` values must now contain at least 32 characters;
+  deployments that omit it continue to use the validated `SESSION_SECRET`.
 - `.env` settings sync now rejects any value containing a line break, closing
   an env-line injection where an app admin could append arbitrary environment
   variables to the deployment `.env`; Lidarr and Audiobookshelf URL settings

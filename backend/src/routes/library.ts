@@ -3478,6 +3478,7 @@ router.get<{ id?: string }>(
                     logger.error(
                         `[COVER-ART] Failed to fetch audiobook cover: ${coverUrl} (${imageResponse.status} ${imageResponse.statusText})`,
                     );
+                    await imageResponse.body?.cancel().catch(() => {});
                     return res
                         .status(404)
                         .json({ error: "Audiobook cover art not found" });

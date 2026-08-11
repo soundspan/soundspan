@@ -306,6 +306,68 @@ describe("audiobooks route runtime", () => {
         existsSpy.mockRestore();
     });
 
+    it("cancels failed Audiobookshelf cover responses and returns 404", async () => {
+        const existsSpy = jest.spyOn(require("fs"), "existsSync");
+        existsSpy.mockReturnValue(false);
+        const cancel = jest.fn().mockResolvedValue(undefined);
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: false,
+            body: { cancel },
+        });
+        (global as any).fetch = fetchMock;
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            localCoverPath: null,
+            coverUrl: "items/book-1/cover",
+        });
+        getSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = { params: { id: "book-1" } } as any;
+        const res = createRes();
+
+        await coverHandler(req, res);
+
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Cover not found" });
+        existsSpy.mockRestore();
+    });
+
+    it("streams successful Audiobookshelf cover responses without cancelling", async () => {
+        const existsSpy = jest.spyOn(require("fs"), "existsSync");
+        existsSpy.mockReturnValue(false);
+        const cancel = jest.fn().mockResolvedValue(undefined);
+        const fetchMock = jest.fn().mockResolvedValue({
+            ok: true,
+            body: { cancel },
+            arrayBuffer: jest
+                .fn()
+                .mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
+            headers: { get: jest.fn().mockReturnValue("image/jpeg") },
+        });
+        (global as any).fetch = fetchMock;
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            localCoverPath: null,
+            coverUrl: "items/book-1/cover",
+        });
+        getSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+
+        const req = { params: { id: "book-1" } } as any;
+        const res = createRes();
+
+        await coverHandler(req, res);
+
+        expect(cancel).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(200);
+        expect(res.send).toHaveBeenCalledWith(Buffer.from([1, 2, 3]));
+        existsSpy.mockRestore();
+    });
+
     it("validates search query input", async () => {
         const req = { query: {}, user: { id: "user-1" } } as any;
         const res = createRes();

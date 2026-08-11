@@ -1179,10 +1179,12 @@ describe("library cover-art proxy compatibility", () => {
     });
 
     it("returns 404 when audiobook query-url fetch fails", async () => {
+        const cancel = jest.fn().mockResolvedValue(undefined);
         const fetchMock = jest.fn().mockResolvedValue({
             ok: false,
             status: 404,
             statusText: "Not Found",
+            body: { cancel },
             headers: { get: jest.fn().mockReturnValue(null) },
         });
         (global as any).fetch = fetchMock;
@@ -1200,6 +1202,7 @@ describe("library cover-art proxy compatibility", () => {
 
         await coverArtHandler(req, res);
 
+        expect(cancel).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({ error: "Audiobook cover art not found" });
     });

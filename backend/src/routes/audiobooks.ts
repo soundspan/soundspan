@@ -707,6 +707,7 @@ router.get<{ id: string }>(
                             const buffer = await response.arrayBuffer();
                             return res.send(Buffer.from(buffer));
                         }
+                        await response.body?.cancel().catch(() => {});
                     } catch (proxyError: any) {
                         logger.error(
                             `[Audiobook Cover] Proxy error for ${id}:`,

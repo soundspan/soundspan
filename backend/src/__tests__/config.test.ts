@@ -60,10 +60,15 @@ describe("config module", () => {
         });
 
         process.env = { ...originalEnv, ...nextEnv };
+        Object.entries(overrides).forEach(([key, value]) => {
+            if (value === undefined) {
+                delete process.env[key];
+            }
+        });
         return import("../config");
     }
 
-    afterAll(() => {
+    afterEach(() => {
         process.env = originalEnv;
     });
 
@@ -239,12 +244,42 @@ describe("config module", () => {
         expect(config.allowedOrigins).toEqual([""]);
     });
 
-    it("uses JWT_SECRET when set and otherwise falls back to SESSION_SECRET", async () => {
-        const explicit = await loadConfigModule({ JWT_SECRET: "jwt-secret" });
-        expect(explicit.config.jwtSecret).toBe("jwt-secret");
-
+    it("falls back to SESSION_SECRET when JWT_SECRET is absent", async () => {
         const fallback = await loadConfigModule({ JWT_SECRET: undefined });
         expect(fallback.config.jwtSecret).toBe(requiredEnv().SESSION_SECRET);
+    });
+
+    it("rejects JWT_SECRET values shorter than 32 characters", async () => {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(
+            loadConfigModule({ JWT_SECRET: "short-jwt-secret" }),
+        ).rejects.toThrow("process.exit:1");
+        expect(
+            mockLoggerError.mock.calls.some(
+                (call) =>
+                    typeof call[0] === "string" &&
+                    call[0].includes(
+                        "JWT_SECRET must be at least 32 characters",
+                    ),
+            ),
+        ).toBe(true);
+
+        exitSpy.mockRestore();
+    });
+
+    it("uses JWT_SECRET when it is at least 32 characters", async () => {
+        const jwtSecret = "12345678901234567890123456789012";
+        const explicit = await loadConfigModule({ JWT_SECRET: jwtSecret });
+
+        expect(explicit.config.jwtSecret).toBe(jwtSecret);
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "Environment variables validated",
+        );
     });
 
     it("enables public docs and strict decryption only for literal true", async () => {

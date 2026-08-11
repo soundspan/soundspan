@@ -57,6 +57,10 @@ const envSchema = z.object({
     SESSION_SECRET: z
         .string()
         .min(32, "SESSION_SECRET must be at least 32 characters"),
+    JWT_SECRET: z
+        .string()
+        .min(32, "JWT_SECRET must be at least 32 characters")
+        .optional(),
     PORT: z.string().optional(),
     NODE_ENV: z.enum(["development", "production", "test"]).optional(),
     MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
