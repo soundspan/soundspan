@@ -594,6 +594,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `.env` settings sync now rejects any value containing a line break, closing
+  an env-line injection where an app admin could append arbitrary environment
+  variables to the deployment `.env`; Lidarr and Audiobookshelf URL settings
+  are now validated as URLs at the API boundary.
 - Enforced media-root containment through the shared `safeResolvePath` helper
   for segmented-streaming session creation, self-heal, and playback repair;
   library audio-info probes; file-validator checks; and artist/discovery

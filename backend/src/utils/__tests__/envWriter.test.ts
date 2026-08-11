@@ -135,6 +135,77 @@ describe("envWriter", () => {
         expect(written).toContain("EXTERNAL_API_URL=https://api.example");
     });
 
+    it("rejects newline injection without reading or writing the env file", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        const injectedValue =
+            "http://lidarr:8686\nLIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true";
+
+        const error = await writeEnvFile({
+            LIDARR_URL: injectedValue,
+        }).catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error).not.toBeInstanceOf(EnvFileSyncSkippedError);
+        if (!(error instanceof Error)) {
+            throw new Error("Expected writeEnvFile to reject with an Error");
+        }
+        expect(error.message).toContain("LIDARR_URL");
+        expect(error.message).not.toContain(injectedValue);
+        expect(error.message).not.toContain(
+            "LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true",
+        );
+        expect(mockReadFileSync).not.toHaveBeenCalled();
+        expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
+    });
+
+    it("rejects carriage-return injection without writing the env file", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+
+        await expect(
+            writeEnvFile({
+                LIDARR_URL: "http://lidarr:8686\rEVIL=1",
+            }),
+        ).rejects.toThrow(
+            "Refusing to write .env: value for LIDARR_URL contains a line break",
+        );
+        expect(mockReadFileSync).not.toHaveBeenCalled();
+        expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
+    });
+
+    it("asserts environment variable key syntax before filesystem access", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+
+        await expect(writeEnvFile({ "INVALID-KEY": "value" })).rejects.toEqual(
+            expect.objectContaining({
+                name: "AssertionError",
+                message: "Invalid environment variable name",
+            }),
+        );
+        expect(mockReadFileSync).not.toHaveBeenCalled();
+        expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
+    });
+
+    it("writes values with non-line-break special characters unchanged", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        mockReadFileSync.mockImplementation(() => {
+            throw new Error("ENOENT");
+        });
+        const url = "https://api.example/search?q=rock+roll&limit=10";
+        const secret = "value=with equals and spaces";
+
+        await writeEnvFile({
+            EXTERNAL_API_URL: url,
+            SESSION_SECRET: secret,
+        });
+
+        const written = String(mockWriteFileSync.mock.calls[0][1]);
+        expect(written).toContain(`EXTERNAL_API_URL=${url}`);
+        expect(written).toContain(`SESSION_SECRET=${secret}`);
+    });
+
     it("writes integration secret keys when DB-only mode is off", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         mockReadFileSync.mockImplementation(() => {

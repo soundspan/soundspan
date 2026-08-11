@@ -805,6 +805,58 @@ describe("systemSettings runtime routes", () => {
         expect(res.body.error).toBe("Invalid settings");
     });
 
+    it("returns 400 for an invalid Lidarr URL", async () => {
+        const req = { body: { lidarrUrl: "not a url" } } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
+        expect(mockWriteEnvFile).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for a Lidarr URL containing a newline", async () => {
+        const req = {
+            body: { lidarrUrl: "http://lidarr:8686\nEVIL=1" },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
+        expect(mockWriteEnvFile).not.toHaveBeenCalled();
+    });
+
+    it("preserves empty-string Lidarr URL clear semantics", async () => {
+        const req = { body: { lidarrUrl: "" } } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSystemSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({ lidarrUrl: "" }),
+            }),
+        );
+        expect(mockWriteEnvFile).toHaveBeenCalledWith(
+            expect.objectContaining({ LIDARR_URL: null }),
+        );
+    });
+
+    it("returns 400 for an invalid Audiobookshelf URL", async () => {
+        const req = { body: { audiobookshelfUrl: "not a url" } } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(mockSystemSettingsUpsert).not.toHaveBeenCalled();
+        expect(mockWriteEnvFile).not.toHaveBeenCalled();
+    });
+
     it("continues successfully when env sync is skipped", async () => {
         mockWriteEnvFile.mockRejectedValue(
             new EnvFileSyncSkippedError("containerized env"),

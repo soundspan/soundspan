@@ -9,6 +9,7 @@ import {
 } from "../config/secretsPolicy";
 
 const log = logger.child("EnvWriter");
+const ENV_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const STALE_ENV_SYNC_KEYS = [
     "SOULSEEK_USERNAME",
@@ -64,6 +65,26 @@ function shouldSkipEnvSync(envPath: string): string | null {
     return null;
 }
 
+function assertSafeEnvVariables(
+    variables: Record<string, string | null | undefined>,
+): void {
+    assert.ok(
+        variables && typeof variables === "object" && !Array.isArray(variables),
+        "variables must be an environment variable record",
+    );
+    Object.entries(variables).forEach(([key, value]) => {
+        assert.ok(
+            ENV_VARIABLE_NAME_PATTERN.test(key),
+            "Invalid environment variable name",
+        );
+        if (typeof value === "string" && /[\r\n]/.test(value)) {
+            throw new Error(
+                `Refusing to write .env: value for ${key} contains a line break`,
+            );
+        }
+    });
+}
+
 function atomicWriteFileSecret(targetPath: string, content: string): void {
     assert.strictEqual(
         typeof targetPath,
@@ -112,6 +133,8 @@ export async function writeEnvFile(
         log.debug(`Skipping .env sync: ${skipReason}`);
         throw new EnvFileSyncSkippedError(skipReason);
     }
+
+    assertSafeEnvVariables(variables);
 
     // Read existing .env
     let existingContent = "";

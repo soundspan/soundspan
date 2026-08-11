@@ -49,7 +49,7 @@ router.use(requireAdmin);
 const systemSettingsSchema = z.object({
     // Download Services
     lidarrEnabled: z.boolean().optional(),
-    lidarrUrl: z.string().optional(),
+    lidarrUrl: z.string().url().optional().or(z.literal("")),
     lidarrApiKey: z.string().nullable().optional(),
     lidarrWebhookSecret: z.string().nullable().optional(),
 
@@ -66,7 +66,7 @@ const systemSettingsSchema = z.object({
 
     // Media Services
     audiobookshelfEnabled: z.boolean().optional(),
-    audiobookshelfUrl: z.string().optional(),
+    audiobookshelfUrl: z.string().url().optional().or(z.literal("")),
     audiobookshelfApiKey: z.string().nullable().optional(),
 
     // Soulseek (direct connection via slsk-client)
