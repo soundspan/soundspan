@@ -1,7 +1,11 @@
 const mockScanQueueAdd = jest.fn();
+const mockSchedulerQueueAdd = jest.fn();
 jest.mock("../../workers/queues", () => ({
     scanQueue: {
         add: (...args: unknown[]) => mockScanQueueAdd(...args),
+    },
+    schedulerQueue: {
+        add: (...args: unknown[]) => mockSchedulerQueueAdd(...args),
     },
 }));
 
@@ -15,13 +19,6 @@ jest.mock("../../services/simpleDownloadManager", () => ({
         onDownloadComplete: (...args: unknown[]) =>
             mockOnDownloadComplete(...args),
         onImportFailed: (...args: unknown[]) => mockOnImportFailed(...args),
-    },
-}));
-
-const mockQueueCleanerStart = jest.fn();
-jest.mock("../../jobs/queueCleaner", () => ({
-    queueCleaner: {
-        start: (...args: unknown[]) => mockQueueCleanerStart(...args),
     },
 }));
 
@@ -226,7 +223,7 @@ describe("webhooks routes runtime", () => {
         );
     });
 
-    it("handles Grab events, starts cleaner when matched, and ignores missing ids", async () => {
+    it("handles Grab events, enqueues claimed reconciliation when matched, and ignores missing ids", async () => {
         mockOnDownloadGrabbed.mockResolvedValueOnce({ matched: true });
 
         const req = {
@@ -255,7 +252,18 @@ describe("webhooks routes runtime", () => {
             "Artist One",
             42,
         );
-        expect(mockQueueCleanerStart).toHaveBeenCalledTimes(1);
+        expect(mockSchedulerQueueAdd).toHaveBeenCalledWith(
+            "download-reconciliation-cycle",
+            {
+                mode: "repeat",
+                source: "lidarr-webhook",
+            },
+            {
+                jobId: "scheduler:reconciliation:on-demand",
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ success: true });
 
@@ -404,9 +412,8 @@ describe("webhooks routes runtime", () => {
     });
 
     it("returns 500 on webhook processing errors", async () => {
-        mockGetSystemSettings.mockRejectedValueOnce(
-            new Error("settings unavailable"),
-        );
+        const routeError = new Error("settings unavailable");
+        mockGetSystemSettings.mockRejectedValueOnce(routeError);
 
         const req = {
             body: { eventType: "Grab", downloadId: "dl-9" },
@@ -419,8 +426,33 @@ describe("webhooks routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Webhook processing failed" });
         expect(mockLoggerError).toHaveBeenCalledWith(
-            "Webhook error:",
-            "settings unavailable",
+            "Webhook error",
+            routeError,
+        );
+    });
+
+    it("sanitizes scheduler enqueue failures for matched Grab events", async () => {
+        const queueError = new Error("redis://secret@queue unavailable");
+        mockOnDownloadGrabbed.mockResolvedValueOnce({ matched: true });
+        mockSchedulerQueueAdd.mockRejectedValueOnce(queueError);
+        const req = {
+            body: {
+                eventType: "Grab",
+                downloadId: "dl-queue-error",
+                albums: [{ foreignAlbumId: "mbid-queue-error" }],
+            },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await postLidarr(req, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Webhook processing failed" });
+        expect(JSON.stringify(res.body)).not.toContain("redis://secret");
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            "Webhook error",
+            queueError,
         );
     });
 });

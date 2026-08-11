@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 
 type AuthFailureMode = "ok" | "unauthorized" | "forbidden";
 const authFailureState = { mode: "ok" as AuthFailureMode };
+const mockQueueCleanerLogError = jest.fn();
 
 const mockRequireAuth = jest.fn(
     async (_req: Request, res: Response, next: () => void) => {
@@ -33,6 +34,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: mockQueueCleanerLogError,
+        })),
     },
 }));
 
@@ -61,11 +68,19 @@ jest.mock("../../utils/systemSettings", () => ({
     invalidateSystemSettingsCache: jest.fn(),
 }));
 
-jest.mock("../../jobs/queueCleaner", () => ({
-    queueCleaner: {
-        start: jest.fn(),
-        stop: jest.fn(),
-        getStatus: jest.fn(() => ({ running: false, lastRunAt: null })),
+const mockSchedulerJobGetState = jest.fn();
+const mockSchedulerJobRemove = jest.fn();
+const mockSchedulerJob = {
+    id: "scheduler:reconciliation:on-demand",
+    getState: mockSchedulerJobGetState,
+    remove: mockSchedulerJobRemove,
+};
+const mockSchedulerQueueAdd = jest.fn();
+const mockSchedulerQueueGetJob = jest.fn();
+jest.mock("../../workers/queues", () => ({
+    schedulerQueue: {
+        add: (...args: unknown[]) => mockSchedulerQueueAdd(...args),
+        getJob: (...args: unknown[]) => mockSchedulerQueueGetJob(...args),
     },
 }));
 
@@ -135,7 +150,6 @@ import router from "../systemSettings";
 import { prisma } from "../../utils/db";
 import { writeEnvFile, EnvFileSyncSkippedError } from "../../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
-import { queueCleaner } from "../../jobs/queueCleaner";
 import { decrypt } from "../../utils/encryption";
 import { lastFmService } from "../../services/lastfm";
 import { tidalService } from "../../services/tidal";
@@ -156,7 +170,6 @@ const mockAxiosPut = axios.put as jest.Mock;
 const mockWriteEnvFile = writeEnvFile as jest.Mock;
 const mockInvalidateSystemSettingsCache =
     invalidateSystemSettingsCache as jest.Mock;
-const mockQueueCleaner = queueCleaner as jest.Mocked<typeof queueCleaner>;
 const mockDecrypt = decrypt as jest.Mock;
 const mockLastFmService = lastFmService as jest.Mocked<typeof lastFmService>;
 const mockTidalService = tidalService as jest.Mocked<typeof tidalService>;
@@ -266,11 +279,10 @@ describe("systemSettings runtime routes", () => {
         mockDecrypt.mockImplementation((value: string) => `dec:${value}`);
         mockLastFmService.refreshApiKey.mockResolvedValue(undefined as any);
         mockSoulseekService.disconnect.mockReturnValue(undefined as any);
-        mockQueueCleaner.start.mockResolvedValue(undefined as any);
-        mockQueueCleaner.getStatus.mockReturnValue({
-            running: true,
-            lastRunAt: "2026-02-17T00:00:00.000Z",
-        } as any);
+        mockSchedulerQueueAdd.mockResolvedValue(mockSchedulerJob);
+        mockSchedulerQueueGetJob.mockResolvedValue(null);
+        mockSchedulerJobGetState.mockResolvedValue("waiting");
+        mockSchedulerJobRemove.mockResolvedValue(undefined);
         mockTidalService.isSidecarHealthy.mockResolvedValue(true);
         mockTidalService.verifySession.mockResolvedValue({
             valid: true,
@@ -1425,24 +1437,67 @@ describe("systemSettings runtime routes", () => {
         });
     });
 
-    it("manages queue cleaner and clears cache keys while preserving sessions", async () => {
+    it("manages the cluster queue-cleaner job and clears cache keys while preserving sessions", async () => {
+        mockSchedulerQueueGetJob.mockResolvedValueOnce(mockSchedulerJob);
+        mockSchedulerJobGetState.mockResolvedValueOnce("active");
         const queueStatusReq = { user: { id: "user-1" } } as any;
         const queueStatusRes = createRes();
         await queueStatusHandler(queueStatusReq, queueStatusRes);
         expect(queueStatusRes.statusCode).toBe(200);
-        expect(queueStatusRes.body.running).toBe(true);
+        expect(queueStatusRes.body).toEqual({
+            running: true,
+            queued: false,
+            state: "active",
+            jobId: "scheduler:reconciliation:on-demand",
+            workerOwned: true,
+        });
 
         const startReq = { user: { id: "user-1" } } as any;
         const startRes = createRes();
         await queueStartHandler(startReq, startRes);
         expect(startRes.statusCode).toBe(200);
-        expect(startRes.body.success).toBe(true);
+        expect(mockSchedulerQueueAdd).toHaveBeenCalledWith(
+            "download-reconciliation-cycle",
+            {
+                mode: "repeat",
+                source: "system-settings",
+            },
+            {
+                jobId: "scheduler:reconciliation:on-demand",
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(startRes.body).toEqual({
+            success: true,
+            message: "Queue cleaner job enqueued",
+            status: {
+                running: false,
+                queued: true,
+                state: "waiting",
+                jobId: "scheduler:reconciliation:on-demand",
+                workerOwned: true,
+            },
+        });
 
+        mockSchedulerQueueGetJob.mockResolvedValueOnce(mockSchedulerJob);
+        mockSchedulerJobGetState.mockResolvedValueOnce("waiting");
         const stopReq = { user: { id: "user-1" } } as any;
         const stopRes = createRes();
         await queueStopHandler(stopReq, stopRes);
         expect(stopRes.statusCode).toBe(200);
-        expect(stopRes.body.success).toBe(true);
+        expect(mockSchedulerJobRemove).toHaveBeenCalledTimes(1);
+        expect(stopRes.body).toEqual({
+            success: true,
+            message: "Queued queue cleaner job cancelled",
+            status: {
+                running: false,
+                queued: false,
+                state: "idle",
+                jobId: null,
+                workerOwned: true,
+            },
+        });
 
         mockRedisClient.keys.mockResolvedValue([
             "sess:abc",
@@ -1462,14 +1517,68 @@ describe("systemSettings runtime routes", () => {
         );
     });
 
-    it("returns 500 when queue cleaner start fails", async () => {
-        mockQueueCleaner.start.mockRejectedValueOnce(
-            new Error("queue unavailable"),
-        );
+    it("sanitizes queue cleaner enqueue failures while logging raw detail", async () => {
+        const queueError = new Error("redis://secret@queue unavailable");
+        mockSchedulerQueueAdd.mockRejectedValueOnce(queueError);
         const req = { user: { id: "user-1" } } as any;
         const res = createRes();
         await queueStartHandler(req, res);
         expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to start queue cleaner" });
+        expect(JSON.stringify(res.body)).not.toContain("redis://secret");
+        expect(mockQueueCleanerLogError).toHaveBeenCalledWith(
+            "Failed to enqueue queue cleaner worker job",
+            queueError,
+        );
+    });
+
+    it("refuses to interrupt an active claimed queue cleaner job", async () => {
+        mockSchedulerQueueGetJob.mockResolvedValueOnce(mockSchedulerJob);
+        mockSchedulerJobGetState.mockResolvedValueOnce("active");
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+
+        await queueStopHandler(req, res);
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body).toEqual({
+            error: "Queue cleaner job is already active",
+        });
+        expect(mockSchedulerJobRemove).not.toHaveBeenCalled();
+    });
+
+    it("sanitizes queue cleaner status and cancellation failures", async () => {
+        const statusError = new Error("redis://status-secret@queue");
+        mockSchedulerQueueGetJob.mockRejectedValueOnce(statusError);
+        const statusRes = createRes();
+
+        await queueStatusHandler({ user: { id: "user-1" } } as any, statusRes);
+
+        expect(statusRes.statusCode).toBe(500);
+        expect(statusRes.body).toEqual({
+            error: "Failed to get queue cleaner status",
+        });
+        expect(JSON.stringify(statusRes.body)).not.toContain("status-secret");
+        expect(mockQueueCleanerLogError).toHaveBeenCalledWith(
+            "Failed to read queue cleaner worker status",
+            statusError,
+        );
+
+        const cancellationError = new Error("redis://stop-secret@queue");
+        mockSchedulerQueueGetJob.mockResolvedValueOnce(mockSchedulerJob);
+        mockSchedulerJobGetState.mockResolvedValueOnce("waiting");
+        mockSchedulerJobRemove.mockRejectedValueOnce(cancellationError);
+        const stopRes = createRes();
+
+        await queueStopHandler({ user: { id: "user-1" } } as any, stopRes);
+
+        expect(stopRes.statusCode).toBe(500);
+        expect(stopRes.body).toEqual({ error: "Failed to stop queue cleaner" });
+        expect(JSON.stringify(stopRes.body)).not.toContain("stop-secret");
+        expect(mockQueueCleanerLogError).toHaveBeenCalledWith(
+            "Failed to cancel queued queue cleaner worker job",
+            cancellationError,
+        );
     });
 
     it("handles cache clear when no non-session keys exist", async () => {

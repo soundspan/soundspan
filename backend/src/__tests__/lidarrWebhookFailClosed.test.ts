@@ -11,6 +11,7 @@
 export {};
 
 const mockScanQueueAdd = jest.fn(async () => undefined);
+const mockSchedulerQueueAdd = jest.fn(async () => undefined);
 const mockOnDownloadGrabbed = jest.fn(async () => ({ matched: false }));
 const mockOnDownloadComplete = jest.fn(async () => ({ jobId: null }));
 const mockOnImportFailed = jest.fn(async () => undefined);
@@ -24,6 +25,7 @@ const mockConfig = {
 
 jest.mock("../workers/queues", () => ({
     scanQueue: { add: mockScanQueueAdd },
+    schedulerQueue: { add: mockSchedulerQueueAdd },
 }));
 
 jest.mock("../services/simpleDownloadManager", () => ({
@@ -32,10 +34,6 @@ jest.mock("../services/simpleDownloadManager", () => ({
         onDownloadComplete: mockOnDownloadComplete,
         onImportFailed: mockOnImportFailed,
     },
-}));
-
-jest.mock("../jobs/queueCleaner", () => ({
-    queueCleaner: { start: jest.fn() },
 }));
 
 jest.mock("../utils/systemSettings", () => ({

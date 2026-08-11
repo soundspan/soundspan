@@ -9,16 +9,13 @@
  * 2xx, not the pre-fix uncaught-P2002 500.
  */
 const mockScanQueueAdd = jest.fn();
+const mockSchedulerQueueAdd = jest.fn();
 jest.mock("../../workers/queues", () => ({
     scanQueue: {
         add: (...args: unknown[]) => mockScanQueueAdd(...args),
     },
-}));
-
-const mockQueueCleanerStart = jest.fn();
-jest.mock("../../jobs/queueCleaner", () => ({
-    queueCleaner: {
-        start: (...args: unknown[]) => mockQueueCleanerStart(...args),
+    schedulerQueue: {
+        add: (...args: unknown[]) => mockSchedulerQueueAdd(...args),
     },
 }));
 
@@ -276,6 +273,32 @@ describe("webhooks Grab route -- real simpleDownloadManager P2002 race (F23)", (
         expect(firstRes.body).toEqual({ success: true });
         expect(secondRes.statusCode).toBe(200);
         expect(secondRes.body).toEqual({ success: true });
-        expect(mockQueueCleanerStart).toHaveBeenCalledTimes(2);
+        expect(mockSchedulerQueueAdd).toHaveBeenCalledTimes(2);
+        expect(mockSchedulerQueueAdd).toHaveBeenNthCalledWith(
+            1,
+            "download-reconciliation-cycle",
+            {
+                mode: "repeat",
+                source: "lidarr-webhook",
+            },
+            {
+                jobId: "scheduler:reconciliation:on-demand",
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mockSchedulerQueueAdd).toHaveBeenNthCalledWith(
+            2,
+            "download-reconciliation-cycle",
+            {
+                mode: "repeat",
+                source: "lidarr-webhook",
+            },
+            {
+                jobId: "scheduler:reconciliation:on-demand",
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
     });
 });

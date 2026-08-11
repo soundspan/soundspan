@@ -5,7 +5,7 @@ import { prisma } from "../utils/db";
 import { z } from "zod";
 import { EnvFileSyncSkippedError, writeEnvFile } from "../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
-import { queueCleaner } from "../jobs/queueCleaner";
+import { schedulerQueue } from "../workers/queues";
 import { encrypt, decrypt } from "../utils/encryption";
 import { ENCRYPTED_SETTINGS_COLUMNS } from "../utils/encryptedColumns";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
@@ -15,8 +15,69 @@ import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
 const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
+const QUEUE_CLEANER_JOB_NAME = "download-reconciliation-cycle";
+const QUEUE_CLEANER_JOB_ID = "scheduler:reconciliation:on-demand";
+const queueCleanerLog = logger.child("SystemSettingsQueueCleaner");
 // Shared validation message for admin outbound connection-test URLs.
 const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
+
+type QueueCleanerWorkerStatus = {
+    running: boolean;
+    queued: boolean;
+    state: string;
+    jobId: string | null;
+    workerOwned: true;
+};
+
+function idleQueueCleanerWorkerStatus(): QueueCleanerWorkerStatus {
+    return {
+        running: false,
+        queued: false,
+        state: "idle",
+        jobId: null,
+        workerOwned: true,
+    };
+}
+
+async function getQueueCleanerWorkerStatus(
+    job: Awaited<ReturnType<typeof schedulerQueue.getJob>>,
+): Promise<QueueCleanerWorkerStatus> {
+    if (!job) return idleQueueCleanerWorkerStatus();
+
+    const state = await job.getState();
+    return {
+        running: state === "active",
+        queued: ["waiting", "delayed", "paused"].includes(state),
+        state,
+        jobId: String(job.id),
+        workerOwned: true,
+    };
+}
+
+async function enqueueQueueCleanerWorkerJob() {
+    return schedulerQueue.add(
+        QUEUE_CLEANER_JOB_NAME,
+        { mode: "repeat", source: "system-settings" },
+        {
+            jobId: QUEUE_CLEANER_JOB_ID,
+            removeOnComplete: true,
+            removeOnFail: 10,
+        },
+    );
+}
+
+async function cancelQueuedQueueCleanerWorkerJob(): Promise<
+    "absent" | "active" | "cancelled"
+> {
+    const job = await schedulerQueue.getJob(QUEUE_CLEANER_JOB_ID);
+    if (!job) return "absent";
+
+    const status = await getQueueCleanerWorkerStatus(job);
+    if (status.running) return "active";
+
+    await job.remove();
+    return "cancelled";
+}
 
 function normalizeAdminTestUrl(url: string): string | null {
     // Deliberately the STRING check only (no DNS resolution): admin connection
@@ -1273,7 +1334,7 @@ router.post("/tidal-auth/token", async (req, res) => {
  * @openapi
  * /api/system-settings/queue-cleaner-status:
  *   get:
- *     summary: Get queue cleaner status
+ *     summary: Get cluster-wide queue cleaner worker-job status
  *     tags: [System Settings]
  *     security:
  *       - sessionAuth: []
@@ -1286,23 +1347,32 @@ router.post("/tidal-auth/token", async (req, res) => {
  *       403:
  *         description: Admin access required
  */
-// Get queue cleaner status
-router.get("/queue-cleaner-status", (req, res) => {
-    res.json(queueCleaner.getStatus());
+// Get queue cleaner worker-job status from the shared scheduler queue.
+router.get("/queue-cleaner-status", async (req, res) => {
+    try {
+        const job = await schedulerQueue.getJob(QUEUE_CLEANER_JOB_ID);
+        res.json(await getQueueCleanerWorkerStatus(job));
+    } catch (error) {
+        queueCleanerLog.error(
+            "Failed to read queue cleaner worker status",
+            error,
+        );
+        sendInternalRouteError(res, "Failed to get queue cleaner status");
+    }
 });
 
 /**
  * @openapi
  * /api/system-settings/queue-cleaner/start:
  *   post:
- *     summary: Start the queue cleaner manually
+ *     summary: Enqueue a claimed queue cleaner worker job
  *     tags: [System Settings]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Queue cleaner started
+ *         description: Queue cleaner worker job enqueued
  *       401:
  *         description: Not authenticated
  *       403:
@@ -1310,19 +1380,21 @@ router.get("/queue-cleaner-status", (req, res) => {
  *       500:
  *         description: Failed to start queue cleaner
  */
-// Start queue cleaner manually
+// Request one coalesced reconciliation cycle from the worker scheduler.
 router.post("/queue-cleaner/start", async (req, res) => {
     try {
-        await queueCleaner.start();
+        const job = await enqueueQueueCleanerWorkerJob();
         res.json({
             success: true,
-            message: "Queue cleaner started",
-            status: queueCleaner.getStatus(),
+            message: "Queue cleaner job enqueued",
+            status: await getQueueCleanerWorkerStatus(job),
         });
-    } catch (error: any) {
-        res.status(500).json({
-            error: "Failed to start queue cleaner",
-        });
+    } catch (error) {
+        queueCleanerLog.error(
+            "Failed to enqueue queue cleaner worker job",
+            error,
+        );
+        sendInternalRouteError(res, "Failed to start queue cleaner");
     }
 });
 
@@ -1330,27 +1402,50 @@ router.post("/queue-cleaner/start", async (req, res) => {
  * @openapi
  * /api/system-settings/queue-cleaner/stop:
  *   post:
- *     summary: Stop the queue cleaner manually
+ *     summary: Cancel a queued queue cleaner worker job
  *     tags: [System Settings]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Queue cleaner stopped
+ *         description: Queued queue cleaner worker job cancelled or absent
  *       401:
  *         description: Not authenticated
  *       403:
  *         description: Admin access required
+ *       409:
+ *         description: Queue cleaner job is already active
+ *       500:
+ *         description: Failed to stop queue cleaner
  */
-// Stop queue cleaner manually
-router.post("/queue-cleaner/stop", (req, res) => {
-    queueCleaner.stop();
-    res.json({
-        success: true,
-        message: "Queue cleaner stopped",
-        status: queueCleaner.getStatus(),
-    });
+// Cancel a pending cluster-wide request; claimed active work is not interruptible.
+router.post("/queue-cleaner/stop", async (req, res) => {
+    try {
+        const result = await cancelQueuedQueueCleanerWorkerJob();
+        if (result === "active") {
+            return sendRouteError(
+                res,
+                409,
+                "Queue cleaner job is already active",
+            );
+        }
+
+        return res.json({
+            success: true,
+            message:
+                result === "cancelled"
+                    ? "Queued queue cleaner job cancelled"
+                    : "No queued queue cleaner job",
+            status: idleQueueCleanerWorkerStatus(),
+        });
+    } catch (error) {
+        queueCleanerLog.error(
+            "Failed to cancel queued queue cleaner worker job",
+            error,
+        );
+        return sendInternalRouteError(res, "Failed to stop queue cleaner");
+    }
 });
 
 /**

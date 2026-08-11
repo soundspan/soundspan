@@ -6,9 +6,8 @@
  */
 
 import { Router } from "express";
-import { scanQueue } from "../workers/queues";
+import { scanQueue, schedulerQueue } from "../workers/queues";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
-import { queueCleaner } from "../jobs/queueCleaner";
 import { getSystemSettings } from "../utils/systemSettings";
 import { webhookLimiter } from "../middleware/rateLimiter";
 import { prisma } from "../utils/db";
@@ -16,9 +15,24 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
+import { sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
 const LEGACY_SERVICE_ALIASES = [BRAND_SLUG];
+const QUEUE_CLEANER_JOB_NAME = "download-reconciliation-cycle";
+const QUEUE_CLEANER_JOB_ID = "scheduler:reconciliation:on-demand";
+
+async function enqueueQueueCleanerJob(): Promise<void> {
+    await schedulerQueue.add(
+        QUEUE_CLEANER_JOB_NAME,
+        { mode: "repeat", source: "lidarr-webhook" },
+        {
+            jobId: QUEUE_CLEANER_JOB_ID,
+            removeOnComplete: true,
+            removeOnFail: 10,
+        },
+    );
+}
 
 /**
  * @openapi
@@ -163,9 +177,9 @@ router.post("/lidarr", webhookLimiter, async (req, res) => {
         }
 
         res.json({ success: true });
-    } catch (error: any) {
-        logger.error("Webhook error:", error.message);
-        res.status(500).json({ error: "Webhook processing failed" });
+    } catch (error) {
+        logger.error("Webhook error", error);
+        sendInternalRouteError(res, "Webhook processing failed");
     }
 });
 
@@ -199,8 +213,7 @@ async function handleGrab(payload: any) {
     );
 
     if (result.matched) {
-        // Start queue cleaner to monitor this download
-        queueCleaner.start();
+        await enqueueQueueCleanerJob();
     }
 }
 
