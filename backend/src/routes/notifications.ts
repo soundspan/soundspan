@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { notificationService } from "../services/notificationService";
-import { requireAuth } from "../middleware/auth";
+import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
@@ -452,7 +452,7 @@ router.post(
  * @openapi
  * /api/notifications/downloads/{id}/retry:
  *   post:
- *     summary: Retry a failed download
+ *     summary: Retry a failed download (admin only)
  *     description: Retries a failed or exhausted download job. Supports pending-track-retry (Soulseek), spotify_import (Soulseek then Lidarr fallback), and generic album retry via Lidarr.
  *     tags: [Notifications]
  *     security:
@@ -487,10 +487,13 @@ router.post(
  *         description: Download not found or not in failed state
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.post(
     "/downloads/:id/retry",
     requireAuth,
+    requireAdmin,
     asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
         try {
             // Get the failed download

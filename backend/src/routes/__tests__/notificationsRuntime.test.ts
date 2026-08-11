@@ -1,5 +1,11 @@
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireAdmin: (req: any, res: any, next: () => void) => {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -71,8 +77,12 @@ jest.mock("../../services/simpleDownloadManager", () => ({
 }));
 
 import router from "../notifications";
+import { requireAdmin } from "../../middleware/auth";
 
-function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
+type HttpMethod = "get" | "post" | "put" | "delete";
+const MAX_ROUTE_HANDLERS = 4;
+
+function getRouteLayer(path: string, method: HttpMethod) {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -80,7 +90,37 @@ function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
     if (!layer) {
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     }
+    return layer;
+}
+
+function getHandler(path: string, method: HttpMethod) {
+    const layer = getRouteLayer(path, method);
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+async function invokeRouteStack(
+    path: string,
+    method: HttpMethod,
+    req: any,
+    res: any,
+) {
+    const { stack } = getRouteLayer(path, method).route;
+    if (stack.length > MAX_ROUTE_HANDLERS) {
+        throw new Error(`Too many route handlers: ${stack.length}`);
+    }
+    for (let index = 0; index < MAX_ROUTE_HANDLERS; index += 1) {
+        const entry = stack[index];
+        if (!entry) {
+            return;
+        }
+        let nextCalled = false;
+        await entry.handle(req, res, () => {
+            nextCalled = true;
+        });
+        if (!nextCalled) {
+            return;
+        }
+    }
 }
 
 function createRes() {
@@ -173,6 +213,72 @@ describe("notifications route runtime", () => {
             success: true,
             error: null,
         });
+    });
+
+    it("requires admin authorization for download retries", () => {
+        const middlewares = getRouteLayer(
+            "/downloads/:id/retry",
+            "post",
+        ).route.stack.map((entry: { handle: unknown }) => entry.handle);
+
+        expect(middlewares).toContain(requireAdmin);
+    });
+
+    it("rejects non-admin download retries before downloads or writes", async () => {
+        const req = {
+            user: { id: "u1", role: "user" },
+            params: { id: "job-1" },
+        } as any;
+        const res = createRes();
+
+        await invokeRouteStack("/downloads/:id/retry", "post", req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(soulseekService.downloadBestMatch).not.toHaveBeenCalled();
+        expect(soulseekService.searchAndDownloadBatch).not.toHaveBeenCalled();
+        expect(simpleDownloadManager.startDownload).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.updateMany).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.update).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.create).not.toHaveBeenCalled();
+    });
+
+    it("allows admin download retries through the route stack", async () => {
+        prisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "job-generic",
+            userId: "u1",
+            subject: "Artist - Album",
+            type: "album",
+            targetMbid: "album-mbid",
+            artistMbid: "artist-mbid",
+            metadata: {},
+        });
+        prisma.downloadJob.create.mockResolvedValueOnce({
+            id: "job-new-generic",
+            metadata: {},
+        });
+        const req = {
+            user: { id: "u1", role: "admin" },
+            params: { id: "job-generic" },
+        } as any;
+        const res = createRes();
+
+        await invokeRouteStack("/downloads/:id/retry", "post", req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            success: true,
+            newJobId: "job-new-generic",
+            error: null,
+        });
+        expect(simpleDownloadManager.startDownload).toHaveBeenCalledWith(
+            "job-new-generic",
+            "Artist",
+            "Album",
+            "album-mbid",
+            "u1",
+            false,
+        );
     });
 
     it("handles notification listing/read/clear endpoints", async () => {

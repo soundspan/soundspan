@@ -1,7 +1,7 @@
-import { Router } from "express";
+import { Request, Router } from "express";
 import { logger } from "../utils/logger";
 import { z } from "zod";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { sessionLog } from "../utils/playlistLogger";
 import { trackMappingService } from "../services/trackMappingService";
@@ -16,6 +16,9 @@ const router = Router();
 const PLAYLISTS_MAX_LIMIT = 1000;
 const PLAYLISTS_DEFAULT_LIMIT = 500;
 const PLAYLIST_PREVIEW_ITEMS = 12;
+const pendingRetryPath = "/:id/pending/:trackId/retry";
+
+type RetryRequest = Request<{ id: string; trackId: string }>;
 
 router.use(requireAuthOrToken);
 
@@ -1420,7 +1423,7 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
  * @openapi
  * /api/playlists/{id}/pending/{trackId}/retry:
  *   post:
- *     summary: Retry downloading a pending track from Soulseek
+ *     summary: Retry downloading a pending track from Soulseek (admin only)
  *     description: Returns immediately and downloads in background. Triggers a library scan after download.
  *     tags: [Playlists]
  *     security:
@@ -1456,13 +1459,13 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
  *       400:
  *         description: Music path or Soulseek credentials not configured
  *       403:
- *         description: Access denied
+ *         description: Authenticated but not an admin, or access denied
  *       404:
  *         description: Playlist or pending track not found
  *       401:
  *         description: Not authenticated
  */
-router.post("/:id/pending/:trackId/retry", async (req, res) => {
+router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
     try {
         const userId = req.user!.id;
         const { id: playlistId, trackId: pendingTrackId } = req.params;

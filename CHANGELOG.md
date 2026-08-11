@@ -620,6 +620,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Retry endpoints for Soulseek-backed downloads (playlist pending-track retry
+  and download-job retry) are now admin-only, closing the authorization bypass
+  around the #216 direct-download admin boundary.
 - YouTube Music browse home, mood-playlists, and mixes 4xx responses no longer
   echo raw sidecar error details to clients; they return static messages while
   retaining status and detail in server logs. The route-error leak ratchet now

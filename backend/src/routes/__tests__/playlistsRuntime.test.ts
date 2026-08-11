@@ -1,5 +1,11 @@
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: any, _res: any, next: () => void) => next(),
+    requireAdmin: (req: any, res: any, next: () => void) => {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
 
 const childLogger = {
@@ -127,8 +133,12 @@ jest.mock("../../utils/playlistLogger", () => ({
 
 import { z } from "zod";
 import router from "../playlists";
+import { requireAdmin } from "../../middleware/auth";
 
-function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
+type HttpMethod = "get" | "post" | "put" | "delete";
+const MAX_ROUTE_HANDLERS = 4;
+
+function getRouteLayer(path: string, method: HttpMethod) {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -136,7 +146,37 @@ function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
     if (!layer) {
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     }
+    return layer;
+}
+
+function getHandler(path: string, method: HttpMethod) {
+    const layer = getRouteLayer(path, method);
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+async function invokeRouteStack(
+    path: string,
+    method: HttpMethod,
+    req: any,
+    res: any,
+) {
+    const { stack } = getRouteLayer(path, method).route;
+    if (stack.length > MAX_ROUTE_HANDLERS) {
+        throw new Error(`Too many route handlers: ${stack.length}`);
+    }
+    for (let index = 0; index < MAX_ROUTE_HANDLERS; index += 1) {
+        const entry = stack[index];
+        if (!entry) {
+            return;
+        }
+        let nextCalled = false;
+        await entry.handle(req, res, () => {
+            nextCalled = true;
+        });
+        if (!nextCalled) {
+            return;
+        }
+    }
 }
 
 function createRes() {
@@ -294,6 +334,81 @@ describe("playlists route runtime", () => {
             soulseekPassword: null,
         });
         scanQueue.add.mockResolvedValue({ id: "scan-1" });
+    });
+
+    it("requires admin authorization for pending-track retries", () => {
+        const middlewares = getRouteLayer(
+            "/:id/pending/:trackId/retry",
+            "post",
+        ).route.stack.map((entry: { handle: unknown }) => entry.handle);
+
+        expect(middlewares).toContain(requireAdmin);
+    });
+
+    it("rejects non-admin pending-track retries before downloads or writes", async () => {
+        const req = {
+            user: { id: "u1", role: "user" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
+        const res = createRes();
+
+        await invokeRouteStack("/:id/pending/:trackId/retry", "post", req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(soulseekService.downloadBestMatch).not.toHaveBeenCalled();
+        expect(prisma.hiddenPlaylist.upsert).not.toHaveBeenCalled();
+        expect(prisma.hiddenPlaylist.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.playlist.create).not.toHaveBeenCalled();
+        expect(prisma.playlist.update).not.toHaveBeenCalled();
+        expect(prisma.playlist.delete).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.create).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.delete).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+        expect(prisma.playlistPendingTrack.update).not.toHaveBeenCalled();
+        expect(prisma.playlistPendingTrack.delete).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.create).not.toHaveBeenCalled();
+        expect(prisma.downloadJob.update).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("allows admin pending-track retries through the route stack", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce({
+            id: "pt-1",
+            spotifyArtist: "Artist",
+            spotifyTitle: "Title",
+            spotifyAlbum: "Album",
+            albumMbid: null,
+            artistMbid: null,
+        });
+        getSystemSettings.mockResolvedValueOnce({
+            musicPath: "/music",
+            soulseekUsername: "user",
+            soulseekPassword: "pass",
+        });
+        const req = {
+            user: { id: "u1", role: "admin" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
+        const res = createRes();
+
+        await invokeRouteStack("/:id/pending/:trackId/retry", "post", req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            success: false,
+            message: "Track not found on Soulseek",
+            error: "No matching files found",
+        });
+        expect(soulseekService.searchTrack).toHaveBeenCalledWith(
+            "Artist",
+            "Title",
+        );
     });
 
     it("rejects unauthenticated listing", async () => {
