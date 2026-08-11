@@ -1178,34 +1178,50 @@ describe("library cover-art proxy compatibility", () => {
         );
     });
 
-    it("returns 404 when audiobook query-url fetch fails", async () => {
-        const cancel = jest.fn().mockResolvedValue(undefined);
-        const fetchMock = jest.fn().mockResolvedValue({
-            ok: false,
-            status: 404,
-            statusText: "Not Found",
-            body: { cancel },
-            headers: { get: jest.fn().mockReturnValue(null) },
-        });
-        (global as any).fetch = fetchMock;
-        mockGetSystemSettings.mockResolvedValueOnce({
-            audiobookshelfUrl: "https://audiobooks.example",
-            audiobookshelfApiKey: "abs-key",
-        });
-
-        const req = {
+    it.each([
+        {
+            source: "query URL",
             query: { url: "audiobook__items/missing/cover" },
             params: {},
-            headers: {},
-        } as any;
-        const res = createRes();
+        },
+        {
+            source: "ID parameter",
+            query: {},
+            params: { id: "audiobook__items/missing/cover" },
+        },
+    ])(
+        "cancels the upstream body when an audiobook $source fetch fails",
+        async ({ query, params }) => {
+            const cancel = jest.fn().mockResolvedValue(undefined);
+            const fetchMock = jest.fn().mockResolvedValue({
+                ok: false,
+                status: 404,
+                statusText: "Not Found",
+                body: { cancel },
+                headers: { get: jest.fn().mockReturnValue(null) },
+            });
+            (global as any).fetch = fetchMock;
+            mockGetSystemSettings.mockResolvedValueOnce({
+                audiobookshelfUrl: "https://audiobooks.example",
+                audiobookshelfApiKey: "abs-key",
+            });
 
-        await coverArtHandler(req, res);
+            const req = {
+                query,
+                params,
+                headers: {},
+            } as any;
+            const res = createRes();
 
-        expect(cancel).toHaveBeenCalledTimes(1);
-        expect(res.statusCode).toBe(404);
-        expect(res.body).toEqual({ error: "Audiobook cover art not found" });
-    });
+            await coverArtHandler(req, res);
+
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({
+                error: "Audiobook cover art not found",
+            });
+        },
+    );
 
     it("serves native query and id cover files with CORS headers", async () => {
         const { config } = jest.requireMock("../../config") as {
