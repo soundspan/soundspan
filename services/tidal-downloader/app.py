@@ -21,6 +21,7 @@ import threading
 import time
 from base64 import b64decode
 from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 from xml.etree.ElementTree import fromstring as xml_fromstring
@@ -83,10 +84,35 @@ class _ThrottlePoolFullWarning(logging.Filter):
 
 logging.getLogger("urllib3.connectionpool").addFilter(_ThrottlePoolFullWarning())
 
+
+async def _run_stream_cache_cleanup() -> None:
+    """Remove expired stream manifests at a fixed interval until shutdown."""
+    # A service-lifetime loop is intentionally shutdown-bounded by _app_lifespan.
+    while True:
+        await asyncio.sleep(_STREAM_CACHE_CLEANUP_INTERVAL_SECONDS)
+        _clean_stream_cache()
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    """Own and stop the stream-cache maintenance task with the application."""
+    cleanup_task = asyncio.create_task(
+        _run_stream_cache_cleanup(),
+        name="tidal-stream-cache-cleanup",
+    )
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+
+
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(
     title="soundspan TIDAL Downloader & Streamer",
     version="2.0.0",
+    lifespan=_app_lifespan,
     dependencies=[Depends(require_internal_secret)],
     # The docs/openapi routes are registered via add_route(), which app-level
     # dependencies do NOT cover — left on they'd disclose the full API schema
@@ -111,6 +137,8 @@ _user_auth_state_lock = threading.Lock()
 _stream_cache: dict[tuple[str, int, str], dict] = {}
 _stream_cache_lock = threading.Lock()
 STREAM_CACHE_TTL = 600  # 10 minutes
+_STREAM_CACHE_MAX_ENTRIES = 1000
+_STREAM_CACHE_CLEANUP_INTERVAL_SECONDS = 60
 STREAM_QUALITY_OPTIONS = {"LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"}
 
 # ── tidalapi ↔ tiddl quality mapping ──────────────────────────────
@@ -345,6 +373,46 @@ def _sanitize_path_component(name: str) -> str:
     return name.strip(". ")
 
 
+def _sanitize_download_relative_path(rendered_path: str) -> Path:
+    """Validate and sanitize every rendered download-path component."""
+    sanitized_parts = []
+    for component in rendered_path.split("/"):
+        sanitized = _sanitize_path_component(component)
+        if not sanitized or sanitized in {".", ".."} or Path(sanitized).is_absolute():
+            raise ValueError("Invalid output template path component")
+        sanitized_parts.append(sanitized)
+    return Path(*sanitized_parts)
+
+
+def _require_contained_download_path(path: Path, destination_root: Path) -> Path:
+    """Resolve a download path and reject targets outside the destination root."""
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(destination_root)
+    except ValueError:
+        raise ValueError("Download path resolves outside MUSIC_PATH") from None
+    return resolved_path
+
+
+def _build_download_file_path(
+    relative_stem: Path,
+    file_extension: str,
+    dest_base: Path,
+) -> tuple[Path, Path, Path]:
+    """Build contained final and temporary paths from a rendered template."""
+    relative_file = relative_stem.parent / f"{relative_stem.name}{file_extension}"
+    destination_root = dest_base.resolve()
+    file_path = _require_contained_download_path(
+        destination_root / relative_file,
+        destination_root,
+    )
+    tmp_path = _require_contained_download_path(
+        file_path.with_suffix(file_path.suffix + ".tmp"),
+        destination_root,
+    )
+    return relative_file, file_path, tmp_path
+
+
 def _is_playlist_not_found_error(error: Exception) -> bool:
     """Return True when an upstream exception clearly indicates missing playlist."""
     if isinstance(error, HTTPException):
@@ -391,14 +459,17 @@ def _download_track_sync(
         album=album,
         with_asterisk_ext=False,
     )
-    # Sanitize each path component
-    parts = relative_path.split("/")
-    parts = [_sanitize_path_component(p) for p in parts if p]
-    relative_path = "/".join(parts)
+    relative_stem = _sanitize_download_relative_path(relative_path)
 
     # 3. Get stream data
     stream = api.get_track_stream(track_id=track_id, quality=quality)
     urls, file_extension = parse_track_stream(stream)
+
+    relative_file, file_path, tmp_path = _build_download_file_path(
+        relative_stem,
+        file_extension,
+        dest_base,
+    )
 
     # Download raw bytes
     from tiddl.core.utils.download import download as download_bytes
@@ -406,11 +477,9 @@ def _download_track_sync(
     stream_data = download_bytes(urls)
 
     # 4. Write to disk
-    file_path = dest_base / f"{relative_path}{file_extension}"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write to temp file first, then move (atomic-ish)
-    tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
     tmp_path.write_bytes(stream_data)
 
     # 5. If FLAC, ffmpeg extraction may be needed
@@ -450,7 +519,7 @@ def _download_track_sync(
         "album": album.title,
         "quality": stream.audioQuality,
         "file_path": str(file_path),
-        "relative_path": f"{relative_path}{file_extension}",
+        "relative_path": relative_file.as_posix(),
         "file_size": file_path.stat().st_size,
     }
 
@@ -731,9 +800,14 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
     """
     normalized_quality = _normalize_stream_quality(quality)
     cache_key = (user_id, track_id, normalized_quality)
+    now = time.time()
     with _stream_cache_lock:
+        _remove_expired_stream_cache_entries(now)
         cached = _stream_cache.get(cache_key)
-    if cached and time.time() < cached.get("expires_at", 0):
+        if cached is not None:
+            _stream_cache.pop(cache_key, None)
+            _stream_cache[cache_key] = cached
+    if cached is not None:
         return cached
 
     api = _get_user_api(user_id)
@@ -797,17 +871,26 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
     }
 
     with _stream_cache_lock:
+        _remove_expired_stream_cache_entries(time.time())
+        _stream_cache.pop(cache_key, None)
         _stream_cache[cache_key] = result
+        if len(_stream_cache) > _STREAM_CACHE_MAX_ENTRIES:
+            oldest_key = next(iter(_stream_cache))
+            _stream_cache.pop(oldest_key, None)
     return result
 
 
-def _clean_stream_cache():
+def _remove_expired_stream_cache_entries(now: float) -> None:
+    """Remove expired entries while the caller holds the stream-cache lock."""
+    expired = [key for key, value in _stream_cache.items() if now >= value.get("expires_at", 0)]
+    for key in expired:
+        _stream_cache.pop(key, None)
+
+
+def _clean_stream_cache() -> None:
     """Remove expired entries from the stream cache."""
-    now = time.time()
     with _stream_cache_lock:
-        expired = [k for k, v in _stream_cache.items() if now >= v.get("expires_at", 0)]
-        for k in expired:
-            _stream_cache.pop(k, None)
+        _remove_expired_stream_cache_entries(time.time())
 
 
 # ════════════════════════════════════════════════════════════════════
