@@ -318,6 +318,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vibe text search now runs its blocking Redis response wait on a dedicated
   connection, so a slow CLAP sidecar cannot stall the shared Redis client used
   by sessions and caches.
+- The CLAP analyzer's PostgreSQL connections now run in autocommit mode, so
+  pgvector type registration, liveness checks, and idle-queue polls no longer
+  leave sessions `idle in transaction` holding relation locks — previously such
+  sessions could block schema migrations needing an `AccessExclusiveLock` on
+  `Track`, queueing all later queries behind the migration and exhausting the
+  backend connection pools during upgrades. (#224)
 - The ytmusic-streamer playlist endpoint's public-browse and auth-fallback
   paths, and the debug search endpoint, now offload blocking ytmusicapi calls
   to the asyncio thread pool instead of stalling the event loop, and batch

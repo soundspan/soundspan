@@ -328,7 +328,8 @@ class DatabaseConnection:
 
         self.conn = psycopg2.connect(self.url, options="-c client_encoding=UTF8")
         self.conn.set_client_encoding("UTF8")
-        self.conn.autocommit = False
+        # Read/poll queries must not hold relation locks while idle and block migrations (#224).
+        self.conn.autocommit = True
 
         # Register pgvector type
         register_vector(self.conn)
