@@ -61,8 +61,8 @@ export async function blockingBlPop(
     timeoutSeconds: number,
 ): Promise<{ key: string; element: string } | null> {
     const dedicated = redisClient.duplicate();
-    await dedicated.connect();
     try {
+        await dedicated.connect();
         return await dedicated.blPop(key, timeoutSeconds);
     } finally {
         try {

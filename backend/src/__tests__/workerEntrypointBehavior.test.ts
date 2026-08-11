@@ -640,6 +640,34 @@ describe("worker entrypoint behavior", () => {
         );
     });
 
+    it("stops the health-check interval on graceful shutdown", async () => {
+        const processOnSpy = jest
+            .spyOn(process, "on")
+            .mockImplementation(() => process as any);
+        const { dependencyReadiness, logger } = setupWorkerRuntime();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../worker");
+        await waitForWorkerReadyLog(logger);
+
+        const sigtermHandler = processOnSpy.mock.calls.find(
+            ([event]) => event === "SIGTERM",
+        )?.[1] as (() => Promise<void>) | undefined;
+
+        expect(sigtermHandler).toBeDefined();
+        await sigtermHandler?.();
+        await flushWorkerTicks();
+        const probeCallCountAfterShutdown =
+            dependencyReadiness.probe.mock.calls.length;
+
+        await jest.advanceTimersByTimeAsync(HEALTH_INTERVAL_MS * 2);
+        await flushWorkerTicks();
+
+        expect(dependencyReadiness.probe).toHaveBeenCalledTimes(
+            probeCallCountAfterShutdown,
+        );
+    });
+
     it("closes health server and exits on SIGTERM graceful shutdown", async () => {
         const processOnSpy = jest
             .spyOn(process, "on")

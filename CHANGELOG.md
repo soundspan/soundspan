@@ -319,6 +319,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dedicated Redis BLPOP connection is now closed when its initial connect fails,
+  instead of leaking a reconnecting client.
+- Worker health-check interval is now captured, unref'd, and cleared during
+  graceful shutdown.
 - Soulseek forced disconnects now destroy the underlying slsk-client, closing
   its server, listen, and peer sockets, and remove the attached error listener
   before dropping the reference. Previously each search-failure or empty-search

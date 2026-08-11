@@ -38,6 +38,7 @@ let workersInitialized = false;
 let isStartupComplete = false;
 let isDraining = false;
 let healthServer: HttpServer | null = null;
+let healthCheckInterval: NodeJS.Timeout | null = null;
 const dependencyReadiness = createDependencyReadinessTracker("worker");
 
 const DEFAULT_WORKER_HEALTH_PORT = 3010;
@@ -254,6 +255,11 @@ async function gracefulShutdown(signal: string) {
     log.debug(`\nReceived ${signal}. Starting graceful worker shutdown...`);
 
     try {
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
+
         if (workersInitialized) {
             const { shutdownWorkers } = await import("./workers");
             await shutdownWorkers();
@@ -296,7 +302,7 @@ process.on("uncaughtException", (error) => {
 });
 
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;
-setInterval(async () => {
+healthCheckInterval = setInterval(async () => {
     try {
         const dependencySnapshot = await dependencyReadiness.probe(true);
         if (!dependencySnapshot.overallHealthy) {
@@ -325,6 +331,7 @@ setInterval(async () => {
         });
     }
 }, HEALTH_CHECK_INTERVAL);
+healthCheckInterval.unref();
 
 startHealthServer();
 

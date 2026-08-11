@@ -215,6 +215,17 @@ describe("redisClient", () => {
         expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
     });
 
+    it("closes the dedicated connection when connect() rejects", async () => {
+        const error = new Error("connect failed");
+        dedicatedClient.connect.mockRejectedValue(error);
+        const { blockingBlPop } = await import("../redis");
+
+        await expect(blockingBlPop("k", 30)).rejects.toBe(error);
+
+        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.blPop).not.toHaveBeenCalled();
+    });
+
     it("swallows close failures after a successful BLPOP", async () => {
         const value = { key: "k", element: "payload" };
         dedicatedClient.blPop.mockResolvedValue(value);
