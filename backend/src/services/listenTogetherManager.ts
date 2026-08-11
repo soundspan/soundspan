@@ -82,6 +82,8 @@ export interface GroupState {
     readyTimeout: ReturnType<typeof setTimeout> | null;
     /** Absolute ready-gate deadline (`Date.now()` ms), if waiting. */
     readyDeadlineMs: number | null;
+    /** Timer handle for the current track's boundary watchdog. */
+    boundaryTimeout: ReturnType<typeof setTimeout> | null;
     lastActivity: number; // Date.now()
     createdAt: Date;
     /** True when in-memory state has diverged from DB and needs persisting. */
@@ -99,6 +101,8 @@ export interface GroupSnapshot {
     hostUserId: string;
     syncState: GroupSyncState;
     readyDeadlineMs?: number | null;
+    /** Ready votes are optional when reading snapshots written by older versions. */
+    readyUserIds?: string[];
     playback: {
         queue: SyncQueueItem[];
         currentIndex: number;
@@ -184,11 +188,30 @@ function truncateQueueItemsToAvailableCapacity(
     return remainingCapacity > 0 ? items.slice(0, remainingCapacity) : [];
 }
 
-/** Compute the "live" position in ms, accounting for elapsed time. */
-function computePosition(pb: GroupPlayback): number {
+function currentTrackDurationMs(pb: GroupPlayback): number | null {
+    const durationSeconds = pb.queue[pb.currentIndex]?.duration;
+    if (
+        typeof durationSeconds !== "number" ||
+        !Number.isFinite(durationSeconds) ||
+        durationSeconds < 0
+    ) {
+        return null;
+    }
+    const durationMs = durationSeconds * 1000;
+    return Number.isFinite(durationMs) ? durationMs : null;
+}
+
+function computeUnclampedPosition(pb: GroupPlayback): number {
     if (!pb.isPlaying) return pb.positionMs;
     const elapsed = Date.now() - pb.lastPositionUpdate;
     return pb.positionMs + Math.max(elapsed, 0);
+}
+
+/** Compute the "live" position in ms without running past the current track. */
+function computePosition(pb: GroupPlayback): number {
+    const positionMs = Math.max(0, computeUnclampedPosition(pb));
+    const durationMs = currentTrackDurationMs(pb);
+    return durationMs === null ? positionMs : clamp(positionMs, 0, durationMs);
 }
 
 function currentTrackId(pb: GroupPlayback): string | null {
@@ -222,6 +245,9 @@ export const MAX_QUEUE_SIZE = 500;
 
 /** Max time to wait for all members to report ready (ms). */
 const READY_GATE_TIMEOUT_MS = 8_000;
+
+/** Grace after a track boundary before the server repairs a stalled host. */
+const BOUNDARY_WATCHDOG_GRACE_MS = 5_000;
 
 /** How long before a member with no sockets is considered stale (ms). */
 const STALE_MEMBER_MS = 60_000;
@@ -260,6 +286,10 @@ export interface ManagerCallbacks {
         },
     ): void;
     onGroupEnded(groupId: string, reason: string): void;
+    onBoundaryWatchdog?(
+        groupId: string,
+        data: { currentIndex: number; stateVersion: number },
+    ): void;
 }
 
 class GroupManager {
@@ -342,6 +372,7 @@ class GroupManager {
             readyUserIds: new Set(),
             readyTimeout: null,
             readyDeadlineMs: null,
+            boundaryTimeout: null,
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
@@ -417,12 +448,14 @@ class GroupManager {
             readyUserIds: new Set(),
             readyTimeout: null,
             readyDeadlineMs: null,
+            boundaryTimeout: null,
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
         };
 
         this.groups.set(id, group);
+        this.syncBoundaryWatchdog(group);
         log.info(
             `Created group ${id} "${opts.name}" hosted by ${opts.hostUsername}`,
         );
@@ -440,7 +473,10 @@ class GroupManager {
     /** Remove group from memory (after DB cleanup). */
     remove(groupId: string): void {
         const group = this.groups.get(groupId);
-        if (group) this.clearReadyGateTimer(group);
+        if (group) {
+            this.clearReadyGateTimer(group);
+            this.clearBoundaryWatchdogTimer(group);
+        }
         this.groups.delete(groupId);
         log.debug(`Removed group ${groupId} from memory`);
     }
@@ -649,6 +685,7 @@ class GroupManager {
         group.syncState = "playing";
         group.lastActivity = Date.now();
         group.dirty = true;
+        this.syncBoundaryWatchdog(group);
 
         const delta = this.playbackDelta(group);
         this.callbacks?.onPlaybackDelta(groupId, delta);
@@ -662,6 +699,7 @@ class GroupManager {
         if (waitingDelta) return waitingDelta;
 
         const pb = group.playback;
+        this.clearBoundaryWatchdogTimer(group);
         // Freeze position
         pb.positionMs = computePosition(pb);
         pb.isPlaying = false;
@@ -691,6 +729,7 @@ class GroupManager {
         pb.stateVersion++;
         group.lastActivity = Date.now();
         group.dirty = true;
+        this.syncBoundaryWatchdog(group);
 
         const delta = this.playbackDelta(group);
         this.callbacks?.onPlaybackDelta(groupId, delta);
@@ -711,6 +750,7 @@ class GroupManager {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
         this.ensureNoPendingTrackChange(group);
+        this.clearBoundaryWatchdogTimer(group);
 
         const pb = group.playback;
         if (pb.queue.length === 0)
@@ -739,6 +779,7 @@ class GroupManager {
             } else {
                 group.syncState = "paused";
             }
+            this.syncBoundaryWatchdog(group);
             this.broadcastState(group);
             return { snapshot: this.snapshot(group), waiting: false };
         }
@@ -794,6 +835,8 @@ class GroupManager {
         if (group.syncState !== "waiting") return false;
 
         group.readyUserIds.add(userId);
+        const member = group.members.get(userId);
+        if (member) member.isReady = true;
         return this.checkReadyGate(group);
     }
 
@@ -918,6 +961,7 @@ class GroupManager {
         pb.stateVersion++;
         group.lastActivity = Date.now();
         group.dirty = true;
+        this.syncBoundaryWatchdog(group);
 
         const delta = this.queueDelta(group);
         this.callbacks?.onQueueDelta(groupId, delta);
@@ -964,6 +1008,7 @@ class GroupManager {
             syncState: group.syncState,
             readyDeadlineMs:
                 group.syncState === "waiting" ? group.readyDeadlineMs : null,
+            readyUserIds: Array.from(group.readyUserIds),
             playback: {
                 queue: pb.queue,
                 currentIndex: pb.currentIndex,
@@ -1005,6 +1050,7 @@ class GroupManager {
         if (existing) {
             // Timers close over old group objects; drop and re-arm on replacement.
             this.clearReadyGateTimer(existing);
+            this.clearBoundaryWatchdogTimer(existing);
         }
 
         const rawQueue = Array.isArray(snapshot.playback?.queue)
@@ -1041,6 +1087,21 @@ class GroupManager {
             incomingStateVersion,
             incomingServerTime,
         );
+        const readyUserIds = new Set<string>(
+            Array.isArray(snapshot.readyUserIds)
+                ? snapshot.readyUserIds.filter(
+                      (userId): userId is string => typeof userId === "string",
+                  )
+                : [],
+        );
+        if (
+            existing &&
+            incomingStateVersion <= existing.playback.stateVersion
+        ) {
+            for (const userId of existing.readyUserIds) {
+                readyUserIds.add(userId);
+            }
+        }
 
         const members = new Map<string, GroupMember>();
         for (const member of snapshot.members ?? []) {
@@ -1052,7 +1113,7 @@ class GroupManager {
                 joinedAt: new Date(member.joinedAt),
                 // Preserve local socket presence for users connected to this pod.
                 socketIds: existingMember?.socketIds ?? new Set<string>(),
-                isReady: false,
+                isReady: readyUserIds.has(member.userId),
                 unavailableIndices: new Set(),
                 lastSeen: now,
             });
@@ -1103,9 +1164,10 @@ class GroupManager {
             syncState,
             playback,
             members,
-            readyUserIds: new Set<string>(),
+            readyUserIds,
             readyTimeout: null,
             readyDeadlineMs,
+            boundaryTimeout: null,
             lastActivity: now,
             createdAt: existing?.createdAt ?? new Date(),
             dirty: false,
@@ -1117,7 +1179,46 @@ class GroupManager {
             this.rearmReadyGateFromDeadline(group, readyDeadlineMs ?? now);
         } else {
             this.clearReadyGateState(group);
+            this.syncBoundaryWatchdog(group);
         }
+    }
+
+    /** Resolve a due boundary watchdog after the socket layer acquires its lock. */
+    handleBoundaryWatchdog(
+        groupId: string,
+        expectedIndex: number,
+        expectedStateVersion: number,
+    ): boolean {
+        const group = this.groups.get(groupId);
+        if (!group) return false;
+
+        const pb = group.playback;
+        if (
+            !pb.isPlaying ||
+            pb.currentIndex !== expectedIndex ||
+            pb.stateVersion !== expectedStateVersion
+        ) {
+            return false;
+        }
+
+        const durationMs = currentTrackDurationMs(pb);
+        if (durationMs === null) return false;
+        if (
+            computeUnclampedPosition(pb) <
+            durationMs + BOUNDARY_WATCHDOG_GRACE_MS
+        ) {
+            this.syncBoundaryWatchdog(group);
+            return false;
+        }
+
+        this.clearBoundaryWatchdogTimer(group);
+        if (pb.currentIndex + 1 < pb.queue.length) {
+            this.setTrack(groupId, group.hostUserId, pb.currentIndex + 1, true);
+            return true;
+        }
+
+        this.pauseAtBoundary(group, durationMs);
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -1189,6 +1290,7 @@ class GroupManager {
             const currentIndex = group.playback.currentIndex;
             if (member?.unavailableIndices?.has(currentIndex)) {
                 group.readyUserIds.add(uid);
+                member.isReady = true;
                 continue;
             }
             if (!group.readyUserIds.has(uid)) return false;
@@ -1213,6 +1315,60 @@ class GroupManager {
     private clearReadyGateState(group: GroupState): void {
         this.clearReadyGateTimer(group);
         group.readyUserIds.clear();
+        for (const member of group.members.values()) {
+            member.isReady = false;
+        }
+    }
+
+    private clearBoundaryWatchdogTimer(group: GroupState): void {
+        if (group.boundaryTimeout) {
+            clearTimeout(group.boundaryTimeout);
+        }
+        group.boundaryTimeout = null;
+    }
+
+    private pauseAtBoundary(group: GroupState, durationMs: number): void {
+        const now = Date.now();
+        group.playback.positionMs = durationMs;
+        group.playback.isPlaying = false;
+        group.playback.lastPositionUpdate = now;
+        group.playback.stateVersion++;
+        group.syncState = "paused";
+        group.lastActivity = now;
+        group.dirty = true;
+        this.broadcastState(group);
+    }
+
+    private syncBoundaryWatchdog(group: GroupState): void {
+        this.clearBoundaryWatchdogTimer(group);
+        if (!group.playback.isPlaying) return;
+
+        const durationMs = currentTrackDurationMs(group.playback);
+        if (durationMs === null) return;
+        const waitMs = Math.max(
+            0,
+            durationMs +
+                BOUNDARY_WATCHDOG_GRACE_MS -
+                computeUnclampedPosition(group.playback),
+        );
+        const currentIndex = group.playback.currentIndex;
+        const stateVersion = group.playback.stateVersion;
+        const boundaryTimeout = setTimeout(() => {
+            group.boundaryTimeout = null;
+            if (this.groups.get(group.id) !== group) return;
+            if (this.callbacks?.onBoundaryWatchdog) {
+                this.callbacks.onBoundaryWatchdog(group.id, {
+                    currentIndex,
+                    stateVersion,
+                });
+                return;
+            }
+            this.handleBoundaryWatchdog(group.id, currentIndex, stateVersion);
+        }, waitMs);
+        group.boundaryTimeout = boundaryTimeout;
+        if (typeof boundaryTimeout.unref === "function") {
+            boundaryTimeout.unref();
+        }
     }
 
     private ensureNoPendingTrackChange(group: GroupState): void {
@@ -1252,8 +1408,12 @@ class GroupManager {
     }
 
     private enterReadyGate(group: GroupState): void {
+        this.clearBoundaryWatchdogTimer(group);
         group.syncState = "waiting";
         group.readyUserIds.clear();
+        for (const member of group.members.values()) {
+            member.isReady = false;
+        }
         this.armReadyGateTimer(group, Date.now() + READY_GATE_TIMEOUT_MS);
     }
 
@@ -1278,6 +1438,7 @@ class GroupManager {
         pb.stateVersion++;
         group.syncState = "playing";
         group.dirty = true;
+        this.syncBoundaryWatchdog(group);
 
         this.callbacks?.onPlayAt(group.id, {
             positionMs: 0,
@@ -1291,6 +1452,7 @@ class GroupManager {
 
     private endGroupInternal(group: GroupState, reason: string): void {
         this.clearReadyGateState(group);
+        this.clearBoundaryWatchdogTimer(group);
 
         group.playback.isPlaying = false;
         group.syncState = "idle";

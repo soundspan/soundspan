@@ -1,3 +1,9 @@
+import {
+    groupManager as runtimeGroupManager,
+    type ManagerCallbacks as RuntimeManagerCallbacks,
+    type SyncQueueItem as RuntimeSyncQueueItem,
+} from "../listenTogetherManager";
+
 describe("listenTogether service", () => {
     const originalEnv = process.env;
 
@@ -1326,6 +1332,139 @@ describe("listenTogether service", () => {
                 queue: [],
                 currentTimeMs: 0,
                 isPlaying: false,
+            }),
+        );
+    });
+});
+
+describe("listenTogether playback boundary behavior", () => {
+    const track = (id: string, duration: number): RuntimeSyncQueueItem => ({
+        id,
+        title: `Track ${id}`,
+        duration,
+        artist: { id: `artist-${id}`, name: `Artist ${id}` },
+        album: { id: `album-${id}`, title: `Album ${id}`, coverArt: null },
+    });
+
+    const createCallbacks = (): jest.Mocked<RuntimeManagerCallbacks> => ({
+        onGroupState: jest.fn(),
+        onPlaybackDelta: jest.fn(),
+        onQueueDelta: jest.fn(),
+        onWaiting: jest.fn(),
+        onPlayAt: jest.fn(),
+        onMemberJoined: jest.fn(),
+        onMemberLeft: jest.fn(),
+        onGroupEnded: jest.fn(),
+    });
+
+    function resetRuntimeManager(): void {
+        for (const groupId of runtimeGroupManager.allGroupIds()) {
+            runtimeGroupManager.remove(groupId);
+        }
+    }
+
+    function createPlayingGroup(
+        groupId: string,
+        queue: RuntimeSyncQueueItem[],
+        callbacks: RuntimeManagerCallbacks,
+    ): void {
+        runtimeGroupManager.setCallbacks(callbacks);
+        runtimeGroupManager.create(groupId, {
+            name: "Boundary Group",
+            joinCode: "BOUND1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue,
+            isPlaying: true,
+            createdAt: new Date(),
+        });
+        runtimeGroupManager.addMember(groupId, "guest", "Guest");
+        runtimeGroupManager.addSocket(groupId, "host", "host-socket");
+        runtimeGroupManager.addSocket(groupId, "guest", "guest-socket");
+    }
+
+    beforeEach(() => {
+        resetRuntimeManager();
+        jest.useFakeTimers({ now: new Date("2026-08-11T00:00:00.000Z") });
+    });
+
+    afterEach(() => {
+        resetRuntimeManager();
+        jest.useRealTimers();
+    });
+
+    it("clamps emitted positions and enters the next track ready gate after the boundary grace", async () => {
+        const callbacks = createCallbacks();
+        createPlayingGroup(
+            "g-boundary-next",
+            [track("short", 3), track("next", 30)],
+            callbacks,
+        );
+
+        await jest.advanceTimersByTimeAsync(4_000);
+        runtimeGroupManager.addMember("g-boundary-next", "host", "Host");
+        const emittedDuringGrace =
+            callbacks.onGroupState.mock.calls.at(-1)?.[1];
+        expect(emittedDuringGrace?.playback.positionMs).toBe(3_000);
+
+        await jest.advanceTimersByTimeAsync(4_001);
+
+        const afterWatchdog =
+            runtimeGroupManager.snapshotById("g-boundary-next");
+        expect(afterWatchdog?.playback.currentIndex).toBe(1);
+        expect(afterWatchdog?.syncState).toBe("waiting");
+        expect(callbacks.onWaiting).toHaveBeenCalledTimes(1);
+        expect(
+            callbacks.onGroupState.mock.calls.every(([, snapshot]) => {
+                const item =
+                    snapshot.playback.queue[snapshot.playback.currentIndex];
+                return (
+                    !item ||
+                    snapshot.playback.positionMs <= item.duration * 1_000
+                );
+            }),
+        ).toBe(true);
+    });
+
+    it("pauses and broadcasts the clamped duration when there is no next item", async () => {
+        const callbacks = createCallbacks();
+        createPlayingGroup("g-boundary-end", [track("only", 3)], callbacks);
+
+        await jest.advanceTimersByTimeAsync(8_001);
+
+        const snapshot = runtimeGroupManager.snapshotById("g-boundary-end");
+        expect(snapshot?.syncState).toBe("paused");
+        expect(snapshot?.playback.isPlaying).toBe(false);
+        expect(snapshot?.playback.positionMs).toBe(3_000);
+        expect(callbacks.onGroupState).toHaveBeenLastCalledWith(
+            "g-boundary-end",
+            expect.objectContaining({ syncState: "paused" }),
+        );
+    });
+
+    it("cancels the pending boundary action when the host advances during grace", async () => {
+        const boundaryAction = jest.fn();
+        const callbacks = {
+            ...createCallbacks(),
+            onBoundaryWatchdog: boundaryAction,
+        } as jest.Mocked<RuntimeManagerCallbacks>;
+        createPlayingGroup(
+            "g-boundary-cancel",
+            [track("short", 3), track("next", 30)],
+            callbacks,
+        );
+
+        await jest.advanceTimersByTimeAsync(4_000);
+        runtimeGroupManager.next("g-boundary-cancel", "host");
+        await jest.advanceTimersByTimeAsync(4_001);
+
+        expect(boundaryAction).not.toHaveBeenCalled();
+        expect(runtimeGroupManager.snapshotById("g-boundary-cancel")).toEqual(
+            expect.objectContaining({
+                syncState: "waiting",
+                playback: expect.objectContaining({ currentIndex: 1 }),
             }),
         );
     });

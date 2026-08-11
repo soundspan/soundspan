@@ -40,6 +40,8 @@ import {
 import { resolveQueueForUser } from "./listenTogetherResolution";
 import { trackMappingService } from "./trackMappingService";
 
+const log = logger.child("ListenTogetherSocket");
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -727,6 +729,21 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
             ns.to(groupId).emit("group:ended", { reason });
             void queueEndedSnapshotSync(groupId);
         },
+        onBoundaryWatchdog(groupId: string, data) {
+            void withGroupMutationLock(
+                groupId,
+                "boundary-watchdog",
+                async () => {
+                    groupManager.handleBoundaryWatchdog(
+                        groupId,
+                        data.currentIndex,
+                        data.stateVersion,
+                    );
+                },
+            ).catch((err) => {
+                log.error(`Boundary watchdog failed for group ${groupId}`, err);
+            });
+        },
     };
 
     groupManager.setCallbacks(callbacks);
@@ -1154,7 +1171,13 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                         return;
                     }
                     await withGroupMutationLock(groupId, "ready", async () => {
+                        const wasWaiting =
+                            groupManager.snapshotById(groupId)?.syncState ===
+                            "waiting";
                         groupManager.reportReady(groupId, userId);
+                        if (wasWaiting) {
+                            void queuePersistAndPublishSnapshot(groupId);
+                        }
                     });
                     sendAck(ack, { ok: true });
                 } catch (err) {

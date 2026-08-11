@@ -23,6 +23,7 @@ describe("listen together socket runtime behavior", () => {
             warn: jest.fn(),
             error: jest.fn(),
         };
+        logger.child = jest.fn(() => logger);
         const jwtVerify: any = jest.fn(() => ({
             userId: "user-1",
             username: "User One",
@@ -111,6 +112,7 @@ describe("listen together socket runtime behavior", () => {
                 stateVersion: 1,
             })),
             reportReady: jest.fn(),
+            handleBoundaryWatchdog: jest.fn(),
         };
         const joinGroupById = jest.fn(async () => ({
             groupId: "group-1",
@@ -468,11 +470,22 @@ describe("listen together socket runtime behavior", () => {
             truncated: true,
         });
 
+        const readySnapshot = {
+            id: "group-1",
+            syncState: "waiting",
+            playback: { queue: [], stateVersion: 3 },
+            members: [],
+        };
+        mocks.groupManager.snapshotById.mockReturnValue(readySnapshot);
         const readyAck = jest.fn();
         await eventHandlers["ready"](readyAck);
         expect(mocks.groupManager.reportReady).toHaveBeenCalledWith(
             "group-1",
             "user-1",
+        );
+        expect(mocks.listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
+            "group-1",
+            readySnapshot,
         );
         expect(readyAck).toHaveBeenCalledWith({ ok: true });
 
