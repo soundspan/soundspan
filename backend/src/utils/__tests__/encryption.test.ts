@@ -91,6 +91,26 @@ describe("encryption utils", () => {
         ).rejects.toThrow("insecure default value");
     });
 
+    it.each([
+        ["SETTINGS_ENCRYPTION_KEY", { settingsKey: "x".repeat(31) }],
+        ["ENCRYPTION_KEY", { fallbackKey: "y".repeat(31) }],
+    ])(
+        "throws on import when %s is shorter than 32 characters",
+        async (_, keys) => {
+            await expect(loadEncryptionModule(keys)).rejects.toThrow(
+                "at least 32 characters",
+            );
+        },
+    );
+
+    it("accepts an encryption key at the 32-character boundary", async () => {
+        const { encrypt, decrypt } = await loadEncryptionModule({
+            settingsKey: "k".repeat(32),
+        });
+
+        expect(decrypt(encrypt("boundary-value"))).toBe("boundary-value");
+    });
+
     it("uses ENCRYPTION_KEY as a fallback when SETTINGS_ENCRYPTION_KEY is not set", async () => {
         const { encrypt, decrypt } = await loadEncryptionModule({
             fallbackKey: VALID_KEY,

@@ -10,7 +10,15 @@ import {
     parseEnvFloat,
     parseEnvInt,
 } from "./utils/envParsers";
-import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
+import {
+    CRITICAL_SECRET_MIN_LENGTH,
+    getCriticalSecretFailure,
+    INSECURE_INTERNAL_API_SECRET,
+    INSECURE_SETTINGS_ENCRYPTION_KEY,
+    isSecretsDbOnlyEnabled,
+    resolveSettingsEncryptionKey,
+    type CriticalSecretFailure,
+} from "./config/secretsPolicy";
 
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
@@ -50,21 +58,66 @@ const isTraceTruthy = (value: string | undefined): boolean => {
     return normalized ? TRACE_TRUTHY_VALUES.has(normalized) : false;
 };
 
-// Validate critical environment variables on startup
-const envSchema = z.object({
-    DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-    REDIS_URL: z.string().min(1, "REDIS_URL is required"),
-    SESSION_SECRET: z
-        .string()
-        .min(32, "SESSION_SECRET must be at least 32 characters"),
-    JWT_SECRET: z
-        .string()
-        .min(32, "JWT_SECRET must be at least 32 characters")
-        .optional(),
-    PORT: z.string().optional(),
-    NODE_ENV: z.enum(["development", "production", "test"]).optional(),
-    MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
-});
+function criticalSecretMessage(
+    name: string,
+    failure: CriticalSecretFailure,
+): string {
+    if (failure === "missing") return `${name} is required`;
+    if (failure === "published-default") {
+        return `${name} must not use the published insecure default`;
+    }
+    return `${name} must be at least ${CRITICAL_SECRET_MIN_LENGTH} characters`;
+}
+
+function addCriticalSecretIssue(
+    context: z.RefinementCtx,
+    name: string,
+    value: string | undefined,
+    publishedDefault: string,
+): void {
+    const failure = getCriticalSecretFailure(value, publishedDefault);
+    if (!failure) return;
+    context.addIssue({
+        code: "custom",
+        path: [name],
+        message: criticalSecretMessage(name, failure),
+    });
+}
+
+// Validate critical environment variables on startup.
+const envSchema = z
+    .object({
+        DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+        REDIS_URL: z.string().min(1, "REDIS_URL is required"),
+        SESSION_SECRET: z
+            .string()
+            .min(32, "SESSION_SECRET must be at least 32 characters"),
+        JWT_SECRET: z
+            .string()
+            .min(32, "JWT_SECRET must be at least 32 characters")
+            .optional(),
+        SETTINGS_ENCRYPTION_KEY: z.string().optional(),
+        ENCRYPTION_KEY: z.string().optional(),
+        INTERNAL_API_SECRET: z.string().optional(),
+        PORT: z.string().optional(),
+        NODE_ENV: z.enum(["development", "production", "test"]).optional(),
+        MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
+    })
+    .superRefine((env, context) => {
+        const encryptionKey = resolveSettingsEncryptionKey(env);
+        addCriticalSecretIssue(
+            context,
+            encryptionKey.name,
+            encryptionKey.value,
+            INSECURE_SETTINGS_ENCRYPTION_KEY,
+        );
+        addCriticalSecretIssue(
+            context,
+            "INTERNAL_API_SECRET",
+            env.INTERNAL_API_SECRET,
+            INSECURE_INTERNAL_API_SECRET,
+        );
+    });
 
 try {
     envSchema.parse(process.env);
@@ -337,10 +390,9 @@ export const config = {
         url: process.env.YTMUSIC_STREAMER_URL || "http://127.0.0.1:8586",
     },
 
-    // Shared secret sent as the `x-internal-secret` header on backend→sidecar
-    // calls (F31). Optional, so booting without it never fails; when unset no
-    // header is sent and the FastAPI sidecars reject the call fail-closed (403).
-    internalApiSecret: process.env.INTERNAL_API_SECRET,
+    // Validated shared secret sent as the `x-internal-secret` header on
+    // backend→sidecar calls (F31).
+    internalApiSecret: process.env.INTERNAL_API_SECRET!,
 
     // When no webhook secret is configured in system settings, the Lidarr
     // webhook rejects requests (fail closed) unless this is true; see

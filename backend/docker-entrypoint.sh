@@ -20,6 +20,42 @@ if [ "$(id -u)" = "0" ]; then
   exit 1
 fi
 
+is_critical_secret_invalid() {
+  secret_value="$1"
+  insecure_default="$2"
+  [ -z "$secret_value" ] || [ "$secret_value" = "$insecure_default" ] || [ "${#secret_value}" -lt 32 ]
+}
+
+# Validate critical secrets before migrations or other external startup work.
+if is_critical_secret_invalid "${SESSION_SECRET:-}" "changeme-generate-secure-key"; then
+  cat >&2 <<'EOF'
+[ERROR] SESSION_SECRET is missing, uses the published default, or is shorter than 32 characters.
+SESSION_SECRET must be stable because it signs JWTs and is the API-key pepper fallback.
+An ephemeral value invalidates all sessions and API-key hashes on restart.
+Generate one with: openssl rand -base64 32
+EOF
+  exit 1
+fi
+
+if is_critical_secret_invalid "${SETTINGS_ENCRYPTION_KEY:-}" "default-encryption-key-change-me"; then
+  cat >&2 <<'EOF'
+[ERROR] SETTINGS_ENCRYPTION_KEY is missing, uses the published default, or is shorter than 32 characters.
+SETTINGS_ENCRYPTION_KEY encrypts API keys, passwords, and 2FA secrets and must be stable across restarts.
+Changing it makes existing encrypted data unreadable.
+Generate one with: openssl rand -base64 32
+EOF
+  exit 1
+fi
+
+if is_critical_secret_invalid "${INTERNAL_API_SECRET:-}" "soundspan-internal-secret-change-me"; then
+  cat >&2 <<'EOF'
+[ERROR] INTERNAL_API_SECRET is missing, uses the published default, or is shorter than 32 characters.
+INTERNAL_API_SECRET authenticates service-to-service requests and must match every backend sidecar.
+Generate one with: openssl rand -base64 32
+EOF
+  exit 1
+fi
+
 echo "[START] Starting soundspan Backend..."
 
 # Docker Compose health checks ensure database and Redis are ready
@@ -108,28 +144,6 @@ if [ "${REDIS_FLUSH_ON_STARTUP:-false}" = "true" ]; then
   " || echo "[REDIS] Cache clear skipped (Redis unavailable)"
 else
   echo "[REDIS] Skipping startup cache flush (REDIS_FLUSH_ON_STARTUP=false)"
-fi
-
-# Require a stable session secret.
-if [ -z "$SESSION_SECRET" ] || [ "$SESSION_SECRET" = "changeme-generate-secure-key" ] || [ "${#SESSION_SECRET}" -lt 32 ]; then
-  cat >&2 <<'EOF'
-[ERROR] SESSION_SECRET is missing, uses the published default, or is shorter than 32 characters.
-SESSION_SECRET must be stable because it signs JWTs and is the API-key pepper fallback.
-An ephemeral value invalidates all sessions and API-key hashes on restart.
-Generate one with: openssl rand -base64 32
-EOF
-  exit 1
-fi
-
-# Require a stable encryption key.
-if [ -z "$SETTINGS_ENCRYPTION_KEY" ] || [ "$SETTINGS_ENCRYPTION_KEY" = "default-encryption-key-change-me" ]; then
-  cat >&2 <<'EOF'
-[ERROR] SETTINGS_ENCRYPTION_KEY is missing or uses the published default.
-SETTINGS_ENCRYPTION_KEY encrypts API keys, passwords, and 2FA secrets and must be stable across restarts.
-Changing it makes existing encrypted data unreadable.
-Generate one with: openssl rand -base64 32
-EOF
-  exit 1
 fi
 
 echo "[START] soundspan Backend starting on port ${PORT:-3006}..."

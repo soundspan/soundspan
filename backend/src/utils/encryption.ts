@@ -1,4 +1,10 @@
 import crypto from "crypto";
+import {
+    CRITICAL_SECRET_MIN_LENGTH,
+    getCriticalSecretFailure,
+    INSECURE_SETTINGS_ENCRYPTION_KEY,
+    resolveSettingsEncryptionKey,
+} from "../config/secretsPolicy";
 import { isEnvFlagEnabled } from "./envParsers";
 import { logger } from "./logger";
 
@@ -13,18 +19,13 @@ const GCM_IV_BYTES = 12; // 96-bit nonce, the GCM standard
 const GCM_TAG_BYTES = 16; // 128-bit authentication tag (GCM default)
 const LEGACY_IV_BYTES = 16;
 
-// Insecure default that must not be used in production
-const INSECURE_DEFAULT = "default-encryption-key-change-me";
-
 /**
  * Get and validate the raw encryption key string from the environment.
- * Throws if not set or using the insecure default. Validated on module load to
- * fail fast.
+ * Throws if missing, weak, or using the insecure default. Validated on module
+ * load to fail fast.
  */
 function getRawEncryptionKey(): string {
-    // Support both SETTINGS_ENCRYPTION_KEY (primary) and ENCRYPTION_KEY (compatibility)
-    const key =
-        process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+    const { value: key } = resolveSettingsEncryptionKey(process.env);
 
     if (!key) {
         throw new Error(
@@ -34,10 +35,21 @@ function getRawEncryptionKey(): string {
         );
     }
 
-    if (key === INSECURE_DEFAULT) {
+    const failure = getCriticalSecretFailure(
+        key,
+        INSECURE_SETTINGS_ENCRYPTION_KEY,
+    );
+    if (failure === "published-default") {
         throw new Error(
             "CRITICAL: Encryption key is set to the insecure default value.\n" +
                 "You must set a unique SETTINGS_ENCRYPTION_KEY or ENCRYPTION_KEY.\n" +
+                "Generate a secure key with: openssl rand -base64 32",
+        );
+    }
+
+    if (failure === "too-short") {
+        throw new Error(
+            `CRITICAL: Encryption key must be at least ${CRITICAL_SECRET_MIN_LENGTH} characters.\n` +
                 "Generate a secure key with: openssl rand -base64 32",
         );
     }

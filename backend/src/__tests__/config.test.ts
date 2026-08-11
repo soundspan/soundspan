@@ -34,6 +34,8 @@ describe("config module", () => {
             DATABASE_URL: "postgresql://db/soundspan",
             REDIS_URL: "redis://127.0.0.1:6379",
             SESSION_SECRET: "12345678901234567890123456789012",
+            SETTINGS_ENCRYPTION_KEY: "23456789012345678901234567890123",
+            INTERNAL_API_SECRET: "34567890123456789012345678901234",
             MUSIC_PATH: "/music",
         };
     }
@@ -277,6 +279,123 @@ describe("config module", () => {
         const explicit = await loadConfigModule({ JWT_SECRET: jwtSecret });
 
         expect(explicit.config.jwtSecret).toBe(jwtSecret);
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "Environment variables validated",
+        );
+    });
+
+    it.each([
+        ["SETTINGS_ENCRYPTION_KEY", "x".repeat(31)],
+        ["INTERNAL_API_SECRET", "y".repeat(31)],
+    ])("rejects a weak %s at startup", async (name, value) => {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(loadConfigModule({ [name]: value })).rejects.toThrow(
+            "process.exit:1",
+        );
+        expect(
+            mockLoggerError.mock.calls.some(
+                (call) =>
+                    typeof call[0] === "string" &&
+                    call[0].includes(`${name} must be at least 32 characters`),
+            ),
+        ).toBe(true);
+        expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain(value);
+
+        exitSpy.mockRestore();
+    });
+
+    it("validates the legacy ENCRYPTION_KEY fallback with the same minimum", async () => {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(
+            loadConfigModule({
+                SETTINGS_ENCRYPTION_KEY: undefined,
+                ENCRYPTION_KEY: "z".repeat(31),
+            }),
+        ).rejects.toThrow("process.exit:1");
+        expect(
+            mockLoggerError.mock.calls.some(
+                (call) =>
+                    typeof call[0] === "string" &&
+                    call[0].includes(
+                        "ENCRYPTION_KEY must be at least 32 characters",
+                    ),
+            ),
+        ).toBe(true);
+
+        exitSpy.mockRestore();
+    });
+
+    it.each([
+        [
+            "SETTINGS_ENCRYPTION_KEY",
+            {
+                SETTINGS_ENCRYPTION_KEY: undefined,
+                ENCRYPTION_KEY: undefined,
+            },
+        ],
+        ["INTERNAL_API_SECRET", { INTERNAL_API_SECRET: undefined }],
+    ])("requires %s at startup", async (name, overrides) => {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(loadConfigModule(overrides)).rejects.toThrow(
+            "process.exit:1",
+        );
+        expect(
+            mockLoggerError.mock.calls.some(
+                (call) =>
+                    typeof call[0] === "string" &&
+                    call[0].includes(`${name} is required`),
+            ),
+        ).toBe(true);
+
+        exitSpy.mockRestore();
+    });
+
+    it.each([
+        ["SETTINGS_ENCRYPTION_KEY", "default-encryption-key-change-me"],
+        ["INTERNAL_API_SECRET", "soundspan-internal-secret-change-me"],
+    ])("rejects the published %s default at startup", async (name, value) => {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(loadConfigModule({ [name]: value })).rejects.toThrow(
+            "process.exit:1",
+        );
+        expect(
+            mockLoggerError.mock.calls.some(
+                (call) =>
+                    typeof call[0] === "string" &&
+                    call[0].includes(`${name} must not use the published`),
+            ),
+        ).toBe(true);
+
+        exitSpy.mockRestore();
+    });
+
+    it("accepts critical secrets at the 32-character boundary", async () => {
+        const { config } = await loadConfigModule({
+            SETTINGS_ENCRYPTION_KEY: "e".repeat(32),
+            INTERNAL_API_SECRET: "i".repeat(32),
+        });
+
+        expect(config.internalApiSecret).toBe("i".repeat(32));
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             "Environment variables validated",
         );
