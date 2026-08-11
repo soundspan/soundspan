@@ -920,9 +920,8 @@ describe("podcast download runtime behavior", () => {
         jest.useFakeTimers({ doNotFake: ["setImmediate"] });
         const mocks = setupPodcastDownloadMocks();
         const idleTimeoutMs = 120_000;
-        const streamControls: Array<
-            Record<string, (...args: any[]) => void>
-        > = [];
+        const streamControls: Array<Record<string, (...args: any[]) => void>> =
+            [];
         const dataStreams: Array<{ destroy: jest.Mock }> = [];
         const writeStreams = Array.from({ length: 3 }, () =>
             (mocks.fsModule.createWriteStream as jest.Mock)(),
@@ -937,11 +936,9 @@ describe("podcast download runtime behavior", () => {
         (mocks.axiosGet as jest.Mock).mockImplementation(async () => {
             const control: Record<string, (...args: any[]) => void> = {};
             const dataStream = {
-                on: jest.fn(
-                    (event: string, cb: (...args: any[]) => void) => {
-                        control[event] = cb;
-                    },
-                ),
+                on: jest.fn((event: string, cb: (...args: any[]) => void) => {
+                    control[event] = cb;
+                }),
                 pipe: jest.fn(),
                 destroy: jest.fn(),
             };
@@ -1023,9 +1020,7 @@ describe("podcast download runtime behavior", () => {
         mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
         (mocks.fsPromises.stat as jest.Mock).mockImplementation(
             async (targetPath: string) =>
-                targetPath.endsWith(".tmp")
-                    ? { size: 3 }
-                    : { size: 1_048_576 },
+                targetPath.endsWith(".tmp") ? { size: 3 } : { size: 1_048_576 },
         );
         (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
             { fileSize: 3 },
