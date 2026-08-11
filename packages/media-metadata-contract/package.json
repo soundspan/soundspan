@@ -11,10 +11,10 @@
         "dist"
     ],
     "scripts": {
-        "build": "npm exec --yes --package typescript -- tsc -p tsconfig.json",
+        "build": "tsc -p tsconfig.json",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
+        "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "exports": {
         ".": {
@@ -23,6 +23,7 @@
         }
     },
     "devDependencies": {
-        "prettier": "3.8.2"
+        "prettier": "3.8.2",
+        "typescript": "6.0.3"
     }
 }

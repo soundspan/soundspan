@@ -26,9 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN pip3 install --upgrade pip setuptools wheel
-
 WORKDIR /app
 
 # Install ALL Python dependencies from the hash-pinned lock (roadmap F50) so a
