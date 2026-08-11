@@ -344,6 +344,29 @@ test("countLeakPattern counts an axios detail chain exactly once", () => {
     );
 });
 
+test("countLeakPattern flags sidecar detail in a ternary consequent", () => {
+    const source =
+        'res.status(400).json({ error: typeof error?.response?.data?.detail === "string" ? error.response.data.detail : "static" })';
+    assert.ok(countLeakPattern(source) >= 1);
+});
+
+test("countLeakPattern flags terminal plural details in a response value", () => {
+    assert.equal(countLeakPattern("res.json({ error: result.details })"), 1);
+});
+
+test("countLeakPattern flags Err-suffixed identifier properties", () => {
+    assert.equal(countLeakPattern("res.json({ error: fetchErr.message })"), 1);
+});
+
+test("countLeakPattern does not treat optional or nullish operators as ternaries", () => {
+    const source = `
+        const optional = a?.b;
+        const fallback = x ?? y;
+        res.json({ error: "static" });
+    `;
+    assert.equal(countLeakPattern(source), 0);
+});
+
 test("countLeakPattern counts nested String interpolation exactly once", () => {
     assert.equal(countLeakPattern("res.send(`failed: ${String(err)}`)"), 1);
 });

@@ -3,6 +3,7 @@ import request from "supertest";
 
 const AUTH_HEADER = "x-test-auth";
 const AUTH_VALUE = "ok";
+const SIDECAR_DETAIL = "SIDECAR-INTERNAL-DETAIL";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (req: Request, res: Response, next: NextFunction) => {
@@ -70,6 +71,7 @@ jest.mock("../../utils/systemSettings", () => ({
 }));
 
 import { ytMusicService } from "../../services/youtubeMusic";
+import { logger } from "../../utils/logger";
 import router, { _resetYtBrowseCache } from "../browse";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 
@@ -159,6 +161,28 @@ describe("browse ytmusic routes integration", () => {
         expect(mockGetHome).toHaveBeenCalledWith(20, "user-1");
     });
 
+    it("sanitizes sidecar 4xx home responses and logs their detail", async () => {
+        mockGetHome.mockRejectedValueOnce({
+            response: {
+                status: 422,
+                data: { detail: SIDECAR_DETAIL },
+            },
+        });
+
+        const res = await request(app)
+            .get("/api/browse/ytmusic/home")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(422);
+        expect(res.body).toEqual({
+            error: "Invalid request for home content",
+        });
+        expect(JSON.stringify(res.body)).not.toContain(SIDECAR_DETAIL);
+        expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).toContain(
+            SIDECAR_DETAIL,
+        );
+    });
+
     it("validates mood params and returns payload", async () => {
         mockGetMoodPlaylists.mockResolvedValueOnce([
             {
@@ -202,7 +226,7 @@ describe("browse ytmusic routes integration", () => {
         mockGetMoodPlaylists.mockRejectedValueOnce({
             response: {
                 status: 422,
-                data: { detail: "Invalid mood category params" },
+                data: { detail: SIDECAR_DETAIL },
             },
         });
 
@@ -211,7 +235,13 @@ describe("browse ytmusic routes integration", () => {
             .set(AUTH_HEADER, AUTH_VALUE);
 
         expect(res.status).toBe(422);
-        expect(res.body).toEqual({ error: "Invalid mood category params" });
+        expect(res.body).toEqual({
+            error: "Invalid request for mood playlists",
+        });
+        expect(JSON.stringify(res.body)).not.toContain(SIDECAR_DETAIL);
+        expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).toContain(
+            SIDECAR_DETAIL,
+        );
     });
 
     it("caps playlist limit and returns playlist payload", async () => {
@@ -399,5 +429,25 @@ describe("browse ytmusic routes integration", () => {
             mixes: [],
             source: "ytmusic",
         });
+    });
+
+    it("sanitizes sidecar 4xx mixes responses and logs their detail", async () => {
+        mockGetLibraryPlaylists.mockRejectedValueOnce({
+            response: {
+                status: 422,
+                data: { detail: SIDECAR_DETAIL },
+            },
+        });
+
+        const res = await request(app)
+            .get("/api/browse/ytmusic/mixes")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(422);
+        expect(res.body).toEqual({ error: "Invalid request for mixes" });
+        expect(JSON.stringify(res.body)).not.toContain(SIDECAR_DETAIL);
+        expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).toContain(
+            SIDECAR_DETAIL,
+        );
     });
 });

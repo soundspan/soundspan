@@ -687,11 +687,12 @@ router.get("/ytmusic/home", async (req: Request, res: Response) => {
     } catch (error: any) {
         const status = resolveHttpStatusFromError(error);
         if (status && status >= 400 && status < 500) {
+            logger.warn("[Browse] YT Music home request rejected:", {
+                status,
+                detail: error?.response?.data?.detail,
+            });
             return res.status(status).json({
-                error:
-                    typeof error?.response?.data?.detail === "string"
-                        ? error.response.data.detail
-                        : "Invalid request for home content",
+                error: "Invalid request for home content",
             });
         }
         logger.error("[Browse] YT Music home error:", error);
@@ -751,11 +752,12 @@ router.get("/ytmusic/mood-playlists", async (req: Request, res: Response) => {
     } catch (error: any) {
         const status = resolveHttpStatusFromError(error);
         if (status && status >= 400 && status < 500) {
+            logger.warn("[Browse] YT Music mood playlists request rejected:", {
+                status,
+                detail: error?.response?.data?.detail,
+            });
             return res.status(status).json({
-                error:
-                    typeof error?.response?.data?.detail === "string"
-                        ? error.response.data.detail
-                        : "Invalid request for mood playlists",
+                error: "Invalid request for mood playlists",
             });
         }
         logger.error("[Browse] YT Music mood playlists error:", error);
@@ -953,11 +955,12 @@ router.get("/ytmusic/mixes", async (req: Request, res: Response) => {
             return res.json({ mixes: [], source: "ytmusic" as const });
         }
         if (status && status >= 400 && status < 500) {
+            logger.warn("[Browse] YT Music mixes request rejected:", {
+                status,
+                detail: error?.response?.data?.detail,
+            });
             return res.status(status).json({
-                error:
-                    typeof error?.response?.data?.detail === "string"
-                        ? error.response.data.detail
-                        : "Invalid request for mixes",
+                error: "Invalid request for mixes",
             });
         }
         logger.error(

@@ -614,6 +614,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- YouTube Music browse home, mood-playlists, and mixes 4xx responses no longer
+  echo raw sidecar error details to clients; they return static messages while
+  retaining status and detail in server logs. The route-error leak ratchet now
+  also detects ternary-consequent leaks, plural `.details`, and identifiers
+  ending in `Err`.
 - `.env` settings sync now rejects any value containing a line break, closing
   an env-line injection where an app admin could append arbitrary environment
   variables to the deployment `.env`; Lidarr and Audiobookshelf URL settings

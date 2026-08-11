@@ -611,7 +611,7 @@ describe("browse branch coverage", () => {
             expect(failing.body).toEqual({ error: "Failed to fetch playlist" });
         });
 
-        it("maps ytmusic mixes non-401 4xx to detail message", async () => {
+        it("maps ytmusic mixes non-401 4xx to a static sanitized message", async () => {
             ytMusicService.getLibraryPlaylists.mockRejectedValueOnce({
                 response: { status: 403, data: { detail: "YT OAuth missing" } },
             });
@@ -621,7 +621,8 @@ describe("browse branch coverage", () => {
                 .set(AUTH_HEADER, AUTH_VALUE);
 
             expect(res.status).toBe(403);
-            expect(res.body).toEqual({ error: "YT OAuth missing" });
+            expect(res.body).toEqual({ error: "Invalid request for mixes" });
+            expect(JSON.stringify(res.body)).not.toContain("YT OAuth missing");
         });
 
         it("returns 500 for ytmusic mixes non-http failures", async () => {
