@@ -325,6 +325,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audio engines can now re-synthesize a missed end-of-track on tab refocus,
+  and Howler's preloaded-track promotion no longer depends on
+  background-throttled timers. (#338)
+- Listen Together hosts no longer snap back to the start when their own
+  ready-gate `play-at` broadcast arrives, cross-resolved queue items preserve
+  mid-track position, and event-driven ready reports let backgrounded hosts
+  pass the gate promptly. (#340)
+- Listen Together ready-gate votes now survive cross-replica snapshot
+  rehydration (track changes start when everyone is buffered instead of always
+  waiting out the 8s timeout), and the server clamps virtual position to track
+  duration with a boundary watchdog so a stalled host can no longer silently
+  diverge from guests. (#341)
+- Persisted playback snapshots now window the queue around the current position
+  instead of truncating to the first 100 items, so restored sessions with large
+  queues resume at the real track and keep auto-advancing. (#342)
+- Access tokens now refresh proactively before expiry (with a refocus
+  catch-up), so long listening sessions no longer bake expired credentials into
+  stream URLs and stall at the next track load. (#343)
+- The playback error breaker now half-opens after a 60s cooldown, probing one
+  advance instead of halting playback permanently until reload. (#344)
+- Listen Together followers now estimate client-server clock offset and
+  skew-correct their synchronized start positions, so a fast client clock no
+  longer clips track intros. (#345)
 - Playback no longer permanently stops at track boundaries in background tabs:
   autoplay rejection is no longer treated as a fatal track error, refocusing
   completes a missed advance, and the consecutive-error breaker self-heals on
