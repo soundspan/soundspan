@@ -638,6 +638,81 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(result.tracksRemoved).toBe(0);
     });
 
+    it("bounds missing-track health writes when no audio files are found", async () => {
+        const scanner = new MusicScannerService();
+        const tracks = Array.from({ length: 25 }, (_, index) => ({
+            id: `track-missing-${index}`,
+            filePath: `Missing/Track-${index}.mp3`,
+            fileModified: new Date("2026-01-01T00:00:00.000Z"),
+        }));
+        let inFlight = 0;
+        let maxInFlight = 0;
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([]);
+        mockPrisma.track.findMany.mockResolvedValue(tracks);
+        mockPrisma.libraryHealthRecord.upsert.mockImplementation(async () => {
+            inFlight++;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            try {
+                await Promise.resolve();
+                return {};
+            } finally {
+                inFlight--;
+            }
+        });
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({ tracksRemoved: 0 }),
+        );
+
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledTimes(25);
+        expect(maxInFlight).toBeLessThanOrEqual(4);
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "track-missing-0",
+                    filePath: "Missing/Track-0.mp3",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "track-missing-24",
+                    filePath: "Missing/Track-24.mp3",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+    });
+
+    it("propagates missing-track health write failures on the no-audio guard path", async () => {
+        const scanner = new MusicScannerService();
+        const upsertError = new Error("health write failed");
+        const tracks = Array.from({ length: 8 }, (_, index) => ({
+            id: `track-missing-${index}`,
+            filePath: `Missing/Track-${index}.mp3`,
+            fileModified: new Date("2026-01-01T00:00:00.000Z"),
+        }));
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([]);
+        mockPrisma.track.findMany.mockResolvedValue(tracks);
+        mockPrisma.libraryHealthRecord.upsert.mockRejectedValueOnce(
+            upsertError,
+        );
+
+        await expect(scanner.scanLibrary("/music")).rejects.toBe(upsertError);
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledTimes(4);
+        expect(mockPrisma.track.deleteMany).not.toHaveBeenCalled();
+    });
+
     it("collects file processing errors and continues scan completion", async () => {
         const scanner = new MusicScannerService();
         const audioFile = "/music/Broken/Bad.flac";

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A new root `npm run verify:python` command runs the four suites locally, and
   both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
 
+### Fixed
+
+- Bounded the missing-track health-record writes in the scanner and file
+  validator so an unavailable music mount no longer fans out one concurrent
+  upsert per track and exhausts the worker database pool (hardens the #319
+  scan-reconciliation path).
+
 ### Changed
 
 - The Subsonic `getPlaylists` endpoint now computes playlist durations with a

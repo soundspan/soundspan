@@ -15,6 +15,7 @@ import {
     parseArtistFromPath,
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
+import { processBatched } from "../utils/async";
 
 type LibraryHealthRecordDelegate = {
     upsert(args: Prisma.LibraryHealthRecordUpsertArgs): Promise<unknown>;
@@ -45,6 +46,8 @@ const AUDIO_EXTENSIONS = new Set([
     ".wv",
 ]);
 const MAX_SCAN_DEPTH = 64;
+// Cap health writes at the worker database pool's four connections.
+const HEALTH_WRITE_BATCH_SIZE = 4;
 
 interface ScanProgress {
     filesScanned: number;
@@ -110,12 +113,14 @@ export class MusicScannerService {
     private async markMissingTracks(
         tracks: Array<{ id: string; filePath: string }>,
     ): Promise<void> {
-        await Promise.all(
-            tracks.map((track) =>
-                this.markTrackHealthIssue(
-                    track.id,
-                    "MISSING_FROM_DISK",
-                    track.filePath,
+        await processBatched(tracks, HEALTH_WRITE_BATCH_SIZE, (batch) =>
+            Promise.all(
+                batch.map((track) =>
+                    this.markTrackHealthIssue(
+                        track.id,
+                        "MISSING_FROM_DISK",
+                        track.filePath,
+                    ),
                 ),
             ),
         );

@@ -204,6 +204,58 @@ describe("FileValidatorService", () => {
         });
     });
 
+    it("bounds health-record writes while recording many missing tracks", async () => {
+        const service = new FileValidatorService();
+        const tracks = Array.from({ length: 25 }, (_, index) => ({
+            id: `missing-${index}`,
+            filePath: `missing-${index}.mp3`,
+            title: `Missing ${index}`,
+        }));
+        let inFlight = 0;
+        let maxInFlight = 0;
+
+        mockFindMany.mockResolvedValue(tracks);
+        mockFsAccess.mockRejectedValue(new Error("ENOENT"));
+        mockLibraryHealthUpsert.mockImplementation(async () => {
+            inFlight++;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            try {
+                await Promise.resolve();
+                return {};
+            } finally {
+                inFlight--;
+            }
+        });
+
+        await expect(service.validateLibrary()).resolves.toEqual(
+            expect.objectContaining({
+                tracksChecked: 25,
+                tracksMissing: tracks.map((track) => track.id),
+            }),
+        );
+
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledTimes(25);
+        expect(maxInFlight).toBeLessThanOrEqual(4);
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "missing-0",
+                    filePath: "missing-0.mp3",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "missing-24",
+                    filePath: "missing-24.mp3",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+    });
+
     it("returns false when validateTrack cannot find the track", async () => {
         const service = new FileValidatorService();
         mockFindUnique.mockResolvedValueOnce(null);

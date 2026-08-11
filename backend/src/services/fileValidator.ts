@@ -5,6 +5,10 @@ import { prisma } from "../utils/db";
 import { config } from "../config";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import PQueue from "p-queue";
+import { processBatched } from "../utils/async";
+
+// Cap health writes at the worker database pool's four connections.
+const HEALTH_WRITE_BATCH_SIZE = 4;
 
 type LibraryHealthRecordDelegate = {
     upsert(args: Prisma.LibraryHealthRecordUpsertArgs): Promise<unknown>;
@@ -162,10 +166,15 @@ export class FileValidatorService {
             const missingTracks = tracks.filter((track) =>
                 missingTrackIds.includes(track.id),
             );
-            await Promise.all(
-                missingTracks.map((track) =>
-                    this.markTrackMissing(track.id, track.filePath),
-                ),
+            await processBatched(
+                missingTracks,
+                HEALTH_WRITE_BATCH_SIZE,
+                (batch) =>
+                    Promise.all(
+                        batch.map((track) =>
+                            this.markTrackMissing(track.id, track.filePath),
+                        ),
+                    ),
             );
         }
 
