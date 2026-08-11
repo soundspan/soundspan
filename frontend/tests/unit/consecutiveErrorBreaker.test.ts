@@ -5,6 +5,16 @@ import {
     DEFAULT_CONSECUTIVE_ERROR_THRESHOLD,
 } from "../../lib/audio-engine/consecutiveErrorBreaker";
 
+function createBreakerHarness(cooldownMs: number = 60_000) {
+    let nowMs = 0;
+    return {
+        breaker: createConsecutiveErrorBreaker(3, cooldownMs, () => nowMs),
+        advanceBy(ms: number): void {
+            nowMs += ms;
+        },
+    };
+}
+
 test("default threshold is 3", () => {
     assert.equal(DEFAULT_CONSECUTIVE_ERROR_THRESHOLD, 3);
 });
@@ -98,4 +108,60 @@ test("success between errors prevents tripping", () => {
     breaker.recordError(); // 2 again
     assert.equal(breaker.isTripped(), false);
     assert.equal(breaker.getErrorCount(), 2);
+});
+
+test("half-opens for one probe after the cooldown elapses", () => {
+    const harness = createBreakerHarness();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+
+    assert.equal(harness.breaker.isTripped(), true);
+    harness.advanceBy(59_000);
+    assert.equal(harness.breaker.isTripped(), true);
+    harness.advanceBy(1_001);
+    assert.equal(harness.breaker.isTripped(), false);
+    assert.equal(harness.breaker.isTripped(), true);
+});
+
+test("one error during the half-open probe immediately re-trips", () => {
+    const harness = createBreakerHarness();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.advanceBy(60_000);
+    assert.equal(harness.breaker.isTripped(), false);
+
+    assert.equal(harness.breaker.recordError(), true);
+    assert.equal(harness.breaker.isTripped(), true);
+});
+
+test("success during the half-open probe fully resets the breaker", () => {
+    const harness = createBreakerHarness();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.advanceBy(60_000);
+    assert.equal(harness.breaker.isTripped(), false);
+
+    harness.breaker.recordSuccess();
+    assert.equal(harness.breaker.getErrorCount(), 0);
+    assert.equal(harness.breaker.recordError(), false);
+    assert.equal(harness.breaker.recordError(), false);
+    assert.equal(harness.breaker.isTripped(), false);
+});
+
+test("error count remains consecutive across the half-open transition", () => {
+    const harness = createBreakerHarness();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    harness.breaker.recordError();
+    assert.equal(harness.breaker.getErrorCount(), 3);
+
+    harness.advanceBy(60_000);
+    assert.equal(harness.breaker.isTripped(), false);
+    assert.equal(harness.breaker.getErrorCount(), 3);
+
+    harness.breaker.recordError();
+    assert.equal(harness.breaker.getErrorCount(), 4);
 });
