@@ -27,6 +27,7 @@ import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
+import { parseBoundedInt } from "../utils/queryParams";
 import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -971,10 +972,16 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
  *         name: limit
  *         schema:
  *           type: integer
+ *           default: 100
+ *           minimum: 1
+ *           maximum: 100
  *       - in: query
  *         name: offset
  *         schema:
  *           type: integer
+ *           default: 0
+ *           minimum: 0
+ *           maximum: 1000000
  *     responses:
  *       200:
  *         description: List of enrichment failures
@@ -994,8 +1001,8 @@ router.get("/failures", async (req, res) => {
         if (entityType) options.entityType = entityType as string;
         if (includeSkipped === "true") options.includeSkipped = true;
         if (includeResolved === "true") options.includeResolved = true;
-        if (limit) options.limit = parseInt(limit as string);
-        if (offset) options.offset = parseInt(offset as string);
+        options.limit = parseBoundedInt(req.query.limit, 100, 1, 100);
+        options.offset = parseBoundedInt(req.query.offset, 0, 0, 1_000_000);
 
         const result = await enrichmentFailureService.getFailures(options);
         res.json(result);
