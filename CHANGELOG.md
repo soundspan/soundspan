@@ -22,21 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A new root `npm run verify:python` command runs the four suites locally, and
   both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
 
-### Fixed
-
-- Clamp `GET /api/enrichment/failures` `limit`/`offset` through the shared bounded-int parser so oversized or non-numeric values can no longer trigger whole-table loads or Prisma 500s.
-- Podcast background downloads now abort after 2 minutes of stream inactivity,
-  preventing leaked file handles/sockets and permanently stuck "already
-  downloading" episodes when a host stalls mid-transfer.
-- Offloaded the public YouTube Music album, artist, and song browse calls from
-  the ytmusic-streamer event loop and bounded them with a
-  `YTMUSIC_BROWSE_TIMEOUT` deadline (default: 30 seconds), so a slow or hung
-  upstream no longer freezes the sidecar and its health endpoint.
-- Bounded the missing-track health-record writes in the scanner and file
-  validator so an unavailable music mount no longer fans out one concurrent
-  upsert per track and exhausts the worker database pool (hardens the #319
-  scan-reconciliation path).
-
 ### Changed
 
 - The Subsonic `getPlaylists` endpoint now computes playlist durations with a
@@ -329,6 +314,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of being dropped.
 
 ### Fixed
+
+- Clamp `GET /api/enrichment/failures` `limit`/`offset` through the shared bounded-int parser so oversized or non-numeric values can no longer trigger whole-table loads or Prisma 500s.
+- Podcast background downloads now abort after 2 minutes of stream inactivity,
+  preventing leaked file handles/sockets and permanently stuck "already
+  downloading" episodes when a host stalls mid-transfer.
+- Offloaded the public YouTube Music album, artist, and song browse calls from
+  the ytmusic-streamer event loop and bounded them with a
+  `YTMUSIC_BROWSE_TIMEOUT` deadline (default: 30 seconds), so a slow or hung
+  upstream no longer freezes the sidecar and its health endpoint.
+- Bounded the missing-track health-record writes in the scanner and file
+  validator so an unavailable music mount no longer fans out one concurrent
+  upsert per track and exhausts the worker database pool (hardens the #319
+  scan-reconciliation path).
 
 - `GET /api/library/tracks/:id/stream` no longer leaks an
   `AudioStreamingService` eviction timer when streaming fails, and the FFmpeg
@@ -909,6 +907,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   library-wide and makes outbound metadata API calls; removed the unused
   `enrichArtist`/`enrichAlbum` frontend client methods.
 
+- Segmented-streaming DASH build failures no longer include raw ffmpeg stderr
+  (absolute library/cache paths and errno detail) in 502 responses; clients now
+  receive a static message and error code while full detail is logged
+  server-side only. The route-error leak ratchet now recurses into
+  `backend/src/services/` subdirectories. Retry semantics are preserved by
+  carrying the server-computed transient-vs-permanent build-failure
+  classification as a flag instead of deriving it from the previously
+  detail-bearing client message.
+
 ### Accessibility
 
 - The player seek slider now exposes screen-reader slider semantics and supports
@@ -925,17 +932,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live text summary of its node count and focused track, and supports keyboard
   navigation (Arrow/Home/End to move focus between visible tracks, Enter/Space
   to explore the focused track) alongside the existing pointer interactions.
-
-### Security
-
-- Segmented-streaming DASH build failures no longer include raw ffmpeg stderr
-  (absolute library/cache paths and errno detail) in 502 responses; clients now
-  receive a static message and error code while full detail is logged
-  server-side only. The route-error leak ratchet now recurses into
-  `backend/src/services/` subdirectories. Retry semantics are preserved by
-  carrying the server-computed transient-vs-permanent build-failure
-  classification as a flag instead of deriving it from the previously
-  detail-bearing client message.
 
 ## [1.9.0] - 2026-08-08
 
