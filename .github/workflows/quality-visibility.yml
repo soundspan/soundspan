@@ -215,6 +215,9 @@ jobs:
             -r services/tidal-downloader/requirements-test.txt \
             -r services/ytmusic-streamer/requirements-test.txt
 
+      - name: Run AIO image hardening tests
+        run: pytest tests/ -q
+
       - name: Ruff lint
         run: ruff check services/
 
@@ -251,6 +254,9 @@ jobs:
 
       - name: Test route error canonicalization gate
         run: npm run check:error-canon:test
+
+      - name: Check Dockerfile hygiene
+        run: node --test scripts/ci/dockerfile-hygiene.test.mjs
 
       - name: Check frontend hardcoded hex baseline
         run: npm --prefix frontend run lint:hex
