@@ -15,7 +15,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "soundspan.selectorLabels" . | nindent 8 }}
+        {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "aio") | nindent 8 }}
         {{- with .Values.global.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

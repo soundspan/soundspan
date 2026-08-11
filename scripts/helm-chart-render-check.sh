@@ -23,7 +23,19 @@ else
   }
 fi
 
+assert_service_selectors_isolated() {
+  local render_name="$1"
+  local manifest_file="$2"
+  local checker="${BASH_SOURCE[0]%/*}/ci/helm-service-selector-check.mjs"
+
+  if ! node "$checker" "$manifest_file"; then
+    echo "[ERROR] Service selector isolation failed (${render_name})" >&2
+    exit 1
+  fi
+}
+
 tmp_aio="$(mktemp)"
+tmp_aio_sidecars="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
@@ -31,7 +43,7 @@ tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -46,6 +58,14 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   echo "[ERROR] AIO render missing expected deployment name: ${RELEASE_NAME}" >&2
   exit 1
 fi
+assert_service_selectors_isolated "default AIO" "$tmp_aio"
+
+echo "[CHECK] render AIO mode with HTTP sidecars for Service selector isolation"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set tidalSidecar.enabled=true \
+  --set ytmusicStreamer.enabled=true \
+  >"$tmp_aio_sidecars"
+assert_service_selectors_isolated "AIO with HTTP sidecars" "$tmp_aio_sidecars"
 
 echo "[CHECK] render HA individual mode with worker split"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
@@ -70,6 +90,7 @@ if ! perl -0777 -ne 'exit((/name:\s+LISTEN_TOGETHER_STATE_STORE_ENABLED\s+value:
   echo "[ERROR] Individual HA render missing LISTEN_TOGETHER_STATE_STORE_ENABLED=true" >&2
   exit 1
 fi
+assert_service_selectors_isolated "HA individual" "$tmp_individual_ha"
 
 echo "[CHECK] render global.env config map + envFrom wiring"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
@@ -121,6 +142,7 @@ for sidecar in tidal ytmusic; do
     exit 1
   fi
 done
+assert_service_selectors_isolated "individual with HTTP sidecars" "$tmp_sidecars"
 
 # Secret generation (F22): the stable-lookup template must still render a
 # complete Secret on first install / dry-run (where `lookup` returns nil and the
