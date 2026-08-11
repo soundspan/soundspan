@@ -2,6 +2,8 @@ import Bull from "bull";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
+const log = logger.child("BullQueues");
+
 function buildBullRedisConfig(
     redisUrlString: string,
 ): Bull.QueueOptions["redis"] {
@@ -40,14 +42,14 @@ function buildBullRedisConfig(
             redisConfig.tls = {};
         }
 
-        logger.debug(
-            `[Bull] Redis config resolved (host=${redisUrl.hostname}, port=${port}, db=${redisConfig.db ?? 0}, tls=${isTls})`,
+        log.debug(
+            `Redis config resolved (host=${redisUrl.hostname}, port=${port}, db=${redisConfig.db ?? 0}, tls=${isTls})`,
         );
 
         return redisConfig as Bull.QueueOptions["redis"];
     } catch (error) {
-        logger.warn(
-            `[Bull] Failed to parse REDIS_URL for queues, falling back to ${fallback.host}:${fallback.port}`,
+        log.warn(
+            `Failed to parse REDIS_URL for queues, falling back to ${fallback.host}:${fallback.port}`,
         );
         return fallback;
     }
@@ -119,6 +121,18 @@ export const schedulerQueue = new Bull("worker-scheduler", {
     settings: defaultQueueSettings,
 });
 
+/** Durable Redis queue for persisted generic playlist-import jobs. */
+export const genericImportQueue = new Bull("generic-import", {
+    redis: redisConfig,
+    settings: defaultQueueSettings,
+    defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5_000 },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
+});
+
 // Export all queues for monitoring
 export const queues = [
     scanQueue,
@@ -127,19 +141,17 @@ export const queues = [
     validationQueue,
     analysisQueue,
     schedulerQueue,
+    genericImportQueue,
 ];
 
 // Add error handlers to all queues to prevent unhandled exceptions
 queues.forEach((queue) => {
     queue.on("error", (error) => {
-        logger.error(`Bull queue error (${queue.name}):`, {
-            message: error.message,
-            stack: error.stack,
-        });
+        log.error(`Bull queue error (${queue.name})`, error);
     });
 
     queue.on("stalled", (job) => {
-        logger.warn(`Bull job stalled (${queue.name}):`, {
+        log.warn(`Bull job stalled (${queue.name}):`, {
             jobId: job.id,
             data: job.data,
         });
@@ -147,4 +159,4 @@ queues.forEach((queue) => {
 });
 
 // Log queue initialization
-logger.debug("Bull queues initialized with stability settings");
+log.debug("Bull queues initialized with stability settings");

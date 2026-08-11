@@ -22,7 +22,9 @@ describe("workers/queues", () => {
             debug: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("bull", () => ({
             __esModule: true,
@@ -48,7 +50,7 @@ describe("workers/queues", () => {
             "rediss://user:pass@cache.example:6381/2",
         );
 
-        expect(bullCtor).toHaveBeenCalledTimes(6);
+        expect(bullCtor).toHaveBeenCalledTimes(7);
         const firstCallArgs = bullCtor.mock.calls[0];
         const firstQueueOptions = firstCallArgs[1];
 
@@ -63,7 +65,7 @@ describe("workers/queues", () => {
                 tls: {},
             }),
         );
-        expect(queuesModule.queues).toHaveLength(6);
+        expect(queuesModule.queues).toHaveLength(7);
         expect(logger.debug).toHaveBeenCalledWith(
             expect.stringContaining("Redis config resolved"),
         );
@@ -99,6 +101,29 @@ describe("workers/queues", () => {
         });
     });
 
+    it("bounds generic import retries, stalled recovery, and Redis retention", () => {
+        const { bullCtor } = loadQueues("redis://cache.example:6379/0");
+
+        const importCall = bullCtor.mock.calls.find(
+            (call: any[]) => call[0] === "generic-import",
+        );
+
+        expect(importCall).toBeDefined();
+        expect(importCall![1].settings).toEqual(
+            expect.objectContaining({
+                stalledInterval: 30_000,
+                lockDuration: 30_000,
+                maxStalledCount: 1,
+            }),
+        );
+        expect(importCall![1].defaultJobOptions).toEqual({
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: 100,
+            removeOnFail: 200,
+        });
+    });
+
     it("wires queue error and stalled handlers for observability", () => {
         const { bullCtor, logger } = loadQueues("redis://cache.example:6379/0");
 
@@ -115,11 +140,8 @@ describe("workers/queues", () => {
         stalledHandler({ id: "job-1", data: { payload: true } });
 
         expect(logger.error).toHaveBeenCalledWith(
-            "Bull queue error (library-scan):",
-            {
-                message: "queue exploded",
-                stack: expect.any(String),
-            },
+            "Bull queue error (library-scan)",
+            err,
         );
         expect(logger.warn).toHaveBeenCalledWith(
             "Bull job stalled (library-scan):",

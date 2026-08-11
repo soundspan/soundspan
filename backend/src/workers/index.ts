@@ -9,6 +9,7 @@ import {
     imageQueue,
     validationQueue,
     schedulerQueue,
+    genericImportQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import {
@@ -17,6 +18,11 @@ import {
 } from "./processors/discoverProcessor";
 import { processImageOptimization } from "./processors/imageProcessor";
 import { processValidation } from "./processors/validationProcessor";
+import {
+    finalizeGenericImportQueueFailure,
+    GENERIC_IMPORT_WORKER_CONCURRENCY,
+    processGenericImport,
+} from "./processors/genericImportProcessor";
 import {
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
@@ -43,6 +49,7 @@ import { queueCleaner } from "../jobs/queueCleaner";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
+import { genericImportJobRunner } from "../services/genericImportJobRunner";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -889,6 +896,11 @@ if (config.features.discovery) {
 }
 imageQueue.process(processImageOptimization);
 validationQueue.process(processValidation);
+genericImportQueue.process(
+    "*",
+    GENERIC_IMPORT_WORKER_CONCURRENCY,
+    processGenericImport,
+);
 async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
     const mode = job?.data?.mode === "startup" ? "startup" : "repeat";
 
@@ -1114,6 +1126,35 @@ validationQueue.on("active", (job) => {
     );
 });
 
+genericImportQueue.on("active", (job) => {
+    recordQueueProcessorEvent("generic-import", "active", job);
+});
+
+genericImportQueue.on("completed", (job) => {
+    recordQueueProcessorEvent("generic-import", "completed", job);
+});
+
+genericImportQueue.on("failed", (job, error) => {
+    if (!job) {
+        queueProcessorLog.error("Generic import queue failure had no job", {
+            error,
+        });
+        return;
+    }
+    recordQueueProcessorEvent("generic-import", "failed", job);
+    void finalizeGenericImportQueueFailure(job, error).catch(
+        (finalizationError) => {
+            queueProcessorLog.error(
+                "Failed to finalize exhausted generic import job",
+                {
+                    jobId: job.id,
+                    error: finalizationError,
+                },
+            );
+        },
+    );
+});
+
 // The scheduler queue runs the heavy maintenance cycles (metadata refresh,
 // reconciliation, artist-count backfills) — the primary stall suspects — so
 // it MUST feed the event-loop watchdog's attribution registry.
@@ -1180,6 +1221,10 @@ registerSchedulerJobs()
         log.error("Failed to register scheduler queue jobs:", err);
     });
 
+genericImportJobRunner.registerRecoveryJobs().catch((error) => {
+    log.error("Failed to register generic import recovery jobs", { error });
+});
+
 /**
  * Gracefully shutdown all workers and cleanup resources
  */
@@ -1203,6 +1248,7 @@ export async function shutdownWorkers(): Promise<void> {
     imageQueue.removeAllListeners();
     validationQueue.removeAllListeners();
     schedulerQueue.removeAllListeners();
+    genericImportQueue.removeAllListeners();
 
     // Close all queues gracefully
     await Promise.all([
@@ -1211,6 +1257,7 @@ export async function shutdownWorkers(): Promise<void> {
         imageQueue.close(),
         validationQueue.close(),
         schedulerQueue.close(),
+        genericImportQueue.close(),
     ]);
 
     // Disconnect enrichment state service Redis connections (2 connections)
@@ -1247,4 +1294,5 @@ export {
     imageQueue,
     validationQueue,
     schedulerQueue,
+    genericImportQueue,
 };

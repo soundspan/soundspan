@@ -34,6 +34,7 @@ describe("workers runtime behavior", () => {
         const imageQueue = createQueueMock();
         const validationQueue = createQueueMock();
         const schedulerQueue = createQueueMock();
+        const genericImportQueue = createQueueMock();
 
         const logger = {
             debug: jest.fn(),
@@ -51,6 +52,11 @@ describe("workers runtime behavior", () => {
         const startDiscoverWeeklyCron = jest.fn();
         const stopDiscoverWeeklyCron = jest.fn();
         const processDiscoverCronTick = jest.fn(async () => ({ ok: true }));
+        const processGenericImport = jest.fn(async () => undefined);
+        const finalizeGenericImportQueueFailure = jest.fn(
+            async () => undefined,
+        );
+        const registerRecoveryJobs = jest.fn(async () => undefined);
         const runDataIntegrityCheck = jest.fn(async () => undefined);
         const shutdownDiscoverProcessor = jest.fn(async () => undefined);
         const cleanupExpiredCache = jest.fn(async () => undefined);
@@ -135,6 +141,7 @@ describe("workers runtime behavior", () => {
             imageQueue,
             validationQueue,
             schedulerQueue,
+            genericImportQueue,
         }));
         jest.doMock("../processors/scanProcessor", () => ({
             processScan: jest.fn(async () => ({
@@ -159,6 +166,16 @@ describe("workers runtime behavior", () => {
                 tracksChecked: 0,
                 tracksRemoved: 0,
             })),
+        }));
+        jest.doMock("../processors/genericImportProcessor", () => ({
+            processGenericImport,
+            finalizeGenericImportQueueFailure,
+            GENERIC_IMPORT_WORKER_CONCURRENCY: 2,
+        }));
+        jest.doMock("../../services/genericImportJobRunner", () => ({
+            genericImportJobRunner: {
+                registerRecoveryJobs,
+            },
         }));
         jest.doMock("../unifiedEnrichment", () => ({
             startUnifiedEnrichmentWorker,
@@ -227,6 +244,7 @@ describe("workers runtime behavior", () => {
             imageQueue,
             validationQueue,
             schedulerQueue,
+            genericImportQueue,
             logger,
             startUnifiedEnrichmentWorker,
             stopUnifiedEnrichmentWorker,
@@ -234,6 +252,9 @@ describe("workers runtime behavior", () => {
             stopMoodBucketWorker,
             startDiscoverWeeklyCron,
             stopDiscoverWeeklyCron,
+            processGenericImport,
+            finalizeGenericImportQueueFailure,
+            registerRecoveryJobs,
             runDataIntegrityCheck,
             downloadQueueManager,
             simpleDownloadManager,
@@ -286,6 +307,12 @@ describe("workers runtime behavior", () => {
             "*",
             expect.any(Function),
         );
+        expect(mocks.genericImportQueue.process).toHaveBeenCalledWith(
+            "*",
+            2,
+            mocks.processGenericImport,
+        );
+        expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
         expect(mocks.startUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startMoodBucketWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
@@ -407,6 +434,7 @@ describe("workers runtime behavior", () => {
         expect(workers.imageQueue).toBe(mocks.imageQueue);
         expect(workers.validationQueue).toBe(mocks.validationQueue);
         expect(workers.schedulerQueue).toBe(mocks.schedulerQueue);
+        expect(workers.genericImportQueue).toBe(mocks.genericImportQueue);
     });
 
     it("shuts down workers and queue resources cleanly", async () => {
@@ -423,7 +451,11 @@ describe("workers runtime behavior", () => {
         expect(mocks.stopMoodBucketWorker).toHaveBeenCalledTimes(1);
         expect(mocks.downloadQueueManager.shutdown).toHaveBeenCalledTimes(1);
         expect(mocks.scanQueue.removeAllListeners).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.genericImportQueue.removeAllListeners,
+        ).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.close).toHaveBeenCalledTimes(1);
+        expect(mocks.genericImportQueue.close).toHaveBeenCalledTimes(1);
         expect(mocks.enrichmentStateService.disconnect).toHaveBeenCalledTimes(
             1,
         );
@@ -1037,6 +1069,12 @@ describe("workers runtime behavior", () => {
         );
         getHandler(mocks.validationQueue, "active")(job);
 
+        getHandler(mocks.genericImportQueue, "active")(job);
+        getHandler(mocks.genericImportQueue, "completed")(job);
+        const genericImportError = new Error("import-retries-exhausted");
+        getHandler(mocks.genericImportQueue, "failed")(job, genericImportError);
+        await flushPromises();
+
         getHandler(
             mocks.schedulerQueue,
             "completed",
@@ -1060,6 +1098,10 @@ describe("workers runtime behavior", () => {
             expect.stringMatching(
                 /workerId=.* event=failed queue=worker-scheduler count=\d+/,
             ),
+        );
+        expect(mocks.finalizeGenericImportQueueFailure).toHaveBeenCalledWith(
+            job,
+            genericImportError,
         );
     });
 
@@ -1102,6 +1144,9 @@ describe("workers runtime behavior", () => {
         mocks.schedulerQueue.isReady.mockRejectedValueOnce(
             new Error("scheduler-not-ready"),
         );
+        mocks.registerRecoveryJobs.mockRejectedValueOnce(
+            new Error("generic-import-recovery-not-ready"),
+        );
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         require("../index");
@@ -1118,6 +1163,10 @@ describe("workers runtime behavior", () => {
         expect(mocks.logger.error).toHaveBeenCalledWith(
             "Failed to register scheduler queue jobs:",
             expect.any(Error),
+        );
+        expect(mocks.logger.error).toHaveBeenCalledWith(
+            "Failed to register generic import recovery jobs",
+            expect.objectContaining({ error: expect.any(Error) }),
         );
     });
 

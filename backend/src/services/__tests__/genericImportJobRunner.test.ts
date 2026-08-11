@@ -1,9 +1,30 @@
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
+    logger: (() => {
+        const scopedLogger = {
+            child: jest.fn(),
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        };
+        scopedLogger.child.mockReturnValue(scopedLogger);
+        return scopedLogger;
+    })(),
+}));
+
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        importJob: {
+            findMany: jest.fn(),
+        },
+    },
+}));
+
+jest.mock("../../workers/queues", () => ({
+    genericImportQueue: {
+        add: jest.fn(),
+        getJob: jest.fn(),
+        isReady: jest.fn(),
     },
 }));
 
@@ -21,6 +42,9 @@ jest.mock("../playlistImportService", () => ({
     },
 }));
 
+import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
+import { genericImportQueue } from "../../workers/queues";
 import { importJobStore } from "../importJobStore";
 import { playlistImportService } from "../playlistImportService";
 import { genericImportJobRunner } from "../genericImportJobRunner";
@@ -31,9 +55,225 @@ describe("generic import job runner", () => {
     const mockPreviewImport = playlistImportService.previewImport as jest.Mock;
     const mockImportPlaylist =
         playlistImportService.importPlaylist as jest.Mock;
+    const mockQueueAdd = genericImportQueue.add as jest.Mock;
+    const mockQueueGetJob = genericImportQueue.getJob as jest.Mock;
+    const mockQueueReady = genericImportQueue.isReady as jest.Mock;
+    const mockFindMany = prisma.importJob.findMany as jest.Mock;
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockQueueAdd.mockResolvedValue({ id: "queued-job" });
+        mockQueueGetJob.mockResolvedValue(null);
+        mockQueueReady.mockResolvedValue(undefined);
+        mockFindMany.mockResolvedValue([]);
+    });
+
+    it("durably enqueues a persisted job with a stable queue identity", async () => {
+        genericImportJobRunner.enqueue("job-durable");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(mockQueueAdd).toHaveBeenCalledWith(
+            "generic-import-run",
+            { jobId: "job-durable" },
+            { jobId: "job-durable" },
+        );
+    });
+
+    it("coalesces duplicate submissions onto the existing durable queue job", async () => {
+        mockQueueGetJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("waiting"),
+        });
+
+        genericImportJobRunner.enqueue("job-already-queued");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(mockQueueAdd).not.toHaveBeenCalled();
+        expect(mockUpdateJob).not.toHaveBeenCalled();
+    });
+
+    it("logs queue persistence failures without leaking an unhandled rejection", async () => {
+        const queueError = new Error("redis credentials rejected");
+        mockQueueAdd.mockRejectedValueOnce(queueError);
+
+        genericImportJobRunner.enqueue("job-queue-failure");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(logger.error).toHaveBeenCalledWith(
+            "Failed to enqueue persisted import job",
+            expect.objectContaining({
+                jobId: "job-queue-failure",
+                error: queueError,
+            }),
+        );
+    });
+
+    it("requeues a bounded batch of active persisted jobs for recovery", async () => {
+        mockFindMany.mockResolvedValueOnce([
+            { id: "pending-job" },
+            { id: "resolving-job" },
+            { id: "creating-job" },
+            { id: "cancelling-job" },
+        ]);
+
+        await expect(genericImportJobRunner.recoverActiveJobs()).resolves.toBe(
+            4,
+        );
+
+        expect(mockFindMany).toHaveBeenCalledWith({
+            where: {
+                status: {
+                    in: [
+                        "pending",
+                        "resolving",
+                        "creating_playlist",
+                        "cancelling",
+                    ],
+                },
+            },
+            orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+            select: { id: true },
+            take: 100,
+        });
+        expect(mockQueueAdd).toHaveBeenCalledTimes(4);
+        expect(mockQueueAdd).toHaveBeenNthCalledWith(
+            4,
+            "generic-import-run",
+            { jobId: "cancelling-job" },
+            { jobId: "cancelling-job" },
+        );
+    });
+
+    it("terminalizes stale persisted state when its queue retries were already exhausted", async () => {
+        mockFindMany.mockResolvedValueOnce([{ id: "exhausted-job" }]);
+        mockQueueGetJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("failed"),
+        });
+        mockGetJob.mockResolvedValueOnce({
+            id: "exhausted-job",
+            status: "resolving",
+        });
+
+        await expect(genericImportJobRunner.recoverActiveJobs()).resolves.toBe(
+            1,
+        );
+
+        expect(mockQueueAdd).not.toHaveBeenCalled();
+        expect(mockUpdateJob).toHaveBeenCalledWith("exhausted-job", {
+            status: "failed",
+            progress: 100,
+            error: "Generic import job failed",
+        });
+    });
+
+    it("never requeues more than the recovery batch capacity in one sweep", async () => {
+        mockFindMany.mockResolvedValueOnce(
+            Array.from({ length: 101 }, (_, index) => ({
+                id: `bounded-job-${index}`,
+            })),
+        );
+
+        await expect(genericImportJobRunner.recoverActiveJobs()).resolves.toBe(
+            100,
+        );
+
+        expect(mockQueueAdd).toHaveBeenCalledTimes(100);
+        expect(mockQueueAdd).not.toHaveBeenCalledWith(
+            "generic-import-run",
+            { jobId: "bounded-job-100" },
+            expect.anything(),
+        );
+    });
+
+    it("registers bounded startup and periodic recovery jobs", async () => {
+        await genericImportJobRunner.registerRecoveryJobs();
+
+        expect(mockQueueReady).toHaveBeenCalledTimes(1);
+        expect(mockQueueAdd).toHaveBeenNthCalledWith(
+            1,
+            "generic-import-recover",
+            { trigger: "startup" },
+            expect.objectContaining({
+                jobId: "generic-import-recovery:startup",
+                removeOnComplete: true,
+                removeOnFail: true,
+            }),
+        );
+        expect(mockQueueAdd).toHaveBeenNthCalledWith(
+            2,
+            "generic-import-recover",
+            { trigger: "repeat" },
+            expect.objectContaining({
+                jobId: "generic-import-recovery:repeat",
+                repeat: { every: 60_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            }),
+        );
+    });
+
+    it("rethrows retryable failures without prematurely making the job terminal", async () => {
+        mockGetJob.mockResolvedValue({
+            id: "job-retry",
+            userId: "user-1",
+            sourceUrl: "https://open.spotify.com/playlist/abc",
+            requestedPlaylistName: null,
+            status: "pending",
+        });
+        const retryableError = new Error("provider temporarily unavailable");
+        mockPreviewImport.mockRejectedValueOnce(retryableError);
+
+        await expect(
+            genericImportJobRunner.runJob("job-retry", {
+                retryFailures: true,
+                finalAttempt: false,
+            }),
+        ).rejects.toBe(retryableError);
+
+        expect(mockUpdateJob).not.toHaveBeenCalledWith(
+            "job-retry",
+            expect.objectContaining({ status: "failed" }),
+        );
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Import job attempt failed; queue retry remains",
+            expect.objectContaining({
+                jobId: "job-retry",
+                error: retryableError,
+            }),
+        );
+    });
+
+    it("stores only a safe failure after queue retries are exhausted", async () => {
+        mockGetJob.mockResolvedValue({
+            id: "job-final-attempt",
+            userId: "user-1",
+            sourceUrl: "https://open.spotify.com/playlist/abc",
+            requestedPlaylistName: null,
+            status: "pending",
+        });
+        const internalError = new Error(
+            "postgresql://admin:secret@db/import failed",
+        );
+        mockPreviewImport.mockRejectedValueOnce(internalError);
+
+        await expect(
+            genericImportJobRunner.runJob("job-final-attempt", {
+                retryFailures: true,
+                finalAttempt: true,
+            }),
+        ).rejects.toBe(internalError);
+
+        expect(mockUpdateJob).toHaveBeenLastCalledWith("job-final-attempt", {
+            status: "failed",
+            progress: 100,
+            error: "Generic import job failed",
+        });
+        expect(logger.error).toHaveBeenCalledWith(
+            "Import job failed",
+            expect.objectContaining({
+                jobId: "job-final-attempt",
+                error: internalError,
+            }),
+        );
     });
 
     it("runs a pending import job through preview and playlist creation", async () => {
@@ -161,7 +401,7 @@ describe("generic import job runner", () => {
         expect(mockUpdateJob).toHaveBeenLastCalledWith("job-1", {
             status: "failed",
             progress: 100,
-            error: "preview failed",
+            error: "Generic import job failed",
         });
     });
 
