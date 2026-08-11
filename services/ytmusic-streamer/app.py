@@ -215,6 +215,11 @@ EXTRACT_DELAY_MIN = env_float("YTMUSIC_EXTRACT_DELAY_MIN", "0.5")
 EXTRACT_DELAY_MAX = env_float("YTMUSIC_EXTRACT_DELAY_MAX", "2.0")
 _extract_pacer = ThreadSafeRatePacer(EXTRACT_DELAY_MIN, EXTRACT_DELAY_MAX)
 EXTRACT_TIMEOUT = env_float("YTMUSIC_EXTRACT_TIMEOUT", "60")
+YTDLP_EXTRACT_CONCURRENCY = max(1, min(16, env_int("YTMUSIC_YTDLP_EXTRACT_CONCURRENCY", "4")))
+_yt_dlp_extract_executor = ThreadPoolExecutor(
+    max_workers=YTDLP_EXTRACT_CONCURRENCY,
+    thread_name_prefix="yt-dlp-extract",
+)
 # Overall deadline for public metadata browse calls.
 BROWSE_TIMEOUT = env_float("YTMUSIC_BROWSE_TIMEOUT", "30")
 YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
@@ -912,17 +917,27 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
     )
 
 
-async def _extract_stream_info_bounded(func, *args) -> dict:
-    """Run a sync stream extraction off the event loop with an overall deadline.
+async def _extract_yt_dlp_bounded(func, *args, timeout_detail: str) -> dict:
+    """Run sync yt-dlp work in its bounded pool with an overall deadline.
 
-    asyncio.wait_for cancels the awaiting request after EXTRACT_TIMEOUT
-    seconds and maps it to HTTP 504. The orphaned worker thread cannot
-    hang forever: yt-dlp's socket_timeout bounds its network reads.
+    Timed-out worker threads remain confined to the dedicated executor, and
+    yt-dlp's socket_timeout bounds their network operations.
     """
     try:
-        return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=EXTRACT_TIMEOUT)
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(_yt_dlp_extract_executor, func, *args)
+        return await asyncio.wait_for(future, timeout=EXTRACT_TIMEOUT)
     except TimeoutError as error:
-        raise HTTPException(status_code=504, detail="Stream extraction timed out") from error
+        raise HTTPException(status_code=504, detail=timeout_detail) from error
+
+
+async def _extract_stream_info_bounded(func, *args) -> dict:
+    """Run a sync stream extraction through the shared yt-dlp bounds."""
+    return await _extract_yt_dlp_bounded(
+        func,
+        *args,
+        timeout_detail="Stream extraction timed out",
+    )
 
 
 async def _browse_public_bounded(func, *args):
@@ -2178,6 +2193,7 @@ async def yt_video_info(url: str = Query(...)):
         "no_warnings": True,
         "extract_flat": False,
         "skip_download": True,
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -2199,7 +2215,10 @@ async def yt_video_info(url: str = Query(...)):
                     download=False,
                 )
 
-        info = await asyncio.to_thread(_extract)
+        info = await _extract_yt_dlp_bounded(
+            _extract,
+            timeout_detail="YouTube extraction timed out",
+        )
         if not info:
             raise HTTPException(status_code=404, detail="Video not found")
 
@@ -2271,6 +2290,7 @@ async def yt_playlist_info(url: str = Query(...)):
         "extract_flat": "in_playlist",
         "skip_download": True,
         "playlistend": YT_PLAYLIST_MAX_ENTRIES + 1,
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -2289,7 +2309,10 @@ async def yt_playlist_info(url: str = Query(...)):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(enumerate_url, download=False)
 
-        info = await asyncio.to_thread(_extract)
+        info = await _extract_yt_dlp_bounded(
+            _extract,
+            timeout_detail="YouTube extraction timed out",
+        )
         if not info:
             raise HTTPException(status_code=404, detail="Playlist or channel not found")
 
@@ -2385,8 +2408,8 @@ _yt_download_tasks: set = set()
 YT_DOWNLOAD_JOB_TTL = 6 * 60 * 60  # prune terminal jobs after 6 hours
 # Downloads run on a dedicated, size-limited executor so multi-hour yt-dlp
 # jobs cannot exhaust the event loop's shared default thread pool — used by
-# every asyncio.to_thread call (stream-URL extraction, search, /yt/info,
-# /yt/proxy) — and starve streaming for all users. Jobs beyond the limit
+# other asyncio.to_thread calls such as search and browse — and starve
+# streaming for all users. Jobs beyond the limit
 # wait in the executor's queue and stay in the "queued" state until a
 # worker picks them up.
 YT_DOWNLOAD_CONCURRENCY = max(1, env_int("YT_DOWNLOAD_CONCURRENCY", "2"))
