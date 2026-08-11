@@ -6,12 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-### Security
-
-- Subsonic JSONP callback parameters are now validated against a strict
-  JavaScript identifier pattern, with a nosniff plain-JSON fallback for missing
-  or invalid callbacks.
-
 ### Added
 
 - Added an opt-in `SECRETS_DB_ONLY` flag (default `false`). When enabled, integration secrets (Last.fm, Fanart.tv, Lidarr, OpenAI, Deezer, Audiobookshelf API keys) are read exclusively from encrypted system settings — the `.env` fallback for those keys is ignored and the settings-driven `.env` sync omits them. Startup fails fast if the settings layer is not readable before services start. Default behavior is unchanged.
@@ -325,6 +319,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Helm: the AIO entrypoint Service now selects only its own component's pods,
+  so enabling a streaming sidecar no longer routes app/ingress traffic to the
+  internal sidecar port; the chart render check asserts Service selector
+  isolation across components. (#348)
+- CI now actually runs the Dockerfile digest-pin/hygiene suite and the AIO
+  image-hardening pytest suite, which previously existed but were never
+  invoked. (#349)
 - Audio engines can now re-synthesize a missed end-of-track on tab refocus,
   and Howler's preloaded-track promotion no longer depends on
   background-throttled timers. (#338)
@@ -674,6 +675,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Subsonic JSONP callback parameters are now validated against a strict
+  JavaScript identifier pattern, with a nosniff plain-JSON fallback for missing
+  or invalid callbacks.
+- Soulseek and single-file-organizer session-log entries no longer include raw
+  library error text or absolute server paths (details stay in server logs),
+  and the raw-error leak ratchet now also scans backend workers, jobs, and
+  middleware with frozen baselines. (#347)
 - Retry endpoints for Soulseek-backed downloads (playlist pending-track retry
   and download-job retry) are now admin-only, closing the authorization bypass
   around the #216 direct-download admin boundary.
