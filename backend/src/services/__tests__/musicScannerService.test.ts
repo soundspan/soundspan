@@ -515,6 +515,129 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockParseFile).not.toHaveBeenCalled();
     });
 
+    it("removes missing tracks and cleans up orphans when library deletion is enabled", async () => {
+        const scanner = new MusicScannerService();
+
+        mockPrisma.systemSettings.findFirst.mockResolvedValue({
+            discNoBackfillDone: true,
+            libraryDeletionEnabled: true,
+        });
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/Present/Track.mp3"]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-missing-1",
+                filePath: "Missing/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+            },
+            {
+                id: "track-present-1",
+                filePath: "Present/Track.mp3",
+                fileModified: new Date("2026-02-02T00:00:00.000Z"),
+            },
+        ]);
+        mockPrisma.track.deleteMany.mockResolvedValue({ count: 1 });
+        mockPrisma.album.findMany.mockResolvedValue([
+            { id: "album-orphan-1", title: "Old Album" },
+        ]);
+        mockPrisma.artist.findMany.mockResolvedValue([
+            { id: "artist-orphan-1", name: "Old Artist" },
+        ]);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["track-missing-1"] } },
+        });
+        expect(result.tracksRemoved).toBe(1);
+        expect(mockPrisma.libraryHealthRecord.upsert).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "track-missing-1",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+        expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["album-orphan-1"] } },
+        });
+        expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["artist-orphan-1"] } },
+        });
+    });
+
+    it("removes missing tracks even when library deletion is disabled", async () => {
+        const scanner = new MusicScannerService();
+
+        mockPrisma.systemSettings.findFirst.mockResolvedValue({
+            discNoBackfillDone: true,
+            libraryDeletionEnabled: false,
+        });
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/Present/Track.mp3"]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-missing-1",
+                filePath: "Missing/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+            },
+            {
+                id: "track-present-1",
+                filePath: "Present/Track.mp3",
+                fileModified: new Date("2026-02-02T00:00:00.000Z"),
+            },
+        ]);
+        mockPrisma.track.deleteMany.mockResolvedValue({ count: 1 });
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["track-missing-1"] } },
+        });
+        expect(result.tracksRemoved).toBe(1);
+        expect(mockPrisma.libraryHealthRecord.upsert).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "track-missing-1",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+    });
+
+    it("does not delete missing tracks when no audio files are found", async () => {
+        const scanner = new MusicScannerService();
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-missing-1",
+                filePath: "Missing/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+            },
+        ]);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    trackId: "track-missing-1",
+                    status: "MISSING_FROM_DISK",
+                }),
+            }),
+        );
+        expect(result.tracksRemoved).toBe(0);
+    });
+
     it("collects file processing errors and continues scan completion", async () => {
         const scanner = new MusicScannerService();
         const audioFile = "/music/Broken/Bad.flac";

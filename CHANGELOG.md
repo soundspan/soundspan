@@ -324,6 +324,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sessions could block schema migrations needing an `AccessExclusiveLock` on
   `Track`, queueing all later queries behind the migration and exhausting the
   backend connection pools during upgrades. (#224)
+- Library scans now reconcile the database with disk: whether or not the
+  admin "Allow library deletion" checkbox is enabled, a scanned track that is
+  missing from disk is removed from the database, counted in the scan's
+  removed total, and orphaned albums and artists are cleaned up. That checkbox
+  only prevents deletion of tracks-on-disk via the UI. As a safeguard, a scan
+  that finds zero audio files while the database still has tracks (for
+  example an unmounted music volume) skips removal and keeps the flag-only
+  Library Health behavior
+  ([#309](https://github.com/BonzTM/soundspan/issues/309)).
 - The ytmusic-streamer playlist endpoint's public-browse and auth-fallback
   paths, and the debug search endpoint, now offload blocking ytmusicapi calls
   to the asyncio thread pool instead of stalling the event loop, and batch

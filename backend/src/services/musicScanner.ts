@@ -107,6 +107,42 @@ export class MusicScannerService {
         });
     }
 
+    private async markMissingTracks(
+        tracks: Array<{ id: string; filePath: string }>,
+    ): Promise<void> {
+        await Promise.all(
+            tracks.map((track) =>
+                this.markTrackHealthIssue(
+                    track.id,
+                    "MISSING_FROM_DISK",
+                    track.filePath,
+                ),
+            ),
+        );
+        logger.debug(
+            `Recorded ${tracks.length} missing tracks in library health`,
+        );
+    }
+
+    private async handleMissingTracks(
+        tracks: Array<{ id: string; filePath: string }>,
+        audioFileCount: number,
+    ): Promise<number> {
+        if (audioFileCount === 0) {
+            await this.markMissingTracks(tracks);
+            logger.warn(
+                "Skipped removing missing tracks because no audio files were found; the music directory may be unavailable",
+            );
+            return 0;
+        }
+
+        const deleted = await prisma.track.deleteMany({
+            where: { id: { in: tracks.map((track) => track.id) } },
+        });
+        logger.info(`Removed ${deleted.count} missing tracks from the library`);
+        return deleted.count;
+    }
+
     /**
      * Scan the music directory and update the database
      */
@@ -223,7 +259,7 @@ export class MusicScannerService {
 
         await this.scanQueue.onIdle();
 
-        // Step 4: Record health issues for tracked files that no longer exist
+        // Step 4: Handle tracked files that no longer exist
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f)),
         );
@@ -232,19 +268,14 @@ export class MusicScannerService {
         );
 
         if (tracksToRemove.length > 0) {
-            await Promise.all(
-                tracksToRemove.map((track) =>
-                    this.markTrackHealthIssue(
-                        track.id,
-                        "MISSING_FROM_DISK",
-                        track.filePath,
-                    ),
-                ),
-            );
-            logger.debug(
-                `Recorded ${tracksToRemove.length} missing tracks in library health`,
+            result.tracksRemoved = await this.handleMissingTracks(
+                tracksToRemove,
+                audioFiles.length,
             );
         }
+
+        const shouldCleanOrphans =
+            tracksToRemove.length === 0 || result.tracksRemoved > 0;
 
         // Step 5: Clean up orphaned albums (albums with no tracks)
         const orphanedAlbums = await prisma.album.findMany({
@@ -254,7 +285,7 @@ export class MusicScannerService {
             select: { id: true, title: true },
         });
 
-        if (tracksToRemove.length === 0 && orphanedAlbums.length > 0) {
+        if (shouldCleanOrphans && orphanedAlbums.length > 0) {
             logger.debug(
                 `Removing ${orphanedAlbums.length} orphaned albums...`,
             );
@@ -273,7 +304,7 @@ export class MusicScannerService {
             select: { id: true, name: true },
         });
 
-        if (tracksToRemove.length === 0 && orphanedArtists.length > 0) {
+        if (shouldCleanOrphans && orphanedArtists.length > 0) {
             logger.debug(
                 `Removing ${
                     orphanedArtists.length
