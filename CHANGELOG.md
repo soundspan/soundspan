@@ -315,6 +315,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GET /api/library/tracks/:id/stream` no longer leaks an
+  `AudioStreamingService` eviction timer when streaming fails, and the FFmpeg
+  fallback reuses a single service instance.
+- `/api/library/recently-listened`, `/api/homepage/genres`, and
+  `/api/homepage/top-podcasts` now clamp their `limit` query parameter (invalid
+  input falls back to the default), preventing NaN 500s, unbounded database
+  reads, and unbounded Redis cache-key cardinality.
 - Vibe text search now runs its blocking Redis response wait on a dedicated
   connection, so a slow CLAP sidecar cannot stall the shared Redis client used
   by sessions and caches.

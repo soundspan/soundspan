@@ -76,6 +76,7 @@ import {
 import { shuffleArray } from "../utils/shuffle";
 import { separateArtists } from "../utils/separateArtists";
 import { safeResolvePath } from "../utils/safeResolvePath";
+import { parseBoundedInt } from "../utils/queryParams";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -692,9 +693,8 @@ router.post(
 router.get(
     "/recently-listened",
     asyncHandler(async (req, res) => {
-        const { limit = "10" } = req.query;
         const userId = req.user!.id;
-        const limitNum = parseInt(limit as string, 10);
+        const limitNum = parseBoundedInt(req.query.limit, 10, 1, 100);
 
         const [recentPlays, inProgressAudiobooks, inProgressPodcasts] =
             await Promise.all([
@@ -4308,9 +4308,11 @@ router.get("/tracks/:id/stream", async (req, res) => {
                 return sendRouteError(res, 404, "Track not available");
             }
 
+            let streamingService: AudioStreamingService | null = null;
+
             try {
                 // Initialize streaming service
-                const streamingService = new AudioStreamingService(
+                streamingService = new AudioStreamingService(
                     config.music.musicPath,
                     config.music.transcodeCachePath,
                     config.music.transcodeCacheMaxGb,
@@ -4340,7 +4342,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     filePath,
                     mimeType,
                 );
-                streamingService.destroy();
                 logger.debug(
                     `[STREAM] File sent successfully: ${path.basename(
                         filePath,
@@ -4352,15 +4353,11 @@ router.get("/tracks/:id/stream", async (req, res) => {
                 // If FFmpeg not found, try original quality instead
                 if (
                     err.code === "FFMPEG_NOT_FOUND" &&
-                    requestedQuality !== "original"
+                    requestedQuality !== "original" &&
+                    streamingService !== null
                 ) {
                     logger.warn(
                         `[STREAM] FFmpeg not available, falling back to original quality`,
-                    );
-                    const streamingService = new AudioStreamingService(
-                        config.music.musicPath,
-                        config.music.transcodeCachePath,
-                        config.music.transcodeCacheMaxGb,
                     );
 
                     const { filePath, mimeType } =
@@ -4377,7 +4374,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
                         filePath,
                         mimeType,
                     );
-                    streamingService.destroy();
                     return;
                 }
 
@@ -4385,6 +4381,8 @@ router.get("/tracks/:id/stream", async (req, res) => {
                 return res
                     .status(500)
                     .json({ error: "Failed to stream track" });
+            } finally {
+                streamingService?.destroy();
             }
         }
 

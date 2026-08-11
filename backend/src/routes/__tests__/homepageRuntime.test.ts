@@ -184,6 +184,36 @@ describe("homepage routes runtime", () => {
         );
     });
 
+    it("uses the default /genres limit for invalid input", async () => {
+        const req = { query: { limit: "abc" } } as any;
+        const res = createRes();
+
+        await getGenres(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisGet).toHaveBeenCalledWith("homepage:genres:4");
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "homepage:genres:4",
+            86400,
+            expect.any(String),
+        );
+    });
+
+    it("clamps the /genres limit used by the cache key", async () => {
+        const req = { query: { limit: "999999" } } as any;
+        const res = createRes();
+
+        await getGenres(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisGet).toHaveBeenCalledWith("homepage:genres:50");
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "homepage:genres:50",
+            86400,
+            expect.any(String),
+        );
+    });
+
     it("returns 500 for /genres when DB query fails", async () => {
         mockAlbumFindMany.mockRejectedValueOnce(new Error("db down"));
         const req = { query: {} } as any;
@@ -245,6 +275,42 @@ describe("homepage routes runtime", () => {
         ]);
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "homepage:top-podcasts:1",
+            86400,
+            expect.any(String),
+        );
+    });
+
+    it("uses the default /top-podcasts limit for invalid input", async () => {
+        const req = { query: { limit: "abc" } } as any;
+        const res = createRes();
+
+        await getTopPodcasts(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisGet).toHaveBeenCalledWith("homepage:top-podcasts:6");
+        expect(mockPodcastFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 6 }),
+        );
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "homepage:top-podcasts:6",
+            86400,
+            expect.any(String),
+        );
+    });
+
+    it("clamps the /top-podcasts limit used by the query and cache key", async () => {
+        const req = { query: { limit: "999999" } } as any;
+        const res = createRes();
+
+        await getTopPodcasts(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockRedisGet).toHaveBeenCalledWith("homepage:top-podcasts:50");
+        expect(mockPodcastFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 50 }),
+        );
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "homepage:top-podcasts:50",
             86400,
             expect.any(String),
         );

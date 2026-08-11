@@ -1240,6 +1240,7 @@ describe("library stream runtime coverage", () => {
             "/tmp/soundspan-cache/track-high.mp3",
             "audio/mpeg",
         );
+        expect(mockAudioStreamingCtor).toHaveBeenCalledTimes(1);
         expect(mockStreamDestroy).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBe(200);
     });
@@ -1305,7 +1306,7 @@ describe("library stream runtime coverage", () => {
 
         await streamHandler(req, res);
 
-        expect(mockAudioStreamingCtor).toHaveBeenCalledTimes(2);
+        expect(mockAudioStreamingCtor).toHaveBeenCalledTimes(1);
         expect(mockStreamGetStreamFilePath).toHaveBeenNthCalledWith(
             1,
             "track-1",
@@ -1326,6 +1327,7 @@ describe("library stream runtime coverage", () => {
             "/tmp/soundspan-cache/track-original.flac",
             "audio/flac",
         );
+        expect(mockStreamDestroy).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBe(200);
     });
 
@@ -1345,7 +1347,9 @@ describe("library stream runtime coverage", () => {
 
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to stream track" });
+        expect(mockAudioStreamingCtor).toHaveBeenCalledTimes(1);
         expect(mockStreamWithRangeSupport).not.toHaveBeenCalled();
+        expect(mockStreamDestroy).toHaveBeenCalledTimes(1);
     });
 
     it("returns 500 when an upstream lookup throws before streaming starts", async () => {
@@ -1702,6 +1706,48 @@ describe("library catalog list runtime coverage", () => {
                 albumCount: 7,
             }),
         ]);
+    });
+
+    it("uses the default recently-listened limit for invalid input", async () => {
+        const req = {
+            query: { limit: "abc" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await recentlyListenedHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockPlayFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 30 }),
+        );
+        expect(mockAudiobookProgressFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 4 }),
+        );
+        expect(mockPodcastProgressFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 20 }),
+        );
+    });
+
+    it("clamps the recently-listened limit before querying", async () => {
+        const req = {
+            query: { limit: "1000000" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await recentlyListenedHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockPlayFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 300 }),
+        );
+        expect(mockAudiobookProgressFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 34 }),
+        );
+        expect(mockPodcastProgressFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 200 }),
+        );
     });
 
     it("returns 500 when recently listened aggregation fails", async () => {
