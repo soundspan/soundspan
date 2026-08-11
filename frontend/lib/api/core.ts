@@ -9,6 +9,8 @@ const AUTH_REFRESH_TIMEOUT_MS = 10_000;
 export const IMPORT_PREVIEW_TIMEOUT_MS = 60_000;
 const DEFAULT_TIMEOUT_RETRY_BACKOFF_MS = 350;
 const MAX_TIMEOUT_RETRIES = 1;
+const PROACTIVE_REFRESH_LIFETIME_RATIO = 0.8;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 interface ApiError extends Error {
     status?: number;
@@ -68,6 +70,23 @@ export abstract class ApiClientCore {
     protected tokenInitialized: boolean = false;
     private readonly inFlightGetRequests = new Map<string, Promise<unknown>>();
     private refreshPromise: Promise<boolean> | null = null;
+    private proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    private proactiveRefreshAtMs: number | null = null;
+
+    private readonly handleVisibilityChange = (): void => {
+        if (
+            typeof window === "undefined" ||
+            typeof document === "undefined" ||
+            document.visibilityState !== "visible" ||
+            this.proactiveRefreshAtMs === null ||
+            Date.now() < this.proactiveRefreshAtMs
+        ) {
+            return;
+        }
+
+        this.cancelProactiveRefreshTimer();
+        void this.refreshAccessToken();
+    };
 
     constructor(baseUrl?: string) {
         // Don't set baseUrl in constructor - determine it dynamically on each request
@@ -78,8 +97,19 @@ export abstract class ApiClientCore {
             this.token = localStorage.getItem(AUTH_TOKEN_KEY);
             if (this.token) {
                 this.tokenInitialized = true;
+                this.scheduleProactiveTokenRefresh(this.token);
             }
             // Note: Refresh token is loaded on-demand via getRefreshToken()
+        }
+
+        if (
+            typeof window !== "undefined" &&
+            typeof document !== "undefined"
+        ) {
+            document.addEventListener(
+                "visibilitychange",
+                this.handleVisibilityChange,
+            );
         }
     }
 
@@ -95,6 +125,7 @@ export abstract class ApiClientCore {
         const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
         if (storedToken) {
             this.token = storedToken;
+            this.scheduleProactiveTokenRefresh(storedToken);
         }
 
         this.tokenInitialized = true;
@@ -129,6 +160,7 @@ export abstract class ApiClientCore {
                 localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
             }
         }
+        this.scheduleProactiveTokenRefresh(token);
     }
 
     // Get refresh token from storage
@@ -142,10 +174,79 @@ export abstract class ApiClientCore {
     // Clear both JWT tokens
     clearToken() {
         this.token = null;
+        this.clearProactiveRefreshSchedule();
         if (typeof window !== "undefined") {
             localStorage.removeItem(AUTH_TOKEN_KEY);
             localStorage.removeItem(REFRESH_TOKEN_KEY);
         }
+    }
+
+    private decodeTokenExpiryMs(token: string): number | null {
+        const payloadSegment = token.split(".")[1];
+        if (!payloadSegment || typeof atob !== "function") {
+            return null;
+        }
+
+        try {
+            const base64Payload = payloadSegment
+                .replace(/-/g, "+")
+                .replace(/_/g, "/");
+            const paddedPayload = base64Payload.padEnd(
+                Math.ceil(base64Payload.length / 4) * 4,
+                "=",
+            );
+            const payload: unknown = JSON.parse(atob(paddedPayload));
+            if (!payload || typeof payload !== "object") {
+                return null;
+            }
+
+            const expiresAtSeconds = (payload as Record<string, unknown>).exp;
+            const expiresAtMs = Number(expiresAtSeconds) * 1000;
+            return typeof expiresAtSeconds === "number" &&
+                Number.isFinite(expiresAtMs) &&
+                expiresAtMs > 0
+                ? expiresAtMs
+                : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private scheduleProactiveTokenRefresh(token: string): void {
+        this.clearProactiveRefreshSchedule();
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        const expiresAtMs = this.decodeTokenExpiryMs(token);
+        if (expiresAtMs === null) {
+            return;
+        }
+
+        const nowMs = Date.now();
+        const remainingLifetimeMs = Math.max(0, expiresAtMs - nowMs);
+        const refreshDelayMs = Math.min(
+            Math.floor(remainingLifetimeMs * PROACTIVE_REFRESH_LIFETIME_RATIO),
+            MAX_TIMER_DELAY_MS,
+        );
+        this.proactiveRefreshAtMs = nowMs + refreshDelayMs;
+        this.proactiveRefreshTimer = setTimeout(() => {
+            this.proactiveRefreshTimer = null;
+            void this.refreshAccessToken();
+        }, refreshDelayMs);
+    }
+
+    private cancelProactiveRefreshTimer(): void {
+        if (this.proactiveRefreshTimer === null) {
+            return;
+        }
+        clearTimeout(this.proactiveRefreshTimer);
+        this.proactiveRefreshTimer = null;
+    }
+
+    private clearProactiveRefreshSchedule(): void {
+        this.cancelProactiveRefreshTimer();
+        this.proactiveRefreshAtMs = null;
     }
 
     // Get the base URL dynamically to support switching between localhost and IP
@@ -526,6 +627,7 @@ export abstract class ApiClientCore {
             if (storedToken) {
                 this.token = storedToken;
                 this.tokenInitialized = true;
+                this.scheduleProactiveTokenRefresh(storedToken);
                 return storedToken;
             }
         }
