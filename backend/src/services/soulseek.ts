@@ -198,6 +198,13 @@ class SoulseekService {
             `Force disconnecting (was connected for ${uptime}s)`,
             "WARN",
         );
+        this.teardownClient();
+        this.client = null;
+        this.connectedAt = null;
+        this.lastConnectAttempt = 0; // Allow immediate reconnect
+    }
+
+    private teardownClient(): void {
         try {
             this.client?.removeAllListeners?.("error");
             this.client?.destroy?.();
@@ -212,9 +219,6 @@ class SoulseekService {
                 "WARN",
             );
         }
-        this.client = null;
-        this.connectedAt = null;
-        this.lastConnectAttempt = 0; // Allow immediate reconnect
     }
 
     /**
@@ -1296,6 +1300,7 @@ class SoulseekService {
      * Disconnect from Soulseek
      */
     disconnect(): void {
+        this.teardownClient();
         this.client = null;
         sessionLog("SOULSEEK", "Disconnected");
     }

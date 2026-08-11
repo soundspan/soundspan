@@ -437,14 +437,59 @@ describe("soulseek service", () => {
         setIntervalSpy.mockRestore();
     });
 
-    it("disconnect clears client and logs state", () => {
+    it("disconnect tears down the client before clearing it and logs state", () => {
         const service = soulseekService as any;
-        service.client = { search: jest.fn(), download: jest.fn() };
+        const client = {
+            search: jest.fn(),
+            download: jest.fn(),
+            destroy: jest.fn(() => {
+                expect(service.client).toBe(client);
+            }),
+            removeAllListeners: jest.fn(() => {
+                expect(service.client).toBe(client);
+            }),
+        };
+        service.client = client;
 
         soulseekService.disconnect();
 
+        expect(client.removeAllListeners).toHaveBeenCalledWith("error");
+        expect(client.destroy).toHaveBeenCalledTimes(1);
         expect(service.client).toBeNull();
         expect(mockSessionLog).toHaveBeenCalledWith("SOULSEEK", "Disconnected");
+    });
+
+    it("disconnect clears the client and warns when teardown throws", () => {
+        const service = soulseekService as any;
+        service.client = {
+            search: jest.fn(),
+            download: jest.fn(),
+            destroy: jest.fn(() => {
+                throw new Error("socket teardown failed");
+            }),
+            removeAllListeners: jest.fn(),
+        };
+
+        expect(() => soulseekService.disconnect()).not.toThrow();
+
+        expect(service.client).toBeNull();
+        expect(mockSessionLog).toHaveBeenCalledWith(
+            "SOULSEEK",
+            expect.stringContaining("Client teardown failed"),
+            "WARN",
+        );
+        expect(mockSessionLog).toHaveBeenCalledWith("SOULSEEK", "Disconnected");
+    });
+
+    it("disconnect safely clears clients without teardown methods or a client", () => {
+        const service = soulseekService as any;
+        service.client = { search: jest.fn(), download: jest.fn() };
+
+        expect(() => soulseekService.disconnect()).not.toThrow();
+        expect(service.client).toBeNull();
+
+        expect(() => soulseekService.disconnect()).not.toThrow();
+        expect(service.client).toBeNull();
     });
 
     it("normalizes track titles and keeps original when normalization removes too much", () => {

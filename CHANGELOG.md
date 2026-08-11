@@ -319,6 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Soulseek: public disconnect() now destroys the client and removes its error listener before dropping the reference, closing a socket/listener leak on reconnect cycles (sibling of #331).
 - Dedicated Redis BLPOP connection is now closed when its initial connect fails,
   instead of leaking a reconnecting client.
 - Worker health-check interval is now captured, unref'd, and cleared during
