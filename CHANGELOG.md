@@ -323,6 +323,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of leaking a reconnecting client.
 - Worker health-check interval is now captured, unref'd, and cleared during
   graceful shutdown.
+- Bounded every `/api/library/radio` candidate-pool query (discovery, favorites
+  fallback, decade, mood, workout, vibe genre/random fallbacks, and the
+  all-library default) with `ORDER BY random() LIMIT` sampling in SQL instead of
+  materializing the full matching track-id set into memory, and escaped `%`/`_`
+  LIKE wildcards in the genre-radio value so a wildcard query value can no
+  longer match the entire library.
 - Soulseek forced disconnects now destroy the underlying slsk-client, closing
   its server, listen, and peer sockets, and remove the attached error listener
   before dropping the reference. Previously each search-failure or empty-search

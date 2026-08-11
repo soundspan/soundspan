@@ -42,6 +42,7 @@ jest.mock("../../utils/db", () => ({
         dislikedEntity: {
             findMany: jest.fn(),
         },
+        $queryRaw: jest.fn(),
     },
     Prisma: {
         SortOrder: {
@@ -49,6 +50,11 @@ jest.mock("../../utils/db", () => ({
             desc: "desc",
         },
         DbNull: null,
+        sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+            strings,
+            values,
+        }),
+        join: (values: unknown[]) => values,
     },
 }));
 
@@ -189,6 +195,7 @@ const mockOwnedAlbumFindMany = prisma.ownedAlbum.findMany as jest.Mock;
 const mockSimilarArtistFindMany = prisma.similarArtist.findMany as jest.Mock;
 const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
 const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
+const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
     const layer = (router as any).stack.find(
@@ -336,8 +343,8 @@ describe("library vibe radio reliability compatibility", () => {
         mockTrackFindMany
             .mockResolvedValueOnce([analyzedCandidate]) // analyzed comparison set
             .mockResolvedValueOnce([]) // fallback A: same artist
-            .mockResolvedValueOnce([]) // fallback D: random
             .mockResolvedValueOnce([hydratedCandidate]); // final hydrated results
+        mockQueryRaw.mockResolvedValueOnce([]); // fallback D: random
         mockOwnedAlbumFindMany.mockResolvedValue([]);
         mockSimilarArtistFindMany.mockResolvedValue([]);
 
@@ -614,11 +621,11 @@ describe("library vibe radio reliability compatibility", () => {
     });
 
     it("uses shuffled non-vibe radio ordering and tolerates tracks without artist ids", async () => {
+        mockQueryRaw.mockResolvedValueOnce([
+            { id: "all-track-1" },
+            { id: "all-track-2" },
+        ]);
         mockTrackFindMany
-            .mockResolvedValueOnce([
-                { id: "all-track-1" },
-                { id: "all-track-2" },
-            ])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 {
@@ -684,8 +691,8 @@ describe("library vibe radio reliability compatibility", () => {
                 }),
             ],
         });
-        // Pool query + diversify artist lookup (GH #46) + full track fetch.
-        expect(mockTrackFindMany).toHaveBeenCalledTimes(3);
+        // Diversify artist lookup + full track fetch; the pool is sampled in SQL.
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(2);
     });
 
     it("returns 500 when radio processing throws", async () => {

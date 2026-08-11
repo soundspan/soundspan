@@ -140,6 +140,11 @@ jest.mock("../../utils/db", () => ({
             desc: "desc",
         },
         DbNull: null,
+        sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+            strings,
+            values,
+        }),
+        join: (values: unknown[]) => values,
     },
 }));
 
@@ -572,6 +577,25 @@ function createRadioTrack(id: string, overrides?: Partial<any>) {
         trackGenres: [],
         ...overrides,
     };
+}
+
+function expectBoundedRandomQuery(call: unknown[], limit: number) {
+    const [strings, ...values] = call as [TemplateStringsArray, ...unknown[]];
+    const sql = strings.join("?");
+    expect(sql).toContain("ORDER BY random()");
+    expect(sql).toContain("LIMIT");
+    expect(values).toContain(limit);
+}
+
+function expectNoUnboundedIdPoolFetch() {
+    expect(
+        mockTrackFindMany.mock.calls.some(
+            ([args]) =>
+                args?.select?.id === true &&
+                Object.keys(args.select).length === 1 &&
+                args.take === undefined,
+        ),
+    ).toBe(false);
 }
 
 describe("library scan and organize runtime coverage", () => {
@@ -5041,8 +5065,8 @@ describe("library catalog list runtime coverage", () => {
             error: "Radio type is required",
         });
 
+        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "u1" }, { id: "u2" }]);
         mockTrackFindMany
-            .mockResolvedValueOnce([{ id: "u1" }, { id: "u2" }])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("u1"),
@@ -5057,18 +5081,18 @@ describe("library catalog list runtime coverage", () => {
         await radioHandler(discoveryReq, discoveryRes);
         expect(discoveryRes.statusCode).toBe(200);
         expect(discoveryRes.body.tracks).toHaveLength(2);
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[0], 8);
+        expectNoUnboundedIdPoolFetch();
 
-        mockTrackFindMany
+        mockPrismaQueryRaw
             .mockResolvedValueOnce([{ id: "u3" }])
+            .mockResolvedValueOnce([{ id: "lp1" }, { id: "lp2" }]);
+        mockTrackFindMany
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("lp1"),
                 createRadioTrack("lp2"),
             ]);
-        mockPrismaQueryRaw.mockResolvedValueOnce([
-            { id: "lp1" },
-            { id: "lp2" },
-        ]);
 
         const fallbackReq = {
             query: { type: "discovery", limit: "2" },
@@ -5076,7 +5100,7 @@ describe("library catalog list runtime coverage", () => {
         } as any;
         const fallbackRes = createRes();
         await radioHandler(fallbackReq, fallbackRes);
-        expect(mockPrismaQueryRaw).toHaveBeenCalled();
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[1], 8);
         expect(fallbackRes.statusCode).toBe(200);
         expect(fallbackRes.body.tracks.map((track: any) => track.id)).toEqual([
             "lp1",
@@ -5085,9 +5109,10 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("builds workout radio using audio, genre table, and album-genre fallback sources", async () => {
-        mockTrackFindMany
+        mockPrismaQueryRaw
             .mockResolvedValueOnce([{ id: "w1" }])
-            .mockResolvedValueOnce([{ id: "w3" }])
+            .mockResolvedValueOnce([{ id: "w3" }]);
+        mockTrackFindMany
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("w1"),
@@ -5114,6 +5139,9 @@ describe("library catalog list runtime coverage", () => {
             "w2",
             "w3",
         ]);
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[0], 12);
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[1], 6);
+        expectNoUnboundedIdPoolFetch();
     });
 
     it("supports artist radio validation, empty artist libraries, and mixed artist+similar queues", async () => {
@@ -5570,26 +5598,6 @@ describe("library catalog list runtime coverage", () => {
             if (Array.isArray(args.where?.album?.artistId?.in)) {
                 return [{ id: "sim-b1" }];
             }
-            if (args.where?.trackGenres?.some) {
-                return [{ id: "genre-c1" }];
-            }
-            if (
-                Array.isArray(args.where?.id?.notIn) &&
-                args.select?.id &&
-                !args.where?.album &&
-                !args.include
-            ) {
-                // Fallback D dropped `take` for sampleUniform (GH #46);
-                // return a generous pool for the sampler to draw from.
-                const fillerCount =
-                    typeof args.take === "number" ? args.take : 60;
-                return Array.from(
-                    { length: fillerCount },
-                    (_unused, index) => ({
-                        id: `rnd-d${index + 1}`,
-                    }),
-                );
-            }
             if (Array.isArray(args.where?.id?.in) && args.include?.album) {
                 return (args.where.id.in as string[]).map(
                     (id: string, index: number) =>
@@ -5610,6 +5618,13 @@ describe("library catalog list runtime coverage", () => {
         mockSimilarArtistFindMany.mockResolvedValueOnce([
             { toArtistId: "artist-sim-1", weight: 0.9 },
         ]);
+        mockPrismaQueryRaw
+            .mockResolvedValueOnce([{ id: "genre-c1" }])
+            .mockResolvedValueOnce(
+                Array.from({ length: 50 }, (_unused, index) => ({
+                    id: `rnd-d${index + 1}`,
+                })),
+            );
 
         const missingSourceReq = {
             query: { type: "vibe" },
@@ -5646,6 +5661,8 @@ describe("library catalog list runtime coverage", () => {
                 }),
             }),
         );
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[0], 55);
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[1], 50);
     });
 
     it("covers favorites, decade, genre, mood, and all radio branches", async () => {
@@ -5667,8 +5684,8 @@ describe("library catalog list runtime coverage", () => {
         ]);
 
         mockPrismaQueryRaw.mockResolvedValueOnce([]);
+        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "rand-fav-1" }]);
         mockTrackFindMany
-            .mockResolvedValueOnce([{ id: "rand-fav-1" }])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("rand-fav-1")]);
         const fallbackFavoritesReq = {
@@ -5679,9 +5696,10 @@ describe("library catalog list runtime coverage", () => {
         await radioHandler(fallbackFavoritesReq, fallbackFavoritesRes);
         expect(fallbackFavoritesRes.statusCode).toBe(200);
         expect(fallbackFavoritesRes.body.tracks[0].id).toBe("rand-fav-1");
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[2], 4);
 
+        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "dec-1" }]);
         mockTrackFindMany
-            .mockResolvedValueOnce([{ id: "dec-1" }])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("dec-1")]);
         const decadeReq = {
@@ -5691,8 +5709,8 @@ describe("library catalog list runtime coverage", () => {
         const decadeRes = createRes();
         await radioHandler(decadeReq, decadeRes);
         expect(decadeRes.statusCode).toBe(200);
-        expect(mockGetDecadeWhereClause).toHaveBeenCalledWith(1990);
         expect(decadeRes.body.tracks[0].id).toBe("dec-1");
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[3], 4);
 
         mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "genre-1" }]);
         mockTrackFindMany
@@ -5707,8 +5725,8 @@ describe("library catalog list runtime coverage", () => {
         expect(genreRes.statusCode).toBe(200);
         expect(genreRes.body.tracks[0].id).toBe("genre-1");
 
+        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "mood-1" }]);
         mockTrackFindMany
-            .mockResolvedValueOnce([{ id: "mood-1" }])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("mood-1")]);
         const moodReq = {
@@ -5719,9 +5737,10 @@ describe("library catalog list runtime coverage", () => {
         await radioHandler(moodReq, moodRes);
         expect(moodRes.statusCode).toBe(200);
         expect(moodRes.body.tracks[0].id).toBe("mood-1");
+        expectBoundedRandomQuery(mockPrismaQueryRaw.mock.calls[5], 4);
 
+        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "mood-2" }]);
         mockTrackFindMany
-            .mockResolvedValueOnce([{ id: "mood-2" }])
             .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("mood-2")]);
         const defaultMoodReq = {
@@ -5742,8 +5761,8 @@ describe("library catalog list runtime coverage", () => {
             ["instrumental", "mood-instrumental"],
         ];
         for (const [moodValue, trackId] of additionalMoodCases) {
+            mockPrismaQueryRaw.mockResolvedValueOnce([{ id: trackId }]);
             mockTrackFindMany
-                .mockResolvedValueOnce([{ id: trackId }])
                 .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
                 .mockResolvedValueOnce([createRadioTrack(trackId)]);
             const req = {
@@ -5756,7 +5775,7 @@ describe("library catalog list runtime coverage", () => {
             expect(res.body.tracks[0].id).toBe(trackId);
         }
 
-        mockTrackFindMany.mockResolvedValueOnce([]);
+        mockPrismaQueryRaw.mockResolvedValueOnce([]);
         const emptyAllReq = {
             query: { type: "all", limit: "5" },
             user: { id: "user-1" },
@@ -5765,7 +5784,41 @@ describe("library catalog list runtime coverage", () => {
         await radioHandler(emptyAllReq, emptyAllRes);
         expect(emptyAllRes.statusCode).toBe(200);
         expect(emptyAllRes.body).toEqual({ tracks: [] });
+        expectBoundedRandomQuery(
+            mockPrismaQueryRaw.mock.calls[
+                mockPrismaQueryRaw.mock.calls.length - 1
+            ],
+            20,
+        );
+        expectNoUnboundedIdPoolFetch();
     });
+
+    it.each([
+        ["%", "%\\%%"],
+        ["_", "%\\_%"],
+        ["rock", "%rock%"],
+    ])(
+        "escapes genre LIKE input %s as a literal pattern",
+        async (value, pattern) => {
+            mockPrismaQueryRaw
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            const req = {
+                query: { type: "genre", value, limit: "1" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await radioHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual({ tracks: [] });
+            const likeValues = mockPrismaQueryRaw.mock.calls
+                .flatMap((call) => call.slice(1))
+                .filter((boundValue) => boundValue === pattern);
+            expect(likeValues).toHaveLength(4);
+        },
+    );
 
     it("returns liked radio tracks using deterministic liked-order membership", async () => {
         mockLikedTrackFindMany.mockResolvedValueOnce([
@@ -5938,7 +5991,7 @@ describe("library catalog list runtime coverage", () => {
         expect(missingTrackRes.statusCode).toBe(404);
         expect(missingTrackRes.body).toEqual({ error: "Track not found" });
 
-        mockTrackFindMany.mockRejectedValueOnce(new Error("radio explosion"));
+        mockPrismaQueryRaw.mockRejectedValueOnce(new Error("radio explosion"));
         const errorReq = {
             query: { type: "all", limit: "2" },
             user: { id: "user-1" },

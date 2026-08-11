@@ -22,10 +22,7 @@ import fs from "fs";
 import { config } from "../config";
 import { isOriginAllowed } from "../utils/cors";
 import { fanartService } from "../services/fanart";
-import {
-    allocateTracksWithArtistWeighting,
-    sampleUniform,
-} from "../services/artistSlotAllocation";
+import { allocateTracksWithArtistWeighting } from "../services/artistSlotAllocation";
 import { deezerService } from "../services/deezer";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
@@ -68,11 +65,7 @@ import {
     getMergedGenres,
     getArtistDisplaySummary,
 } from "../utils/metadataOverrides";
-import {
-    getEffectiveYear,
-    getDecadeWhereClause,
-    getDecadeFromYear,
-} from "../utils/dateFilters";
+import { getEffectiveYear, getDecadeFromYear } from "../utils/dateFilters";
 import { shuffleArray } from "../utils/shuffle";
 import { separateArtists } from "../utils/separateArtists";
 import { safeResolvePath } from "../utils/safeResolvePath";
@@ -145,6 +138,32 @@ const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_T
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
+
+/** Escape LIKE metacharacters so user input matches literally (PG default escape '\'). */
+const escapeLikePattern = (value: string): string =>
+    value.replace(/[\\%_]/g, (character) => `\\${character}`);
+
+const moodPoolCondition = (moodValue: string): Prisma.Sql => {
+    switch (moodValue) {
+        case "high-energy":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.energy >= ${0.7} AND t.bpm >= ${120}`;
+        case "chill":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND (t.energy <= ${0.4} OR t.arousal <= ${0.4})`;
+        case "happy":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.valence >= ${0.6} AND t.energy >= ${0.5}`;
+        case "melancholy":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND (t.valence <= ${0.4} OR t."keyScale" = ${"minor"})`;
+        case "dance":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.danceability >= ${0.7}`;
+        case "acoustic":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.acousticness >= ${0.6}`;
+        case "instrumental":
+            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.instrumentalness >= ${0.7}`;
+        default:
+            return Prisma.sql`${moodValue} = ANY(t."lastfmTags")`;
+    }
+};
+
 interface AudioInfoResponsePayload {
     codec: string | null;
     bitrate: number | null;
@@ -6066,19 +6085,18 @@ router.get(
             case "discovery":
                 // Lesser-played tracks - get tracks the user hasn't played or played least
                 // First, get tracks with NO plays at all (truly undiscovered)
-                const unplayedTracks = await prisma.track.findMany({
-                    where: {
-                        plays: { none: {} }, // No plays by anyone
-                    },
-                    select: { id: true },
-                });
+                const unplayedTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id FROM "Track" t
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM "Play" p WHERE p."trackId" = t.id
+                    )
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
 
                 if (unplayedTracks.length >= limitNum) {
-                    // Uniform sample instead of an unordered `take` (GH #46).
-                    trackIds = sampleUniform(
-                        unplayedTracks.map((t) => t.id),
-                        limitNum * 4,
-                    );
+                    // The candidate pool is bounded and uniformly sampled in SQL.
+                    trackIds = unplayedTracks.map((t) => t.id);
                 } else {
                     // Fallback: get tracks with the fewest plays using raw count
                     const leastPlayedTracks = await prisma.$queryRaw<
@@ -6135,14 +6153,14 @@ router.get(
                     logger.debug(
                         "[Radio:favorites] No play data found, returning random tracks",
                     );
-                    const randomTracks = await prisma.track.findMany({
-                        select: { id: true },
-                    });
-                    // Uniform sample instead of an unordered `take` (GH #46).
-                    trackIds = sampleUniform(
-                        randomTracks.map((t) => t.id),
-                        limitNum * 4,
-                    );
+                    const randomTracks = await prisma.$queryRaw<
+                        { id: string }[]
+                    >`
+                        SELECT id FROM "Track"
+                        ORDER BY random()
+                        LIMIT ${limitNum * 4}
+                    `;
+                    trackIds = randomTracks.map((t) => t.id);
                 }
                 break;
 
@@ -6150,23 +6168,21 @@ router.get(
                 // Filter by decade (e.g., value = "1990" for 90s)
                 const decadeStart = parseInt(radioValue || "2000", 10) || 2000;
 
-                // Fetch all matching ids and sample uniformly — an
-                // unordered `take` returned the same artist-clustered
-                // slice on every request (GH #46).
-                const decadeTracks = await prisma.track.findMany({
-                    where: {
-                        album: getDecadeWhereClause(decadeStart),
-                    },
-                    select: { id: true },
-                });
-                trackIds = sampleUniform(
-                    decadeTracks.map((t) => t.id),
-                    limitNum * 4,
-                );
+                // The candidate pool is bounded and uniformly sampled in SQL.
+                const decadeTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id FROM "Track" t
+                    JOIN "Album" a ON a.id = t."albumId"
+                    WHERE (a."originalYear" >= ${decadeStart} AND a."originalYear" < ${decadeStart + 10})
+                       OR (a."originalYear" IS NULL AND a."year" >= ${decadeStart} AND a."year" < ${decadeStart + 10})
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
+                trackIds = decadeTracks.map((t) => t.id);
                 break;
 
             case "genre": {
                 const genreValue = (radioValue || "").toLowerCase();
+                const genrePattern = `%${escapeLikePattern(genreValue)}%`;
 
                 // Prefer track-level genre evidence (Last.fm track tags,
                 // Essentia genres) so the pool is matching TRACKS — the
@@ -6183,11 +6199,11 @@ router.get(
                     FROM "Track" t
                     WHERE EXISTS (
                         SELECT 1 FROM unnest(t."lastfmTags") AS tag(name)
-                        WHERE LOWER(tag.name) LIKE ${"%" + genreValue + "%"}
+                        WHERE LOWER(tag.name) LIKE ${genrePattern}
                     )
                     OR EXISTS (
                         SELECT 1 FROM unnest(t."essentiaGenres") AS eg(name)
-                        WHERE LOWER(eg.name) LIKE ${"%" + genreValue + "%"}
+                        WHERE LOWER(eg.name) LIKE ${genrePattern}
                     )
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
@@ -6207,12 +6223,12 @@ router.get(
                         WHERE (
                             (ar.genres IS NOT NULL AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-                                WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
+                                WHERE LOWER(g.genre) LIKE ${genrePattern}
                             ))
                             OR
                             (ar."userGenres" IS NOT NULL AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
-                                WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
+                                WHERE LOWER(ug.genre) LIKE ${genrePattern}
                             ))
                         )
                         ORDER BY sort_key
@@ -6232,111 +6248,34 @@ router.get(
                 break;
             }
 
-            case "mood":
+            case "mood": {
                 // Mood-based filtering using audio analysis features
                 const moodValue = (radioValue || "").toLowerCase();
-                let moodWhere: any = { analysisStatus: "completed" };
-
-                switch (moodValue) {
-                    case "high-energy":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            energy: { gte: 0.7 },
-                            bpm: { gte: 120 },
-                        };
-                        break;
-                    case "chill":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            OR: [
-                                { energy: { lte: 0.4 } },
-                                { arousal: { lte: 0.4 } },
-                            ],
-                        };
-                        break;
-                    case "happy":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            valence: { gte: 0.6 },
-                            energy: { gte: 0.5 },
-                        };
-                        break;
-                    case "melancholy":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            OR: [
-                                { valence: { lte: 0.4 } },
-                                { keyScale: "minor" },
-                            ],
-                        };
-                        break;
-                    case "dance":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            danceability: { gte: 0.7 },
-                        };
-                        break;
-                    case "acoustic":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            acousticness: { gte: 0.6 },
-                        };
-                        break;
-                    case "instrumental":
-                        moodWhere = {
-                            analysisStatus: "completed",
-                            instrumentalness: { gte: 0.7 },
-                        };
-                        break;
-                    default:
-                        // Try Last.fm tags if mood not recognized
-                        moodWhere = {
-                            lastfmTags: { has: moodValue },
-                        };
-                }
-
-                // Uniform sample instead of an unordered `take` (GH #46).
-                const moodTracks = await prisma.track.findMany({
-                    where: moodWhere,
-                    select: { id: true },
-                });
-                trackIds = sampleUniform(
-                    moodTracks.map((t) => t.id),
-                    limitNum * 4,
-                );
+                const moodCondition = moodPoolCondition(moodValue);
+                const moodTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id FROM "Track" t
+                    WHERE ${moodCondition}
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
+                trackIds = moodTracks.map((t) => t.id);
                 break;
+            }
 
             case "workout":
                 // High-energy workout tracks - multiple strategies
                 let workoutTrackIds: string[] = [];
 
                 // Strategy 1: Audio analysis - high energy AND fast BPM
-                const energyTracks = await prisma.track.findMany({
-                    where: {
-                        analysisStatus: "completed",
-                        OR: [
-                            // High energy with fast tempo
-                            {
-                                AND: [
-                                    { energy: { gte: 0.65 } },
-                                    { bpm: { gte: 115 } },
-                                ],
-                            },
-                            // Has workout mood tag
-                            {
-                                moodTags: {
-                                    hasSome: ["workout", "energetic", "upbeat"],
-                                },
-                            },
-                        ],
-                    },
-                    select: { id: true },
-                });
-                // Uniform sample instead of an unordered `take` (GH #46).
-                workoutTrackIds = sampleUniform(
-                    energyTracks.map((t) => t.id),
-                    limitNum * 4,
-                );
+                const energyTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT t.id FROM "Track" t
+                    WHERE t."analysisStatus" = ${"completed"}
+                      AND ((t.energy >= ${0.65} AND t.bpm >= ${115})
+                           OR t."moodTags" && ARRAY[${"workout"}, ${"energetic"}, ${"upbeat"}]::text[])
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
+                workoutTrackIds = energyTracks.map((t) => t.id);
                 logger.debug(
                     `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
                 );
@@ -6394,23 +6333,19 @@ router.get(
 
                     // Also check album.genres JSON field
                     if (workoutTrackIds.length < limitNum) {
-                        const albumGenreTrackRows = await prisma.track.findMany(
-                            {
-                                where: {
-                                    album: {
-                                        OR: workoutGenreNames.map((g) => ({
-                                            genres: { string_contains: g },
-                                        })),
-                                    },
-                                },
-                                select: { id: true },
-                            },
-                        );
-                        // Uniform sample instead of an unordered `take` (GH #46).
-                        const albumGenreTracks = sampleUniform(
-                            albumGenreTrackRows,
-                            limitNum * 2,
-                        );
+                        const albumGenreTracks = await prisma.$queryRaw<
+                            { id: string }[]
+                        >`
+                            SELECT t.id FROM "Track" t
+                            JOIN "Album" a ON a.id = t."albumId"
+                            WHERE a.genres IS NOT NULL
+                              AND EXISTS (
+                                SELECT 1 FROM unnest(${workoutGenreNames}::text[]) AS g(name)
+                                WHERE (a.genres #>> '{}') LIKE '%' || g.name || '%'
+                              )
+                            ORDER BY random()
+                            LIMIT ${limitNum * 2}
+                        `;
                         workoutTrackIds = [
                             ...new Set([
                                 ...workoutTrackIds,
@@ -7307,28 +7242,29 @@ router.get(
                     vibeMatchedIds.length < limitNum &&
                     sourceGenres.length > 0
                 ) {
-                    // Search using the TrackGenre relation for better accuracy
-                    const genreTracks = await prisma.track.findMany({
-                        where: {
-                            trackGenres: {
-                                some: {
-                                    genre: {
-                                        name: {
-                                            in: sourceGenres,
-                                            mode: "insensitive",
-                                        },
-                                    },
-                                },
-                            },
-                            id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
-                        },
-                        select: { id: true },
-                    });
-                    // Uniform sample instead of an unordered `take` (GH #46).
-                    const newIds = sampleUniform(
-                        genreTracks.map((t) => t.id),
-                        limitNum,
-                    );
+                    // Search using the TrackGenre relation for better accuracy.
+                    const genreTracks = await prisma.$queryRaw<
+                        { id: string }[]
+                    >`
+                        SELECT t.id FROM "Track" t
+                        WHERE EXISTS (
+                            SELECT 1 FROM "TrackGenre" tg
+                            JOIN "Genre" g ON g.id = tg."genreId"
+                            WHERE tg."trackId" = t.id
+                              AND LOWER(g.name) IN (${Prisma.join(
+                                  sourceGenres.map((genre) =>
+                                      genre.toLowerCase(),
+                                  ),
+                              )})
+                        )
+                        AND t.id NOT IN (${Prisma.join([
+                            sourceTrackId,
+                            ...vibeMatchedIds,
+                        ])})
+                        ORDER BY random()
+                        LIMIT ${limitNum}
+                    `;
+                    const newIds = genreTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
                     logger.debug(
                         `[Radio:vibe] Fallback C (same genre): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`,
@@ -7337,17 +7273,19 @@ router.get(
 
                 // 6. Fallback D: Random from library
                 if (vibeMatchedIds.length < limitNum) {
-                    const randomTracks = await prisma.track.findMany({
-                        where: {
-                            id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
-                        },
-                        select: { id: true },
-                    });
-                    // Uniform sample instead of an unordered `take` (GH #46).
-                    const newIds = sampleUniform(
-                        randomTracks.map((t) => t.id),
-                        limitNum - vibeMatchedIds.length,
-                    );
+                    const remainingLimit = limitNum - vibeMatchedIds.length;
+                    const randomTracks = await prisma.$queryRaw<
+                        { id: string }[]
+                    >`
+                        SELECT t.id FROM "Track" t
+                        WHERE t.id NOT IN (${Prisma.join([
+                            sourceTrackId,
+                            ...vibeMatchedIds,
+                        ])})
+                        ORDER BY random()
+                        LIMIT ${remainingLimit}
+                    `;
+                    const newIds = randomTracks.map((t) => t.id);
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
                     logger.debug(
                         `[Radio:vibe] Fallback D (random): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`,
@@ -7474,9 +7412,11 @@ router.get(
             case "all":
             default:
                 // Random selection from all tracks in library
-                const allTracks = await prisma.track.findMany({
-                    select: { id: true },
-                });
+                const allTracks = await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT id FROM "Track"
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
                 trackIds = allTracks.map((t) => t.id);
         }
 
