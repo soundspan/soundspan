@@ -19,11 +19,24 @@ describe("podcast download runtime behavior", () => {
         const prisma = {
             $connect: jest.fn(async () => undefined),
             podcastEpisode: {
-                findUnique: jest.fn(async () => ({ fileSize: 1_048_576 })),
+                findUnique: jest.fn(async () => ({
+                    fileSize: 1_048_576,
+                    podcastId: "podcast-1",
+                })),
                 update: jest.fn(async () => undefined),
             },
+            podcastSubscription: {
+                findUnique: jest.fn(async () => ({
+                    userId: "user-1",
+                    podcastId: "podcast-1",
+                })),
+            },
             podcastDownload: {
-                findFirst: jest.fn(async () => ({ id: "dl-1", fileSizeMb: 1 })),
+                findFirst: jest.fn(async () => ({
+                    id: "dl-1",
+                    userId: "user-1",
+                    fileSizeMb: 1,
+                })),
                 deleteMany: jest.fn(async () => ({ count: 1 })),
                 updateMany: jest.fn(async () => ({ count: 1 })),
                 findMany: jest.fn(async () => []),
@@ -36,7 +49,9 @@ describe("podcast download runtime behavior", () => {
             debug: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         const fsPromises = {
             access: jest.fn(async () => undefined),
@@ -142,9 +157,104 @@ describe("podcast download runtime behavior", () => {
         expect(mocks.prisma.podcastDownload.updateMany).toHaveBeenCalled();
     });
 
+    it("rejects traversal episode IDs before database or filesystem access", async () => {
+        const mocks = setupPodcastDownloadMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        await expect(
+            podcastDownload.getCachedFilePath("../../outside/target"),
+        ).resolves.toBeNull();
+
+        expect(mocks.prisma.podcastEpisode.findUnique).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.access).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.unlink).not.toHaveBeenCalled();
+    });
+
+    it("rejects traversal episode IDs before starting a background download", async () => {
+        const mocks = setupPodcastDownloadMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "../outside",
+            "https://example.com/outside.mp3",
+            "user-1",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(mocks.prisma.podcastEpisode.findUnique).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.mkdir).not.toHaveBeenCalled();
+        expect(mocks.axiosGet).not.toHaveBeenCalled();
+    });
+
+    it("checks episode and subscription ownership before filesystem access", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
+            {
+                fileSize: 1_048_576,
+                podcastId: "podcast-1",
+            },
+        );
+        (
+            mocks.prisma.podcastSubscription.findUnique as jest.Mock
+        ).mockResolvedValue(null);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        await expect(
+            podcastDownload.getCachedFilePath("episode-unsubscribed"),
+        ).resolves.toBeNull();
+
+        expect(mocks.prisma.podcastSubscription.findUnique).toHaveBeenCalled();
+        expect(mocks.fsPromises.access).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.unlink).not.toHaveBeenCalled();
+    });
+
+    it("does not start a download for a user without a podcast subscription", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        (
+            mocks.prisma.podcastSubscription.findUnique as jest.Mock
+        ).mockResolvedValue(null);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-unsubscribed-download",
+            "https://example.com/unsubscribed.mp3",
+            "user-2",
+        );
+        for (let index = 0; index < 4; index += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.fsPromises.mkdir).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.access).not.toHaveBeenCalled();
+        expect(mocks.axiosGet).not.toHaveBeenCalled();
+        expect(mocks.prisma.podcastDownload.upsert).not.toHaveBeenCalled();
+    });
+
+    it("does not touch cache files for missing episodes", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
+            null,
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        await expect(
+            podcastDownload.getCachedFilePath("episode-missing"),
+        ).resolves.toBeNull();
+
+        expect(mocks.fsPromises.access).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.unlink).not.toHaveBeenCalled();
+    });
+
     it("cleans expired cache records and computes cache stats", async () => {
         const mocks = setupPodcastDownloadMocks();
+        const setTimeoutSpy = mockImmediateTimers();
         (mocks.prisma.podcastDownload.findMany as jest.Mock)
+            .mockRejectedValueOnce(new Error("Connection reset"))
             .mockResolvedValueOnce([
                 {
                     id: "d1",
@@ -175,6 +285,7 @@ describe("podcast download runtime behavior", () => {
 
         const cleanup = await podcastDownload.cleanupExpiredCache();
         expect(cleanup).toEqual({ deleted: 2, freedMb: 20 });
+        expect(mocks.prisma.$connect).toHaveBeenCalledTimes(1);
         expect(mocks.fsPromises.unlink).toHaveBeenCalledTimes(2);
         expect(mocks.prisma.podcastDownload.delete).toHaveBeenCalledTimes(2);
 
@@ -182,6 +293,7 @@ describe("podcast download runtime behavior", () => {
         expect(stats.totalFiles).toBe(2);
         expect(stats.totalSizeMb).toBe(10);
         expect(stats.oldestFile).toEqual(new Date("2025-02-01T00:00:00.000Z"));
+        setTimeoutSpy.mockRestore();
     });
 
     it("starts a single in-flight background download per episode", async () => {
@@ -252,6 +364,7 @@ describe("podcast download runtime behavior", () => {
         mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
         mocks.prisma.podcastEpisode.findUnique = jest.fn(async () => ({
             fileSize: 3,
+            podcastId: "podcast-1",
         }));
         (mocks.fsPromises.stat as jest.Mock).mockImplementation(
             async (targetPath: string) => {
@@ -424,6 +537,7 @@ describe("podcast download runtime behavior", () => {
 
     it("completes a background download and upserts podcast cache metadata", async () => {
         const mocks = setupPodcastDownloadMocks();
+        const setTimeoutSpy = mockImmediateTimers();
         const writeStream = (mocks.fsModule.createWriteStream as jest.Mock)();
         (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValue(
             writeStream,
@@ -442,6 +556,9 @@ describe("podcast download runtime behavior", () => {
                 fileSize: 3,
             },
         );
+        (mocks.prisma.podcastDownload.upsert as jest.Mock)
+            .mockRejectedValueOnce(new Error("Connection reset"))
+            .mockResolvedValueOnce(undefined);
 
         (mocks.axiosGet as jest.Mock).mockImplementation(async () => {
             const listeners = new Map<
@@ -496,11 +613,14 @@ describe("podcast download runtime behavior", () => {
                 },
             }),
         );
+        expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalledTimes(2);
+        expect(mocks.prisma.$connect).toHaveBeenCalledTimes(1);
         expect(mocks.fsPromises.rename).toHaveBeenCalledWith(
             "/music/.soundspan/podcast-audio/episode-complete.tmp",
             "/music/.soundspan/podcast-audio/episode-complete.mp3",
         );
         expect(podcastDownload.isDownloading("episode-complete")).toBe(false);
+        setTimeoutSpy.mockRestore();
     });
 
     it("deletes cache and db record when canonical episode size mismatches local cache", async () => {
@@ -529,7 +649,7 @@ describe("podcast download runtime behavior", () => {
         });
     });
 
-    it("deletes stale cache when DB record is missing", async () => {
+    it("does not touch stale cache files when the ownership record is missing", async () => {
         const mocks = setupPodcastDownloadMocks();
         (mocks.fsPromises.stat as jest.Mock).mockResolvedValue({
             size: 1_000_000,
@@ -549,10 +669,88 @@ describe("podcast download runtime behavior", () => {
             await podcastDownload.getCachedFilePath("episode-missing-db");
 
         expect(cachedPath).toBeNull();
-        expect(mocks.fsPromises.unlink).toHaveBeenCalledWith(
-            "/music/.soundspan/podcast-audio/episode-missing-db.mp3",
-        );
+        expect(mocks.fsPromises.unlink).not.toHaveBeenCalled();
         expect(mocks.prisma.podcastDownload.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects declared media sizes above the download limit before opening a file", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const dataStream = {
+            on: jest.fn(),
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+        };
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
+            headers: { "content-length": String(1024 * 1024 * 1024 + 1) },
+            data: dataStream,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-declared-oversized",
+            "https://example.com/oversized.mp3",
+            "user-1",
+        );
+        for (let index = 0; index < 5; index += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(dataStream.destroy).toHaveBeenCalled();
+        expect(mocks.fsModule.createWriteStream).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.rename).not.toHaveBeenCalled();
+        expect(mocks.prisma.podcastDownload.upsert).not.toHaveBeenCalled();
+    });
+
+    it("aborts and cleans up when observed media bytes exceed the download limit", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const controls: Record<string, (...args: any[]) => void> = {};
+        const dataStream = {
+            on: jest.fn((event: string, callback: (...args: any[]) => void) => {
+                controls[event] = callback;
+            }),
+            pipe: jest.fn(),
+            destroy: jest.fn(),
+        };
+        const writeStream = (mocks.fsModule.createWriteStream as jest.Mock)();
+        (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValue(
+            writeStream,
+        );
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
+            {
+                fileSize: 0,
+                podcastId: "podcast-1",
+            },
+        );
+        (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
+            headers: { "content-length": "0" },
+            data: dataStream,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-observed-oversized",
+            "https://example.com/streamed.mp3",
+            "user-1",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        controls.data?.({ length: 1024 * 1024 * 1024 + 1 });
+        for (let index = 0; index < 5; index += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(dataStream.destroy).toHaveBeenCalled();
+        expect(writeStream.destroy).toHaveBeenCalled();
+        expect(mocks.fsPromises.unlink).toHaveBeenCalledWith(
+            "/music/.soundspan/podcast-audio/episode-observed-oversized.tmp",
+        );
+        expect(mocks.fsPromises.rename).not.toHaveBeenCalled();
+        expect(mocks.prisma.podcastDownload.upsert).not.toHaveBeenCalled();
     });
 
     it("deletes cache and db record when db-recorded file size mismatches", async () => {
@@ -731,7 +929,7 @@ describe("podcast download runtime behavior", () => {
 
         expect(mocks.prisma.podcastEpisode.findUnique).toHaveBeenCalledWith({
             where: { id: "episode-file-size-fallback" },
-            select: { fileSize: true },
+            select: { fileSize: true, podcastId: true },
         });
         expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalled();
     });
@@ -1190,9 +1388,7 @@ describe("podcast download runtime behavior", () => {
             false,
         );
         expect(mocks.logger.error).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "[PODCAST-DL] Background download failed for episode-retry-exhausted:",
-            ),
+            "Background download failed for episode-retry-exhausted",
             "stream error",
         );
         setTimeoutSpy.mockRestore();
@@ -1383,8 +1579,34 @@ describe("podcast download runtime behavior", () => {
 
         expect(cleanup).toEqual({ deleted: 0, freedMb: 0 });
         expect(mocks.logger.error).toHaveBeenCalledWith(
-            "[PODCAST-DL] Failed to delete /music/.soundspan/podcast-audio/fail.mp3:",
+            "Failed to delete /music/.soundspan/podcast-audio/fail.mp3",
             "db delete failed",
         );
+    });
+
+    it("never unlinks cleanup records outside the podcast cache", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        (
+            mocks.prisma.podcastDownload.findMany as jest.Mock
+        ).mockResolvedValueOnce([
+            {
+                id: "d-outside",
+                localPath: "/tmp/victim.mp3",
+                fileSizeMb: 3,
+                lastAccessedAt: new Date("2024-01-01T00:00:00.000Z"),
+            },
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        const cleanup = await podcastDownload.cleanupExpiredCache();
+
+        expect(mocks.fsPromises.unlink).not.toHaveBeenCalledWith(
+            "/tmp/victim.mp3",
+        );
+        expect(mocks.prisma.podcastDownload.delete).toHaveBeenCalledWith({
+            where: { id: "d-outside" },
+        });
+        expect(cleanup).toEqual({ deleted: 1, freedMb: 0 });
     });
 });

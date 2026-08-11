@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 const mockParseString = jest.fn();
 const mockAxiosGet = jest.fn();
 
@@ -29,7 +31,9 @@ const mockLogger = {
     debug: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
@@ -56,6 +60,7 @@ describe("rssParserService", () => {
         mockLogger.debug.mockReset();
         mockLogger.warn.mockReset();
         mockLogger.error.mockReset();
+        mockLogger.child.mockClear();
     });
 
     it("parses feed metadata and episode fields for success cases", async () => {
@@ -135,7 +140,7 @@ describe("rssParserService", () => {
         expect(mockAxiosGet).toHaveBeenCalledWith(
             "https://example.com/feed.xml",
             expect.objectContaining({
-                responseType: "text",
+                responseType: "stream",
                 headers: expect.objectContaining({
                     Accept: "application/rss+xml",
                     "User-Agent": "rss-parser",
@@ -454,7 +459,7 @@ describe("rssParserService", () => {
         expect(result.episodes).toHaveLength(1);
         expect(result.episodes[0].title).toBe("Good item");
         expect(mockLogger.error).toHaveBeenCalledWith(
-            '    Error parsing episode "Broken item":',
+            'Error parsing episode "Broken item"',
             "bad image metadata",
         );
     });
@@ -538,7 +543,7 @@ describe("rssParserService", () => {
         ).rejects.toThrow("Failed to parse podcast feed: request timed out");
 
         expect(mockLogger.error).toHaveBeenCalledWith(
-            expect.stringContaining("[RSS PARSER] Failed to parse feed:"),
+            "Failed to parse feed",
             "request timed out",
         );
     });
@@ -551,7 +556,7 @@ describe("rssParserService", () => {
         ).rejects.toThrow("Failed to parse podcast feed: Unknown feed error");
 
         expect(mockLogger.error).toHaveBeenCalledWith(
-            expect.stringContaining("[RSS PARSER] Failed to parse feed:"),
+            "Failed to parse feed",
             "Unknown feed error",
         );
     });
@@ -643,5 +648,91 @@ describe("rssParserService", () => {
         ).rejects.toThrow(
             "Failed to parse podcast feed: Redirect without a Location header",
         );
+    });
+
+    it("rejects a feed whose declared length exceeds the byte limit before parsing", async () => {
+        const body = Readable.from([Buffer.from("tiny")]);
+        const destroySpy = jest.spyOn(body, "destroy");
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
+            headers: { "content-length": String(5 * 1024 * 1024 + 1) },
+            data: body,
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/oversized.xml"),
+        ).rejects.toThrow("Podcast feed exceeds maximum size");
+
+        expect(destroySpy).toHaveBeenCalled();
+        expect(mockParseString).not.toHaveBeenCalled();
+    });
+
+    it("destroys a feed stream when observed bytes exceed the byte limit", async () => {
+        const body = Readable.from([
+            Buffer.alloc(3 * 1024 * 1024),
+            Buffer.alloc(3 * 1024 * 1024),
+        ]);
+        const destroySpy = jest.spyOn(body, "destroy");
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
+            headers: {},
+            data: body,
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/stream-bomb.xml"),
+        ).rejects.toThrow("Podcast feed exceeds maximum size");
+
+        expect(destroySpy).toHaveBeenCalled();
+        expect(mockParseString).not.toHaveBeenCalled();
+    });
+
+    it("rejects feeds whose parsed item count exceeds the episode limit", async () => {
+        mockFeedResponse({
+            title: "Unbounded Feed",
+            items: Array.from({ length: 1001 }, (_, index) => ({
+                title: `Episode ${index}`,
+                enclosure: {
+                    url: `https://cdn.example.com/${index}.mp3`,
+                    type: "audio/mpeg",
+                },
+            })),
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/unbounded.xml"),
+        ).rejects.toThrow("Podcast feed exceeds maximum episode count");
+    });
+
+    it("excludes episodes whose declared enclosure size exceeds the media limit", async () => {
+        mockFeedResponse({
+            title: "Oversized Enclosure Feed",
+            items: [
+                {
+                    title: "Oversized Episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/oversized.mp3",
+                        type: "audio/mpeg",
+                        length: String(1024 * 1024 * 1024 + 1),
+                    },
+                },
+                {
+                    title: "Bounded Episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/bounded.mp3",
+                        type: "audio/mpeg",
+                        length: "1024",
+                    },
+                },
+            ],
+        });
+
+        const result = await rssParserService.parseFeed(
+            "https://example.com/enclosure-bounds.xml",
+        );
+
+        expect(result.episodes.map((episode) => episode.title)).toEqual([
+            "Bounded Episode",
+        ]);
     });
 });

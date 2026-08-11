@@ -8,6 +8,49 @@ import {
 
 /** Redirect-hop cap for feed fetches (matches the image proxy's limit). */
 const MAX_FEED_REDIRECTS = 5;
+/** Maximum RSS payload accepted before XML parsing. */
+export const MAX_PODCAST_FEED_BYTES = 5 * 1024 * 1024;
+/** Maximum number of feed items accepted from one RSS document. */
+export const MAX_PODCAST_FEED_EPISODES = 1000;
+/** Maximum declared podcast enclosure size accepted during ingestion. */
+export const MAX_PODCAST_ENCLOSURE_BYTES = 1024 * 1024 * 1024;
+const rssParserLogger = logger.child("RSSParser");
+
+interface DestroyableFeedStream {
+    on: (event: string, listener: (...args: any[]) => void) => unknown;
+    destroy: () => unknown;
+}
+
+function isDestroyableFeedStream(
+    value: unknown,
+): value is DestroyableFeedStream {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "on" in value &&
+        typeof value.on === "function" &&
+        "destroy" in value &&
+        typeof value.destroy === "function"
+    );
+}
+
+function destroyFeedBody(body: unknown): void {
+    if (isDestroyableFeedStream(body)) {
+        body.destroy();
+    }
+}
+
+function describeRSSParserError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return "Unknown error";
+}
+
+class RSSFeedLimitError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "RSSFeedLimitError";
+    }
+}
 
 interface RSSPodcast {
     title: string;
@@ -45,6 +88,8 @@ interface ParsedPodcastFeed {
 interface RSSFeedRequestOptions {
     headers?: Record<string, string>;
 }
+
+type FeedMetadata = ParsedPodcastFeed["feedMetadata"];
 
 export class RSSFeedNotModifiedError extends Error {
     readonly etag?: string;
@@ -90,6 +135,162 @@ class RSSParserService {
             : undefined;
     }
 
+    private async fetchFeedResponse(
+        safeFeedUrl: string,
+        options: RSSFeedRequestOptions,
+    ): Promise<AxiosResponse<unknown>> {
+        let currentUrl = safeFeedUrl;
+        for (let hop = 0; hop <= MAX_FEED_REDIRECTS; hop += 1) {
+            const response = await axios.get<unknown>(currentUrl, {
+                responseType: "stream",
+                timeout: 60000,
+                maxRedirects: 0,
+                headers: {
+                    Accept: "application/rss+xml",
+                    "User-Agent": "rss-parser",
+                    ...(options.headers ?? {}),
+                },
+                validateStatus: (status) =>
+                    (status >= 200 && status < 300) ||
+                    status === 304 ||
+                    (status >= 300 && status < 400),
+            });
+            if (response.status < 300 || response.status === 304) {
+                return response;
+            }
+
+            destroyFeedBody(response.data);
+            if (hop === MAX_FEED_REDIRECTS) {
+                throw new Error("Too many redirects");
+            }
+            const location = this.getHeaderValue(response.headers, "location");
+            if (!location) {
+                throw new Error("Redirect without a Location header");
+            }
+            const nextUrl = await resolveSafeOutboundRedirectTarget(
+                location,
+                currentUrl,
+            );
+            if (!nextUrl) {
+                throw new Error("Invalid or private feed redirect target");
+            }
+            rssParserLogger.debug(
+                `Following feed redirect (${response.status}) -> ${nextUrl}`,
+            );
+            currentUrl = nextUrl;
+        }
+        throw new Error("Too many redirects");
+    }
+
+    private async readFeedBody(
+        response: AxiosResponse<unknown>,
+    ): Promise<string> {
+        const declaredHeader = this.getHeaderValue(
+            response.headers,
+            "content-length",
+        );
+        const declaredLength = Number(declaredHeader ?? 0);
+        if (
+            !Number.isSafeInteger(declaredLength) ||
+            declaredLength < 0 ||
+            declaredLength > MAX_PODCAST_FEED_BYTES
+        ) {
+            destroyFeedBody(response.data);
+            throw new RSSFeedLimitError("Podcast feed exceeds maximum size");
+        }
+
+        if (typeof response.data === "string") {
+            if (Buffer.byteLength(response.data) > MAX_PODCAST_FEED_BYTES) {
+                throw new RSSFeedLimitError(
+                    "Podcast feed exceeds maximum size",
+                );
+            }
+            return response.data;
+        }
+        if (Buffer.isBuffer(response.data)) {
+            if (response.data.byteLength > MAX_PODCAST_FEED_BYTES) {
+                throw new RSSFeedLimitError(
+                    "Podcast feed exceeds maximum size",
+                );
+            }
+            return response.data.toString("utf8");
+        }
+        if (!isDestroyableFeedStream(response.data)) {
+            throw new Error("Feed response body is not readable");
+        }
+
+        return this.readFeedStream(response.data);
+    }
+
+    private readFeedStream(stream: DestroyableFeedStream): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
+            const chunks: Buffer[] = [];
+            let totalBytes = 0;
+            let settled = false;
+            const settle = (error?: Error) => {
+                if (settled) return;
+                settled = true;
+                if (error) reject(error);
+                else resolve(Buffer.concat(chunks).toString("utf8"));
+            };
+
+            stream.on("data", (chunk: Buffer | Uint8Array | string) => {
+                if (settled) return;
+                const buffer = Buffer.isBuffer(chunk)
+                    ? chunk
+                    : Buffer.from(chunk);
+                totalBytes += buffer.byteLength;
+                if (totalBytes > MAX_PODCAST_FEED_BYTES) {
+                    settle(
+                        new RSSFeedLimitError(
+                            "Podcast feed exceeds maximum size",
+                        ),
+                    );
+                    stream.destroy();
+                    return;
+                }
+                chunks.push(buffer);
+            });
+            stream.on("end", () => settle());
+            stream.on("error", (error: Error) => settle(error));
+            stream.on("aborted", () =>
+                settle(new Error("Feed response was aborted")),
+            );
+        });
+    }
+
+    private getFeedMetadata(response: AxiosResponse<unknown>): FeedMetadata {
+        return {
+            etag: this.getHeaderValue(response.headers, "etag"),
+            lastModified: this.getHeaderValue(
+                response.headers,
+                "last-modified",
+            ),
+        };
+    }
+
+    private parsePodcast(feed: any): RSSPodcast {
+        return {
+            title: feed.title || "Unknown Podcast",
+            author: feed.itunesAuthor || feed.author || undefined,
+            description: feed.description || undefined,
+            imageUrl: this.extractImageUrl(feed),
+            language: feed.language || undefined,
+            explicit: this.parseExplicit(feed.itunesExplicit),
+            itunesId: this.extractItunesId(feed),
+        };
+    }
+
+    private getBoundedFeedItems(feed: any): any[] {
+        const items = Array.isArray(feed.items) ? feed.items : [];
+        if (items.length > MAX_PODCAST_FEED_EPISODES) {
+            throw new RSSFeedLimitError(
+                "Podcast feed exceeds maximum episode count",
+            );
+        }
+        return items;
+    }
+
     /**
      * Parse an RSS podcast feed from a URL
      */
@@ -102,61 +303,9 @@ class RSSParserService {
             if (!safeFeedUrl) {
                 throw new Error("Invalid or private feed URL");
             }
-
-            logger.debug(`\n [RSS PARSER] Fetching feed: ${safeFeedUrl}`);
-            // Follow redirects manually so EVERY hop is re-validated by the
-            // DNS-resolving SSRF guard — axios' built-in following would fetch
-            // a public feed's 302 to http://10.0.0.5/ without any check.
-            let currentUrl = safeFeedUrl;
-            let response: AxiosResponse<string>;
-            for (let hop = 0; ; hop += 1) {
-                response = await axios.get<string>(currentUrl, {
-                    responseType: "text",
-                    timeout: 60000,
-                    maxRedirects: 0,
-                    headers: {
-                        Accept: "application/rss+xml",
-                        "User-Agent": "rss-parser",
-                        ...(options.headers ?? {}),
-                    },
-                    validateStatus: (status) =>
-                        (status >= 200 && status < 300) ||
-                        status === 304 ||
-                        (status >= 300 && status < 400),
-                });
-                if (response.status < 300 || response.status === 304) {
-                    break;
-                }
-                if (hop >= MAX_FEED_REDIRECTS) {
-                    throw new Error("Too many redirects");
-                }
-                const location = this.getHeaderValue(
-                    response.headers,
-                    "location",
-                );
-                if (!location) {
-                    throw new Error("Redirect without a Location header");
-                }
-                const nextUrl = await resolveSafeOutboundRedirectTarget(
-                    location,
-                    currentUrl,
-                );
-                if (!nextUrl) {
-                    throw new Error("Invalid or private feed redirect target");
-                }
-                logger.debug(
-                    ` [RSS PARSER] Following feed redirect (${response.status}) -> ${nextUrl}`,
-                );
-                currentUrl = nextUrl;
-            }
-
-            const feedMetadata = {
-                etag: this.getHeaderValue(response.headers, "etag"),
-                lastModified: this.getHeaderValue(
-                    response.headers,
-                    "last-modified",
-                ),
-            };
+            rssParserLogger.debug(`Fetching feed: ${safeFeedUrl}`);
+            const response = await this.fetchFeedResponse(safeFeedUrl, options);
+            const feedMetadata = this.getFeedMetadata(response);
 
             if (response.status === 304) {
                 throw new RSSFeedNotModifiedError(
@@ -165,79 +314,18 @@ class RSSParserService {
                 );
             }
 
-            const parser = this.createParser();
-            const feed = await parser.parseString(response.data);
+            const feedBody = await this.readFeedBody(response);
+            const feed = await this.createParser().parseString(feedBody);
+            const items = this.getBoundedFeedItems(feed);
+            const podcast = this.parsePodcast(feed);
 
-            // Extract podcast metadata
-            const podcast: RSSPodcast = {
-                title: feed.title || "Unknown Podcast",
-                author: (feed as any).itunesAuthor || feed.author || undefined,
-                description: feed.description || undefined,
-                imageUrl: this.extractImageUrl(feed),
-                language: feed.language || undefined,
-                explicit: this.parseExplicit((feed as any).itunesExplicit),
-                itunesId: this.extractItunesId(feed),
-            };
-
-            logger.debug(`   Podcast: ${podcast.title}`);
-            logger.debug(`   Author: ${podcast.author || "Unknown"}`);
-            logger.debug(`   Episodes found: ${feed.items?.length || 0}`);
-
-            // Extract episodes
-            const episodes: RSSEpisode[] = (feed.items || [])
-                .map((item) => {
-                    try {
-                        // Find audio enclosure
-                        const audioEnclosure = this.findAudioEnclosure(item);
-                        if (!audioEnclosure) {
-                            logger.warn(
-                                ` Skipping episode "${item.title}" - no audio found`,
-                            );
-                            return null;
-                        }
-
-                        const episode: RSSEpisode = {
-                            guid: item.guid || item.link || item.title || "",
-                            title: item.title || "Unknown Episode",
-                            description:
-                                item.content ||
-                                item.contentSnippet ||
-                                undefined,
-                            audioUrl: audioEnclosure.url,
-                            duration: this.parseDuration(
-                                (item as any).itunesDuration,
-                            ),
-                            publishedAt: item.pubDate
-                                ? new Date(item.pubDate)
-                                : new Date(),
-                            episodeNumber: (item as any).itunesEpisode
-                                ? parseInt((item as any).itunesEpisode)
-                                : undefined,
-                            season: (item as any).itunesSeason
-                                ? parseInt((item as any).itunesSeason)
-                                : undefined,
-                            imageUrl:
-                                this.extractImageUrl(item) ||
-                                podcast.imageUrl ||
-                                undefined,
-                            fileSize: audioEnclosure.length
-                                ? parseInt(audioEnclosure.length)
-                                : undefined,
-                            mimeType: audioEnclosure.type || "audio/mpeg",
-                        };
-
-                        return episode;
-                    } catch (error: any) {
-                        logger.error(
-                            `    Error parsing episode "${item.title}":`,
-                            error.message,
-                        );
-                        return null;
-                    }
-                })
-                .filter((ep): ep is RSSEpisode => ep !== null);
-
-            logger.debug(`   Successfully parsed ${episodes.length} episodes`);
+            rssParserLogger.debug(`Podcast: ${podcast.title}`);
+            rssParserLogger.debug(`Author: ${podcast.author || "Unknown"}`);
+            rssParserLogger.debug(`Episodes found: ${items.length}`);
+            const episodes = this.parseEpisodes(items, podcast);
+            rssParserLogger.debug(
+                `Successfully parsed ${episodes.length} episodes`,
+            );
 
             return { podcast, episodes, feedMetadata };
         } catch (error) {
@@ -252,9 +340,75 @@ class RSSParserService {
                       ? error.message
                       : "Unknown feed error";
 
-            logger.error(`\n [RSS PARSER] Failed to parse feed:`, errorMessage);
+            rssParserLogger.error("Failed to parse feed", errorMessage);
             throw new Error(`Failed to parse podcast feed: ${errorMessage}`);
         }
+    }
+
+    private parseEpisodes(items: any[], podcast: RSSPodcast): RSSEpisode[] {
+        return items
+            .map((item) => {
+                try {
+                    return this.parseEpisode(item, podcast);
+                } catch (error) {
+                    rssParserLogger.error(
+                        `Error parsing episode "${item.title}"`,
+                        describeRSSParserError(error),
+                    );
+                    return null;
+                }
+            })
+            .filter((episode): episode is RSSEpisode => episode !== null);
+    }
+
+    private parseEpisode(item: any, podcast: RSSPodcast): RSSEpisode | null {
+        const audioEnclosure = this.findAudioEnclosure(item);
+        if (!audioEnclosure) {
+            rssParserLogger.warn(
+                `Skipping episode "${item.title}" - no audio found`,
+            );
+            return null;
+        }
+        const fileSize = this.parseEnclosureSize(audioEnclosure.length);
+        if (this.isRejectedEnclosureSize(audioEnclosure.length)) {
+            rssParserLogger.warn(
+                `Skipping episode "${item.title}" - enclosure exceeds size limit`,
+            );
+            return null;
+        }
+
+        return {
+            guid: item.guid || item.link || item.title || "",
+            title: item.title || "Unknown Episode",
+            description: item.content || item.contentSnippet || undefined,
+            audioUrl: audioEnclosure.url,
+            duration: this.parseDuration(item.itunesDuration),
+            publishedAt: item.pubDate ? new Date(item.pubDate) : new Date(),
+            episodeNumber: item.itunesEpisode
+                ? parseInt(item.itunesEpisode)
+                : undefined,
+            season: item.itunesSeason ? parseInt(item.itunesSeason) : undefined,
+            imageUrl:
+                this.extractImageUrl(item) || podcast.imageUrl || undefined,
+            fileSize,
+            mimeType: audioEnclosure.type || "audio/mpeg",
+        };
+    }
+
+    private parseEnclosureSize(length?: string): number | undefined {
+        if (!length) return undefined;
+        const parsed = Number(length);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+    }
+
+    private isRejectedEnclosureSize(length?: string): boolean {
+        if (!length) return false;
+        const parsed = Number(length);
+        return (
+            !Number.isSafeInteger(parsed) ||
+            parsed < 0 ||
+            parsed > MAX_PODCAST_ENCLOSURE_BYTES
+        );
     }
 
     /**

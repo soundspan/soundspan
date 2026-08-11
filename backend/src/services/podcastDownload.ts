@@ -2,13 +2,15 @@ import { prisma, Prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import fs from "fs/promises";
+import type { WriteStream } from "node:fs";
 import path from "path";
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { BRAND_USER_AGENT } from "../config/brand";
 import {
     resolveSafeOutboundRedirectTarget,
     resolveSafeOutboundUrl,
 } from "./outboundUrlSafety";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 /**
  * PodcastDownloadService - Background download and caching of podcast episodes
@@ -31,11 +33,30 @@ const downloadProgress = new Map<string, DownloadProgress>();
 const PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS = 3;
 const PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MAX_PODCAST_DOWNLOAD_REDIRECTS = 5;
+const MAX_PODCAST_EPISODE_ID_LENGTH = 128;
+const PODCAST_EPISODE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+/** Maximum declared or observed bytes accepted for one podcast download. */
+export const MAX_PODCAST_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
+const podcastDownloadLogger = logger.child("PodcastDownload");
 
 class PodcastDownloadBlockedError extends Error {
     constructor(url: string) {
         super(`Blocked SSRF-unsafe podcast download target: ${url}`);
         this.name = "PodcastDownloadBlockedError";
+    }
+}
+
+class PodcastDownloadLimitError extends Error {
+    constructor() {
+        super("Podcast enclosure exceeds maximum download size");
+        this.name = "PodcastDownloadLimitError";
+    }
+}
+
+class PodcastDownloadAuthorizationError extends Error {
+    constructor() {
+        super("Podcast episode is not available to this user");
+        this.name = "PodcastDownloadAuthorizationError";
     }
 }
 
@@ -46,7 +67,7 @@ async function openSafePodcastDownloadStream(
     let current = await resolveSafeOutboundUrl(rawUrl);
     if (!current) throw new PodcastDownloadBlockedError(rawUrl);
 
-    for (let hop = 0; ; hop += 1) {
+    for (let hop = 0; hop <= MAX_PODCAST_DOWNLOAD_REDIRECTS; hop += 1) {
         const response = await axios.get(current, {
             responseType: "stream",
             timeout: 600000,
@@ -62,7 +83,7 @@ async function openSafePodcastDownloadStream(
         if (response.data && typeof response.data.destroy === "function") {
             response.data.destroy();
         }
-        if (hop >= MAX_PODCAST_DOWNLOAD_REDIRECTS) {
+        if (hop === MAX_PODCAST_DOWNLOAD_REDIRECTS) {
             throw new PodcastDownloadBlockedError(current);
         }
         const location =
@@ -74,6 +95,7 @@ async function openSafePodcastDownloadStream(
         if (!next) throw new PodcastDownloadBlockedError(location);
         current = next;
     }
+    throw new PodcastDownloadBlockedError(current);
 }
 
 function describePodcastDownloadError(error: unknown): string {
@@ -113,7 +135,11 @@ async function withPodcastDownloadPrismaRetry<T>(
     operationName: string,
     operation: () => Promise<T>,
 ): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
+    for (
+        let attempt = 1;
+        attempt <= PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS;
+        attempt += 1
+    ) {
         try {
             return await operation();
         } catch (error) {
@@ -124,20 +150,136 @@ async function withPodcastDownloadPrismaRetry<T>(
                 throw error;
             }
 
-            logger.warn(
-                `[PODCAST-DL/Prisma] ${operationName} failed (attempt ${attempt}/${PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS}), retrying`,
+            podcastDownloadLogger.warn(
+                `${operationName} failed (attempt ${attempt}/${PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS}), retrying`,
                 error,
             );
             await prisma.$connect().catch(() => {});
             await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
         }
     }
+    throw new Error(`${operationName} exhausted its retry bound`);
 }
 
 // Cache directory for podcast audio files
 const getPodcastCacheDir = (): string => {
-    return path.join(config.music.transcodeCachePath, "../podcast-audio");
+    return path.resolve(config.music.transcodeCachePath, "../podcast-audio");
 };
+
+function isValidEpisodeId(episodeId: string): boolean {
+    return (
+        episodeId.length > 0 &&
+        episodeId.length <= MAX_PODCAST_EPISODE_ID_LENGTH &&
+        PODCAST_EPISODE_ID_PATTERN.test(episodeId)
+    );
+}
+
+function resolvePodcastCacheFile(
+    episodeId: string,
+    extension: "mp3" | "tmp",
+): string | null {
+    if (!isValidEpisodeId(episodeId)) return null;
+    return safeResolvePath(getPodcastCacheDir(), `${episodeId}.${extension}`);
+}
+
+function resolveStoredPodcastCacheFile(localPath: string): string | null {
+    const cacheDir = getPodcastCacheDir();
+    const resolvedLocalPath = path.resolve(localPath);
+    if (path.extname(resolvedLocalPath).toLowerCase() !== ".mp3") return null;
+    const relativePath = path.relative(cacheDir, resolvedLocalPath);
+    return safeResolvePath(cacheDir, relativePath);
+}
+
+interface AuthorizedCacheMetadata {
+    episode: { fileSize: number | null; podcastId: string };
+    download: { userId: string; fileSizeMb: number };
+}
+
+async function findAuthorizedCacheMetadata(
+    episodeId: string,
+): Promise<AuthorizedCacheMetadata | null> {
+    const episode = await withPodcastDownloadPrismaRetry(
+        "getCachedFilePath.podcastEpisode.findUnique",
+        () =>
+            prisma.podcastEpisode.findUnique({
+                where: { id: episodeId },
+                select: { fileSize: true, podcastId: true },
+            }),
+    );
+    if (!episode) return null;
+
+    const download = await withPodcastDownloadPrismaRetry(
+        "getCachedFilePath.podcastDownload.findFirst",
+        () =>
+            prisma.podcastDownload.findFirst({
+                where: { episodeId },
+                select: { userId: true, fileSizeMb: true },
+            }),
+    );
+    if (!download) return null;
+
+    const subscription = await withPodcastDownloadPrismaRetry(
+        "getCachedFilePath.podcastSubscription.findUnique",
+        () =>
+            prisma.podcastSubscription.findUnique({
+                where: {
+                    userId_podcastId: {
+                        userId: download.userId,
+                        podcastId: episode.podcastId,
+                    },
+                },
+                select: { userId: true },
+            }),
+    );
+    return subscription ? { episode, download } : null;
+}
+
+async function deleteInvalidCachedFile(
+    episodeId: string,
+    cachedPath: string,
+    reason: string,
+): Promise<void> {
+    podcastDownloadLogger.debug(`${reason} for ${episodeId}, deleting cache`);
+    await fs.unlink(cachedPath).catch(() => {});
+    await withPodcastDownloadPrismaRetry(
+        "getCachedFilePath.podcastDownload.deleteMany.invalidSize",
+        () => prisma.podcastDownload.deleteMany({ where: { episodeId } }),
+    );
+}
+
+async function hasValidCachedFileSize(
+    episodeId: string,
+    cachedPath: string,
+    actualBytes: number,
+    metadata: AuthorizedCacheMetadata,
+): Promise<boolean> {
+    const canonicalBytes = metadata.episode.fileSize || 0;
+    if (
+        canonicalBytes > 0 &&
+        Math.abs(actualBytes - canonicalBytes) / canonicalBytes > 0.01
+    ) {
+        await deleteInvalidCachedFile(
+            episodeId,
+            cachedPath,
+            `Canonical size mismatch (${actualBytes}/${canonicalBytes})`,
+        );
+        return false;
+    }
+
+    const recordedBytes = metadata.download.fileSizeMb * 1024 * 1024;
+    if (
+        recordedBytes > 0 &&
+        Math.abs(actualBytes - recordedBytes) / recordedBytes > 0.01
+    ) {
+        await deleteInvalidCachedFile(
+            episodeId,
+            cachedPath,
+            `Recorded size mismatch (${actualBytes}/${Math.round(recordedBytes)})`,
+        );
+        return false;
+    }
+    return true;
+}
 
 /**
  * Get download progress for an episode
@@ -168,113 +310,48 @@ export function getDownloadProgress(
 export async function getCachedFilePath(
     episodeId: string,
 ): Promise<string | null> {
+    const cachedPath = resolvePodcastCacheFile(episodeId, "mp3");
+    if (!cachedPath) return null;
+
     // Don't return cache path if still downloading - file may be incomplete
     if (downloadingEpisodes.has(episodeId)) {
-        logger.debug(
-            `[PODCAST-DL] Episode ${episodeId} is still downloading, not using cache`,
+        podcastDownloadLogger.debug(
+            `Episode ${episodeId} is still downloading, not using cache`,
         );
         return null;
     }
 
-    const cacheDir = getPodcastCacheDir();
-    const cachedPath = path.join(cacheDir, `${episodeId}.mp3`);
-
     try {
+        const metadata = await findAuthorizedCacheMetadata(episodeId);
+        if (!metadata) return null;
+
         await fs.access(cachedPath, fs.constants.F_OK);
         const stats = await fs.stat(cachedPath);
 
-        // File must be > 0 bytes to be valid
-        if (stats.size > 0) {
-            // Strong validation: if we know the canonical remote file size, require the cache to match.
-            // This prevents "cached=true" when we only downloaded part of the file (which breaks seeking and causes 416s).
-            try {
-                const episode = await withPodcastDownloadPrismaRetry(
-                    "getCachedFilePath.podcastEpisode.findUnique",
-                    () =>
-                        prisma.podcastEpisode.findUnique({
-                            where: { id: episodeId },
-                            select: { fileSize: true },
-                        }),
-                );
-                if (episode?.fileSize && episode.fileSize > 0) {
-                    const expected = episode.fileSize;
-                    const actual = stats.size;
-                    const variance = Math.abs(actual - expected) / expected;
-                    if (variance > 0.01) {
-                        logger.debug(
-                            `[PODCAST-DL] Episode size mismatch vs episode.fileSize for ${episodeId}: actual ${actual} vs expected ${expected} (variance ${Math.round(
-                                variance * 100,
-                            )}%), deleting cache`,
-                        );
-                        await fs.unlink(cachedPath).catch(() => {});
-                        await withPodcastDownloadPrismaRetry(
-                            "getCachedFilePath.podcastDownload.deleteMany",
-                            () =>
-                                prisma.podcastDownload.deleteMany({
-                                    where: { episodeId },
-                                }),
-                        );
-                        return null;
-                    }
-                }
-            } catch {
-                // If this check fails, fall back to prior DB-record based validation
-            }
-
-            // Check database record exists
-            const dbRecord = await withPodcastDownloadPrismaRetry(
-                "getCachedFilePath.podcastDownload.findFirst",
-                () =>
-                    prisma.podcastDownload.findFirst({
-                        where: { episodeId },
-                    }),
-            );
-
-            // If no DB record, file might be incomplete or stale
-            if (!dbRecord) {
-                logger.debug(
-                    `[PODCAST-DL] No DB record for ${episodeId}, deleting stale cache file`,
-                );
-                await fs.unlink(cachedPath).catch(() => {});
-                return null;
-            }
-
-            // Validate file size matches what we recorded (allow 1% variance for filesystem differences)
-            const expectedSize = dbRecord.fileSizeMb * 1024 * 1024;
-            const actualSize = stats.size;
-            const variance = Math.abs(actualSize - expectedSize) / expectedSize;
-
-            if (expectedSize > 0 && variance > 0.01) {
-                logger.debug(
-                    `[PODCAST-DL] Size mismatch for ${episodeId}: actual ${actualSize} vs expected ${Math.round(expectedSize)}, deleting`,
-                );
-                await fs.unlink(cachedPath).catch(() => {});
-                await withPodcastDownloadPrismaRetry(
-                    "getCachedFilePath.podcastDownload.deleteMany.sizeMismatch",
-                    () =>
-                        prisma.podcastDownload.deleteMany({
-                            where: { episodeId },
-                        }),
-                );
-                return null;
-            }
-
-            // Update last accessed time
-            await withPodcastDownloadPrismaRetry(
-                "getCachedFilePath.podcastDownload.updateMany.lastAccessedAt",
-                () =>
-                    prisma.podcastDownload.updateMany({
-                        where: { episodeId },
-                        data: { lastAccessedAt: new Date() },
-                    }),
-            );
-
-            logger.debug(
-                `[PODCAST-DL] Cache valid for ${episodeId}: ${stats.size} bytes`,
-            );
-            return cachedPath;
+        if (stats.size <= 0) return null;
+        if (
+            !(await hasValidCachedFileSize(
+                episodeId,
+                cachedPath,
+                stats.size,
+                metadata,
+            ))
+        ) {
+            return null;
         }
-        return null;
+
+        await withPodcastDownloadPrismaRetry(
+            "getCachedFilePath.podcastDownload.updateMany.lastAccessedAt",
+            () =>
+                prisma.podcastDownload.updateMany({
+                    where: { episodeId },
+                    data: { lastAccessedAt: new Date() },
+                }),
+        );
+        podcastDownloadLogger.debug(
+            `Cache valid for ${episodeId}: ${stats.size} bytes`,
+        );
+        return cachedPath;
     } catch {
         return null;
     }
@@ -289,10 +366,15 @@ export function downloadInBackground(
     audioUrl: string,
     userId: string,
 ): void {
+    if (!resolvePodcastCacheFile(episodeId, "mp3")) {
+        podcastDownloadLogger.warn("Rejected invalid podcast episode ID");
+        return;
+    }
+
     // Skip if already downloading
     if (downloadingEpisodes.has(episodeId)) {
-        logger.debug(
-            `[PODCAST-DL] Already downloading episode ${episodeId}, skipping`,
+        podcastDownloadLogger.debug(
+            `Already downloading episode ${episodeId}, skipping`,
         );
         return;
     }
@@ -302,10 +384,10 @@ export function downloadInBackground(
 
     // Start download in background (don't await)
     performDownload(episodeId, audioUrl, userId)
-        .catch((err) => {
-            logger.error(
-                `[PODCAST-DL] Background download failed for ${episodeId}:`,
-                err.message,
+        .catch((error: unknown) => {
+            podcastDownloadLogger.error(
+                `Background download failed for ${episodeId}`,
+                describePodcastDownloadError(error),
             );
         })
         .finally(() => {
@@ -313,299 +395,391 @@ export function downloadInBackground(
         });
 }
 
-/**
- * Perform the actual download with retry support
- */
+interface PodcastDownloadPaths {
+    cacheDir: string;
+    tempPath: string;
+    finalPath: string;
+}
+
+function getPodcastDownloadPaths(episodeId: string): PodcastDownloadPaths {
+    const tempPath = resolvePodcastCacheFile(episodeId, "tmp");
+    const finalPath = resolvePodcastCacheFile(episodeId, "mp3");
+    if (!tempPath || !finalPath) throw new PodcastDownloadAuthorizationError();
+    return { cacheDir: getPodcastCacheDir(), tempPath, finalPath };
+}
+
+async function authorizePodcastDownload(episodeId: string, userId: string) {
+    const episode = await withPodcastDownloadPrismaRetry(
+        "performDownload.podcastEpisode.findUnique.authorization",
+        () =>
+            prisma.podcastEpisode.findUnique({
+                where: { id: episodeId },
+                select: { fileSize: true, podcastId: true },
+            }),
+    );
+    if (!episode) throw new PodcastDownloadAuthorizationError();
+
+    const subscription = await withPodcastDownloadPrismaRetry(
+        "performDownload.podcastSubscription.findUnique.authorization",
+        () =>
+            prisma.podcastSubscription.findUnique({
+                where: {
+                    userId_podcastId: { userId, podcastId: episode.podcastId },
+                },
+                select: { userId: true },
+            }),
+    );
+    if (!subscription) throw new PodcastDownloadAuthorizationError();
+    return episode;
+}
+
+function getDeclaredDownloadBytes(response: AxiosResponse): number {
+    const rawDeclared = response.headers["content-length"];
+    if (rawDeclared === undefined) return 0;
+    const declared = Number(rawDeclared);
+    if (!Number.isSafeInteger(declared) || declared < 0) {
+        return MAX_PODCAST_DOWNLOAD_BYTES + 1;
+    }
+    return declared;
+}
+
+function rejectOversizedDownload(
+    response: AxiosResponse,
+    controller: AbortController,
+): never {
+    controller.abort();
+    response.data.destroy();
+    throw new PodcastDownloadLimitError();
+}
+
+async function determineExpectedDownloadBytes(
+    episodeId: string,
+    storedBytes: number | null,
+    response: AxiosResponse,
+    controller: AbortController,
+): Promise<number> {
+    const declaredBytes = getDeclaredDownloadBytes(response);
+    if (declaredBytes > MAX_PODCAST_DOWNLOAD_BYTES) {
+        rejectOversizedDownload(response, controller);
+    }
+    const expectedBytes = declaredBytes || storedBytes || 0;
+    if (expectedBytes > MAX_PODCAST_DOWNLOAD_BYTES) {
+        rejectOversizedDownload(response, controller);
+    }
+    if (declaredBytes === 0) return expectedBytes;
+
+    try {
+        if (
+            !storedBytes ||
+            Math.abs(storedBytes - declaredBytes) / storedBytes > 0.01
+        ) {
+            await withPodcastDownloadPrismaRetry(
+                "performDownload.podcastEpisode.update.fileSize",
+                () =>
+                    prisma.podcastEpisode.update({
+                        where: { id: episodeId },
+                        data: { fileSize: declaredBytes },
+                    }),
+            );
+        }
+    } catch (error) {
+        podcastDownloadLogger.warn(
+            `Failed to persist Content-Length: ${describePodcastDownloadError(error)}`,
+        );
+    }
+    return expectedBytes;
+}
+
+interface DownloadStreamState {
+    bytesDownloaded: number;
+    idleTimer?: ReturnType<typeof setTimeout>;
+    lastLogTime: number;
+    settled: boolean;
+}
+
+function clearDownloadIdleTimer(state: DownloadStreamState): void {
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.idleTimer = undefined;
+}
+
+function recordDownloadedChunk(
+    state: DownloadStreamState,
+    episodeId: string,
+    expectedBytes: number,
+    chunkLength: number,
+): boolean {
+    state.bytesDownloaded += chunkLength;
+    if (state.bytesDownloaded > MAX_PODCAST_DOWNLOAD_BYTES) return false;
+    downloadProgress.set(episodeId, {
+        bytesDownloaded: state.bytesDownloaded,
+        totalBytes: expectedBytes,
+    });
+    const now = Date.now();
+    if (now - state.lastLogTime <= 30000) return true;
+    const percent = expectedBytes
+        ? Math.round((state.bytesDownloaded / expectedBytes) * 100)
+        : 0;
+    podcastDownloadLogger.debug(
+        `Download progress ${episodeId}: ${percent}% (${Math.round(state.bytesDownloaded / 1024 / 1024)}MB)`,
+    );
+    state.lastLogTime = now;
+    return true;
+}
+
+function resetDownloadIdleTimer(
+    state: DownloadStreamState,
+    abort: (error: Error) => void,
+): void {
+    clearDownloadIdleTimer(state);
+    state.idleTimer = setTimeout(
+        () =>
+            abort(
+                new Error(
+                    `Download idle timeout after ${PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS}ms`,
+                ),
+            ),
+        PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS,
+    );
+    state.idleTimer.unref?.();
+}
+
+function destroyDownloadStreams(
+    response: AxiosResponse,
+    writeStream: WriteStream,
+): void {
+    response.data.destroy();
+    writeStream.destroy();
+}
+
+async function streamDownloadToFile(
+    episodeId: string,
+    tempPath: string,
+    expectedBytes: number,
+    response: AxiosResponse,
+    controller: AbortController,
+): Promise<void> {
+    const writeStream = (await import("fs")).createWriteStream(tempPath);
+    const state: DownloadStreamState = {
+        bytesDownloaded: 0,
+        lastLogTime: Date.now(),
+        settled: false,
+    };
+
+    await new Promise<void>((resolve, reject) => {
+        const settle = (error?: Error) => {
+            if (state.settled) return;
+            state.settled = true;
+            clearDownloadIdleTimer(state);
+            if (error) reject(error);
+            else resolve();
+        };
+        const abort = (error: Error) => {
+            controller.abort();
+            destroyDownloadStreams(response, writeStream);
+            settle(error);
+        };
+
+        resetDownloadIdleTimer(state, abort);
+        response.data.on("data", (chunk: Buffer) => {
+            if (state.settled) return;
+            resetDownloadIdleTimer(state, abort);
+            if (
+                !recordDownloadedChunk(
+                    state,
+                    episodeId,
+                    expectedBytes,
+                    chunk.length,
+                )
+            ) {
+                abort(new PodcastDownloadLimitError());
+            }
+        });
+        response.data.on("end", () => writeStream.end(() => settle()));
+        writeStream.on("error", (error) => {
+            settle(error);
+            response.data.destroy();
+        });
+        response.data.on("error", (error: Error) => {
+            settle(error);
+            writeStream.destroy();
+        });
+        response.data.on("aborted", () => {
+            settle(new Error("Download aborted by server"));
+            writeStream.destroy();
+        });
+        if (!state.settled) response.data.pipe(writeStream, { end: false });
+    });
+}
+
+async function finalizePodcastDownload(
+    episodeId: string,
+    userId: string,
+    paths: PodcastDownloadPaths,
+    expectedBytes: number,
+): Promise<void> {
+    const stats = await fs.stat(paths.tempPath);
+    if (stats.size === 0) throw new Error("Downloaded file is empty");
+    if (expectedBytes > 0) {
+        const variance = Math.abs(stats.size - expectedBytes) / expectedBytes;
+        if (variance > 0.01) {
+            throw new Error(
+                `Download incomplete: got ${stats.size} bytes, expected ${expectedBytes}`,
+            );
+        }
+    }
+
+    await fs.rename(paths.tempPath, paths.finalPath);
+    const fileSizeMb = stats.size / 1024 / 1024;
+    await withPodcastDownloadPrismaRetry(
+        "performDownload.podcastDownload.upsert",
+        () =>
+            prisma.podcastDownload.upsert({
+                where: { userId_episodeId: { userId, episodeId } },
+                create: {
+                    userId,
+                    episodeId,
+                    localPath: paths.finalPath,
+                    fileSizeMb,
+                    downloadedAt: new Date(),
+                    lastAccessedAt: new Date(),
+                },
+                update: {
+                    localPath: paths.finalPath,
+                    fileSizeMb,
+                    downloadedAt: new Date(),
+                    lastAccessedAt: new Date(),
+                },
+            }),
+    );
+    podcastDownloadLogger.debug(
+        `Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`,
+    );
+}
+
+async function performDownloadAttempt(
+    episodeId: string,
+    audioUrl: string,
+    userId: string,
+    paths: PodcastDownloadPaths,
+): Promise<void> {
+    const episode = await authorizePodcastDownload(episodeId, userId);
+    if (
+        episode.fileSize !== null &&
+        episode.fileSize > MAX_PODCAST_DOWNLOAD_BYTES
+    ) {
+        throw new PodcastDownloadLimitError();
+    }
+    await fs.mkdir(paths.cacheDir, { recursive: true });
+
+    downloadingEpisodes.delete(episodeId);
+    try {
+        if (await getCachedFilePath(episodeId)) return;
+    } finally {
+        downloadingEpisodes.add(episodeId);
+    }
+    await fs.unlink(paths.tempPath).catch(() => {});
+
+    const controller = new AbortController();
+    const response = await openSafePodcastDownloadStream(
+        audioUrl,
+        controller.signal,
+    );
+    const expectedBytes = await determineExpectedDownloadBytes(
+        episodeId,
+        episode.fileSize,
+        response,
+        controller,
+    );
+    podcastDownloadLogger.debug(
+        `Downloading ${episodeId} (${Math.round(expectedBytes / 1024 / 1024)}MB)`,
+    );
+    downloadProgress.set(episodeId, {
+        bytesDownloaded: 0,
+        totalBytes: expectedBytes,
+    });
+    await streamDownloadToFile(
+        episodeId,
+        paths.tempPath,
+        expectedBytes,
+        response,
+        controller,
+    );
+    await finalizePodcastDownload(episodeId, userId, paths, expectedBytes);
+}
+
+function isNonRetryableDownloadError(error: unknown): boolean {
+    return (
+        error instanceof PodcastDownloadBlockedError ||
+        error instanceof PodcastDownloadLimitError ||
+        error instanceof PodcastDownloadAuthorizationError
+    );
+}
+
+/** Performs one bounded series of download attempts. */
 async function performDownload(
     episodeId: string,
     audioUrl: string,
     userId: string,
-    attempt: number = 1,
 ): Promise<void> {
     const maxAttempts = 3;
-    logger.debug(
-        `[PODCAST-DL] Starting background download for episode ${episodeId} (attempt ${attempt}/${maxAttempts})`,
-    );
-
-    const cacheDir = getPodcastCacheDir();
-
-    // Ensure cache directory exists
-    await fs.mkdir(cacheDir, { recursive: true });
-
-    const tempPath = path.join(cacheDir, `${episodeId}.tmp`);
-    const finalPath = path.join(cacheDir, `${episodeId}.mp3`);
-
-    try {
-        // Check if already cached (and validated)
-        downloadingEpisodes.delete(episodeId); // Temporarily remove to check cache
-        const existingCached = await getCachedFilePath(episodeId);
-        downloadingEpisodes.add(episodeId); // Re-add
-        if (existingCached) {
-            logger.debug(
-                `[PODCAST-DL] Episode ${episodeId} already cached, skipping download`,
-            );
+    const paths = getPodcastDownloadPaths(episodeId);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        podcastDownloadLogger.debug(
+            `Starting download for ${episodeId} (attempt ${attempt}/${maxAttempts})`,
+        );
+        try {
+            await performDownloadAttempt(episodeId, audioUrl, userId, paths);
+            downloadProgress.delete(episodeId);
             return;
-        }
-
-        // Clean up any partial temp files from previous attempts
-        await fs.unlink(tempPath).catch(() => {});
-
-        // Download the file with longer timeout for large podcasts
-        const controller = new AbortController();
-        const response = await openSafePodcastDownloadStream(
-            audioUrl,
-            controller.signal,
-        );
-
-        // axios >=1.18 types indexed header access as a union; coerce to string.
-        const contentLength = parseInt(
-            String(response.headers["content-length"] ?? "0"),
-            10,
-        );
-        let expectedBytes =
-            Number.isFinite(contentLength) && contentLength > 0
-                ? contentLength
-                : 0;
-
-        // If the origin provides Content-Length, treat it as ground truth and persist it.
-        // This prevents us from "accepting" partial caches that later break seeking.
-        if (expectedBytes > 0) {
-            try {
-                const episode = await withPodcastDownloadPrismaRetry(
-                    "performDownload.podcastEpisode.findUnique.contentLength",
-                    () =>
-                        prisma.podcastEpisode.findUnique({
-                            where: { id: episodeId },
-                            select: { fileSize: true },
-                        }),
-                );
-                const existing = episode?.fileSize || 0;
-                if (!existing) {
-                    await withPodcastDownloadPrismaRetry(
-                        "performDownload.podcastEpisode.update.initialFileSize",
-                        () =>
-                            prisma.podcastEpisode.update({
-                                where: { id: episodeId },
-                                data: { fileSize: expectedBytes },
-                            }),
-                    );
-                } else {
-                    const variance =
-                        Math.abs(existing - expectedBytes) / existing;
-                    if (variance > 0.01) {
-                        await withPodcastDownloadPrismaRetry(
-                            "performDownload.podcastEpisode.update.correctedFileSize",
-                            () =>
-                                prisma.podcastEpisode.update({
-                                    where: { id: episodeId },
-                                    data: { fileSize: expectedBytes },
-                                }),
-                        );
-                    }
-                }
-            } catch (error) {
-                logger.warn(
-                    `[PODCAST-DL] Failed to persist Content-Length as episode fileSize: ${describePodcastDownloadError(error)}`,
-                );
+        } catch (error) {
+            await fs.unlink(paths.tempPath).catch(() => {});
+            downloadProgress.delete(episodeId);
+            if (isNonRetryableDownloadError(error) || attempt === maxAttempts) {
+                throw error;
             }
-        } else {
-            // Fallback: use DB fileSize if present (better than nothing)
-            try {
-                const episode = await withPodcastDownloadPrismaRetry(
-                    "performDownload.podcastEpisode.findUnique.fallbackFileSize",
-                    () =>
-                        prisma.podcastEpisode.findUnique({
-                            where: { id: episodeId },
-                            select: { fileSize: true },
-                        }),
-                );
-                if (episode?.fileSize && episode.fileSize > 0) {
-                    expectedBytes = episode.fileSize;
-                }
-            } catch (error) {
-                logger.warn(
-                    `[PODCAST-DL] Failed to read fallback episode fileSize: ${describePodcastDownloadError(error)}`,
-                );
-            }
-        }
-
-        logger.debug(
-            `[PODCAST-DL] Downloading ${episodeId} (${expectedBytes > 0 ? Math.round(expectedBytes / 1024 / 1024) : 0}MB)`,
-        );
-
-        // Initialize progress tracking
-        downloadProgress.set(episodeId, {
-            bytesDownloaded: 0,
-            totalBytes: expectedBytes || 0,
-        });
-
-        // Write to temp file first with progress tracking
-        const writeStream = (await import("fs")).createWriteStream(tempPath);
-        let bytesDownloaded = 0;
-        let lastLogTime = Date.now();
-
-        await new Promise<void>((resolve, reject) => {
-            let settled = false;
-            let idleTimer: ReturnType<typeof setTimeout> | undefined;
-
-            const clearIdleTimer = () => {
-                if (idleTimer) clearTimeout(idleTimer);
-                idleTimer = undefined;
-            };
-            const settle = (error?: Error) => {
-                if (settled) return;
-                settled = true;
-                clearIdleTimer();
-                if (error) reject(error);
-                else resolve();
-            };
-            const resetIdleTimer = () => {
-                clearIdleTimer();
-                idleTimer = setTimeout(() => {
-                    if (settled) return;
-                    settled = true;
-                    clearIdleTimer();
-                    controller.abort();
-                    response.data.destroy();
-                    writeStream.destroy();
-                    reject(
-                        new Error(
-                            `Download idle timeout after ${PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS}ms`,
-                        ),
-                    );
-                }, PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS);
-                idleTimer.unref?.();
-            };
-
-            resetIdleTimer();
-            response.data.on("data", (chunk: Buffer) => {
-                resetIdleTimer();
-                bytesDownloaded += chunk.length;
-                downloadProgress.set(episodeId, {
-                    bytesDownloaded,
-                    totalBytes: contentLength,
-                });
-
-                // Log progress every 30 seconds for long downloads
-                const now = Date.now();
-                if (now - lastLogTime > 30000) {
-                    const percent =
-                        contentLength > 0
-                            ? Math.round(
-                                  (bytesDownloaded / contentLength) * 100,
-                              )
-                            : 0;
-                    logger.debug(
-                        `[PODCAST-DL] Download progress ${episodeId}: ${percent}% (${Math.round(bytesDownloaded / 1024 / 1024)}MB)`,
-                    );
-                    lastLogTime = now;
-                }
-            });
-
-            response.data.on("end", () => {
-                writeStream.end(() => settle());
-            });
-
-            response.data.pipe(writeStream, { end: false });
-
-            writeStream.on("error", (err) => {
-                settle(err);
-                response.data.destroy();
-            });
-
-            response.data.on("error", (err: Error) => {
-                settle(err);
-                writeStream.destroy();
-            });
-
-            // Handle aborted connections
-            response.data.on("aborted", () => {
-                settle(new Error("Download aborted by server"));
-                writeStream.destroy();
-            });
-        });
-
-        // Verify file was written and is complete
-        const stats = await fs.stat(tempPath);
-        if (stats.size === 0) {
-            await fs.unlink(tempPath).catch(() => {});
-            throw new Error("Downloaded file is empty");
-        }
-
-        // Check completeness when we know an expected size (prefer Content-Length).
-        // Allow a small variance because some servers are inconsistent at the byte level.
-        if (expectedBytes > 0) {
-            const variance =
-                Math.abs(stats.size - expectedBytes) / expectedBytes;
-            if (variance > 0.01) {
-                const percentComplete = Math.round(
-                    (stats.size / expectedBytes) * 100,
-                );
-                logger.error(
-                    `[PODCAST-DL] Incomplete download for ${episodeId}: ${stats.size}/${expectedBytes} bytes (${percentComplete}%)`,
-                );
-                await fs.unlink(tempPath).catch(() => {});
-                throw new Error(
-                    `Download incomplete: got ${stats.size} bytes, expected ${expectedBytes}`,
-                );
-            }
-        }
-
-        // Move temp file to final location
-        await fs.rename(tempPath, finalPath);
-
-        // Record in database
-        const fileSizeMb = stats.size / 1024 / 1024;
-
-        await withPodcastDownloadPrismaRetry(
-            "performDownload.podcastDownload.upsert",
-            () =>
-                prisma.podcastDownload.upsert({
-                    where: {
-                        userId_episodeId: { userId, episodeId },
-                    },
-                    create: {
-                        userId,
-                        episodeId,
-                        localPath: finalPath,
-                        fileSizeMb,
-                        downloadedAt: new Date(),
-                        lastAccessedAt: new Date(),
-                    },
-                    update: {
-                        localPath: finalPath,
-                        fileSizeMb,
-                        downloadedAt: new Date(),
-                        lastAccessedAt: new Date(),
-                    },
-                }),
-        );
-
-        logger.debug(
-            `[PODCAST-DL] Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`,
-        );
-
-        // Clean up progress tracking
-        downloadProgress.delete(episodeId);
-    } catch (error: any) {
-        // Clean up temp file and progress tracking on error
-        await fs.unlink(tempPath).catch(() => {});
-        downloadProgress.delete(episodeId);
-
-        if (error instanceof PodcastDownloadBlockedError) {
-            throw error;
-        }
-
-        // Retry on failure
-        if (attempt < maxAttempts) {
-            logger.debug(
-                `[PODCAST-DL] Download failed (attempt ${attempt}), retrying in 5s: ${error.message}`,
+            podcastDownloadLogger.debug(
+                `Download failed (attempt ${attempt}), retrying in 5s: ${describePodcastDownloadError(error)}`,
             );
             await new Promise((resolve) => setTimeout(resolve, 5000));
-            return performDownload(episodeId, audioUrl, userId, attempt + 1);
         }
+    }
+}
 
-        throw error;
+interface ExpiredPodcastDownload {
+    id: string;
+    localPath: string;
+    fileSizeMb: number;
+}
+
+async function deleteExpiredPodcastDownload(
+    download: ExpiredPodcastDownload,
+): Promise<number | null> {
+    try {
+        const safeLocalPath = resolveStoredPodcastCacheFile(download.localPath);
+        if (safeLocalPath) {
+            await fs.unlink(safeLocalPath).catch(() => {});
+        } else {
+            podcastDownloadLogger.warn(
+                "Skipped unsafe podcast cache cleanup path",
+            );
+        }
+        await withPodcastDownloadPrismaRetry(
+            "cleanupExpiredCache.podcastDownload.delete",
+            () =>
+                prisma.podcastDownload.delete({
+                    where: { id: download.id },
+                }),
+        );
+        podcastDownloadLogger.debug(
+            `Deleted expired cache record: ${path.basename(download.localPath)}`,
+        );
+        return safeLocalPath ? download.fileSizeMb : 0;
+    } catch (error) {
+        podcastDownloadLogger.error(
+            `Failed to delete ${download.localPath}`,
+            describePodcastDownloadError(error),
+        );
+        return null;
     }
 }
 
@@ -617,7 +791,7 @@ export async function cleanupExpiredCache(): Promise<{
     deleted: number;
     freedMb: number;
 }> {
-    logger.debug("[PODCAST-DL] Starting cache cleanup...");
+    podcastDownloadLogger.debug("Starting cache cleanup");
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -637,35 +811,14 @@ export async function cleanupExpiredCache(): Promise<{
     let freedMb = 0;
 
     for (const download of expiredDownloads) {
-        try {
-            // Delete file from disk
-            await fs.unlink(download.localPath).catch(() => {});
-
-            // Delete database record
-            await withPodcastDownloadPrismaRetry(
-                "cleanupExpiredCache.podcastDownload.delete",
-                () =>
-                    prisma.podcastDownload.delete({
-                        where: { id: download.id },
-                    }),
-            );
-
-            deleted++;
-            freedMb += download.fileSizeMb;
-
-            logger.debug(
-                `[PODCAST-DL] Deleted expired cache: ${path.basename(download.localPath)}`,
-            );
-        } catch (err: any) {
-            logger.error(
-                `[PODCAST-DL] Failed to delete ${download.localPath}:`,
-                err.message,
-            );
-        }
+        const freedForDownload = await deleteExpiredPodcastDownload(download);
+        if (freedForDownload === null) continue;
+        deleted++;
+        freedMb += freedForDownload;
     }
 
-    logger.debug(
-        `[PODCAST-DL] Cleanup complete: ${deleted} files deleted, ${freedMb.toFixed(1)}MB freed`,
+    podcastDownloadLogger.debug(
+        `Cleanup complete: ${deleted} records deleted, ${freedMb.toFixed(1)}MB freed`,
     );
 
     return { deleted, freedMb };
