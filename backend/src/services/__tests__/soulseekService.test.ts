@@ -292,6 +292,105 @@ describe("soulseek service", () => {
                 "WARN",
             );
         });
+
+        it("force disconnect tears down the client before clearing connection state", () => {
+            const service = soulseekService as any;
+            const client = {
+                search: jest.fn(),
+                download: jest.fn(),
+                destroy: jest.fn(() => {
+                    expect(service.client).toBe(client);
+                }),
+                removeAllListeners: jest.fn(() => {
+                    expect(service.client).toBe(client);
+                }),
+            };
+            service.client = client;
+            service.connectedAt = new Date();
+            service.lastConnectAttempt = Date.now();
+
+            service.forceDisconnect();
+
+            expect(client.removeAllListeners).toHaveBeenCalledWith("error");
+            expect(client.destroy).toHaveBeenCalledTimes(1);
+            expect(service.client).toBeNull();
+            expect(service.lastConnectAttempt).toBe(0);
+            expect(service.connectedAt).toBeNull();
+        });
+
+        it("force disconnect safely resets state without teardown methods or a client", () => {
+            const service = soulseekService as any;
+            service.client = { search: jest.fn(), download: jest.fn() };
+            service.connectedAt = new Date();
+            service.lastConnectAttempt = Date.now();
+
+            expect(() => service.forceDisconnect()).not.toThrow();
+            expect(service.client).toBeNull();
+            expect(service.lastConnectAttempt).toBe(0);
+            expect(service.connectedAt).toBeNull();
+
+            service.connectedAt = new Date();
+            service.lastConnectAttempt = Date.now();
+
+            expect(() => service.forceDisconnect()).not.toThrow();
+            expect(service.client).toBeNull();
+            expect(service.lastConnectAttempt).toBe(0);
+            expect(service.connectedAt).toBeNull();
+        });
+
+        it("force disconnect resets state and warns when client teardown throws", () => {
+            const service = soulseekService as any;
+            service.client = {
+                search: jest.fn(),
+                download: jest.fn(),
+                destroy: jest.fn(() => {
+                    throw new Error("socket teardown failed");
+                }),
+                removeAllListeners: jest.fn(),
+            };
+            service.connectedAt = new Date();
+            service.lastConnectAttempt = Date.now();
+
+            expect(() => service.forceDisconnect()).not.toThrow();
+
+            expect(service.client).toBeNull();
+            expect(service.lastConnectAttempt).toBe(0);
+            expect(service.connectedAt).toBeNull();
+            expect(mockSessionLog).toHaveBeenCalledWith(
+                "SOULSEEK",
+                expect.stringContaining("Client teardown failed"),
+                "WARN",
+            );
+        });
+
+        it("connect uses a fresh client after force disconnect", async () => {
+            allowSlskConnectCalls = true;
+            const service = soulseekService as any;
+            const oldClient = {
+                search: jest.fn(),
+                download: jest.fn(),
+                destroy: jest.fn(),
+                removeAllListeners: jest.fn(),
+            };
+            const newClient = {
+                search: jest.fn(),
+                download: jest.fn(),
+                on: jest.fn(),
+            };
+            service.client = oldClient;
+            mockSlskConnect.mockImplementation(
+                (
+                    _options: unknown,
+                    cb: (err: Error | null, client: unknown) => void,
+                ) => cb(null, newClient),
+            );
+
+            service.forceDisconnect();
+            await soulseekService.connect();
+
+            expect(service.client).toBe(newClient);
+            expect(oldClient.destroy).toHaveBeenCalledTimes(1);
+        });
     });
 
     it("registers a periodic failed-user cleanup interval and runs cleanup callback", () => {

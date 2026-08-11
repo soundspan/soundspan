@@ -23,6 +23,8 @@ interface SlskClient {
         opts: { file: SearchResult; path: string },
         cb: (err: Error | null, data?: { buffer: Buffer }) => void,
     ): void;
+    destroy?(): void;
+    removeAllListeners?(event?: string): void;
 }
 
 export interface SearchResult {
@@ -196,6 +198,18 @@ class SoulseekService {
             `Force disconnecting (was connected for ${uptime}s)`,
             "WARN",
         );
+        try {
+            this.client?.removeAllListeners?.("error");
+            this.client?.destroy?.();
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            sessionLog(
+                "SOULSEEK",
+                `Client teardown failed: ${message}`,
+                "WARN",
+            );
+        }
         this.client = null;
         this.connectedAt = null;
         this.lastConnectAttempt = 0; // Allow immediate reconnect

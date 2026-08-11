@@ -319,6 +319,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Soulseek forced disconnects now destroy the underlying slsk-client, closing
+  its server, listen, and peer sockets, and remove the attached error listener
+  before dropping the reference. Previously each search-failure or empty-search
+  reconnect cycle orphaned open sockets and EventEmitter listeners in the
+  long-running backend.
 - Audiobook cover proxy routes now cancel non-success upstream response bodies
   so undici can promptly return their sockets to the connection pool.
 - Clamp `GET /api/enrichment/failures` `limit`/`offset` through the shared bounded-int parser so oversized or non-numeric values can no longer trigger whole-table loads or Prisma 500s.
