@@ -215,6 +215,8 @@ EXTRACT_DELAY_MIN = env_float("YTMUSIC_EXTRACT_DELAY_MIN", "0.5")
 EXTRACT_DELAY_MAX = env_float("YTMUSIC_EXTRACT_DELAY_MAX", "2.0")
 _extract_pacer = ThreadSafeRatePacer(EXTRACT_DELAY_MIN, EXTRACT_DELAY_MAX)
 EXTRACT_TIMEOUT = env_float("YTMUSIC_EXTRACT_TIMEOUT", "60")
+# Overall deadline for public metadata browse calls.
+BROWSE_TIMEOUT = env_float("YTMUSIC_BROWSE_TIMEOUT", "30")
 YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
@@ -921,6 +923,19 @@ async def _extract_stream_info_bounded(func, *args) -> dict:
         return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=EXTRACT_TIMEOUT)
     except TimeoutError as error:
         raise HTTPException(status_code=504, detail="Stream extraction timed out") from error
+
+
+async def _browse_public_bounded(func, *args):
+    """Run a sync public ytmusicapi browse call off the event loop with an overall deadline.
+
+    asyncio.wait_for cancels the awaiting request after BROWSE_TIMEOUT seconds
+    and maps it to HTTP 504. The orphaned worker thread is not force-killed,
+    but the event loop and the client are unblocked.
+    """
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=BROWSE_TIMEOUT)
+    except TimeoutError as error:
+        raise HTTPException(status_code=504, detail="YouTube Music request timed out") from error
 
 
 def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 20) -> list[dict]:
@@ -1793,7 +1808,7 @@ async def get_album(browse_id: str, user_id: str = Query(...)):
     try:
         if user_id == "__public__":
             yt = _get_public_ytmusic("native")
-            album = yt.get_album(browse_id)
+            album = await _browse_public_bounded(yt.get_album, browse_id)
         else:
             album = await asyncio.to_thread(
                 _run_ytmusic_with_auth_retry,
@@ -1817,7 +1832,7 @@ async def get_artist(channel_id: str, user_id: str = Query(...)):
     try:
         if user_id == "__public__":
             yt = _get_public_ytmusic("native")
-            artist = yt.get_artist(channel_id)
+            artist = await _browse_public_bounded(yt.get_artist, channel_id)
         else:
             artist = await asyncio.to_thread(
                 _run_ytmusic_with_auth_retry,
@@ -1879,7 +1894,7 @@ async def get_song(video_id: str, user_id: str = Query(...)):
     try:
         if user_id == "__public__":
             yt = _get_public_ytmusic("native")
-            song = yt.get_song(video_id)
+            song = await _browse_public_bounded(yt.get_song, video_id)
         else:
             song = await asyncio.to_thread(
                 _run_ytmusic_with_auth_retry,

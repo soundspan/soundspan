@@ -65,6 +65,66 @@ async def test_charts_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_public_album_offloaded_to_worker_thread(client, monkeypatch):
+    """Public album work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def get_album(browse_id):
+        captured["t"] = threading.current_thread().name
+        return {"title": "t", "artists": [], "thumbnails": [], "tracks": []}
+
+    public_client = types.SimpleNamespace(get_album=get_album)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.get("/album/x?user_id=__public__")
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_public_artist_offloaded_to_worker_thread(client, monkeypatch):
+    """Public artist work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def get_artist(channel_id):
+        captured["t"] = threading.current_thread().name
+        return {"name": "a"}
+
+    public_client = types.SimpleNamespace(get_artist=get_artist)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.get("/artist/x?user_id=__public__")
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_public_song_offloaded_to_worker_thread(client, monkeypatch):
+    """Public song work should execute in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    def get_song(video_id):
+        captured["t"] = threading.current_thread().name
+        return {"videoDetails": {"videoId": video_id, "lengthSeconds": "1"}}
+
+    public_client = types.SimpleNamespace(get_song=get_song)
+    monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
+
+    response = await client.get("/song/dQw4w9WgXcQ?user_id=__public__")
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
 async def test_public_playlist_offloaded_to_worker_thread(client, monkeypatch):
     """Public playlist work should execute in an asyncio worker thread."""
     import app

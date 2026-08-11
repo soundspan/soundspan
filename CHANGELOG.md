@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Podcast background downloads now abort after 2 minutes of stream inactivity,
   preventing leaked file handles/sockets and permanently stuck "already
   downloading" episodes when a host stalls mid-transfer.
+- Offloaded the public YouTube Music album, artist, and song browse calls from
+  the ytmusic-streamer event loop and bounded them with a
+  `YTMUSIC_BROWSE_TIMEOUT` deadline (default: 30 seconds), so a slow or hung
+  upstream no longer freezes the sidecar and its health endpoint.
 - Bounded the missing-track health-record writes in the scanner and file
   validator so an unavailable music mount no longer fans out one concurrent
   upsert per track and exhausts the worker database pool (hardens the #319
