@@ -488,196 +488,207 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     // Player manipulation helpers (defined before the callbacks that use them)
     // -----------------------------------------------------------------------
 
-    const applyPlaybackToPlayer = useCallback((snapshot: GroupSnapshot) => {
-        const pb = snapshot.playback;
-        if (!pb || !Array.isArray(pb.queue)) return;
-        const availabilityForState =
-            trackAvailabilityStateVersionRef.current === pb.stateVersion
-                ? trackAvailabilityRef.current
-                : null;
-        const mappedQueue = pb.queue.map((item, index) =>
-            toLocalTrack(item, availabilityForState?.get(index)),
-        );
-        const safeIndex =
-            mappedQueue.length > 0
-                ? Math.min(Math.max(pb.currentIndex, 0), mappedQueue.length - 1)
-                : 0;
-        const targetTrack = mappedQueue[safeIndex] ?? null;
-
-        const state = audioStateRef.current;
-        const ctrl = controlsRef.current;
-
-        if (
-            pendingHostTrackIndexRef.current !== null &&
-            pendingHostTrackIndexRef.current !== safeIndex
-        ) {
-            pendingHostTrackIndexRef.current = null;
-        }
-        clearObsoleteReadyReportLoadListener(
-            safeIndex,
-            pb.queue[safeIndex]?.id ?? null,
-        );
-        isApplyingRemoteRef.current = true;
-
-        // Pause before switching tracks to prevent buffered audio from
-        // the old track replaying during the async transition.
-        if (
-            state.currentTrack?.id !== targetTrack?.id &&
-            playbackEngine.isPlaying()
-        ) {
-            ctrl.pause({ suppressListenTogetherBroadcast: true });
-        }
-
-        // Set queue + track
-        state.setPlaybackType("track");
-        state.setQueue(mappedQueue);
-        state.setCurrentIndex(safeIndex);
-        state.setCurrentTrack(targetTrack);
-        state.setCurrentAudiobook(null);
-        state.setCurrentPodcast(null);
-        state.setIsShuffle(false); // Sync groups don't use shuffle
-        state.setVibeMode(false);
-
-        // Compute target position (compensate for network latency)
-        let targetMs = Math.max(0, pb.positionMs);
-        if (pb.isPlaying && pb.serverTime) {
-            const age = Date.now() - pb.serverTime;
-            targetMs += Math.min(Math.max(age, 0), 5000); // Cap compensation at 5s
-        }
-        if (targetTrack?.duration) {
-            targetMs = Math.min(targetMs, targetTrack.duration * 1000);
-        }
-
-        // Convert to seconds for the player
-        const targetSec = targetMs / 1000;
-
-        // Seek if needed
-        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
-        if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
-            ctrl.seek(targetSec, {
-                allowListenTogetherFollower: true,
-                suppressListenTogetherBroadcast: true,
-            });
-        }
-
-        // Play/pause — skip resume when a reconnect audio recovery is pending,
-        // because recoverAudioAfterReconnect will reload the stream and resume
-        // after the reload completes. Resuming here would race with the reload
-        // and cause overlapping audio. Pause must still be applied so that a
-        // paused host state is respected (recoverAudioAfterReconnect exits
-        // early when !pb.isPlaying).
-        if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
-            // Let recoverAudioAfterReconnect handle resume after reload
-        } else if (pb.isPlaying) {
-            ctrl.resume({
-                suppressListenTogetherBroadcast: true,
-                listenTogetherForceIsPlaying: true,
-                listenTogetherPositionMs: pb.positionMs,
-                listenTogetherServerTimeMs: pb.serverTime,
-            });
-        } else {
-            ctrl.pause({ suppressListenTogetherBroadcast: true });
-        }
-
-        queueMicrotask(() => {
-            isApplyingRemoteRef.current = false;
-        });
-    }, [clearObsoleteReadyReportLoadListener]);
-
-    const applyDeltaToPlayer = useCallback((delta: PlaybackDelta) => {
-        // Ignore deltas while a reconnect audio recovery is in progress.
-        // recoverAudioAfterReconnect owns the reload+resume lifecycle;
-        // applying a delta here would race with that reload.
-        if (pendingReconnectAudioRecoveryRef.current) return;
-
-        const state = audioStateRef.current;
-        const ctrl = controlsRef.current;
-
-        isApplyingRemoteRef.current = true;
-
-        // Handle track change if currentIndex changed
-        const currentQueue = state.queue;
-        let trackChanged = false;
-        if (currentQueue.length > 0) {
-            const safeIdx = Math.min(
-                Math.max(delta.currentIndex, 0),
-                currentQueue.length - 1,
+    const applyPlaybackToPlayer = useCallback(
+        (snapshot: GroupSnapshot) => {
+            const pb = snapshot.playback;
+            if (!pb || !Array.isArray(pb.queue)) return;
+            const availabilityForState =
+                trackAvailabilityStateVersionRef.current === pb.stateVersion
+                    ? trackAvailabilityRef.current
+                    : null;
+            const mappedQueue = pb.queue.map((item, index) =>
+                toLocalTrack(item, availabilityForState?.get(index)),
             );
-            const queueItem = currentQueue[safeIdx] ?? null;
-            // Listen Together queues are music-only; ignore episode entries.
-            const effectiveTrack =
-                queueItem && !isEpisodeQueueItem(queueItem) ? queueItem : null;
-            trackChanged = effectiveTrack?.id !== state.currentTrack?.id;
+            const safeIndex =
+                mappedQueue.length > 0
+                    ? Math.min(
+                          Math.max(pb.currentIndex, 0),
+                          mappedQueue.length - 1,
+                      )
+                    : 0;
+            const targetTrack = mappedQueue[safeIndex] ?? null;
+
+            const state = audioStateRef.current;
+            const ctrl = controlsRef.current;
+
             if (
                 pendingHostTrackIndexRef.current !== null &&
-                pendingHostTrackIndexRef.current !== safeIdx
+                pendingHostTrackIndexRef.current !== safeIndex
             ) {
                 pendingHostTrackIndexRef.current = null;
             }
             clearObsoleteReadyReportLoadListener(
-                safeIdx,
-                delta.trackId,
+                safeIndex,
+                pb.queue[safeIndex]?.id ?? null,
             );
-            if (trackChanged) {
-                // Pause before switching to prevent buffered audio from the old
-                // track replaying during the async transition.
-                if (playbackEngine.isPlaying()) {
-                    ctrl.pause({ suppressListenTogetherBroadcast: true });
-                }
-                state.setCurrentIndex(safeIdx);
-                state.setCurrentTrack(effectiveTrack);
-            } else if (safeIdx !== state.currentIndex) {
-                state.setCurrentIndex(safeIdx);
+            isApplyingRemoteRef.current = true;
+
+            // Pause before switching tracks to prevent buffered audio from
+            // the old track replaying during the async transition.
+            if (
+                state.currentTrack?.id !== targetTrack?.id &&
+                playbackEngine.isPlaying()
+            ) {
+                ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
-        }
 
-        // Compute target position
-        let targetMs = Math.max(0, delta.positionMs);
-        if (delta.isPlaying && delta.serverTime) {
-            const age = Date.now() - delta.serverTime;
-            targetMs += Math.min(Math.max(age, 0), 5000);
-        }
-        const safeTrackIdx =
-            currentQueue.length > 0
-                ? Math.min(
-                      Math.max(delta.currentIndex, 0),
-                      currentQueue.length - 1,
-                  )
-                : -1;
-        const track =
-            safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
-        if (track?.duration) {
-            targetMs = Math.min(targetMs, track.duration * 1000);
-        }
+            // Set queue + track
+            state.setPlaybackType("track");
+            state.setQueue(mappedQueue);
+            state.setCurrentIndex(safeIndex);
+            state.setCurrentTrack(targetTrack);
+            state.setCurrentAudiobook(null);
+            state.setCurrentPodcast(null);
+            state.setIsShuffle(false); // Sync groups don't use shuffle
+            state.setVibeMode(false);
 
-        const targetSec = targetMs / 1000;
-        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
+            // Compute target position (compensate for network latency)
+            let targetMs = Math.max(0, pb.positionMs);
+            if (pb.isPlaying && pb.serverTime) {
+                const age = Date.now() - pb.serverTime;
+                targetMs += Math.min(Math.max(age, 0), 5000); // Cap compensation at 5s
+            }
+            if (targetTrack?.duration) {
+                targetMs = Math.min(targetMs, targetTrack.duration * 1000);
+            }
 
-        // Seek if drift is significant
-        if (drift > 1.5) {
-            ctrl.seek(targetSec, {
-                allowListenTogetherFollower: true,
-                suppressListenTogetherBroadcast: true,
+            // Convert to seconds for the player
+            const targetSec = targetMs / 1000;
+
+            // Seek if needed
+            const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
+            if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
+                ctrl.seek(targetSec, {
+                    allowListenTogetherFollower: true,
+                    suppressListenTogetherBroadcast: true,
+                });
+            }
+
+            // Play/pause — skip resume when a reconnect audio recovery is pending,
+            // because recoverAudioAfterReconnect will reload the stream and resume
+            // after the reload completes. Resuming here would race with the reload
+            // and cause overlapping audio. Pause must still be applied so that a
+            // paused host state is respected (recoverAudioAfterReconnect exits
+            // early when !pb.isPlaying).
+            if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
+                // Let recoverAudioAfterReconnect handle resume after reload
+            } else if (pb.isPlaying) {
+                ctrl.resume({
+                    suppressListenTogetherBroadcast: true,
+                    listenTogetherForceIsPlaying: true,
+                    listenTogetherPositionMs: pb.positionMs,
+                    listenTogetherServerTimeMs: pb.serverTime,
+                });
+            } else {
+                ctrl.pause({ suppressListenTogetherBroadcast: true });
+            }
+
+            queueMicrotask(() => {
+                isApplyingRemoteRef.current = false;
             });
-        }
+        },
+        [clearObsoleteReadyReportLoadListener],
+    );
 
-        // Play/pause — after a track change, always call resume if delta says
-        // playing, because the pre-switch pause may have cleared isPlaying state.
-        if (delta.isPlaying && (trackChanged || !playbackEngine.isPlaying())) {
-            ctrl.resume({
-                suppressListenTogetherBroadcast: true,
-                listenTogetherForceIsPlaying: true,
-                listenTogetherPositionMs: delta.positionMs,
-                listenTogetherServerTimeMs: delta.serverTime,
+    const applyDeltaToPlayer = useCallback(
+        (delta: PlaybackDelta) => {
+            // Ignore deltas while a reconnect audio recovery is in progress.
+            // recoverAudioAfterReconnect owns the reload+resume lifecycle;
+            // applying a delta here would race with that reload.
+            if (pendingReconnectAudioRecoveryRef.current) return;
+
+            const state = audioStateRef.current;
+            const ctrl = controlsRef.current;
+
+            isApplyingRemoteRef.current = true;
+
+            // Handle track change if currentIndex changed
+            const currentQueue = state.queue;
+            let trackChanged = false;
+            if (currentQueue.length > 0) {
+                const safeIdx = Math.min(
+                    Math.max(delta.currentIndex, 0),
+                    currentQueue.length - 1,
+                );
+                const queueItem = currentQueue[safeIdx] ?? null;
+                // Listen Together queues are music-only; ignore episode entries.
+                const effectiveTrack =
+                    queueItem && !isEpisodeQueueItem(queueItem)
+                        ? queueItem
+                        : null;
+                trackChanged = effectiveTrack?.id !== state.currentTrack?.id;
+                if (
+                    pendingHostTrackIndexRef.current !== null &&
+                    pendingHostTrackIndexRef.current !== safeIdx
+                ) {
+                    pendingHostTrackIndexRef.current = null;
+                }
+                clearObsoleteReadyReportLoadListener(safeIdx, delta.trackId);
+                if (trackChanged) {
+                    // Pause before switching to prevent buffered audio from the old
+                    // track replaying during the async transition.
+                    if (playbackEngine.isPlaying()) {
+                        ctrl.pause({ suppressListenTogetherBroadcast: true });
+                    }
+                    state.setCurrentIndex(safeIdx);
+                    state.setCurrentTrack(effectiveTrack);
+                } else if (safeIdx !== state.currentIndex) {
+                    state.setCurrentIndex(safeIdx);
+                }
+            }
+
+            // Compute target position
+            let targetMs = Math.max(0, delta.positionMs);
+            if (delta.isPlaying && delta.serverTime) {
+                const age = Date.now() - delta.serverTime;
+                targetMs += Math.min(Math.max(age, 0), 5000);
+            }
+            const safeTrackIdx =
+                currentQueue.length > 0
+                    ? Math.min(
+                          Math.max(delta.currentIndex, 0),
+                          currentQueue.length - 1,
+                      )
+                    : -1;
+            const track =
+                safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
+            if (track?.duration) {
+                targetMs = Math.min(targetMs, track.duration * 1000);
+            }
+
+            const targetSec = targetMs / 1000;
+            const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
+
+            // Seek if drift is significant
+            if (drift > 1.5) {
+                ctrl.seek(targetSec, {
+                    allowListenTogetherFollower: true,
+                    suppressListenTogetherBroadcast: true,
+                });
+            }
+
+            // Play/pause — after a track change, always call resume if delta says
+            // playing, because the pre-switch pause may have cleared isPlaying state.
+            if (
+                delta.isPlaying &&
+                (trackChanged || !playbackEngine.isPlaying())
+            ) {
+                ctrl.resume({
+                    suppressListenTogetherBroadcast: true,
+                    listenTogetherForceIsPlaying: true,
+                    listenTogetherPositionMs: delta.positionMs,
+                    listenTogetherServerTimeMs: delta.serverTime,
+                });
+            } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
+                ctrl.pause({ suppressListenTogetherBroadcast: true });
+            }
+
+            queueMicrotask(() => {
+                isApplyingRemoteRef.current = false;
             });
-        } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
-            ctrl.pause({ suppressListenTogetherBroadcast: true });
-        }
-
-        queueMicrotask(() => {
-            isApplyingRemoteRef.current = false;
-        });
-    }, [clearObsoleteReadyReportLoadListener]);
+        },
+        [clearObsoleteReadyReportLoadListener],
+    );
 
     const recoverAudioAfterReconnect = useCallback(
         (snapshot: GroupSnapshot) => {
@@ -837,69 +848,72 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     /**
      * Apply a queue delta — queue changed server-side.
      */
-    const applyQueueDelta = useCallback((delta: QueueDelta) => {
-        // Ignore stale/equal versions so late queue packets cannot rewind visuals.
-        if (delta.stateVersion <= lastAppliedVersionRef.current) return;
-        lastAppliedVersionRef.current = delta.stateVersion;
+    const applyQueueDelta = useCallback(
+        (delta: QueueDelta) => {
+            // Ignore stale/equal versions so late queue packets cannot rewind visuals.
+            if (delta.stateVersion <= lastAppliedVersionRef.current) return;
+            lastAppliedVersionRef.current = delta.stateVersion;
 
-        setActiveGroup((prev) => {
-            if (!prev) return prev;
-            const next = {
-                ...prev,
-                playback: {
-                    ...prev.playback,
-                    queue: delta.queue,
-                    currentIndex: delta.currentIndex,
-                    trackId: delta.trackId,
-                    stateVersion: delta.stateVersion,
-                },
-            };
-            activeGroupRef.current = next;
-            return next;
-        });
+            setActiveGroup((prev) => {
+                if (!prev) return prev;
+                const next = {
+                    ...prev,
+                    playback: {
+                        ...prev.playback,
+                        queue: delta.queue,
+                        currentIndex: delta.currentIndex,
+                        trackId: delta.trackId,
+                        stateVersion: delta.stateVersion,
+                    },
+                };
+                activeGroupRef.current = next;
+                return next;
+            });
 
-        // Rebuild local queue from sync queue
-        if (!Array.isArray(delta.queue)) return;
-        const availabilityForState =
-            trackAvailabilityStateVersionRef.current === delta.stateVersion
-                ? trackAvailabilityRef.current
-                : null;
-        const mappedQueue = delta.queue.map((item, index) =>
-            toLocalTrack(item, availabilityForState?.get(index)),
-        );
-        const safeIndex =
-            mappedQueue.length > 0
-                ? Math.min(
-                      Math.max(delta.currentIndex, 0),
-                      mappedQueue.length - 1,
-                  )
-                : 0;
+            // Rebuild local queue from sync queue
+            if (!Array.isArray(delta.queue)) return;
+            const availabilityForState =
+                trackAvailabilityStateVersionRef.current === delta.stateVersion
+                    ? trackAvailabilityRef.current
+                    : null;
+            const mappedQueue = delta.queue.map((item, index) =>
+                toLocalTrack(item, availabilityForState?.get(index)),
+            );
+            const safeIndex =
+                mappedQueue.length > 0
+                    ? Math.min(
+                          Math.max(delta.currentIndex, 0),
+                          mappedQueue.length - 1,
+                      )
+                    : 0;
 
-        if (
-            pendingHostTrackIndexRef.current !== null &&
-            pendingHostTrackIndexRef.current !== safeIndex
-        ) {
-            pendingHostTrackIndexRef.current = null;
-        }
-        clearObsoleteReadyReportLoadListener(safeIndex, delta.trackId);
-        isApplyingRemoteRef.current = true;
-        const aState = audioStateRef.current;
+            if (
+                pendingHostTrackIndexRef.current !== null &&
+                pendingHostTrackIndexRef.current !== safeIndex
+            ) {
+                pendingHostTrackIndexRef.current = null;
+            }
+            clearObsoleteReadyReportLoadListener(safeIndex, delta.trackId);
+            isApplyingRemoteRef.current = true;
+            const aState = audioStateRef.current;
 
-        startTransition(() => {
-            aState.setPlaybackType("track");
-            aState.setQueue(mappedQueue);
-            aState.setCurrentIndex(safeIndex);
-            aState.setCurrentTrack(mappedQueue[safeIndex] ?? null);
-            aState.setCurrentAudiobook(null);
-            aState.setCurrentPodcast(null);
-            aState.setVibeMode(false);
-        });
+            startTransition(() => {
+                aState.setPlaybackType("track");
+                aState.setQueue(mappedQueue);
+                aState.setCurrentIndex(safeIndex);
+                aState.setCurrentTrack(mappedQueue[safeIndex] ?? null);
+                aState.setCurrentAudiobook(null);
+                aState.setCurrentPodcast(null);
+                aState.setVibeMode(false);
+            });
 
-        // Allow time for the deferred startTransition to commit before clearing
-        setTimeout(() => {
-            isApplyingRemoteRef.current = false;
-        }, 100);
-    }, [clearObsoleteReadyReportLoadListener]);
+            // Allow time for the deferred startTransition to commit before clearing
+            setTimeout(() => {
+                isApplyingRemoteRef.current = false;
+            }, 100);
+        },
+        [clearObsoleteReadyReportLoadListener],
+    );
 
     // -----------------------------------------------------------------------
     // Socket.IO lifecycle
@@ -1617,10 +1631,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             // Listen Together queues are music-only; ignore episode entries.
             if (!targetTrack || isEpisodeQueueItem(targetTrack)) return false;
             pendingHostTrackIndexRef.current = safeIndex;
-            clearObsoleteReadyReportLoadListener(
-                safeIndex,
-                targetTrack.id,
-            );
+            clearObsoleteReadyReportLoadListener(safeIndex, targetTrack.id);
             const optimisticSelectionPolicy =
                 getListenTogetherOptimisticTrackSelectionPolicy();
             if (optimisticSelectionPolicy.guardRemoteApply) {

@@ -102,10 +102,7 @@ export abstract class ApiClientCore {
             // Note: Refresh token is loaded on-demand via getRefreshToken()
         }
 
-        if (
-            typeof window !== "undefined" &&
-            typeof document !== "undefined"
-        ) {
+        if (typeof window !== "undefined" && typeof document !== "undefined") {
             document.addEventListener(
                 "visibilitychange",
                 this.handleVisibilityChange,

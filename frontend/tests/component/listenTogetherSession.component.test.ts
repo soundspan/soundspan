@@ -758,10 +758,7 @@ type ListenTogetherCallbacks = {
         }>;
         stateVersion: number;
     }) => void;
-    onWaiting: (data: {
-        trackId: string | null;
-        currentIndex: number;
-    }) => void;
+    onWaiting: (data: { trackId: string | null; currentIndex: number }) => void;
     onPlayAt: (data: {
         positionMs: number;
         serverTime: number;
@@ -923,10 +920,8 @@ const originalProviderSocketMethods = {
     removeFromQueue: listenTogetherSocket.removeFromQueue,
     clearQueue: listenTogetherSocket.clearQueue,
 };
-const originalProviderSocketConnectedDescriptor = Object.getOwnPropertyDescriptor(
-    listenTogetherSocket,
-    "isConnected",
-);
+const originalProviderSocketConnectedDescriptor =
+    Object.getOwnPropertyDescriptor(listenTogetherSocket, "isConnected");
 const providerApi = api as unknown as {
     getMyListenGroup: () => Promise<MockGroupSnapshot | null>;
 };
@@ -961,42 +956,33 @@ function installProviderBoundaryStubs(): void {
 after(() => {
     if (!providerBoundaryStubsInstalled) return;
     const socket = listenTogetherSocket as unknown as typeof providerSocket;
-    socket.probeRoute = originalProviderSocketMethods.probeRoute.bind(
-        listenTogetherSocket,
-    );
-    socket.connect = originalProviderSocketMethods.connect.bind(
-        listenTogetherSocket,
-    );
-    socket.disconnect = originalProviderSocketMethods.disconnect.bind(
-        listenTogetherSocket,
-    );
-    socket.joinGroup = originalProviderSocketMethods.joinGroup.bind(
-        listenTogetherSocket,
-    );
-    socket.reportReady = originalProviderSocketMethods.reportReady.bind(
-        listenTogetherSocket,
-    );
+    socket.probeRoute =
+        originalProviderSocketMethods.probeRoute.bind(listenTogetherSocket);
+    socket.connect =
+        originalProviderSocketMethods.connect.bind(listenTogetherSocket);
+    socket.disconnect =
+        originalProviderSocketMethods.disconnect.bind(listenTogetherSocket);
+    socket.joinGroup =
+        originalProviderSocketMethods.joinGroup.bind(listenTogetherSocket);
+    socket.reportReady =
+        originalProviderSocketMethods.reportReady.bind(listenTogetherSocket);
     socket.play = originalProviderSocketMethods.play.bind(listenTogetherSocket);
-    socket.pause = originalProviderSocketMethods.pause.bind(
-        listenTogetherSocket,
-    );
+    socket.pause =
+        originalProviderSocketMethods.pause.bind(listenTogetherSocket);
     socket.seek = originalProviderSocketMethods.seek.bind(listenTogetherSocket);
     socket.next = originalProviderSocketMethods.next.bind(listenTogetherSocket);
-    socket.previous = originalProviderSocketMethods.previous.bind(
-        listenTogetherSocket,
-    );
-    socket.setTrack = originalProviderSocketMethods.setTrack.bind(
-        listenTogetherSocket,
-    );
-    socket.addToQueue = originalProviderSocketMethods.addToQueue.bind(
-        listenTogetherSocket,
-    );
-    socket.removeFromQueue = originalProviderSocketMethods.removeFromQueue.bind(
-        listenTogetherSocket,
-    );
-    socket.clearQueue = originalProviderSocketMethods.clearQueue.bind(
-        listenTogetherSocket,
-    );
+    socket.previous =
+        originalProviderSocketMethods.previous.bind(listenTogetherSocket);
+    socket.setTrack =
+        originalProviderSocketMethods.setTrack.bind(listenTogetherSocket);
+    socket.addToQueue =
+        originalProviderSocketMethods.addToQueue.bind(listenTogetherSocket);
+    socket.removeFromQueue =
+        originalProviderSocketMethods.removeFromQueue.bind(
+            listenTogetherSocket,
+        );
+    socket.clearQueue =
+        originalProviderSocketMethods.clearQueue.bind(listenTogetherSocket);
     if (originalProviderSocketConnectedDescriptor) {
         Object.defineProperty(
             listenTogetherSocket,
@@ -1088,7 +1074,8 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerControlCalls.pause = 0;
     providerAudioState.queue = group.playback.queue;
     providerAudioState.currentIndex = currentIndex;
-    providerAudioState.currentTrack = group.playback.queue[currentIndex] ?? null;
+    providerAudioState.currentTrack =
+        group.playback.queue[currentIndex] ?? null;
     providerAudioState.playbackType = "track";
     providerAudioStateCalls.currentIndex = [];
     providerAudioStateCalls.currentTrack = [];
@@ -1154,11 +1141,17 @@ async function mountListenTogetherProvider(
 
     return {
         latest: () => {
-            assert.ok(latestRef.current, "listen-together context did not render");
+            assert.ok(
+                latestRef.current,
+                "listen-together context did not render",
+            );
             return latestRef.current;
         },
         callbacks: () => {
-            assert.ok(providerSocketState.callbacks, "socket callbacks missing");
+            assert.ok(
+                providerSocketState.callbacks,
+                "socket callbacks missing",
+            );
             return providerSocketState.callbacks;
         },
         act: async (action: () => void | Promise<void>) => {
