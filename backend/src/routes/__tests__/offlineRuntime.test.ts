@@ -329,12 +329,86 @@ describe("offline routes runtime", () => {
 
         expect(res.statusCode).toBe(400);
         expect(res.body).toEqual({
-            error: "localPath, quality, and fileSizeMb required",
+            error: "Invalid request",
+            details: expect.any(Array),
         });
         expect(mockCachedTrackUpsert).not.toHaveBeenCalled();
     });
 
-    it("upserts completed cached tracks and handles errors", async () => {
+    it("rejects an out-of-allowlist completion quality", async () => {
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            params: { id: "t1" },
+            body: {
+                localPath: "/cache/t1.mp3",
+                quality: "ultra",
+                fileSizeMb: 15.5,
+            },
+        } as any;
+        const res = createRes();
+
+        await postTrackComplete(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Invalid request",
+            details: expect.any(Array),
+        });
+        expect(mockCachedTrackUpsert).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["negative", -1],
+        ["NaN", "NaN"],
+        ["over the per-file maximum", 4097],
+    ])("rejects a %s completion file size", async (_label, fileSizeMb) => {
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            params: { id: "t1" },
+            body: {
+                localPath: "/cache/t1.mp3",
+                quality: "high",
+                fileSizeMb,
+            },
+        } as any;
+        const res = createRes();
+
+        await postTrackComplete(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Invalid request",
+            details: expect.any(Array),
+        });
+        expect(mockCachedTrackUpsert).not.toHaveBeenCalled();
+    });
+
+    it("rejects an overlong completion local path", async () => {
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            params: { id: "t1" },
+            body: {
+                localPath: "x".repeat(1025),
+                quality: "high",
+                fileSizeMb: 15.5,
+            },
+        } as any;
+        const res = createRes();
+
+        await postTrackComplete(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Invalid request",
+            details: expect.any(Array),
+        });
+        expect(mockCachedTrackUpsert).not.toHaveBeenCalled();
+    });
+
+    it("upserts completed cached tracks with a parsed numeric size", async () => {
         const req = {
             session: {},
             user: { id: "u1", username: "u1", role: "user" },
@@ -374,12 +448,26 @@ describe("offline routes runtime", () => {
         expect(res.body).toEqual(
             expect.objectContaining({ id: "cached-1", trackId: "t1" }),
         );
+    });
+
+    it("returns 500 when a completed track upsert fails", async () => {
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            params: { id: "t1" },
+            body: {
+                localPath: "/cache/t1.mp3",
+                quality: "high",
+                fileSizeMb: "15.5",
+            },
+        } as any;
+        const res = createRes();
 
         mockCachedTrackUpsert.mockRejectedValueOnce(new Error("write failed"));
-        const errorRes = createRes();
-        await postTrackComplete(req, errorRes);
-        expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "Failed to complete download" });
+        await postTrackComplete(req, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to complete download" });
     });
 
     it("returns cached albums grouped by album id", async () => {

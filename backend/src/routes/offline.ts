@@ -8,8 +8,16 @@ const router = Router();
 
 router.use(requireAuth);
 
+const qualitySchema = z.enum(["original", "high", "medium", "low"]);
+
 const downloadAlbumSchema = z.object({
-    quality: z.enum(["original", "high", "medium", "low"]).optional(),
+    quality: qualitySchema.optional(),
+});
+
+const completeTrackSchema = z.object({
+    localPath: z.string().min(1).max(1024),
+    quality: qualitySchema,
+    fileSizeMb: z.coerce.number().finite().positive().max(4096),
 });
 
 /**
@@ -178,18 +186,23 @@ router.post("/albums/:id/download", async (req, res) => {
  *             properties:
  *               localPath:
  *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 1024
  *                 description: Local file path on device
  *               quality:
  *                 type: string
+ *                 enum: [original, high, medium, low]
  *                 description: Audio quality of the cached file
  *               fileSizeMb:
  *                 type: number
+ *                 exclusiveMinimum: 0
+ *                 maximum: 4096
  *                 description: File size in megabytes
  *     responses:
  *       200:
  *         description: Cached track record created or updated
  *       400:
- *         description: Missing required fields
+ *         description: Invalid request
  *       401:
  *         description: Not authenticated
  */
@@ -198,13 +211,9 @@ router.post("/tracks/:id/complete", async (req, res) => {
     try {
         const userId = req.user!.id;
         const trackId = req.params.id;
-        const { localPath, quality, fileSizeMb } = req.body;
-
-        if (!localPath || !quality || !fileSizeMb) {
-            return res
-                .status(400)
-                .json({ error: "localPath, quality, and fileSizeMb required" });
-        }
+        const { localPath, quality, fileSizeMb } = completeTrackSchema.parse(
+            req.body,
+        );
 
         const cachedTrack = await prisma.cachedTrack.upsert({
             where: {
@@ -219,17 +228,22 @@ router.post("/tracks/:id/complete", async (req, res) => {
                 trackId,
                 localPath,
                 quality,
-                fileSizeMb: parseFloat(fileSizeMb),
+                fileSizeMb,
             },
             update: {
                 localPath,
-                fileSizeMb: parseFloat(fileSizeMb),
+                fileSizeMb,
                 lastAccessedAt: new Date(),
             },
         });
 
         res.json(cachedTrack);
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res
+                .status(400)
+                .json({ error: "Invalid request", details: error.issues });
+        }
         logger.error("Complete track download error:", error);
         res.status(500).json({ error: "Failed to complete download" });
     }
