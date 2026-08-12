@@ -28,6 +28,19 @@ function legacyEncrypt(text: string, rawKey: string): string {
     return iv.toString("hex") + ":" + encrypted.toString("hex");
 }
 
+/** Produce one-block legacy ciphertext whose PKCS#7 padding is always invalid. */
+function legacyEncryptWithInvalidPadding(text: string, rawKey: string): string {
+    const blockBytes = 16;
+    if (Buffer.byteLength(text, "utf8") >= blockBytes) {
+        throw new Error("test fixture plaintext must fit in one CBC block");
+    }
+
+    const [ivHex, encryptedHex] = legacyEncrypt(text, rawKey).split(":");
+    const iv = Buffer.from(ivHex, "hex");
+    iv[blockBytes - 1] ^= 0xff;
+    return iv.toString("hex") + ":" + encryptedHex;
+}
+
 describe("migrate-settings-to-gcm planColumnReencryption", () => {
     it("skips empty / null / non-string values", () => {
         expect(planColumnReencryption(null)).toEqual({ action: "skip-empty" });
@@ -68,10 +81,10 @@ describe("migrate-settings-to-gcm planColumnReencryption", () => {
     });
 
     it("leaves undecryptable values UNTOUCHED (never rewrites garbage)", () => {
-        // Legacy ciphertext under a DIFFERENT key — the module cannot decrypt it.
-        const undecryptable = legacyEncrypt(
+        // Corrupt the final padding byte so decryption deterministically fails.
+        const undecryptable = legacyEncryptWithInvalidPadding(
             "lost-forever",
-            "a-totally-different-32byte-key-000000",
+            process.env.SETTINGS_ENCRYPTION_KEY as string,
         );
         const outcome = planColumnReencryption(undecryptable);
         expect(outcome.action).toBe("skip-error");
@@ -159,9 +172,9 @@ describe("migrate-settings-to-gcm migrateModelRows", () => {
     });
 
     it("skips v2 rows without updating and counts undecryptable values as skipped", async () => {
-        const undecryptable = legacyEncrypt(
+        const undecryptable = legacyEncryptWithInvalidPadding(
             "lost",
-            "a-totally-different-32byte-key-000000",
+            process.env.SETTINGS_ENCRYPTION_KEY as string,
         );
         const { delegate, updateCalls } = fakeDelegate([
             { id: "u1", subsonicPassword: "v2:aa:bb:cc:dd" },
