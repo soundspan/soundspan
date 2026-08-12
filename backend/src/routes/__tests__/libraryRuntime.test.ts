@@ -4248,8 +4248,7 @@ describe("library catalog list runtime coverage", () => {
                         { filePath: "/absolute/track.flac" },
                         { filePath: "Artist/../Other/track.flac" },
                         {
-                            filePath:
-                                "Safe Artist/Safe Album/safe-track.flac",
+                            filePath: "Safe Artist/Safe Album/safe-track.flac",
                         },
                     ],
                 },

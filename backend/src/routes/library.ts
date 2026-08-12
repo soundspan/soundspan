@@ -5370,10 +5370,10 @@ router.delete<{ id: string }>(
                         });
                     }
                 } catch (err) {
-                    libraryDeletionLogger.warn(
-                        "Could not delete track file",
-                        { trackId: track.id, error: err },
-                    );
+                    libraryDeletionLogger.warn("Could not delete track file", {
+                        trackId: track.id,
+                        error: err,
+                    });
                     // Continue with database deletion even if file deletion fails
                 }
             }
@@ -5592,8 +5592,9 @@ router.delete<{ id: string }>(
             for (const album of artist.albums) {
                 for (const track of album.tracks) {
                     if (track.filePath) {
-                        const deletionPath =
-                            resolvePersistedTrackDeletionPath(track.filePath);
+                        const deletionPath = resolvePersistedTrackDeletionPath(
+                            track.filePath,
+                        );
                         if (!deletionPath) {
                             libraryDeletionLogger.warn(
                                 "Skipped unsafe persisted artist track path",
@@ -5609,7 +5610,10 @@ router.delete<{ id: string }>(
                                         deletionPath.pathParts[0].toLowerCase() ===
                                         "soulseek"
                                             ? deletionPath.pathParts.slice(0, 2)
-                                            : deletionPath.pathParts.slice(0, 1);
+                                            : deletionPath.pathParts.slice(
+                                                  0,
+                                                  1,
+                                              );
                                     const artistFolder = safeResolvePath(
                                         config.music.musicPath,
                                         artistPathParts.join("/"),
