@@ -333,6 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Queue auto-advance no longer stalls at track boundaries: engine listeners
+  remain attached across playback state changes so end events cannot be dropped,
+  a one-shot watchdog advances tracks if an end event is ever lost, and
+  end-handling telemetry is now visible server-side.
 - Fixed the native audio engine treating the browser's spec-mandated
   end-of-stream pause as unexpected, which intermittently froze queue
   auto-advance at track boundaries, especially in hidden tabs; the Howler path

@@ -1320,6 +1320,14 @@ const getClientMetricEvents = (
         );
 };
 
+const getServerSignalEvents = (
+    eventName: string,
+): Array<Record<string, unknown>> => {
+    return apiCalls.reportPlaybackClientMetric.filter(
+        (payload) => payload.event === eventName,
+    );
+};
+
 const emitFatalLoadError = async (): Promise<void> => {
     engine.emit("loaderror", {
         error: new Error("fatal decode failure"),
@@ -1471,6 +1479,186 @@ test("newly loaded source can end immediately after an advance", async () => {
     engine.emit("end");
 
     assert.equal(controlCalls.next, 2);
+});
+
+test("keeps engine end listeners attached across playback state churn", async () => {
+    const tracks = [makeTrack("stable-1"), makeTrack("stable-2")];
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+    audioState.repeatMode = "one";
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    const stableEvents = [
+        "timeupdate",
+        "end",
+        "playerror",
+        "play",
+        "pause",
+        "vhsresponse",
+        "manifeststall",
+        "manifest-stall",
+    ];
+    const beforeChurn = stableEvents.map((event) => ({
+        event,
+        on: engine.onCalls.filter((call) => call.event === event).length,
+        off: engine.offCalls.filter((call) => call.event === event).length,
+    }));
+
+    playbackState.isPlaying = true;
+    audioState.repeatMode = "off";
+    rerenderOrchestrator();
+    engine.emit("end");
+
+    assert.equal(controlCalls.next, 1);
+    assert.deepEqual(
+        stableEvents.map((event) => ({
+            event,
+            on: engine.onCalls.filter((call) => call.event === event).length,
+            off: engine.offCalls.filter((call) => call.event === event).length,
+        })),
+        beforeChurn,
+    );
+});
+
+test("track-end watchdog advances after a lost end event and emits server telemetry", async () => {
+    mock.timers.enable();
+    enableWindowMetrics();
+    playbackState.isPlaying = true;
+    const track = makeTrack("watchdog-ended");
+    audioState.currentTrack = track;
+    audioState.queue = [track, makeTrack("watchdog-next")];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    engine.duration = 210;
+    engine.currentTime = 209.8;
+    engine.actualCurrentTime = 209.8;
+    engine.emit("timeupdate", { timeSec: 209.8 });
+
+    engine.playing = false;
+    engine.trackEnded = true;
+    mock.timers.tick(1_999);
+    assert.equal(controlCalls.next, 0);
+    mock.timers.tick(1);
+    await flushAsync();
+
+    assert.equal(controlCalls.next, 1);
+    const signals = getServerSignalEvents("player.track_end_advanced");
+    assert.equal(signals.length, 1);
+    assert.deepEqual(signals[0]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        trackId: "watchdog-ended",
+        viaWatchdog: true,
+    });
+});
+
+test("normal end handling cancels the watchdog and advances only once", async () => {
+    mock.timers.enable();
+    playbackState.isPlaying = true;
+    const track = makeTrack("handled-before-watchdog");
+    audioState.currentTrack = track;
+    audioState.queue = [track, makeTrack("handled-next")];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    engine.duration = 210;
+    engine.currentTime = 209.8;
+    engine.emit("timeupdate", { timeSec: 209.8 });
+    engine.emit("end");
+
+    engine.playing = false;
+    engine.trackEnded = true;
+    mock.timers.tick(2_000);
+    await flushAsync();
+
+    assert.equal(controlCalls.next, 1);
+});
+
+test("pause clears an armed track-end watchdog", async () => {
+    mock.timers.enable();
+    playbackState.isPlaying = true;
+    const track = makeTrack("paused-near-end");
+    audioState.currentTrack = track;
+    audioState.queue = [track, makeTrack("paused-next")];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    engine.duration = 210;
+    engine.currentTime = 209.8;
+    engine.emit("timeupdate", { timeSec: 209.8 });
+    engine.emit("pause");
+
+    engine.playing = false;
+    engine.trackEnded = true;
+    mock.timers.tick(2_000);
+    await flushAsync();
+
+    assert.equal(controlCalls.next, 0);
+});
+
+test("reports rejected and normally advanced track ends to the server", async () => {
+    enableWindowMetrics();
+    const track = makeTrack("telemetry-end");
+    audioState.currentTrack = track;
+    audioState.queue = [track, makeTrack("telemetry-next")];
+
+    renderOrchestrator();
+    engine.emit("end");
+    await flushAsync();
+
+    const rejected = getServerSignalEvents("player.track_end_rejected");
+    assert.equal(rejected.length, 1);
+    assert.deepEqual(rejected[0]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        reason: "engine_source_loading",
+        currentTrackId: "telemetry-end",
+        activeEngineTrackId: null,
+        activeLoadId: -1,
+    });
+
+    engine.emit("load", { durationSec: 210 });
+    engine.emit("end");
+    await flushAsync();
+
+    const advanced = getServerSignalEvents("player.track_end_advanced");
+    assert.equal(advanced.length, 1);
+    assert.deepEqual(advanced[0]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        trackId: "telemetry-end",
+        viaWatchdog: false,
+    });
+
+    engine.emit("end");
+    await flushAsync();
+
+    const duplicateRejected = getServerSignalEvents(
+        "player.track_end_rejected",
+    );
+    assert.equal(duplicateRejected.length, 2);
+    assert.deepEqual(duplicateRejected[1]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        reason: "duplicate_end",
+        currentTrackId: "telemetry-end",
+        activeEngineTrackId: "telemetry-end",
+        activeLoadId: 1,
+    });
 });
 
 test("startup playback watchdog does not reload for a listen-together follower", async () => {

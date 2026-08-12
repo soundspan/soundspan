@@ -17,6 +17,7 @@ import {
 } from "@/lib/audio-engine/engineMode";
 import type {
     AudioEngineErrorPayload,
+    AudioEngineEventHandler,
     AudioEngineManifestStallPayload,
     AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
@@ -92,6 +93,10 @@ import {
     type CanonicalMediaProviderIdentity,
     type CanonicalMediaSource,
 } from "@soundspan/media-metadata-contract";
+import {
+    createTrackEndWatchdog,
+    type TrackEndWatchdog,
+} from "./trackEndWatchdog";
 
 interface RuntimeProviderTrack {
     mediaSource?: CanonicalMediaSource;
@@ -254,6 +259,8 @@ const PLAYBACK_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.startup_timeline",
     "player.unexpected_stop",
     "player.unexpected_pause",
+    "player.track_end_rejected",
+    "player.track_end_advanced",
     "player.playback_error",
     "player.segment_quarantined",
     "session.prewarm_validation_aborted",
@@ -394,6 +401,8 @@ const SEGMENTED_PAUSE_RECOVERY_DEBOUNCE_MS = 600;
 const SEGMENTED_PAUSE_RECOVERY_MIN_SILENCE_MS = 1200;
 const SEGMENTED_PAUSE_RECOVERY_MAX_BUFFERED_AHEAD_SEC = 1.0;
 const SEGMENTED_HANDOFF_LISTENER_BACKSTOP_MS = 20_000;
+const TRACK_END_WATCHDOG_TIMEOUT_MS = 2_000;
+const TRACK_END_WATCHDOG_BOUNDARY_SEC = 0.75;
 const AUDIO_ENGINE_MANIFEST_STALL_EVENTS = [
     "manifeststall",
     "manifest-stall",
@@ -402,6 +411,18 @@ const audioEngine = createRuntimeAudioEngine();
 const orchestratorLogger = sharedFrontendLogger.child(
     "AudioPlaybackOrchestrator",
 );
+
+interface OrchestratorEngineEventHandlers {
+    handleTimeUpdate: AudioEngineEventHandler<"timeupdate">;
+    handleLoad: AudioEngineEventHandler<"load">;
+    handleEnd: (viaWatchdog: boolean) => void;
+    handleError: AudioEngineEventHandler<"loaderror">;
+    handlePlay: AudioEngineEventHandler<"play">;
+    handlePause: AudioEngineEventHandler<"pause">;
+    handleVhsResponse: AudioEngineEventHandler<"vhsresponse">;
+    handleManifestStall: AudioEngineEventHandler<"manifeststall">;
+    cleanup: () => void;
+}
 
 interface ActiveSegmentedSessionSnapshot {
     sessionId: string;
@@ -724,6 +745,8 @@ export const AudioPlaybackOrchestrator = memo(
         const lastLoggedRemotePlayKeyRef = useRef<string | null>(null);
         const activeEngineTrackIdRef = useRef<string | null>(null);
         const activeEngineLoadIdRef = useRef<number>(-1);
+        const engineEventHandlersRef =
+            useRef<OrchestratorEngineEventHandlers | null>(null);
         const recoverablePlayErrorPendingRef = useRef<boolean>(false);
         const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
         const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(
@@ -857,6 +880,34 @@ export const AudioPlaybackOrchestrator = memo(
             loadId: -1,
             handledAtMs: 0,
         });
+        const trackEndWatchdogRef = useRef<TrackEndWatchdog | null>(null);
+        if (!trackEndWatchdogRef.current) {
+            trackEndWatchdogRef.current = createTrackEndWatchdog({
+                timeoutMs: TRACK_END_WATCHDOG_TIMEOUT_MS,
+                shouldHandle: (snapshot) => {
+                    const lastHandled = lastHandledTrackEndRef.current;
+                    const endWasAlreadyHandled =
+                        lastHandled.trackId === snapshot.trackId &&
+                        lastHandled.loadId === snapshot.loadId;
+                    const sourceStillMatches =
+                        currentTrackRef.current?.id === snapshot.trackId &&
+                        loadIdRef.current === snapshot.loadId &&
+                        activeEngineTrackIdRef.current === snapshot.trackId &&
+                        activeEngineLoadIdRef.current === snapshot.loadId;
+                    return (
+                        snapshot.statusWasPlaying &&
+                        playbackTypeRef.current === "track" &&
+                        !isLoadingRef.current &&
+                        !endWasAlreadyHandled &&
+                        sourceStillMatches &&
+                        audioEngine.hasTrackEnded()
+                    );
+                },
+                onUnhandledEnd: () => {
+                    engineEventHandlersRef.current?.handleEnd(true);
+                },
+            });
+        }
 
         const howlerLoadStartMsRef = useRef<number>(0);
 
@@ -3523,6 +3574,7 @@ export const AudioPlaybackOrchestrator = memo(
             currentTrackRef.current = currentTrack;
             const currentTrackId = currentTrack?.id ?? null;
             if (previousTrackId !== currentTrackId) {
+                trackEndWatchdogRef.current?.clear();
                 abortAllSegmentedPrewarmValidations("track_change");
             }
             const handoffListenerTrackId =
@@ -3727,6 +3779,7 @@ export const AudioPlaybackOrchestrator = memo(
         useEffect(() => {
             playbackTypeRef.current = playbackType;
             if (playbackType !== "track") {
+                trackEndWatchdogRef.current?.clear();
                 abortAllSegmentedPrewarmValidations("track_change");
                 clearSegmentedHandoffLoadListeners("playback_type_change");
                 segmentedStartupRetryCountRef.current = 0;
@@ -4515,8 +4568,8 @@ export const AudioPlaybackOrchestrator = memo(
             [currentPodcast, isBuffering],
         );
 
-        // Subscribe to runtime audio engine events
-        useEffect(() => {
+        // Refresh event behavior after every render without detaching listeners.
+        useLayoutEffect(() => {
             const handleTimeUpdate = (data: {
                 timeSec: number;
                 time?: number;
@@ -4533,7 +4586,7 @@ export const AudioPlaybackOrchestrator = memo(
                 // This prevents stale timeupdate events from overwriting optimistic seek updates
                 // and blocks stale callbacks from a prior track listener closure.
                 // Skip during loading: the engine may still report the previous track's position
-                // after React re-registers this handler with the new track's ID but before
+                // after React refreshes this delegated closure with the new track's ID but before
                 // audioEngine.load() replaces the source.
                 if (!isLoadingRef.current) {
                     setCurrentTimeFromEngine(
@@ -4585,6 +4638,28 @@ export const AudioPlaybackOrchestrator = memo(
                     }
                     noteSegmentedStartupProgress(liveTrackId, currentTimeValue);
                     noteSegmentedStartupAudible(liveTrackId, currentTimeValue);
+
+                    const durationSec = audioEngine.getDuration();
+                    const isEndAdjacent =
+                        !isLoadingRef.current &&
+                        Boolean(liveTrackId) &&
+                        Number.isFinite(durationSec) &&
+                        durationSec > 0 &&
+                        durationSec - currentTimeValue <=
+                            TRACK_END_WATCHDOG_BOUNDARY_SEC;
+                    if (isEndAdjacent && liveTrackId) {
+                        trackEndWatchdogRef.current?.arm({
+                            trackId: liveTrackId,
+                            loadId: loadIdRef.current,
+                            statusWasPlaying:
+                                audioEngine.isPlaying() ||
+                                playbackStateMachine.isPlaying ||
+                                isPlaying ||
+                                lastPlayingStateRef.current,
+                        });
+                    } else {
+                        trackEndWatchdogRef.current?.clear();
+                    }
                 }
 
                 // Notify heartbeat of progress to detect stalls
@@ -4615,6 +4690,7 @@ export const AudioPlaybackOrchestrator = memo(
                 durationSec: number;
                 duration?: number;
             }) => {
+                trackEndWatchdogRef.current?.clear();
                 const loadedDuration =
                     typeof data.durationSec === "number"
                         ? data.durationSec
@@ -4667,16 +4743,43 @@ export const AudioPlaybackOrchestrator = memo(
                 }
             };
 
-            const handleEnd = () => {
+            const rejectTrackEnd = (
+                reason:
+                    | "engine_source_loading"
+                    | "stale_engine_load"
+                    | "stale_engine_track"
+                    | "duplicate_end",
+                details: Record<string, unknown> = {},
+            ): void => {
+                const fields = {
+                    reason,
+                    currentTrackId: currentTrackRef.current?.id ?? null,
+                    activeEngineTrackId: activeEngineTrackIdRef.current,
+                    activeLoadId: activeEngineLoadIdRef.current,
+                };
+                orchestratorLogger.warn("Rejected track end event", {
+                    ...fields,
+                    ...details,
+                });
+                logPlaybackClientMetric("player.track_end_rejected", fields);
+            };
+
+            const handleEnd = (viaWatchdog: boolean = false) => {
                 const isListenTogether = Boolean(
                     getListenTogetherSessionSnapshot()?.groupId,
                 );
+                const currentTrackId = currentTrackRef.current?.id ?? null;
+                const advanceEndedTrack = (): void => {
+                    advancePlayIntentAtMsRef.current = Date.now();
+                    logPlaybackClientMetric("player.track_end_advanced", {
+                        trackId: currentTrackId,
+                        viaWatchdog,
+                    });
+                    next();
+                };
                 if (playbackType === "track") {
                     if (isLoadingRef.current) {
-                        orchestratorLogger.warn("Rejected track end event", {
-                            reason: "engine_source_loading",
-                            currentTrackId: currentTrackRef.current?.id ?? null,
-                            activeLoadId: activeEngineLoadIdRef.current,
+                        rejectTrackEnd("engine_source_loading", {
                             currentLoadId: loadIdRef.current,
                         });
                         return;
@@ -4684,27 +4787,18 @@ export const AudioPlaybackOrchestrator = memo(
 
                     // Guard: stale end event from a previous load cycle
                     if (activeEngineLoadIdRef.current !== loadIdRef.current) {
-                        orchestratorLogger.warn("Rejected track end event", {
-                            reason: "stale_engine_load",
-                            currentTrackId: currentTrackRef.current?.id ?? null,
-                            activeLoadId: activeEngineLoadIdRef.current,
+                        rejectTrackEnd("stale_engine_load", {
                             currentLoadId: loadIdRef.current,
                         });
                         return;
                     }
-                    const currentTrackId = currentTrackRef.current?.id ?? null;
                     const activeEngineTrackId = activeEngineTrackIdRef.current;
                     if (
                         currentTrackId &&
                         activeEngineTrackId &&
                         currentTrackId !== activeEngineTrackId
                     ) {
-                        orchestratorLogger.warn("Rejected track end event", {
-                            reason: "stale_engine_track",
-                            currentTrackId,
-                            activeEngineTrackId,
-                            activeLoadId: activeEngineLoadIdRef.current,
-                        });
+                        rejectTrackEnd("stale_engine_track");
                         return;
                     }
 
@@ -4718,16 +4812,10 @@ export const AudioPlaybackOrchestrator = memo(
                             lastHandled.loadId === activeLoadId &&
                             now - lastHandled.handledAtMs < 1500
                         ) {
-                            orchestratorLogger.warn(
-                                "Rejected track end event",
-                                {
-                                    reason: "duplicate_end",
-                                    currentTrackId,
-                                    activeLoadId,
-                                    sinceLastHandledMs:
-                                        now - lastHandled.handledAtMs,
-                                },
-                            );
+                            rejectTrackEnd("duplicate_end", {
+                                sinceLastHandledMs:
+                                    now - lastHandled.handledAtMs,
+                            });
                             return;
                         }
                         lastHandledTrackEndRef.current = {
@@ -4736,6 +4824,7 @@ export const AudioPlaybackOrchestrator = memo(
                             handledAtMs: now,
                         };
                     }
+                    trackEndWatchdogRef.current?.clear();
                 }
 
                 // Save final progress for audiobooks/podcasts
@@ -4857,8 +4946,7 @@ export const AudioPlaybackOrchestrator = memo(
                             });
 
                         if (!shouldAutoMatchVibe || !currentTrack?.id) {
-                            advancePlayIntentAtMsRef.current = Date.now();
-                            next();
+                            advanceEndedTrack();
                             return;
                         }
 
@@ -4868,8 +4956,7 @@ export const AudioPlaybackOrchestrator = memo(
                         }).finally(() => {
                             if (currentTrackRef.current?.id !== endedTrackId)
                                 return;
-                            advancePlayIntentAtMsRef.current = Date.now();
-                            next();
+                            advanceEndedTrack();
                         });
                     }
                 } else {
@@ -5290,6 +5377,7 @@ export const AudioPlaybackOrchestrator = memo(
             };
 
             const handlePause = () => {
+                trackEndWatchdogRef.current?.clear();
                 if (isLoadingRef.current) return;
                 if (seekReloadInProgressRef.current) return;
                 if (segmentedHandoffInProgressRef.current) {
@@ -5539,78 +5627,81 @@ export const AudioPlaybackOrchestrator = memo(
                 isUserInitiatedRef.current = false;
             };
 
-            audioEngine.on("timeupdate", handleTimeUpdate);
-            audioEngine.on("load", handleLoad);
-            audioEngine.on("end", handleEnd);
-            audioEngine.on("loaderror", handleError);
-            audioEngine.on("playerror", handleError);
-            audioEngine.on("play", handlePlay);
-            audioEngine.on("pause", handlePause);
-            audioEngine.on("vhsresponse", handleVhsResponse);
             const handleManifestStall = (
                 payload: AudioEngineManifestStallPayload,
             ) => {
                 handleStartupManifestStall(payload);
             };
+
+            engineEventHandlersRef.current = {
+                handleTimeUpdate,
+                handleLoad,
+                handleEnd,
+                handleError,
+                handlePlay,
+                handlePause,
+                handleVhsResponse,
+                handleManifestStall,
+                cleanup: clearUnexpectedPauseRecoveryCheck,
+            };
+        });
+
+        // The shared hybrid facade keeps its identity while inner engines swap.
+        // Bind once per facade identity and dispatch into the latest closures.
+        useEffect(() => {
+            const stableHandleTimeUpdate: AudioEngineEventHandler<
+                "timeupdate"
+            > = (payload) =>
+                engineEventHandlersRef.current?.handleTimeUpdate(payload);
+            const stableHandleLoad: AudioEngineEventHandler<"load"> = (
+                payload,
+            ) => engineEventHandlersRef.current?.handleLoad(payload);
+            const stableHandleEnd: AudioEngineEventHandler<"end"> = () =>
+                engineEventHandlersRef.current?.handleEnd(false);
+            const stableHandleError: AudioEngineEventHandler<"loaderror"> = (
+                payload,
+            ) => engineEventHandlersRef.current?.handleError(payload);
+            const stableHandlePlay: AudioEngineEventHandler<"play"> = () =>
+                engineEventHandlersRef.current?.handlePlay();
+            const stableHandlePause: AudioEngineEventHandler<"pause"> = () =>
+                engineEventHandlersRef.current?.handlePause();
+            const stableHandleVhsResponse: AudioEngineEventHandler<
+                "vhsresponse"
+            > = (payload) =>
+                engineEventHandlersRef.current?.handleVhsResponse(payload);
+            const stableHandleManifestStall: AudioEngineEventHandler<
+                "manifeststall"
+            > = (payload) =>
+                engineEventHandlersRef.current?.handleManifestStall(payload);
+
+            audioEngine.on("timeupdate", stableHandleTimeUpdate);
+            audioEngine.on("load", stableHandleLoad);
+            audioEngine.on("end", stableHandleEnd);
+            audioEngine.on("loaderror", stableHandleError);
+            audioEngine.on("playerror", stableHandleError);
+            audioEngine.on("play", stableHandlePlay);
+            audioEngine.on("pause", stableHandlePause);
+            audioEngine.on("vhsresponse", stableHandleVhsResponse);
             for (const eventName of AUDIO_ENGINE_MANIFEST_STALL_EVENTS) {
-                audioEngine.on(eventName, handleManifestStall);
+                audioEngine.on(eventName, stableHandleManifestStall);
             }
 
             return () => {
-                clearUnexpectedPauseRecoveryCheck();
-                audioEngine.off("timeupdate", handleTimeUpdate);
-                audioEngine.off("load", handleLoad);
-                audioEngine.off("end", handleEnd);
-                audioEngine.off("loaderror", handleError);
-                audioEngine.off("playerror", handleError);
-                audioEngine.off("play", handlePlay);
-                audioEngine.off("pause", handlePause);
-                audioEngine.off("vhsresponse", handleVhsResponse);
+                engineEventHandlersRef.current?.cleanup();
+                trackEndWatchdogRef.current?.clear();
+                audioEngine.off("timeupdate", stableHandleTimeUpdate);
+                audioEngine.off("load", stableHandleLoad);
+                audioEngine.off("end", stableHandleEnd);
+                audioEngine.off("loaderror", stableHandleError);
+                audioEngine.off("playerror", stableHandleError);
+                audioEngine.off("play", stableHandlePlay);
+                audioEngine.off("pause", stableHandlePause);
+                audioEngine.off("vhsresponse", stableHandleVhsResponse);
                 for (const eventName of AUDIO_ENGINE_MANIFEST_STALL_EVENTS) {
-                    audioEngine.off(eventName, handleManifestStall);
+                    audioEngine.off(eventName, stableHandleManifestStall);
                 }
             };
-        }, [
-            playbackType,
-            currentTrack,
-            currentAudiobook,
-            currentPodcast,
-            repeatMode,
-            next,
-            pause,
-            setCurrentTimeFromEngine,
-            setDuration,
-            setIsPlaying,
-            setIsBuffering,
-            queue,
-            currentIndex,
-            isShuffle,
-            shuffleIndices,
-            requestAutoMatchVibe,
-            setCurrentTrack,
-            setCurrentAudiobook,
-            setCurrentPodcast,
-            setPlaybackType,
-            saveAudiobookProgress,
-            savePodcastProgress,
-            scheduleTrackErrorSkip,
-            clearPendingTrackErrorSkip,
-            clearUnexpectedPauseRecoveryCheck,
-            clearStartupPlaybackRecovery,
-            clearSegmentedStartupFallback,
-            clearTransientTrackRecovery,
-            attemptSegmentedHandoffRecovery,
-            attemptTransientTrackRecovery,
-            isPlaying,
-            resolveBufferedAheadSec,
-            scheduleStartupPlaybackRecovery,
-            hasStartupChunkResponseForTrack,
-            handleStartupManifestStall,
-            emitSegmentedStartupTimeline,
-            noteSegmentedStartupAudible,
-            noteSegmentedStartupProgress,
-            noteSegmentedStartupVhsResponse,
-        ]);
+        }, []);
 
         // Foreground recovery: when the page returns from background and
         // audio was playing when it went hidden but the engine is no longer
@@ -5690,6 +5781,14 @@ export const AudioPlaybackOrchestrator = memo(
                                     loadId: currentLoadId,
                                 },
                             );
+                            trackEndWatchdogRef.current?.clear();
+                            logPlaybackClientMetric(
+                                "player.track_end_advanced",
+                                {
+                                    trackId: currentMediaId,
+                                    viaWatchdog: false,
+                                },
+                            );
                             next();
                             return;
                         }
@@ -5747,6 +5846,7 @@ export const AudioPlaybackOrchestrator = memo(
                 null;
 
             if (!currentMediaId) {
+                trackEndWatchdogRef.current?.clear();
                 wasPlayingWhenHiddenRef.current = false;
                 markSegmentedStartupRampWindow(null, "media_cleared");
                 setStreamProfile(null);
@@ -5772,6 +5872,7 @@ export const AudioPlaybackOrchestrator = memo(
 
             const previousMediaId = lastTrackIdRef.current;
             if (currentMediaId !== previousMediaId) {
+                trackEndWatchdogRef.current?.clear();
                 segmentedStartupTimelineRef.current = null;
             }
 
@@ -7374,6 +7475,7 @@ export const AudioPlaybackOrchestrator = memo(
                     scheduleStartupPlaybackRecovery(currentTrack.id);
                 }
             } else {
+                trackEndWatchdogRef.current?.clear();
                 clearStartupPlaybackRecovery();
                 audioEngine.pause();
             }
