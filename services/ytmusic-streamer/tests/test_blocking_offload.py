@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import threading
 import types
+from pathlib import Path
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.anyio
-async def test_search_offloaded_to_worker_thread(client, monkeypatch):
+async def test_search_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Search work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def fake(*args, **kwargs):
+    def fake(*args: Any, **kwargs: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return [], "native"
 
@@ -28,13 +33,15 @@ async def test_search_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_library_songs_offloaded_to_worker_thread(client, monkeypatch):
+async def test_library_songs_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Library-song work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def fake(user_id, operation, func):
+    def fake(user_id: Any, operation: Any, func: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return []
 
@@ -48,14 +55,20 @@ async def test_library_songs_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_charts_offloaded_to_worker_thread(client, monkeypatch):
+async def test_charts_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Charts work should execute in an asyncio worker thread."""
     import app
 
-    captured = {}
-    public_client = types.SimpleNamespace(
-        get_charts=lambda country: captured.__setitem__("t", threading.current_thread().name) or {}
-    )
+    captured: dict[str, str] = {}
+
+    def get_charts(country: Any) -> dict[str, Any]:
+        assert country == "US"
+        captured["t"] = threading.current_thread().name
+        return {}
+
+    public_client = types.SimpleNamespace(get_charts=get_charts)
     monkeypatch.setattr(app, "_get_public_ytmusic", lambda strategy: public_client)
 
     response = await client.get("/charts?country=US")
@@ -65,13 +78,15 @@ async def test_charts_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_public_album_offloaded_to_worker_thread(client, monkeypatch):
+async def test_public_album_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Public album work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def get_album(browse_id):
+    def get_album(browse_id: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {"title": "t", "artists": [], "thumbnails": [], "tracks": []}
 
@@ -85,13 +100,15 @@ async def test_public_album_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_public_artist_offloaded_to_worker_thread(client, monkeypatch):
+async def test_public_artist_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Public artist work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def get_artist(channel_id):
+    def get_artist(channel_id: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {"name": "a"}
 
@@ -105,13 +122,15 @@ async def test_public_artist_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_public_song_offloaded_to_worker_thread(client, monkeypatch):
+async def test_public_song_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Public song work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def get_song(video_id):
+    def get_song(video_id: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {"videoDetails": {"videoId": video_id, "lengthSeconds": "1"}}
 
@@ -125,13 +144,15 @@ async def test_public_song_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_public_playlist_offloaded_to_worker_thread(client, monkeypatch):
+async def test_public_playlist_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Public playlist work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def get_playlist(playlist_id, limit):
+    def get_playlist(playlist_id: Any, limit: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {"id": playlist_id, "title": "t", "tracks": []}
 
@@ -145,16 +166,18 @@ async def test_public_playlist_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_playlist_auth_fallback_offloaded_to_worker_thread(client, monkeypatch):
+async def test_playlist_auth_fallback_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Public playlist fallback work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def fail_authenticated_fetch(*args, **kwargs):
+    def fail_authenticated_fetch(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("authenticated fetch failed")
 
-    def get_playlist(playlist_id, limit):
+    def get_playlist(playlist_id: Any, limit: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {"id": playlist_id, "title": "t", "tracks": []}
 
@@ -169,13 +192,15 @@ async def test_playlist_auth_fallback_offloaded_to_worker_thread(client, monkeyp
 
 
 @pytest.mark.anyio
-async def test_debug_search_offloaded_to_worker_thread(client, monkeypatch):
+async def test_debug_search_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Debug-search work should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def send_request(endpoint, body):
+    def send_request(endpoint: str, body: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return {}
 
@@ -190,17 +215,19 @@ async def test_debug_search_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_device_code_offloaded_to_worker_thread(client, monkeypatch):
+async def test_device_code_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """OAuth device-code initiation should run in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeOAuthCredentials:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def get_code(self):
+        def get_code(self) -> Any:
             captured["t"] = threading.current_thread().name
             return {
                 "device_code": "dc",
@@ -222,17 +249,19 @@ async def test_device_code_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_device_code_poll_offloaded_to_worker_thread(client, monkeypatch):
+async def test_device_code_poll_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """OAuth device-code polling should run in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeOAuthCredentials:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def token_from_code(self, device_code):
+        def token_from_code(self, device_code: Any) -> Any:
             captured["t"] = threading.current_thread().name
             # Pending short-circuits before any file writes.
             return {"error": "authorization_pending"}
@@ -250,14 +279,16 @@ async def test_device_code_poll_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_auth_restore_offloaded_to_worker_thread(client, monkeypatch, tmp_path):
+async def test_auth_restore_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Credential restoration writes should execute in an asyncio worker thread."""
     import app
 
     captured = []
     original_write = app._write_private_file
 
-    def recording_write(path, content):
+    def recording_write(path: Any, content: Any) -> Any:
         captured.append(threading.current_thread().name)
         original_write(path, content)
 
@@ -281,7 +312,9 @@ async def test_auth_restore_offloaded_to_worker_thread(client, monkeypatch, tmp_
 
 
 @pytest.mark.anyio
-async def test_auth_clear_offloaded_to_worker_thread(client, monkeypatch, tmp_path):
+async def test_auth_clear_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Credential removal should execute in an asyncio worker thread."""
     import app
 
@@ -294,7 +327,7 @@ async def test_auth_clear_offloaded_to_worker_thread(client, monkeypatch, tmp_pa
     captured = []
     original_unlink = app._unlink_if_exists
 
-    def recording_unlink(path):
+    def recording_unlink(path: Any) -> Any:
         captured.append(threading.current_thread().name)
         original_unlink(path)
 
@@ -311,24 +344,24 @@ async def test_auth_clear_offloaded_to_worker_thread(client, monkeypatch, tmp_pa
 
 @pytest.mark.anyio
 async def test_device_code_poll_success_write_offloaded_to_worker_thread(
-    client, monkeypatch, tmp_path
-):
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Successful device polling writes should execute in an asyncio worker thread."""
     import app
 
     class SuccessfulOAuthCredentials:
         """Return a deterministic successful device-code token."""
 
-        def __init__(self, client_id, client_secret):
+        def __init__(self, client_id: Any, client_secret: Any) -> None:
             pass
 
-        def token_from_code(self, device_code):
+        def token_from_code(self, device_code: Any) -> Any:
             return {"access_token": "at", "refresh_token": "rt"}
 
     captured = []
     original_write = app._write_private_file
 
-    def recording_write(path, content):
+    def recording_write(path: Any, content: Any) -> Any:
         captured.append(threading.current_thread().name)
         original_write(path, content)
 

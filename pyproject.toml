@@ -58,48 +58,87 @@ ignore = [
 ]
 
 [tool.mypy]
-# Pragmatic initial gate; stricter checks should be enabled incrementally in follow-up ratchets.
 # Python 3.11 matches the repo floor (Ruff py311 and audio-analyzer python:3.11-slim),
 # so mypy checks against the oldest interpreter the sidecars run on.
 python_version = "3.11"
-files = ["services"]
+files = ["services/common"]
 mypy_path = ["services"]
-exclude = [
-  "^services/.*/tests/", # Dynamic pytest doubles are covered by Ruff and runtime tests, not this initial type gate.
-  "^services/audio-analyzer-clap/analyzer\\.py$", # Avoid collision with the other top-level analyzer module during discovery.
-  "^services/tidal-downloader/app\\.py$", # Covered by a standalone mypy invocation to avoid the top-level app module collision.
-]
-check_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
+strict = true
+warn_unreachable = true
+disallow_any_unimported = true
+show_error_codes = true
+# Allow package-specific follow_imports overrides to apply to incompatible stubs too.
+follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
-# Both import spellings are required by the sidecars' runtime path bootstraps. The
-# same shared modules are checked as `common.*`; avoid following their namespace-
-# package alias a second time as `services.common.*`.
-module = ["services.common.*"]
+# tiddl 3.4.4 does not publish PEP 561 type information (7 import diagnostics).
+module = ["tiddl", "tiddl.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# yt-dlp 2026.7.4 does not publish PEP 561 type information (2 import diagnostics).
+module = ["yt_dlp", "yt_dlp.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Essentia has no PEP 561 metadata in the analyzer environment (2 import diagnostics).
+module = ["essentia", "essentia.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# laion-clap has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
+module = ["laion_clap", "laion_clap.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# librosa has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
+module = ["librosa", "librosa.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pgvector has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
+module = ["pgvector", "pgvector.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# psycopg2 has no bundled typing metadata in either analyzer environment (4 import diagnostics).
+module = ["psycopg2", "psycopg2.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# redis is absent from the minimal analyzer check environments (2 import diagnostics).
+module = ["redis", "redis.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# requests has no bundled typing metadata in the CLAP environment (1 import diagnostic).
+module = ["requests", "requests.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# torch is absent from the minimal CLAP check environment (1 import diagnostic).
+module = ["torch", "torch.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# NumPy 2.5 stubs require Python 3.12 syntax while this gate targets Python 3.11
+# (1 transitive syntax diagnostic); the analyzer module owns its NumPy boundaries.
+module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-module = [
-  "essentia",
-  "essentia.*",
-  "laion_clap",
-  "laion_clap.*",
-  "librosa",
-  "librosa.*",
-  "pgvector",
-  "pgvector.*",
-  "psycopg2",
-  "psycopg2.*",
-  "redis",
-  "redis.*",
-  "tiddl",
-  "tiddl.*",
-  "torch",
-  "torch.*",
-  "yt_dlp",
-  "yt_dlp.*",
-]
-ignore_missing_imports = true
+# Both large sidecars are standalone top-level `analyzer` modules, so mypy assigns
+# the same module name in their collision-free invocations. Measured strict debt:
+# - audio-analyzer/analyzer.py: 91 errors (51 no-untyped-call, 33 no-untyped-def,
+#   3 union-attr, 2 unreachable, 2 no-any-unimported).
+# - audio-analyzer-clap/analyzer.py: 87 errors (25 no-untyped-def, 25 attr-defined,
+#   22 no-untyped-call, 6 unreachable, 5 no-any-unimported, 2 union-attr,
+#   1 assignment, 1 type-arg).
+module = ["analyzer"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+disallow_any_unimported = false
+warn_unreachable = false
+disable_error_code = ["assignment", "attr-defined", "union-attr"]

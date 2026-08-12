@@ -8,9 +8,12 @@ corresponding implementation is added to app.py.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
+from httpx import AsyncClient
 
 # ═══════════════════════════════════════════════════════════════════════
 # Mock factory helpers
@@ -51,8 +54,8 @@ def _make_mock_playlist(
     name: str = "My Playlist",
     image_id: str = "ab67616d-0000-b273-1234567890ab",
     num_tracks: int = 25,
-    tracks: list | None = None,
-) -> object:
+    tracks: list[Any] | None = None,
+) -> Any:
     """Build a mock tidalapi Playlist object."""
     playlist = type("Playlist", (), {})()
     playlist.id = uuid
@@ -73,7 +76,7 @@ def _make_mock_mix(
     title: str = "Daily Discovery",
     sub_title: str = "For You",
     image_id: str = "ab67616d-0000-b273-1234567890ab",
-) -> object:
+) -> Any:
     """Build a mock tidalapi Mix object."""
     mix = type("Mix", (), {})()
     mix.id = mix_id
@@ -91,7 +94,7 @@ def _make_mock_mix(
 def _make_mock_category(
     *,
     title: str = "Shelf Title",
-    items: list | None = None,
+    items: list[Any] | None = None,
 ) -> MagicMock:
     """Build a mock tidalapi PageCategory (shelf)."""
     cat = MagicMock()
@@ -100,7 +103,7 @@ def _make_mock_category(
     return cat
 
 
-def _make_mock_page(categories: list | None = None) -> MagicMock:
+def _make_mock_page(categories: list[Any] | None = None) -> MagicMock:
     """Build a mock tidalapi Page object with categories."""
     page = MagicMock()
     page.categories = categories or []
@@ -131,7 +134,7 @@ def _make_mock_genre(
 class TestTidalImageUrl:
     """Verify UUID-to-URL conversion for TIDAL image resources."""
 
-    def test_basic_uuid_conversion(self):
+    def test_basic_uuid_conversion(self) -> None:
         """Dashes in the image UUID should be replaced with slashes."""
         from app import _tidal_image_url
 
@@ -140,7 +143,7 @@ class TestTidalImageUrl:
             "https://resources.tidal.com/images/ab67616d/0000/b273/1234567890ab/480x480.jpg"
         )
 
-    def test_different_dimensions(self):
+    def test_different_dimensions(self) -> None:
         """Different width/height should be reflected in the URL."""
         from app import _tidal_image_url
 
@@ -149,7 +152,7 @@ class TestTidalImageUrl:
             "https://resources.tidal.com/images/ab67616d/0000/b273/1234567890ab/1280x1280.jpg"
         )
 
-    def test_rectangular_dimensions(self):
+    def test_rectangular_dimensions(self) -> None:
         """Non-square dimensions should be supported."""
         from app import _tidal_image_url
 
@@ -158,14 +161,14 @@ class TestTidalImageUrl:
             "https://resources.tidal.com/images/ab67616d/0000/b273/1234567890ab/640x480.jpg"
         )
 
-    def test_none_image_id_returns_none(self):
+    def test_none_image_id_returns_none(self) -> None:
         """A None image UUID should return None (no crash)."""
         from app import _tidal_image_url
 
         result = _tidal_image_url(None, w=480, h=480)
         assert result is None
 
-    def test_empty_string_image_id_returns_none(self):
+    def test_empty_string_image_id_returns_none(self) -> None:
         """An empty string image UUID should return None."""
         from app import _tidal_image_url
 
@@ -181,7 +184,7 @@ class TestTidalImageUrl:
 class TestSerializePage:
     """Verify that a tidalapi Page is serialized to shelf format."""
 
-    def test_page_with_categories_returns_shelves(self):
+    def test_page_with_categories_returns_shelves(self) -> None:
         """Each Page category should become a shelf dict."""
         from app import _serialize_page
 
@@ -197,7 +200,7 @@ class TestSerializePage:
         assert isinstance(result[0]["contents"], list)
         assert len(result[0]["contents"]) >= 1
 
-    def test_empty_page_returns_empty_list(self):
+    def test_empty_page_returns_empty_list(self) -> None:
         """A page with no categories should produce an empty list."""
         from app import _serialize_page
 
@@ -205,7 +208,7 @@ class TestSerializePage:
         result = _serialize_page(page)
         assert result == []
 
-    def test_multiple_categories_serialized(self):
+    def test_multiple_categories_serialized(self) -> None:
         """Multiple categories should produce multiple shelves."""
         from app import _serialize_page
 
@@ -221,7 +224,7 @@ class TestSerializePage:
         assert result[0]["title"] == "Shelf A"
         assert result[1]["title"] == "Shelf B"
 
-    def test_category_with_mixed_item_types(self):
+    def test_category_with_mixed_item_types(self) -> None:
         """Categories may contain playlists, mixes, albums — all should serialize."""
         from app import _serialize_page
 
@@ -244,7 +247,7 @@ class TestSerializePage:
 class TestSerializeMix:
     """Verify mix serialization."""
 
-    def test_mix_fields(self):
+    def test_mix_fields(self) -> None:
         """All expected fields should be present in the serialized mix."""
         from app import _serialize_mix
 
@@ -262,7 +265,7 @@ class TestSerializeMix:
         assert "thumbnailUrl" in result
         assert isinstance(result["thumbnailUrl"], str)
 
-    def test_mix_image_calls_image_method(self):
+    def test_mix_image_calls_image_method(self) -> None:
         """The serializer should call mix.image() to get the URL."""
         from app import _serialize_mix
 
@@ -280,7 +283,7 @@ class TestSerializeMix:
 class TestSerializePlaylistPreview:
     """Verify playlist preview serialization (list views)."""
 
-    def test_preview_fields(self):
+    def test_preview_fields(self) -> None:
         """Preview should include uuid, name, image, and num_tracks."""
         from app import _serialize_playlist_preview
 
@@ -297,7 +300,7 @@ class TestSerializePlaylistPreview:
         assert result["numTracks"] == 50
         assert "thumbnailUrl" in result
 
-    def test_preview_does_not_include_tracks(self):
+    def test_preview_does_not_include_tracks(self) -> None:
         """Preview should not contain a full track listing."""
         from app import _serialize_playlist_preview
 
@@ -315,7 +318,7 @@ class TestSerializePlaylistPreview:
 class TestSerializePlaylistDetail:
     """Verify detailed playlist serialization (with tracks)."""
 
-    def test_detail_includes_tracks(self):
+    def test_detail_includes_tracks(self) -> None:
         """Detail should include the full track list."""
         from app import _serialize_playlist_detail
 
@@ -359,7 +362,7 @@ class TestSerializePlaylistDetail:
         assert track_a["duration"] == 200
         assert track_a["isrc"] == "USRC10000001"
 
-    def test_detail_empty_tracks(self):
+    def test_detail_empty_tracks(self) -> None:
         """A playlist with no tracks should have an empty tracks list."""
         from app import _serialize_playlist_detail
 
@@ -384,7 +387,7 @@ class TestSerializePlaylistDetail:
 class TestSerializeGenre:
     """Verify genre serialization."""
 
-    def test_genre_fields(self):
+    def test_genre_fields(self) -> None:
         """Serialized genre should include name, path, and image."""
         from app import _serialize_genre
 
@@ -404,7 +407,7 @@ class TestSerializeGenre:
 class TestBuildBrowseSession:
     """Verify that _build_browse_session constructs a tidalapi.Session."""
 
-    def test_builds_session_from_stored_credentials(self):
+    def test_builds_session_from_stored_credentials(self) -> None:
         """Should create a tidalapi.Session using _user_auth_state creds."""
         from app import _build_browse_session, _user_auth_state
 
@@ -415,10 +418,9 @@ class TestBuildBrowseSession:
             "country_code": "US",
         }
 
-        with patch("app.tidalapi") as mock_tidalapi:
+        with patch("app.Session") as mock_session_factory, patch("app.Config"):
             mock_session = MagicMock()
-            mock_tidalapi.Session.return_value = mock_session
-            mock_tidalapi.Config.return_value = MagicMock()
+            mock_session_factory.return_value = mock_session
 
             session = _build_browse_session("test-user")
 
@@ -427,19 +429,19 @@ class TestBuildBrowseSession:
         # Clean up
         _user_auth_state.pop("test-user", None)
 
-    def test_raises_401_when_no_credentials(self):
+    def test_raises_401_when_no_credentials(self) -> None:
         """Should raise HTTPException(401) when user has no stored creds."""
         from app import _build_browse_session, _user_auth_state
 
         _user_auth_state.pop("no-such-user", None)
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(HTTPException) as exc_info:
             _build_browse_session("no-such-user")
 
         # Should be an HTTPException with 401 status
         assert exc_info.value.status_code == 401
 
-    def test_caches_session_on_second_call(self):
+    def test_caches_session_on_second_call(self) -> None:
         """Second call for same user should return cached session."""
         from app import (
             _browse_sessions,
@@ -455,17 +457,16 @@ class TestBuildBrowseSession:
         }
         _browse_sessions.pop("cache-user", None)
 
-        with patch("app.tidalapi") as mock_tidalapi:
+        with patch("app.Session") as mock_session_factory, patch("app.Config"):
             mock_session = MagicMock()
-            mock_tidalapi.Session.return_value = mock_session
-            mock_tidalapi.Config.return_value = MagicMock()
+            mock_session_factory.return_value = mock_session
 
             first = _build_browse_session("cache-user")
             second = _build_browse_session("cache-user")
 
             assert first is second
             # Session constructor should only be called once (cached)
-            assert mock_tidalapi.Session.call_count == 1
+            assert mock_session_factory.call_count == 1
 
         # Clean up
         _user_auth_state.pop("cache-user", None)
@@ -481,7 +482,7 @@ class TestBrowseHomeEndpoint:
     """Tests for GET /user/browse/home."""
 
     @pytest.mark.anyio
-    async def test_returns_401_when_no_session(self, client):
+    async def test_returns_401_when_no_session(self, client: AsyncClient) -> None:
         """Should return 401 when the user has no TIDAL browse session."""
         from app import _browse_sessions, _user_auth_state
 
@@ -492,7 +493,7 @@ class TestBrowseHomeEndpoint:
         assert resp.status_code == 401
 
     @pytest.mark.anyio
-    async def test_returns_200_with_shelves(self, client):
+    async def test_returns_200_with_shelves(self, client: AsyncClient) -> None:
         """Should return 200 with shelf data when session exists."""
         playlist = _make_mock_playlist(name="Trending Playlist")
         cat = _make_mock_category(title="Trending", items=[playlist])
@@ -516,7 +517,7 @@ class TestBrowseExploreEndpoint:
     """Tests for GET /user/browse/explore."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_shelves(self, client):
+    async def test_returns_200_with_shelves(self, client: AsyncClient) -> None:
         """Should return 200 with explore shelves."""
         playlist = _make_mock_playlist(name="New Releases")
         cat = _make_mock_category(title="New Releases", items=[playlist])
@@ -539,7 +540,7 @@ class TestBrowseGenresEndpoint:
     """Tests for GET /user/browse/genres."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_genres(self, client):
+    async def test_returns_200_with_genres(self, client: AsyncClient) -> None:
         """Should return 200 with a list of genres."""
         mock_page = _make_mock_page(
             categories=[
@@ -571,7 +572,7 @@ class TestBrowseMoodsEndpoint:
     """Tests for GET /user/browse/moods."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_moods(self, client):
+    async def test_returns_200_with_moods(self, client: AsyncClient) -> None:
         """Should return 200 with a list of moods."""
         mock_page = _make_mock_page(
             categories=[
@@ -602,7 +603,7 @@ class TestBrowseMixesEndpoint:
     """Tests for GET /user/browse/mixes."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_mixes(self, client):
+    async def test_returns_200_with_mixes(self, client: AsyncClient) -> None:
         """Should return 200 with a list of mixes."""
         mock_page = _make_mock_page(
             categories=[
@@ -634,7 +635,7 @@ class TestBrowseGenrePlaylistsEndpoint:
     """Tests for GET /user/browse/genre-playlists."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_playlists(self, client):
+    async def test_returns_200_with_playlists(self, client: AsyncClient) -> None:
         """Should return 200 with genre-specific playlists."""
         playlist_a = _make_mock_playlist(uuid="pl-1", name="Pop Hits")
         playlist_b = _make_mock_playlist(uuid="pl-2", name="Pop Rising")
@@ -656,7 +657,7 @@ class TestBrowseGenrePlaylistsEndpoint:
         assert len(data["playlists"]) >= 1
 
     @pytest.mark.anyio
-    async def test_requires_path_parameter(self, client):
+    async def test_requires_path_parameter(self, client: AsyncClient) -> None:
         """Should return 422 when path query parameter is missing."""
         mock_session = MagicMock()
 
@@ -673,7 +674,7 @@ class TestBrowsePlaylistDetailEndpoint:
     """Tests for GET /user/browse/playlist/{uuid}."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_playlist_detail(self, client):
+    async def test_returns_200_with_playlist_detail(self, client: AsyncClient) -> None:
         """Should return 200 with full playlist detail including tracks."""
         tracks = [
             _make_mock_track(track_id=1, name="Track 1"),
@@ -703,7 +704,7 @@ class TestBrowsePlaylistDetailEndpoint:
         assert data["tracks"][0]["title"] == "Track 1"
 
     @pytest.mark.anyio
-    async def test_returns_404_when_playlist_not_found(self, client):
+    async def test_returns_404_when_playlist_not_found(self, client: AsyncClient) -> None:
         """Should return 404 when tidalapi cannot find the playlist."""
         mock_session = MagicMock()
         mock_session.playlist.side_effect = Exception("Not found")
@@ -717,7 +718,9 @@ class TestBrowsePlaylistDetailEndpoint:
         assert resp.status_code == 404
 
     @pytest.mark.anyio
-    async def test_returns_502_when_user_playlist_lookup_fails_with_transport_error(self, client):
+    async def test_returns_502_when_user_playlist_lookup_fails_with_transport_error(
+        self, client: AsyncClient
+    ) -> None:
         """Transport/runtime failures should surface as 502 for retryability."""
         mock_session = MagicMock()
         mock_session.playlist.side_effect = RuntimeError("transport timeout")
@@ -736,7 +739,7 @@ class TestPublicBrowsePlaylistDetailEndpoint:
     """Tests for GET /browse/playlist/{uuid}."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_playlist_detail(self, client):
+    async def test_returns_200_with_playlist_detail(self, client: AsyncClient) -> None:
         """Should return 200 with full public playlist detail including tracks."""
         tracks = [
             _make_mock_track(track_id=1, name="Track 1"),
@@ -763,7 +766,7 @@ class TestPublicBrowsePlaylistDetailEndpoint:
         assert data["tracks"][0]["title"] == "Track 1"
 
     @pytest.mark.anyio
-    async def test_returns_404_when_playlist_not_found(self, client):
+    async def test_returns_404_when_playlist_not_found(self, client: AsyncClient) -> None:
         """Should return 404 when public browse cannot find the playlist."""
         mock_session = MagicMock()
         mock_session.playlist.side_effect = Exception("Not found")
@@ -774,7 +777,9 @@ class TestPublicBrowsePlaylistDetailEndpoint:
         assert resp.status_code == 404
 
     @pytest.mark.anyio
-    async def test_returns_502_for_public_playlist_upstream_transport_errors(self, client):
+    async def test_returns_502_for_public_playlist_upstream_transport_errors(
+        self, client: AsyncClient
+    ) -> None:
         """Transport/runtime errors should not be collapsed to not-found responses."""
         mock_session = MagicMock()
         mock_session.playlist.side_effect = RuntimeError("upstream timeout")
@@ -790,7 +795,7 @@ class TestBrowseMixDetailEndpoint:
     """Tests for GET /user/browse/mix/{mix_id}."""
 
     @pytest.mark.anyio
-    async def test_returns_200_with_mix_detail(self, client):
+    async def test_returns_200_with_mix_detail(self, client: AsyncClient) -> None:
         """Should return 200 with mix metadata and tracks."""
         tracks = [
             _make_mock_track(track_id=10, name="Mix Track A"),
@@ -821,7 +826,7 @@ class TestBrowseMixDetailEndpoint:
         assert data["tracks"][0]["title"] == "Mix Track A"
 
     @pytest.mark.anyio
-    async def test_returns_404_when_mix_not_found(self, client):
+    async def test_returns_404_when_mix_not_found(self, client: AsyncClient) -> None:
         """Should return 404 when tidalapi cannot find the mix."""
         mock_session = MagicMock()
         mock_session.mix.side_effect = Exception("Not found")

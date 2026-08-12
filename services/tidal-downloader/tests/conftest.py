@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Any, Literal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -18,7 +20,7 @@ def _install_tiddl_stub() -> None:
         return
 
     class _PlaceholderClient:
-        def __init__(self, *args, **kwargs) -> None:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             self.args = args
             self.kwargs = kwargs
 
@@ -28,8 +30,11 @@ def _install_tiddl_stub() -> None:
     class _PlaceholderAuthClientError(Exception):
         """Fallback auth error used when tiddl is unavailable in tests."""
 
-    def _missing_tiddl(*_args, **_kwargs):
+    def _missing_tiddl(*_args: Any, **_kwargs: Any) -> Any:
         raise ModuleNotFoundError("tiddl is not installed in the test environment")
+
+    def export(module: types.ModuleType, name: str, value: object) -> None:
+        module.__dict__[name] = value
 
     tiddl_module = types.ModuleType("tiddl")
     core_module = types.ModuleType("tiddl.core")
@@ -40,24 +45,24 @@ def _install_tiddl_stub() -> None:
     format_module = types.ModuleType("tiddl.core.utils.format")
     metadata_module = types.ModuleType("tiddl.core.metadata")
 
-    auth_module.AuthAPI = _PlaceholderClient
-    auth_module.AuthClientError = _PlaceholderAuthClientError
-    auth_client_module.AuthClient = _PlaceholderClient
-    api_module.TidalAPI = _PlaceholderClient
-    api_module.TidalClient = _PlaceholderClient
-    api_module.ApiError = _PlaceholderApiError
-    utils_module.get_track_stream_data = _missing_tiddl
-    utils_module.parse_track_stream = _missing_tiddl
-    format_module.format_template = _missing_tiddl
-    metadata_module.add_track_metadata = _missing_tiddl
-    metadata_module.Cover = _PlaceholderClient
+    export(auth_module, "AuthAPI", _PlaceholderClient)
+    export(auth_module, "AuthClientError", _PlaceholderAuthClientError)
+    export(auth_client_module, "AuthClient", _PlaceholderClient)
+    export(api_module, "TidalAPI", _PlaceholderClient)
+    export(api_module, "TidalClient", _PlaceholderClient)
+    export(api_module, "ApiError", _PlaceholderApiError)
+    export(utils_module, "get_track_stream_data", _missing_tiddl)
+    export(utils_module, "parse_track_stream", _missing_tiddl)
+    export(format_module, "format_template", _missing_tiddl)
+    export(metadata_module, "add_track_metadata", _missing_tiddl)
+    export(metadata_module, "Cover", _PlaceholderClient)
 
-    tiddl_module.core = core_module
-    core_module.auth = auth_module
-    core_module.api = api_module
-    core_module.utils = utils_module
-    core_module.metadata = metadata_module
-    utils_module.format = format_module
+    export(tiddl_module, "core", core_module)
+    export(core_module, "auth", auth_module)
+    export(core_module, "api", api_module)
+    export(core_module, "utils", utils_module)
+    export(core_module, "metadata", metadata_module)
+    export(utils_module, "format", format_module)
 
     sys.modules["tiddl"] = tiddl_module
     sys.modules["tiddl.core"] = core_module
@@ -80,13 +85,13 @@ INTERNAL_API_SECRET = "test-internal-secret-value"
 
 
 @pytest.fixture(autouse=True)
-def internal_api_secret(monkeypatch):
+def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Configure a known INTERNAL_API_SECRET for the app under test."""
     monkeypatch.setenv("INTERNAL_API_SECRET", INTERNAL_API_SECRET)
 
 
 @pytest.fixture(autouse=True)
-def local_app_module():
+def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
     sys.modules.pop("app", None)
     sys.path.insert(0, str(SERVICE_ROOT))
@@ -99,13 +104,13 @@ def local_app_module():
 
 
 @pytest.fixture()
-def anyio_backend():
+def anyio_backend() -> Literal["asyncio"]:
     """Use asyncio for all async tests."""
     return "asyncio"
 
 
 @pytest.fixture()
-async def client():
+async def client() -> AsyncIterator[AsyncClient]:
     """Async HTTP client wired to the FastAPI app under test.
 
     Presents the internal-auth header by default so behaviour tests reach the

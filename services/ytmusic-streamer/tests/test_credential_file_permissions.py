@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.fixture()
-def data_path(monkeypatch, tmp_path):
+def data_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     """Redirect credential writes to a temporary directory."""
     import app
 
@@ -15,7 +19,7 @@ def data_path(monkeypatch, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_auth_restore_writes_0600(client, data_path):
+async def test_auth_restore_writes_0600(client: AsyncClient, data_path: Any) -> None:
     """Restore creates OAuth and client credential files with mode 0600."""
     response = await client.post(
         "/auth/restore?user_id=userx",
@@ -32,7 +36,7 @@ async def test_auth_restore_writes_0600(client, data_path):
 
 
 @pytest.mark.anyio
-async def test_auth_restore_tightens_existing_file(client, data_path):
+async def test_auth_restore_tightens_existing_file(client: AsyncClient, data_path: Any) -> None:
     """Restore tightens a pre-existing OAuth file with loose permissions."""
     oauth_path = data_path / "oauth_usery.json"
     oauth_path.write_text("{}")
@@ -44,17 +48,19 @@ async def test_auth_restore_tightens_existing_file(client, data_path):
 
 
 @pytest.mark.anyio
-async def test_device_code_poll_success_writes_0600(client, data_path, monkeypatch):
+async def test_device_code_poll_success_writes_0600(
+    client: AsyncClient, data_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Successful device polling writes both credential files as mode 0600."""
     import app
 
     class SuccessfulOAuthCredentials:
         """Return a deterministic successful device-code token."""
 
-        def __init__(self, client_id, client_secret):
+        def __init__(self, client_id: Any, client_secret: Any) -> None:
             pass
 
-        def token_from_code(self, device_code):
+        def token_from_code(self, device_code: Any) -> Any:
             return {"access_token": "at", "refresh_token": "rt"}
 
     monkeypatch.setattr(app, "OAuthCredentials", SuccessfulOAuthCredentials)

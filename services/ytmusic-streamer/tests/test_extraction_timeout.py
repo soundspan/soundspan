@@ -6,8 +6,10 @@ import asyncio
 import inspect
 import threading
 import time
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 VIDEO_ID = "dQw4w9WgXcQ"
 PLAYLIST_URL = "https://www.youtube.com/playlist?list=PL-abcDEF12345"
@@ -26,21 +28,28 @@ METADATA_EXTRACTION_CASES = (
 )
 
 
-def _youtube_dl_returning(info, *, started=None, release=None, captured=None):
+def _slow_empty_extraction(*_args: Any) -> dict[str, Any]:
+    time.sleep(0.5)
+    return {}
+
+
+def _youtube_dl_returning(
+    info: Any, *, started: Any = None, release: Any = None, captured: Any = None
+) -> Any:
     """Build a controllable yt-dlp fake for endpoint-level extraction tests."""
 
     class FakeYoutubeDL:
-        def __init__(self, options):
+        def __init__(self, options: Any) -> None:
             if captured is not None:
                 captured.append(options)
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, exc_type, exc_value, traceback):
+        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
             return False
 
-        def extract_info(self, url, download=False):
+        def extract_info(self, url: Any, download: Any = False) -> Any:
             if started is not None:
                 started.set()
             if release is not None:
@@ -50,20 +59,22 @@ def _youtube_dl_returning(info, *, started=None, release=None, captured=None):
     return FakeYoutubeDL
 
 
-def _blocking_youtube_dl(state, state_lock, at_limit, release, concurrency_limit):
+def _blocking_youtube_dl(
+    state: Any, state_lock: Any, at_limit: Any, release: Any, concurrency_limit: Any
+) -> Any:
     """Build a yt-dlp fake that records and blocks concurrent extraction."""
 
     class BlockingYoutubeDL:
-        def __init__(self, options):
+        def __init__(self, options: Any) -> None:
             self.options = options
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, exc_type, exc_value, traceback):
+        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
             return False
 
-        def extract_info(self, url, download=False):
+        def extract_info(self, url: Any, download: Any = False) -> Any:
             with state_lock:
                 state["active"] += 1
                 state["started"] += 1
@@ -81,7 +92,9 @@ def _blocking_youtube_dl(state, state_lock, at_limit, release, concurrency_limit
 
 
 @pytest.mark.anyio
-async def test_slow_extraction_returns_504(client, monkeypatch):
+async def test_slow_extraction_returns_504(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stalled YouTube Music extraction should return HTTP 504."""
     import app
 
@@ -89,7 +102,7 @@ async def test_slow_extraction_returns_504(client, monkeypatch):
     monkeypatch.setattr(
         app,
         "_get_stream_url_sync",
-        lambda *args: (time.sleep(0.5), {})[1],
+        _slow_empty_extraction,
     )
 
     response = await client.get(f"/stream/{VIDEO_ID}?user_id=__public__")
@@ -99,7 +112,9 @@ async def test_slow_extraction_returns_504(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_yt_proxy_slow_extraction_returns_504(client, monkeypatch):
+async def test_yt_proxy_slow_extraction_returns_504(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stalled regular YouTube extraction should return HTTP 504."""
     import app
 
@@ -107,7 +122,7 @@ async def test_yt_proxy_slow_extraction_returns_504(client, monkeypatch):
     monkeypatch.setattr(
         app,
         "_get_yt_stream_url_sync",
-        lambda *args: (time.sleep(0.5), {})[1],
+        _slow_empty_extraction,
     )
 
     response = await client.get(f"/yt/proxy/{VIDEO_ID}")
@@ -122,7 +137,9 @@ async def test_yt_proxy_slow_extraction_returns_504(client, monkeypatch):
     METADATA_EXTRACTION_CASES,
     ids=("video-info", "playlist-info"),
 )
-async def test_slow_metadata_extraction_returns_504(client, monkeypatch, path, info):
+async def test_slow_metadata_extraction_returns_504(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, path: Any, info: Any
+) -> None:
     """A stalled metadata extraction should return a sanitized HTTP 504."""
     import app
     import yt_dlp
@@ -147,7 +164,9 @@ async def test_slow_metadata_extraction_returns_504(client, monkeypatch, path, i
 
 
 @pytest.mark.anyio
-async def test_fast_extraction_unaffected(client, monkeypatch):
+async def test_fast_extraction_unaffected(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A fast extraction should retain the existing success response."""
     import app
 
@@ -172,13 +191,15 @@ async def test_fast_extraction_unaffected(client, monkeypatch):
     assert response.json()["url"] == "http://cdn/x"
 
 
-def test_ydl_opts_include_socket_timeout(monkeypatch):
+def test_ydl_opts_include_socket_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Both stream extractors should bound yt-dlp socket operations."""
     import app
 
-    captured = []
+    captured: list[dict[str, Any]] = []
 
-    def fake_extract(cache_key, url, ydl_opts, video_id, error_label):
+    def fake_extract(
+        cache_key: Any, url: Any, ydl_opts: Any, video_id: Any, error_label: Any
+    ) -> Any:
         captured.append(ydl_opts)
         return {"url": "http://cdn/x"}
 
@@ -197,12 +218,14 @@ def test_ydl_opts_include_socket_timeout(monkeypatch):
     METADATA_EXTRACTION_CASES,
     ids=("video-info", "playlist-info"),
 )
-async def test_metadata_extraction_configures_socket_timeout(client, monkeypatch, path, info):
+async def test_metadata_extraction_configures_socket_timeout(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, path: Any, info: Any
+) -> None:
     """Metadata endpoints should bound each yt-dlp socket operation."""
     import app
     import yt_dlp
 
-    captured = []
+    captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
         yt_dlp,
         "YoutubeDL",
@@ -217,7 +240,9 @@ async def test_metadata_extraction_configures_socket_timeout(client, monkeypatch
 
 
 @pytest.mark.anyio
-async def test_metadata_extraction_concurrency_is_bounded(client, monkeypatch):
+async def test_metadata_extraction_concurrency_is_bounded(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Concurrent metadata work should not exceed the configured worker bound."""
     import app
     import yt_dlp
@@ -262,7 +287,7 @@ async def test_metadata_extraction_concurrency_is_bounded(client, monkeypatch):
     assert all(response.status_code == 200 for response in responses)
 
 
-def test_download_sync_split():
+def test_download_sync_split() -> None:
     """The download hot path and its extracted helpers stay below 60 lines."""
     import app
 

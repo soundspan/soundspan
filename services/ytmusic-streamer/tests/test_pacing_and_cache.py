@@ -17,7 +17,7 @@ if str(SERVICES_ROOT) not in sys.path:
 from common.sidecar_runtime_utils import ThreadSafeRatePacer  # noqa: E402
 
 
-def test_pacer_is_thread_safe_and_serializes():
+def test_pacer_is_thread_safe_and_serializes() -> None:
     pacer = ThreadSafeRatePacer(0.02, 0.02)
     started_at = time.monotonic()
 
@@ -33,12 +33,12 @@ def test_pacer_is_thread_safe_and_serializes():
     assert completion_times[-1] - started_at >= 7 * 0.02 * 0.8
 
 
-def test_pacer_rejects_bad_bounds():
+def test_pacer_rejects_bad_bounds() -> None:
     with pytest.raises(ValueError):
         ThreadSafeRatePacer(1.0, 0.5)
 
 
-def test_stream_cache_is_bounded(monkeypatch):
+def test_stream_cache_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     monkeypatch.setattr(app, "STREAM_CACHE_MAX", 3)
@@ -52,7 +52,7 @@ def test_stream_cache_is_bounded(monkeypatch):
     assert list(app._stream_cache) == ["stream-2", "stream-3", "stream-4"]
 
 
-def test_search_cache_cleanup_and_bound(monkeypatch):
+def test_search_cache_cleanup_and_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     monkeypatch.setattr(app, "SEARCH_CACHE_MAX", 2)
@@ -63,7 +63,7 @@ def test_search_cache_cleanup_and_bound(monkeypatch):
     assert len(app._search_cache) <= 2
 
 
-def test_dead_lock_removed():
+def test_dead_lock_removed() -> None:
     import app
 
     assert not hasattr(app, "_extract_lock")

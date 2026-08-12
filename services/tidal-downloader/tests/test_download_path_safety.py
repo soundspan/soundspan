@@ -5,14 +5,16 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 
 class _FakeDownloadApi:
     """Provide the minimal provider behavior needed for a track download."""
 
-    def get_track(self, track_id: int):
+    def get_track(self, track_id: int) -> Any:
         return types.SimpleNamespace(
             id=track_id,
             title="Track",
@@ -20,24 +22,28 @@ class _FakeDownloadApi:
             artists=[types.SimpleNamespace(name="Artist")],
         )
 
-    def get_album(self, _album_id: int):
+    def get_album(self, _album_id: int) -> Any:
         return types.SimpleNamespace(title="Album", cover=None, releaseDate=None)
 
-    def get_track_stream(self, *, track_id: int, quality: str):
+    def get_track_stream(self, *, track_id: int, quality: str) -> Any:
         return types.SimpleNamespace(audioQuality=quality)
 
 
-def _configure_download(monkeypatch, app, rendered_path: str, payload: bytes = b"audio") -> None:
+def _configure_download(
+    monkeypatch: pytest.MonkeyPatch, app: Any, rendered_path: str, payload: bytes = b"audio"
+) -> None:
     """Stub provider helpers while preserving real filesystem writes."""
     download_module = types.ModuleType("tiddl.core.utils.download")
-    download_module.download = lambda _urls: payload
+    download_module.__dict__["download"] = lambda _urls: payload
     monkeypatch.setitem(sys.modules, "tiddl.core.utils.download", download_module)
     monkeypatch.setattr(app, "format_template", lambda **_kwargs: rendered_path)
     monkeypatch.setattr(app, "parse_track_stream", lambda _stream: (["url"], ".m4a"))
     monkeypatch.setattr(app, "add_track_metadata", lambda **_kwargs: None)
 
 
-def test_download_rejects_absolute_rendered_template(tmp_path, monkeypatch):
+def test_download_rejects_absolute_rendered_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app
 
     destination = tmp_path / "music"
@@ -50,7 +56,7 @@ def test_download_rejects_absolute_rendered_template(tmp_path, monkeypatch):
     assert not outside_stem.with_suffix(".m4a").exists()
 
 
-def test_download_rejects_symlink_escape(tmp_path, monkeypatch):
+def test_download_rejects_symlink_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     destination = tmp_path / "music"
@@ -66,7 +72,9 @@ def test_download_rejects_symlink_escape(tmp_path, monkeypatch):
     assert not (outside / "track.m4a").exists()
 
 
-def test_download_rejects_temporary_file_symlink_escape(tmp_path, monkeypatch):
+def test_download_rejects_temporary_file_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app
 
     destination = tmp_path / "music"
@@ -83,7 +91,9 @@ def test_download_rejects_temporary_file_symlink_escape(tmp_path, monkeypatch):
     assert outside_file.read_bytes() == b"unchanged"
 
 
-def test_download_writes_valid_rendered_template_beneath_destination(tmp_path, monkeypatch):
+def test_download_writes_valid_rendered_template_beneath_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app
 
     destination = tmp_path / "music"
@@ -99,10 +109,10 @@ def test_download_writes_valid_rendered_template_beneath_destination(tmp_path, m
 
 @pytest.mark.anyio
 async def test_download_route_sanitizes_component_that_becomes_empty(
-    client,
-    tmp_path,
-    monkeypatch,
-):
+    client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     destination = tmp_path / "music"

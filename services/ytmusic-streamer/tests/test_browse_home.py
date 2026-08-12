@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
 # Sample shelf data returned by ytmusicapi's get_home()
@@ -49,7 +50,7 @@ class TestHomeShelfFiltering:
     """Verify that YTMUSIC_HOME_FILTERED_SHELVES removes unwanted shelves."""
 
     @pytest.mark.anyio
-    async def test_quick_picks_filtered_by_default(self, client):
+    async def test_quick_picks_filtered_by_default(self, client: AsyncClient) -> None:
         """'Quick picks' shelf should be absent from the default response."""
         mock_yt = MagicMock()
         mock_yt.get_home.return_value = _SAMPLE_SHELVES
@@ -64,7 +65,7 @@ class TestHomeShelfFiltering:
         assert "Trending" in titles
 
     @pytest.mark.anyio
-    async def test_filtering_is_case_insensitive(self, client):
+    async def test_filtering_is_case_insensitive(self, client: AsyncClient) -> None:
         """Shelves with varying case should still be filtered."""
         shelves = [
             {
@@ -88,7 +89,7 @@ class TestHomeShelfFiltering:
         assert "Trending" in titles
 
     @pytest.mark.anyio
-    async def test_custom_filtered_shelves_via_env(self, client):
+    async def test_custom_filtered_shelves_via_env(self, client: AsyncClient) -> None:
         """Patching the filter set should allow custom shelf exclusion."""
         mock_yt = MagicMock()
         mock_yt.get_home.return_value = _SAMPLE_SHELVES
@@ -107,7 +108,7 @@ class TestHomeShelfFiltering:
         assert "Quick picks" in titles
 
     @pytest.mark.anyio
-    async def test_empty_filter_set_passes_all_shelves(self, client):
+    async def test_empty_filter_set_passes_all_shelves(self, client: AsyncClient) -> None:
         """An empty filter set should let all shelves through."""
         mock_yt = MagicMock()
         mock_yt.get_home.return_value = _SAMPLE_SHELVES
@@ -132,7 +133,7 @@ class TestHomeItemTypeField:
     """Verify that item type is extracted from raw ytmusicapi responses."""
 
     @pytest.mark.anyio
-    async def test_home_items_include_type_from_resultType(self, client):
+    async def test_home_items_include_type_from_resultType(self, client: AsyncClient) -> None:
         """Items with resultType should have a type field in the response."""
         shelves = [
             {
@@ -170,7 +171,7 @@ class TestHomeItemTypeField:
         assert contents[1]["type"] == "playlist"
 
     @pytest.mark.anyio
-    async def test_home_items_omit_type_when_missing(self, client):
+    async def test_home_items_omit_type_when_missing(self, client: AsyncClient) -> None:
         """Items without resultType/type should not have a type field."""
         shelves = [
             {
@@ -199,7 +200,7 @@ class TestHomeItemTypeField:
         assert "type" not in contents[0]
 
     @pytest.mark.anyio
-    async def test_home_items_use_type_field_fallback(self, client):
+    async def test_home_items_use_type_field_fallback(self, client: AsyncClient) -> None:
         """Items with 'type' instead of 'resultType' should still get type."""
         shelves = [
             {
@@ -273,7 +274,7 @@ class TestBrowseAlbumEndpoint:
     """Verify the /browse-album/{browse_id} public endpoint."""
 
     @pytest.mark.anyio
-    async def test_browse_album_returns_formatted_data(self, client):
+    async def test_browse_album_returns_formatted_data(self, client: AsyncClient) -> None:
         """Should return formatted album data without requiring auth."""
         mock_yt = MagicMock()
         mock_yt.get_album.return_value = _SAMPLE_ALBUM_RESPONSE
@@ -297,7 +298,7 @@ class TestBrowseAlbumEndpoint:
         mock_yt.get_album.assert_called_once_with("MPREb_test123")
 
     @pytest.mark.anyio
-    async def test_browse_album_not_found_returns_404(self, client):
+    async def test_browse_album_not_found_returns_404(self, client: AsyncClient) -> None:
         """Should return 404 when get_album raises a 'not found' exception."""
         mock_yt = MagicMock()
         mock_yt.get_album.side_effect = Exception("Unable to find 'contents'")
@@ -308,7 +309,7 @@ class TestBrowseAlbumEndpoint:
         assert resp.status_code == 404
 
     @pytest.mark.anyio
-    async def test_browse_album_unexpected_error_returns_500(self, client):
+    async def test_browse_album_unexpected_error_returns_500(self, client: AsyncClient) -> None:
         """Should return 500 for unexpected non-not-found errors."""
         mock_yt = MagicMock()
         mock_yt.get_album.side_effect = Exception("Connection timeout")
@@ -325,7 +326,7 @@ class TestBrowseAlbumEndpoint:
 class TestYTMusicLanguageParam:
     """Verify that YTMUSIC_LANGUAGE is forwarded to YTMusic constructors."""
 
-    def test_language_passed_to_public_ytmusic(self):
+    def test_language_passed_to_public_ytmusic(self) -> None:
         """Public (unauthenticated) YTMusic should receive language kwarg."""
         from app import _public_ytmusic_instances
 
@@ -346,7 +347,7 @@ class TestYTMusicLanguageParam:
         # Clean up
         _public_ytmusic_instances.clear()
 
-    def test_language_passed_to_authenticated_ytmusic(self):
+    def test_language_passed_to_authenticated_ytmusic(self) -> None:
         """Authenticated (per-user) YTMusic should receive language kwarg."""
         import json
 

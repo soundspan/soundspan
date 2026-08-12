@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import types
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 
 def _stub_api() -> types.SimpleNamespace:
@@ -28,18 +30,17 @@ def _stub_api() -> types.SimpleNamespace:
 
 
 @pytest.fixture()
-def api_recorder(monkeypatch):
+def api_recorder(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Record credentials passed to the TIDAL API factory and stub downloads."""
     import app
 
-    calls = []
-    monkeypatch.setattr(
-        app,
-        "_build_api",
-        lambda access_token, user_id, country_code: (
-            calls.append((access_token, user_id, country_code)) or _stub_api()
-        ),
-    )
+    calls: list[tuple[str, str, str]] = []
+
+    def build_api(access_token: str, user_id: str, country_code: str) -> types.SimpleNamespace:
+        calls.append((access_token, user_id, country_code))
+        return _stub_api()
+
+    monkeypatch.setattr(app, "_build_api", build_api)
     monkeypatch.setattr(
         app,
         "_download_track_sync",
@@ -58,7 +59,7 @@ def api_recorder(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_search_accepts_bearer_header(client, api_recorder):
+async def test_search_accepts_bearer_header(client: AsyncClient, api_recorder: Any) -> None:
     """Search accepts a bearer token and optional TIDAL identity headers."""
     resp = await client.post(
         "/search",
@@ -75,7 +76,9 @@ async def test_search_accepts_bearer_header(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_search_legacy_query_params_warn_deprecated(client, api_recorder, caplog):
+async def test_search_legacy_query_params_warn_deprecated(
+    client: AsyncClient, api_recorder: Any, caplog: pytest.LogCaptureFixture
+) -> None:
     """Legacy search credential query parameters work with a warning."""
     with caplog.at_level(logging.WARNING):
         resp = await client.post(
@@ -89,7 +92,7 @@ async def test_search_legacy_query_params_warn_deprecated(client, api_recorder, 
 
 
 @pytest.mark.anyio
-async def test_search_header_wins_over_query(client, api_recorder):
+async def test_search_header_wins_over_query(client: AsyncClient, api_recorder: Any) -> None:
     """Search header credentials take precedence over legacy query values."""
     resp = await client.post(
         "/search?access_token=tok-q&user_id=u-query&country_code=FR",
@@ -106,7 +109,7 @@ async def test_search_header_wins_over_query(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_search_missing_token_rejected(client, api_recorder):
+async def test_search_missing_token_rejected(client: AsyncClient, api_recorder: Any) -> None:
     """Search rejects requests that provide no token in either location."""
     resp = await client.post("/search", json={"query": "q"})
 
@@ -115,7 +118,7 @@ async def test_search_missing_token_rejected(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_download_track_accepts_bearer_header(client, api_recorder):
+async def test_download_track_accepts_bearer_header(client: AsyncClient, api_recorder: Any) -> None:
     """Track download accepts a bearer token header."""
     resp = await client.post(
         "/download/track",
@@ -128,7 +131,9 @@ async def test_download_track_accepts_bearer_header(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_download_track_missing_token_rejected(client, api_recorder):
+async def test_download_track_missing_token_rejected(
+    client: AsyncClient, api_recorder: Any
+) -> None:
     """Track download rejects requests with no token."""
     resp = await client.post("/download/track", json={"track_id": 1})
 
@@ -137,7 +142,7 @@ async def test_download_track_missing_token_rejected(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_download_album_accepts_bearer_header(client, api_recorder):
+async def test_download_album_accepts_bearer_header(client: AsyncClient, api_recorder: Any) -> None:
     """Album download accepts a bearer token header."""
     resp = await client.post(
         "/download/album",
@@ -151,7 +156,9 @@ async def test_download_album_accepts_bearer_header(client, api_recorder):
 
 
 @pytest.mark.anyio
-async def test_download_album_missing_token_rejected(client, api_recorder):
+async def test_download_album_missing_token_rejected(
+    client: AsyncClient, api_recorder: Any
+) -> None:
     """Album download rejects requests with no token."""
     resp = await client.post("/download/album", json={"album_id": 2})
 

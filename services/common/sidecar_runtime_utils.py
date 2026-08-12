@@ -9,6 +9,7 @@ import random
 import re
 import threading
 import time
+from collections.abc import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -65,7 +66,8 @@ def register_error_handlers(app: FastAPI, logger: logging.Logger) -> None:
         _request: Request,
         exc: StarletteHTTPException,
     ) -> JSONResponse:
-        detail = exc.detail
+        # Starlette annotates detail narrowly, while FastAPI accepts JSON objects.
+        detail: object = exc.detail
         if isinstance(detail, dict):
             body = detail
         elif isinstance(detail, str):
@@ -198,7 +200,7 @@ async def build_range_proxy_response(
     if "content-range" in upstream.headers:
         response_headers["Content-Range"] = upstream.headers["content-range"]
 
-    async def range_stream():
+    async def range_stream() -> AsyncIterator[bytes]:
         try:
             async for chunk in upstream.aiter_bytes(chunk_size=65536):
                 yield chunk
@@ -233,7 +235,7 @@ def build_full_proxy_response(
     the stream gracefully.
     """
 
-    async def stream_audio():
+    async def stream_audio() -> AsyncIterator[bytes]:
         async with build_stream_proxy_client(user_agent=user_agent) as client:
             try:
                 async with client.stream("GET", stream_url, headers=request_headers) as response:

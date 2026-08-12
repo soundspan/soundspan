@@ -8,13 +8,16 @@ yt-dlp / real downloads are never invoked: the list/cancel tests seed the
 in-memory job store directly, and the POST test stubs the background worker.
 """
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.anyio
-async def test_downloads_list_returns_jobs_newest_first(client):
+async def test_downloads_list_returns_jobs_newest_first(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -34,7 +37,7 @@ async def test_downloads_list_returns_jobs_newest_first(client):
 
 
 @pytest.mark.anyio
-async def test_downloads_list_empty(client):
+async def test_downloads_list_empty(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -44,7 +47,7 @@ async def test_downloads_list_empty(client):
 
 
 @pytest.mark.anyio
-async def test_cancel_queued_job_marks_cancelled(client):
+async def test_cancel_queued_job_marks_cancelled(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -58,7 +61,7 @@ async def test_cancel_queued_job_marks_cancelled(client):
 
 
 @pytest.mark.anyio
-async def test_cancel_inflight_sets_flag_without_forcing_status(client):
+async def test_cancel_inflight_sets_flag_without_forcing_status(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -75,7 +78,7 @@ async def test_cancel_inflight_sets_flag_without_forcing_status(client):
 
 
 @pytest.mark.anyio
-async def test_cancel_terminal_job_is_noop(client):
+async def test_cancel_terminal_job_is_noop(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -89,7 +92,7 @@ async def test_cancel_terminal_job_is_noop(client):
 
 
 @pytest.mark.anyio
-async def test_cancel_unknown_job_404(client):
+async def test_cancel_unknown_job_404(client: AsyncClient) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
@@ -98,13 +101,15 @@ async def test_cancel_unknown_job_404(client):
 
 
 @pytest.mark.anyio
-async def test_post_download_records_source(client, tmp_path, monkeypatch):
+async def test_post_download_records_source(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app as app_module
 
     app_module._yt_download_jobs.clear()
     monkeypatch.setattr(app_module, "YT_DOWNLOAD_DIR", str(tmp_path))
 
-    async def _noop(*args, **kwargs):
+    async def _noop(*args: Any, **kwargs: Any) -> Any:
         return None
 
     with patch("app._run_yt_download_job", _noop):
@@ -123,7 +128,7 @@ async def test_post_download_records_source(client, tmp_path, monkeypatch):
     assert app_module._yt_download_jobs[job_id]["source"] == "My Channel"
 
 
-def test_download_request_model_has_no_output_dir():
+def test_download_request_model_has_no_output_dir() -> None:
     """The write path is server config (YT_DOWNLOAD_DIR); callers must not
     be able to point downloads at an arbitrary directory."""
     import app as app_module
@@ -132,7 +137,9 @@ def test_download_request_model_has_no_output_dir():
 
 
 @pytest.mark.anyio
-async def test_post_download_ignores_client_output_dir(client, tmp_path, monkeypatch):
+async def test_post_download_ignores_client_output_dir(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A client-supplied output_dir is ignored: the idempotency check (and
     the download itself) always target the server-configured
     YT_DOWNLOAD_DIR, never a caller-chosen path."""
@@ -151,7 +158,7 @@ async def test_post_download_ignores_client_output_dir(client, tmp_path, monkeyp
     existing = download_dir / "Song [vidoutdirAA].mp3"
     existing.write_bytes(b"x")
 
-    async def _noop(*args, **kwargs):
+    async def _noop(*args: Any, **kwargs: Any) -> Any:
         return None
 
     with patch("app._run_yt_download_job", _noop):

@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import logging
 import types
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 MARKER = "sekrit-token-abc123"
 
 
 @pytest.mark.anyio
-async def test_auth_device_error_sanitized(client, monkeypatch, caplog):
+async def test_auth_device_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Device-auth failures are logged without exposing internal details."""
     import app
 
     class FailingAuthAPI:
-        def get_device_auth(self):
+        def get_device_auth(self) -> Any:
             raise Exception(MARKER)
 
     monkeypatch.setattr(app, "AuthAPI", FailingAuthAPI)
@@ -30,11 +34,13 @@ async def test_auth_device_error_sanitized(client, monkeypatch, caplog):
 
 
 @pytest.mark.anyio
-async def test_auth_session_api_error_sanitized(client, monkeypatch, caplog):
+async def test_auth_session_api_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Session API errors are logged without exposing internal details."""
     import app
 
-    def _raise_api_error(*_args, **_kwargs):
+    def _raise_api_error(*_args: Any, **_kwargs: Any) -> Any:
         raise app.ApiError(MARKER)
 
     monkeypatch.setattr(app, "_build_api", _raise_api_error)
@@ -51,11 +57,13 @@ async def test_auth_session_api_error_sanitized(client, monkeypatch, caplog):
 
 
 @pytest.mark.anyio
-async def test_search_api_error_sanitized(client, monkeypatch, caplog):
+async def test_search_api_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Search API errors are logged without exposing internal details."""
     import app
 
-    def _raise_api_error(_query):
+    def _raise_api_error(_query: Any) -> Any:
         raise app.ApiError(MARKER)
 
     monkeypatch.setattr(
@@ -76,15 +84,17 @@ async def test_search_api_error_sanitized(client, monkeypatch, caplog):
 
 
 @pytest.mark.anyio
-async def test_user_auth_restore_failure_sanitized(client, monkeypatch, caplog):
+async def test_user_auth_restore_failure_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Credential restore failures expose neither session nor refresh details."""
     import app
 
-    def _raise_api_error():
+    def _raise_api_error() -> Any:
         raise app.ApiError(MARKER)
 
     class FailingAuthAPI:
-        def refresh_token(self, _refresh_token):
+        def refresh_token(self, _refresh_token: Any) -> Any:
             raise Exception("refresh-marker-xyz")
 
     monkeypatch.setattr(
@@ -112,11 +122,13 @@ async def test_user_auth_restore_failure_sanitized(client, monkeypatch, caplog):
 
 
 @pytest.mark.anyio
-async def test_browse_home_error_sanitized(client, monkeypatch, caplog):
+async def test_browse_home_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Browse-home failures are logged without exposing internal details."""
     import app
 
-    def _boom():
+    def _boom() -> Any:
         raise Exception(MARKER)
 
     monkeypatch.setattr(
@@ -134,7 +146,9 @@ async def test_browse_home_error_sanitized(client, monkeypatch, caplog):
 
 
 @pytest.mark.anyio
-async def test_download_album_per_track_error_sanitized(client, monkeypatch, caplog):
+async def test_download_album_per_track_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Per-track album failures are logged without exposing internal details."""
     import app
 
@@ -151,7 +165,7 @@ async def test_download_album_per_track_error_sanitized(client, monkeypatch, cap
         ),
     )
 
-    def _raise_download_error(**_kwargs):
+    def _raise_download_error(**_kwargs: Any) -> Any:
         raise Exception(MARKER)
 
     monkeypatch.setattr(app, "_build_api", lambda *_args, **_kwargs: api)

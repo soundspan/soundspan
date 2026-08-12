@@ -224,11 +224,20 @@ jobs:
       - name: Ruff format check
         run: ruff format --check services/
 
-      - name: Mypy services
+      - name: Mypy shared services
         run: mypy
 
-      - name: Mypy tidal downloader standalone
-        run: MYPYPATH=services mypy services/tidal-downloader/app.py
+      - name: Mypy TIDAL downloader
+        run: MYPYPATH=services mypy services/tidal-downloader/app.py services/tidal-downloader/tests
+
+      - name: Mypy YouTube Music streamer
+        run: MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/tests
+
+      - name: Mypy audio analyzer
+        run: MYPYPATH=services mypy services/audio-analyzer/analyzer.py
+
+      - name: Mypy CLAP analyzer
+        run: MYPYPATH=services mypy services/audio-analyzer-clap/analyzer.py
 
   enforcement-gates:
     name: Enforcement Gates

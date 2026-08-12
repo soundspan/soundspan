@@ -21,7 +21,9 @@ AUDIO_EXTENSIONS = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
 ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "processing"}
 
 
-def find_active_download_job(jobs: dict, video_id: str) -> dict | None:
+def find_active_download_job(
+    jobs: dict[str, dict[str, Any]], video_id: str
+) -> dict[str, Any] | None:
     """
     Return a non-terminal download job for video_id from the in-memory job
     store, or None. POST /yt/download reuses such a job instead of starting
@@ -102,7 +104,7 @@ _CHANNEL_ID_RE = re.compile(r"youtube\.com/channel/(UC[A-Za-z0-9_\-]+)")
 _CHANNEL_LEGACY_RE = re.compile(r"youtube\.com/(c|user)/([A-Za-z0-9_.\-]+)")
 
 
-def classify_youtube_url(url: str) -> dict:
+def classify_youtube_url(url: str) -> dict[str, Any]:
     """
     Classify a pasted YouTube URL for the bulk-download flow. Returns a dict
     whose "kind" is one of:
@@ -175,7 +177,7 @@ def classify_youtube_url(url: str) -> dict:
     return {"kind": "unknown"}
 
 
-def build_playlist_entries(info: Any, max_entries: int) -> dict:
+def build_playlist_entries(info: Any, max_entries: int) -> dict[str, Any]:
     """
     Parse a yt-dlp flat-extracted playlist/channel info dict into a bounded,
     JSON-serializable summary for the bulk-download preview:
@@ -202,7 +204,7 @@ def build_playlist_entries(info: Any, max_entries: int) -> dict:
 
     raw = info.get("entries")
     raw = raw if isinstance(raw, list) else []
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     for entry in raw:
         if not isinstance(entry, dict):
             continue
@@ -238,7 +240,7 @@ def build_playlist_entries(info: Any, max_entries: int) -> dict:
     }
 
 
-def bulk_album_metadata(source: str | None, kind: str | None = None) -> dict | None:
+def bulk_album_metadata(source: str | None, kind: str | None = None) -> dict[str, str] | None:
     """
     Audio tags to stamp on a bulk-download file so a *channel's* videos group
     under one artist/album instead of each video's own (often per-DJ) YouTube
@@ -267,7 +269,7 @@ def bulk_album_metadata(source: str | None, kind: str | None = None) -> dict | N
     return {"artist": label, "album_artist": label, "album": label}
 
 
-def build_tag_rewrite_command(filepath: str, tags: dict, tmp_path: str) -> list:
+def build_tag_rewrite_command(filepath: str, tags: dict[str, Any], tmp_path: str) -> list[str]:
     """
     Build the ffmpeg argv that rewrites `tags` onto `filepath`, stream-copying
     (no re-encode) into `tmp_path`. ffmpeg-written tags stay readable by the

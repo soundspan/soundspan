@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import threading
 import types
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 
 def _fake_user() -> types.SimpleNamespace:
@@ -14,14 +16,16 @@ def _fake_user() -> types.SimpleNamespace:
 
 
 @pytest.mark.anyio
-async def test_device_auth_offloaded_to_worker_thread(client, monkeypatch):
+async def test_device_auth_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Device-auth initiation should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeAuthAPI:
-        def get_device_auth(self):
+        def get_device_auth(self) -> Any:
             captured["t"] = threading.current_thread().name
             return types.SimpleNamespace(
                 deviceCode="dc",
@@ -41,14 +45,16 @@ async def test_device_auth_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_token_exchange_offloaded_to_worker_thread(client, monkeypatch):
+async def test_token_exchange_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Token exchange should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeAuthAPI:
-        def get_auth(self, device_code):
+        def get_auth(self, device_code: Any) -> Any:
             captured["t"] = threading.current_thread().name
             return types.SimpleNamespace(
                 access_token="at",
@@ -67,14 +73,16 @@ async def test_token_exchange_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_token_refresh_offloaded_to_worker_thread(client, monkeypatch):
+async def test_token_refresh_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Token refresh should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeAuthAPI:
-        def refresh_token(self, refresh_token):
+        def refresh_token(self, refresh_token: Any) -> Any:
             captured["t"] = threading.current_thread().name
             return types.SimpleNamespace(
                 access_token="at2",
@@ -92,20 +100,22 @@ async def test_token_refresh_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_search_offloaded_to_worker_thread(client, monkeypatch):
+async def test_search_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Admin search should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def _empty_results():
+    def _empty_results() -> Any:
         return types.SimpleNamespace(
             tracks=types.SimpleNamespace(items=[]),
             albums=types.SimpleNamespace(items=[]),
             artists=types.SimpleNamespace(items=[]),
         )
 
-    def fake_get_search(query):
+    def fake_get_search(query: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return _empty_results()
 
@@ -126,21 +136,23 @@ async def test_search_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_download_album_metadata_offloaded_to_worker_thread(client, monkeypatch):
+async def test_download_album_metadata_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Album metadata and pagination should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
     class FakeAPI:
-        def get_album(self, album_id):
+        def get_album(self, album_id: Any) -> Any:
             captured["album"] = threading.current_thread().name
             return types.SimpleNamespace(
                 title="A",
                 artist=types.SimpleNamespace(name="X"),
             )
 
-        def get_album_items(self, album_id, limit=100, offset=0):
+        def get_album_items(self, album_id: Any, limit: Any = 100, offset: Any = 0) -> Any:
             captured["items"] = threading.current_thread().name
             return types.SimpleNamespace(items=[], totalNumberOfItems=0)
 
@@ -194,14 +206,14 @@ def _fake_browse_session(endpoint: str) -> types.SimpleNamespace:
     ],
 )
 async def test_browse_session_build_offloaded_to_worker_thread(
-    client, monkeypatch, endpoint, params
-):
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, endpoint: str, params: Any
+) -> None:
     """Each authenticated browse endpoint should build its session in a worker thread."""
     import app
 
     captured = {}
 
-    def fake_build_browse_session(user_id, quality):
+    def fake_build_browse_session(user_id: Any, quality: Any) -> Any:
         captured["t"] = threading.current_thread().name
         return _fake_browse_session(endpoint)
 
@@ -219,13 +231,15 @@ def _session_obj() -> types.SimpleNamespace:
 
 
 @pytest.mark.anyio
-async def test_auth_session_offloaded_to_worker_thread(client, monkeypatch):
+async def test_auth_session_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Admin session verification should execute in an asyncio worker thread."""
     import app
 
     captured = {}
 
-    def fake_get_session():
+    def fake_get_session() -> Any:
         captured["t"] = threading.current_thread().name
         return _session_obj()
 
@@ -245,13 +259,15 @@ async def test_auth_session_offloaded_to_worker_thread(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_user_auth_restore_session_offloaded_to_worker_thread(client, monkeypatch):
+async def test_user_auth_restore_session_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Per-user session restore should verify the session off the event loop."""
     import app
 
     captured = {}
 
-    def fake_get_session():
+    def fake_get_session() -> Any:
         captured["t"] = threading.current_thread().name
         return _session_obj()
 
@@ -277,21 +293,23 @@ async def test_user_auth_restore_session_offloaded_to_worker_thread(client, monk
 
 
 @pytest.mark.anyio
-async def test_user_auth_restore_refresh_offloaded_to_worker_thread(client, monkeypatch):
+async def test_user_auth_restore_refresh_offloaded_to_worker_thread(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Expired-token refresh + re-verify should both run off the event loop."""
     import app
 
     captured = {}
 
     class FakeAuthAPI:
-        def refresh_token(self, refresh_token):
+        def refresh_token(self, refresh_token: Any) -> Any:
             captured["refresh"] = threading.current_thread().name
             return types.SimpleNamespace(access_token="at2", user=_fake_user())
 
-    def expired_get_session():
+    def expired_get_session() -> Any:
         raise app.ApiError("expired")
 
-    def refreshed_get_session():
+    def refreshed_get_session() -> Any:
         captured["session"] = threading.current_thread().name
         return _session_obj()
 

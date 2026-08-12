@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 import types
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 VIDEO_ID = "dQw4w9WgXcQ"
 
@@ -19,11 +21,13 @@ VIDEO_ID = "dQw4w9WgXcQ"
         (f"/song/{VIDEO_ID}", "get_song"),
     ],
 )
-async def test_slow_public_browse_returns_504(client, monkeypatch, path, method_name):
+async def test_slow_public_browse_returns_504(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, path: Any, method_name: str
+) -> None:
     """A stalled public metadata browse should return HTTP 504."""
     import app
 
-    def slow_browse(_identifier):
+    def slow_browse(_identifier: Any) -> Any:
         time.sleep(0.5)
         return {}
 
@@ -38,7 +42,9 @@ async def test_slow_public_browse_returns_504(client, monkeypatch, path, method_
 
 
 @pytest.mark.anyio
-async def test_fast_public_album_browse_preserves_response_shape(client, monkeypatch):
+async def test_fast_public_album_browse_preserves_response_shape(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A fast public album browse should retain the existing success response."""
     import app
 
