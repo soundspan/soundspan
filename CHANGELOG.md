@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `[SegmentedStreaming]` scope to `[Playback]`. Genuinely segmented
   manifest, segment, session, and DASH lifecycle telemetry keeps its existing
   names.
+- Extracted the library route helpers into typed utility modules as the first
+  stage of the `library.ts` decomposition (#124); behavior is unchanged.
 - Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating
   current PyPI artifacts: `essentia-tensorflow` 2.1b6.dev1389 remains the newest
   CPython 3.11 manylinux x86-64 build, while 2.1b6.dev1438 is CPython 3.14-only.
@@ -342,6 +344,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Queue auto-advance now recovers when the browser blocks the next track's
+  playback start in a background or unfocused window, using bounded automatic
+  retries plus a retry on window focus, with blocked and recovery-attempt states
+  visible in server telemetry.
 - Admin “Test connection” failures for Audiobookshelf, Fanart.tv, Last.fm,
   Soulseek, Spotify, and TIDAL no longer log the user out: upstream credential
   failures now return 502 instead of 401, and the web client only treats
@@ -743,6 +749,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Hardened external-metadata escaping for Deezer and Spotify, and replaced
+  backtracking-prone normalization regexes with linear forms in Soulseek,
+  search, and Lidarr.
 - Cover-image storage operations validate IDs and contain all filesystem paths
   under the type-specific covers directory.
 - Account-management, 2FA, and Subsonic-credential routes now have dedicated

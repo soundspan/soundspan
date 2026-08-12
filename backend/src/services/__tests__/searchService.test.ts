@@ -64,6 +64,46 @@ describe("search service", () => {
         expect(normalizeCacheQuery("  Radio   HEAD  ")).toBe("radio head");
     });
 
+    it.each([
+        ["rock & roll", "rock:* & and:* & roll:*"],
+        ["AT&T", "AT:* & and:* & T:*"],
+        ["  one\t & \n two  ", "one:* & and:* & two:*"],
+        ["punctuation! & symbols?", "punctuation:* & and:* & symbols:*"],
+    ])("preserves tsquery output for %p", async (query, expectedTsquery) => {
+        prisma.$queryRaw.mockResolvedValueOnce([
+            {
+                id: "artist-tsquery",
+                name: "Artist",
+                mbid: "mbid-tsquery",
+                heroUrl: null,
+                rank: 1,
+            },
+        ]);
+
+        await searchService.searchArtists({ query });
+
+        expect(prisma.$queryRaw.mock.calls[0][1]).toBe(expectedTsquery);
+    });
+
+    it("normalizes long whitespace-only separators without excessive backtracking", async () => {
+        const query = `alpha${" ".repeat(50_000)}beta`;
+        prisma.$queryRaw.mockResolvedValueOnce([
+            {
+                id: "artist-long-query",
+                name: "Artist",
+                mbid: "mbid-long-query",
+                heroUrl: null,
+                rank: 1,
+            },
+        ]);
+        const startedAt = performance.now();
+
+        await searchService.searchArtists({ query });
+
+        expect(prisma.$queryRaw.mock.calls[0][1]).toBe("alpha:* & beta:*");
+        expect(performance.now() - startedAt).toBeLessThan(500);
+    });
+
     it("searches artists via fts and fallback branches", async () => {
         prisma.$queryRaw.mockResolvedValueOnce([
             {

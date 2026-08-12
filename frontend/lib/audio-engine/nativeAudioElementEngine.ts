@@ -713,19 +713,36 @@ export class NativeAudioElementEngine implements AudioEngine {
 
     private armVisibilityRetry(): void {
         this.disarmVisibilityRetry();
-        this.visibilityRetryCleanup = this.bindGlobalListener(
+        let retryFired = false;
+        const fireRetry = (via: "visibility" | "focus"): void => {
+            if (
+                retryFired ||
+                (via === "visibility" && this.isPageHidden())
+            ) {
+                return;
+            }
+            retryFired = true;
+            this.dispatch({
+                type: "VISIBILITY_RETRY_FIRED",
+                via,
+                nowMs: this.now(),
+            });
+        };
+        const visibilityCleanup = this.bindGlobalListener(
             "document",
             "visibilitychange",
-            () => {
-                if (this.isPageHidden()) {
-                    return;
-                }
-                this.dispatch({
-                    type: "VISIBILITY_RETRY_FIRED",
-                    nowMs: this.now(),
-                });
-            },
+            () => fireRetry("visibility"),
         );
+        const focusCleanup = this.bindGlobalListener(
+            "window",
+            "focus",
+            () => fireRetry("focus"),
+        );
+        this.visibilityRetryCleanup = () => {
+            retryFired = true;
+            visibilityCleanup();
+            focusCleanup();
+        };
     }
 
     private disarmVisibilityRetry(): void {

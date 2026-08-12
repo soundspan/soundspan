@@ -260,9 +260,7 @@ describe("imageStorage service", () => {
     );
 
     it("does not delete a path outside the covers root", () => {
-        expect(
-            deleteLocalImage("native:albums/../../outside.jpg"),
-        ).toBe(false);
+        expect(deleteLocalImage("native:albums/../../outside.jpg")).toBe(false);
         expect(mockExistsSync).not.toHaveBeenCalled();
         expect(mockUnlinkSync).not.toHaveBeenCalled();
     });
