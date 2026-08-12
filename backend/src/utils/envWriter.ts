@@ -21,6 +21,18 @@ const STALE_ENV_SYNC_KEYS = [
     "MULLVAD_SERVER_CITY",
 ] as const;
 
+const ENV_CATEGORIES = {
+    "Database & Redis": ["DATABASE_URL", "REDIS_URL"],
+    Server: ["PORT", "NODE_ENV", "SESSION_SECRET", "ALLOWED_ORIGINS"],
+    Lidarr: ["LIDARR_ENABLED", "LIDARR_URL", "LIDARR_API_KEY"],
+    "Last.fm": ["LASTFM_API_KEY"],
+    "Fanart.tv": ["FANART_API_KEY"],
+    OpenAI: ["OPENAI_API_KEY"],
+    Audiobookshelf: ["AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_API_KEY"],
+    "Docker Paths": ["MUSIC_PATH", "DOWNLOAD_PATH"],
+    Security: ["SETTINGS_ENCRYPTION_KEY"],
+} as const;
+
 /**
  * Represents the EnvFileSyncSkippedError class.
  */
@@ -119,9 +131,117 @@ function atomicWriteFileSecret(targetPath: string, content: string): void {
     }
 }
 
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+    return (
+        error instanceof Error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
+}
+
+function readExistingEnvVariables(envPath: string): Map<string, string> {
+    const existingVars = new Map<string, string>();
+    let existingContent: string;
+
+    try {
+        existingContent = fs.readFileSync(envPath, "utf-8");
+    } catch (error) {
+        if (!isMissingFileError(error)) {
+            throw error;
+        }
+        log.debug("No existing .env file, creating new one");
+        return existingVars;
+    }
+
+    existingContent.split("\n").forEach((line) => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#")) {
+            const [key, ...valueParts] = trimmed.split("=");
+            if (key) {
+                existingVars.set(key.trim(), valueParts.join("="));
+            }
+        }
+    });
+    return existingVars;
+}
+
+function reconcileEnvVariables(
+    existingVars: Map<string, string>,
+    variables: Record<string, string | null | undefined>,
+    secretsDbOnly: boolean,
+): void {
+    STALE_ENV_SYNC_KEYS.forEach((key) => existingVars.delete(key));
+    if (secretsDbOnly) {
+        DB_ONLY_SECRET_ENV_KEYS.forEach((key) => existingVars.delete(key));
+    }
+
+    Object.entries(variables).forEach(([key, value]) => {
+        const isDbOnlySecret = DB_ONLY_SECRET_ENV_KEYS.includes(
+            key as (typeof DB_ONLY_SECRET_ENV_KEYS)[number],
+        );
+        if (secretsDbOnly && isDbOnlySecret) {
+            return;
+        }
+        if (value === null) {
+            existingVars.delete(key);
+        } else if (value !== undefined) {
+            existingVars.set(key, value);
+        }
+    });
+}
+
+function appendCategorizedVariables(
+    lines: string[],
+    existingVars: Map<string, string>,
+    writtenKeys: Set<string>,
+): void {
+    Object.entries(ENV_CATEGORIES).forEach(([category, keys]) => {
+        const categoryVars: string[] = [];
+        keys.forEach((key) => {
+            if (existingVars.has(key)) {
+                categoryVars.push(`${key}=${existingVars.get(key)}`);
+                writtenKeys.add(key);
+            }
+        });
+        if (categoryVars.length > 0) {
+            lines.push("", `# ${category}`, ...categoryVars);
+        }
+    });
+}
+
+function appendUncategorizedVariables(
+    lines: string[],
+    existingVars: Map<string, string>,
+    writtenKeys: Set<string>,
+): void {
+    const uncategorized: string[] = [];
+    existingVars.forEach((value, key) => {
+        if (!writtenKeys.has(key)) {
+            uncategorized.push(`${key}=${value}`);
+        }
+    });
+    if (uncategorized.length > 0) {
+        lines.push("", "# Other Variables", ...uncategorized);
+    }
+}
+
+function buildEnvContent(existingVars: Map<string, string>): string {
+    const lines = [
+        "# soundspan Environment Variables",
+        `# Auto-generated on ${new Date().toISOString()}`,
+        "",
+    ];
+    const writtenKeys = new Set<string>();
+
+    appendCategorizedVariables(lines, existingVars, writtenKeys);
+    appendUncategorizedVariables(lines, existingVars, writtenKeys);
+    lines.push("");
+    return lines.join("\n");
+}
+
 /**
- * Writes key-value pairs to .env file
- * Preserves existing variables not in the provided map
+ * Writes key-value pairs to the configured `.env` file atomically.
+ * `null` deletes a key, `undefined` leaves it unchanged, and omitted keys are preserved.
+ * Read failures other than a missing file are rethrown before any replacement is attempted.
  */
 export async function writeEnvFile(
     variables: Record<string, string | null | undefined>,
@@ -135,107 +255,8 @@ export async function writeEnvFile(
     }
 
     assertSafeEnvVariables(variables);
-
-    // Read existing .env
-    let existingContent = "";
-    const existingVars = new Map<string, string>();
-
-    try {
-        existingContent = fs.readFileSync(envPath, "utf-8");
-
-        // Parse existing variables
-        existingContent.split("\n").forEach((line) => {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith("#")) {
-                const [key, ...valueParts] = trimmed.split("=");
-                if (key) {
-                    existingVars.set(key.trim(), valueParts.join("="));
-                }
-            }
-        });
-    } catch (error) {
-        log.debug("No existing .env file, creating new one");
-    }
-
-    // Remove env keys that are no longer consumed at runtime.
-    STALE_ENV_SYNC_KEYS.forEach((key) => {
-        existingVars.delete(key);
-    });
-
-    if (secretsDbOnly) {
-        DB_ONLY_SECRET_ENV_KEYS.forEach((key) => {
-            existingVars.delete(key);
-        });
-    }
-
-    // Update with new values
-    Object.entries(variables).forEach(([key, value]) => {
-        if (
-            secretsDbOnly &&
-            DB_ONLY_SECRET_ENV_KEYS.includes(
-                key as (typeof DB_ONLY_SECRET_ENV_KEYS)[number],
-            )
-        ) {
-            return;
-        }
-        if (value !== null && value !== undefined) {
-            existingVars.set(key, value);
-        }
-    });
-
-    // Build new .env content
-    const lines: string[] = [
-        "# soundspan Environment Variables",
-        `# Auto-generated on ${new Date().toISOString()}`,
-        "",
-    ];
-
-    // Group variables by category
-    const categories = {
-        "Database & Redis": ["DATABASE_URL", "REDIS_URL"],
-        Server: ["PORT", "NODE_ENV", "SESSION_SECRET", "ALLOWED_ORIGINS"],
-        Lidarr: ["LIDARR_ENABLED", "LIDARR_URL", "LIDARR_API_KEY"],
-        "Last.fm": ["LASTFM_API_KEY"],
-        "Fanart.tv": ["FANART_API_KEY"],
-        OpenAI: ["OPENAI_API_KEY"],
-        Audiobookshelf: ["AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_API_KEY"],
-        "Docker Paths": ["MUSIC_PATH", "DOWNLOAD_PATH"],
-        Security: ["SETTINGS_ENCRYPTION_KEY"],
-    };
-
-    const writtenKeys = new Set<string>();
-
-    // Write categorized variables
-    Object.entries(categories).forEach(([category, keys]) => {
-        const categoryVars: string[] = [];
-
-        keys.forEach((key) => {
-            if (existingVars.has(key)) {
-                const value = existingVars.get(key);
-                categoryVars.push(`${key}=${value}`);
-                writtenKeys.add(key);
-            }
-        });
-
-        if (categoryVars.length > 0) {
-            lines.push("", `# ${category}`, ...categoryVars);
-        }
-    });
-
-    // Write uncategorized variables
-    const uncategorized: string[] = [];
-    existingVars.forEach((value, key) => {
-        if (!writtenKeys.has(key)) {
-            uncategorized.push(`${key}=${value}`);
-        }
-    });
-
-    if (uncategorized.length > 0) {
-        lines.push("", "# Other Variables", ...uncategorized);
-    }
-
-    lines.push(""); // Trailing newline
-
-    atomicWriteFileSecret(envPath, lines.join("\n"));
+    const existingVars = readExistingEnvVariables(envPath);
+    reconcileEnvVariables(existingVars, variables, secretsDbOnly);
+    atomicWriteFileSecret(envPath, buildEnvContent(existingVars));
     log.debug(`.env file updated with ${existingVars.size} variables`);
 }

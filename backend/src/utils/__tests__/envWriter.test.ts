@@ -10,6 +10,14 @@ const mockLogger = {
 };
 mockLogger.child.mockReturnValue(mockLogger);
 
+function createFsError(code: string): NodeJS.ErrnoException {
+    const error = new Error(
+        `filesystem error: ${code}`,
+    ) as NodeJS.ErrnoException;
+    error.code = code;
+    return error;
+}
+
 jest.mock("fs", () => ({
     __esModule: true,
     default: {
@@ -31,7 +39,7 @@ describe("envWriter", () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        jest.resetAllMocks();
         process.env = { ...originalEnv };
         delete process.env.ENABLE_ENV_FILE_SYNC;
         delete process.env.KUBERNETES_SERVICE_HOST;
@@ -93,7 +101,7 @@ describe("envWriter", () => {
             .spyOn(process, "cwd")
             .mockReturnValue("/srv/backend");
         mockReadFileSync.mockImplementation(() => {
-            throw new Error("ENOENT");
+            throw createFsError("ENOENT");
         });
 
         await writeEnvFile({ PORT: "3006" });
@@ -114,7 +122,7 @@ describe("envWriter", () => {
     it("creates a new env file when one does not exist", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         mockReadFileSync.mockImplementation(() => {
-            throw new Error("ENOENT");
+            throw createFsError("ENOENT");
         });
 
         await writeEnvFile({
@@ -191,7 +199,7 @@ describe("envWriter", () => {
     it("writes values with non-line-break special characters unchanged", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         mockReadFileSync.mockImplementation(() => {
-            throw new Error("ENOENT");
+            throw createFsError("ENOENT");
         });
         const url = "https://api.example/search?q=rock+roll&limit=10";
         const secret = "value=with equals and spaces";
@@ -209,7 +217,7 @@ describe("envWriter", () => {
     it("writes integration secret keys when DB-only mode is off", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         mockReadFileSync.mockImplementation(() => {
-            throw new Error("ENOENT");
+            throw createFsError("ENOENT");
         });
 
         await writeEnvFile({
@@ -226,7 +234,7 @@ describe("envWriter", () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         process.env.SECRETS_DB_ONLY = "true";
         mockReadFileSync.mockImplementation(() => {
-            throw new Error("ENOENT");
+            throw createFsError("ENOENT");
         });
 
         await writeEnvFile({
@@ -266,13 +274,15 @@ describe("envWriter", () => {
         expect(written).toContain("DATABASE_URL=postgresql://db/soundspan");
     });
 
-    it("parses existing values, preserves uncategorized keys, and updates non-null values", async () => {
+    it("deletes null values while preserving undefined and unrelated values", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         mockReadFileSync.mockReturnValue(
             [
                 "# Existing",
                 "DATABASE_URL=postgres://user:pass@db/app?sslmode=disable",
                 "=missing-key-value-should-be-ignored",
+                "FANART_API_KEY=clear-me",
+                "LIDARR_ENABLED=true",
                 "CUSTOM_KEY=keep-me",
                 "",
             ].join("\n"),
@@ -281,7 +291,7 @@ describe("envWriter", () => {
         await writeEnvFile({
             DATABASE_URL: "postgres://new:value@db/newdb",
             REDIS_URL: "redis://cache:6379/0",
-            CUSTOM_KEY: null,
+            FANART_API_KEY: null,
             NEW_KEY: "new-value",
             LIDARR_ENABLED: undefined,
         });
@@ -292,15 +302,43 @@ describe("envWriter", () => {
         expect(written).toContain("# Database & Redis");
         expect(written).toContain("DATABASE_URL=postgres://new:value@db/newdb");
         expect(written).toContain("REDIS_URL=redis://cache:6379/0");
+        expect(written).not.toContain("FANART_API_KEY=");
+        expect(written).toContain("LIDARR_ENABLED=true");
         expect(written).toContain("# Other Variables");
         expect(written).toContain("CUSTOM_KEY=keep-me");
         expect(written).toContain("NEW_KEY=new-value");
-        expect(written).not.toContain("LIDARR_ENABLED=");
     });
+
+    it.each(["EACCES", "EIO"])(
+        "rethrows %s read failures before replacing the env file",
+        async (code) => {
+            process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+            const readError = createFsError(code);
+            mockReadFileSync.mockImplementation(() => {
+                throw readError;
+            });
+
+            await expect(writeEnvFile({ PORT: "3006" })).rejects.toBe(
+                readError,
+            );
+
+            expect(mockReadFileSync).toHaveBeenCalledWith(
+                "/tmp/soundspan.env",
+                "utf-8",
+            );
+            expect(mockWriteFileSync).not.toHaveBeenCalled();
+            expect(mockChmodSync).not.toHaveBeenCalled();
+            expect(mockRenameSync).not.toHaveBeenCalled();
+            expect(mockUnlinkSync).not.toHaveBeenCalled();
+        },
+    );
 
     it("cleans up the temporary file and preserves the original error when rename fails", async () => {
         process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
         const renameError = new Error("rename failed");
+        mockReadFileSync.mockImplementation(() => {
+            throw createFsError("ENOENT");
+        });
         mockRenameSync.mockImplementation(() => {
             throw renameError;
         });
