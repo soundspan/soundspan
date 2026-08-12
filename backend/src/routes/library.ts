@@ -141,6 +141,181 @@ const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_T
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
+const LIBRARY_MAINTENANCE_JOB_ID = "library-global-maintenance";
+const LIBRARY_MAINTENANCE_CLAIM_KEY =
+    "library:maintenance:admission:library-global-maintenance";
+const LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS = 6 * 60 * 60;
+const LIBRARY_MAINTENANCE_COOLDOWN_SECONDS = 30;
+const libraryMaintenanceLogger = logger.child("LibraryMaintenance");
+
+interface AdmittedLibraryMaintenance {
+    admitted: true;
+    claimToken: string;
+    cooldownKey: string;
+    cooldownToken: string;
+}
+
+interface RejectedLibraryMaintenance {
+    admitted: false;
+    reason: "active" | "cooldown";
+    jobId?: string;
+}
+
+type LibraryMaintenanceAdmission =
+    | AdmittedLibraryMaintenance
+    | RejectedLibraryMaintenance;
+
+const releaseRedisClaim = async (key: string, token: string): Promise<void> => {
+    try {
+        await scanQueue.client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            key,
+            token,
+        );
+    } catch (error) {
+        libraryMaintenanceLogger.warn("Failed to release admission claim", {
+            key,
+            error,
+        });
+    }
+};
+
+const findPendingLibraryMaintenanceJob = async () => {
+    const jobs = await scanQueue.getJobs(
+        ["active", "waiting", "delayed", "paused"],
+        0,
+        0,
+        true,
+    );
+    return jobs[0] ?? null;
+};
+
+const removeSettledLibraryMaintenanceJob = async (): Promise<void> => {
+    const job = await scanQueue.getJob(LIBRARY_MAINTENANCE_JOB_ID);
+    if (!job) {
+        return;
+    }
+    const state = await job.getState();
+    if (state === "completed" || state === "failed") {
+        await job.remove();
+    }
+};
+
+const admitLibraryMaintenance = async (
+    userId: string,
+): Promise<LibraryMaintenanceAdmission> => {
+    const claimToken = crypto.randomUUID();
+    const acquired = await scanQueue.client.set(
+        LIBRARY_MAINTENANCE_CLAIM_KEY,
+        claimToken,
+        "EX",
+        LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS,
+        "NX",
+    );
+    if (acquired !== "OK") {
+        return { admitted: false, reason: "active" };
+    }
+
+    try {
+        const pendingJob = await findPendingLibraryMaintenanceJob();
+        if (pendingJob) {
+            await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
+            return {
+                admitted: false,
+                reason: "active",
+                jobId: String(pendingJob.id),
+            };
+        }
+        await removeSettledLibraryMaintenanceJob();
+
+        const cooldownKey = `library:maintenance:cooldown:${userId}`;
+        const cooldownToken = crypto.randomUUID();
+        const cooldownAcquired = await scanQueue.client.set(
+            cooldownKey,
+            cooldownToken,
+            "EX",
+            LIBRARY_MAINTENANCE_COOLDOWN_SECONDS,
+            "NX",
+        );
+        if (cooldownAcquired !== "OK") {
+            await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
+            return { admitted: false, reason: "cooldown" };
+        }
+
+        return {
+            admitted: true,
+            claimToken,
+            cooldownKey,
+            cooldownToken,
+        };
+    } catch (error) {
+        await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
+        throw error;
+    }
+};
+
+const releaseLibraryMaintenanceAdmission = async (
+    admission: AdmittedLibraryMaintenance,
+    keepCooldown: boolean,
+): Promise<void> => {
+    await releaseRedisClaim(
+        LIBRARY_MAINTENANCE_CLAIM_KEY,
+        admission.claimToken,
+    );
+    if (!keepCooldown) {
+        await releaseRedisClaim(admission.cooldownKey, admission.cooldownToken);
+    }
+};
+
+const finishOrganizationInBackground = async (
+    organization: Promise<void>,
+    admission: AdmittedLibraryMaintenance,
+): Promise<void> => {
+    try {
+        await organization;
+    } catch (error) {
+        libraryMaintenanceLogger.error("Manual organization failed", error);
+    } finally {
+        await releaseLibraryMaintenanceAdmission(admission, true);
+    }
+};
+
+const organizeBeforeLibraryScan = async (): Promise<void> => {
+    try {
+        libraryMaintenanceLogger.info(
+            "Organizing downloads before library scan",
+        );
+        await organizeSingles();
+        libraryMaintenanceLogger.info("Download organization complete");
+    } catch (error) {
+        libraryMaintenanceLogger.warn(
+            "Download organization skipped before library scan",
+            error,
+        );
+    }
+};
+
+const startAdmittedLibraryScan = async (
+    userId: string,
+    admission: AdmittedLibraryMaintenance,
+) => {
+    let scanQueued = false;
+    try {
+        await organizeBeforeLibraryScan();
+        const job = await scanQueue.add(
+            "scan",
+            { userId, musicPath: config.music.musicPath },
+            {
+                jobId: LIBRARY_MAINTENANCE_JOB_ID,
+            },
+        );
+        scanQueued = true;
+        return job;
+    } finally {
+        await releaseLibraryMaintenanceAdmission(admission, scanQueued);
+    }
+};
 
 const moodPoolCondition = (moodValue: string): Prisma.Sql => {
     switch (moodValue) {
@@ -590,7 +765,7 @@ router.get(
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Library scan started successfully
+ *         description: Library scan started or global library maintenance is already running
  *         content:
  *           application/json:
  *             schema:
@@ -606,6 +781,15 @@ router.get(
  *                 musicPath:
  *                   type: string
  *                   example: "/path/to/music"
+ *                 status:
+ *                   type: string
+ *                   description: Present as "processing" when maintenance was already active
+ *       429:
+ *         description: This user started library maintenance too recently
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Failed to start scan
  *         content:
@@ -622,28 +806,26 @@ router.post(
             });
         }
 
-        // First, organize any SLSKD downloads from Docker container to music library
-        // This ensures files are moved before the scan finds them
-        try {
-            const { organizeSingles } =
-                await import("../workers/organizeSingles");
-            logger.info("[Scan] Organizing SLSKD downloads before scan...");
-            await organizeSingles();
-            logger.info("[Scan] SLSKD organization complete");
-        } catch (err: any) {
-            // Not a fatal error - SLSKD might not be running or have no files
-            logger.info("[Scan] SLSKD organization skipped:", err.message);
+        const userId = req.user?.id || "system";
+        const admission = await admitLibraryMaintenance(userId);
+        if (!admission.admitted) {
+            if (admission.reason === "cooldown") {
+                return sendRouteError(
+                    res,
+                    429,
+                    "Library maintenance was started recently",
+                );
+            }
+            return res.json({
+                message: "Library maintenance already running",
+                status: "processing",
+                jobId: admission.jobId ?? LIBRARY_MAINTENANCE_JOB_ID,
+                musicPath: config.music.musicPath,
+            });
         }
 
-        const userId = req.user?.id || "system";
-
-        // Add scan job to queue
-        const job = await scanQueue.add("scan", {
-            userId,
-            musicPath: config.music.musicPath,
-        });
-
-        res.json({
+        const job = await startAdmittedLibraryScan(userId, admission);
+        return res.json({
             message: "Library scan started",
             jobId: job.id,
             musicPath: config.music.musicPath,
@@ -719,7 +901,7 @@ router.get(
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Organization started
+ *         description: Organization started or global library maintenance is already running
  *         content:
  *           application/json:
  *             schema:
@@ -727,6 +909,15 @@ router.get(
  *               properties:
  *                 message:
  *                   type: string
+ *                 status:
+ *                   type: string
+ *                   description: Present as "processing" when maintenance was already active
+ *       429:
+ *         description: This user started library maintenance too recently
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       401:
  *         description: Not authenticated
  */
@@ -734,10 +925,32 @@ router.get(
 router.post(
     "/organize",
     asyncHandler(async (req, res) => {
-        // Run in background
-        organizeSingles().catch((err) => {
-            logger.error("Manual organization failed:", err);
-        });
+        const admission = await admitLibraryMaintenance(
+            req.user?.id || "system",
+        );
+        if (!admission.admitted) {
+            if (admission.reason === "cooldown") {
+                return sendRouteError(
+                    res,
+                    429,
+                    "Library maintenance was started recently",
+                );
+            }
+            return res.json({
+                message: "Library maintenance already running",
+                status: "processing",
+            });
+        }
+
+        let organization: Promise<void>;
+        try {
+            organization = organizeSingles();
+        } catch (error) {
+            await releaseLibraryMaintenanceAdmission(admission, false);
+            throw error;
+        }
+
+        void finishOrganizationInBackground(organization, admission);
 
         res.json({ message: "Organization started in background" });
     }),

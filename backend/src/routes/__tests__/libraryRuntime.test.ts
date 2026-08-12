@@ -174,6 +174,11 @@ jest.mock("../../workers/queues", () => ({
     scanQueue: {
         add: jest.fn(),
         getJob: jest.fn(),
+        getJobs: jest.fn(),
+        client: {
+            set: jest.fn(),
+            eval: jest.fn(),
+        },
     },
 }));
 
@@ -421,9 +426,13 @@ const mockPrismaTransaction = prisma.$transaction as jest.Mock;
 const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockScanQueueAdd = scanQueue.add as jest.Mock;
 const mockScanQueueGetJob = scanQueue.getJob as jest.Mock;
+const mockScanQueueGetJobs = scanQueue.getJobs as jest.Mock;
+const mockScanQueueClientSet = scanQueue.client.set as jest.Mock;
+const mockScanQueueClientEval = scanQueue.client.eval as jest.Mock;
 const mockOrganizeSingles = organizeSingles as jest.Mock;
 const mockLoggerInfo = logger.info as jest.Mock;
 const mockLoggerError = logger.error as jest.Mock;
+const mockLoggerWarn = logger.warn as jest.Mock;
 const mockLoggerDebug = logger.debug as jest.Mock;
 const mockAudioStreamingCtor = AudioStreamingService as unknown as jest.Mock;
 const mockCoverArtGetCoverArt = coverArtService.getCoverArt as jest.Mock;
@@ -613,6 +622,9 @@ describe("library scan and organize runtime coverage", () => {
         mockOrganizeSingles.mockResolvedValue(undefined);
         mockScanQueueAdd.mockResolvedValue({ id: "job-123" });
         mockScanQueueGetJob.mockResolvedValue(null);
+        mockScanQueueGetJobs.mockResolvedValue([]);
+        mockScanQueueClientSet.mockResolvedValue("OK");
+        mockScanQueueClientEval.mockResolvedValue(1);
     });
 
     it("short-circuits scan when MUSIC_PATH is missing", async () => {
@@ -647,13 +659,19 @@ describe("library scan and organize runtime coverage", () => {
             jobId: "job-123",
             musicPath: "/music",
         });
-        expect(mockScanQueueAdd).toHaveBeenCalledWith("scan", {
-            userId: "user-22",
-            musicPath: "/music",
-        });
-        expect(mockLoggerInfo).toHaveBeenCalledWith(
-            "[Scan] SLSKD organization skipped:",
-            "slskd unavailable",
+        expect(mockScanQueueAdd).toHaveBeenCalledWith(
+            "scan",
+            {
+                userId: "user-22",
+                musicPath: "/music",
+            },
+            {
+                jobId: "library-global-maintenance",
+            },
+        );
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Download organization skipped before library scan",
+            expect.objectContaining({ message: "slskd unavailable" }),
         );
     });
 
@@ -664,10 +682,119 @@ describe("library scan and organize runtime coverage", () => {
         await scanHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(mockScanQueueAdd).toHaveBeenCalledWith("scan", {
-            userId: "system",
+        expect(mockScanQueueAdd).toHaveBeenCalledWith(
+            "scan",
+            {
+                userId: "system",
+                musicPath: "/music",
+            },
+            {
+                jobId: "library-global-maintenance",
+            },
+        );
+    });
+
+    it("coalesces concurrent scan requests before organization starts twice", async () => {
+        let finishOrganization: (() => void) | undefined;
+        let markOrganizationStarted: (() => void) | undefined;
+        const organizationStarted = new Promise<void>((resolve) => {
+            markOrganizationStarted = resolve;
+        });
+        mockOrganizeSingles.mockImplementationOnce(() => {
+            markOrganizationStarted!();
+            return new Promise<void>((resolve) => {
+                finishOrganization = resolve;
+            });
+        });
+        mockScanQueueClientSet
+            .mockResolvedValueOnce("OK")
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce("OK");
+
+        const firstRes = createRes();
+        const secondRes = createRes();
+        const firstRequest = scanHandler(
+            { user: { id: "user-1" } } as any,
+            firstRes,
+        );
+        const secondRequest = scanHandler(
+            { user: { id: "user-1" } } as any,
+            secondRes,
+        );
+
+        await Promise.all([secondRequest, organizationStarted]);
+
+        expect(secondRes.statusCode).toBe(200);
+        expect(secondRes.body).toEqual({
+            message: "Library maintenance already running",
+            status: "processing",
+            jobId: "library-global-maintenance",
             musicPath: "/music",
         });
+        expect(mockOrganizeSingles).toHaveBeenCalledTimes(1);
+        expect(mockScanQueueAdd).not.toHaveBeenCalled();
+
+        expect(finishOrganization).toBeDefined();
+        finishOrganization!();
+        await firstRequest;
+
+        expect(firstRes.body).toEqual({
+            message: "Library scan started",
+            jobId: "job-123",
+            musicPath: "/music",
+        });
+        expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns already running when a scan job is active without starting duplicate work", async () => {
+        mockScanQueueGetJobs.mockResolvedValueOnce([{ id: "job-active" }]);
+
+        const res = createRes();
+        await scanHandler({ user: { id: "user-2" } } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            message: "Library maintenance already running",
+            status: "processing",
+            jobId: "job-active",
+            musicPath: "/music",
+        });
+        expect(mockOrganizeSingles).not.toHaveBeenCalled();
+        expect(mockScanQueueAdd).not.toHaveBeenCalled();
+        expect(mockScanQueueClientEval).toHaveBeenCalledTimes(1);
+    });
+
+    it("reuses the maintenance identity after preserving the prior result for status polling", async () => {
+        const completedJob = {
+            id: "library-global-maintenance",
+            getState: jest.fn().mockResolvedValue("completed"),
+            remove: jest.fn().mockResolvedValue(undefined),
+        };
+        mockScanQueueGetJob.mockResolvedValueOnce(completedJob);
+
+        const res = createRes();
+        await scanHandler({ user: { id: "user-5" } } as any, res);
+
+        expect(completedJob.getState).toHaveBeenCalledTimes(1);
+        expect(completedJob.remove).toHaveBeenCalledTimes(1);
+        expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
+    });
+
+    it("rate limits a user who started maintenance during the cooldown", async () => {
+        mockScanQueueClientSet
+            .mockResolvedValueOnce("OK")
+            .mockResolvedValueOnce(null);
+
+        const res = createRes();
+        await scanHandler({ user: { id: "user-2" } } as any, res);
+
+        expect(res.statusCode).toBe(429);
+        expect(res.body).toEqual({
+            error: "Library maintenance was started recently",
+        });
+        expect(mockOrganizeSingles).not.toHaveBeenCalled();
+        expect(mockScanQueueAdd).not.toHaveBeenCalled();
+        expect(mockScanQueueClientEval).toHaveBeenCalledTimes(1);
     });
 
     it("returns scan trigger error when queue add fails", async () => {
@@ -740,6 +867,21 @@ describe("library scan and organize runtime coverage", () => {
         expect(mockOrganizeSingles).toHaveBeenCalledTimes(1);
     });
 
+    it("does not start organization while a scan job is active", async () => {
+        mockScanQueueGetJobs.mockResolvedValueOnce([{ id: "job-active" }]);
+
+        const res = createRes();
+        await organizeHandler({ user: { id: "user-4" } } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            message: "Library maintenance already running",
+            status: "processing",
+        });
+        expect(mockOrganizeSingles).not.toHaveBeenCalled();
+        expect(mockScanQueueAdd).not.toHaveBeenCalled();
+    });
+
     it("keeps organization endpoint successful when background promise rejects", async () => {
         const backgroundError = new Error("organizer worker failed");
         mockOrganizeSingles.mockReturnValueOnce(
@@ -757,7 +899,7 @@ describe("library scan and organize runtime coverage", () => {
             message: "Organization started in background",
         });
         expect(mockLoggerError).toHaveBeenCalledWith(
-            "Manual organization failed:",
+            "Manual organization failed",
             backgroundError,
         );
     });
