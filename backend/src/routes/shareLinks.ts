@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Router } from "express";
+import { PassThrough } from "node:stream";
+import type { Archiver, ArchiverError } from "archiver";
+import { Router, type Response } from "express";
 import { z } from "zod";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
@@ -10,8 +12,10 @@ import { fetchExternalImage } from "../services/imageProxy";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
+import { sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
+const zipLogger = logger.child("ShareLinks.ZipArchive");
 
 const playlistItemInclude = {
     track: {
@@ -72,6 +76,214 @@ const trackStreamSelect = {
     filePath: true,
     fileModified: true,
 } as const;
+
+type ZipTrack = {
+    id: string;
+    title: string;
+    filePath: string;
+    fileModified: Date;
+    artistName: string;
+};
+
+type ZipSource = {
+    file: fs.ReadStream;
+    input: PassThrough;
+};
+
+class ZipArchiveLifecycle {
+    readonly waitForAbort: Promise<void>;
+    readonly waitForResponse: Promise<void>;
+    private readonly sources = new Set<ZipSource>();
+    private readonly abortListeners = new Set<() => void>();
+    private archiveFinalized = false;
+    private abortCalled = false;
+    private completed = false;
+    private resolveAbort: () => void = () => {};
+    private resolveResponse: () => void = () => {};
+
+    constructor(
+        private readonly archive: Archiver,
+        private readonly res: Response,
+    ) {
+        this.waitForAbort = new Promise((resolve) => {
+            this.resolveAbort = resolve;
+        });
+        this.waitForResponse = new Promise((resolve) => {
+            this.resolveResponse = resolve;
+        });
+        res.on("close", this.onDisconnect);
+        res.on("aborted", this.onDisconnect);
+        res.on("finish", this.onFinish);
+        archive.on("error", this.onArchiveError);
+        archive.on("warning", this.onArchiveWarning);
+    }
+
+    isAborted(): boolean {
+        return this.abortCalled;
+    }
+
+    markArchiveFinalized(): void {
+        this.archiveFinalized = true;
+    }
+
+    complete(): void {
+        this.completed = true;
+        this.closeSources();
+    }
+
+    abort(error?: Error): void {
+        if (this.abortCalled || this.completed) return;
+        this.abortCalled = true;
+        this.closeSources();
+        if (!this.archiveFinalized) this.archive.abort();
+        for (const listener of this.abortListeners) listener();
+        this.abortListeners.clear();
+        this.resolveAbort();
+        this.resolveResponse();
+        if (error && !this.res.destroyed) this.res.destroy(error);
+    }
+
+    appendFile(filePath: string, name: string, date: Date): Promise<boolean> {
+        const source = this.createSource(filePath);
+        return new Promise((resolve) => {
+            let settled = false;
+            const settle = (appended: boolean) => {
+                if (settled) return;
+                settled = true;
+                this.archive.off("entry", onEntry);
+                this.abortListeners.delete(onAbort);
+                if (appended) this.sources.delete(source);
+                resolve(appended);
+            };
+            const onEntry = () => settle(true);
+            const onAbort = () => settle(false);
+            this.abortListeners.add(onAbort);
+            this.archive.once("entry", onEntry);
+            this.archive.append(source.input, { name, date });
+            source.file.pipe(source.input);
+        });
+    }
+
+    cleanup(): void {
+        this.res.off("close", this.onDisconnect);
+        this.res.off("aborted", this.onDisconnect);
+        this.res.off("finish", this.onFinish);
+        this.archive.off("error", this.onArchiveError);
+        this.archive.off("warning", this.onArchiveWarning);
+        this.abortListeners.clear();
+    }
+
+    private createSource(filePath: string): ZipSource {
+        const source = {
+            file: fs.createReadStream(filePath),
+            input: new PassThrough(),
+        };
+        this.sources.add(source);
+        const onError = (error: Error) => {
+            zipLogger.error("Archive source stream failed", { error });
+            this.abort(error);
+        };
+        source.file.once("error", onError);
+        source.file.once("close", () => source.file.off("error", onError));
+        return source;
+    }
+
+    private closeSources(): void {
+        for (const source of this.sources) {
+            if (!source.file.destroyed) source.file.destroy();
+            if (!source.input.destroyed) source.input.end();
+        }
+        this.sources.clear();
+    }
+
+    private readonly onDisconnect = () => {
+        if (!this.res.writableFinished) this.abort();
+    };
+
+    private readonly onFinish = () => this.resolveResponse();
+
+    private readonly onArchiveError = (error: ArchiverError) => {
+        zipLogger.error("Archive stream failed", { error });
+        this.abort(error);
+    };
+
+    private readonly onArchiveWarning = (error: ArchiverError) => {
+        if (error.code === "ENOENT") {
+            zipLogger.warn("Archive source file was not found; skipping", {
+                error,
+            });
+            return;
+        }
+        zipLogger.error("Archive stream warning", { error });
+        this.abort(error);
+    };
+}
+
+function resolveZipSource(track: ZipTrack): {
+    filePath: string;
+    name: string;
+    date: Date;
+} | null {
+    const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+    const filePath = safeResolvePath(
+        config.music.musicPath,
+        normalizedFilePath,
+    );
+    if (!filePath) return null;
+    const ext = path.extname(filePath) || ".mp3";
+    const safeName = `${track.artistName} - ${track.title}`.replace(
+        /[/\\?%*:|"<>]/g,
+        "_",
+    );
+    return { filePath, name: `${safeName}${ext}`, date: track.fileModified };
+}
+
+async function finalizeZipArchive(
+    archive: Archiver,
+    lifecycle: ZipArchiveLifecycle,
+): Promise<boolean> {
+    const finalizePromise = archive.finalize();
+    const finalized = await Promise.race([
+        finalizePromise.then(() => true),
+        lifecycle.waitForAbort.then(() => false),
+    ]);
+    if (!finalized) return false;
+    lifecycle.markArchiveFinalized();
+    await lifecycle.waitForResponse;
+    return !lifecycle.isAborted();
+}
+
+async function streamZipArchive(
+    archive: Archiver,
+    res: Response,
+    tracks: ReadonlyArray<ZipTrack>,
+): Promise<void> {
+    const lifecycle = new ZipArchiveLifecycle(archive, res);
+    archive.pipe(res);
+    try {
+        for (const track of tracks) {
+            const source = resolveZipSource(track);
+            if (!source) {
+                zipLogger.warn("Skipping track with unsafe archive path", {
+                    trackId: track.id,
+                });
+                continue;
+            }
+            const appended = await lifecycle.appendFile(
+                source.filePath,
+                source.name,
+                source.date,
+            );
+            if (!appended) return;
+        }
+        if (await finalizeZipArchive(archive, lifecycle)) lifecycle.complete();
+    } catch (error) {
+        lifecycle.abort(error instanceof Error ? error : undefined);
+        throw error;
+    } finally {
+        lifecycle.cleanup();
+    }
+}
 
 function resolveNativeCoverPath(nativePath: string): string | null {
     const trimmed = nativePath.replace(/^\/+/, "").trim();
@@ -742,46 +954,7 @@ router.get("/access/:token/zip", async (req, res) => {
             `attachment; filename="soundspan-share.zip"`,
         );
 
-        archive.on("error", (err) => {
-            logger.error("Zip archive error:", err);
-            res.destroy(err);
-        });
-
-        archive.on("warning", (err) => {
-            if (err.code === "ENOENT") {
-                logger.warn(
-                    "Zip archive: file not found, skipping:",
-                    err.message,
-                );
-            } else {
-                logger.error("Zip archive warning:", err);
-                res.destroy(err);
-            }
-        });
-
-        archive.pipe(res);
-
-        for (const track of streamableTracks) {
-            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const resolvedPath = safeResolvePath(
-                config.music.musicPath,
-                normalizedFilePath,
-            );
-            if (!resolvedPath) {
-                logger.warn(
-                    `Zip: skipping track with unsafe path: ${track.id}`,
-                );
-                continue;
-            }
-            const ext = path.extname(resolvedPath) || ".mp3";
-            const safeName = `${track.artistName} - ${track.title}`.replace(
-                /[/\\?%*:|"<>]/g,
-                "_",
-            );
-            archive.file(resolvedPath, { name: `${safeName}${ext}` });
-        }
-
-        await archive.finalize();
+        await streamZipArchive(archive, res, streamableTracks);
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res
@@ -790,7 +963,7 @@ router.get("/access/:token/zip", async (req, res) => {
         }
         logger.error("Share zip error:", error);
         if (!res.headersSent) {
-            res.status(500).json({ error: "Failed to create zip archive" });
+            sendInternalRouteError(res, "Failed to create zip archive");
         }
     }
 });

@@ -35,14 +35,17 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: mockRequireAuth,
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const loggerMock = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: (...args: unknown[]) => mockLoggerError(...args),
-    },
-}));
+        child: jest.fn(),
+    };
+    loggerMock.child.mockReturnValue(loggerMock);
+    return { logger: loggerMock };
+});
 
 jest.mock("../../utils/db", () => ({
     prisma: {

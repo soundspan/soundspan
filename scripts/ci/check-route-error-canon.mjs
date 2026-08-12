@@ -40,7 +40,7 @@ const BASELINE = Object.freeze({
     "backend/src/routes/releases.ts": 4,
     "backend/src/routes/search.ts": 4,
     "backend/src/routes/settings.ts": 5,
-    "backend/src/routes/shareLinks.ts": 7,
+    "backend/src/routes/shareLinks.ts": 6,
     "backend/src/routes/social.ts": 3,
     "backend/src/routes/soulseek.ts": 7,
     "backend/src/routes/spotify.ts": 8,

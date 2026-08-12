@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import { PassThrough } from "node:stream";
 import type { Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import router from "../shareLinks";
@@ -7,14 +10,17 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const mockLogger = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+        child: jest.fn(),
+    };
+    mockLogger.child.mockReturnValue(mockLogger);
+    return { logger: mockLogger };
+});
 
 jest.mock("node:crypto", () => ({
     __esModule: true,
@@ -57,10 +63,12 @@ const mockGetStreamFilePath = jest.fn().mockResolvedValue({
     mimeType: "audio/flac",
 });
 const mockDestroy = jest.fn();
-const mockArchiveFile = jest.fn();
+const mockArchiveAbort = jest.fn();
+const mockArchiveAppend = jest.fn();
 const mockArchivePipe = jest.fn();
 const mockArchiveFinalize = jest.fn().mockResolvedValue(undefined);
-const mockArchiveOn = jest.fn();
+let mockArchive: EventEmitter;
+let mockArchiveDestination: MockResponse | undefined;
 
 jest.mock("../../services/audioStreaming", () => ({
     AudioStreamingService: jest.fn().mockImplementation(() => ({
@@ -72,12 +80,15 @@ jest.mock("../../services/audioStreaming", () => ({
 
 jest.mock("archiver", () => ({
     __esModule: true,
-    ZipArchive: jest.fn(() => ({
-        file: mockArchiveFile,
-        pipe: mockArchivePipe,
-        finalize: mockArchiveFinalize,
-        on: mockArchiveOn,
-    })),
+    ZipArchive: jest.fn(() => {
+        mockArchive = new EventEmitter();
+        return Object.assign(mockArchive, {
+            abort: mockArchiveAbort,
+            append: mockArchiveAppend,
+            pipe: mockArchivePipe,
+            finalize: mockArchiveFinalize,
+        });
+    }),
 }));
 
 const mockFetchExternalImage = jest.fn().mockResolvedValue({
@@ -138,10 +149,12 @@ type MockRequestInput = {
     headers?: Record<string, string>;
 };
 
-type MockResponse = {
+type MockResponse = EventEmitter & {
     statusCode: number;
     body: unknown;
     headers: Record<string, string>;
+    destroyed: boolean;
+    writableFinished: boolean;
     status: jest.MockedFunction<(code: number) => MockResponse>;
     json: jest.MockedFunction<(payload: unknown) => MockResponse>;
     setHeader: jest.MockedFunction<
@@ -169,10 +182,12 @@ function getHandler(path: string, method: "get" | "post" | "delete") {
 }
 
 function createRes() {
-    const res = {} as MockResponse;
+    const res = new EventEmitter() as MockResponse;
     res.statusCode = 200;
     res.body = undefined;
     res.headers = {};
+    res.destroyed = false;
+    res.writableFinished = false;
     res.status = jest.fn((code: number) => {
         res.statusCode = code;
         return res;
@@ -189,13 +204,40 @@ function createRes() {
         res.body = data;
         return res;
     });
-    res.destroy = jest.fn(() => res);
+    res.destroy = jest.fn(() => {
+        res.destroyed = true;
+        return res;
+    });
 
     return res;
 }
 
 function createReq(overrides: MockRequestInput): Request {
     return overrides as unknown as Request;
+}
+
+function mockSingleTrackZipShare(): void {
+    mockShareLinkFindUnique.mockResolvedValueOnce({
+        id: "share-zip",
+        token: "zip-token",
+        resourceType: "album",
+        resourceId: "album-1",
+        revoked: false,
+        expiresAt: null,
+        maxPlays: null,
+        playCount: 0,
+    });
+    mockAlbumFindUnique.mockResolvedValueOnce({
+        artist: { name: "Artist One" },
+        tracks: [
+            {
+                id: "track-1",
+                title: "Track One",
+                filePath: "artist/album/01.flac",
+                fileModified: new Date(),
+            },
+        ],
+    });
 }
 
 describe("shareLinks routes runtime", () => {
@@ -209,6 +251,30 @@ describe("shareLinks routes runtime", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.restoreAllMocks();
+        jest.spyOn(fs, "createReadStream").mockImplementation(
+            () => new PassThrough() as unknown as fs.ReadStream,
+        );
+
+        mockArchiveDestination = undefined;
+        mockArchiveAppend.mockReset();
+        mockArchiveFinalize.mockReset();
+        mockArchivePipe.mockReset();
+        mockArchivePipe.mockImplementation((destination: MockResponse) => {
+            mockArchiveDestination = destination;
+        });
+        mockArchiveAppend.mockImplementation(
+            (_source: NodeJS.ReadableStream, data: { name: string }) => {
+                queueMicrotask(() => mockArchive.emit("entry", data));
+                return mockArchive;
+            },
+        );
+        mockArchiveFinalize.mockImplementation(async () => {
+            if (mockArchiveDestination) {
+                mockArchiveDestination.writableFinished = true;
+                mockArchiveDestination.emit("finish");
+            }
+        });
 
         mockRandomBytes.mockReturnValue({
             toString: jest.fn(() => "a".repeat(64)),
@@ -862,8 +928,92 @@ describe("shareLinks routes runtime", () => {
             expect(res.headers["Content-Type"]).toBe("application/zip");
             expect(res.headers["Content-Disposition"]).toContain("attachment");
             expect(mockArchivePipe).toHaveBeenCalledWith(res);
-            expect(mockArchiveFile).toHaveBeenCalledTimes(2);
+            expect(mockArchiveAppend).toHaveBeenCalledTimes(2);
             expect(mockArchiveFinalize).toHaveBeenCalledTimes(1);
+        });
+
+        it("aborts once and destroys the active file stream when the client disconnects", async () => {
+            mockSingleTrackZipShare();
+
+            const fileStream = new PassThrough();
+            const destroyFileStream = jest.spyOn(fileStream, "destroy");
+            jest.mocked(fs.createReadStream).mockReturnValue(
+                fileStream as unknown as fs.ReadStream,
+            );
+            let sourceQueued: (() => void) | undefined;
+            const sourceQueuedPromise = new Promise<void>((resolve) => {
+                sourceQueued = resolve;
+            });
+            mockArchiveAppend.mockImplementationOnce(() => {
+                sourceQueued?.();
+                return mockArchive;
+            });
+
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+            const routePromise = getSharedZip(req, res);
+
+            await sourceQueuedPromise;
+            res.emit("close");
+            res.emit("aborted");
+            await routePromise;
+
+            expect(mockArchiveAbort).toHaveBeenCalledTimes(1);
+            expect(destroyFileStream).toHaveBeenCalledTimes(1);
+        });
+
+        it("aborts once and releases the active file when the archive errors", async () => {
+            mockSingleTrackZipShare();
+            const fileStream = new PassThrough();
+            const destroyFileStream = jest.spyOn(fileStream, "destroy");
+            jest.mocked(fs.createReadStream).mockReturnValue(
+                fileStream as unknown as fs.ReadStream,
+            );
+            let sourceQueued: (() => void) | undefined;
+            const sourceQueuedPromise = new Promise<void>((resolve) => {
+                sourceQueued = resolve;
+            });
+            mockArchiveAppend.mockImplementationOnce(() => {
+                sourceQueued?.();
+                return mockArchive;
+            });
+
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+            const routePromise = getSharedZip(req, res);
+            const archiveError = new Error("archive failed");
+
+            await sourceQueuedPromise;
+            mockArchive.emit("error", archiveError);
+            res.emit("close");
+            await routePromise;
+
+            expect(mockArchiveAbort).toHaveBeenCalledTimes(1);
+            expect(destroyFileStream).toHaveBeenCalledTimes(1);
+            expect(res.destroy).toHaveBeenCalledWith(archiveError);
+        });
+
+        it("does not abort and removes disconnect listeners after normal completion", async () => {
+            mockSingleTrackZipShare();
+
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+
+            await getSharedZip(req, res);
+
+            expect(mockArchiveAbort).not.toHaveBeenCalled();
+            expect(res.listenerCount("close")).toBe(0);
+            expect(res.listenerCount("aborted")).toBe(0);
+            expect(mockArchive.listenerCount("error")).toBe(0);
+            expect(mockArchive.listenerCount("warning")).toBe(0);
+            res.emit("close");
+            expect(mockArchiveAbort).not.toHaveBeenCalled();
         });
 
         it("returns 404 when no streamable tracks exist", async () => {
