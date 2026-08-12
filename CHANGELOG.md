@@ -746,6 +746,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Playlist import links now require canonical HTTP(S) URLs, and audiobook
+  preflight responses now use the central deny-by-default CORS policy.
 - Account-management, 2FA, Subsonic-credential, admin queue-dashboard, and
   playback-state sync routes now have route-level rate limiting; playback-state
   uses a generous dedicated tier for its high-frequency cadence, and invite

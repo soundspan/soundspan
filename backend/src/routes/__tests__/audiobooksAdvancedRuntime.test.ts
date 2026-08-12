@@ -1,4 +1,7 @@
-import type { Request, Response } from "express";
+import cors from "cors";
+import express, { type Request, type Response } from "express";
+import request from "supertest";
+import { isOriginAllowed } from "../../utils/cors";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
@@ -79,10 +82,7 @@ const mockFetch = jest.fn();
 
 import router from "../audiobooks";
 
-function getHandler(
-    path: string,
-    method: "get" | "post" | "delete" | "options",
-) {
+function getHandler(path: string, method: "get" | "post" | "delete") {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -91,6 +91,23 @@ function getHandler(
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     }
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+function createAppWithCentralCors(allowedOrigins: string[]) {
+    const app = express();
+    app.use(
+        cors({
+            origin: (origin, callback) => {
+                callback(
+                    null,
+                    isOriginAllowed(origin, allowedOrigins, "production"),
+                );
+            },
+            credentials: true,
+        }),
+    );
+    app.use("/api/audiobooks", router);
+    return app;
 }
 
 function createRes() {
@@ -169,7 +186,6 @@ function createMockStream() {
 
 describe("audiobooks advanced runtime", () => {
     const debugSeriesHandler = getHandler("/debug-series", "get");
-    const coverOptionsHandler = getHandler("/:id/cover", "options");
     const coverHandler = getHandler("/:id/cover", "get");
     const detailsHandler = getHandler("/:id", "get");
     const streamHandler = getHandler("/:id/stream", "get");
@@ -271,24 +287,32 @@ describe("audiobooks advanced runtime", () => {
         expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
-    it("serves OPTIONS preflight for cover endpoint", async () => {
-        const req = {
-            params: { id: "book-1" },
-            headers: { origin: "https://app.example" },
-        } as any;
-        const res = createRes();
+    it("allows audiobook cover preflight through the central CORS allowlist", async () => {
+        const origin = "https://app.example";
+        const response = await request(createAppWithCentralCors([origin]))
+            .options("/api/audiobooks/book-1/cover")
+            .set("Origin", origin)
+            .set("Access-Control-Request-Method", "GET");
 
-        await coverOptionsHandler(req, res);
+        expect(response.status).toBe(204);
+        expect(response.headers["access-control-allow-origin"]).toBe(origin);
+        expect(response.headers["access-control-allow-credentials"]).toBe(
+            "true",
+        );
+    });
 
-        expect(res.statusCode).toBe(204);
-        expect(res.headers["Access-Control-Allow-Origin"]).toBe(
-            "https://app.example",
-        );
-        expect(res.headers["Access-Control-Allow-Credentials"]).toBe("true");
-        expect(res.headers["Access-Control-Allow-Methods"]).toBe(
-            "GET, OPTIONS",
-        );
-        expect(res.end).toHaveBeenCalled();
+    it("does not reflect a disallowed audiobook cover preflight origin", async () => {
+        const response = await request(
+            createAppWithCentralCors(["https://app.example"]),
+        )
+            .options("/api/audiobooks/book-1/cover")
+            .set("Origin", "https://evil.example")
+            .set("Access-Control-Request-Method", "GET");
+
+        expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+        expect(
+            response.headers["access-control-allow-credentials"],
+        ).toBeUndefined();
     });
 
     it("serves local cover paths and fallback disk covers", async () => {

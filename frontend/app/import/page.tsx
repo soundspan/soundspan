@@ -34,7 +34,11 @@ function tryParsePlaylistUrl(rawInput: string): URL | null {
         ? trimmed
         : `https://${trimmed}`;
     try {
-        return new URL(withProtocol);
+        const parsed = new URL(withProtocol);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return null;
+        }
+        return parsed;
     } catch {
         return null;
     }
@@ -60,6 +64,9 @@ function getResolutionSubtitle(track: PlaylistImportResolvedTrack): string {
 export function isSupportedPlaylistUrl(url: string): boolean {
     const parsed = tryParsePlaylistUrl(url);
     if (!parsed) return false;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return false;
+    }
 
     const hostname = parsed.hostname.toLowerCase();
     const path = parsed.pathname;
@@ -203,7 +210,8 @@ function ImportPageContent() {
 
     const [step, setStep] = useState<ImportStep>("input");
     const [importMode, setImportMode] = useState<ImportMode>("url");
-    const [url, setUrl] = useState("");
+    const [urlInput, setUrlInput] = useState("");
+    const [canonicalUrl, setCanonicalUrl] = useState("");
     const [playlistName, setPlaylistName] = useState("");
     const [preview, setPreview] =
         useState<PlaylistImportPreviewResponse | null>(null);
@@ -219,23 +227,26 @@ function ImportPageContent() {
 
     const fetchPreview = useCallback(
         async (nextUrl: string) => {
-            const trimmedUrl = nextUrl.trim();
-            if (!trimmedUrl) {
+            if (!nextUrl.trim()) {
                 toast.error("Please enter a playlist URL");
                 return;
             }
 
-            if (!isSupportedPlaylistUrl(trimmedUrl)) {
+            const parsedUrl = tryParsePlaylistUrl(nextUrl);
+            if (!parsedUrl || !isSupportedPlaylistUrl(parsedUrl.href)) {
                 toast.error(
                     "Supported URLs: Spotify, Deezer, YouTube Music, and TIDAL playlists",
                 );
                 return;
             }
 
+            const nextCanonicalUrl = parsedUrl.href;
             setIsPreviewLoading(true);
             try {
-                const response = await api.previewPlaylistImport(trimmedUrl);
-                setUrl(trimmedUrl);
+                const response =
+                    await api.previewPlaylistImport(nextCanonicalUrl);
+                setUrlInput(nextCanonicalUrl);
+                setCanonicalUrl(nextCanonicalUrl);
                 setPreview(response);
                 setPlaylistName(response.playlistName);
                 setStep("preview");
@@ -328,11 +339,11 @@ function ImportPageContent() {
     };
 
     const handleSubmitBackgroundJob = async () => {
-        if (!url) return;
+        if (!canonicalUrl) return;
 
         try {
             const result = await api.submitImportJob(
-                url,
+                canonicalUrl,
                 playlistName || undefined,
             );
             if (result.deduped) {
@@ -352,7 +363,8 @@ function ImportPageContent() {
 
     const resetFlow = () => {
         setStep("input");
-        setUrl("");
+        setUrlInput("");
+        setCanonicalUrl("");
         setPlaylistName("");
         setPreview(null);
         setResult(null);
@@ -438,15 +450,15 @@ function ImportPageContent() {
                                     </label>
                                     <input
                                         type="text"
-                                        value={url}
+                                        value={urlInput}
                                         onChange={(event) =>
-                                            setUrl(event.target.value)
+                                            setUrlInput(event.target.value)
                                         }
                                         placeholder="Paste a Spotify, Deezer, YouTube Music, or TIDAL playlist URL"
                                         className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-colors"
                                         onKeyDown={(event) =>
                                             event.key === "Enter" &&
-                                            void fetchPreview(url)
+                                            void fetchPreview(urlInput)
                                         }
                                     />
                                     <p className="text-xs text-gray-400 mt-2">
@@ -470,8 +482,12 @@ function ImportPageContent() {
                                     </p>
                                 </div>
                                 <button
-                                    onClick={() => void fetchPreview(url)}
-                                    disabled={isPreviewLoading || !url.trim()}
+                                    onClick={() =>
+                                        void fetchPreview(urlInput)
+                                    }
+                                    disabled={
+                                        isPreviewLoading || !urlInput.trim()
+                                    }
                                     className="w-full py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                                 >
                                     {isPreviewLoading ? (
@@ -573,9 +589,9 @@ function ImportPageContent() {
                                     {preview.summary.total} songs found
                                 </p>
                             </div>
-                            {url && (
+                            {canonicalUrl && (
                                 <a
-                                    href={url}
+                                    href={canonicalUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-gray-400 hover:text-brand transition-colors"
@@ -678,7 +694,7 @@ function ImportPageContent() {
                                 )}
                             </button>
                         </div>
-                        {url && importableCount > 0 && (
+                        {canonicalUrl && importableCount > 0 && (
                             <button
                                 onClick={() => void handleSubmitBackgroundJob()}
                                 disabled={isExecuting}
