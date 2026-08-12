@@ -27,9 +27,10 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeVar, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import OAuthCredentials, YTMusic
 
@@ -60,6 +61,10 @@ from yt_download import (
     find_existing_download,
     resolve_download_filepath,
 )
+
+JsonObject = dict[str, Any]
+JsonList = list[JsonObject]
+T = TypeVar("T")
 from yt_download import (
     extract_video_id as _extract_video_id,
 )
@@ -74,7 +79,7 @@ def _safe_remove(path: str) -> None:
         pass
 
 
-def _stamp_audio_tags(filepath: str, tags: dict) -> None:
+def _stamp_audio_tags(filepath: str, tags: dict[str, str]) -> None:
     """
     Rewrite audio tags on a downloaded file via ffmpeg (stream copy, no
     re-encode), covering the opus/flac/ogg/mp3/m4a containers the /yt/
@@ -225,7 +230,7 @@ BROWSE_TIMEOUT = env_float("YTMUSIC_BROWSE_TIMEOUT", "30")
 YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
-_search_cache: dict[str, dict] = {}
+_search_cache: dict[str, JsonObject] = {}
 _search_cache_lock = threading.Lock()
 SEARCH_CACHE_TTL = env_int("YTMUSIC_SEARCH_CACHE_TTL", "300")  # 5 minutes
 SEARCH_CACHE_MAX = env_int("YTMUSIC_SEARCH_CACHE_MAX", "1024")
@@ -260,7 +265,7 @@ _ALLOWED_STREAM_QUALITIES = {"LOW", "MEDIUM", "HIGH", "LOSSLESS"}
 
 # ── Stream URL cache (in-memory, URLs expire after ~6h) ────────────
 # Keys are "{user_id}:{video_id}" to isolate per-user sessions
-_stream_cache: dict[str, dict] = {}
+_stream_cache: dict[str, JsonObject] = {}
 _stream_cache_lock = threading.Lock()
 STREAM_CACHE_TTL = 5 * 60 * 60  # 5 hours (YouTube URLs expire at ~6h)
 STREAM_CACHE_MAX = env_int("YTMUSIC_STREAM_CACHE_MAX", "1024")
@@ -268,7 +273,7 @@ TV_CLIENT_NAME = "TVHTML5"
 TV_CLIENT_VERSION = "7.20250101.00.00"
 
 
-def _bound_cache(cache: dict, max_size: int) -> None:
+def _bound_cache(cache: dict[str, JsonObject], max_size: int) -> None:
     """Evict oldest entries; callers must hold the owning cache's lock."""
     while len(cache) > max_size:
         cache.pop(next(iter(cache)))
@@ -396,7 +401,7 @@ def _client_creds_file(user_id: str) -> Path:
     return DATA_PATH / f"client_creds_{user_id}.json"
 
 
-def _clear_user_search_fallback(user_id: str):
+def _clear_user_search_fallback(user_id: str) -> None:
     """Clear per-user auto-fallback state so native search can be retried."""
     _ytmusic_auto_tv_fallback_users.discard(user_id)
 
@@ -417,7 +422,7 @@ def _resolve_user_search_strategy(user_id: str) -> Literal["tv", "native"]:
     return "native"
 
 
-def _apply_tv_client_context(yt: YTMusic):
+def _apply_tv_client_context(yt: YTMusic) -> None:
     """Apply TVHTML5 client context required by the custom TV search parser."""
     yt.context["context"]["client"]["clientName"] = TV_CLIENT_NAME
     yt.context["context"]["client"]["clientVersion"] = TV_CLIENT_VERSION
@@ -441,7 +446,7 @@ def _get_public_ytmusic(strategy: Literal["tv", "native"]) -> YTMusic:
     return yt
 
 
-def _invalidate_public_ytmusic(strategy: Literal["tv", "native"]):
+def _invalidate_public_ytmusic(strategy: Literal["tv", "native"]) -> None:
     """Force re-creation of a public search client on next use."""
     with _public_ytmusic_lock:
         _public_ytmusic_instances.pop(strategy, None)
@@ -469,7 +474,7 @@ def _parse_duration_text_value(value: Any) -> int:
     return 0
 
 
-def _normalize_native_search_item(item: dict) -> dict | None:
+def _normalize_native_search_item(item: object) -> JsonObject | None:
     """
     Normalize search results into the connector shim shape used by the backend.
     This accepts both native `yt.search()` items and TV-parser candidates.
@@ -548,13 +553,13 @@ def _native_search(
     query: str,
     filter: Literal["songs", "albums", "artists", "videos"] | None = None,
     limit: int = 20,
-) -> list[dict]:
+) -> JsonList:
     """Execute yt.search() and normalize results to sidecar response shape."""
-    raw_items = yt.search(query, filter=filter, limit=limit)
+    raw_items: object = yt.search(query, filter=filter, limit=limit)
     if not isinstance(raw_items, list):
         return []
 
-    normalized: list[dict] = []
+    normalized: JsonList = []
     for item in raw_items:
         if not isinstance(item, dict):
             continue
@@ -632,7 +637,7 @@ def _get_ytmusic(user_id: str) -> YTMusic:
     )
 
 
-def _invalidate_ytmusic(user_id: str):
+def _invalidate_ytmusic(user_id: str) -> None:
     """Force re-creation of a user's YTMusic instance on next use."""
     with _ytmusic_instances_lock:
         _ytmusic_instances.pop(user_id, None)
@@ -791,7 +796,7 @@ def _stream_extraction_http_error(
     return _sanitized_http_error(error_label, error, 502, "Failed to extract stream")
 
 
-def _best_audio_stream_url(info: dict) -> str | None:
+def _best_audio_stream_url(info: JsonObject) -> str | None:
     """Return the direct URL or the highest-bitrate audio-only format URL."""
     stream_url = info.get("url")
     if stream_url:
@@ -808,10 +813,10 @@ def _best_audio_stream_url(info: dict) -> str | None:
 def _extract_stream_info(
     cache_key: str,
     url: str,
-    ydl_opts: dict,
+    ydl_opts: JsonObject,
     video_id: str,
     error_label: str,
-) -> dict:
+) -> JsonObject:
     """Extract a yt-dlp audio URL through the shared paced cache workflow.
 
     Performs cache lookup, paced extraction, result construction, cache store,
@@ -860,7 +865,7 @@ def _extract_stream_info(
         raise _stream_extraction_http_error(video_id, error_label, error) from error
 
 
-def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
+def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> JsonObject:
     """Extract a cached audio stream URL for a regular YouTube video."""
     fmt = PROXY_AUDIO_FORMAT_SELECTORS.get(quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"])
     ydl_opts = {
@@ -885,7 +890,7 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
     )
 
 
-def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> dict:
+def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> JsonObject:
     """Extract a cached audio stream URL for a YouTube Music video."""
     format_map = {
         "LOW": "ba[abr<=64]/worstaudio/ba",
@@ -917,7 +922,9 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
     )
 
 
-async def _extract_yt_dlp_bounded(func, *args, timeout_detail: str) -> dict:
+async def _extract_yt_dlp_bounded(
+    func: Callable[..., JsonObject], *args: Any, timeout_detail: str
+) -> JsonObject:
     """Run sync yt-dlp work in its bounded pool with an overall deadline.
 
     Timed-out worker threads remain confined to the dedicated executor, and
@@ -931,7 +938,7 @@ async def _extract_yt_dlp_bounded(func, *args, timeout_detail: str) -> dict:
         raise HTTPException(status_code=504, detail=timeout_detail) from error
 
 
-async def _extract_stream_info_bounded(func, *args) -> dict:
+async def _extract_stream_info_bounded(func: Callable[..., JsonObject], *args: Any) -> JsonObject:
     """Run a sync stream extraction through the shared yt-dlp bounds."""
     return await _extract_yt_dlp_bounded(
         func,
@@ -940,7 +947,7 @@ async def _extract_stream_info_bounded(func, *args) -> dict:
     )
 
 
-async def _browse_public_bounded(func, *args):
+async def _browse_public_bounded(func: Callable[..., T], *args: Any) -> T:
     """Run a sync public ytmusicapi browse call off the event loop with an overall deadline.
 
     asyncio.wait_for cancels the awaiting request after BROWSE_TIMEOUT seconds
@@ -953,7 +960,7 @@ async def _browse_public_bounded(func, *args):
         raise HTTPException(status_code=504, detail="YouTube Music request timed out") from error
 
 
-def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 20) -> list[dict]:
+def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 20) -> JsonList:
     """
     WORKAROUND(#813) — Custom search parser for the TVHTML5 client.
 
@@ -968,7 +975,7 @@ def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 
     Returns a list of dicts with keys: type, videoId, title, artist(s),
     album, duration, duration_seconds, thumbnails, etc.
     """
-    body: dict = {"query": query}
+    body: JsonObject = {"query": query}
 
     # Apply filter params (song-only search).
     # For TVHTML5 the filter encoding is the same as WEB_REMIX.
@@ -986,16 +993,16 @@ def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 
     except Exception:
         raise  # let caller handle
 
-    items: list[dict] = []
+    items: JsonList = []
 
-    def _extract_text(obj) -> str:
+    def _extract_text(obj: Any) -> str:
         """Pull text from simpleText, runs, or accessibilityData."""
         if not obj:
             return ""
         if isinstance(obj, str):
             return obj
         if "simpleText" in obj:
-            return obj["simpleText"]
+            return str(obj["simpleText"])
         if "runs" in obj:
             return "".join(r.get("text", "") for r in obj["runs"])
         return ""
@@ -1045,7 +1052,7 @@ def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 
             )
         )
 
-    def _walk_renderers(node, depth=0):
+    def _walk_renderers(node: Any, depth: int = 0) -> None:
         """Recursively walk the TV response tree and extract results."""
         if depth > 15 or len(items) >= limit:
             return
@@ -1220,7 +1227,7 @@ def _tv_search(yt: YTMusic, query: str, filter: str | None = None, limit: int = 
 
     _walk_renderers(raw)
 
-    normalized: list[dict] = []
+    normalized: JsonList = []
     for item in items:
         mapped = _normalize_native_search_item(item)
         if mapped:
@@ -1245,7 +1252,7 @@ def _clean_stream_cache_locked() -> int:
     return len(expired)
 
 
-def _clean_stream_cache():
+def _clean_stream_cache() -> None:
     """Remove expired entries from stream cache."""
     with _stream_cache_lock:
         expired_count = _clean_stream_cache_locked()
@@ -1270,7 +1277,7 @@ def _get_cached_search(
     filter_: str | None,
     limit: int,
     strategy: Literal["tv", "native"],
-) -> list | None:
+) -> JsonList | None:
     """Return cached search results if still valid, else None."""
     key = _search_cache_key(user_id, query, filter_, limit, strategy)
     with _search_cache_lock:
@@ -1280,7 +1287,7 @@ def _get_cached_search(
             entry = None
     if entry and entry.get("expires_at", 0) > time.time():
         log.debug(f"Search cache hit: {key}")
-        return entry["results"]
+        return cast(JsonList, entry["results"])
     return None
 
 
@@ -1290,8 +1297,8 @@ def _set_cached_search(
     filter_: str | None,
     limit: int,
     strategy: Literal["tv", "native"],
-    results: list,
-):
+    results: JsonList,
+) -> None:
     """Store search results in cache with TTL."""
     key = _search_cache_key(user_id, query, filter_, limit, strategy)
     with _search_cache_lock:
@@ -1312,13 +1319,13 @@ def _search_once(
     limit: int,
     strategy: Literal["tv", "native"],
     use_unauth_client: bool = False,
-) -> list[dict]:
+) -> JsonList:
     """
     Execute one search strategy with cache lookup/store.
     """
     cached = _get_cached_search(user_id, query, filter_, limit, strategy)
     if cached is not None:
-        return cast(list[dict], cached)
+        return cached
 
     if use_unauth_client:
         yt = _get_public_ytmusic(strategy)
@@ -1365,7 +1372,7 @@ def _search_with_mode_fallback(
     filter_: Literal["songs", "albums", "artists", "videos"] | None,
     limit: int,
     use_unauth_client: bool = False,
-) -> tuple[list[dict], Literal["tv", "native"]]:
+) -> tuple[JsonList, Literal["tv", "native"]]:
     """
     Execute search according to configured mode.
     In auto mode, try native first and fall back to tv per-user on failure.
@@ -1436,7 +1443,7 @@ def _clean_search_cache_locked() -> int:
     return len(expired)
 
 
-def _clean_search_cache():
+def _clean_search_cache() -> None:
     """Remove expired entries from search cache."""
     with _search_cache_lock:
         expired_count = _clean_search_cache_locked()
@@ -1450,7 +1457,7 @@ def _clean_search_cache():
 
 
 @app.get("/health")
-async def health():
+async def health() -> JsonObject:
     # Count how many users have OAuth files
     oauth_files = list(DATA_PATH.glob("oauth_*.json"))
     return {
@@ -1466,7 +1473,7 @@ async def health():
 
 
 @app.get("/auth/status")
-async def auth_status(user_id: str = Query(...)):
+async def auth_status(user_id: str = Query(...)) -> JsonObject:
     """Check if a specific user has valid OAuth credentials."""
     oauth_path = _oauth_file(user_id)
 
@@ -1489,7 +1496,7 @@ async def auth_status(user_id: str = Query(...)):
 
 
 @app.post("/auth/restore")
-async def auth_restore(req: Request, user_id: str = Query(...)):
+async def auth_restore(req: Request, user_id: str = Query(...)) -> JsonObject:
     """
     Restore OAuth credentials for a user from the backend database.
     The backend sends the decrypted OAuth JSON which is written as
@@ -1532,7 +1539,7 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
 
 
 @app.post("/auth/clear")
-async def auth_clear(user_id: str = Query(...)):
+async def auth_clear(user_id: str = Query(...)) -> JsonObject:
     """Remove stored OAuth credentials for a specific user."""
     _invalidate_ytmusic(user_id)
     _clear_user_search_fallback(user_id)
@@ -1548,7 +1555,7 @@ async def auth_clear(user_id: str = Query(...)):
 
 
 @app.post("/auth/device-code")
-async def auth_device_code(req: DeviceCodeRequest):
+async def auth_device_code(req: DeviceCodeRequest) -> JsonObject:
     """
     Initiate the Google OAuth device code flow.
     Returns a user_code and verification_url for the user to visit.
@@ -1577,7 +1584,9 @@ async def auth_device_code(req: DeviceCodeRequest):
 
 
 @app.post("/auth/device-code/poll")
-async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query(...)):
+async def auth_device_code_poll(
+    req: DeviceCodePollRequest, user_id: str = Query(...)
+) -> JsonObject:
     """
     Poll for device code authorization completion.
     Returns the OAuth token JSON when the user completes authorization,
@@ -1661,7 +1670,7 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
 
 
 @app.post("/search")
-async def search(req: SearchRequest, user_id: str = Query(...)):
+async def search(req: SearchRequest, user_id: str = Query(...)) -> JsonObject:
     """Search YouTube Music for songs, albums, or artists.
 
     Search uses an unauthenticated client context so user OAuth search history
@@ -1702,7 +1711,7 @@ async def search(req: SearchRequest, user_id: str = Query(...)):
 
 
 @app.post("/search/batch")
-async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
+async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)) -> JsonObject:
     """Run multiple search queries with controlled concurrency.
 
     Uses a semaphore to limit parallel InnerTube requests (default: 3)
@@ -1717,7 +1726,7 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
             detail=f"Batch search accepts at most {_BATCH_SEARCH_MAX_QUERIES} queries",
         )
 
-    async def _run_one(q: BatchSearchQuery) -> dict:
+    async def _run_one(q: BatchSearchQuery) -> JsonObject:
         """Execute and sanitize one query in the batch."""
         # Check primary cache first — avoids consuming a semaphore slot.
         strategy = _resolve_user_search_strategy(user_id)
@@ -1756,7 +1765,7 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
 
 
 @app.post("/search/debug")
-async def search_debug(req: SearchRequest, user_id: str = Query(...)):
+async def search_debug(req: SearchRequest, user_id: str = Query(...)) -> JsonObject:
     """WORKAROUND(#813) — Return the raw TV-format response for debugging.
 
     This endpoint lets us inspect the actual TVHTML5 response structure
@@ -1768,7 +1777,7 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
     # Keep user_id in the route signature for request-shape compatibility, but
     # debug search uses the public TV client like normal search paths.
     yt = _get_public_ytmusic("tv")
-    body: dict = {"query": req.query}
+    body: JsonObject = {"query": req.query}
     if req.filter == "songs":
         body["params"] = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
     try:
@@ -1778,7 +1787,7 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
         raise _sanitized_http_error("Debug search", e, 500, "Debug search failed") from e
 
 
-def _format_album_response(browse_id: str, album: dict) -> dict:
+def _format_album_response(browse_id: str, album: JsonObject) -> JsonObject:
     """Build a normalized album response dict from a ytmusicapi get_album() result."""
     tracks = []
     for t in album.get("tracks", []):
@@ -1815,7 +1824,7 @@ def _format_album_response(browse_id: str, album: dict) -> dict:
 
 
 @app.get("/album/{browse_id}")
-async def get_album(browse_id: str, user_id: str = Query(...)):
+async def get_album(browse_id: str, user_id: str = Query(...)) -> JsonObject:
     """Get album details and track listing from YouTube Music.
 
     When user_id is "__public__", uses an unauthenticated YTMusic instance.
@@ -1839,7 +1848,7 @@ async def get_album(browse_id: str, user_id: str = Query(...)):
 
 
 @app.get("/artist/{channel_id}")
-async def get_artist(channel_id: str, user_id: str = Query(...)):
+async def get_artist(channel_id: str, user_id: str = Query(...)) -> JsonObject:
     """Get artist details from YouTube Music.
 
     When user_id is "__public__", uses an unauthenticated YTMusic instance.
@@ -1900,7 +1909,7 @@ async def get_artist(channel_id: str, user_id: str = Query(...)):
 
 
 @app.get("/song/{video_id}")
-async def get_song(video_id: str, user_id: str = Query(...)):
+async def get_song(video_id: str, user_id: str = Query(...)) -> JsonObject:
     """Get song metadata from YouTube Music.
 
     When user_id is "__public__", uses an unauthenticated YTMusic instance.
@@ -1938,7 +1947,9 @@ async def get_song(video_id: str, user_id: str = Query(...)):
 
 
 @app.get("/stream/{video_id}")
-async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str = "HIGH"):
+async def get_stream_info(
+    video_id: str, user_id: str = Query(...), quality: str = "HIGH"
+) -> JsonObject:
     """Get stream URL info for a video (metadata only, no proxy).
 
     When user_id is "__public__", skips OAuth verification.
@@ -1964,10 +1975,10 @@ async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str
 @app.get("/proxy/{video_id}")
 async def proxy_stream(
     video_id: str,
+    request: Request,
     user_id: str = Query(...),
     quality: str = "HIGH",
-    request: Request = None,  # type: ignore[assignment]  # FastAPI injects Request despite the sentinel default
-):
+) -> StreamingResponse:
     """
     Proxy the audio stream from YouTube. The backend pipes this to the
     frontend player. Stream URLs are IP-locked to the server, so we
@@ -2020,7 +2031,9 @@ async def proxy_stream(
 
 
 @app.get("/library/songs")
-async def library_songs(user_id: str = Query(...), limit: int = 100, order: str = "recently_added"):
+async def library_songs(
+    user_id: str = Query(...), limit: int = 100, order: str = "recently_added"
+) -> JsonObject:
     """Get user's liked/library songs from YouTube Music."""
     try:
         songs = await asyncio.to_thread(
@@ -2063,7 +2076,7 @@ async def library_songs(user_id: str = Query(...), limit: int = 100, order: str 
 @app.get("/library/albums")
 async def library_albums(
     user_id: str = Query(...), limit: int = 100, order: str = "recently_added"
-):
+) -> JsonObject:
     """Get user's saved albums from YouTube Music."""
     try:
         albums = await asyncio.to_thread(
@@ -2123,7 +2136,7 @@ async def library_playlists(
     user_id: str = Query(...),
     limit: int = Query(25, ge=1, le=100),
     mixes_only: bool = False,
-):
+) -> JsonObject:
     """Get user's library playlists from YouTube Music.
 
     When mixes_only=true, filters to auto-generated/personalized mixes
@@ -2172,7 +2185,7 @@ async def library_playlists(
 
 
 @app.get("/yt/info")
-async def yt_video_info(url: str = Query(...)):
+async def yt_video_info(url: str = Query(...)) -> JsonObject:
     """
     Return metadata for a regular YouTube video.
     No authentication required — uses yt-dlp anonymous extraction.
@@ -2208,7 +2221,7 @@ async def yt_video_info(url: str = Query(...)):
 
     try:
 
-        def _extract():
+        def _extract() -> Any:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(
                     f"https://www.youtube.com/watch?v={video_id}",
@@ -2250,7 +2263,7 @@ async def yt_video_info(url: str = Query(...)):
 
 
 @app.get("/yt/playlist-info")
-async def yt_playlist_info(url: str = Query(...)):
+async def yt_playlist_info(url: str = Query(...)) -> JsonObject:
     """
     Enumerate a YouTube playlist or channel into a bounded list of video
     entries for the bulk-download UI. No authentication required — uses
@@ -2305,7 +2318,7 @@ async def yt_playlist_info(url: str = Query(...)):
 
     try:
 
-        def _extract():
+        def _extract() -> Any:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(enumerate_url, download=False)
 
@@ -2345,9 +2358,9 @@ async def yt_playlist_info(url: str = Query(...)):
 @app.get("/yt/proxy/{video_id}")
 async def yt_proxy_stream(
     video_id: str,
+    request: Request,
     quality: str = "HIGH",
-    request: Request = None,  # type: ignore[assignment]  # FastAPI injects Request despite the sentinel default
-):
+) -> StreamingResponse:
     """
     Proxy audio stream from a regular YouTube video.
     No OAuth required — uses anonymous yt-dlp extraction.
@@ -2401,10 +2414,10 @@ class YtDownloadRequest(BaseModel):
 # ── Download job store (in-memory) ──────────────────────────────────
 # Jobs are lost on restart — acceptable, because the on-disk idempotency
 # check prevents re-downloading completed files on a retried request.
-_yt_download_jobs: dict[str, dict] = {}
+_yt_download_jobs: dict[str, JsonObject] = {}
 # Strong references to in-flight tasks: asyncio only keeps weak refs to
 # tasks, so an unreferenced download task could be garbage-collected.
-_yt_download_tasks: set = set()
+_yt_download_tasks: set[asyncio.Task[None]] = set()
 YT_DOWNLOAD_JOB_TTL = 6 * 60 * 60  # prune terminal jobs after 6 hours
 # Downloads run on a dedicated, size-limited executor so multi-hour yt-dlp
 # jobs cannot exhaust the event loop's shared default thread pool — used by
@@ -2423,7 +2436,7 @@ _yt_download_executor = ThreadPoolExecutor(
 TERMINAL_DOWNLOAD_STATUSES = ("completed", "failed", "cancelled")
 
 
-def _prune_yt_download_jobs():
+def _prune_yt_download_jobs() -> None:
     """Drop terminal jobs older than the TTL to bound memory."""
     cutoff = time.time() - YT_DOWNLOAD_JOB_TTL
     stale = [
@@ -2442,7 +2455,7 @@ def _new_yt_download_job(
     status: str = "queued",
     source: str | None = None,
     source_kind: str | None = None,
-) -> dict:
+) -> JsonObject:
     """Create and register a download job record."""
     _prune_yt_download_jobs()
     job: dict[str, Any] = {
@@ -2463,7 +2476,7 @@ def _new_yt_download_job(
     return job
 
 
-def _yt_download_job_payload(job: dict) -> dict:
+def _yt_download_job_payload(job: JsonObject) -> JsonObject:
     """Public job-status shape returned to the backend."""
     return {
         "job_id": job["job_id"],
@@ -2479,7 +2492,9 @@ def _yt_download_job_payload(job: dict) -> dict:
     }
 
 
-def _update_yt_download_progress(job: dict, update: dict, download_cancelled):
+def _update_yt_download_progress(
+    job: JsonObject, update: JsonObject, download_cancelled: type[Exception]
+) -> None:
     """Apply one yt-dlp progress update to a download job."""
     if job.get("cancel_requested"):
         raise download_cancelled("cancelled by user")
@@ -2496,12 +2511,12 @@ def _update_yt_download_progress(job: dict, update: dict, download_cancelled):
 
 
 def _build_yt_download_opts(
-    job: dict,
+    job: JsonObject,
     audio_format: str,
     quality: str,
     output_dir: str,
-    download_cancelled,
-) -> dict:
+    download_cancelled: type[Exception],
+) -> JsonObject:
     """Build yt-dlp options for a bounded audio download."""
     outtmpl = os.path.join(output_dir, "%(title)s [%(id)s].%(ext)s")
     postprocessors = [
@@ -2516,7 +2531,7 @@ def _build_yt_download_opts(
 
     fmt = PROXY_AUDIO_FORMAT_SELECTORS.get(quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"])
 
-    def _progress_hook(update: dict):
+    def _progress_hook(update: JsonObject) -> None:
         _update_yt_download_progress(job, update, download_cancelled)
 
     return {
@@ -2541,7 +2556,9 @@ def _build_yt_download_opts(
     }
 
 
-def _complete_yt_download(job: dict, info: dict, audio_format: str, output_dir: str) -> None:
+def _complete_yt_download(
+    job: JsonObject, info: JsonObject, audio_format: str, output_dir: str
+) -> None:
     """Resolve output metadata and mark a successful download completed."""
     video_id = job["video_id"]
     filepath = resolve_download_filepath(info, audio_format)
@@ -2561,7 +2578,7 @@ def _complete_yt_download(job: dict, info: dict, audio_format: str, output_dir: 
     log.info(f"YT download completed for {video_id}: {filepath}")
 
 
-def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: str):
+def _yt_download_sync(job: JsonObject, audio_format: str, quality: str, output_dir: str) -> None:
     """Run a blocking yt-dlp download and update its job record."""
     import yt_dlp
 
@@ -2583,7 +2600,9 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
     _complete_yt_download(job, info, audio_format, output_dir)
 
 
-async def _run_yt_download_job(job: dict, audio_format: str, quality: str, output_dir: str):
+async def _run_yt_download_job(
+    job: JsonObject, audio_format: str, quality: str, output_dir: str
+) -> None:
     """Background task wrapper that records failures on the job."""
     try:
         # Dedicated executor, NOT asyncio.to_thread: to_thread shares the
@@ -2609,7 +2628,7 @@ async def _run_yt_download_job(job: dict, audio_format: str, quality: str, outpu
 
 
 @app.post("/yt/download")
-async def yt_download(req: YtDownloadRequest):
+async def yt_download(req: YtDownloadRequest) -> JsonObject:
     """
     Start a background audio download for a regular YouTube video.
     Returns {job_id, status} immediately; poll GET /yt/download/{job_id}
@@ -2668,7 +2687,7 @@ async def yt_download(req: YtDownloadRequest):
 
 
 @app.get("/yt/download/{job_id}")
-async def yt_download_status(job_id: str):
+async def yt_download_status(job_id: str) -> JsonObject:
     """
     Return the status of a download job started via POST /yt/download.
     404 when the job is unknown (e.g. after a sidecar restart).
@@ -2680,7 +2699,7 @@ async def yt_download_status(job_id: str):
 
 
 @app.get("/yt/downloads")
-async def yt_downloads_list():
+async def yt_downloads_list() -> JsonObject:
     """
     List all known download jobs (active + recent terminal within the 6h
     TTL), newest first, for the downloads view. The store is in-memory and
@@ -2696,7 +2715,7 @@ async def yt_downloads_list():
 
 
 @app.delete("/yt/downloads/{job_id}")
-async def yt_download_cancel(job_id: str):
+async def yt_download_cancel(job_id: str) -> JsonObject:
     """
     Cancel a download job. A still-queued job never starts; an in-flight job
     is aborted at its next progress tick. Terminal jobs are a no-op. 404 when
@@ -2720,7 +2739,7 @@ async def yt_download_cancel(job_id: str):
 
 
 @app.on_event("startup")
-async def startup():
+async def startup() -> None:
     log.info("YouTube Music Streamer starting up (multi-user mode)")
     log.info(
         f"Rate-pacing config: batch_concurrency={BATCH_CONCURRENCY}, "
@@ -2771,7 +2790,7 @@ def _get_browse_ytmusic(user_id: str | None = None) -> YTMusic:
 
 
 @app.get("/charts")
-async def get_charts(country: str = "US", user_id: str | None = Query(None)):
+async def get_charts(country: str = "US", user_id: str | None = Query(None)) -> JsonObject:
     """Get YT Music charts (top songs, trending, etc.).
 
     Always uses a public (unauthenticated) YTMusic instance because
@@ -2807,7 +2826,7 @@ async def get_charts(country: str = "US", user_id: str | None = Query(None)):
 
 
 @app.get("/moods-and-genres")
-async def get_moods_and_genres(user_id: str | None = Query(None)):
+async def get_moods_and_genres(user_id: str | None = Query(None)) -> JsonList:
     """Get YT Music mood/genre categories.
 
     Always uses a public (unauthenticated) YTMusic instance because
@@ -2841,7 +2860,9 @@ async def get_moods_and_genres(user_id: str | None = Query(None)):
 
 
 @app.get("/home")
-async def get_home(limit: int = Query(6, ge=1, le=20), user_id: str | None = Query(None)):
+async def get_home(
+    limit: int = Query(6, ge=1, le=20), user_id: str | None = Query(None)
+) -> JsonList:
     """Get YT Music home page shelves (featured/curated content).
 
     Always uses a public (unauthenticated) YTMusic instance because
@@ -2852,7 +2873,8 @@ async def get_home(limit: int = Query(6, ge=1, le=20), user_id: str | None = Que
         home = await asyncio.to_thread(lambda: _get_public_ytmusic("native").get_home(limit=limit))
 
         shelves = []
-        for shelf in home:
+        for raw_shelf in home:
+            shelf: object = raw_shelf
             if not isinstance(shelf, dict):
                 continue
             title = shelf.get("title", "")
@@ -2902,7 +2924,7 @@ async def get_home(limit: int = Query(6, ge=1, le=20), user_id: str | None = Que
 
 
 @app.get("/browse-album/{browse_id}")
-async def get_browse_album(browse_id: str):
+async def get_browse_album(browse_id: str) -> JsonObject:
     """Get album details from YouTube Music (unauthenticated, public browse)."""
     try:
         album = await asyncio.to_thread(lambda: _get_public_ytmusic("native").get_album(browse_id))
@@ -2924,7 +2946,7 @@ async def get_browse_album(browse_id: str):
 @app.get("/mood-playlists")
 async def get_mood_playlists(
     params: str = Query(..., min_length=1, max_length=512), user_id: str | None = Query(None)
-):
+) -> JsonList:
     """Get playlists for a specific mood/genre category.
 
     Uses a custom browse implementation instead of ytmusicapi's
@@ -2944,8 +2966,6 @@ async def get_mood_playlists(
 
         result = []
         for item in playlists:
-            if not isinstance(item, dict):
-                continue
             # parse_playlist may return author as a list of
             # {"name": str, "id": str|None} dicts; flatten to a string.
             raw_author = item.get("author", "")
@@ -2982,7 +3002,7 @@ async def get_playlist(
     playlist_id: str,
     limit: int = 100,
     user_id: str | None = Query(None),
-):
+) -> JsonObject:
     """Get a YT Music playlist with track details.
 
     When ``user_id`` is provided, prefers authenticated browse context and
@@ -3061,7 +3081,7 @@ async def get_playlist(
         ) from e
 
 
-def _fetch_mood_playlists(yt: YTMusic, params: str) -> list[dict]:
+def _fetch_mood_playlists(yt: YTMusic, params: str) -> JsonList:
     """Robustly fetch mood/genre playlists via the browse API.
 
     ``ytmusicapi.get_mood_playlists`` crashes on categories whose first
@@ -3084,9 +3104,9 @@ def _fetch_mood_playlists(yt: YTMusic, params: str) -> list[dict]:
         "browse",
         {"browseId": "FEmusic_moods_and_genres_category", "params": params},
     )
-    playlists: list[dict] = []
+    playlists: JsonList = []
     for section in nav(response, SINGLE_COLUMN_TAB + SECTION_LIST):
-        path: list = []
+        path: list[str] = []
         if "gridRenderer" in section:
             path = list(GRID_ITEMS)
         elif "musicCarouselShelfRenderer" in section:
@@ -3109,15 +3129,17 @@ def _fetch_mood_playlists(yt: YTMusic, params: str) -> list[dict]:
     return playlists
 
 
-def _best_thumbnail(thumbnails: list) -> str | None:
+def _best_thumbnail(thumbnails: JsonList) -> str | None:
     """Pick the best available thumbnail URL."""
     if not thumbnails:
         return None
     # Prefer medium/large resolution
     for t in reversed(thumbnails):
-        if isinstance(t, dict) and t.get("url"):
-            return t["url"]
-    return thumbnails[0].get("url") if isinstance(thumbnails[0], dict) else None
+        url = t.get("url")
+        if isinstance(url, str) and url:
+            return url
+    first_url = thumbnails[0].get("url")
+    return first_url if isinstance(first_url, str) else None
 
 
 def _parse_duration(duration_str: str) -> int:
@@ -3136,7 +3158,7 @@ def _parse_duration(duration_str: str) -> int:
 
 
 @app.on_event("shutdown")
-async def shutdown():
+async def shutdown() -> None:
     _clean_stream_cache()
     _clean_search_cache()
     with _ytmusic_instances_lock:

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 
 def _search_results(query: str) -> SimpleNamespace:
@@ -21,13 +23,15 @@ def _search_results(query: str) -> SimpleNamespace:
 
 
 @pytest.mark.anyio
-async def test_batch_search_rejects_requests_above_query_cap(client, monkeypatch):
+async def test_batch_search_rejects_requests_above_query_cap(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Oversized batches should fail validation without invoking TIDAL."""
     import app
 
     calls: list[str] = []
 
-    async def fake_run_user_api_call(*_args, **_kwargs):
+    async def fake_run_user_api_call(*_args: Any, **_kwargs: Any) -> Any:
         calls.append("called")
         return _search_results("unexpected")
 
@@ -50,14 +54,16 @@ async def test_batch_search_rejects_requests_above_query_cap(client, monkeypatch
 
 
 @pytest.mark.anyio
-async def test_batch_search_bounds_concurrency_and_preserves_order(client, monkeypatch):
+async def test_batch_search_bounds_concurrency_and_preserves_order(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Batch searches should limit concurrent provider calls and retain input order."""
     import app
 
     in_flight = 0
     max_in_flight = 0
 
-    async def fake_run_user_api_call(_user_id, func, operation):
+    async def fake_run_user_api_call(_user_id: Any, func: Any, operation: Any) -> Any:
         assert operation.startswith("batch search")
         nonlocal in_flight, max_in_flight
         in_flight += 1
@@ -87,11 +93,13 @@ async def test_batch_search_bounds_concurrency_and_preserves_order(client, monke
 
 
 @pytest.mark.anyio
-async def test_batch_search_returns_shaped_results_in_order(client, monkeypatch):
+async def test_batch_search_returns_shaped_results_in_order(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A small valid batch should retain the established response shape and order."""
     import app
 
-    async def fake_run_user_api_call(_user_id, func, operation):
+    async def fake_run_user_api_call(_user_id: Any, func: Any, operation: Any) -> Any:
         assert operation.startswith("batch search")
         api = SimpleNamespace(get_search=lambda query: _search_results(query))
         return func(api)

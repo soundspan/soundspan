@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import types
+from typing import Any
 
 import pytest
 
@@ -22,35 +23,37 @@ def _assert_lock_available(lock: threading.Lock, operation: str) -> None:
     lock.release()
 
 
-class _IterationLockCheckingDict(dict):
-    def __init__(self, values, lock: threading.Lock) -> None:
+class _IterationLockCheckingDict(dict[Any, Any]):
+    def __init__(self, values: Any, lock: threading.Lock) -> None:
         super().__init__(values)
         self._lock = lock
 
-    def __iter__(self):
+    def __iter__(self) -> Any:
         _assert_lock_held(self._lock)
         return super().__iter__()
 
-    def items(self):
+    def items(self) -> Any:
         _assert_lock_held(self._lock)
         return super().items()
 
 
-class _AccessLockCheckingDict(dict):
+class _AccessLockCheckingDict(dict[Any, Any]):
     def __init__(self, lock: threading.Lock) -> None:
         super().__init__()
         self._lock = lock
 
-    def get(self, key, default=None):
+    def get(self, key: Any, default: Any = None) -> Any:
         _assert_lock_held(self._lock)
         return super().get(key, default)
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key: Any, value: Any) -> None:
         _assert_lock_held(self._lock)
         super().__setitem__(key, value)
 
 
-def test_clear_stream_cache_holds_lock_and_preserves_other_users(monkeypatch):
+def test_clear_stream_cache_holds_lock_and_preserves_other_users(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     lock = threading.Lock()
@@ -70,7 +73,9 @@ def test_clear_stream_cache_holds_lock_and_preserves_other_users(monkeypatch):
     assert cache == {("other", 1, "HIGH"): {"expires_at": 100}}
 
 
-def test_clean_stream_cache_holds_lock_and_removes_only_expired(monkeypatch):
+def test_clean_stream_cache_holds_lock_and_removes_only_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     lock = threading.Lock()
@@ -90,13 +95,15 @@ def test_clean_stream_cache_holds_lock_and_removes_only_expired(monkeypatch):
     assert cache == {("user", 2, "HIGH"): {"expires_at": 101}}
 
 
-def test_stream_cache_access_lock_excludes_only_dictionary_operations(monkeypatch):
+def test_stream_cache_access_lock_excludes_only_dictionary_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     lock = threading.Lock()
     cache = _AccessLockCheckingDict(lock)
 
-    def assert_provider_call_is_unlocked(**_kwargs):
+    def assert_provider_call_is_unlocked(**_kwargs: Any) -> Any:
         _assert_lock_available(lock, "TIDAL API call")
         return types.SimpleNamespace(
             manifestMimeType="application/vnd.tidal.bts",
@@ -105,7 +112,7 @@ def test_stream_cache_access_lock_excludes_only_dictionary_operations(monkeypatc
             sampleRate=None,
         )
 
-    def assert_parser_call_is_unlocked(_stream):
+    def assert_parser_call_is_unlocked(_stream: Any) -> Any:
         _assert_lock_available(lock, "stream parser call")
         return ["url"], ".flac"
 
@@ -124,10 +131,10 @@ def test_stream_cache_access_lock_excludes_only_dictionary_operations(monkeypatc
     assert cache[("user", 1, "HIGH")] is result
 
 
-def _stream_api(url_by_track: dict[int, str]):
+def _stream_api(url_by_track: dict[int, str]) -> Any:
     """Build a provider double that returns a distinct URL per track."""
 
-    def get_track_stream(*, track_id: int, quality: str):
+    def get_track_stream(*, track_id: int, quality: str) -> Any:
         return types.SimpleNamespace(
             manifestMimeType="application/vnd.tidal.bts",
             audioQuality=quality,
@@ -139,14 +146,16 @@ def _stream_api(url_by_track: dict[int, str]):
     return types.SimpleNamespace(get_track_stream=get_track_stream)
 
 
-def _configure_stream_loading(monkeypatch, app, cache, urls: dict[int, str]) -> None:
+def _configure_stream_loading(
+    monkeypatch: pytest.MonkeyPatch, app: Any, cache: Any, urls: dict[int, str]
+) -> None:
     """Install deterministic cache and provider state for stream lookups."""
     monkeypatch.setattr(app, "_stream_cache", cache)
     monkeypatch.setattr(app, "_user_apis", {"user": _stream_api(urls)})
     monkeypatch.setattr(app, "parse_track_stream", lambda stream: ([stream.url], ".flac"))
 
 
-def test_stream_lookup_removes_expired_entries(monkeypatch):
+def test_stream_lookup_removes_expired_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     cache = {
@@ -163,7 +172,9 @@ def test_stream_lookup_removes_expired_entries(monkeypatch):
     assert ("user", 2, "HIGH") in cache
 
 
-def test_stream_cache_is_bounded_and_evicts_least_recently_used(monkeypatch):
+def test_stream_cache_is_bounded_and_evicts_least_recently_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     cache = {
@@ -180,7 +191,7 @@ def test_stream_cache_is_bounded_and_evicts_least_recently_used(monkeypatch):
     assert list(cache) == [("user", 1, "HIGH"), ("user", 3, "HIGH")]
 
 
-def test_stream_insertion_prefers_expired_eviction(monkeypatch):
+def test_stream_insertion_prefers_expired_eviction(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     cache = {
@@ -197,7 +208,7 @@ def test_stream_insertion_prefers_expired_eviction(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_stream_cache_cleanup_loop_runs_periodically(monkeypatch):
+async def test_stream_cache_cleanup_loop_runs_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     cleanup_calls = []
@@ -219,7 +230,7 @@ async def test_stream_cache_cleanup_loop_runs_periodically(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_app_lifespan_owns_stream_cache_cleanup_task(monkeypatch):
+async def test_app_lifespan_owns_stream_cache_cleanup_task(monkeypatch: pytest.MonkeyPatch) -> None:
     import app
 
     started = asyncio.Event()

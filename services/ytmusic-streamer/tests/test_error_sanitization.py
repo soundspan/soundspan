@@ -4,24 +4,32 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
 
 MARKER = "sekrit-yt-abc123"
 LOGGER_NAME = "ytmusic-streamer"
 
 
 @pytest.mark.anyio
-async def test_auth_status_reason_sanitized(client, monkeypatch, tmp_path, caplog) -> None:
+async def test_auth_status_reason_sanitized(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Auth status must log internal detail without returning it to clients."""
     import app
 
     monkeypatch.setattr(app, "DATA_PATH", tmp_path)
     (tmp_path / "oauth_u1.json").write_text("{}", encoding="utf-8")
 
-    def raise_internal_error(user_id):
+    def raise_internal_error(user_id: Any) -> Any:
         """Simulate credential initialization exposing sensitive detail."""
         raise Exception(MARKER)
 
@@ -42,14 +50,16 @@ async def test_auth_status_reason_sanitized(client, monkeypatch, tmp_path, caplo
 
 
 @pytest.mark.anyio
-async def test_device_code_init_error_sanitized(client, monkeypatch, caplog) -> None:
+async def test_device_code_init_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Device-code failures must keep logged exception details out of responses."""
     import app
 
     class FailingOAuthCredentials:
         """Raise sensitive detail while constructing OAuth credentials."""
 
-        def __init__(self, client_id, client_secret):
+        def __init__(self, client_id: Any, client_secret: Any) -> None:
             raise Exception(MARKER)
 
     monkeypatch.setattr(app, "OAuthCredentials", FailingOAuthCredentials)
@@ -71,11 +81,15 @@ async def test_device_code_init_error_sanitized(client, monkeypatch, caplog) -> 
 
 
 @pytest.mark.anyio
-async def test_search_error_sanitized(client, monkeypatch, caplog) -> None:
+async def test_search_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Search failures must keep logged exception details out of responses."""
     import app
 
-    def raise_internal_error(user_id, query, filter_, limit, use_unauth_client=True):
+    def raise_internal_error(
+        user_id: Any, query: Any, filter_: Any, limit: Any, use_unauth_client: bool = True
+    ) -> Any:
         """Simulate a search implementation failure with sensitive detail."""
         raise Exception(MARKER)
 
@@ -95,11 +109,13 @@ async def test_search_error_sanitized(client, monkeypatch, caplog) -> None:
 
 
 @pytest.mark.anyio
-async def test_home_error_sanitized(client, monkeypatch, caplog) -> None:
+async def test_home_error_sanitized(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Home failures must keep logged exception details out of responses."""
     import app
 
-    def raise_internal_error(mode):
+    def raise_internal_error(mode: Any) -> Any:
         """Simulate public YTMusic client creation failing with sensitive detail."""
         raise Exception(MARKER)
 
@@ -118,23 +134,25 @@ async def test_home_error_sanitized(client, monkeypatch, caplog) -> None:
     )
 
 
-def test_stream_extraction_error_sanitized(monkeypatch, caplog) -> None:
+def test_stream_extraction_error_sanitized(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Stream extraction must log internal detail but return a generic 502."""
     import app
 
     class FailingYoutubeDL:
         """Minimal yt-dlp context manager that fails during extraction."""
 
-        def __init__(self, options):
+        def __init__(self, options: Any) -> None:
             self.options = options
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, exc_type, exc_value, traceback):
+        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Any:
             return False
 
-        def extract_info(self, url, download):
+        def extract_info(self, url: Any, download: Any) -> Any:
             raise Exception(MARKER)
 
     yt_dlp_stub = SimpleNamespace(YoutubeDL=FailingYoutubeDL)

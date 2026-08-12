@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Mypy now runs in strict mode with enumerated, justified per-module exceptions;
+  tidal-downloader and ytmusic-streamer are fully strict, including their tests.
 - Frontend TypeScript now compiles under strict mode.
 - Renamed playback telemetry so log names match their emitters:
   `player.howler_startup` → `player.engine_startup`;

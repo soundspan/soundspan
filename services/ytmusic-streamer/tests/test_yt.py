@@ -7,6 +7,7 @@ so these tests run without the sidecar's heavy runtime dependencies.
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -37,7 +38,7 @@ VIDEO_ID = "dQw4w9WgXcQ"
 # ── bulk_album_metadata (collapse a CHANNEL to one artist) ──────────
 
 
-def test_bulk_album_metadata_channel_sets_artist_albumartist_and_album():
+def test_bulk_album_metadata_channel_sets_artist_albumartist_and_album() -> None:
     assert bulk_album_metadata("Book Club Radio", "channel") == {
         "artist": "Book Club Radio",
         "album_artist": "Book Club Radio",
@@ -45,7 +46,7 @@ def test_bulk_album_metadata_channel_sets_artist_albumartist_and_album():
     }
 
 
-def test_bulk_album_metadata_channel_strips_whitespace():
+def test_bulk_album_metadata_channel_strips_whitespace() -> None:
     assert bulk_album_metadata("  Book Club Radio  ", "channel") == {
         "artist": "Book Club Radio",
         "album_artist": "Book Club Radio",
@@ -53,26 +54,26 @@ def test_bulk_album_metadata_channel_strips_whitespace():
     }
 
 
-def test_bulk_album_metadata_playlist_preserves_native_metadata():
+def test_bulk_album_metadata_playlist_preserves_native_metadata() -> None:
     # Playlists are curated, often multi-artist — never collapse to one artist.
     assert bulk_album_metadata("Best of 2024", "playlist") is None
 
 
 @pytest.mark.parametrize("kind", [None, "video", "mix", "unknown"])
-def test_bulk_album_metadata_only_collapses_channels(kind):
+def test_bulk_album_metadata_only_collapses_channels(kind: Any) -> None:
     # Anything other than an explicit channel is left as native metadata.
     assert bulk_album_metadata("Some Title", kind) is None
 
 
 @pytest.mark.parametrize("source", [None, "", "   ", 123, []])
-def test_bulk_album_metadata_none_for_blank_or_nonstring(source):
+def test_bulk_album_metadata_none_for_blank_or_nonstring(source: Any) -> None:
     assert bulk_album_metadata(source, "channel") is None
 
 
 # ── build_tag_rewrite_command (ffmpeg tag rewrite, parser-safe) ─────
 
 
-def test_build_tag_rewrite_command_stream_copies_and_keeps_metadata():
+def test_build_tag_rewrite_command_stream_copies_and_keeps_metadata() -> None:
     cmd = build_tag_rewrite_command(
         "/music/yt/track.opus",
         {"artist": "Book Club Radio"},
@@ -89,7 +90,7 @@ def test_build_tag_rewrite_command_stream_copies_and_keeps_metadata():
     assert cmd[cmd.index("artist=Book Club Radio") - 1] == "-metadata"
 
 
-def test_build_tag_rewrite_command_emits_one_metadata_pair_per_tag_in_order():
+def test_build_tag_rewrite_command_emits_one_metadata_pair_per_tag_in_order() -> None:
     cmd = build_tag_rewrite_command(
         "in.flac",
         {"artist": "A", "album_artist": "A", "album": "A"},
@@ -118,7 +119,7 @@ def test_build_tag_rewrite_command_emits_one_metadata_pair_per_tag_in_order():
         f"  {VIDEO_ID}  ",
     ],
 )
-def test_extract_video_id_variants(url):
+def test_extract_video_id_variants(url: Any) -> None:
     assert extract_video_id(url) == VIDEO_ID
 
 
@@ -131,7 +132,7 @@ def test_extract_video_id_variants(url):
         "",
     ],
 )
-def test_extract_video_id_rejects_invalid(url):
+def test_extract_video_id_rejects_invalid(url: Any) -> None:
     with pytest.raises(ValueError):
         extract_video_id(url)
 
@@ -139,7 +140,7 @@ def test_extract_video_id_rejects_invalid(url):
 # ── YT_PLAYER_CLIENTS (regular-YouTube extractor clients) ───────────
 
 
-def test_yt_player_clients_excludes_broken_bare_android():
+def test_yt_player_clients_excludes_broken_bare_android() -> None:
     # The bare "android" InnerTube client is PO-token-gated and returns no
     # usable audio formats, so it must not be used for regular-YouTube
     # extraction (it made /yt/info 502 with "Requested format is not
@@ -153,20 +154,20 @@ def test_yt_player_clients_excludes_broken_bare_android():
 # ── find_existing_download (idempotency check) ──────────────────────
 
 
-def test_find_existing_download_matches_bracketed_id(tmp_path):
+def test_find_existing_download_matches_bracketed_id(tmp_path: Path) -> None:
     target = tmp_path / f"Some DJ Set [{VIDEO_ID}].mp3"
     target.write_bytes(b"audio")
 
     assert find_existing_download(str(tmp_path), VIDEO_ID) == str(target)
 
 
-def test_find_existing_download_ignores_non_audio_extensions(tmp_path):
+def test_find_existing_download_ignores_non_audio_extensions(tmp_path: Path) -> None:
     (tmp_path / f"Some DJ Set [{VIDEO_ID}].jpg").write_bytes(b"thumb")
 
     assert find_existing_download(str(tmp_path), VIDEO_ID) is None
 
 
-def test_find_existing_download_no_char_class_false_positive(tmp_path):
+def test_find_existing_download_no_char_class_false_positive(tmp_path: Path) -> None:
     # Regression: the old pattern f"*[{video_id}].*" treated [..] as a glob
     # character class, so any file ending in one of the id's characters
     # matched. "mix-Q.mp3" ends with "Q", which is inside the class.
@@ -175,7 +176,7 @@ def test_find_existing_download_no_char_class_false_positive(tmp_path):
     assert find_existing_download(str(tmp_path), VIDEO_ID) is None
 
 
-def test_find_existing_download_handles_glob_chars_in_dir(tmp_path):
+def test_find_existing_download_handles_glob_chars_in_dir(tmp_path: Path) -> None:
     weird_dir = tmp_path / "music [archive]"
     weird_dir.mkdir()
     target = weird_dir / f"Track [{VIDEO_ID}].opus"
@@ -184,14 +185,14 @@ def test_find_existing_download_handles_glob_chars_in_dir(tmp_path):
     assert find_existing_download(str(weird_dir), VIDEO_ID) == str(target)
 
 
-def test_find_existing_download_missing_dir_returns_none(tmp_path):
+def test_find_existing_download_missing_dir_returns_none(tmp_path: Path) -> None:
     assert find_existing_download(str(tmp_path / "nope"), VIDEO_ID) is None
 
 
 # ── resolve_download_filepath ───────────────────────────────────────
 
 
-def test_resolve_filepath_from_requested_downloads(tmp_path):
+def test_resolve_filepath_from_requested_downloads(tmp_path: Path) -> None:
     final = tmp_path / f"Title [{VIDEO_ID}].mp3"
     final.write_bytes(b"audio")
     info = {"requested_downloads": [{"filepath": str(final)}]}
@@ -199,7 +200,7 @@ def test_resolve_filepath_from_requested_downloads(tmp_path):
     assert resolve_download_filepath(info, "mp3") == str(final)
 
 
-def test_resolve_filepath_accounts_for_extract_audio_extension(tmp_path):
+def test_resolve_filepath_accounts_for_extract_audio_extension(tmp_path: Path) -> None:
     # yt-dlp may record the pre-postprocessing media path (e.g. .webm);
     # FFmpegExtractAudio replaces the extension with the requested format.
     recorded = tmp_path / f"Title [{VIDEO_ID}].webm"
@@ -210,7 +211,7 @@ def test_resolve_filepath_accounts_for_extract_audio_extension(tmp_path):
     assert resolve_download_filepath(info, "mp3") == str(converted)
 
 
-def test_resolve_filepath_falls_back_to_legacy_keys(tmp_path):
+def test_resolve_filepath_falls_back_to_legacy_keys(tmp_path: Path) -> None:
     final = tmp_path / f"Title [{VIDEO_ID}].m4a"
     final.write_bytes(b"audio")
     info = {"filepath": str(final)}
@@ -218,13 +219,13 @@ def test_resolve_filepath_falls_back_to_legacy_keys(tmp_path):
     assert resolve_download_filepath(info, "m4a") == str(final)
 
 
-def test_resolve_filepath_returns_none_when_nothing_exists(tmp_path):
+def test_resolve_filepath_returns_none_when_nothing_exists(tmp_path: Path) -> None:
     info = {"requested_downloads": [{"filepath": str(tmp_path / "missing.webm")}]}
 
     assert resolve_download_filepath(info, "mp3") is None
 
 
-def test_resolve_filepath_handles_bad_info():
+def test_resolve_filepath_handles_bad_info() -> None:
     assert resolve_download_filepath(None, "mp3") is None
     assert resolve_download_filepath({}, "mp3") is None
     assert resolve_download_filepath({"requested_downloads": "x"}, "mp3") is None
@@ -236,7 +237,7 @@ def test_resolve_filepath_handles_bad_info():
 # decode hint that does not match the bytes served.
 
 
-def test_proxy_selectors_cover_all_qualities():
+def test_proxy_selectors_cover_all_qualities() -> None:
     assert set(PROXY_AUDIO_FORMAT_SELECTORS) == {
         "LOW",
         "MEDIUM",
@@ -247,16 +248,16 @@ def test_proxy_selectors_cover_all_qualities():
     assert PROXY_AUDIO_FORMAT_SELECTORS["HIGH"] == "ba[abr<=256]/ba"
 
 
-def test_derive_proxy_audio_container_opus_maps_to_webm():
+def test_derive_proxy_audio_container_opus_maps_to_webm() -> None:
     assert derive_proxy_audio_container({"acodec": "opus"}) == "webm"
 
 
-def test_derive_proxy_audio_container_aac_maps_to_mp4():
+def test_derive_proxy_audio_container_aac_maps_to_mp4() -> None:
     assert derive_proxy_audio_container({"acodec": "mp4a.40.2"}) == "mp4"
     assert derive_proxy_audio_container({"acodec": "aac"}) == "mp4"
 
 
-def test_derive_proxy_audio_container_uses_selected_format_not_best_abr():
+def test_derive_proxy_audio_container_uses_selected_format_not_best_abr() -> None:
     # The selected (top-level) acodec wins even when a higher-abr opus
     # format exists in the formats list — mirrors the proxy, which maps
     # Content-Type from the selected format's acodec only.
@@ -269,7 +270,7 @@ def test_derive_proxy_audio_container_uses_selected_format_not_best_abr():
     assert derive_proxy_audio_container(info) == "mp4"
 
 
-def test_derive_proxy_audio_container_defaults_to_mp4():
+def test_derive_proxy_audio_container_defaults_to_mp4() -> None:
     assert derive_proxy_audio_container({}) == "mp4"
     assert derive_proxy_audio_container({"acodec": None}) == "mp4"
     assert derive_proxy_audio_container(None) == "mp4"
@@ -284,12 +285,12 @@ def test_derive_proxy_audio_container_defaults_to_mp4():
 # though the postprocessor is about to replace it.
 
 
-def _job(job_id, video_id, status):
+def _job(job_id: Any, video_id: Any, status: Any) -> Any:
     return {"job_id": job_id, "video_id": video_id, "status": status}
 
 
 @pytest.mark.parametrize("status", sorted(ACTIVE_DOWNLOAD_STATUSES))
-def test_find_active_download_job_matches_each_active_status(status):
+def test_find_active_download_job_matches_each_active_status(status: Any) -> None:
     jobs = {"j1": _job("j1", VIDEO_ID, status)}
 
     found = find_active_download_job(jobs, VIDEO_ID)
@@ -297,28 +298,28 @@ def test_find_active_download_job_matches_each_active_status(status):
     assert found is jobs["j1"]
 
 
-def test_active_statuses_cover_the_full_non_terminal_lifecycle():
+def test_active_statuses_cover_the_full_non_terminal_lifecycle() -> None:
     assert {"queued", "downloading", "processing"} == ACTIVE_DOWNLOAD_STATUSES
 
 
 @pytest.mark.parametrize("status", ["completed", "failed"])
-def test_find_active_download_job_ignores_terminal_jobs(status):
+def test_find_active_download_job_ignores_terminal_jobs(status: Any) -> None:
     jobs = {"j1": _job("j1", VIDEO_ID, status)}
 
     assert find_active_download_job(jobs, VIDEO_ID) is None
 
 
-def test_find_active_download_job_ignores_other_videos():
+def test_find_active_download_job_ignores_other_videos() -> None:
     jobs = {"j1": _job("j1", "otherVideo1", "downloading")}
 
     assert find_active_download_job(jobs, VIDEO_ID) is None
 
 
-def test_find_active_download_job_empty_store():
+def test_find_active_download_job_empty_store() -> None:
     assert find_active_download_job({}, VIDEO_ID) is None
 
 
-def test_find_active_download_job_prefers_active_over_terminal():
+def test_find_active_download_job_prefers_active_over_terminal() -> None:
     jobs = {
         "j1": _job("j1", VIDEO_ID, "failed"),
         "j2": _job("j2", VIDEO_ID, "processing"),
@@ -338,21 +339,21 @@ def test_find_active_download_job_prefers_active_over_terminal():
 PLAYLIST_ID = "PL-TQY69MwxBRttHQST4uYTaFs4RQPLuOH"
 
 
-def test_classify_pure_playlist_url():
+def test_classify_pure_playlist_url() -> None:
     result = classify_youtube_url(f"https://www.youtube.com/playlist?list={PLAYLIST_ID}")
     assert result["kind"] == "playlist"
     assert result["playlist_id"] == PLAYLIST_ID
     assert result["enumerate_url"] == (f"https://www.youtube.com/playlist?list={PLAYLIST_ID}")
 
 
-def test_classify_watch_with_playlist_prefers_playlist():
+def test_classify_watch_with_playlist_prefers_playlist() -> None:
     # A real (non-RD) list wins over the focused video.
     result = classify_youtube_url(f"https://www.youtube.com/watch?v={VIDEO_ID}&list={PLAYLIST_ID}")
     assert result["kind"] == "playlist"
     assert result["playlist_id"] == PLAYLIST_ID
 
 
-def test_classify_radio_mix_is_mix_not_playlist():
+def test_classify_radio_mix_is_mix_not_playlist() -> None:
     # RD* lists are auto-generated radio/mixes — not enumerable as a set,
     # so they fall back to the single focused video.
     result = classify_youtube_url(
@@ -371,25 +372,25 @@ def test_classify_radio_mix_is_mix_not_playlist():
         f"https://www.youtube.com/shorts/{VIDEO_ID}",
     ],
 )
-def test_classify_single_video(url):
+def test_classify_single_video(url: Any) -> None:
     result = classify_youtube_url(url)
     assert result["kind"] == "video"
     assert result["video_id"] == VIDEO_ID
 
 
-def test_classify_channel_handle():
+def test_classify_channel_handle() -> None:
     result = classify_youtube_url("https://www.youtube.com/@BookClubRadio")
     assert result["kind"] == "channel"
     assert result["enumerate_url"] == ("https://www.youtube.com/@BookClubRadio/videos")
 
 
-def test_classify_channel_handle_with_tab_normalizes_to_videos():
+def test_classify_channel_handle_with_tab_normalizes_to_videos() -> None:
     result = classify_youtube_url("https://www.youtube.com/@BookClubRadio/streams")
     assert result["kind"] == "channel"
     assert result["enumerate_url"] == ("https://www.youtube.com/@BookClubRadio/videos")
 
 
-def test_classify_channel_id():
+def test_classify_channel_id() -> None:
     result = classify_youtube_url("https://www.youtube.com/channel/UCabcdEFGHijklMNOpqrSTUvw")
     assert result["kind"] == "channel"
     assert result["enumerate_url"] == (
@@ -410,7 +411,7 @@ def test_classify_channel_id():
         ),
     ],
 )
-def test_classify_legacy_channel_paths(url, expected):
+def test_classify_legacy_channel_paths(url: Any, expected: Any) -> None:
     result = classify_youtube_url(url)
     assert result["kind"] == "channel"
     assert result["enumerate_url"] == expected
@@ -425,7 +426,7 @@ def test_classify_legacy_channel_paths(url, expected):
         "",
     ],
 )
-def test_classify_unknown(url):
+def test_classify_unknown(url: Any) -> None:
     assert classify_youtube_url(url)["kind"] == "unknown"
 
 
@@ -435,7 +436,9 @@ def test_classify_unknown(url):
 # and reporting truncation.
 
 
-def _flat_info(n, *, playlist_count=None, title="My Playlist", channel="Chan"):
+def _flat_info(
+    n: Any, *, playlist_count: Any = None, title: Any = "My Playlist", channel: Any = "Chan"
+) -> Any:
     return {
         "title": title,
         "channel": channel,
@@ -447,7 +450,7 @@ def _flat_info(n, *, playlist_count=None, title="My Playlist", channel="Chan"):
     }
 
 
-def test_build_playlist_entries_maps_fields():
+def test_build_playlist_entries_maps_fields() -> None:
     info = {
         "title": "Set",
         "uploader": "DJ",
@@ -465,7 +468,7 @@ def test_build_playlist_entries_maps_fields():
     ]
 
 
-def test_build_playlist_entries_skips_unavailable():
+def test_build_playlist_entries_skips_unavailable() -> None:
     info = {
         "title": "T",
         "entries": [
@@ -481,14 +484,14 @@ def test_build_playlist_entries_skips_unavailable():
     assert out["count"] == 2
 
 
-def test_build_playlist_entries_caps_and_marks_truncated():
+def test_build_playlist_entries_caps_and_marks_truncated() -> None:
     out = build_playlist_entries(_flat_info(10), 4)
     assert out["count"] == 4
     assert out["truncated"] is True
     assert [e["videoId"] for e in out["entries"]] == [f"vid{i:08d}" for i in range(4)]
 
 
-def test_build_playlist_entries_truncated_from_playlist_count():
+def test_build_playlist_entries_truncated_from_playlist_count() -> None:
     # yt-dlp returned only the first 5 (playlistend cap) but the playlist
     # actually has 500 — still truncated even though entries <= max.
     out = build_playlist_entries(_flat_info(5, playlist_count=500), 100)
@@ -497,17 +500,17 @@ def test_build_playlist_entries_truncated_from_playlist_count():
     assert out["truncated"] is True
 
 
-def test_build_playlist_entries_uploader_falls_back_to_channel():
+def test_build_playlist_entries_uploader_falls_back_to_channel() -> None:
     info = {"entries": [{"id": "aaaaaaaaaaa", "title": "x", "channel": "ChanX"}]}
     assert build_playlist_entries(info, 10)["entries"][0]["uploader"] == "ChanX"
 
 
-def test_build_playlist_entries_duration_none_when_missing():
+def test_build_playlist_entries_duration_none_when_missing() -> None:
     info = {"entries": [{"id": "aaaaaaaaaaa", "title": "x"}]}
     assert build_playlist_entries(info, 10)["entries"][0]["duration"] is None
 
 
-def test_build_playlist_entries_handles_bad_info():
+def test_build_playlist_entries_handles_bad_info() -> None:
     for bad in (None, {}, "nope", {"entries": "x"}):
         out = build_playlist_entries(bad, 10)
         assert out["count"] == 0

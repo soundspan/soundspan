@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.anyio
-async def test_http_exception_uses_error_key(client):
+async def test_http_exception_uses_error_key(client: AsyncClient) -> None:
     """String HTTPException details are exposed through the error key."""
     response = await client.post("/search", json={"query": "q"})
 

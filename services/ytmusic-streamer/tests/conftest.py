@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -18,13 +20,13 @@ INTERNAL_API_SECRET = "test-internal-secret-value"
 
 
 @pytest.fixture(autouse=True)
-def internal_api_secret(monkeypatch):
+def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Configure a known INTERNAL_API_SECRET for the app under test."""
     monkeypatch.setenv("INTERNAL_API_SECRET", INTERNAL_API_SECRET)
 
 
 @pytest.fixture(autouse=True)
-def local_app_module():
+def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
     sys.modules.pop("app", None)
     sys.path.insert(0, str(SERVICE_ROOT))
@@ -37,13 +39,13 @@ def local_app_module():
 
 
 @pytest.fixture()
-def anyio_backend():
+def anyio_backend() -> Literal["asyncio"]:
     """Use asyncio for all async tests."""
     return "asyncio"
 
 
 @pytest.fixture()
-async def client():
+async def client() -> AsyncIterator[AsyncClient]:
     """Async HTTP client wired to the FastAPI app under test.
 
     Presents the internal-auth header by default so behaviour tests reach the

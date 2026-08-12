@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 
 def _album_items(count: int, start: int = 0) -> list[SimpleNamespace]:
@@ -13,13 +14,13 @@ def _album_items(count: int, start: int = 0) -> list[SimpleNamespace]:
     ]
 
 
-def test_paginates_all_pages():
+def test_paginates_all_pages() -> None:
     """Pagination returns every track and requests each page once."""
     import app
 
     calls = []
 
-    def get_album_items(album_id, limit, offset):
+    def get_album_items(album_id: Any, limit: Any, offset: Any) -> Any:
         calls.append((album_id, limit, offset))
         page_lengths = {0: 100, 100: 100, 200: 50}
         return SimpleNamespace(
@@ -36,13 +37,13 @@ def test_paginates_all_pages():
     assert calls == [(123, 100, 0), (123, 100, 100), (123, 100, 200)]
 
 
-def test_zero_limit_does_not_infinite_loop():
+def test_zero_limit_does_not_infinite_loop() -> None:
     """An echoed zero limit cannot prevent pagination from terminating."""
     import app
 
     calls = []
 
-    def get_album_items(album_id, limit, offset):
+    def get_album_items(album_id: Any, limit: Any, offset: Any) -> Any:
         calls.append((album_id, limit, offset))
         if len(calls) == 1:
             page = _album_items(100)
@@ -64,13 +65,13 @@ def test_zero_limit_does_not_infinite_loop():
     assert len(calls) <= 2
 
 
-def test_stops_on_empty_first_page():
+def test_stops_on_empty_first_page() -> None:
     """An empty first page terminates pagination immediately."""
     import app
 
     calls = []
 
-    def get_album_items(album_id, limit, offset):
+    def get_album_items(album_id: Any, limit: Any, offset: Any) -> Any:
         calls.append((album_id, limit, offset))
         return SimpleNamespace(items=[], limit=100, totalNumberOfItems=0)
 

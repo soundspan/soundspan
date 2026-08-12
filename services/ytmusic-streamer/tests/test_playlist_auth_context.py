@@ -6,10 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
 
 
 @pytest.mark.anyio
-async def test_playlist_uses_user_context_when_user_id_provided(client):
+async def test_playlist_uses_user_context_when_user_id_provided(client: AsyncClient) -> None:
     """Owned/private playlists must be fetched with the caller's OAuth context."""
     playlist_payload = {
         "title": "Owned Playlist",
@@ -40,7 +41,9 @@ async def test_playlist_uses_user_context_when_user_id_provided(client):
 
 
 @pytest.mark.anyio
-async def test_playlist_falls_back_to_public_when_authenticated_fetch_fails(client):
+async def test_playlist_falls_back_to_public_when_authenticated_fetch_fails(
+    client: AsyncClient,
+) -> None:
     """If authenticated browse fails, playlist fetch should retry via public client."""
     public_yt = MagicMock()
     public_yt.get_playlist.return_value = {
@@ -80,8 +83,8 @@ async def test_playlist_falls_back_to_public_when_authenticated_fetch_fails(clie
 
 @pytest.mark.anyio
 async def test_playlist_returns_401_when_auth_is_invalid_and_public_fallback_also_fails(
-    client,
-):
+    client: AsyncClient,
+) -> None:
     """Preserve actionable OAuth errors for owned/private playlists."""
     public_yt = MagicMock()
     public_yt.get_playlist.side_effect = RuntimeError("public lookup failed")
@@ -101,8 +104,8 @@ async def test_playlist_returns_401_when_auth_is_invalid_and_public_fallback_als
 
 @pytest.mark.anyio
 async def test_playlist_preserves_non_401_auth_http_errors_when_public_fallback_fails(
-    client,
-):
+    client: AsyncClient,
+) -> None:
     """Authenticated HTTP errors should remain actionable (not collapsed to 500)."""
     public_yt = MagicMock()
     public_yt.get_playlist.side_effect = RuntimeError("public lookup failed")

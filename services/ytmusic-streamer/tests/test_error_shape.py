@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
 VALID_ID = "dQw4w9WgXcQ"
 
 
 @pytest.mark.anyio
-async def test_http_exception_uses_error_key(client):
+async def test_http_exception_uses_error_key(client: AsyncClient) -> None:
     """String HTTPException details are exposed through the error key."""
     response = await client.get("/stream/bad?user_id=u1")
 
@@ -19,15 +22,19 @@ async def test_http_exception_uses_error_key(client):
 
 
 @pytest.mark.anyio
-async def test_unhandled_exception_returns_sanitized_error(client, monkeypatch):
+async def test_unhandled_exception_returns_sanitized_error(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Unhandled exceptions return a generic body without leaking details."""
     import app
 
-    def raise_unhandled(*_args, **_kwargs):
+    def raise_unhandled(*_args: Any, **_kwargs: Any) -> Any:
         raise Exception("SECRET-LEAK-XYZ")
 
     monkeypatch.setattr(app, "_get_stream_url_sync", raise_unhandled)
-    client._transport.raise_app_exceptions = False
+    transport = client._transport
+    assert isinstance(transport, ASGITransport)
+    transport.raise_app_exceptions = False
 
     response = await client.get(f"/stream/{VALID_ID}?user_id=__public__")
 
@@ -37,11 +44,13 @@ async def test_unhandled_exception_returns_sanitized_error(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_nested_http_exception_detail_is_preserved(client, monkeypatch):
+async def test_nested_http_exception_detail_is_preserved(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Structured HTTPException details retain their top-level fields."""
     import app
 
-    def raise_age_restricted(*_args, **_kwargs):
+    def raise_age_restricted(*_args: Any, **_kwargs: Any) -> Any:
         raise HTTPException(
             status_code=451,
             detail={

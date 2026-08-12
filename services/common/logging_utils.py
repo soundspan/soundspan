@@ -66,7 +66,7 @@ def configure_service_logger(
     return logger
 
 
-def with_log_context(logger: logging.Logger, **context: Any) -> logging.LoggerAdapter:
+def with_log_context(logger: logging.Logger, **context: Any) -> logging.LoggerAdapter[Any]:
     """Attach persistent context fields to all emitted records."""
     return logging.LoggerAdapter(logger, context)
 
@@ -85,7 +85,9 @@ def log_exceptions(
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> R:
                 try:
-                    return await func(*args, **kwargs)
+                    # iscoroutinefunction establishes the awaitable result, but its
+                    # type guard does not preserve the generic decorator return type.
+                    return await func(*args, **kwargs)  # type: ignore[no-any-return]
                 except Exception:
                     logger.log(level, message, exc_info=True)
                     raise
@@ -127,7 +129,9 @@ def log_timing(
                         operation,
                         (time.perf_counter() - start) * 1000.0,
                     )
-                    return result
+                    # iscoroutinefunction establishes the awaitable result, but its
+                    # type guard does not preserve the generic decorator return type.
+                    return result  # type: ignore[no-any-return]
                 except Exception:
                     logger.exception(
                         "%s failed after %.2fms",

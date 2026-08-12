@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import types
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
 
 
 @pytest.fixture(autouse=True)
-def clear_user_auth_state(local_app_module):
+def clear_user_auth_state(local_app_module: Any) -> Any:
     """Prevent per-user auth state from leaking between race tests."""
     import app
 
@@ -25,11 +27,11 @@ def clear_user_auth_state(local_app_module):
         app._user_auth_state.clear()
 
 
-def _park_refresh_in_to_thread(monkeypatch, app):
+def _park_refresh_in_to_thread(monkeypatch: pytest.MonkeyPatch, app: Any) -> Any:
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_to_thread(func, *args, **kwargs):
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
         entered.set()
         await release.wait()
         return func(*args, **kwargs)
@@ -38,7 +40,7 @@ def _park_refresh_in_to_thread(monkeypatch, app):
     return entered, release
 
 
-def _seed_refresh(monkeypatch, app):
+def _seed_refresh(monkeypatch: pytest.MonkeyPatch, app: Any) -> Any:
     credentials = {
         "access_token": "old-access",
         "refresh_token": "refresh-token",
@@ -59,7 +61,9 @@ def _seed_refresh(monkeypatch, app):
 
 
 @pytest.mark.anyio
-async def test_auth_clear_waits_for_refresh_and_remains_authoritative(monkeypatch, client):
+async def test_auth_clear_waits_for_refresh_and_remains_authoritative(
+    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
+) -> None:
     import app
 
     refreshed_api = _seed_refresh(monkeypatch, app)
@@ -68,7 +72,7 @@ async def test_auth_clear_waits_for_refresh_and_remains_authoritative(monkeypatc
     lock_requests = 0
     clear_requested_lock = asyncio.Event()
 
-    def observe_user_lock_request(user_id):
+    def observe_user_lock_request(user_id: Any) -> Any:
         nonlocal lock_requests
         lock_requests += 1
         if lock_requests == 2:
@@ -99,7 +103,9 @@ async def test_auth_clear_waits_for_refresh_and_remains_authoritative(monkeypatc
 
 
 @pytest.mark.anyio
-async def test_refresh_does_not_restore_directly_cleared_session(monkeypatch):
+async def test_refresh_does_not_restore_directly_cleared_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import app
 
     _seed_refresh(monkeypatch, app)

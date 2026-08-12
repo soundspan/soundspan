@@ -7,32 +7,34 @@ mixes (422) and assembles the enumerated entries for real playlists. yt-dlp
 is mocked so the tests do no network I/O.
 """
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from httpx import AsyncClient
 
 
-def _fake_youtube_dl(flat_info):
+def _fake_youtube_dl(flat_info: Any) -> Any:
     """A yt_dlp.YoutubeDL stand-in whose extract_info returns flat_info."""
 
     class _FakeYDL:
-        def __init__(self, opts):
+        def __init__(self, opts: Any) -> None:
             self.opts = opts
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: Any) -> Any:
             return False
 
-        def extract_info(self, url, download=False):
+        def extract_info(self, url: Any, download: Any = False) -> Any:
             return flat_info
 
     return _FakeYDL
 
 
 @pytest.mark.anyio
-async def test_playlist_info_enumerates_real_playlist(client):
+async def test_playlist_info_enumerates_real_playlist(client: AsyncClient) -> None:
     flat = {
         "title": "My Set",
         "channel": "DJ",
@@ -62,7 +64,7 @@ async def test_playlist_info_enumerates_real_playlist(client):
 
 
 @pytest.mark.anyio
-async def test_playlist_info_rejects_radio_mix(client):
+async def test_playlist_info_rejects_radio_mix(client: AsyncClient) -> None:
     resp = await client.get(
         "/yt/playlist-info",
         params={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ"},
@@ -72,7 +74,7 @@ async def test_playlist_info_rejects_radio_mix(client):
 
 
 @pytest.mark.anyio
-async def test_playlist_info_rejects_single_video(client):
+async def test_playlist_info_rejects_single_video(client: AsyncClient) -> None:
     resp = await client.get(
         "/yt/playlist-info",
         params={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
@@ -81,7 +83,7 @@ async def test_playlist_info_rejects_single_video(client):
 
 
 @pytest.mark.anyio
-async def test_playlist_info_422_when_no_entries(client):
+async def test_playlist_info_422_when_no_entries(client: AsyncClient) -> None:
     flat = {"title": "Empty", "entries": []}
     with patch("yt_dlp.YoutubeDL", _fake_youtube_dl(flat)):
         resp = await client.get(
