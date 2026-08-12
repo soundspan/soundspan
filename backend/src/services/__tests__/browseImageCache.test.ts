@@ -1,19 +1,31 @@
 import crypto from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-    },
-}));
+const mockScopedLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+const mockLogger = {
+    ...mockScopedLogger,
+    child: jest.fn(() => mockScopedLogger),
+};
+let mockTranscodeCachePath = "";
+
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 jest.mock("../../config", () => ({
     config: {
-        music: {
-            transcodeCachePath: "/tmp/test-transcode",
+        get music() {
+            return { transcodeCachePath: mockTranscodeCachePath };
+        },
+        browseImageCache: {
+            maxBytes: 20 * 1024 * 1024,
+            maxEntries: 100,
         },
     },
 }));
@@ -22,44 +34,49 @@ jest.mock("../imageProxy", () => ({
     fetchExternalImage: jest.fn(),
 }));
 
-jest.mock("fs");
-
-type FsModule = typeof import("fs");
 type FetchExternalImageFn = typeof import("../imageProxy").fetchExternalImage;
-
-const CACHE_DIR = path.join("/tmp/test-transcode", "../covers/browse");
 
 async function loadBrowseImageCache() {
     jest.resetModules();
-
     const module = await import("../browseImageCache");
-    const fs = jest.requireMock("fs") as jest.Mocked<FsModule>;
     const { fetchExternalImage } = jest.requireMock("../imageProxy") as {
         fetchExternalImage: jest.MockedFunction<FetchExternalImageFn>;
     };
-    const { logger } = jest.requireMock("../../utils/logger") as {
-        logger: {
-            debug: jest.Mock;
-            info: jest.Mock;
-            warn: jest.Mock;
-            error: jest.Mock;
-        };
-    };
-
-    return {
-        ...module,
-        fs,
-        mockFetchExternalImage: fetchExternalImage,
-        logger,
-    };
+    return { ...module, fetchExternalImage };
 }
 
 describe("browseImageCache", () => {
-    beforeEach(() => {
+    let tempDir: string;
+    let cacheDir: string;
+
+    beforeEach(async () => {
         jest.clearAllMocks();
+        tempDir = await fs.mkdtemp(
+            path.join(os.tmpdir(), "soundspan-browse-image-cache-unit-"),
+        );
+        mockTranscodeCachePath = path.join(tempDir, "transcodes");
+        cacheDir = path.join(tempDir, "covers", "browse");
     });
 
-    it("browseImageCacheKey returns deterministic SHA-256 hex", async () => {
+    afterEach(async () => {
+        await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    async function seedCacheEntry(
+        key: string,
+        contentType?: string,
+    ): Promise<void> {
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+            path.join(cacheDir, `${key}.img`),
+            Buffer.alloc(700),
+        );
+        if (contentType !== undefined) {
+            await fs.writeFile(path.join(cacheDir, `${key}.meta`), contentType);
+        }
+    }
+
+    it("returns a deterministic SHA-256 key", async () => {
         const { browseImageCacheKey } = await loadBrowseImageCache();
         const url = "https://images.example/cover.jpg";
 
@@ -69,92 +86,47 @@ describe("browseImageCache", () => {
         expect(browseImageCacheKey(url)).toHaveLength(64);
     });
 
-    it("getBrowseImageFromCache returns null when image file is missing", async () => {
-        const { getBrowseImageFromCache, fs } = await loadBrowseImageCache();
-        const mockExistsSync = fs.existsSync as jest.MockedFunction<
-            FsModule["existsSync"]
-        >;
+    it("creates the cache directory lazily and returns null for a miss", async () => {
+        const { getBrowseImageFromCache } = await loadBrowseImageCache();
+        const key = crypto.createHash("sha256").update("missing").digest("hex");
 
-        mockExistsSync.mockReturnValue(false);
-
-        expect(getBrowseImageFromCache("missing-key")).toBeNull();
+        await expect(getBrowseImageFromCache(key)).resolves.toBeNull();
+        await expect(fs.stat(cacheDir)).resolves.toMatchObject({});
     });
 
-    it("ensureCacheDir initializes once and reuses cacheDir on subsequent calls", async () => {
-        const { getBrowseImageFromCache, fs } = await loadBrowseImageCache();
-        const mockExistsSync = fs.existsSync as jest.MockedFunction<
-            FsModule["existsSync"]
-        >;
-        const mockMkdirSync = fs.mkdirSync as jest.MockedFunction<
-            FsModule["mkdirSync"]
-        >;
+    it("returns a cached entry with its metadata content type", async () => {
+        const { browseImageCacheKey, getBrowseImageFromCache } =
+            await loadBrowseImageCache();
+        const key = browseImageCacheKey("https://images.example/cover.webp");
+        await seedCacheEntry(key, "image/webp\n");
 
-        mockExistsSync.mockReturnValue(false);
-
-        getBrowseImageFromCache("one");
-        getBrowseImageFromCache("two");
-
-        expect(mockMkdirSync).toHaveBeenCalledTimes(1);
-        expect(mockMkdirSync).toHaveBeenCalledWith(CACHE_DIR, {
-            recursive: true,
-        });
-    });
-
-    it("getBrowseImageFromCache returns cached entry with metadata content type", async () => {
-        const { getBrowseImageFromCache, fs } = await loadBrowseImageCache();
-        const mockExistsSync = fs.existsSync as jest.MockedFunction<
-            FsModule["existsSync"]
-        >;
-        const mockReadFileSync = fs.readFileSync as jest.Mock;
-
-        mockExistsSync.mockReturnValue(true);
-        mockReadFileSync.mockReturnValue("image/webp\n");
-
-        expect(getBrowseImageFromCache("abc")).toEqual({
-            filePath: path.join(CACHE_DIR, "abc.img"),
+        await expect(getBrowseImageFromCache(key)).resolves.toEqual({
+            filePath: path.join(cacheDir, `${key}.img`),
             contentType: "image/webp",
         });
     });
 
-    it("getBrowseImageFromCache keeps default type when meta file is empty", async () => {
-        const { getBrowseImageFromCache, fs } = await loadBrowseImageCache();
-        const mockExistsSync = fs.existsSync as jest.MockedFunction<
-            FsModule["existsSync"]
-        >;
-        const mockReadFileSync = fs.readFileSync as jest.Mock;
+    it.each([undefined, "   "])(
+        "defaults missing or empty metadata to image/jpeg",
+        async (metadata) => {
+            const { browseImageCacheKey, getBrowseImageFromCache } =
+                await loadBrowseImageCache();
+            const key = browseImageCacheKey(
+                `https://images.example/default-${metadata ?? "missing"}`,
+            );
+            await seedCacheEntry(key, metadata);
 
-        mockExistsSync.mockReturnValue(true);
-        mockReadFileSync.mockReturnValue("   ");
+            await expect(getBrowseImageFromCache(key)).resolves.toEqual({
+                filePath: path.join(cacheDir, `${key}.img`),
+                contentType: "image/jpeg",
+            });
+        },
+    );
 
-        expect(getBrowseImageFromCache("empty-meta")).toEqual({
-            filePath: path.join(CACHE_DIR, "empty-meta.img"),
-            contentType: "image/jpeg",
-        });
-    });
-
-    it("getBrowseImageFromCache falls back to image/jpeg when meta read fails", async () => {
-        const { getBrowseImageFromCache, fs } = await loadBrowseImageCache();
-        const mockExistsSync = fs.existsSync as jest.MockedFunction<
-            FsModule["existsSync"]
-        >;
-        const mockReadFileSync = fs.readFileSync as jest.Mock;
-
-        mockExistsSync.mockReturnValue(true);
-        mockReadFileSync.mockImplementation(() => {
-            throw new Error("meta missing");
-        });
-
-        expect(getBrowseImageFromCache("no-meta")).toEqual({
-            filePath: path.join(CACHE_DIR, "no-meta.img"),
-            contentType: "image/jpeg",
-        });
-    });
-
-    it("fetchAndCacheBrowseImage returns null when upstream fetch fails", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, logger } =
+    it("returns null when the upstream fetch fails", async () => {
+        const { fetchAndCacheBrowseImage, fetchExternalImage } =
             await loadBrowseImageCache();
-
-        mockFetchExternalImage.mockResolvedValue({
+        fetchExternalImage.mockResolvedValue({
             ok: false,
             url: "https://images.example/bad.jpg",
             status: "fetch_error",
@@ -164,17 +136,16 @@ describe("browseImageCache", () => {
         await expect(
             fetchAndCacheBrowseImage("https://images.example/bad.jpg"),
         ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(mockScopedLogger.warn).toHaveBeenCalledTimes(1);
     });
 
-    it("fetchAndCacheBrowseImage rejects non-image content-type", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, logger, fs } =
+    it("rejects a non-image content type", async () => {
+        const { fetchAndCacheBrowseImage, fetchExternalImage } =
             await loadBrowseImageCache();
-
-        mockFetchExternalImage.mockResolvedValue({
+        fetchExternalImage.mockResolvedValue({
             ok: true,
             url: "https://images.example/not-image",
-            buffer: Buffer.alloc(1000, 1),
+            buffer: Buffer.alloc(1_000, 1),
             contentType: "text/html",
             etag: "etag",
         });
@@ -182,15 +153,15 @@ describe("browseImageCache", () => {
         await expect(
             fetchAndCacheBrowseImage("https://images.example/not-image"),
         ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect(fs.writeFileSync).not.toHaveBeenCalled();
+        await expect(fs.readdir(cacheDir)).rejects.toMatchObject({
+            code: "ENOENT",
+        });
     });
 
-    it("fetchAndCacheBrowseImage rejects tiny responses", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, logger, fs } =
+    it("rejects a response below the minimum image size", async () => {
+        const { fetchAndCacheBrowseImage, fetchExternalImage } =
             await loadBrowseImageCache();
-
-        mockFetchExternalImage.mockResolvedValue({
+        fetchExternalImage.mockResolvedValue({
             ok: true,
             url: "https://images.example/tiny.jpg",
             buffer: Buffer.alloc(100, 1),
@@ -201,15 +172,12 @@ describe("browseImageCache", () => {
         await expect(
             fetchAndCacheBrowseImage("https://images.example/tiny.jpg"),
         ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
 
-    it("fetchAndCacheBrowseImage rejects oversized responses", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, logger, fs } =
+    it("preserves the 5 MiB per-response cap", async () => {
+        const { fetchAndCacheBrowseImage, fetchExternalImage } =
             await loadBrowseImageCache();
-
-        mockFetchExternalImage.mockResolvedValue({
+        fetchExternalImage.mockResolvedValue({
             ok: true,
             url: "https://images.example/huge.jpg",
             buffer: Buffer.alloc(5 * 1024 * 1024 + 1, 1),
@@ -220,142 +188,61 @@ describe("browseImageCache", () => {
         await expect(
             fetchAndCacheBrowseImage("https://images.example/huge.jpg"),
         ).resolves.toBeNull();
-        expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect(fs.writeFileSync).not.toHaveBeenCalled();
+        await expect(fs.readdir(cacheDir)).rejects.toMatchObject({
+            code: "ENOENT",
+        });
     });
 
-    it("fetchAndCacheBrowseImage caches valid image and preserves image/* content-type", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, fs } =
+    it.each([
+        ["image/png", "image/png"],
+        ["", "image/jpeg"],
+    ])(
+        "caches a valid image using %s metadata",
+        async (sourceType, expected) => {
+            const { fetchAndCacheBrowseImage, fetchExternalImage } =
+                await loadBrowseImageCache();
+            const url = `https://images.example/cover-${expected}`;
+            fetchExternalImage.mockResolvedValue({
+                ok: true,
+                url,
+                buffer: Buffer.alloc(1_000, 1),
+                contentType: sourceType,
+                etag: "etag",
+            });
+
+            const entry = await fetchAndCacheBrowseImage(url);
+
+            expect(entry).toEqual({
+                filePath: expect.stringMatching(/\.img$/),
+                contentType: expected,
+            });
+            await expect(fs.readFile(entry!.filePath)).resolves.toEqual(
+                Buffer.alloc(1_000, 1),
+            );
+            await expect(
+                fs.readFile(entry!.filePath.replace(/\.img$/, ".meta"), "utf8"),
+            ).resolves.toBe(expected);
+        },
+    );
+
+    it("returns null and leaves no partial files when a write fails", async () => {
+        const { fetchAndCacheBrowseImage, fetchExternalImage } =
             await loadBrowseImageCache();
-        const mockWriteFileSync = fs.writeFileSync as jest.MockedFunction<
-            FsModule["writeFileSync"]
-        >;
-        const mockRenameSync = fs.renameSync as jest.MockedFunction<
-            FsModule["renameSync"]
-        >;
-
-        mockFetchExternalImage.mockResolvedValue({
-            ok: true,
-            url: "https://images.example/cover.png",
-            buffer: Buffer.alloc(1000, 1),
-            contentType: "image/png",
-            etag: "etag",
-        });
-
-        await expect(
-            fetchAndCacheBrowseImage("https://images.example/cover.png"),
-        ).resolves.toEqual({
-            filePath: path.join(
-                CACHE_DIR,
-                `${crypto
-                    .createHash("sha256")
-                    .update("https://images.example/cover.png")
-                    .digest("hex")}.img`,
-            ),
-            contentType: "image/png",
-        });
-
-        expect(mockRenameSync).toHaveBeenCalledTimes(1);
-        expect(mockWriteFileSync).toHaveBeenNthCalledWith(
-            2,
-            expect.stringMatching(/\.meta$/),
-            "image/png",
-        );
-    });
-
-    it("fetchAndCacheBrowseImage defaults to image/jpeg when contentType is empty", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, fs } =
-            await loadBrowseImageCache();
-        const mockWriteFileSync = fs.writeFileSync as jest.MockedFunction<
-            FsModule["writeFileSync"]
-        >;
-
-        mockFetchExternalImage.mockResolvedValue({
-            ok: true,
-            url: "https://images.example/no-type",
-            buffer: Buffer.alloc(1000, 1),
-            contentType: "",
-            etag: "etag",
-        });
-
-        await expect(
-            fetchAndCacheBrowseImage("https://images.example/no-type"),
-        ).resolves.toEqual({
-            filePath: path.join(
-                CACHE_DIR,
-                `${crypto
-                    .createHash("sha256")
-                    .update("https://images.example/no-type")
-                    .digest("hex")}.img`,
-            ),
-            contentType: "image/jpeg",
-        });
-        expect(mockWriteFileSync).toHaveBeenNthCalledWith(
-            2,
-            expect.stringMatching(/\.meta$/),
-            "image/jpeg",
-        );
-    });
-
-    it("fetchAndCacheBrowseImage returns null and cleans tmp file when write fails", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, fs, logger } =
-            await loadBrowseImageCache();
-        const mockWriteFileSync = fs.writeFileSync as jest.MockedFunction<
-            FsModule["writeFileSync"]
-        >;
-        const mockUnlinkSync = fs.unlinkSync as jest.MockedFunction<
-            FsModule["unlinkSync"]
-        >;
-
-        mockFetchExternalImage.mockResolvedValue({
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.chmod(cacheDir, 0o500);
+        fetchExternalImage.mockResolvedValue({
             ok: true,
             url: "https://images.example/write-fail",
-            buffer: Buffer.alloc(1000, 1),
+            buffer: Buffer.alloc(1_000, 1),
             contentType: "image/jpeg",
             etag: "etag",
-        });
-        mockWriteFileSync.mockImplementationOnce(() => {
-            throw new Error("disk full");
         });
 
         await expect(
             fetchAndCacheBrowseImage("https://images.example/write-fail"),
         ).resolves.toBeNull();
-        expect(logger.error).toHaveBeenCalledTimes(1);
-        expect(mockUnlinkSync).toHaveBeenCalledTimes(1);
-        expect(mockUnlinkSync).toHaveBeenCalledWith(
-            expect.stringMatching(/\.tmp$/),
-        );
-    });
-
-    it("fetchAndCacheBrowseImage swallows cleanup errors after write failure", async () => {
-        const { fetchAndCacheBrowseImage, mockFetchExternalImage, fs, logger } =
-            await loadBrowseImageCache();
-        const mockWriteFileSync = fs.writeFileSync as jest.MockedFunction<
-            FsModule["writeFileSync"]
-        >;
-        const mockUnlinkSync = fs.unlinkSync as jest.MockedFunction<
-            FsModule["unlinkSync"]
-        >;
-
-        mockFetchExternalImage.mockResolvedValue({
-            ok: true,
-            url: "https://images.example/cleanup-fail",
-            buffer: Buffer.alloc(1000, 1),
-            contentType: "image/jpeg",
-            etag: "etag",
-        });
-        mockWriteFileSync.mockImplementationOnce(() => {
-            throw new Error("write failed");
-        });
-        mockUnlinkSync.mockImplementationOnce(() => {
-            throw new Error("unlink failed");
-        });
-
-        await expect(
-            fetchAndCacheBrowseImage("https://images.example/cleanup-fail"),
-        ).resolves.toBeNull();
-        expect(logger.error).toHaveBeenCalledTimes(1);
-        expect(mockUnlinkSync).toHaveBeenCalledTimes(1);
+        expect(mockScopedLogger.error).toHaveBeenCalledTimes(1);
+        await expect(fs.readdir(cacheDir)).resolves.toEqual([]);
+        await fs.chmod(cacheDir, 0o700);
     });
 });

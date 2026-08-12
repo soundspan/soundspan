@@ -80,6 +80,8 @@ describe("config module", () => {
             NODE_ENV: "production",
             TRANSCODE_CACHE_PATH: "/cache/transcodes",
             TRANSCODE_CACHE_MAX_GB: "12",
+            BROWSE_IMAGE_CACHE_MAX_BYTES: "1234567",
+            BROWSE_IMAGE_CACHE_MAX_ENTRIES: "123",
             LIDARR_ENABLED: "true",
             LIDARR_URL: "http://lidarr:8686",
             LIDARR_API_KEY: "lidarr-key",
@@ -107,6 +109,10 @@ describe("config module", () => {
             musicPath: "/music",
             transcodeCachePath: "/cache/transcodes",
             transcodeCacheMaxGb: 12,
+        });
+        expect(config.browseImageCache).toEqual({
+            maxBytes: 1234567,
+            maxEntries: 123,
         });
         expect(config.lidarr).toEqual({
             url: "http://lidarr:8686",
@@ -221,10 +227,16 @@ describe("config module", () => {
         const { config } = await loadConfigModule({
             PORT: "not-a-number",
             TRANSCODE_CACHE_MAX_GB: "invalid-size",
+            BROWSE_IMAGE_CACHE_MAX_BYTES: "invalid-size",
+            BROWSE_IMAGE_CACHE_MAX_ENTRIES: "0",
         });
 
         expect(config.port).toBe(3006);
         expect(config.music.transcodeCacheMaxGb).toBe(10);
+        expect(config.browseImageCache).toEqual({
+            maxBytes: 256 * 1024 * 1024,
+            maxEntries: 2048,
+        });
     });
 
     it("treats only literal true as an enabled feature flag", async () => {

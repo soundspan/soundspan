@@ -224,6 +224,19 @@ export const config = {
         ),
     },
 
+    // Disk-backed browse thumbnails share the covers volume. Both limits are
+    // enforced on each cache write so query churn cannot grow it indefinitely.
+    browseImageCache: {
+        maxBytes: positiveIntEnvOr(
+            process.env.BROWSE_IMAGE_CACHE_MAX_BYTES,
+            256 * 1024 * 1024,
+        ),
+        maxEntries: positiveIntEnvOr(
+            process.env.BROWSE_IMAGE_CACHE_MAX_ENTRIES,
+            2048,
+        ),
+    },
+
     // Artist-diversity knobs for generated queues (GH #46): each artist
     // weighs n^alpha (alpha 0 = one share each, 1 = fully proportional)
     // under a hard per-artist ceiling expressed as a share of queue size.

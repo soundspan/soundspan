@@ -188,7 +188,7 @@ router.get(
         const key = browseImageCacheKey(rawUrl);
 
         // Check disk cache
-        const cached = getBrowseImageFromCache(key);
+        const cached = await getBrowseImageFromCache(key);
         if (cached) {
             res.set("Content-Type", cached.contentType);
             res.set("Cache-Control", "public, max-age=604800, immutable");
@@ -1109,7 +1109,7 @@ router.get(
         const key = browseImageCacheKey(rawUrl);
 
         // Check disk cache
-        const cached = getBrowseImageFromCache(key);
+        const cached = await getBrowseImageFromCache(key);
         if (cached) {
             res.set("Content-Type", cached.contentType);
             res.set("Cache-Control", "public, max-age=604800, immutable");

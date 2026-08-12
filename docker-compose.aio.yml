@@ -29,6 +29,8 @@ services:
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - BROWSE_IMAGE_CACHE_MAX_BYTES=${BROWSE_IMAGE_CACHE_MAX_BYTES:-268435456}
+      - BROWSE_IMAGE_CACHE_MAX_ENTRIES=${BROWSE_IMAGE_CACHE_MAX_ENTRIES:-2048}
       # Runtime streaming-engine selector. Accepted: native | howler | videojs.
       # Leave unset to use the server's built-in default engine.
       - STREAMING_ENGINE_MODE=${STREAMING_ENGINE_MODE:-}
