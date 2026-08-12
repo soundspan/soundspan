@@ -11,6 +11,7 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 HEALTHCHECK = REPO_ROOT / "healthcheck-prod.js"
 COMPOSE_FILE = REPO_ROOT / "docker-compose.aio.yml"
 CHART_DEPLOYMENT = REPO_ROOT / "charts/soundspan/templates/aio/deployment.yaml"
+POSTGRES_CREDENTIALS = REPO_ROOT / "scripts/aio-postgres-credentials.sh"
 
 
 def _heredoc(dockerfile: str, target: str) -> str:
@@ -177,9 +178,34 @@ def test_postgres_password_migration_for_existing_volumes() -> None:
     """Startup must synchronize the password for new and existing database users."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     start_script = _heredoc(dockerfile, "/app/start.sh")
+    credentials_script = POSTGRES_CREDENTIALS.read_text(encoding="utf-8")
 
-    assert re.search(r"CREATE\s+USER\s+soundspan\b", start_script, re.IGNORECASE)
-    assert re.search(r"ALTER\s+USER\s+soundspan\b", start_script, re.IGNORECASE)
+    assert re.search(
+        r"(?im)^COPY\s+(?:--\S+\s+)*scripts/aio-postgres-credentials\.sh\s+"
+        r"/app/aio-postgres-credentials\.sh\s*$",
+        dockerfile,
+    )
+    assert re.search(
+        r"(?m)^\s*/app/aio-postgres-credentials\.sh\s+sync-role(?:\s*(?:#.*)?)?$",
+        start_script,
+    )
+
+    role_absent_branch = re.search(
+        r"(?is)\bif\s+!\s+.*?\bpg_roles\b.*?\brolname\s*=\s*['\"]soundspan['\"]"
+        r".*?\bthen\b(?P<body>.*?)\bfi\b",
+        credentials_script,
+    )
+    assert role_absent_branch is not None
+    assert re.search(
+        r"\bCREATE\s+USER\s+soundspan\b",
+        role_absent_branch.group("body"),
+        re.IGNORECASE,
+    )
+    assert re.search(
+        r"\bALTER\s+USER\s+soundspan\s+WITH\s+PASSWORD\s+:'postgres_password'\s*;",
+        credentials_script,
+        re.IGNORECASE,
+    )
 
 
 def test_analyzer_tuning_env_is_parameterized() -> None:
