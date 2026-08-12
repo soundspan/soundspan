@@ -7,13 +7,15 @@ import {
     type NativeEngineScheduler,
 } from "../../lib/audio-engine/nativeAudioElementEngine";
 import { IosStandaloneAudioContextBridge } from "../../lib/audio-engine/iosStandalonePwaBridge";
-import { NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES } from "../../lib/audio-engine/nativeAudioElementPolicy";
+import {
+    NATIVE_ENGINE_END_PAUSE_EPSILON_SEC,
+    NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES,
+} from "../../lib/audio-engine/nativeAudioElementPolicy";
 
 type ElementListener = (event: unknown) => void;
 
 type PlayBehavior =
-    | { kind: "resolve" }
-    | { kind: "reject"; name: string; message: string };
+    { kind: "resolve" } | { kind: "reject"; name: string; message: string };
 
 class FakeAudioElement implements NativeAudioElementLike {
     currentTime = 0;
@@ -534,6 +536,62 @@ test("stale timeupdate positions are suppressed during the seek mark, then flow 
 // ---------------------------------------------------------------------------
 // End detection — native ended only
 // ---------------------------------------------------------------------------
+
+test("end-adjacent pause with the ended flag waits for ended without emitting pause", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    const element = harness.mainElement();
+    element.fireLoadedMetadata(200);
+    harness.events.length = 0;
+
+    element.paused = true;
+    element.ended = true;
+    element.fire("pause");
+    assert.equal(eventTypes(harness).includes("pause"), false);
+
+    element.fire("ended");
+    assert.equal(
+        harness.events.filter((event) => event.type === "end").length,
+        1,
+    );
+});
+
+test("pause within the end-of-stream epsilon does not emit pause", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    const element = harness.mainElement();
+    element.fireLoadedMetadata(200);
+    harness.events.length = 0;
+
+    element.paused = true;
+    element.currentTime = 200 - NATIVE_ENGINE_END_PAUSE_EPSILON_SEC / 2;
+    element.fire("pause");
+
+    assert.equal(eventTypes(harness).includes("pause"), false);
+});
+
+test("pause with an infinite duration still emits pause", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/live.flac", {
+        autoplay: true,
+    });
+    const element = harness.mainElement();
+    element.fireLoadedMetadata(Number.POSITIVE_INFINITY);
+    harness.events.length = 0;
+
+    element.paused = true;
+    element.currentTime = 3_600;
+    element.fire("pause");
+
+    assert.equal(
+        harness.events.filter((event) => event.type === "pause").length,
+        1,
+    );
+});
 
 test("native ended event emits end exactly once and stops the ticker", () => {
     const harness = createHarness();

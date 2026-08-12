@@ -333,6 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the native audio engine treating the browser's spec-mandated
+  end-of-stream pause as unexpected, which intermittently froze queue
+  auto-advance at track boundaries, especially in hidden tabs; the Howler path
+  is unaffected.
 - Podcast cover-art fetches are size-bounded to prevent resource exhaustion
   (#369).
 - Playlist reorder rejects duplicate-amplified database transactions (#366).

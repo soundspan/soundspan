@@ -20,8 +20,7 @@ const findEffect = <K extends NativeEnginePolicyEffect["kind"]>(
     kind: K,
 ): Extract<NativeEnginePolicyEffect, { kind: K }> | undefined =>
     effects.find((effect) => effect.kind === kind) as
-        | Extract<NativeEnginePolicyEffect, { kind: K }>
-        | undefined;
+        Extract<NativeEnginePolicyEffect, { kind: K }> | undefined;
 
 const loadedState = (
     overrides: Partial<NativeEnginePolicyState> = {},
@@ -484,6 +483,7 @@ test("ELEMENT_PLAYING enters playing, starts the ticker, resets retries, and rep
 test("ELEMENT_PAUSED while playing without a user request classifies as external", () => {
     const { state, effects } = transitionNativeEngine(playingState(), {
         type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
         nowMs: 4_000,
     });
     assert.equal(state.status, "paused");
@@ -493,6 +493,66 @@ test("ELEMENT_PAUSED while playing without a user request classifies as external
     assert.ok(kinds(effects).includes("emitPause"));
 });
 
+test("ELEMENT_PAUSED at end of stream is suppressed until ELEMENT_ENDED emits end", () => {
+    const playing = playingState();
+    const paused = transitionNativeEngine(playing, {
+        type: "ELEMENT_PAUSED",
+        atEndOfStream: true,
+        nowMs: 4_000,
+    });
+    assert.equal(paused.state.status, "playing");
+    assert.equal(kinds(paused.effects).includes("emitPause"), false);
+
+    const ended = transitionNativeEngine(paused.state, {
+        type: "ELEMENT_ENDED",
+        nowMs: 4_001,
+    });
+    assert.equal(ended.state.status, "ended");
+    assert.equal(
+        ended.effects.filter((effect) => effect.kind === "emitEnd").length,
+        1,
+    );
+});
+
+test("ELEMENT_PAUSED at end of stream after a user pause emits pause", () => {
+    const { state: pauseRequested } = transitionNativeEngine(playingState(), {
+        type: "PAUSE_REQUESTED",
+        nowMs: 3_900,
+    });
+    const { state, effects } = transitionNativeEngine(pauseRequested, {
+        type: "ELEMENT_PAUSED",
+        atEndOfStream: true,
+        nowMs: 4_000,
+    });
+    assert.equal(state.status, "paused");
+    assert.ok(kinds(effects).includes("emitPause"));
+});
+
+test("ELEMENT_PAUSED mid-track still emits pause exactly once", () => {
+    const { state, effects } = transitionNativeEngine(playingState(), {
+        type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
+        nowMs: 4_000,
+    });
+    assert.equal(state.status, "paused");
+    assert.equal(
+        effects.filter((effect) => effect.kind === "emitPause").length,
+        1,
+    );
+});
+
+test("ELEMENT_PAUSED with an unknown-duration boundary result still emits pause", () => {
+    const { effects } = transitionNativeEngine(playingState(), {
+        type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
+        nowMs: 4_000,
+    });
+    assert.equal(
+        effects.filter((effect) => effect.kind === "emitPause").length,
+        1,
+    );
+});
+
 test("ELEMENT_PAUSED after a user pause request keeps the user classification", () => {
     const { state: pauseRequested } = transitionNativeEngine(playingState(), {
         type: "PAUSE_REQUESTED",
@@ -500,6 +560,7 @@ test("ELEMENT_PAUSED after a user pause request keeps the user classification", 
     });
     const { state } = transitionNativeEngine(pauseRequested, {
         type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
         nowMs: 4_000,
     });
     assert.equal(state.pauseClassification, "user");
@@ -529,6 +590,7 @@ test("quick pause during autoplay startup (post-metadata window) reaches paused 
     // …the native pause event must land in paused, not stay stuck loading.
     const { state, effects } = transitionNativeEngine(pauseRequested, {
         type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
         nowMs: 1_070,
     });
     assert.equal(state.status, "paused");
@@ -540,6 +602,7 @@ test("ELEMENT_PAUSED after ended is ignored", () => {
     const ended = playingState({ status: "ended" });
     const { effects } = transitionNativeEngine(ended, {
         type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
         nowMs: 4_000,
     });
     assert.deepEqual(effects, []);
@@ -879,6 +942,7 @@ test("stale source after a long pause reloads from source at the current positio
     const paused = playingState();
     const { state: afterPause } = transitionNativeEngine(paused, {
         type: "ELEMENT_PAUSED",
+        atEndOfStream: false,
         nowMs: longPausedAt,
     });
     const resumeAt = longPausedAt + NATIVE_ENGINE_STALE_SOURCE_PAUSE_MS + 1;

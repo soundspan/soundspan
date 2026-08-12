@@ -114,6 +114,9 @@ the operator and client actions below; complete the checklist before rollout.
 - Background playback, token refresh, polling, and Listen Together recovery
   received focused fixes so long sessions, hidden tabs, large queues, and
   cross-replica ready gates recover more predictably.
+- The native audio engine no longer misreads the browser's end-of-track pause
+  as an unexpected stop, fixing queues that intermittently froze between
+  tracks instead of auto-advancing (worst in hidden tabs).
 
 ## Platform and deployment
 

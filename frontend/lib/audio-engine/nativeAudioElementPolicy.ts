@@ -21,12 +21,7 @@
 
 /** Engine lifecycle status. Seeking is tracked via seek-mark fields. */
 export type NativeEngineStatus =
-    | "idle"
-    | "loading"
-    | "playing"
-    | "paused"
-    | "ended"
-    | "error";
+    "idle" | "loading" | "playing" | "paused" | "ended" | "error";
 
 /** Who caused the most recent pause: the user, or the platform/OS. */
 export type NativePauseClassification = "user" | "external" | null;
@@ -36,6 +31,9 @@ export const NATIVE_ENGINE_SEEK_MARK_MS = 300;
 
 /** Positions within this many seconds of the seek target are current. */
 export const NATIVE_ENGINE_SEEK_MARK_TOLERANCE_SEC = 2;
+
+/** Unclassified end-adjacent pauses within this many seconds await `ended`. */
+export const NATIVE_ENGINE_END_PAUSE_EPSILON_SEC = 0.5;
 
 /** Automatic (non-gesture) retry budget per load before exhausting. */
 export const NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES = 3;
@@ -104,7 +102,12 @@ export type NativeEnginePolicyEvent =
     | { type: "STOP_REQUESTED"; nowMs: number }
     | { type: "SEEK_REQUESTED"; timeSec: number; nowMs: number }
     | { type: "ELEMENT_PLAYING"; nowMs: number }
-    | { type: "ELEMENT_PAUSED"; nowMs: number }
+    | {
+          type: "ELEMENT_PAUSED";
+          /** Whether the element was ended or within the end epsilon. */
+          atEndOfStream: boolean;
+          nowMs: number;
+      }
     | { type: "ELEMENT_ENDED"; nowMs: number }
     | { type: "ELEMENT_SEEKED"; timeSec: number; nowMs: number }
     | { type: "ELEMENT_TIME_UPDATE"; timeSec: number; nowMs: number }
@@ -534,6 +537,9 @@ const handleElementPaused = (
     state: State,
     event: Extract<NativeEnginePolicyEvent, { type: "ELEMENT_PAUSED" }>,
 ): Transition => {
+    if (event.atEndOfStream && state.pauseClassification !== "user") {
+        return noChange(state);
+    }
     // Pauses land from "playing" and from the post-metadata startup
     // window (status still "loading" after a quick user pause interrupts
     // the autoplay play() call). Pre-metadata pause noise from source

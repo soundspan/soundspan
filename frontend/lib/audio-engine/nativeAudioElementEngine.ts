@@ -29,6 +29,7 @@ import {
 } from "@/lib/audio-engine/types";
 import {
     createInitialNativeEngineState,
+    NATIVE_ENGINE_END_PAUSE_EPSILON_SEC,
     transitionNativeEngine,
     type NativeEnginePolicyEffect,
     type NativeEnginePolicyEvent,
@@ -168,6 +169,13 @@ const toFiniteDuration = (value: number): number =>
     typeof value === "number" && Number.isFinite(value) && value > 0
         ? value
         : 0;
+
+const isAtEndOfStream = (element: NativeAudioElementLike): boolean =>
+    element.ended ||
+    (Number.isFinite(element.duration) &&
+        element.duration > 0 &&
+        element.currentTime >=
+            element.duration - NATIVE_ENGINE_END_PAUSE_EPSILON_SEC);
 
 /**
  * AudioEngine implementation backed by a single native `<audio>` element.
@@ -814,7 +822,11 @@ export class NativeAudioElementEngine implements AudioEngine {
             case "playing":
                 return this.dispatch({ type: "ELEMENT_PLAYING", nowMs });
             case "pause":
-                return this.dispatch({ type: "ELEMENT_PAUSED", nowMs });
+                return this.dispatch({
+                    type: "ELEMENT_PAUSED",
+                    atEndOfStream: isAtEndOfStream(element),
+                    nowMs,
+                });
             case "ended":
                 return this.dispatch({ type: "ELEMENT_ENDED", nowMs });
             case "seeked":
