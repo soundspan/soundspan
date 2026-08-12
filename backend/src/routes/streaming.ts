@@ -718,9 +718,9 @@ const handleSegmentFetch = async (
                 status: "success",
                 sessionId: session.sessionId,
                 sourceType: session.sourceType,
-            segmentName: req.params.segmentName,
-            ...startupCorrelationFields,
-            latencyMs: segmentedMetricDurationMs(startedAtMs),
+                segmentName: req.params.segmentName,
+                ...startupCorrelationFields,
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
             });
             logSegmentedStreamingTrace(
                 "route.segment.success",

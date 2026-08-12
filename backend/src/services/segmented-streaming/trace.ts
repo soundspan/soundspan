@@ -49,12 +49,7 @@ export const buildSegmentedRouteTraceErrorFields = (
     errorFields: Record<string, unknown>,
     fields: Record<string, unknown> = {},
 ): Record<string, unknown> =>
-    buildPlaybackRouteTraceErrorFields(
-        req,
-        startedAtMs,
-        errorFields,
-        fields,
-    );
+    buildPlaybackRouteTraceErrorFields(req, startedAtMs, errorFields, fields);
 
 /** Emit a gated trace event under the segmented-streaming logger identity. */
 export const logSegmentedStreamingTrace = (

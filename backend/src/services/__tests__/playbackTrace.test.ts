@@ -64,7 +64,10 @@ describe("playback trace identity", () => {
         }
     });
 
-    it.each(["STREAMING_TRACE_LOGS", "SEGMENTED_STREAMING_TRACE_LOGS"] as const)(
+    it.each([
+        "STREAMING_TRACE_LOGS",
+        "SEGMENTED_STREAMING_TRACE_LOGS",
+    ] as const)(
         "keeps %s as a gate for neutral and segmented playback traces",
         async (environmentVariable) => {
             process.env[environmentVariable] = "true";
@@ -79,17 +82,14 @@ describe("playback trace identity", () => {
                 event: "player.engine_startup",
                 fields: { activeEngine: "native" },
             });
-            segmentedTrace.logSegmentedStreamingTrace(
-                "route.segment.success",
-                { segmentName: "chunk-0-00001.m4s" },
-            );
+            segmentedTrace.logSegmentedStreamingTrace("route.segment.success", {
+                segmentName: "chunk-0-00001.m4s",
+            });
 
             expect(mockRootLogger.child).toHaveBeenCalledWith(
                 "Playback.Metric",
             );
-            expect(mockRootLogger.child).toHaveBeenCalledWith(
-                "Playback.Trace",
-            );
+            expect(mockRootLogger.child).toHaveBeenCalledWith("Playback.Trace");
             expect(mockRootLogger.child).toHaveBeenCalledWith(
                 "SegmentedStreaming.Trace",
             );
