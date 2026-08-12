@@ -38,6 +38,8 @@ const ytOauthSessionCache = new Map<
     { authenticated: boolean; expiresAt: number }
 >();
 const ytOauthRestoreInFlight = new Map<string, Promise<boolean>>();
+const ytOauthClearInFlight = new Map<string, Promise<void>>();
+const ytOauthGeneration = new Map<string, number>();
 
 const setYtOAuthCache = (
     userId: string,
@@ -74,10 +76,20 @@ const getCachedYtOAuth = (userId: string): boolean | null => {
     return entry.authenticated;
 };
 
-const invalidateYtOAuthCache = (userId: string) => {
+const invalidateYtOAuthGeneration = (userId: string): number => {
+    const generation = (ytOauthGeneration.get(userId) ?? 0) + 1;
+    ytOauthGeneration.set(userId, generation);
     ytOauthSessionCache.delete(userId);
-    ytOauthRestoreInFlight.delete(userId);
+    return generation;
 };
+
+const getYtOAuthGeneration = (userId: string): number =>
+    ytOauthGeneration.get(userId) ?? 0;
+
+const isCurrentYtOAuthGeneration = (
+    userId: string,
+    generation: number,
+): boolean => getYtOAuthGeneration(userId) === generation;
 
 // ── Guard middleware ───────────────────────────────────────────────
 
@@ -107,37 +119,66 @@ async function requireYtMusicEnabled(
  * if already restored.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
+    const clearInFlight = ytOauthClearInFlight.get(userId);
+    if (clearInFlight) {
+        await clearInFlight;
+    }
+
     const cached = getCachedYtOAuth(userId);
     if (cached !== null) {
         return cached;
     }
 
+    const generation = getYtOAuthGeneration(userId);
     return coalesceInFlightByKey(ytOauthRestoreInFlight, userId, () =>
-        restoreYtUserOAuth(userId),
+        restoreYtUserOAuth(userId, generation),
     );
 }
 
-async function restoreYtUserOAuth(userId: string): Promise<boolean> {
+async function finishYtOAuthRestore(
+    userId: string,
+    generation: number,
+    authenticated: boolean,
+): Promise<boolean> {
+    if (isCurrentYtOAuthGeneration(userId, generation)) {
+        setYtOAuthCache(userId, authenticated);
+        return authenticated;
+    }
+
+    await ytMusicService.clearAuth(userId);
+    return false;
+}
+
+async function restoreYtUserOAuth(
+    userId: string,
+    generation: number,
+): Promise<boolean> {
     try {
         const status = await ytMusicService.getAuthStatus(userId);
+        if (!isCurrentYtOAuthGeneration(userId, generation)) {
+            return finishYtOAuthRestore(userId, generation, false);
+        }
         if (status.authenticated) {
-            setYtOAuthCache(userId, true);
-            return true;
+            return finishYtOAuthRestore(userId, generation, true);
         }
         const userSettings = await prisma.userSettings.findUnique({
             where: { userId },
             select: { ytMusicOAuthJson: true },
         });
+        if (!isCurrentYtOAuthGeneration(userId, generation)) {
+            return finishYtOAuthRestore(userId, generation, false);
+        }
         if (!userSettings?.ytMusicOAuthJson) {
-            setYtOAuthCache(userId, false);
-            return false;
+            return finishYtOAuthRestore(userId, generation, false);
         }
         const oauthJson = decrypt(userSettings.ytMusicOAuthJson);
         if (!oauthJson) {
-            setYtOAuthCache(userId, false);
-            return false;
+            return finishYtOAuthRestore(userId, generation, false);
         }
         const systemSettings = await getSystemSettings();
+        if (!isCurrentYtOAuthGeneration(userId, generation)) {
+            return finishYtOAuthRestore(userId, generation, false);
+        }
         await ytMusicService.restoreOAuthWithCredentials(
             userId,
             oauthJson,
@@ -145,12 +186,55 @@ async function restoreYtUserOAuth(userId: string): Promise<boolean> {
             systemSettings?.ytMusicClientSecret || undefined,
         );
         logger.info(`[YTMusic] Restored OAuth credentials for user ${userId}`);
-        setYtOAuthCache(userId, true);
-        return true;
+        return finishYtOAuthRestore(userId, generation, true);
     } catch (err) {
         logger.debug(`[YTMusic] OAuth restore failed for user ${userId}:`, err);
-        setYtOAuthCache(userId, false);
+        if (isCurrentYtOAuthGeneration(userId, generation)) {
+            setYtOAuthCache(userId, false);
+        }
         return false;
+    }
+}
+
+async function clearYtUserOAuth(userId: string): Promise<void> {
+    const existingClear = ytOauthClearInFlight.get(userId);
+    if (existingClear) {
+        return existingClear;
+    }
+
+    const generation = invalidateYtOAuthGeneration(userId);
+    const pendingRestore = ytOauthRestoreInFlight.get(userId);
+    const clearOperation = performYtOAuthClear(
+        userId,
+        generation,
+        pendingRestore,
+    ).finally(() => {
+        if (ytOauthClearInFlight.get(userId) === clearOperation) {
+            ytOauthClearInFlight.delete(userId);
+        }
+    });
+    ytOauthClearInFlight.set(userId, clearOperation);
+    return clearOperation;
+}
+
+async function performYtOAuthClear(
+    userId: string,
+    generation: number,
+    pendingRestore?: Promise<boolean>,
+): Promise<void> {
+    try {
+        await pendingRestore;
+    } catch {
+        // Continue: logout must still remove DB and sidecar state.
+    }
+    await ytMusicService.clearAuth(userId);
+    await prisma.userSettings.upsert({
+        where: { userId },
+        create: { userId, ytMusicOAuthJson: null },
+        update: { ytMusicOAuthJson: null },
+    });
+    if (isCurrentYtOAuthGeneration(userId, generation)) {
+        setYtOAuthCache(userId, false);
     }
 }
 
@@ -545,17 +629,7 @@ router.post(
         try {
             const userId = req.user!.id;
 
-            // Clear from sidecar
-            await ytMusicService.clearAuth(userId);
-
-            // Clear from database
-            await prisma.userSettings.upsert({
-                where: { userId },
-                create: { userId, ytMusicOAuthJson: null },
-                update: { ytMusicOAuthJson: null },
-            });
-            invalidateYtOAuthCache(userId);
-            setYtOAuthCache(userId, false);
+            await clearYtUserOAuth(userId);
 
             logger.info(
                 `[YTMusic] OAuth credentials cleared for user ${userId}`,

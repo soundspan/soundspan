@@ -262,6 +262,51 @@ describe("tidal streaming route runtime", () => {
         expect(secondRes.body).toEqual(firstRes.body);
     });
 
+    it("keeps logout authoritative when a lazy oauth restore finishes late", async () => {
+        let sidecarAuthenticated = false;
+        let resolveRestore!: () => void;
+        let markRestoreStarted!: () => void;
+        const restoreStarted = new Promise<void>((resolve) => {
+            markRestoreStarted = resolve;
+        });
+        const restoreGate = new Promise<void>((resolve) => {
+            resolveRestore = resolve;
+        });
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValueOnce(
+            false,
+        );
+        tidalStreamingService.restoreOAuth.mockImplementationOnce(async () => {
+            markRestoreStarted();
+            await restoreGate;
+            sidecarAuthenticated = true;
+            return true;
+        });
+        tidalStreamingService.clearAuth.mockImplementation(async () => {
+            sidecarAuthenticated = false;
+        });
+        const userId = "logout-restore-race";
+        const searchRes = createRes();
+        const clearRes = createRes();
+
+        const searchRequest = searchHandler(
+            { user: { id: userId }, body: { query: "hello" } } as any,
+            searchRes,
+        );
+        await restoreStarted;
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        resolveRestore();
+        await Promise.all([searchRequest, clearRequest]);
+
+        expect(searchRes.statusCode).toBe(401);
+        expect(searchRes.body).toEqual({ error: "Not authenticated to TIDAL" });
+        expect(clearRes.body).toEqual({ success: true });
+        expect(sidecarAuthenticated).toBe(false);
+        expect(tidalStreamingService.search).not.toHaveBeenCalled();
+    });
+
     it("evaluates the tidal-enabled middleware for 404, 503, and success", async () => {
         const layer = getRouteLayer("/auth/device-code", "post");
         const middleware = layer.route.stack[1].handle;

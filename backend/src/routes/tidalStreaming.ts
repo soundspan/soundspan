@@ -38,6 +38,8 @@ const tidalOauthSessionCache = new Map<
     { authenticated: boolean; expiresAt: number }
 >();
 const tidalOauthRestoreInFlight = new Map<string, Promise<boolean>>();
+const tidalOauthClearInFlight = new Map<string, Promise<void>>();
+const tidalOauthGeneration = new Map<string, number>();
 const setTidalOAuthCache = (
     userId: string,
     authenticated: boolean,
@@ -73,10 +75,20 @@ const getCachedTidalOAuth = (userId: string): boolean | null => {
     return entry.authenticated;
 };
 
-const invalidateTidalUserCaches = (userId: string) => {
+const invalidateTidalOAuthGeneration = (userId: string): number => {
+    const generation = (tidalOauthGeneration.get(userId) ?? 0) + 1;
+    tidalOauthGeneration.set(userId, generation);
     tidalOauthSessionCache.delete(userId);
-    tidalOauthRestoreInFlight.delete(userId);
+    return generation;
 };
+
+const getTidalOAuthGeneration = (userId: string): number =>
+    tidalOauthGeneration.get(userId) ?? 0;
+
+const isCurrentTidalOAuthGeneration = (
+    userId: string,
+    generation: number,
+): boolean => getTidalOAuthGeneration(userId) === generation;
 
 // ── Guard middleware ───────────────────────────────────────────────
 
@@ -111,25 +123,50 @@ async function requireTidalStreamingEnabled(
  * sidecar. Called before any per-user streaming request.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
+    const clearInFlight = tidalOauthClearInFlight.get(userId);
+    if (clearInFlight) {
+        await clearInFlight;
+    }
+
     const cached = getCachedTidalOAuth(userId);
     if (cached !== null) {
         return cached;
     }
 
+    const generation = getTidalOAuthGeneration(userId);
     return coalesceInFlightByKey(tidalOauthRestoreInFlight, userId, () =>
-        restoreTidalUserOAuth(userId),
+        restoreTidalUserOAuth(userId, generation),
     );
 }
 
-async function restoreTidalUserOAuth(userId: string): Promise<boolean> {
+async function finishTidalOAuthRestore(
+    userId: string,
+    generation: number,
+    authenticated: boolean,
+): Promise<boolean> {
+    if (isCurrentTidalOAuthGeneration(userId, generation)) {
+        setTidalOAuthCache(userId, authenticated);
+        return authenticated;
+    }
+
+    await tidalStreamingService.clearAuth(userId);
+    return false;
+}
+
+async function restoreTidalUserOAuth(
+    userId: string,
+    generation: number,
+): Promise<boolean> {
     // This authenticated client carries the internal secret; a bare request
     // would 403 and be misread as a missing sidecar session.
     try {
         const authenticated =
             await tidalStreamingService.checkSidecarAuthStatus(userId);
+        if (!isCurrentTidalOAuthGeneration(userId, generation)) {
+            return finishTidalOAuthRestore(userId, generation, false);
+        }
         if (authenticated) {
-            setTidalOAuthCache(userId, true);
-            return true;
+            return finishTidalOAuthRestore(userId, generation, true);
         }
     } catch {
         // Sidecar might not have the session, try to restore.
@@ -139,9 +176,11 @@ async function restoreTidalUserOAuth(userId: string): Promise<boolean> {
         where: { userId },
         select: { tidalOAuthJson: true },
     });
+    if (!isCurrentTidalOAuthGeneration(userId, generation)) {
+        return finishTidalOAuthRestore(userId, generation, false);
+    }
     if (!userSettings?.tidalOAuthJson) {
-        setTidalOAuthCache(userId, false);
-        return false;
+        return finishTidalOAuthRestore(userId, generation, false);
     }
 
     let oauthJson: string;
@@ -155,8 +194,48 @@ async function restoreTidalUserOAuth(userId: string): Promise<boolean> {
         userId,
         oauthJson,
     );
-    setTidalOAuthCache(userId, restored);
-    return restored;
+    return finishTidalOAuthRestore(userId, generation, restored);
+}
+
+async function clearTidalUserOAuth(userId: string): Promise<void> {
+    const existingClear = tidalOauthClearInFlight.get(userId);
+    if (existingClear) {
+        return existingClear;
+    }
+
+    const generation = invalidateTidalOAuthGeneration(userId);
+    const pendingRestore = tidalOauthRestoreInFlight.get(userId);
+    const clearOperation = performTidalOAuthClear(
+        userId,
+        generation,
+        pendingRestore,
+    ).finally(() => {
+        if (tidalOauthClearInFlight.get(userId) === clearOperation) {
+            tidalOauthClearInFlight.delete(userId);
+        }
+    });
+    tidalOauthClearInFlight.set(userId, clearOperation);
+    return clearOperation;
+}
+
+async function performTidalOAuthClear(
+    userId: string,
+    generation: number,
+    pendingRestore?: Promise<boolean>,
+): Promise<void> {
+    try {
+        await pendingRestore;
+    } catch {
+        // Continue: logout must still remove DB and sidecar state.
+    }
+    await prisma.userSettings.update({
+        where: { userId },
+        data: { tidalOAuthJson: null },
+    });
+    await tidalStreamingService.clearAuth(userId);
+    if (isCurrentTidalOAuthGeneration(userId, generation)) {
+        setTidalOAuthCache(userId, false);
+    }
 }
 
 // ── Routes ─────────────────────────────────────────────────────────
@@ -476,16 +555,7 @@ router.post("/auth/clear", requireAuth, async (req: Request, res: Response) => {
     const userId = req.user!.id;
 
     try {
-        // Clear from DB
-        await prisma.userSettings.update({
-            where: { userId },
-            data: { tidalOAuthJson: null },
-        });
-
-        // Clear from sidecar
-        await tidalStreamingService.clearAuth(userId);
-        invalidateTidalUserCaches(userId);
-        setTidalOAuthCache(userId, false);
+        await clearTidalUserOAuth(userId);
 
         res.json({ success: true });
     } catch (err: any) {

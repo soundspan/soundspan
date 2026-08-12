@@ -343,6 +343,51 @@ describe("youtube music route runtime behavior", () => {
         expect(secondRes.statusCode).toBe(401);
     });
 
+    it("keeps logout authoritative when a lazy oauth restore finishes late", async () => {
+        let sidecarAuthenticated = false;
+        let resolveRestore!: () => void;
+        let markRestoreStarted!: () => void;
+        const restoreStarted = new Promise<void>((resolve) => {
+            markRestoreStarted = resolve;
+        });
+        const restoreGate = new Promise<void>((resolve) => {
+            resolveRestore = resolve;
+        });
+        ytMusicService.getAuthStatus.mockResolvedValueOnce({
+            authenticated: false,
+        });
+        ytMusicService.restoreOAuthWithCredentials.mockImplementationOnce(
+            async () => {
+                markRestoreStarted();
+                await restoreGate;
+                sidecarAuthenticated = true;
+            },
+        );
+        ytMusicService.clearAuth.mockImplementation(async () => {
+            sidecarAuthenticated = false;
+        });
+        const userId = "logout-restore-race";
+        const libraryRes = createRes();
+        const clearRes = createRes();
+
+        const libraryRequest = librarySongsHandler(
+            { user: { id: userId }, query: {} } as any,
+            libraryRes,
+        );
+        await restoreStarted;
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        resolveRestore();
+        await Promise.all([libraryRequest, clearRequest]);
+
+        expect(libraryRes.statusCode).toBe(401);
+        expect(clearRes.body).toEqual({ success: true });
+        expect(sidecarAuthenticated).toBe(false);
+        expect(ytMusicService.getLibrarySongs).not.toHaveBeenCalled();
+    });
+
     it("validates and initiates device auth with error fallback", async () => {
         const req = { user: { id: "user-1" } } as any;
 
