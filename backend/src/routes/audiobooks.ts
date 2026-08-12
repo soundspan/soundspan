@@ -946,7 +946,10 @@ router.get<{ id: string }>(
             );
 
             const { stream, headers, status } =
-                await audiobookshelfService.streamAudiobook(id, rangeHeader);
+                await audiobookshelfService.streamAudiobook(id, rangeHeader, {
+                    request: req,
+                    response: res,
+                });
 
             logger.debug(
                 `[Audiobook Stream] Got stream, status: ${status}, content-type: ${headers["content-type"]}`,

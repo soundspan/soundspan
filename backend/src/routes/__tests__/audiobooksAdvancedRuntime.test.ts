@@ -569,15 +569,18 @@ describe("audiobooks advanced runtime", () => {
         });
 
         const successRes = createRes();
-        await streamHandler(
-            {
-                params: { id: "stream-2" },
-                headers: { range: "bytes=0-10" },
-                user: { id: "u1" },
-            } as any,
-            successRes,
-        );
+        const successReq = {
+            params: { id: "stream-2" },
+            headers: { range: "bytes=0-10" },
+            user: { id: "u1" },
+        } as any;
+        await streamHandler(successReq, successRes);
 
+        expect(audiobookshelfService.streamAudiobook).toHaveBeenCalledWith(
+            "stream-2",
+            "bytes=0-10",
+            { request: successReq, response: successRes },
+        );
         expect(successRes.statusCode).toBe(206);
         expect(successRes.headers["Content-Type"]).toBe("audio/flac");
         expect(successRes.headers["Content-Length"]).toBe("1234");

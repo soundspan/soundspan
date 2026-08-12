@@ -5,6 +5,45 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 
 const STREAM_HEADER_TIMEOUT_MS = 30_000;
+const UNSAFE_AUDIO_TRACK_URL_ERROR =
+    "Audiobookshelf returned an unsafe audio track URL";
+
+function resolveStreamContentPath(
+    contentUrl: unknown,
+    baseUrl: string | null,
+): string {
+    if (typeof contentUrl !== "string" || !baseUrl) {
+        throw new Error(UNSAFE_AUDIO_TRACK_URL_ERROR);
+    }
+
+    let configuredBase: URL;
+    let resolvedContentUrl: URL;
+    try {
+        configuredBase = new URL(baseUrl);
+        resolvedContentUrl = new URL(
+            contentUrl,
+            `${configuredBase.href.replace(/\/$/, "")}/`,
+        );
+    } catch {
+        throw new Error(UNSAFE_AUDIO_TRACK_URL_ERROR);
+    }
+
+    const usesHttp =
+        resolvedContentUrl.protocol === "http:" ||
+        resolvedContentUrl.protocol === "https:";
+    const hasCredentials =
+        resolvedContentUrl.username !== "" ||
+        resolvedContentUrl.password !== "";
+    if (
+        !usesHttp ||
+        hasCredentials ||
+        resolvedContentUrl.origin !== configuredBase.origin
+    ) {
+        throw new Error(UNSAFE_AUDIO_TRACK_URL_ERROR);
+    }
+
+    return `${resolvedContentUrl.pathname}${resolvedContentUrl.search}`;
+}
 
 interface StreamDisconnectSource {
     readonly aborted?: boolean;
@@ -345,10 +384,15 @@ class AudiobookshelfService {
             if (!contentUrl) {
                 throw new Error("No audio track found for this audiobook");
             }
+            const contentPath = resolveStreamContentPath(
+                contentUrl,
+                this.baseUrl,
+            );
 
             const headers: Record<string, string> = {};
             if (rangeHeader) headers["Range"] = rangeHeader;
-            const response = await this.client!.get(contentUrl, {
+            const response = await this.client!.get(contentPath, {
+                allowAbsoluteUrls: false,
                 responseType: "stream",
                 timeout: 0,
                 signal: controller.signal,

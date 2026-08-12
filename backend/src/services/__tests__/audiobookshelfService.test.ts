@@ -349,6 +349,7 @@ describe("audiobookshelf service behavior", () => {
         );
         expect(streamed.status).toBe(206);
         expect(client.get).toHaveBeenCalledWith("/api/items/book-1/file/123", {
+            allowAbsoluteUrls: false,
             responseType: "stream",
             timeout: 0,
             signal: expect.any(AbortSignal),
@@ -364,9 +365,66 @@ describe("audiobookshelf service behavior", () => {
         ).rejects.toThrow("No audio track found for this audiobook");
     });
 
-    it("aborts stream acquisition on an early client disconnect and detaches listeners", async () => {
+    it.each(["close", "aborted"] as const)(
+        "aborts stream acquisition when the lifecycle request emits %s",
+        async (disconnectEvent) => {
+            const client = createClient();
+            const lifecycle = createStreamLifecycle();
+            const svc = audiobookshelfService as any;
+            svc.client = client;
+            svc.baseUrl = "http://abs.local";
+            svc.initialized = true;
+
+            jest.spyOn(
+                audiobookshelfService,
+                "getAudiobook",
+            ).mockResolvedValueOnce({
+                media: {
+                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                },
+            } as any);
+            client.get.mockImplementationOnce(
+                (_url: string, options: { signal: AbortSignal }) =>
+                    new Promise((_resolve, reject) => {
+                        if (options.signal.aborted) {
+                            reject(options.signal.reason);
+                            return;
+                        }
+                        options.signal.addEventListener(
+                            "abort",
+                            () => reject(options.signal.reason),
+                            { once: true },
+                        );
+                    }),
+            );
+            const abortSpy = jest.spyOn(AbortController.prototype, "abort");
+
+            const acquisition = audiobookshelfService.streamAudiobook(
+                "book-1",
+                undefined,
+                lifecycle,
+            );
+            await Promise.resolve();
+            expectStreamListeners(lifecycle, 1);
+
+            const rejectedAcquisition = expect(acquisition).rejects.toThrow(
+                "Client disconnected",
+            );
+            lifecycle.request.emit(disconnectEvent);
+
+            await rejectedAcquisition;
+            expect(abortSpy).toHaveBeenCalledTimes(1);
+            expectStreamListeners(lifecycle, 0);
+        },
+    );
+
+    it.each([
+        "https://evil.example/audio.mp3",
+        "//evil.example/audio.mp3",
+        "http://user:password@abs.local/audio.mp3",
+        "file:///etc/passwd",
+    ])("rejects an unsafe audiobook content URL: %s", async (contentUrl) => {
         const client = createClient();
-        const lifecycle = createStreamLifecycle();
         const svc = audiobookshelfService as any;
         svc.client = client;
         svc.baseUrl = "http://abs.local";
@@ -375,42 +433,49 @@ describe("audiobookshelf service behavior", () => {
         jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
             {
                 media: {
-                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                    tracks: [{ contentUrl }],
                 },
             } as any,
         );
-        client.get.mockImplementationOnce(
-            (_url: string, options: { signal: AbortSignal }) =>
-                new Promise((_resolve, reject) => {
-                    if (options.signal.aborted) {
-                        reject(options.signal.reason);
-                        return;
-                    }
-                    options.signal.addEventListener(
-                        "abort",
-                        () => reject(options.signal.reason),
-                        { once: true },
-                    );
-                }),
-        );
-        const abortSpy = jest.spyOn(AbortController.prototype, "abort");
 
-        const acquisition = audiobookshelfService.streamAudiobook(
-            "book-1",
-            undefined,
-            lifecycle,
-        );
-        await Promise.resolve();
-        expectStreamListeners(lifecycle, 1);
+        await expect(
+            audiobookshelfService.streamAudiobook("book-1"),
+        ).rejects.toThrow("Audiobookshelf returned an unsafe audio track URL");
+        expect(client.get).not.toHaveBeenCalled();
+    });
 
-        const rejectedAcquisition = expect(acquisition).rejects.toThrow(
-            "Client disconnected",
-        );
-        lifecycle.request.emit("aborted");
+    it("allows an absolute same-origin audiobook content URL", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
 
-        await rejectedAcquisition;
-        expect(abortSpy).toHaveBeenCalledTimes(1);
-        expectStreamListeners(lifecycle, 0);
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [
+                        {
+                            contentUrl:
+                                "http://abs.local/api/items/book-1/file/123?token=track",
+                        },
+                    ],
+                },
+            } as any,
+        );
+        client.get.mockResolvedValueOnce({
+            data: { pipe: jest.fn() },
+            headers: { "content-type": "audio/mpeg" },
+            status: 200,
+        });
+
+        await expect(
+            audiobookshelfService.streamAudiobook("book-1"),
+        ).resolves.toEqual(expect.objectContaining({ status: 200 }));
+        expect(client.get).toHaveBeenCalledWith(
+            "/api/items/book-1/file/123?token=track",
+            expect.objectContaining({ allowAbsoluteUrls: false }),
+        );
     });
 
     it("aborts stream acquisition when the header deadline expires", async () => {
