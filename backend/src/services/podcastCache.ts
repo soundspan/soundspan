@@ -1,10 +1,62 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { safeResolvePath } from "../utils/safeResolvePath";
+import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
 import { buildCachePath } from "./cacheHelpers";
-import { resolveSafeOutboundUrl } from "./outboundUrlSafety";
+import { fetchExternalImage, MAX_EXTERNAL_IMAGE_BYTES } from "./imageProxy";
+
+const podcastCacheLogger = logger.child("PodcastCache");
+
+function describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function isImageMediaType(contentType: string | null): boolean {
+    return contentType?.trim().toLowerCase().startsWith("image/") ?? false;
+}
+
+function isMissingFileError(error: unknown): boolean {
+    return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function resolveCoverPaths(
+    coverCacheDir: string,
+    id: string,
+    type: "podcast" | "episode",
+): { filePath: string; temporaryPath: string } | null {
+    const fileName = `${type}_${id}.jpg`;
+    const filePath = safeResolvePath(coverCacheDir, fileName);
+    const temporaryPath = safeResolvePath(
+        coverCacheDir,
+        `${fileName}.${randomUUID()}.tmp`,
+    );
+
+    return filePath && temporaryPath ? { filePath, temporaryPath } : null;
+}
+
+async function writeCoverAtomically(
+    filePath: string,
+    temporaryPath: string,
+    buffer: Buffer,
+): Promise<void> {
+    try {
+        await fs.writeFile(temporaryPath, buffer);
+        await fs.rename(temporaryPath, filePath);
+    } catch (error) {
+        await fs.unlink(temporaryPath).catch((cleanupError: unknown) => {
+            if (!isMissingFileError(cleanupError)) {
+                podcastCacheLogger.error(
+                    "Failed to clean up partial cover file",
+                    { error: cleanupError },
+                );
+            }
+        });
+        throw error;
+    }
+}
 
 /**
  * Service to cache podcast cover images locally
@@ -46,7 +98,7 @@ export class PodcastCacheService {
         };
 
         try {
-            logger.debug(" Starting podcast cover sync...");
+            podcastCacheLogger.debug("Starting podcast cover sync...");
 
             // Ensure cover cache directory exists
             await fs.mkdir(this.coverCacheDir, { recursive: true });
@@ -59,8 +111,8 @@ export class PodcastCacheService {
                 },
             });
 
-            logger.debug(
-                `[PODCAST] Found ${podcasts.length} podcasts needing cover sync`,
+            podcastCacheLogger.debug(
+                `Found ${podcasts.length} podcasts needing cover sync`,
             );
 
             for (const podcast of podcasts) {
@@ -78,29 +130,29 @@ export class PodcastCacheService {
                                 data: { localCoverPath: localPath },
                             });
                             result.synced++;
-                            logger.debug(
+                            podcastCacheLogger.debug(
                                 `  Synced cover for: ${podcast.title}`,
                             );
                         } else {
                             result.skipped++;
                         }
                     }
-                } catch (error: any) {
+                } catch (error: unknown) {
                     result.failed++;
-                    const errorMsg = `Failed to sync cover for ${podcast.title}: ${error.message}`;
+                    const errorMsg = `Failed to sync cover for ${podcast.title}: ${describeError(error)}`;
                     result.errors.push(errorMsg);
-                    logger.error(` ${errorMsg}`);
+                    podcastCacheLogger.error(` ${errorMsg}`);
                 }
             }
 
-            logger.debug("\nPodcast Cover Sync Summary:");
-            logger.debug(`  Synced: ${result.synced}`);
-            logger.debug(`   Failed: ${result.failed}`);
-            logger.debug(`    Skipped: ${result.skipped}`);
+            podcastCacheLogger.debug("\nPodcast Cover Sync Summary:");
+            podcastCacheLogger.debug(`  Synced: ${result.synced}`);
+            podcastCacheLogger.debug(`   Failed: ${result.failed}`);
+            podcastCacheLogger.debug(`    Skipped: ${result.skipped}`);
 
             return result;
-        } catch (error: any) {
-            logger.error(" Podcast cover sync failed:", error);
+        } catch (error: unknown) {
+            podcastCacheLogger.error(" Podcast cover sync failed:", error);
             throw error;
         }
     }
@@ -117,7 +169,7 @@ export class PodcastCacheService {
         };
 
         try {
-            logger.debug(" Starting podcast episode cover sync...");
+            podcastCacheLogger.debug("Starting podcast episode cover sync...");
 
             await fs.mkdir(this.coverCacheDir, { recursive: true });
 
@@ -141,8 +193,8 @@ export class PodcastCacheService {
                 (ep) => ep.imageUrl !== ep.podcast.imageUrl,
             );
 
-            logger.debug(
-                `[PODCAST] Found ${uniqueEpisodes.length} episodes with unique covers`,
+            podcastCacheLogger.debug(
+                `Found ${uniqueEpisodes.length} episodes with unique covers`,
             );
 
             for (const episode of uniqueEpisodes) {
@@ -160,29 +212,29 @@ export class PodcastCacheService {
                                 data: { localCoverPath: localPath },
                             });
                             result.synced++;
-                            logger.debug(
+                            podcastCacheLogger.debug(
                                 `  Synced cover for episode: ${episode.title}`,
                             );
                         } else {
                             result.skipped++;
                         }
                     }
-                } catch (error: any) {
+                } catch (error: unknown) {
                     result.failed++;
-                    const errorMsg = `Failed to sync cover for episode ${episode.title}: ${error.message}`;
+                    const errorMsg = `Failed to sync cover for episode ${episode.title}: ${describeError(error)}`;
                     result.errors.push(errorMsg);
-                    logger.error(` ${errorMsg}`);
+                    podcastCacheLogger.error(` ${errorMsg}`);
                 }
             }
 
-            logger.debug("\nEpisode Cover Sync Summary:");
-            logger.debug(`  Synced: ${result.synced}`);
-            logger.debug(`   Failed: ${result.failed}`);
-            logger.debug(`    Skipped: ${result.skipped}`);
+            podcastCacheLogger.debug("\nEpisode Cover Sync Summary:");
+            podcastCacheLogger.debug(`  Synced: ${result.synced}`);
+            podcastCacheLogger.debug(`   Failed: ${result.failed}`);
+            podcastCacheLogger.debug(`    Skipped: ${result.skipped}`);
 
             return result;
-        } catch (error: any) {
-            logger.error(" Episode cover sync failed:", error);
+        } catch (error: unknown) {
+            podcastCacheLogger.error(" Episode cover sync failed:", error);
             throw error;
         }
     }
@@ -195,42 +247,56 @@ export class PodcastCacheService {
         imageUrl: string,
         type: "podcast" | "episode",
     ): Promise<string | null> {
+        const paths = resolveCoverPaths(this.coverCacheDir, id, type);
+        if (!paths) {
+            podcastCacheLogger.error(
+                `Rejected cover path outside cache for ${type} ${id}`,
+            );
+            return null;
+        }
+
         try {
-            // DNS-resolving SSRF guard: feed-supplied cover URLs are untrusted
-            // and a public-looking hostname can resolve to an internal address.
-            // Redirects stay hard-disabled below, so one check covers the fetch.
-            const safeUrl = await resolveSafeOutboundUrl(imageUrl);
-            if (!safeUrl) {
-                logger.error(
-                    `SSRF-blocked cover download for ${type} ${id}:`,
-                    imageUrl,
+            const result = await fetchExternalImage({
+                url: imageUrl,
+                timeoutMs: 15000,
+                maxRedirects: 0,
+                maxRetries: 1,
+                maxBytes: MAX_EXTERNAL_IMAGE_BYTES,
+            });
+            if (!result.ok) {
+                if (result.status === "invalid_url") {
+                    podcastCacheLogger.error(
+                        `SSRF-blocked cover download for ${type} ${id}:`,
+                        imageUrl,
+                    );
+                } else {
+                    podcastCacheLogger.error(
+                        `Failed to download cover for ${type} ${id}:`,
+                        result.message ?? result.status,
+                    );
+                }
+                return null;
+            }
+
+            if (!isImageMediaType(result.contentType)) {
+                podcastCacheLogger.error(
+                    `Rejected non-image cover for ${type} ${id}:`,
+                    result.contentType,
                 );
                 return null;
             }
 
-            const response = await fetch(safeUrl, {
-                redirect: "error",
-                signal: AbortSignal.timeout(15000),
-            });
+            await writeCoverAtomically(
+                paths.filePath,
+                paths.temporaryPath,
+                result.buffer,
+            );
 
-            if (!response.ok) {
-                await response.body?.cancel().catch(() => {});
-                throw new Error(
-                    `HTTP ${response.status}: ${response.statusText}`,
-                );
-            }
-
-            const buffer = await response.arrayBuffer();
-            const fileName = `${type}_${id}.jpg`;
-            const filePath = path.join(this.coverCacheDir, fileName);
-
-            await fs.writeFile(filePath, Buffer.from(buffer));
-
-            return filePath;
-        } catch (error: any) {
-            logger.error(
+            return paths.filePath;
+        } catch (error: unknown) {
+            podcastCacheLogger.error(
                 `Failed to download cover for ${type} ${id}:`,
-                error.message,
+                describeError(error),
             );
             return null;
         }
@@ -264,7 +330,7 @@ export class PodcastCacheService {
             if (!validCoverPaths.has(file)) {
                 await fs.unlink(path.join(this.coverCacheDir, file));
                 deleted++;
-                logger.debug(
+                podcastCacheLogger.debug(
                     `  [DELETE] Deleted orphaned podcast cover: ${file}`,
                 );
             }

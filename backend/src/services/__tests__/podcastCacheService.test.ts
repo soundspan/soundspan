@@ -3,7 +3,9 @@ import path from "path";
 const logger = {
     debug: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+logger.child.mockReturnValue(logger);
 
 jest.mock("../../utils/logger", () => ({
     logger,
@@ -27,6 +29,7 @@ jest.mock("../../utils/db", () => ({
 const fsPromises = {
     mkdir: jest.fn(),
     writeFile: jest.fn(),
+    rename: jest.fn(),
     readdir: jest.fn(),
     unlink: jest.fn(),
 };
@@ -60,14 +63,23 @@ jest.mock("../outboundUrlSafety", () => ({
 }));
 
 import { PodcastCacheService } from "../podcastCache";
+import { MAX_EXTERNAL_IMAGE_BYTES } from "../imageProxy";
 
 function okResponse(size = 8) {
-    return {
-        ok: true,
+    return new Response(new Uint8Array(size), {
         status: 200,
-        statusText: "OK",
-        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(size)),
-    };
+        headers: { "content-type": "image/jpeg" },
+    });
+}
+
+function errorResponse(status: number, statusText: string) {
+    return new Response(null, { status, statusText });
+}
+
+function queuePodcastCoverSync(id: string, imageUrl: string) {
+    prisma.podcast.findMany.mockResolvedValueOnce([
+        { id, title: id, imageUrl },
+    ]);
 }
 
 describe("PodcastCacheService", () => {
@@ -80,6 +92,7 @@ describe("PodcastCacheService", () => {
 
         fsPromises.mkdir.mockResolvedValue(undefined);
         fsPromises.writeFile.mockResolvedValue(undefined);
+        fsPromises.rename.mockResolvedValue(undefined);
         fsPromises.readdir.mockResolvedValue([]);
         fsPromises.unlink.mockResolvedValue(undefined);
 
@@ -123,11 +136,7 @@ describe("PodcastCacheService", () => {
 
         fetchMock
             .mockResolvedValueOnce(okResponse())
-            .mockResolvedValueOnce({
-                ok: false,
-                status: 404,
-                statusText: "Not Found",
-            })
+            .mockResolvedValueOnce(errorResponse(404, "Not Found"))
             .mockResolvedValueOnce(okResponse(16));
 
         prisma.podcast.update
@@ -219,12 +228,12 @@ describe("PodcastCacheService", () => {
                 imageUrl: "https://img.example/error.jpg",
             },
         ]);
-        fetchMock.mockResolvedValueOnce({
-            ok: false,
-            status: 500,
-            statusText: "Server Error",
-            body: { cancel },
-        });
+        fetchMock.mockResolvedValueOnce(
+            new Response(new ReadableStream({ cancel }), {
+                status: 500,
+                statusText: "Server Error",
+            }),
+        );
 
         const result = await service.syncAllCovers();
 
@@ -287,11 +296,7 @@ describe("PodcastCacheService", () => {
 
         fetchMock
             .mockResolvedValueOnce(okResponse())
-            .mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-                statusText: "Server Error",
-            })
+            .mockResolvedValueOnce(errorResponse(500, "Server Error"))
             .mockResolvedValueOnce(okResponse(24));
 
         prisma.podcastEpisode.update
@@ -444,6 +449,140 @@ describe("PodcastCacheService", () => {
         expect(mockResolveSafeOutboundUrl).toHaveBeenCalledWith(
             "https://cdn.podcast.example/cover.jpg",
         );
+    });
+
+    it("downloadCover rejects a declared oversized image and cancels its body", async () => {
+        const service = new PodcastCacheService();
+        const cancel = jest.fn();
+        const body = new ReadableStream({ cancel });
+        queuePodcastCoverSync(
+            "pod-declared-large",
+            "https://img.example/declared-large.jpg",
+        );
+        fetchMock.mockResolvedValueOnce(
+            new Response(body, {
+                status: 200,
+                headers: {
+                    "content-type": "image/jpeg",
+                    "content-length": String(MAX_EXTERNAL_IMAGE_BYTES + 1),
+                },
+            }),
+        );
+
+        const result = await service.syncAllCovers();
+
+        expect(result).toEqual({
+            synced: 0,
+            failed: 0,
+            skipped: 1,
+            errors: [],
+        });
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
+        expect(prisma.podcast.update).not.toHaveBeenCalled();
+    });
+
+    it("downloadCover rejects and cancels an oversized streamed image", async () => {
+        const service = new PodcastCacheService();
+        const cancel = jest.fn();
+        queuePodcastCoverSync(
+            "pod-streamed-large",
+            "https://img.example/streamed-large.jpg",
+        );
+        const body = new ReadableStream({
+            start(controller) {
+                controller.enqueue(
+                    new Uint8Array(MAX_EXTERNAL_IMAGE_BYTES + 1),
+                );
+            },
+            cancel,
+        });
+        fetchMock.mockResolvedValueOnce(
+            new Response(body, {
+                status: 200,
+                headers: { "content-type": "image/jpeg" },
+            }),
+        );
+
+        const result = await service.syncAllCovers();
+
+        expect(result.skipped).toBe(1);
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
+        expect(prisma.podcast.update).not.toHaveBeenCalled();
+    });
+
+    it.each(["text/html", null])(
+        "syncAllCovers rejects the %s media type without writing it",
+        async (contentType) => {
+            const service = new PodcastCacheService();
+            queuePodcastCoverSync(
+                "pod-invalid-media",
+                "https://img.example/login-page",
+            );
+            const headers = contentType
+                ? { "content-type": contentType }
+                : undefined;
+            fetchMock.mockResolvedValueOnce(
+                new Response("not an image", { status: 200, headers }),
+            );
+
+            const result = await service.syncAllCovers();
+
+            expect(result.skipped).toBe(1);
+            expect(fsPromises.writeFile).not.toHaveBeenCalled();
+            expect(fsPromises.rename).not.toHaveBeenCalled();
+            expect(prisma.podcast.update).not.toHaveBeenCalled();
+        },
+    );
+
+    it("downloadCover rejects an id that would escape the cover cache", async () => {
+        const service = new PodcastCacheService();
+        queuePodcastCoverSync(
+            "../../../../outside",
+            "https://img.example/cover.jpg",
+        );
+
+        const result = await service.syncAllCovers();
+
+        expect(result.skipped).toBe(1);
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
+        expect(prisma.podcast.update).not.toHaveBeenCalled();
+    });
+
+    it("downloadCover removes a partial temporary file when writing fails", async () => {
+        const service = new PodcastCacheService();
+        queuePodcastCoverSync("pod-partial", "https://img.example/cover.jpg");
+        fsPromises.writeFile.mockRejectedValueOnce(new Error("disk full"));
+
+        const result = await service.syncAllCovers();
+
+        expect(result.skipped).toBe(1);
+        expect(fsPromises.rename).not.toHaveBeenCalled();
+        expect(fsPromises.unlink).toHaveBeenCalledTimes(1);
+        expect(fsPromises.unlink).toHaveBeenCalledWith(
+            expect.stringMatching(/podcast_pod-partial\.jpg\..+\.tmp$/),
+        );
+        expect(prisma.podcast.update).not.toHaveBeenCalled();
+    });
+
+    it("downloadCover removes the temporary file when atomic rename fails", async () => {
+        const service = new PodcastCacheService();
+        queuePodcastCoverSync(
+            "pod-rename-fail",
+            "https://img.example/cover.jpg",
+        );
+        fsPromises.rename.mockRejectedValueOnce(new Error("rename failed"));
+
+        const result = await service.syncAllCovers();
+
+        expect(result.skipped).toBe(1);
+        expect(fsPromises.writeFile).toHaveBeenCalledTimes(1);
+        expect(fsPromises.unlink).toHaveBeenCalledWith(
+            expect.stringMatching(/podcast_pod-rename-fail\.jpg\..+\.tmp$/),
+        );
+        expect(prisma.podcast.update).not.toHaveBeenCalled();
     });
 
     it("downloadCover rejects hostnames that RESOLVE to private addresses", async () => {
