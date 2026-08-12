@@ -483,6 +483,7 @@ let podcastCacheStatus = {
 };
 let seekToleranceOverride: boolean | null = null;
 let segmentedStartupRetryDelayOverride: number | null = null;
+let mirrorMachineIntentToPlaybackState = false;
 const segmentedStartupRetryDelayInputs: Array<{
     retryTimeoutMs: number;
     sourceKind: "segmented" | "direct";
@@ -609,6 +610,7 @@ const resetHarnessState = (): void => {
     };
     seekToleranceOverride = null;
     segmentedStartupRetryDelayOverride = null;
+    mirrorMachineIntentToPlaybackState = false;
     segmentedStartupRetryDelayInputs.length = 0;
     segmentedSessionQueue.length = 0;
     handoffSessionQueue.length = 0;
@@ -1097,6 +1099,19 @@ mock.module("@/lib/storage-migration", {
 const playbackMachine = { state: "IDLE" as string };
 const heartbeatInstances: MockHeartbeatMonitor[] = [];
 
+const transitionPlaybackMachine = (next: string): boolean => {
+    playbackMachine.state = next;
+    if (mirrorMachineIntentToPlaybackState && next === "READY") {
+        playbackState.isPlaying = false;
+        playbackCalls.setIsPlaying.push(false);
+    }
+    if (mirrorMachineIntentToPlaybackState && next === "PLAYING") {
+        playbackState.isPlaying = true;
+        playbackCalls.setIsPlaying.push(true);
+    }
+    return true;
+};
+
 class MockHeartbeatMonitor {
     public monitoring = false;
     public stalled = false;
@@ -1162,14 +1177,8 @@ class MockHeartbeatMonitor {
 mock.module("@/lib/audio", {
     exports: {
         playbackStateMachine: {
-            transition: (next: string) => {
-                playbackMachine.state = next;
-                return true;
-            },
-            forceTransition: (next: string) => {
-                playbackMachine.state = next;
-                return true;
-            },
+            transition: transitionPlaybackMachine,
+            forceTransition: transitionPlaybackMachine,
             getState: () => playbackMachine.state,
             get isPlaying() {
                 return playbackMachine.state === "PLAYING";
@@ -1681,6 +1690,203 @@ test("startup playback watchdog does not reload for a listen-together follower",
     await flushAsync();
 
     assert.equal(engine.reloadCalls, 0);
+});
+
+test("natural queue advance preserves autoplay intent across load-before-play ordering", async () => {
+    enableWindowMetrics();
+    mirrorMachineIntentToPlaybackState = true;
+    playbackState.isPlaying = true;
+    const firstTrack = makeTrack("advance-intent-1");
+    const nextTrack = makeTrack("advance-intent-2");
+    audioState.currentTrack = firstTrack;
+    audioState.queue = [firstTrack, nextTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.emit("play");
+    await flushAsync();
+    assert.equal(playbackMachine.state, "PLAYING");
+
+    engine.emit("end");
+    assert.equal(controlCalls.next, 1);
+
+    audioState.currentTrack = nextTrack;
+    audioState.currentIndex = 1;
+    rerenderOrchestrator();
+    await flushAsync();
+
+    const pauseCallsBeforeLoad = engine.pauseCalls;
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+    rerenderOrchestrator();
+    await flushAsync();
+
+    assert.equal(engine.pauseCalls, pauseCallsBeforeLoad);
+    assert.equal(playbackState.isPlaying, true);
+    engine.emit("play");
+    await flushAsync();
+    assert.equal(playbackMachine.state, "PLAYING");
+    const advanceDecision = getServerSignalEvents(
+        "player.load_autoplay_decision",
+    ).find(
+        (event) =>
+            (event.fields as Record<string, unknown> | undefined)?.loadId === 2,
+    );
+    const advanceDecisionFields = advanceDecision?.fields as
+        | Record<string, unknown>
+        | undefined;
+    assert.equal(advanceDecisionFields?.hasAdvancePlayIntent, true);
+    assert.equal(advanceDecisionFields?.shouldAutoPlayOnLoad, true);
+});
+
+test("manual paused load lands ready without autoplay", async () => {
+    mirrorMachineIntentToPlaybackState = true;
+    playbackState.isPlaying = false;
+    audioState.currentTrack = makeTrack("manual-paused-load");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    assert.equal(engine.loadCalls[0]?.args[1], false);
+
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    assert.equal(playbackMachine.state, "READY");
+    assert.equal(playbackState.isPlaying, false);
+    assert.equal(engine.playCalls, 0);
+});
+
+test("deferred autoplay seeks then reasserts play intent", async () => {
+    enableWindowMetrics();
+    mirrorMachineIntentToPlaybackState = true;
+    playbackState.isPlaying = true;
+    audioState.playbackType = "audiobook";
+    audioState.currentTrack = null;
+    audioState.currentAudiobook = {
+        id: "deferred-audiobook",
+        duration: 900,
+        progress: { currentTime: 37 },
+    };
+    audioState.queue = [];
+
+    renderOrchestrator();
+    await flushAsync();
+    assert.equal(engine.loadCalls[0]?.args[1], false);
+
+    engine.emit("load", { durationSec: 900 });
+    await flushAsync();
+    rerenderOrchestrator();
+    await flushAsync();
+
+    assert.ok(engine.seekCalls.includes(37));
+    assert.ok(engine.playCalls >= 1);
+    assert.ok(playbackCalls.setIsPlaying.includes(true));
+    assert.equal(playbackState.isPlaying, true);
+    assert.equal(engine.pauseCalls, 0);
+    engine.emit("play");
+    await flushAsync();
+    assert.equal(playbackMachine.state, "PLAYING");
+    const [decision] = getServerSignalEvents("player.load_autoplay_decision");
+    const decisionFields = decision?.fields as
+        | Record<string, unknown>
+        | undefined;
+    assert.equal(decisionFields?.deferAutoplay, true);
+    assert.equal(decisionFields?.shouldAutoPlayOnLoad, true);
+    assert.equal(decisionFields?.startTime, 37);
+});
+
+test("user pause during autoplay loading clears the load play intent", async () => {
+    mirrorMachineIntentToPlaybackState = true;
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("pause-during-load");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    assert.equal(engine.loadCalls[0]?.args[1], true);
+
+    playbackState.isPlaying = false;
+    rerenderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    assert.equal(playbackMachine.state, "READY");
+    assert.equal(playbackState.isPlaying, false);
+    assert.equal(engine.playCalls, 0);
+});
+
+test("listen-together follower load never autoplays from local intent", async () => {
+    mirrorMachineIntentToPlaybackState = true;
+    playbackState.isPlaying = true;
+    listenTogetherSnapshot = {
+        groupId: "lt-load-follower",
+        isHost: false,
+    };
+    audioState.currentTrack = makeTrack("lt-follower-load");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    assert.equal(engine.loadCalls[0]?.args[1], false);
+
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    assert.equal(playbackMachine.state, "READY");
+    assert.equal(playbackState.isPlaying, false);
+    assert.equal(engine.playCalls, 0);
+});
+
+test("reports one server-visible autoplay decision per load", async () => {
+    enableWindowMetrics();
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("autoplay-decision");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+
+    const decisions = getServerSignalEvents("player.load_autoplay_decision");
+    assert.equal(decisions.length, 1);
+    assert.deepEqual(decisions[0]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        loadId: 1,
+        shouldAutoPlayOnLoad: true,
+        deferAutoplay: false,
+        hasAdvancePlayIntent: false,
+        wasPlayingBeforeLoad: true,
+        startTime: 0,
+    });
+});
+
+test("reports an autoplay intent conflict before sync-pausing a playing engine", async () => {
+    enableWindowMetrics();
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("autoplay-conflict");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.emit("play");
+    await flushAsync();
+
+    playbackState.isPlaying = false;
+    rerenderOrchestrator();
+    await flushAsync();
+
+    const conflicts = getServerSignalEvents("player.autoplay_intent_conflict");
+    assert.equal(conflicts.length, 1);
+    assert.deepEqual(conflicts[0]?.fields, {
+        engineMode: "howler",
+        activeEngine: "howler",
+        loadId: 1,
+    });
+    assert.equal(engine.pauseCalls, 1);
 });
 
 test("loads direct track, applies output state, and syncs play/pause transitions", async () => {

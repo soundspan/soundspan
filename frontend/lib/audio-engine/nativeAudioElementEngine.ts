@@ -715,10 +715,7 @@ export class NativeAudioElementEngine implements AudioEngine {
         this.disarmVisibilityRetry();
         let retryFired = false;
         const fireRetry = (via: "visibility" | "focus"): void => {
-            if (
-                retryFired ||
-                (via === "visibility" && this.isPageHidden())
-            ) {
+            if (retryFired || (via === "visibility" && this.isPageHidden())) {
                 return;
             }
             retryFired = true;
@@ -733,10 +730,8 @@ export class NativeAudioElementEngine implements AudioEngine {
             "visibilitychange",
             () => fireRetry("visibility"),
         );
-        const focusCleanup = this.bindGlobalListener(
-            "window",
-            "focus",
-            () => fireRetry("focus"),
+        const focusCleanup = this.bindGlobalListener("window", "focus", () =>
+            fireRetry("focus"),
         );
         this.visibilityRetryCleanup = () => {
             retryFired = true;
