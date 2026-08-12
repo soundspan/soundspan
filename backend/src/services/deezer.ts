@@ -114,7 +114,7 @@ class DeezerService {
     }
 
     private escapeDeezerQueryPhrase(value: string): string {
-        return value.replace(/"/g, '\\"');
+        return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     }
 
     private buildAlbumSearchQueries(

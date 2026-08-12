@@ -564,6 +564,26 @@ describe("soulseek service", () => {
     });
 
     it.each([
+        ["parenthetical", "(", "live "],
+        ["bracket", "[", "remaster "],
+    ])(
+        "leaves long unmatched %s descriptors unchanged without excessive backtracking",
+        (_case, openingDelimiter, descriptor) => {
+            const title = `Song ${openingDelimiter}${descriptor.repeat(
+                9_999,
+            )}${descriptor.trim()}`;
+            const startedAt = performance.now();
+
+            const normalized = (soulseekService as any).normalizeTrackTitle(
+                title,
+            );
+
+            expect(normalized).toBe(title);
+            expect(performance.now() - startedAt).toBeLessThan(500);
+        },
+    );
+
+    it.each([
         ["User not exist", "user_offline", true],
         ["Download timed out", "timeout", true],
         ["Connection refused by peer", "connection", true],

@@ -1032,8 +1032,8 @@ class LidarrService {
                 const normalizeTitle = (title: string) =>
                     title
                         .toLowerCase()
-                        .replace(/\(.*?\)/g, "") // Remove parenthetical content (deluxe edition, remaster, etc.)
-                        .replace(/\[.*?\]/g, "") // Remove bracketed content
+                        .replace(/\([^)]*\)/g, "") // Remove parenthetical content (deluxe edition, remaster, etc.)
+                        .replace(/\[[^\]]*\]/g, "") // Remove bracketed content
                         .replace(
                             /[-–—]\s*(deluxe|remaster|bonus|special|anniversary|expanded|limited|collector).*$/i,
                             "",

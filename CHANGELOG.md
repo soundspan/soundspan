@@ -738,6 +738,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Hardened external-metadata escaping for Deezer and Spotify, and replaced
+  backtracking-prone normalization regexes with linear forms in Soulseek,
+  search, and Lidarr.
 - Cover-image storage operations validate IDs and contain all filesystem paths
   under the type-specific covers directory.
 - Account-management, 2FA, and Subsonic-credential routes now have dedicated

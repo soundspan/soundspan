@@ -59,6 +59,8 @@ interface DownloadDestination {
 }
 
 const INVALID_DOWNLOAD_DESTINATION = "Invalid download destination";
+const TRACK_DESCRIPTOR_PATTERN =
+    /(?:live|remaster|remix|version|edit|demo|acoustic|radio|single|extended|instrumental|feat\.|ft\.|featuring)/i;
 
 class SoulseekService {
     private client: SlskClient | null = null;
@@ -116,15 +118,13 @@ class SoulseekService {
             .replace(/[–—]/g, "-") // En/em dash → hyphen
             .replace(/[×]/g, "x"); // Multiplication sign → x
 
-        // Remove content in parentheses that contains live/remaster/remix info
-        const livePatterns =
-            /\s*\([^)]*(?:live|remaster|remix|version|edit|demo|acoustic|radio|single|extended|instrumental|feat\.|ft\.|featuring)[^)]*\)\s*/gi;
-        normalized = normalized.replace(livePatterns, " ");
-
-        // Also try brackets
-        const bracketPatterns =
-            /\s*\[[^\]]*(?:live|remaster|remix|version|edit|demo|acoustic|radio|single|extended|instrumental|feat\.|ft\.|featuring)[^\]]*\]\s*/gi;
-        normalized = normalized.replace(bracketPatterns, " ");
+        // Remove delimited content only when it contains a known descriptor.
+        normalized = normalized.replace(/\(([^)]*)\)/g, (match, segment) =>
+            TRACK_DESCRIPTOR_PATTERN.test(segment) ? " " : match,
+        );
+        normalized = normalized.replace(/\[([^\]]*)\]/g, (match, segment) =>
+            TRACK_DESCRIPTOR_PATTERN.test(segment) ? " " : match,
+        );
 
         // Remove trailing dash content (often contains year or version info)
         normalized = normalized.replace(

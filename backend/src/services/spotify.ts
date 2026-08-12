@@ -62,6 +62,14 @@ const SPOTIFY_ALBUM_REGEX =
     /(?:spotify\.com\/album\/|spotify:album:)([a-zA-Z0-9]+)/;
 const SPOTIFY_TRACK_REGEX =
     /(?:spotify\.com\/track\/|spotify:track:)([a-zA-Z0-9]+)/;
+const HTML_NAMED_ENTITIES: Readonly<Record<string, string>> = {
+    amp: "&",
+    quot: '"',
+    apos: "'",
+    lt: "<",
+    gt: ">",
+    nbsp: " ",
+};
 
 class SpotifyService {
     private anonymousToken: string | null = null;
@@ -719,19 +727,23 @@ class SpotifyService {
     }
 
     private decodeHtmlEntities(value: string): string {
-        return value
-            .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) =>
-                String.fromCharCode(parseInt(hex, 16)),
-            )
-            .replace(/&#(\d+);/g, (_match, dec: string) =>
-                String.fromCharCode(parseInt(dec, 10)),
-            )
-            .replace(/&amp;/g, "&")
-            .replace(/&quot;/g, '"')
-            .replace(/&apos;/g, "'")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/&nbsp;/g, " ");
+        return value.replace(
+            /&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|quot|apos|lt|gt|nbsp));/g,
+            (
+                match,
+                hex: string | undefined,
+                dec: string | undefined,
+                named,
+            ) => {
+                if (hex !== undefined) {
+                    return String.fromCharCode(Number.parseInt(hex, 16));
+                }
+                if (dec !== undefined) {
+                    return String.fromCharCode(Number.parseInt(dec, 10));
+                }
+                return HTML_NAMED_ENTITIES[named] ?? match;
+            },
+        );
     }
 
     private stripHtmlContent(value: string): string {
