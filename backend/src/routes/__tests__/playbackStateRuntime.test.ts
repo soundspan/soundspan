@@ -50,10 +50,7 @@ function getHandler(method: "get" | "post" | "delete", path: string) {
     return handlers[handlers.length - 1];
 }
 
-function getRouteHandlers(
-    method: "get" | "post" | "delete",
-    path: string,
-) {
+function getRouteHandlers(method: "get" | "post" | "delete", path: string) {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
