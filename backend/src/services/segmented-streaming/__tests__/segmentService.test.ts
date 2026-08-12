@@ -43,6 +43,9 @@ const resolveSegmentService = async () => {
     const mockListDashSegments = jest.fn();
     const mockScheduleDashCachePrune = jest.fn();
     const mockSpawn = jest.fn();
+    const mockInspectFfmpegVersion = jest.fn(
+        (_binaryPath: string) => "ffmpeg version 7.0",
+    );
     const heldBuildLocks = new Map<string, string>();
     const mockBuildLockSet = jest.fn(
         async (
@@ -85,11 +88,16 @@ const resolveSegmentService = async () => {
             mockBuildLockEval(...args),
     }));
 
-    jest.doMock("@ffmpeg-installer/ffmpeg", () => ({
-        __esModule: true,
-        default: {
-            path: "/tmp/mock-ffmpeg",
+    jest.doMock("../../../config", () => ({
+        config: {
+            segmentedStreaming: {
+                ffmpegPathOverride: undefined,
+            },
         },
+    }));
+    jest.doMock("../../../utils/configValidator", () => ({
+        inspectFfmpegVersion: mockInspectFfmpegVersion,
+        resolveFfmpegBinaryPath: jest.fn(() => "/tmp/system-ffmpeg"),
     }));
 
     jest.doMock("child_process", () => ({
@@ -133,6 +141,7 @@ const resolveSegmentService = async () => {
             mockListDashSegments,
             mockScheduleDashCachePrune,
             mockSpawn,
+            mockInspectFfmpegVersion,
             mockBuildLockSet,
             mockBuildLockExists,
             mockBuildLockEval,
@@ -153,7 +162,8 @@ describe("segmentedSegmentService", () => {
                 originalLocalSegmentDurationSec;
         }
         jest.resetModules();
-        jest.dontMock("@ffmpeg-installer/ffmpeg");
+        jest.dontMock("../../../config");
+        jest.dontMock("../../../utils/configValidator");
         jest.dontMock("child_process");
         jest.dontMock("../cacheService");
         jest.dontMock("../../../utils/ioredis");
@@ -204,6 +214,14 @@ describe("segmentedSegmentService", () => {
         });
         expect(mocks.mockScheduleDashCachePrune).toHaveBeenCalledTimes(1);
         expect(mocks.mockSpawn).toHaveBeenCalledTimes(1);
+        expect(mocks.mockInspectFfmpegVersion).toHaveBeenCalledWith(
+            "/tmp/system-ffmpeg",
+        );
+        expect(mocks.mockSpawn).toHaveBeenCalledWith(
+            "/tmp/system-ffmpeg",
+            expect.any(Array),
+            expect.any(Object),
+        );
 
         ffmpegProcess.emit("close", 0);
         await wait(0);

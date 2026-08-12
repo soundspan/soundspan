@@ -1,8 +1,12 @@
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
 import fs, { promises as fsPromises } from "fs";
-import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import { logger } from "../../utils/logger";
+import { config } from "../../config";
+import {
+    inspectFfmpegVersion,
+    resolveFfmpegBinaryPath,
+} from "../../utils/configValidator";
 import { createIORedisClient } from "../../utils/ioredis";
 import {
     segmentedStreamingCacheService,
@@ -20,7 +24,6 @@ const REMOTE_INPUT_CAPABILITY_PROBE_TIMEOUT_MS = 4_000;
 const BUILD_FAILURE_RETENTION_MS = 60_000;
 const STARTUP_CACHE_VALIDATION_SUCCESS_TTL_MS = 5_000;
 const FULL_CACHE_VALIDATION_SUCCESS_TTL_MS = 60_000;
-const SYSTEM_FFMPEG_PATH = "/usr/bin/ffmpeg";
 const SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED =
     process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED !== "false";
 const DEFAULT_SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS =
@@ -174,17 +177,10 @@ type DashBuildLockAcquireResult =
     | { acquired: false; unavailable: true }
     | { acquired: false; unavailable: false };
 
-const resolveSegmentedFfmpegBinaryPath = (): string => {
-    const configuredPath = process.env.FFMPEG_PATH?.trim();
-    if (configuredPath) {
-        return configuredPath;
-    }
-    if (fs.existsSync(SYSTEM_FFMPEG_PATH)) {
-        return SYSTEM_FFMPEG_PATH;
-    }
-    return ffmpegPath.path;
-};
-const SEGMENTED_FFMPEG_BINARY_PATH = resolveSegmentedFfmpegBinaryPath();
+const SEGMENTED_FFMPEG_BINARY_PATH = resolveFfmpegBinaryPath(
+    config.segmentedStreaming.ffmpegPathOverride,
+);
+inspectFfmpegVersion(SEGMENTED_FFMPEG_BINARY_PATH);
 
 interface DashEncodingPlan {
     targetRepresentation: DashAudioRepresentation;

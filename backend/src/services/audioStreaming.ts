@@ -7,7 +7,6 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { prisma } from "../utils/db";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import PQueue from "p-queue";
 import { AppError, ErrorCode, ErrorCategory } from "../utils/errors";
 import { parseRangeHeader } from "../utils/rangeParser";
@@ -15,9 +14,16 @@ import { parseFile } from "music-metadata";
 import { isOriginAllowed } from "../utils/cors";
 import { config } from "../config";
 import { coalesceInFlightByKey } from "../utils/singleflight";
+import {
+    inspectFfmpegVersion,
+    resolveFfmpegBinaryPath,
+} from "../utils/configValidator";
 
-// Set FFmpeg path to bundled binary
-ffmpeg.setFfmpegPath(ffmpegPath.path);
+const ffmpegBinaryPath = resolveFfmpegBinaryPath(
+    config.segmentedStreaming.ffmpegPathOverride,
+);
+inspectFfmpegVersion(ffmpegBinaryPath);
+ffmpeg.setFfmpegPath(ffmpegBinaryPath);
 
 // Quality settings
 export const QUALITY_SETTINGS = {

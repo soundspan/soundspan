@@ -15,7 +15,7 @@ type LoadOptions = {
     mkdirError?: string;
     execOutput?: string;
     execError?: string;
-    ffmpegPath?: string;
+    execErrorCode?: string;
 };
 
 type ValidatorModule = {
@@ -49,7 +49,8 @@ describe("validateMusicConfig", () => {
             ...options.env,
         };
 
-        const ffmpegPath = options.ffmpegPath ?? "/bin/ffmpeg";
+        const ffmpegPath =
+            options.env?.FFMPEG_PATH?.trim() || "/usr/bin/ffmpeg";
         const existingPaths = new Set<string>([
             "/music",
             "/cache/transcodes",
@@ -83,9 +84,11 @@ describe("validateMusicConfig", () => {
             }
             createdPaths.add(String(candidate));
         });
-        const execSync = jest.fn(() => {
+        const execFileSync = jest.fn(() => {
             if (options.execError) {
-                throw new Error(options.execError);
+                throw Object.assign(new Error(options.execError), {
+                    code: options.execErrorCode,
+                });
             }
             return options.execOutput ?? "ffmpeg version 7.0";
         });
@@ -97,7 +100,9 @@ describe("validateMusicConfig", () => {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("fs", () => ({
             existsSync,
@@ -106,11 +111,7 @@ describe("validateMusicConfig", () => {
             constants: { R_OK: 4, W_OK: 2 },
         }));
         jest.doMock("child_process", () => ({
-            execSync,
-        }));
-        jest.doMock("@ffmpeg-installer/ffmpeg", () => ({
-            __esModule: true,
-            default: { path: ffmpegPath },
+            execFileSync,
         }));
         jest.doMock("../systemSettings", () => ({
             getSystemSettings,
@@ -128,7 +129,7 @@ describe("validateMusicConfig", () => {
             existsSync,
             accessSync,
             mkdirSync,
-            execSync,
+            execFileSync,
             getSystemSettings,
             logger,
             ffmpegPath,
@@ -300,44 +301,93 @@ describe("validateMusicConfig", () => {
         );
     });
 
-    it("logs warning and continues when bundled ffmpeg is missing", async () => {
-        const { validateMusicConfig, execSync, logger, ffmpegPath } =
+    it("logs warning and continues when system ffmpeg is missing", async () => {
+        const { validateMusicConfig, execFileSync, logger, ffmpegPath } =
             loadValidator({
                 env: { MUSIC_PATH: "/env/music" },
                 existingPaths: ["/env/music"],
-                missingPaths: ["/bin/ffmpeg"],
+                execError: "spawn /usr/bin/ffmpeg ENOENT",
+                execErrorCode: "ENOENT",
             });
 
         const result = await validateMusicConfig();
 
         expect(result.musicPath).toBe("/env/music");
-        expect(execSync).not.toHaveBeenCalled();
-        expect(logger.warn).toHaveBeenCalledWith(
-            "  Bundled FFmpeg not available. Transcoding will not be available.",
+        expect(execFileSync).toHaveBeenCalledWith(
+            "/usr/bin/ffmpeg",
+            ["-version"],
+            {
+                encoding: "utf8",
+                maxBuffer: 65536,
+                timeout: 5000,
+            },
         );
         expect(logger.warn).toHaveBeenCalledWith(
-            `   Error: Bundled FFmpeg not found at: ${ffmpegPath}`,
+            "System FFmpeg is not available; transcoding is disabled",
+            { ffmpegPath },
         );
     });
 
-    it("logs warning and continues when ffmpeg output is invalid", async () => {
-        const { validateMusicConfig, execSync, logger } = loadValidator({
+    it("fails startup when ffmpeg reports an affected version", async () => {
+        const { validateMusicConfig } = loadValidator({
+            env: { MUSIC_PATH: "/env/music" },
+            existingPaths: ["/env/music"],
+            execOutput: "ffmpeg version 4.3.6-0+deb11u1\nconfiguration",
+        });
+
+        await expect(validateMusicConfig()).rejects.toThrow(
+            "FFmpeg 4.3 is unsupported; version 4.4 or newer is required",
+        );
+    });
+
+    it("fails startup when ffmpeg version output cannot be verified", async () => {
+        const { validateMusicConfig } = loadValidator({
             env: { MUSIC_PATH: "/env/music" },
             existingPaths: ["/env/music"],
             execOutput: "not-ffmpeg",
         });
 
-        const result = await validateMusicConfig();
-
-        expect(result.musicPath).toBe("/env/music");
-        expect(execSync).toHaveBeenCalledWith('"/bin/ffmpeg" -version', {
-            encoding: "utf8",
-        });
-        expect(logger.warn).toHaveBeenCalledWith(
-            "  Bundled FFmpeg not available. Transcoding will not be available.",
+        await expect(validateMusicConfig()).rejects.toThrow(
+            "Unable to determine FFmpeg version",
         );
-        expect(logger.warn).toHaveBeenCalledWith(
-            "   Error: Invalid ffmpeg output",
+    });
+
+    it("fails startup when the configured ffmpeg cannot execute", async () => {
+        const { validateMusicConfig } = loadValidator({
+            env: { MUSIC_PATH: "/env/music" },
+            existingPaths: ["/env/music"],
+            execError: "spawn EACCES",
+            execErrorCode: "EACCES",
+        });
+
+        await expect(validateMusicConfig()).rejects.toThrow(
+            "Unable to execute FFmpeg at /usr/bin/ffmpeg",
+        );
+    });
+
+    it("uses a configured system ffmpeg path without shell interpolation", async () => {
+        const configuredPath = "/opt/soundspan/bin/ffmpeg";
+        const { validateMusicConfig, execFileSync } = loadValidator({
+            env: {
+                MUSIC_PATH: "/env/music",
+                FFMPEG_PATH: ` ${configuredPath} `,
+            },
+            existingPaths: ["/env/music"],
+            execOutput: "ffmpeg version 4.4.0\nconfiguration",
+        });
+
+        await expect(validateMusicConfig()).resolves.toEqual(
+            expect.objectContaining({ musicPath: "/env/music" }),
+        );
+
+        expect(execFileSync).toHaveBeenCalledWith(
+            configuredPath,
+            ["-version"],
+            {
+                encoding: "utf8",
+                maxBuffer: 65536,
+                timeout: 5000,
+            },
         );
     });
 

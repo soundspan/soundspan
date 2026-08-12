@@ -27,12 +27,21 @@ const mockPrisma = {
 
 const mockParseFile = jest.fn();
 const mockParseRangeHeader = jest.fn();
+const mockInspectFfmpegVersion = jest.fn(
+    (_binaryPath: string) => "ffmpeg version 7.0",
+);
+const mockResolveFfmpegBinaryPath = jest.fn(
+    (_configuredPath?: string) => "/usr/bin/ffmpeg",
+);
 
 // Mutable config mock so individual tests can exercise the ALLOWED_ORIGINS
 // allowlist semantics ([] = empty → deny cross-origin in production).
 const mockConfig = {
     nodeEnv: "production",
     allowedOrigins: [] as boolean | string[],
+    segmentedStreaming: {
+        ffmpegPathOverride: undefined as string | undefined,
+    },
 };
 
 type FfmpegMode = "success" | "error" | "throw";
@@ -130,11 +139,9 @@ jest.mock("../../config", () => ({
     config: mockConfig,
 }));
 
-jest.mock("@ffmpeg-installer/ffmpeg", () => ({
-    __esModule: true,
-    default: {
-        path: "/mock/bin/ffmpeg",
-    },
+jest.mock("../../utils/configValidator", () => ({
+    inspectFfmpegVersion: mockInspectFfmpegVersion,
+    resolveFfmpegBinaryPath: mockResolveFfmpegBinaryPath,
 }));
 
 jest.mock("fluent-ffmpeg", () => ({
@@ -146,6 +153,9 @@ jest.mock("fluent-ffmpeg", () => ({
 
 import { AudioStreamingService, QUALITY_SETTINGS } from "../audioStreaming";
 import { AppError, ErrorCategory, ErrorCode } from "../../utils/errors";
+
+const configuredFfmpegPath = mockSetFfmpegPath.mock.calls[0]?.[0];
+const inspectedFfmpegPath = mockInspectFfmpegVersion.mock.calls[0]?.[0];
 
 type MockReadStream = {
     on: jest.Mock;
@@ -215,6 +225,11 @@ describe("AudioStreamingService", () => {
         createdServices.push(service);
         return service;
     }
+
+    it("selects the validated system ffmpeg binary", () => {
+        expect(inspectedFfmpegPath).toBe("/usr/bin/ffmpeg");
+        expect(configuredFfmpegPath).toBe("/usr/bin/ffmpeg");
+    });
 
     beforeEach(() => {
         jest.clearAllMocks();

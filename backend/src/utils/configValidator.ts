@@ -1,11 +1,67 @@
 import * as fs from "fs";
 import { logger } from "./logger";
 import * as path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { AppError, ErrorCode, ErrorCategory } from "./errors";
-import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import { getSystemSettings } from "./systemSettings";
 import { parseEnvInt } from "./envParsers";
+
+const ffmpegLogger = logger.child("FFmpeg");
+const SYSTEM_FFMPEG_PATH = "/usr/bin/ffmpeg";
+const MINIMUM_FFMPEG_MAJOR = 4;
+const MINIMUM_FFMPEG_MINOR = 4;
+const FFMPEG_VERSION_TIMEOUT_MS = 5_000;
+const FFMPEG_VERSION_MAX_BUFFER_BYTES = 64 * 1024;
+const FFMPEG_VERSION_PATTERN =
+    /^ffmpeg version (?:n)?(\d+)\.(\d+)(?:[.\s-]|$)/i;
+
+/** Resolves the configured FFmpeg executable, defaulting to the image system binary. */
+export function resolveFfmpegBinaryPath(configuredPath?: string): string {
+    return configuredPath?.trim() || SYSTEM_FFMPEG_PATH;
+}
+
+/** Verifies that an available FFmpeg executable meets the supported version floor. */
+export function inspectFfmpegVersion(binaryPath: string): string | null {
+    let output: string;
+    try {
+        output = execFileSync(binaryPath, ["-version"], {
+            encoding: "utf8",
+            maxBuffer: FFMPEG_VERSION_MAX_BUFFER_BYTES,
+            timeout: FFMPEG_VERSION_TIMEOUT_MS,
+        });
+    } catch (error) {
+        if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ENOENT"
+        ) {
+            return null;
+        }
+        throw new Error(`Unable to execute FFmpeg at ${binaryPath}`, {
+            cause: error,
+        });
+    }
+
+    const versionLine = output.split(/\r?\n/, 1)[0]?.trim() ?? "";
+    const versionMatch = FFMPEG_VERSION_PATTERN.exec(versionLine);
+    if (!versionMatch) {
+        throw new Error(`Unable to determine FFmpeg version at ${binaryPath}`);
+    }
+
+    const major = Number.parseInt(versionMatch[1], 10);
+    const minor = Number.parseInt(versionMatch[2], 10);
+    const isSupported =
+        major > MINIMUM_FFMPEG_MAJOR ||
+        (major === MINIMUM_FFMPEG_MAJOR && minor >= MINIMUM_FFMPEG_MINOR);
+    if (!isSupported) {
+        throw new Error(
+            `FFmpeg ${major}.${minor} is unsupported; version 4.4 or newer is required`,
+        );
+    }
+
+    return versionLine;
+}
 
 export interface MusicConfig {
     musicPath: string;
@@ -118,30 +174,18 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
         );
     }
 
-    // VALIDATE BUNDLED FFMPEG (from @ffmpeg-installer/ffmpeg)
-    try {
-        // Check if bundled FFmpeg binary exists
-        if (!fs.existsSync(ffmpegPath.path)) {
-            throw new Error(`Bundled FFmpeg not found at: ${ffmpegPath.path}`);
-        }
-
-        // Verify it's executable by running version check
-        const result = execSync(`"${ffmpegPath.path}" -version`, {
-            encoding: "utf8",
+    const ffmpegPath = resolveFfmpegBinaryPath(process.env.FFMPEG_PATH);
+    const ffmpegVersion = inspectFfmpegVersion(ffmpegPath);
+    if (ffmpegVersion) {
+        ffmpegLogger.debug("System FFmpeg validated", {
+            ffmpegPath,
+            version: ffmpegVersion,
         });
-        if (!result.includes("ffmpeg version")) {
-            throw new Error("Invalid ffmpeg output");
-        }
-
-        logger.debug(`FFmpeg detected (bundled): ${result.split("\n")[0]}`);
-        logger.debug(`   FFmpeg path: ${ffmpegPath.path}`);
-    } catch (err: any) {
-        logger.warn(
-            "  Bundled FFmpeg not available. Transcoding will not be available.",
+    } else {
+        ffmpegLogger.warn(
+            "System FFmpeg is not available; transcoding is disabled",
+            { ffmpegPath },
         );
-        logger.warn(`   Error: ${err.message}`);
-        logger.warn("   Original quality streaming will still work.");
-        // Don't throw - allow server to start without FFmpeg
     }
 
     logger.debug("Music configuration validated successfully");
