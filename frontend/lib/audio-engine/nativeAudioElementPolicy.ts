@@ -12,8 +12,8 @@
  * - short seek marks that suppress stale `timeupdate` positions instead
  *   of lock flags and timeout timers
  * - bounded automatic retries that exhaust into an explicit error
- * - autoplay-policy handling: `NotAllowedError` arms exactly one
- *   gesture retry and never loops
+ * - autoplay-policy handling: `NotAllowedError` arms one gesture retry,
+ *   one focus/visibility retry, and bounded timer retries
  * - media-error classification: background session reclaim (preserve
  *   media for foreground recovery), stale-source auth expiry (reload
  *   from the stored source at position), transient, and fatal
@@ -46,6 +46,11 @@ export const NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES = 3;
 /** Base delay for automatic retry backoff (multiplied by attempt). */
 export const NATIVE_ENGINE_RETRY_BASE_DELAY_MS = 500;
 
+/** Bounded delays for retrying a browser-blocked playback start. */
+export const NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS = [
+    1_000, 3_000, 7_000,
+] as const;
+
 /**
  * A pause at least this long before a media error suggests the stream
  * URL's rotating auth token expired; recover by reloading from source.
@@ -69,6 +74,8 @@ export interface NativeEnginePolicyState {
     seekTargetSec: number | null;
     /** Automatic retries consumed for the current load. */
     automaticRetriesUsed: number;
+    /** Browser-blocked playback-start retries consumed for this intent. */
+    playStartRetriesUsed: number;
     /** Whether the single autoplay gesture retry has been spent. */
     gestureRetryUsed: boolean;
     /** Classification of the most recent pause. */
@@ -132,7 +139,11 @@ export type NativeEnginePolicyEvent =
           nowMs: number;
       }
     | { type: "GESTURE_RETRY_FIRED"; nowMs: number }
-    | { type: "VISIBILITY_RETRY_FIRED"; nowMs: number }
+    | {
+          type: "VISIBILITY_RETRY_FIRED";
+          via: "visibility" | "focus";
+          nowMs: number;
+      }
     | { type: "RETRY_TIMER_FIRED"; nowMs: number }
     | { type: "RELOAD_REQUESTED"; nowMs: number }
     | {
@@ -230,6 +241,7 @@ export const createInitialNativeEngineState = (): NativeEnginePolicyState => ({
     seekMarkUntilMs: null,
     seekTargetSec: null,
     automaticRetriesUsed: 0,
+    playStartRetriesUsed: 0,
     gestureRetryUsed: false,
     pauseClassification: null,
     pausedAtMs: null,
@@ -365,6 +377,7 @@ const applyFreshLoad = (
     effects: [
         { kind: "cancelRetry" },
         { kind: "disarmGestureRetry" },
+        { kind: "disarmVisibilityRetry" },
         { kind: "stopTicker" },
         { kind: "applyLoad", autoplay: event.autoplay, isRetry: false },
     ],
@@ -434,24 +447,48 @@ const handlePlayRequested = (
         return { state: { ...state, autoplay: true }, effects: [] };
     }
     return {
-        state: { ...state, gestureRetryUsed: false },
+        state: {
+            ...state,
+            autoplay: true,
+            playStartRetriesUsed: 0,
+            gestureRetryUsed: false,
+            pauseClassification: null,
+        },
         effects: [{ kind: "callPlay" }],
     };
 };
 
 const handlePauseRequested = (state: State): Transition => {
+    if (
+        state.status !== "playing" &&
+        state.status !== "loading" &&
+        state.status !== "paused"
+    ) {
+        return noChange(state);
+    }
+    const nextState: State = {
+        ...state,
+        autoplay: false,
+        playStartRetriesUsed: 0,
+        pauseClassification: "user",
+    };
+    const cleanupEffects: NativeEnginePolicyEffect[] = [
+        { kind: "cancelRetry" },
+        { kind: "disarmGestureRetry" },
+        { kind: "disarmVisibilityRetry" },
+    ];
     if (state.status === "loading" && !state.metadataReady) {
         return {
-            state: { ...state, autoplay: false, pauseClassification: "user" },
-            effects: [],
+            state: nextState,
+            effects: cleanupEffects,
         };
     }
     if (state.status !== "playing" && state.status !== "loading") {
-        return noChange(state);
+        return { state: nextState, effects: cleanupEffects };
     }
     return {
-        state: { ...state, autoplay: false, pauseClassification: "user" },
-        effects: [{ kind: "callPause" }],
+        state: nextState,
+        effects: [...cleanupEffects, { kind: "callPause" }],
     };
 };
 
@@ -464,6 +501,7 @@ const handleStopRequested = (state: State): Transition => {
             ...state,
             status: "idle",
             autoplay: false,
+            playStartRetriesUsed: 0,
             pendingSeekSec: null,
             seekMarkUntilMs: null,
             seekTargetSec: null,
@@ -471,6 +509,8 @@ const handleStopRequested = (state: State): Transition => {
         },
         effects: [
             { kind: "cancelRetry" },
+            { kind: "disarmGestureRetry" },
+            { kind: "disarmVisibilityRetry" },
             { kind: "stopTicker" },
             { kind: "haltPlayback" },
             { kind: "emitStop" },
@@ -513,6 +553,9 @@ const handleElementPlaying = (
     event: Extract<NativeEnginePolicyEvent, { type: "ELEMENT_PLAYING" }>,
 ): Transition => {
     const effects: NativeEnginePolicyEffect[] = [
+        { kind: "cancelRetry" },
+        { kind: "disarmGestureRetry" },
+        { kind: "disarmVisibilityRetry" },
         { kind: "startTicker" },
         { kind: "emitPlay" },
         { kind: "emitBuffering", isBuffering: false },
@@ -529,6 +572,7 @@ const handleElementPlaying = (
             ...state,
             status: "playing",
             automaticRetriesUsed: 0,
+            playStartRetriesUsed: 0,
             gestureRetryUsed: false,
             pauseClassification: null,
             pausedAtMs: null,
@@ -750,9 +794,72 @@ const handleElementError = (
     };
 };
 
+type PlayPromiseRejectedEvent = Extract<
+    NativeEnginePolicyEvent,
+    { type: "PLAY_PROMISE_REJECTED" }
+>;
+
+const scheduleBlockedPlayRetry = (
+    state: State,
+    effects: NativeEnginePolicyEffect[],
+): number => {
+    const retriesUsed = state.playStartRetriesUsed;
+    if (
+        !state.autoplay ||
+        retriesUsed >= NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS.length
+    ) {
+        return retriesUsed;
+    }
+    const attempt = retriesUsed + 1;
+    effects.push({
+        kind: "scheduleRetry",
+        attempt,
+        delayMs: NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS[retriesUsed],
+    });
+    return attempt;
+};
+
+const handleBlockedPlayStart = (
+    state: State,
+    event: PlayPromiseRejectedEvent,
+): Transition => {
+    const effects: NativeEnginePolicyEffect[] = [
+        { kind: "stopTicker" },
+        {
+            kind: "emitPlayError",
+            code: "NotAllowedError",
+            message: event.errorMessage,
+            recoverable: true,
+        },
+        {
+            kind: "telemetry",
+            event: "playback_start_blocked",
+            fields: {
+                code: "NotAllowedError",
+                isPageHidden: event.isPageHidden,
+            },
+        },
+        { kind: "armVisibilityRetry" },
+    ];
+    if (!state.gestureRetryUsed) {
+        effects.push({ kind: "armGestureRetry" });
+    }
+    const playStartRetriesUsed = scheduleBlockedPlayRetry(state, effects);
+    return {
+        state: {
+            ...state,
+            status: "paused",
+            pausedAtMs: event.nowMs,
+            playStartRetriesUsed,
+            gestureRetryUsed: true,
+        },
+        effects,
+    };
+};
+
 const handlePlayPromiseRejected = (
     state: State,
-    event: Extract<NativeEnginePolicyEvent, { type: "PLAY_PROMISE_REJECTED" }>,
+    event: PlayPromiseRejectedEvent,
 ): Transition => {
     if (event.errorName === "AbortError") {
         // play() interrupted by a newer load()/pause(); the newer intent
@@ -760,35 +867,7 @@ const handlePlayPromiseRejected = (
         return noChange(state);
     }
     if (event.errorName === "NotAllowedError") {
-        const effects: NativeEnginePolicyEffect[] = [
-            { kind: "stopTicker" },
-            {
-                kind: "emitPlayError",
-                code: "NotAllowedError",
-                message: event.errorMessage,
-                recoverable: true,
-            },
-        ];
-        if (!state.gestureRetryUsed) {
-            effects.push({ kind: "armGestureRetry" });
-        }
-        // Autoplay rejected in a hidden tab (e.g. a queue auto-advance
-        // while the user is tabbed away) is not a gesture problem: the
-        // same play() is typically allowed once the page is visible.
-        // Retry once on the hidden→visible transition instead of sitting
-        // silent until the user happens to click (GH #53).
-        if (event.isPageHidden) {
-            effects.push({ kind: "armVisibilityRetry" });
-        }
-        return {
-            state: {
-                ...state,
-                status: "paused",
-                pausedAtMs: event.nowMs,
-                gestureRetryUsed: true,
-            },
-            effects,
-        };
+        return handleBlockedPlayStart(state, event);
     }
     return {
         state: { ...state, status: "error" },
@@ -813,40 +892,88 @@ const handlePlayPromiseRejected = (
 };
 
 const handleGestureRetryFired = (state: State): Transition => {
-    if (state.status !== "paused" || !state.hasSource) {
+    if (
+        state.status !== "paused" ||
+        !state.hasSource ||
+        !state.autoplay ||
+        state.pauseClassification === "user"
+    ) {
         return { state, effects: [{ kind: "disarmGestureRetry" }] };
     }
     return {
         state,
-        effects: [{ kind: "callPlay" }, { kind: "disarmGestureRetry" }],
+        effects: [
+            { kind: "callPlay" },
+            { kind: "disarmGestureRetry" },
+            {
+                kind: "telemetry",
+                event: "playback_retry_fired",
+                fields: { via: "gesture" },
+            },
+        ],
     };
 };
 
-const handleVisibilityRetryFired = (state: State): Transition => {
+const handleVisibilityRetryFired = (
+    state: State,
+    via: "visibility" | "focus",
+): Transition => {
     // One-shot: whatever happens, the arm is spent. A user pause between
-    // the rejection and the tab return must stay a pause, so only a
-    // still-externally-paused source is retried.
+    // the rejection and retry signal must stay a pause, so only a source
+    // that still carries play intent is retried.
     if (
         state.status !== "paused" ||
         !state.hasSource ||
+        !state.autoplay ||
         state.pauseClassification === "user"
     ) {
         return { state, effects: [{ kind: "disarmVisibilityRetry" }] };
     }
     return {
         state,
-        effects: [{ kind: "callPlay" }, { kind: "disarmVisibilityRetry" }],
+        effects: [
+            { kind: "callPlay" },
+            { kind: "disarmVisibilityRetry" },
+            {
+                kind: "telemetry",
+                event: "playback_retry_fired",
+                fields: { via },
+            },
+        ],
     };
 };
 
 const handleRetryTimerFired = (state: State): Transition => {
-    if (state.status !== "loading") {
+    if (state.status === "loading") {
+        return {
+            state,
+            effects: [
+                {
+                    kind: "applyLoad",
+                    autoplay: state.autoplay,
+                    isRetry: true,
+                },
+            ],
+        };
+    }
+    if (
+        state.status !== "paused" ||
+        !state.hasSource ||
+        !state.autoplay ||
+        state.pauseClassification === "user" ||
+        state.playStartRetriesUsed === 0
+    ) {
         return noChange(state);
     }
     return {
         state,
         effects: [
-            { kind: "applyLoad", autoplay: state.autoplay, isRetry: true },
+            { kind: "callPlay" },
+            {
+                kind: "telemetry",
+                event: "playback_retry_fired",
+                fields: { via: "timer" },
+            },
         ],
     };
 };
@@ -945,7 +1072,7 @@ export function transitionNativeEngine(
         case "GESTURE_RETRY_FIRED":
             return handleGestureRetryFired(state);
         case "VISIBILITY_RETRY_FIRED":
-            return handleVisibilityRetryFired(state);
+            return handleVisibilityRetryFired(state, event.via);
         case "RETRY_TIMER_FIRED":
             return handleRetryTimerFired(state);
         case "RELOAD_REQUESTED":

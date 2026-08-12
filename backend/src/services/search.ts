@@ -108,7 +108,7 @@ export class SearchService {
     private queryToTsquery(query: string): string {
         const terms = query
             .trim()
-            .replace(/\s*&\s*/g, " and ")
+            .replace(/&/g, " and ")
             .split(/\s+/)
             .map((term) => term.replace(/[^\w]/g, ""))
             .filter((term) => term.length > 0);

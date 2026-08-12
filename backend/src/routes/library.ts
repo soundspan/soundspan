@@ -1,8 +1,4 @@
-import {
-    Router,
-    type Request as ExpressRequest,
-    type Response as ExpressResponse,
-} from "express";
+import { Router } from "express";
 import {
     requireAdmin,
     requireAuth,
@@ -20,28 +16,22 @@ import fs from "fs";
 
 // Static imports for performance (avoid dynamic imports in hot paths)
 import { config } from "../config";
-import { isOriginAllowed } from "../utils/cors";
 import { fanartService } from "../services/fanart";
 import { allocateTracksWithArtistWeighting } from "../services/artistSlotAllocation";
 import { deezerService } from "../services/deezer";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
-import { getSystemSettings } from "../utils/systemSettings";
 import {
     AudioStreamingService,
     type Quality as StreamingQuality,
 } from "../services/audioStreaming";
 import { scanQueue } from "../workers/queues";
 import { organizeSingles } from "../workers/organizeSingles";
-import { BRAND_USER_AGENT } from "../config/brand";
 import { extractColorsFromImage } from "../utils/colorExtractor";
 import {
     fetchExternalImage,
-    MAX_EXTERNAL_IMAGE_BYTES,
     normalizeExternalImageUrl,
-    readResponseBodyWithByteCap,
 } from "../services/imageProxy";
-import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 import {
     negotiateCoverArtFormat,
     resizeCoverArt,
@@ -111,628 +101,54 @@ import {
     coversBaseDir,
 } from "../services/nativeCoverHealing";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
+import {
+    AUDIO_INFO_CACHE_TTL_MS,
+    audioInfoCache,
+    buildAudioInfoCacheKey,
+    normalizeStreamingQuality,
+    pruneAudioInfoCache,
+    readAudioInfoPayload,
+    resolveAudioInfoAbsolutePath,
+} from "../utils/libraryAudioInfo";
+import {
+    applyCoverArtCorsHeaders,
+    buildCoverArtCorsHeaders,
+    COVER_ART_IMAGE_CACHE_CONTROL,
+    COVER_ART_IMAGE_CACHE_TTL_SECONDS,
+    COVER_ART_NOT_FOUND_CACHE_TTL_SECONDS,
+    sendAudiobookCover,
+    trySendResizedNativeCover,
+} from "../utils/libraryCoverArt";
+import {
+    hasReliableEnhancedAnalysis,
+    moodPoolCondition,
+} from "../utils/libraryRadioPredicates";
+import {
+    DEFAULT_MY_LIKED_LIMIT,
+    isLibraryDeletionEnabled,
+    MAX_LIMIT,
+    MY_LIKED_PLAYLIST_DESCRIPTION,
+    MY_LIKED_PLAYLIST_ID,
+    MY_LIKED_PLAYLIST_NAME,
+    parseBooleanQueryParam,
+} from "../utils/libraryRouteSupport";
+import {
+    ALBUM_SORT_MAP,
+    ARTIST_SORT_MAP,
+    TRACK_SORT_MAP,
+} from "../utils/librarySorting";
+import {
+    admitLibraryMaintenance,
+    finishOrganizationInBackground,
+    LIBRARY_MAINTENANCE_JOB_ID,
+    libraryMaintenanceLogger,
+    releaseLibraryMaintenanceAdmission,
+    sanitizeScanProgress,
+    sanitizeScanResult,
+    startAdmittedLibraryScan,
+} from "../services/libraryMaintenance";
 
 const router = Router();
-
-const ARTIST_SORT_MAP: Record<string, any> = {
-    name: { name: "asc" as const },
-    "name-desc": { name: "desc" as const },
-    tracks: { totalTrackCount: "desc" as const },
-};
-
-const ALBUM_SORT_MAP: Record<string, any> = {
-    name: { title: "asc" as const },
-    "name-desc": { title: "desc" as const },
-    recent: { year: "desc" as const },
-};
-
-const TRACK_SORT_MAP: Record<string, any> = {
-    name: { title: "asc" as const },
-    "name-desc": { title: "desc" as const },
-};
-
-// Maximum items per request to prevent DoS attacks while supporting large libraries
-const MAX_LIMIT = 10000;
-const DEFAULT_MY_LIKED_LIMIT = 100;
-const MY_LIKED_PLAYLIST_ID = "my-liked";
-const MY_LIKED_PLAYLIST_NAME = "My Liked";
-const MY_LIKED_PLAYLIST_DESCRIPTION = "All your thumbs-up tracks";
-const COVER_ART_IMAGE_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
-const COVER_ART_NOT_FOUND_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
-const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_TTL_SECONDS}, immutable`;
-const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
-const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
-const LIBRARY_MAINTENANCE_JOB_ID = "library-global-maintenance";
-const LIBRARY_MAINTENANCE_CLAIM_KEY =
-    "library:maintenance:admission:library-global-maintenance";
-const LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS = 6 * 60 * 60;
-const LIBRARY_MAINTENANCE_COOLDOWN_SECONDS = 30;
-const libraryMaintenanceLogger = logger.child("LibraryMaintenance");
-
-interface AdmittedLibraryMaintenance {
-    admitted: true;
-    claimToken: string;
-    cooldownKey: string;
-    cooldownToken: string;
-}
-
-interface RejectedLibraryMaintenance {
-    admitted: false;
-    reason: "active" | "cooldown";
-    jobId?: string;
-}
-
-type LibraryMaintenanceAdmission =
-    | AdmittedLibraryMaintenance
-    | RejectedLibraryMaintenance;
-
-const releaseRedisClaim = async (key: string, token: string): Promise<void> => {
-    try {
-        await scanQueue.client.eval(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-            1,
-            key,
-            token,
-        );
-    } catch (error) {
-        libraryMaintenanceLogger.warn("Failed to release admission claim", {
-            key,
-            error,
-        });
-    }
-};
-
-const findPendingLibraryMaintenanceJob = async () => {
-    const jobs = await scanQueue.getJobs(
-        ["active", "waiting", "delayed", "paused"],
-        0,
-        0,
-        true,
-    );
-    return jobs[0] ?? null;
-};
-
-const removeSettledLibraryMaintenanceJob = async (): Promise<void> => {
-    const job = await scanQueue.getJob(LIBRARY_MAINTENANCE_JOB_ID);
-    if (!job) {
-        return;
-    }
-    const state = await job.getState();
-    if (state === "completed" || state === "failed") {
-        await job.remove();
-    }
-};
-
-const admitLibraryMaintenance = async (
-    userId: string,
-): Promise<LibraryMaintenanceAdmission> => {
-    const claimToken = crypto.randomUUID();
-    const acquired = await scanQueue.client.set(
-        LIBRARY_MAINTENANCE_CLAIM_KEY,
-        claimToken,
-        "EX",
-        LIBRARY_MAINTENANCE_CLAIM_TTL_SECONDS,
-        "NX",
-    );
-    if (acquired !== "OK") {
-        return { admitted: false, reason: "active" };
-    }
-
-    try {
-        const pendingJob = await findPendingLibraryMaintenanceJob();
-        if (pendingJob) {
-            await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
-            return {
-                admitted: false,
-                reason: "active",
-                jobId: String(pendingJob.id),
-            };
-        }
-        await removeSettledLibraryMaintenanceJob();
-
-        const cooldownKey = `library:maintenance:cooldown:${userId}`;
-        const cooldownToken = crypto.randomUUID();
-        const cooldownAcquired = await scanQueue.client.set(
-            cooldownKey,
-            cooldownToken,
-            "EX",
-            LIBRARY_MAINTENANCE_COOLDOWN_SECONDS,
-            "NX",
-        );
-        if (cooldownAcquired !== "OK") {
-            await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
-            return { admitted: false, reason: "cooldown" };
-        }
-
-        return {
-            admitted: true,
-            claimToken,
-            cooldownKey,
-            cooldownToken,
-        };
-    } catch (error) {
-        await releaseRedisClaim(LIBRARY_MAINTENANCE_CLAIM_KEY, claimToken);
-        throw error;
-    }
-};
-
-const releaseLibraryMaintenanceAdmission = async (
-    admission: AdmittedLibraryMaintenance,
-    keepCooldown: boolean,
-): Promise<void> => {
-    await releaseRedisClaim(
-        LIBRARY_MAINTENANCE_CLAIM_KEY,
-        admission.claimToken,
-    );
-    if (!keepCooldown) {
-        await releaseRedisClaim(admission.cooldownKey, admission.cooldownToken);
-    }
-};
-
-const finishOrganizationInBackground = async (
-    organization: Promise<void>,
-    admission: AdmittedLibraryMaintenance,
-): Promise<void> => {
-    try {
-        await organization;
-    } catch (error) {
-        libraryMaintenanceLogger.error("Manual organization failed", error);
-    } finally {
-        await releaseLibraryMaintenanceAdmission(admission, true);
-    }
-};
-
-interface SanitizedScanResult {
-    tracksAdded: number;
-    tracksUpdated: number;
-    tracksRemoved: number;
-    failedCount: number;
-    duration: number;
-}
-
-const toNonNegativeInteger = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) && value >= 0
-        ? Math.floor(value)
-        : 0;
-
-const sanitizeScanProgress = (value: unknown): number => {
-    let percent = value;
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        const fields = value as Record<string, unknown>;
-        if (typeof fields.percent === "number") {
-            percent = fields.percent;
-        } else if (
-            typeof fields.processed === "number" &&
-            typeof fields.total === "number" &&
-            fields.total > 0
-        ) {
-            percent = (fields.processed / fields.total) * 100;
-        }
-    }
-
-    return Math.min(100, toNonNegativeInteger(percent));
-};
-
-const sanitizeScanResult = (value: unknown): SanitizedScanResult | null => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return null;
-    }
-
-    const fields = value as Record<string, unknown>;
-    return {
-        tracksAdded: toNonNegativeInteger(fields.tracksAdded),
-        tracksUpdated: toNonNegativeInteger(fields.tracksUpdated),
-        tracksRemoved: toNonNegativeInteger(fields.tracksRemoved),
-        failedCount: Array.isArray(fields.errors) ? fields.errors.length : 0,
-        duration: toNonNegativeInteger(fields.duration),
-    };
-};
-
-const organizeBeforeLibraryScan = async (): Promise<void> => {
-    try {
-        libraryMaintenanceLogger.info(
-            "Organizing downloads before library scan",
-        );
-        await organizeSingles();
-        libraryMaintenanceLogger.info("Download organization complete");
-    } catch (error) {
-        libraryMaintenanceLogger.warn(
-            "Download organization skipped before library scan",
-            error,
-        );
-    }
-};
-
-const startAdmittedLibraryScan = async (
-    userId: string,
-    admission: AdmittedLibraryMaintenance,
-) => {
-    let scanQueued = false;
-    try {
-        await organizeBeforeLibraryScan();
-        const job = await scanQueue.add(
-            "scan",
-            { userId, musicPath: config.music.musicPath },
-            {
-                jobId: LIBRARY_MAINTENANCE_JOB_ID,
-            },
-        );
-        scanQueued = true;
-        return job;
-    } finally {
-        await releaseLibraryMaintenanceAdmission(admission, scanQueued);
-    }
-};
-
-const moodPoolCondition = (moodValue: string): Prisma.Sql => {
-    switch (moodValue) {
-        case "high-energy":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.energy >= ${0.7} AND t.bpm >= ${120}`;
-        case "chill":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND (t.energy <= ${0.4} OR t.arousal <= ${0.4})`;
-        case "happy":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.valence >= ${0.6} AND t.energy >= ${0.5}`;
-        case "melancholy":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND (t.valence <= ${0.4} OR t."keyScale" = ${"minor"})`;
-        case "dance":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.danceability >= ${0.7}`;
-        case "acoustic":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.acousticness >= ${0.6}`;
-        case "instrumental":
-            return Prisma.sql`t."analysisStatus" = ${"completed"} AND t.instrumentalness >= ${0.7}`;
-        default:
-            return Prisma.sql`${moodValue} = ANY(t."lastfmTags")`;
-    }
-};
-
-interface AudioInfoResponsePayload {
-    codec: string | null;
-    bitrate: number | null;
-    sampleRate: number | null;
-    bitDepth: number | null;
-    lossless: boolean | null;
-    channels: number | null;
-}
-
-interface AudioInfoCacheEntry {
-    expiresAt: number;
-    payload: AudioInfoResponsePayload;
-}
-
-const audioInfoCache = new Map<string, AudioInfoCacheEntry>();
-
-const buildAudioInfoCacheKey = (
-    trackId: string,
-    filePath: string,
-    fileModified?: Date | null,
-    options: {
-        scope?: "source" | "playback";
-        quality?: StreamingQuality | null;
-    } = {},
-): string => {
-    const modifiedToken =
-        fileModified instanceof Date ? fileModified.toISOString() : "unknown";
-    const scope = options.scope ?? "source";
-    const quality = options.quality ?? "na";
-    return `${trackId}:${scope}:${quality}:${filePath}:${modifiedToken}`;
-};
-
-const pruneAudioInfoCache = (now: number) => {
-    for (const [key, entry] of audioInfoCache.entries()) {
-        if (entry.expiresAt <= now) {
-            audioInfoCache.delete(key);
-        }
-    }
-
-    while (audioInfoCache.size > AUDIO_INFO_CACHE_MAX_ENTRIES) {
-        const oldestKey = audioInfoCache.keys().next().value as
-            | string
-            | undefined;
-        if (!oldestKey) break;
-        audioInfoCache.delete(oldestKey);
-    }
-};
-
-const normalizeStreamingQuality = (value: unknown): StreamingQuality | null => {
-    if (typeof value !== "string") {
-        return null;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (
-        normalized === "original" ||
-        normalized === "high" ||
-        normalized === "medium" ||
-        normalized === "low"
-    ) {
-        return normalized;
-    }
-    return null;
-};
-
-const resolveAudioInfoAbsolutePath = (
-    relativeFilePath: string,
-): string | null =>
-    safeResolvePath(
-        config.music.musicPath,
-        relativeFilePath.replace(/\\/g, "/"),
-    );
-
-const readAudioInfoPayload = async (
-    absolutePath: string,
-): Promise<AudioInfoResponsePayload> => {
-    const { parseFile } = await import("music-metadata");
-    const metadata = await parseFile(absolutePath, {
-        duration: false,
-        skipCovers: true,
-    });
-    const fmt = metadata.format;
-
-    return {
-        codec: fmt.codec || null,
-        bitrate: fmt.bitrate ? Math.round(fmt.bitrate / 1000) : null, // kbps
-        sampleRate: fmt.sampleRate || null, // Hz
-        bitDepth: fmt.bitsPerSample || null, // e.g. 16, 24
-        lossless: fmt.lossless ?? null,
-        channels: fmt.numberOfChannels || null,
-    };
-};
-
-const hasReliableEnhancedAnalysis = (
-    analysisMode: string | null | undefined,
-    analysisVersion: string | null | undefined,
-): boolean =>
-    analysisMode === "enhanced" &&
-    typeof analysisVersion === "string" &&
-    analysisVersion.startsWith(RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX);
-
-const parseBooleanQueryParam = (
-    value: unknown,
-    defaultValue = true,
-): boolean => {
-    if (typeof value === "boolean") {
-        return value;
-    }
-
-    if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        if (
-            normalized === "true" ||
-            normalized === "1" ||
-            normalized === "yes" ||
-            normalized === "on"
-        ) {
-            return true;
-        }
-        if (
-            normalized === "false" ||
-            normalized === "0" ||
-            normalized === "no" ||
-            normalized === "off"
-        ) {
-            return false;
-        }
-    }
-
-    return defaultValue;
-};
-
-// Cover art reflects the request Origin with credentials only when it passes
-// the same ALLOWED_ORIGINS allowlist the Express app enforces (utils/cors.ts);
-// unlisted origins get no CORS headers (still served, like the cors
-// middleware's deny). Production denies cross-origin requests when the
-// allowlist is empty unless CORS_ALLOW_ALL is enabled; development allows all.
-const buildCoverArtCorsHeaders = (origin?: string): Record<string, string> => {
-    const headers: Record<string, string> = {
-        "Cross-Origin-Resource-Policy": "cross-origin",
-    };
-    if (!origin) {
-        headers["Access-Control-Allow-Origin"] = "*";
-    } else if (isOriginAllowed(origin, config.allowedOrigins, config.nodeEnv)) {
-        headers["Access-Control-Allow-Origin"] = origin;
-        headers["Access-Control-Allow-Credentials"] = "true";
-    }
-    return headers;
-};
-
-const applyCoverArtCorsHeaders = (res: ExpressResponse, origin?: string) => {
-    for (const [name, value] of Object.entries(
-        buildCoverArtCorsHeaders(origin),
-    )) {
-        res.setHeader(name, value);
-    }
-};
-
-const sendAudiobookCover = async (
-    req: ExpressRequest,
-    res: ExpressResponse,
-    audiobookPath: string,
-): Promise<ExpressResponse> => {
-    const coverArtLogger = logger.child("CoverArt");
-    const settings = await getSystemSettings();
-    const audiobookshelfUrl =
-        settings?.audiobookshelfUrl || process.env.AUDIOBOOKSHELF_URL || "";
-    const audiobookshelfApiKey =
-        settings?.audiobookshelfApiKey ||
-        (config.secretsDbOnly ? "" : process.env.AUDIOBOOKSHELF_API_KEY || "");
-    const coverUrl = buildSafeAudiobookCoverUrl(
-        audiobookPath,
-        audiobookshelfUrl.replace(/\/$/, ""),
-    );
-
-    if (!coverUrl) {
-        coverArtLogger.warn("Blocked unsafe audiobook cover path", {
-            audiobookPath,
-        });
-        return sendRouteError(res, 400, "Invalid audiobook cover path");
-    }
-
-    coverArtLogger.debug("Fetching audiobook cover", { coverUrl });
-    const imageResponse = await fetch(coverUrl, {
-        headers: {
-            Authorization: `Bearer ${audiobookshelfApiKey}`,
-            "User-Agent": BRAND_USER_AGENT,
-        },
-        signal: AbortSignal.timeout(15000),
-    });
-
-    if (!imageResponse.ok) {
-        coverArtLogger.error("Failed to fetch audiobook cover", {
-            coverUrl,
-            status: imageResponse.status,
-            statusText: imageResponse.statusText,
-        });
-        try {
-            await imageResponse.body?.cancel();
-        } catch (error) {
-            coverArtLogger.warn("Failed to cancel audiobook cover body", {
-                coverUrl,
-                error,
-            });
-        }
-        return sendRouteError(res, 404, "Audiobook cover art not found");
-    }
-
-    const bodyResult = await readResponseBodyWithByteCap(
-        imageResponse,
-        MAX_EXTERNAL_IMAGE_BYTES,
-    );
-    if (!bodyResult.ok) {
-        return sendRouteError(res, 404, "Audiobook cover art not found");
-    }
-    const imageBuffer = bodyResult.buffer;
-    const contentType = imageResponse.headers.get("content-type");
-    if (contentType) {
-        res.setHeader("Content-Type", contentType);
-    }
-    applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-    res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
-    return res.send(imageBuffer);
-};
-
-const sendResizedNativeCoverResponse = (
-    req: ExpressRequest,
-    res: ExpressResponse,
-    etag: string,
-    contentType: string | null,
-    buffer: Buffer,
-): void => {
-    if (contentType) {
-        res.setHeader("Content-Type", contentType);
-    }
-    applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-    res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
-    res.setHeader("Vary", "Accept");
-    res.setHeader("ETag", etag);
-    res.send(buffer);
-};
-
-/**
- * Serves a native cover file resized to the requested `size` query param.
- * Resized variants are cached in Redis keyed by file identity
- * (path + mtime + size on disk) plus the snapped size and negotiated
- * format, so repeat requests and If-None-Match revalidations are
- * answered without re-decoding the image. Returns true when a response
- * was sent; false when the caller should fall back to sending the
- * original file from disk.
- */
-const trySendResizedNativeCover = async (
-    req: ExpressRequest,
-    res: ExpressResponse,
-    cachePath: string,
-): Promise<boolean> => {
-    const requestedSize = snapCoverArtSize(req.query.size);
-    if (!requestedSize) {
-        return false;
-    }
-
-    try {
-        const imageFormat = negotiateCoverArtFormat(req.headers.accept);
-        const fileStat = await fs.promises.stat(cachePath);
-        const cacheKey = `cover-art:native:${crypto
-            .createHash("md5")
-            .update(
-                `${cachePath}-${fileStat.mtimeMs}-${fileStat.size}-${requestedSize}-${imageFormat}`,
-            )
-            .digest("hex")}`;
-
-        try {
-            const cached = await redisClient.get(cacheKey);
-            if (cached) {
-                const cachedData = JSON.parse(cached);
-                if (req.headers["if-none-match"] === cachedData.etag) {
-                    res.status(304).end();
-                    return true;
-                }
-                sendResizedNativeCoverResponse(
-                    req,
-                    res,
-                    cachedData.etag,
-                    cachedData.contentType ?? null,
-                    Buffer.from(cachedData.data, "base64"),
-                );
-                return true;
-            }
-        } catch (cacheError) {
-            logger.warn("[COVER-ART] Redis cache read error:", cacheError);
-        }
-
-        const fileBuffer = await fs.promises.readFile(cachePath);
-        const resizeResult = await resizeCoverArt({
-            buffer: fileBuffer,
-            contentType: "image/jpeg",
-            size: requestedSize,
-            format: imageFormat,
-        });
-        if (!resizeResult.resized) {
-            return false;
-        }
-
-        const etag = crypto
-            .createHash("md5")
-            .update(resizeResult.buffer)
-            .digest("hex");
-
-        try {
-            await redisClient.setEx(
-                cacheKey,
-                COVER_ART_IMAGE_CACHE_TTL_SECONDS,
-                JSON.stringify({
-                    etag,
-                    contentType: resizeResult.contentType,
-                    data: resizeResult.buffer.toString("base64"),
-                }),
-            );
-        } catch (cacheError) {
-            logger.warn("[COVER-ART] Redis cache write error:", cacheError);
-        }
-
-        if (req.headers["if-none-match"] === etag) {
-            res.status(304).end();
-            return true;
-        }
-
-        sendResizedNativeCoverResponse(
-            req,
-            res,
-            etag,
-            resizeResult.contentType,
-            resizeResult.buffer,
-        );
-        return true;
-    } catch (error) {
-        logger.warn(
-            `[COVER-ART] Native cover resize failed for ${cachePath}:`,
-            error,
-        );
-        return false;
-    }
-};
-
-const isLibraryDeletionEnabled = async (): Promise<boolean> => {
-    const settings = await getSystemSettings();
-    return settings?.libraryDeletionEnabled !== false;
-};
 
 // All routes require auth (session or API key)
 router.use(requireAuthOrToken);

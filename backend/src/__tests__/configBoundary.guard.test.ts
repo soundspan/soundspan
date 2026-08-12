@@ -11,7 +11,7 @@ const ALLOWLIST = [
     "middleware/internalAuth.ts",
     "routes/auth.ts",
     "routes/browse.ts",
-    "routes/library.ts",
+    "utils/libraryCoverArt.ts",
     "routes/podcasts.ts",
     "routes/subsonic.ts",
     "routes/systemSettings.ts",

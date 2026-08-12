@@ -234,6 +234,20 @@ describe("deezerService", () => {
         );
     });
 
+    it.each([
+        ["backslashes", String.raw`Artist\Name`, String.raw`Artist\\Name`],
+        ["double quotes", 'Artist "Name"', String.raw`Artist \"Name\"`],
+        [
+            "backslash-quote combinations",
+            String.raw`Artist\"Name"`,
+            String.raw`Artist\\\"Name\"`,
+        ],
+    ])("escapes Deezer query phrase %s safely", (_case, input, expected) => {
+        expect((deezerService as any).escapeDeezerQueryPhrase(input)).toBe(
+            expected,
+        );
+    });
+
     it("drops empty album-title variants after descriptor stripping", () => {
         const variants = (deezerService as any).buildAlbumTitleVariants(
             " (Deluxe Edition) ",

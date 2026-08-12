@@ -4095,6 +4095,76 @@ describe("lidarr service behavior", () => {
         waitSpy.mockRestore();
     });
 
+    it.each([
+        ["parenthetical", "("],
+        ["bracket", "["],
+    ])(
+        "addAlbum preserves exact title matching for a long unmatched %s opening delimiter",
+        async (_case, openingDelimiter) => {
+            const client = createClientMock();
+            primeServiceWithClient(client);
+            const longTitle = `Long Album ${openingDelimiter}${"x".repeat(
+                50_000,
+            )}`;
+            const artist = {
+                id: 56,
+                artistName: "Long Match Band",
+                foreignArtistId: "artist-long-match",
+                monitored: true,
+            };
+            const album = {
+                id: 903,
+                title: longTitle,
+                foreignAlbumId: "album-long-match",
+                artistId: 56,
+            };
+
+            client.get
+                .mockResolvedValueOnce({ data: [artist] })
+                .mockResolvedValueOnce({ data: [album] })
+                .mockResolvedValueOnce({
+                    data: {
+                        ...album,
+                        monitored: true,
+                        anyReleaseOk: true,
+                        releases: [{ id: 1 }],
+                    },
+                })
+                .mockResolvedValueOnce({
+                    data: {
+                        ...album,
+                        monitored: true,
+                        anyReleaseOk: true,
+                        releases: [{ id: 1 }],
+                    },
+                });
+            client.put.mockResolvedValue({
+                data: { ...album, monitored: true },
+            });
+            client.post.mockResolvedValue({ data: { id: 9103 } });
+            const waitSpy = jest
+                .spyOn(lidarrService as any, "waitForCommand")
+                .mockResolvedValue({
+                    status: "completed",
+                    message: "Search completed with 1 report",
+                });
+            const startedAt = performance.now();
+
+            await expect(
+                lidarrService.addAlbum(
+                    "different-mbid",
+                    "Long Match Band",
+                    longTitle,
+                    "/music",
+                    "artist-long-match",
+                ),
+            ).resolves.toEqual(expect.objectContaining({ id: 903 }));
+            expect(performance.now() - startedAt).toBeLessThan(500);
+
+            waitSpy.mockRestore();
+        },
+    );
+
     it("addAlbum matches album title using strict partial normalized comparison", async () => {
         const client = createClientMock();
         primeServiceWithClient(client);
