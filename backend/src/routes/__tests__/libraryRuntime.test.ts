@@ -4059,6 +4059,60 @@ describe("library catalog list runtime coverage", () => {
         unlinkSpy.mockRestore();
     });
 
+    it("skips absolute and dot-segment track paths while deleting their database rows", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            libraryDeletionEnabled: true,
+        });
+        mockTrackFindUnique
+            .mockResolvedValueOnce({
+                id: "track-absolute",
+                title: "Absolute Path",
+                filePath: "/outside/track.flac",
+            })
+            .mockResolvedValueOnce({
+                id: "track-windows-absolute",
+                title: "Windows Absolute Path",
+                filePath: "C:\\outside\\track.flac",
+            })
+            .mockResolvedValueOnce({
+                id: "track-dot-segment",
+                title: "Dot Segment Path",
+                filePath: "Artist/../outside.flac",
+            });
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = jest
+            .spyOn(fs, "unlinkSync")
+            .mockImplementation(() => undefined);
+
+        await deleteTrackHandler(
+            { params: { id: "track-absolute" } } as any,
+            createRes(),
+        );
+        await deleteTrackHandler(
+            { params: { id: "track-windows-absolute" } } as any,
+            createRes(),
+        );
+        await deleteTrackHandler(
+            { params: { id: "track-dot-segment" } } as any,
+            createRes(),
+        );
+
+        expect(existsSpy).not.toHaveBeenCalled();
+        expect(unlinkSpy).not.toHaveBeenCalled();
+        expect(mockTrackDelete).toHaveBeenNthCalledWith(1, {
+            where: { id: "track-absolute" },
+        });
+        expect(mockTrackDelete).toHaveBeenNthCalledWith(2, {
+            where: { id: "track-windows-absolute" },
+        });
+        expect(mockTrackDelete).toHaveBeenNthCalledWith(3, {
+            where: { id: "track-dot-segment" },
+        });
+
+        existsSpy.mockRestore();
+        unlinkSpy.mockRestore();
+    });
+
     it("continues track deletion when file removal fails", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             libraryDeletionEnabled: true,
@@ -4172,6 +4226,62 @@ describe("library catalog list runtime coverage", () => {
             deletedFiles: 2,
             lidarrDeleted: false,
             lidarrError: null,
+        });
+
+        existsSpy.mockRestore();
+        unlinkSpy.mockRestore();
+        rmSpy.mockRestore();
+    });
+
+    it("contains artist file and recursive folder deletion for malicious persisted paths", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            libraryDeletionEnabled: true,
+        });
+        mockArtistFindUnique.mockResolvedValueOnce({
+            id: "artist-containment",
+            name: "Safe Artist",
+            mbid: null,
+            albums: [
+                {
+                    tracks: [
+                        { filePath: "../outside/track.flac" },
+                        { filePath: "/absolute/track.flac" },
+                        { filePath: "Artist/../Other/track.flac" },
+                        {
+                            filePath:
+                                "Safe Artist/Safe Album/safe-track.flac",
+                        },
+                    ],
+                },
+            ],
+        });
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = jest
+            .spyOn(fs, "unlinkSync")
+            .mockImplementation(() => undefined);
+        const rmSpy = jest
+            .spyOn(fs, "rmSync")
+            .mockImplementation(() => undefined);
+
+        const res = createRes();
+        await deleteArtistHandler(
+            { params: { id: "artist-containment" } } as any,
+            res,
+        );
+
+        expect(unlinkSpy).toHaveBeenCalledTimes(1);
+        expect(unlinkSpy).toHaveBeenCalledWith(
+            "/music/Safe Artist/Safe Album/safe-track.flac",
+        );
+        expect(rmSpy).toHaveBeenCalled();
+        for (const [targetPath] of rmSpy.mock.calls) {
+            expect(targetPath).not.toBe("/music");
+            expect(targetPath).not.toBe("/");
+            expect(targetPath.toString().startsWith("/music/")).toBe(true);
+        }
+        expect(res.body.deletedFiles).toBe(1);
+        expect(mockArtistDelete).toHaveBeenCalledWith({
+            where: { id: "artist-containment" },
         });
 
         existsSpy.mockRestore();
@@ -4416,6 +4526,51 @@ describe("library catalog list runtime coverage", () => {
             message: "Album deleted successfully",
             deletedFiles: 1,
         });
+
+        existsSpy.mockRestore();
+        unlinkSpy.mockRestore();
+        readdirSpy.mockRestore();
+        rmdirSpy.mockRestore();
+    });
+
+    it("skips unsafe album track paths and out-of-root album folders", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            libraryDeletionEnabled: true,
+        });
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-contained",
+            title: "..",
+            artist: { name: ".." },
+            tracks: [
+                { filePath: "../outside.flac" },
+                { filePath: "Safe Artist/Safe Album/safe.flac" },
+            ],
+        });
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = jest
+            .spyOn(fs, "unlinkSync")
+            .mockImplementation(() => undefined);
+        const readdirSpy = jest.spyOn(fs, "readdirSync").mockReturnValue([]);
+        const rmdirSpy = jest
+            .spyOn(fs, "rmdirSync")
+            .mockImplementation(() => undefined);
+
+        const res = createRes();
+        await deleteAlbumHandler(
+            { params: { id: "album-contained" } } as any,
+            res,
+        );
+
+        expect(unlinkSpy).toHaveBeenCalledTimes(1);
+        expect(unlinkSpy).toHaveBeenCalledWith(
+            "/music/Safe Artist/Safe Album/safe.flac",
+        );
+        expect(readdirSpy).not.toHaveBeenCalled();
+        expect(rmdirSpy).not.toHaveBeenCalled();
+        expect(mockAlbumDelete).toHaveBeenCalledWith({
+            where: { id: "album-contained" },
+        });
+        expect(res.body.deletedFiles).toBe(1);
 
         existsSpy.mockRestore();
         unlinkSpy.mockRestore();

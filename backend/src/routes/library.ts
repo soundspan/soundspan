@@ -5281,6 +5281,49 @@ router.get<{ id: string }>(
  *       401:
  *         description: Not authenticated
  */
+interface PersistedTrackDeletionPath {
+    absolutePath: string;
+    pathParts: string[];
+}
+
+const resolvePersistedTrackDeletionPath = (
+    persistedPath: string,
+): PersistedTrackDeletionPath | null => {
+    const normalizedPath = persistedPath.replace(/\\/g, "/");
+    if (
+        path.posix.isAbsolute(normalizedPath) ||
+        path.win32.isAbsolute(persistedPath)
+    ) {
+        return null;
+    }
+
+    const pathParts = normalizedPath.split("/").filter(Boolean);
+    if (
+        pathParts.length === 0 ||
+        pathParts.some((part) => part === "." || part === "..")
+    ) {
+        return null;
+    }
+
+    const absolutePath = safeResolvePath(
+        config.music.musicPath,
+        normalizedPath,
+    );
+    return absolutePath ? { absolutePath, pathParts } : null;
+};
+
+const isSafeRecursiveDeletionTarget = (targetPath: string): boolean => {
+    const musicPath = path.resolve(config.music.musicPath);
+    const resolvedTarget = path.resolve(targetPath);
+    const relativeTarget = path.relative(musicPath, resolvedTarget);
+    return (
+        safeResolvePath(config.music.musicPath, relativeTarget) ===
+        resolvedTarget
+    );
+};
+
+const libraryDeletionLogger = logger.child("LibraryDeletion");
+
 // DELETE /library/tracks/:id
 router.delete<{ id: string }>(
     "/tracks/:id",
@@ -5310,23 +5353,29 @@ router.delete<{ id: string }>(
 
         // Delete file from filesystem if path is available
         if (track.filePath) {
-            try {
-                const normalizedRelativePath = track.filePath.replace(
-                    /\\/g,
-                    "/",
+            const deletionPath = resolvePersistedTrackDeletionPath(
+                track.filePath,
+            );
+            if (!deletionPath) {
+                libraryDeletionLogger.warn(
+                    "Skipped unsafe persisted track path",
+                    { trackId: track.id },
                 );
-                const absolutePath = path.join(
-                    config.music.musicPath,
-                    normalizedRelativePath,
-                );
-
-                if (fs.existsSync(absolutePath)) {
-                    fs.unlinkSync(absolutePath);
-                    logger.debug(`[DELETE] Deleted file: ${absolutePath}`);
+            } else {
+                try {
+                    if (fs.existsSync(deletionPath.absolutePath)) {
+                        fs.unlinkSync(deletionPath.absolutePath);
+                        libraryDeletionLogger.debug("Deleted track file", {
+                            trackId: track.id,
+                        });
+                    }
+                } catch (err) {
+                    libraryDeletionLogger.warn(
+                        "Could not delete track file",
+                        { trackId: track.id, error: err },
+                    );
+                    // Continue with database deletion even if file deletion fails
                 }
-            } catch (err) {
-                logger.warn("[DELETE] Could not delete file:", err);
-                // Continue with database deletion even if file deletion fails
             }
         }
 
@@ -5408,22 +5457,25 @@ router.delete<{ id: string }>(
         let deletedFiles = 0;
         for (const track of album.tracks) {
             if (track.filePath) {
-                try {
-                    const normalizedRelativePath = track.filePath.replace(
-                        /\\/g,
-                        "/",
+                const deletionPath = resolvePersistedTrackDeletionPath(
+                    track.filePath,
+                );
+                if (!deletionPath) {
+                    libraryDeletionLogger.warn(
+                        "Skipped unsafe persisted album track path",
                     );
-                    const absolutePath = path.join(
-                        config.music.musicPath,
-                        normalizedRelativePath,
-                    );
-
-                    if (fs.existsSync(absolutePath)) {
-                        fs.unlinkSync(absolutePath);
-                        deletedFiles++;
+                } else {
+                    try {
+                        if (fs.existsSync(deletionPath.absolutePath)) {
+                            fs.unlinkSync(deletionPath.absolutePath);
+                            deletedFiles++;
+                        }
+                    } catch (err) {
+                        libraryDeletionLogger.warn(
+                            "Could not delete album track file",
+                            { error: err },
+                        );
                     }
-                } catch (err) {
-                    logger.warn("[DELETE] Could not delete file:", err);
                 }
             }
         }
@@ -5431,13 +5483,12 @@ router.delete<{ id: string }>(
         // Try to delete album folder if empty
         try {
             const artistName = album.artist.name;
-            const albumFolder = path.join(
+            const albumFolder = safeResolvePath(
                 config.music.musicPath,
-                artistName,
-                album.title,
+                path.join(artistName, album.title),
             );
 
-            if (fs.existsSync(albumFolder)) {
+            if (albumFolder && fs.existsSync(albumFolder)) {
                 const files = fs.readdirSync(albumFolder);
                 if (files.length === 0) {
                     fs.rmdirSync(albumFolder);
@@ -5541,54 +5592,38 @@ router.delete<{ id: string }>(
             for (const album of artist.albums) {
                 for (const track of album.tracks) {
                     if (track.filePath) {
-                        try {
-                            const normalizedRelativePath =
-                                track.filePath.replace(/\\/g, "/");
-                            const absolutePath = path.join(
-                                config.music.musicPath,
-                                normalizedRelativePath,
+                        const deletionPath =
+                            resolvePersistedTrackDeletionPath(track.filePath);
+                        if (!deletionPath) {
+                            libraryDeletionLogger.warn(
+                                "Skipped unsafe persisted artist track path",
                             );
+                        } else {
+                            try {
+                                if (fs.existsSync(deletionPath.absolutePath)) {
+                                    fs.unlinkSync(deletionPath.absolutePath);
+                                    deletedFiles++;
 
-                            if (fs.existsSync(absolutePath)) {
-                                fs.unlinkSync(absolutePath);
-                                deletedFiles++;
-
-                                // Extract actual artist folder from file path
-                                // Path format: Soulseek/Artist/Album/Track.mp3 OR Artist/Album/Track.mp3
-                                const pathParts = normalizedRelativePath
-                                    .split("/")
-                                    .filter((segment) => segment.length > 0);
-                                if (pathParts.length >= 2) {
-                                    // If first part is "Soulseek", artist folder is Soulseek/Artist
-                                    // Otherwise, artist folder is just Artist
-                                    const actualArtistFolder =
-                                        pathParts[0].toLowerCase() ===
+                                    // Path format: Soulseek/Artist/Album/Track.mp3 OR Artist/Album/Track.mp3
+                                    const artistPathParts =
+                                        deletionPath.pathParts[0].toLowerCase() ===
                                         "soulseek"
-                                            ? path.join(
-                                                  config.music.musicPath,
-                                                  pathParts[0],
-                                                  pathParts[1],
-                                              )
-                                            : path.join(
-                                                  config.music.musicPath,
-                                                  pathParts[0],
-                                              );
-                                    artistFoldersToDelete.add(
-                                        actualArtistFolder,
-                                    );
-                                } else if (pathParts.length === 1) {
-                                    // Single-level path (rare case)
-                                    const actualArtistFolder = path.join(
+                                            ? deletionPath.pathParts.slice(0, 2)
+                                            : deletionPath.pathParts.slice(0, 1);
+                                    const artistFolder = safeResolvePath(
                                         config.music.musicPath,
-                                        pathParts[0],
+                                        artistPathParts.join("/"),
                                     );
-                                    artistFoldersToDelete.add(
-                                        actualArtistFolder,
-                                    );
+                                    if (artistFolder) {
+                                        artistFoldersToDelete.add(artistFolder);
+                                    }
                                 }
+                            } catch (err) {
+                                libraryDeletionLogger.warn(
+                                    "Could not delete artist track file",
+                                    { error: err },
+                                );
                             }
-                        } catch (err) {
-                            logger.warn("[DELETE] Could not delete file:", err);
                         }
                     }
                 }
@@ -5596,6 +5631,12 @@ router.delete<{ id: string }>(
 
             // Delete artist folders based on actual file paths, not database name
             for (const artistFolder of artistFoldersToDelete) {
+                if (!isSafeRecursiveDeletionTarget(artistFolder)) {
+                    libraryDeletionLogger.warn(
+                        "Skipped unsafe recursive artist folder target",
+                    );
+                    continue;
+                }
                 try {
                     if (fs.existsSync(artistFolder)) {
                         logger.debug(
@@ -5621,7 +5662,13 @@ router.delete<{ id: string }>(
                     try {
                         const files = fs.readdirSync(artistFolder);
                         for (const file of files) {
-                            const filePath = path.join(artistFolder, file);
+                            const filePath = safeResolvePath(
+                                artistFolder,
+                                file,
+                            );
+                            if (!filePath) {
+                                continue;
+                            }
                             try {
                                 const stat = fs.statSync(filePath);
                                 if (stat.isDirectory()) {
@@ -5671,6 +5718,7 @@ router.delete<{ id: string }>(
 
             for (const commonPath of commonPaths) {
                 if (
+                    isSafeRecursiveDeletionTarget(commonPath) &&
                     fs.existsSync(commonPath) &&
                     !artistFoldersToDelete.has(commonPath)
                 ) {
