@@ -11,6 +11,7 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
     MAX_EXTERNAL_IMAGE_BYTES,
+    readResponseBodyWithByteCap,
 } from "../imageProxy";
 
 describe("imageProxy", () => {
@@ -383,6 +384,71 @@ describe("imageProxy", () => {
                 status: "fetch_error",
                 url: "https://example.com/unknown-error.jpg",
                 message: "Unknown fetch error",
+            });
+        });
+    });
+
+    describe("readResponseBodyWithByteCap", () => {
+        it("rejects a declared oversized body before reading and cancels it", async () => {
+            const cancel = jest.fn().mockResolvedValue(undefined);
+            const getReader = jest.fn();
+            const response = {
+                headers: new Headers({ "content-length": "2048" }),
+                body: { cancel, getReader },
+            } as unknown as Response;
+
+            const result = await readResponseBodyWithByteCap(response, 1024);
+
+            expect(result).toEqual({
+                ok: false,
+                error: "response_too_large",
+                message: "External image exceeds maximum size",
+            });
+            expect(getReader).not.toHaveBeenCalled();
+            expect(cancel).toHaveBeenCalledTimes(1);
+        });
+
+        it("cancels a streamed body as soon as its bytes exceed the cap", async () => {
+            const cancel = jest.fn();
+            const chunks = [
+                new Uint8Array(512),
+                new Uint8Array(512),
+                new Uint8Array(1),
+                new Uint8Array(512),
+                new Uint8Array(512),
+            ];
+            const body = new ReadableStream<Uint8Array>({
+                pull(controller) {
+                    const chunk = chunks.shift();
+                    if (chunk) {
+                        controller.enqueue(chunk);
+                    } else {
+                        controller.close();
+                    }
+                },
+                cancel,
+            });
+            const response = new Response(body, { status: 200 });
+
+            const result = await readResponseBodyWithByteCap(response, 1024);
+
+            expect(result).toEqual({
+                ok: false,
+                error: "response_too_large",
+                message: "External image exceeds maximum size",
+            });
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(chunks).toHaveLength(1);
+        });
+
+        it("returns a normal small streamed body", async () => {
+            const response = new Response("image-bytes", { status: 200 });
+
+            const result = await readResponseBodyWithByteCap(response, 1024);
+
+            expect(result).toEqual({
+                ok: true,
+                buffer: Buffer.from("image-bytes"),
             });
         });
     });

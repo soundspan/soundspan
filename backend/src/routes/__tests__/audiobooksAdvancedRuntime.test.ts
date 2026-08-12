@@ -346,15 +346,12 @@ describe("audiobooks advanced runtime", () => {
             })
             .mockResolvedValueOnce({ localCoverPath: null, coverUrl: null });
 
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            headers: {
-                get: jest.fn().mockReturnValue("image/png"),
-            },
-            arrayBuffer: jest
-                .fn()
-                .mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
-        });
+        mockFetch.mockResolvedValueOnce(
+            new Response(Uint8Array.from([1, 2, 3]), {
+                status: 200,
+                headers: { "content-type": "image/png" },
+            }),
+        );
 
         const proxyRes = createRes();
         await coverHandler(

@@ -6,6 +6,10 @@ import path from "path";
 import { config } from "../config";
 import { buildCachePath, isPastStaleWindow } from "./cacheHelpers";
 import { buildSafeAudiobookCoverUrl } from "./audiobookCoverProxy";
+import {
+    MAX_EXTERNAL_IMAGE_BYTES,
+    readResponseBodyWithByteCap,
+} from "./imageProxy";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -351,11 +355,17 @@ export class AudiobookCacheService {
                 );
             }
 
-            const buffer = await response.arrayBuffer();
+            const bodyResult = await readResponseBodyWithByteCap(
+                response,
+                MAX_EXTERNAL_IMAGE_BYTES,
+            );
+            if (!bodyResult.ok) {
+                return null;
+            }
             const fileName = `${audiobookId}.jpg`;
             const filePath = path.join(this.coverCacheDir, fileName);
 
-            await fs.writeFile(filePath, Buffer.from(buffer));
+            await fs.writeFile(filePath, bodyResult.buffer);
 
             return filePath;
         } catch (error: any) {

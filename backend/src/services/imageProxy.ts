@@ -14,6 +14,21 @@ import {
  */
 export const MAX_EXTERNAL_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB
 
+/** Result of reading a response body under the external-image byte cap. */
+export type BoundedResponseBodyResult =
+    | { ok: true; buffer: Buffer }
+    | {
+          ok: false;
+          error: "response_too_large";
+          message: "External image exceeds maximum size";
+      };
+
+const RESPONSE_TOO_LARGE_RESULT = Object.freeze({
+    ok: false,
+    error: "response_too_large",
+    message: "External image exceeds maximum size",
+} as const);
+
 /**
  * Normalizes a remote image URL with the shared outbound safety policy.
  */
@@ -91,40 +106,58 @@ async function fetchWithSafeRedirects(options: {
 }
 
 /**
- * Reads a response body while enforcing a byte cap. Returns null (after
- * cancelling the body stream) when the declared Content-Length or the bytes
- * actually read exceed `maxBytes`, so oversized images are never fully
- * buffered into memory.
+ * Reads an external-image response body as a stream under a strict byte cap.
+ * Oversized bodies return a code-owned error result after the response stream
+ * is cancelled; no upstream response details are exposed.
  */
-async function readBodyWithByteCap(
+export async function readResponseBodyWithByteCap(
     response: Response,
-    maxBytes: number,
-): Promise<Buffer | null> {
-    const declaredLength = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    maxBytes = MAX_EXTERNAL_IMAGE_BYTES,
+): Promise<BoundedResponseBodyResult> {
+    if (
+        !Number.isSafeInteger(maxBytes) ||
+        maxBytes < 1 ||
+        maxBytes > MAX_EXTERNAL_IMAGE_BYTES
+    ) {
+        throw new RangeError("Invalid external image byte cap");
+    }
+
+    const rawDeclaredLength = response.headers.get("content-length");
+    const declaredLength =
+        rawDeclaredLength === null ? null : Number(rawDeclaredLength);
+    if (declaredLength !== null && declaredLength > maxBytes) {
         await response.body?.cancel().catch(() => {});
-        return null;
+        return RESPONSE_TOO_LARGE_RESULT;
     }
 
     if (!response.body) {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        return buffer.byteLength > maxBytes ? null : buffer;
+        return { ok: true, buffer: Buffer.alloc(0) };
     }
 
     const reader = response.body.getReader();
     const chunks: Buffer[] = [];
     let totalBytes = 0;
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        totalBytes += value.byteLength;
-        if (totalBytes > maxBytes) {
-            await reader.cancel().catch(() => {});
-            return null;
+    try {
+        for (let readCount = 0; readCount <= maxBytes; readCount += 1) {
+            const { done, value } = await reader.read();
+            if (done) {
+                return {
+                    ok: true,
+                    buffer: Buffer.concat(chunks, totalBytes),
+                };
+            }
+            totalBytes += value.byteLength;
+            if (totalBytes > maxBytes) {
+                await reader.cancel().catch(() => {});
+                return RESPONSE_TOO_LARGE_RESULT;
+            }
+            chunks.push(Buffer.from(value));
         }
-        chunks.push(Buffer.from(value));
+        await reader.cancel().catch(() => {});
+        return RESPONSE_TOO_LARGE_RESULT;
+    } finally {
+        reader.releaseLock();
     }
-    return Buffer.concat(chunks);
 }
 
 /**
@@ -206,15 +239,19 @@ export async function fetchExternalImage(options: {
                 };
             }
 
-            const buffer = await readBodyWithByteCap(response, maxBytes);
-            if (buffer === null) {
+            const bodyResult = await readResponseBodyWithByteCap(
+                response,
+                maxBytes,
+            );
+            if (!bodyResult.ok) {
                 return {
                     ok: false,
                     url: finalUrl,
                     status: "fetch_error",
-                    message: `Image exceeds maximum size of ${maxBytes} bytes`,
+                    message: bodyResult.message,
                 };
             }
+            const { buffer } = bodyResult;
             const contentType = response.headers.get("content-type");
             const etag = crypto.createHash("md5").update(buffer).digest("hex");
 

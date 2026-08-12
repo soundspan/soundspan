@@ -165,6 +165,7 @@ jest.mock("../../utils/colorExtractor", () => ({
 }));
 
 jest.mock("../../services/imageProxy", () => ({
+    ...jest.requireActual("../../services/imageProxy"),
     fetchExternalImage: jest.fn(),
     normalizeExternalImageUrl: (rawUrl: string) => {
         try {
@@ -205,6 +206,7 @@ import router from "../library";
 import { errorHandler } from "../../middleware/errorHandler";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
+import { MAX_EXTERNAL_IMAGE_BYTES } from "../../services/imageProxy";
 import { coverArtService } from "../../services/coverArt";
 import { prisma } from "../../utils/db";
 import { deezerService } from "../../services/deezer";
@@ -1066,11 +1068,12 @@ describe("library cover-art proxy compatibility", () => {
     });
 
     it("fetches audiobook query-url cover art with auth and streams bytes", async () => {
-        const fetchMock = jest.fn().mockResolvedValue({
-            ok: true,
-            arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
-            headers: { get: jest.fn().mockReturnValue("image/jpeg") },
-        });
+        const fetchMock = jest.fn().mockResolvedValue(
+            new Response(Uint8Array.from([1, 2, 3]), {
+                status: 200,
+                headers: { "content-type": "image/jpeg" },
+            }),
+        );
         (global as any).fetch = fetchMock;
         mockGetSystemSettings.mockResolvedValueOnce({
             audiobookshelfUrl: "https://audiobooks.example",
@@ -1100,6 +1103,39 @@ describe("library cover-art proxy compatibility", () => {
         expect(res.headers["Cache-Control"]).toBe(
             "public, max-age=7776000, immutable",
         );
+    });
+
+    it("rejects a declared oversized audiobook cover and cancels its body", async () => {
+        const cancel = jest.fn();
+        const body = new ReadableStream({ cancel });
+        const fetchMock = jest.fn().mockResolvedValue(
+            new Response(body, {
+                status: 200,
+                headers: {
+                    "content-type": "image/jpeg",
+                    "content-length": String(MAX_EXTERNAL_IMAGE_BYTES + 1),
+                },
+            }),
+        );
+        (global as any).fetch = fetchMock;
+        mockGetSystemSettings.mockResolvedValueOnce({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+        const req = {
+            query: { url: "audiobook__items/oversized/cover" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "Audiobook cover art not found",
+        });
     });
 
     it("rejects traversal in an audiobook query cover before fetch", async () => {

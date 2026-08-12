@@ -339,14 +339,19 @@ describe("audiobooks route runtime", () => {
         const existsSpy = jest.spyOn(require("fs"), "existsSync");
         existsSpy.mockReturnValue(false);
         const cancel = jest.fn().mockResolvedValue(undefined);
-        const fetchMock = jest.fn().mockResolvedValue({
-            ok: true,
-            body: { cancel },
-            arrayBuffer: jest
-                .fn()
-                .mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
-            headers: { get: jest.fn().mockReturnValue("image/jpeg") },
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(Uint8Array.from([1, 2, 3]));
+                controller.close();
+            },
+            cancel,
         });
+        const fetchMock = jest.fn().mockResolvedValue(
+            new Response(body, {
+                status: 200,
+                headers: { "content-type": "image/jpeg" },
+            }),
+        );
         (global as any).fetch = fetchMock;
         prisma.audiobook.findUnique.mockResolvedValueOnce({
             localCoverPath: null,

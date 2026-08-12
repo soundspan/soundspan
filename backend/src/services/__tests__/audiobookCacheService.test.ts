@@ -54,6 +54,7 @@ jest.mock("../../config", () => ({
 }));
 
 import { AudiobookCacheService } from "../audiobookCache";
+import { MAX_EXTERNAL_IMAGE_BYTES } from "../imageProxy";
 
 function buildBook(overrides: Record<string, any> = {}) {
     return {
@@ -110,12 +111,9 @@ describe("audiobook cache service behavior", () => {
             audiobookshelfApiKey: "api-key",
         });
 
-        fetchMock.mockResolvedValue({
-            ok: true,
-            status: 200,
-            statusText: "OK",
-            arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
-        });
+        fetchMock.mockResolvedValue(
+            new Response(new Uint8Array(8), { status: 200 }),
+        );
     });
 
     it("syncs all audiobooks, parses series metadata, and tracks per-book failures", async () => {
@@ -330,12 +328,9 @@ describe("audiobook cache service behavior", () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             audiobookshelfApiKey: "api-key",
         });
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            statusText: "OK",
-            arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(16)),
-        });
+        fetchMock.mockResolvedValueOnce(
+            new Response(new Uint8Array(16), { status: 200 }),
+        );
 
         const savedPath = await (service as any).downloadCover(
             "book-d",
@@ -349,6 +344,30 @@ describe("audiobook cache service behavior", () => {
             path.join("/srv/music", "cover-cache", "audiobooks", "book-d.jpg"),
             expect.any(Buffer),
         );
+    });
+
+    it("rejects a declared oversized cover and cancels its body", async () => {
+        const service = new AudiobookCacheService();
+        (service as any).coverCacheAvailable = true;
+        const cancel = jest.fn();
+        const body = new ReadableStream({ cancel });
+        fetchMock.mockResolvedValueOnce(
+            new Response(body, {
+                status: 200,
+                headers: {
+                    "content-length": String(MAX_EXTERNAL_IMAGE_BYTES + 1),
+                },
+            }),
+        );
+
+        const savedPath = await (service as any).downloadCover(
+            "book-oversized",
+            "http://abs.local/oversized.jpg",
+        );
+
+        expect(savedPath).toBeNull();
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
     });
 
     it("returns fresh cache immediately and refreshes stale cache when needed", async () => {

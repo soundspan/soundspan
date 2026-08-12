@@ -7,6 +7,11 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
+import {
+    MAX_EXTERNAL_IMAGE_BYTES,
+    readResponseBodyWithByteCap,
+} from "../services/imageProxy";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -689,6 +694,18 @@ router.get<{ id: string }>(
                         });
 
                         if (response.ok) {
+                            const bodyResult =
+                                await readResponseBodyWithByteCap(
+                                    response,
+                                    MAX_EXTERNAL_IMAGE_BYTES,
+                                );
+                            if (!bodyResult.ok) {
+                                return sendRouteError(
+                                    res,
+                                    404,
+                                    "Cover not found",
+                                );
+                            }
                             res.setHeader(
                                 "Content-Type",
                                 response.headers.get("content-type") ||
@@ -702,10 +719,7 @@ router.get<{ id: string }>(
                                 "Cross-Origin-Resource-Policy",
                                 "cross-origin",
                             );
-
-                            // Stream the response body to client
-                            const buffer = await response.arrayBuffer();
-                            return res.send(Buffer.from(buffer));
+                            return res.send(bodyResult.buffer);
                         }
                         await response.body?.cancel().catch(() => {});
                     } catch (proxyError: any) {

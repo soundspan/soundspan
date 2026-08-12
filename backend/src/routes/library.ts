@@ -37,7 +37,9 @@ import { BRAND_USER_AGENT } from "../config/brand";
 import { extractColorsFromImage } from "../utils/colorExtractor";
 import {
     fetchExternalImage,
+    MAX_EXTERNAL_IMAGE_BYTES,
     normalizeExternalImageUrl,
+    readResponseBodyWithByteCap,
 } from "../services/imageProxy";
 import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 import {
@@ -368,7 +370,14 @@ const sendAudiobookCover = async (
         return sendRouteError(res, 404, "Audiobook cover art not found");
     }
 
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+    const bodyResult = await readResponseBodyWithByteCap(
+        imageResponse,
+        MAX_EXTERNAL_IMAGE_BYTES,
+    );
+    if (!bodyResult.ok) {
+        return sendRouteError(res, 404, "Audiobook cover art not found");
+    }
+    const imageBuffer = bodyResult.buffer;
     const contentType = imageResponse.headers.get("content-type");
     if (contentType) {
         res.setHeader("Content-Type", contentType);

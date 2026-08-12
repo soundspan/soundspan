@@ -278,6 +278,7 @@ jest.mock("../../utils/colorExtractor", () => ({
 }));
 
 jest.mock("../../services/imageProxy", () => ({
+    ...jest.requireActual("../../services/imageProxy"),
     fetchExternalImage: jest.fn(),
     normalizeExternalImageUrl: jest.fn(() => null),
 }));
@@ -4723,15 +4724,12 @@ describe("library catalog list runtime coverage", () => {
         config.allowedOrigins = ["https://app.example"];
         const fetchSpy = jest
             .spyOn(global as any, "fetch")
-            .mockResolvedValueOnce({
-                ok: true,
-                status: 200,
-                statusText: "OK",
-                headers: {
-                    get: jest.fn(() => "image/jpeg"),
-                },
-                arrayBuffer: async () => Buffer.from("audiobook-cover"),
-            } as any);
+            .mockResolvedValueOnce(
+                new Response(Buffer.from("audiobook-cover"), {
+                    status: 200,
+                    headers: { "content-type": "image/jpeg" },
+                }),
+            );
         mockGetSystemSettings.mockResolvedValueOnce({
             audiobookshelfUrl: "https://ab.example",
             audiobookshelfApiKey: "token-123",

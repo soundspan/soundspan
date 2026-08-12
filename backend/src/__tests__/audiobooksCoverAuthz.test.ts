@@ -112,8 +112,12 @@ function writeCover(filePath: string, contents: Buffer): void {
 }
 
 describe("audiobook cover authorization and path containment", () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn();
+
     beforeEach(() => {
         jest.clearAllMocks();
+        global.fetch = fetchMock;
         fs.rmSync(mockMusicPath, { recursive: true, force: true });
         fs.rmSync(path.join(mockTempRoot, "secrets"), {
             recursive: true,
@@ -126,6 +130,7 @@ describe("audiobook cover authorization and path containment", () => {
     });
 
     afterAll(() => {
+        global.fetch = originalFetch;
         fs.rmSync(mockTempRoot, { recursive: true, force: true });
     });
 
@@ -224,5 +229,65 @@ describe("audiobook cover authorization and path containment", () => {
 
         expect(response.status).toBe(404);
         expect(response.body).toEqual({ error: "Cover not found" });
+    });
+
+    it("proxies a normal small remote cover", async () => {
+        const coverBytes = Buffer.from("remote-cover-bytes");
+        mockPrisma.audiobook.findUnique.mockResolvedValue({
+            localCoverPath: null,
+            coverUrl: "items/book-1/cover",
+        });
+        mockGetSystemSettings.mockResolvedValue({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+        fetchMock.mockResolvedValue(
+            new Response(coverBytes, {
+                status: 200,
+                headers: { "content-type": "image/jpeg" },
+            }),
+        );
+
+        const response = await request(buildApp())
+            .get("/api/audiobooks/book-1/cover")
+            .set("x-test-user", "yes");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual(coverBytes);
+    });
+
+    it("cancels an oversized streamed remote cover", async () => {
+        const cancel = jest.fn();
+        const oneMiBChunk = new Uint8Array(1024 * 1024);
+        const chunks = Array.from({ length: 64 }, () => oneMiBChunk);
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                const chunk = chunks.shift();
+                if (chunk) {
+                    controller.enqueue(chunk);
+                } else {
+                    controller.close();
+                }
+            },
+            cancel,
+        });
+        mockPrisma.audiobook.findUnique.mockResolvedValue({
+            localCoverPath: null,
+            coverUrl: "items/book-1/cover",
+        });
+        mockGetSystemSettings.mockResolvedValue({
+            audiobookshelfUrl: "https://audiobooks.example",
+            audiobookshelfApiKey: "abs-key",
+        });
+        fetchMock.mockResolvedValue(new Response(body, { status: 200 }));
+
+        const response = await request(buildApp())
+            .get("/api/audiobooks/book-1/cover")
+            .set("x-test-user", "yes");
+
+        expect(response.status).toBe(404);
+        expect(response.body).toEqual({ error: "Cover not found" });
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(chunks.length).toBeGreaterThan(0);
     });
 });
