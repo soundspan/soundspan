@@ -319,6 +319,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Podcast cover-art fetches are size-bounded to prevent resource exhaustion
+  (#369).
+- Playlist reorder rejects duplicate-amplified database transactions (#366).
+- OAuth logout is fenced against an in-flight lazy credential restore for TIDAL
+  and YouTube Music (#371).
+- Published OpenAPI marks anonymous operations and documents the login response
+  shapes (#370).
+- Soulseek UI search has bounded admission, rate limits, and session/result caps
+  (#376).
+
 - Podcast feeds and enclosures are size-bounded to prevent authenticated
   resource exhaustion (#352).
 - YouTube Music metadata extraction is bounded by an overall deadline and a
@@ -694,6 +704,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
 
 ### Security
+
+- Playlist pending-track operations are scoped to both the playlist and
+  pending-track ids, closing a cross-user IDOR (#366).
+- API-key management and MFA setup/enable/disable now require an interactive
+  session (X-API-Key callers are rejected), and API keys expire after 90 days.
+  **BREAKING:** API keys older than 90 days must be re-issued (#370).
+- The global enrichment-failure API is admin-only and returns a redacted
+  response without raw errors or filesystem paths (#368).
+- Library deletion validates every persisted track path for MUSIC_PATH
+  containment before removal (#365).
+- TIDAL/Soulseek download destinations are validated to stay within MUSIC_PATH
+  (#367).
+- The split-stack Compose deployment requires an explicit PostgreSQL password.
+  **BREAKING:** startup fails on the published default (#372).
+- Backend transcoding no longer selects the bundled obsolete FFmpeg build
+  (CVE-2021-30123); a patched system binary is used and a minimum version is
+  enforced (#374).
+- Helm PostgreSQL credentials are URL-encoded in DATABASE_URL and passed to SQL
+  as safely quoted parameters (#375).
+- .env writes fail closed on non-ENOENT read errors and honor explicit secret
+  clears instead of leaving stale credentials on disk (#373).
 
 - Shared-library download routes (create, release lookup, grab, keep-track) now
   require admin, and keep-track is scoped to the owning DiscoveryAlbum, closing
