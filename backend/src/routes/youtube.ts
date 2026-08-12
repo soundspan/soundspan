@@ -32,6 +32,7 @@ import { logger } from "../utils/logger";
 import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
+const downloadWatcherLogger = logger.child("YouTubeDownloadWatcher");
 
 // ── Video Info ────────────────────────────────────────────────────
 
@@ -358,6 +359,16 @@ const scannedDownloadJobIds = new Set<string>();
  */
 const MAX_SCANNED_DOWNLOAD_JOB_IDS = 1000;
 
+interface ActiveDownloadWatcher {
+    sleepTimer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Maximum concurrent server-side download watchers retained by this module. */
+const MAX_ACTIVE_DOWNLOAD_WATCHERS = 1000;
+
+/** Active server-side download watchers, keyed by sidecar job id. */
+const activeDownloadWatchers = new Map<string, ActiveDownloadWatcher>();
+
 /**
  * Remember `jobId` in `seen`, evicting the oldest remembered ids (Sets
  * iterate in insertion order) once `maxSize` is exceeded, so the dedupe set
@@ -531,21 +542,74 @@ async function enqueueLibraryScanForDownloadJob(
  * multi-hour downloads.
  */
 function watchDownloadJobAndQueueScan(jobId: string, userId: string): void {
-    void (async () => {
-        try {
-            const outcome = await watchYouTubeDownloadJobUntilTerminal(
-                jobId,
-                (id) => youtubeDownloadService.getDownloadJobStatus(id),
-            );
-            if (outcome === "completed") {
-                await enqueueLibraryScanForDownloadJob(jobId, userId);
-            }
-        } catch (watchErr: any) {
-            logger.warn(
-                `[YouTube Route] Download job watcher crashed for ${jobId}: ${watchErr.message}`,
-            );
+    if (activeDownloadWatchers.has(jobId)) {
+        return;
+    }
+    if (activeDownloadWatchers.size >= MAX_ACTIVE_DOWNLOAD_WATCHERS) {
+        downloadWatcherLogger.warn("Active watcher registry is full", {
+            jobId,
+            maxWatchers: MAX_ACTIVE_DOWNLOAD_WATCHERS,
+        });
+        return;
+    }
+
+    const watcher: ActiveDownloadWatcher = { sleepTimer: null };
+    activeDownloadWatchers.set(jobId, watcher);
+    void runDownloadWatcher(jobId, userId, watcher);
+}
+
+/** Run one registered watcher and always release its timer and registry slot. */
+async function runDownloadWatcher(
+    jobId: string,
+    userId: string,
+    watcher: ActiveDownloadWatcher,
+): Promise<void> {
+    try {
+        const outcome = await watchYouTubeDownloadJobUntilTerminal(
+            jobId,
+            (id) => youtubeDownloadService.getDownloadJobStatus(id),
+            { sleep: createWatcherSleep(watcher) },
+        );
+        if (outcome === "completed") {
+            await enqueueLibraryScanForDownloadJob(jobId, userId);
         }
-    })();
+    } catch (watchErr: unknown) {
+        downloadWatcherLogger.warn("Download job watcher crashed", {
+            jobId,
+            error: watchErr,
+        });
+    } finally {
+        clearWatcherSleep(watcher);
+        if (activeDownloadWatchers.get(jobId) === watcher) {
+            activeDownloadWatchers.delete(jobId);
+        }
+    }
+}
+
+/** Create a sequential polling delay owned by one registered watcher. */
+function createWatcherSleep(
+    watcher: ActiveDownloadWatcher,
+): (delayMs: number) => Promise<void> {
+    return (delayMs) =>
+        new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+                if (watcher.sleepTimer === timer) {
+                    watcher.sleepTimer = null;
+                }
+                resolve();
+            }, delayMs);
+            watcher.sleepTimer = timer;
+            timer.unref?.();
+        });
+}
+
+/** Clear the pending delay, if the watcher is settling before it fires. */
+function clearWatcherSleep(watcher: ActiveDownloadWatcher): void {
+    if (watcher.sleepTimer === null) {
+        return;
+    }
+    clearTimeout(watcher.sleepTimer);
+    watcher.sleepTimer = null;
 }
 
 /**

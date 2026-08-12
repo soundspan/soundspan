@@ -10,6 +10,7 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn().mockReturnThis(),
     },
 }));
 
@@ -151,6 +152,10 @@ describe("youtube routes runtime", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     describe("GET /info", () => {
@@ -411,8 +416,79 @@ describe("youtube routes runtime", () => {
             expect(mockWatchJob).toHaveBeenCalledWith(
                 "job-accept",
                 expect.any(Function),
+                expect.objectContaining({ sleep: expect.any(Function) }),
             );
             expect(scanQueue.add).not.toHaveBeenCalled();
+        });
+
+        it("reuses one watcher and one timer when the same job starts twice", async () => {
+            jest.useFakeTimers({ timerLimit: 100 });
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-duplicate",
+                status: "queued",
+            });
+            mockGetDownloadJobStatus.mockResolvedValue({
+                jobId: "job-duplicate",
+                status: "downloading",
+            });
+            mockWatchJob.mockImplementation(
+                async (_jobId, getStatus, options) => {
+                    await getStatus("job-duplicate");
+                    await options.sleep(5_000);
+                    return "failed";
+                },
+            );
+            const req = {
+                body: { videoId: "dQw4w9WgXcQ" },
+                user: { id: "user-1" },
+            } as any;
+
+            await downloadHandler(req, createRes());
+            await downloadHandler(req, createRes());
+            await Promise.resolve();
+
+            expect(mockWatchJob).toHaveBeenCalledTimes(1);
+            expect(jest.getTimerCount()).toBe(1);
+
+            await jest.advanceTimersByTimeAsync(5_000);
+            expect(jest.getTimerCount()).toBe(0);
+        });
+
+        it("removes a watcher when the job reaches a terminal state", async () => {
+            jest.useFakeTimers({ timerLimit: 100 });
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-terminal",
+                status: "queued",
+            });
+            mockGetDownloadJobStatus.mockResolvedValue({
+                jobId: "job-terminal",
+                status: "downloading",
+            });
+            mockWatchJob.mockImplementation(
+                async (_jobId, getStatus, options) => {
+                    await getStatus("job-terminal");
+                    await options.sleep(5_000);
+                    return "failed";
+                },
+            );
+            const req = {
+                body: { videoId: "dQw4w9WgXcQ" },
+                user: { id: "user-1" },
+            } as any;
+
+            await downloadHandler(req, createRes());
+            await Promise.resolve();
+            expect(mockWatchJob).toHaveBeenCalledTimes(1);
+
+            await jest.advanceTimersByTimeAsync(5_000);
+            await downloadHandler(req, createRes());
+            await Promise.resolve();
+
+            expect(mockWatchJob).toHaveBeenCalledTimes(2);
+            expect(jest.getTimerCount()).toBe(1);
+
+            await jest.advanceTimersByTimeAsync(5_000);
+            expect(jest.getTimerCount()).toBe(0);
         });
 
         it("enqueues the scan when the server-side watcher sees completion", async () => {
