@@ -1948,15 +1948,163 @@ describe("playlists route runtime", () => {
         await reorderItems(req, res);
 
         expect(prisma.playlistItem.findMany).toHaveBeenCalledWith({
-            where: {
-                playlistId: "pl-1",
-                trackId: { in: ["t-1", "tidal:991"] },
-            },
-            select: { trackId: true },
+            where: { playlistId: "pl-1" },
+            select: { id: true, trackId: true },
+            take: 1001,
         });
         expect(res.statusCode).toBe(404);
         expect(res.body).toEqual({
             error: "One or more tracks were not found in this playlist",
+        });
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects duplicate reorder identifiers before database work", async () => {
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: { trackIds: ["t-1", "t-1"] },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Reorder identifiers must not contain duplicates",
+        });
+        expect(prisma.playlist.findUnique).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.findMany).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects oversized reorder payloads before database work", async () => {
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                itemIds: Array.from(
+                    { length: 1001 },
+                    (_, index) => `pli-${index}`,
+                ),
+            },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "A playlist reorder cannot exceed 1000 items",
+        });
+        expect(prisma.playlist.findUnique).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.findMany).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid reorder identifiers before database work", async () => {
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: { itemIds: ["pli-1", 42] },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Reorder identifiers must be non-empty strings",
+        });
+        expect(prisma.playlist.findUnique).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.findMany).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("requires reorder identifiers to be an exact playlist permutation", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([
+            { id: "pli-1", trackId: "t-1" },
+            { id: "pli-2", trackId: "t-2" },
+        ]);
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: { itemIds: ["pli-1"] },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(prisma.playlistItem.findMany).toHaveBeenCalledWith({
+            where: { playlistId: "pl-1" },
+            select: { id: true, trackId: true },
+            take: 1001,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Reorder identifiers must include every playlist item exactly once",
+        });
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects reordering playlists larger than the bounded transaction limit", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce(
+            Array.from({ length: 1001 }, (_, index) => ({
+                id: `pli-${index}`,
+                trackId: `t-${index}`,
+            })),
+        );
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: { itemIds: [] },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Playlist exceeds the maximum reorder size of 1000 items",
+        });
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects legacy trackIds when they omit remote playlist items", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([
+            { id: "pli-local", trackId: "t-1" },
+            { id: "pli-remote", trackId: null },
+        ]);
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: { trackIds: ["t-1"] },
+        } as any;
+        const res = createRes();
+
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Reorder identifiers must include every playlist item exactly once",
         });
         expect(prisma.playlistItem.update).not.toHaveBeenCalled();
         expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -2115,6 +2263,30 @@ describe("playlists route runtime", () => {
         expect(res.body).toEqual({ error: "Pending track not found" });
     });
 
+    it("does not delete a pending track belonging to another playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-owned",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.delete.mockRejectedValueOnce({
+            code: "P2025",
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-owned", trackId: "pt-victim" },
+        } as any;
+        const res = createRes();
+
+        await deletePending(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Pending track not found" });
+        expect(prisma.playlistPendingTrack.delete).toHaveBeenCalledWith({
+            where: { id: "pt-victim", playlistId: "pl-owned" },
+        });
+    });
+
     it("handles pending-track delete missing/denied/success/generic-error branches", async () => {
         prisma.playlist.findUnique.mockResolvedValueOnce(null);
         const missingReq = {
@@ -2176,7 +2348,10 @@ describe("playlists route runtime", () => {
 
     it("refreshes pending preview URLs with no-preview and success branches", async () => {
         prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce(null);
-        const missingReq = { params: { id: "pl-1", trackId: "pt-1" } } as any;
+        const missingReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
         const missingRes = createRes();
         await previewPending(missingReq, missingRes);
         expect(missingRes.statusCode).toBe(404);
@@ -2187,7 +2362,10 @@ describe("playlists route runtime", () => {
             spotifyTitle: "T",
         });
         deezerService.getTrackPreview.mockResolvedValueOnce(null);
-        const noneReq = { params: { id: "pl-1", trackId: "pt-1" } } as any;
+        const noneReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
         const noneRes = createRes();
         await previewPending(noneReq, noneRes);
         expect(noneRes.statusCode).toBe(404);
@@ -2201,22 +2379,105 @@ describe("playlists route runtime", () => {
         deezerService.getTrackPreview.mockResolvedValueOnce(
             "https://preview/new.mp3",
         );
-        const okReq = { params: { id: "pl-1", trackId: "pt-1" } } as any;
+        const okReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
         const okRes = createRes();
         await previewPending(okReq, okRes);
         expect(okRes.statusCode).toBe(200);
         expect(okRes.body).toEqual({ previewUrl: "https://preview/new.mp3" });
         expect(prisma.playlistPendingTrack.update).toHaveBeenCalledWith({
-            where: { id: "pt-1" },
+            where: { id: "pt-1", playlistId: "pl-1" },
             data: { deezerPreviewUrl: "https://preview/new.mp3" },
         });
+    });
+
+    it("does not preview a pending track through a different owned playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-owned",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce(null);
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-owned", trackId: "pt-victim" },
+        } as any;
+        const res = createRes();
+
+        await previewPending(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Pending track not found" });
+        expect(prisma.playlistPendingTrack.findUnique).toHaveBeenCalledWith({
+            where: { id: "pt-victim", playlistId: "pl-owned" },
+        });
+        expect(deezerService.getTrackPreview).not.toHaveBeenCalled();
+        expect(prisma.playlistPendingTrack.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when a pending preview disappears before its scoped update", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce({
+            id: "pt-1",
+            spotifyArtist: "A",
+            spotifyTitle: "T",
+        });
+        deezerService.getTrackPreview.mockResolvedValueOnce(
+            "https://preview/new.mp3",
+        );
+        prisma.playlistPendingTrack.update.mockRejectedValueOnce({
+            code: "P2025",
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
+        const res = createRes();
+
+        await previewPending(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Pending track not found" });
+        expect(prisma.playlistPendingTrack.update).toHaveBeenCalledWith({
+            where: { id: "pt-1", playlistId: "pl-1" },
+            data: { deezerPreviewUrl: "https://preview/new.mp3" },
+        });
+    });
+
+    it("denies pending previews for another user's private playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-private",
+            userId: "u2",
+            isPublic: false,
+        });
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-private", trackId: "pt-victim" },
+        } as any;
+        const res = createRes();
+
+        await previewPending(req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Access denied" });
+        expect(prisma.playlistPendingTrack.findUnique).not.toHaveBeenCalled();
+        expect(deezerService.getTrackPreview).not.toHaveBeenCalled();
     });
 
     it("handles pending preview server errors", async () => {
         prisma.playlistPendingTrack.findUnique.mockRejectedValueOnce(
             new Error("preview failed"),
         );
-        const req = { params: { id: "pl-1", trackId: "pt-1" } } as any;
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pt-1" },
+        } as any;
         const res = createRes();
         await previewPending(req, res);
         expect(res.statusCode).toBe(500);
@@ -2332,6 +2593,30 @@ describe("playlists route runtime", () => {
         expect(missingPendingRes.body).toEqual({
             error: "Pending track not found",
         });
+    });
+
+    it("does not retry a pending track belonging to another owned playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-owned",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistPendingTrack.findUnique.mockResolvedValueOnce(null);
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-owned", trackId: "pt-victim" },
+        } as any;
+        const res = createRes();
+
+        await retryPending(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Pending track not found" });
+        expect(prisma.playlistPendingTrack.findUnique).toHaveBeenCalledWith({
+            where: { id: "pt-victim", playlistId: "pl-owned" },
+        });
+        expect(prisma.downloadJob.create).not.toHaveBeenCalled();
+        expect(soulseekService.searchTrack).not.toHaveBeenCalled();
     });
 
     it("reconciles pending tracks for playlist owners", async () => {

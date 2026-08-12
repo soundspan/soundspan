@@ -16,9 +16,140 @@ const router = Router();
 const PLAYLISTS_MAX_LIMIT = 1000;
 const PLAYLISTS_DEFAULT_LIMIT = 500;
 const PLAYLIST_PREVIEW_ITEMS = 12;
+const PLAYLIST_REORDER_MAX_ITEMS = 1000;
 const pendingRetryPath = "/:id/pending/:trackId/retry";
 
 type RetryRequest = Request<{ id: string; trackId: string }>;
+
+type ReorderSelection =
+    | { success: true; ids: string[]; byItemId: boolean }
+    | { success: false; message: string };
+
+type UnvalidatedReorderSelection =
+    | { success: true; ids: unknown[]; byItemId: boolean }
+    | { success: false; message: string };
+
+type ReorderPlaylistItem = {
+    id: string;
+    trackId: string | null;
+};
+
+const reorderPayloadSchema = z.object({
+    itemIds: z.unknown().optional(),
+    trackIds: z.unknown().optional(),
+});
+
+const reorderIdsSchema = z.array(z.string().min(1));
+
+function getReorderSelection(body: unknown): UnvalidatedReorderSelection {
+    const parsedPayload = reorderPayloadSchema.safeParse(body);
+    const payload = parsedPayload.success ? parsedPayload.data : {};
+    const { itemIds, trackIds } = payload;
+    if (itemIds !== undefined && !Array.isArray(itemIds)) {
+        return { success: false, message: "itemIds must be an array" };
+    }
+    if (trackIds !== undefined && !Array.isArray(trackIds)) {
+        return { success: false, message: "trackIds must be an array" };
+    }
+
+    const byItemId = Array.isArray(itemIds);
+    const selected = byItemId ? itemIds : trackIds;
+    if (!Array.isArray(selected)) {
+        return {
+            success: false,
+            message: "itemIds or trackIds must be an array",
+        };
+    }
+    return { success: true, ids: selected, byItemId };
+}
+
+function validateReorderIds(
+    selection: Extract<UnvalidatedReorderSelection, { success: true }>,
+): ReorderSelection {
+    if (selection.ids.length > PLAYLIST_REORDER_MAX_ITEMS) {
+        return {
+            success: false,
+            message: `A playlist reorder cannot exceed ${PLAYLIST_REORDER_MAX_ITEMS} items`,
+        };
+    }
+    const parsedIds = reorderIdsSchema.safeParse(selection.ids);
+    if (!parsedIds.success) {
+        return {
+            success: false,
+            message: "Reorder identifiers must be non-empty strings",
+        };
+    }
+
+    const ids = parsedIds.data;
+    if (new Set(ids).size !== ids.length) {
+        return {
+            success: false,
+            message: "Reorder identifiers must not contain duplicates",
+        };
+    }
+    return { success: true, ids, byItemId: selection.byItemId };
+}
+
+function selectReorderIds(body: unknown): ReorderSelection {
+    const selection = getReorderSelection(body);
+    return selection.success ? validateReorderIds(selection) : selection;
+}
+
+function getExpectedReorderIds(
+    byItemId: boolean,
+    playlistItems: ReorderPlaylistItem[],
+): string[] {
+    if (byItemId) return playlistItems.map((item) => item.id);
+    return playlistItems
+        .map((item) => item.trackId)
+        .filter((trackId): trackId is string => trackId !== null);
+}
+
+function validateExactReorder(
+    selection: Extract<ReorderSelection, { success: true }>,
+    playlistItems: ReorderPlaylistItem[],
+): { status: 400 | 404; message: string } | null {
+    if (playlistItems.length > PLAYLIST_REORDER_MAX_ITEMS) {
+        return {
+            status: 400,
+            message: `Playlist exceeds the maximum reorder size of ${PLAYLIST_REORDER_MAX_ITEMS} items`,
+        };
+    }
+
+    const expectedIds = getExpectedReorderIds(
+        selection.byItemId,
+        playlistItems,
+    );
+    const expectedIdSet = new Set(expectedIds);
+    if (selection.ids.some((id) => !expectedIdSet.has(id))) {
+        return {
+            status: 404,
+            message: selection.byItemId
+                ? "One or more playlist items were not found in this playlist"
+                : "One or more tracks were not found in this playlist",
+        };
+    }
+    if (
+        selection.ids.length !== playlistItems.length ||
+        expectedIds.length !== playlistItems.length
+    ) {
+        return {
+            status: 400,
+            message:
+                "Reorder identifiers must include every playlist item exactly once",
+        };
+    }
+    return null;
+}
+
+function isPrismaRecordNotFound(value: unknown): boolean {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "code" in value &&
+        value.code === "P2025"
+    );
+}
 
 router.use(requireAuthOrToken);
 
@@ -1149,11 +1280,13 @@ router.delete("/:id/items/:trackId", async (req, res) => {
  *             properties:
  *               itemIds:
  *                 type: array
+ *                 maxItems: 1000
  *                 items:
  *                   type: string
  *                 description: Playlist item IDs in the desired order. Use for remote or mixed-source playlists; preferred when both arrays are present.
  *               trackIds:
  *                 type: array
+ *                 maxItems: 1000
  *                 items:
  *                   type: string
  *                 description: Legacy local-library track IDs in the desired order
@@ -1176,25 +1309,10 @@ router.delete("/:id/items/:trackId", async (req, res) => {
 router.put("/:id/items/reorder", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const { itemIds, trackIds } = req.body; // Arrays in desired order (itemIds preferred)
-
-        if (itemIds !== undefined && !Array.isArray(itemIds)) {
-            return res.status(400).json({ error: "itemIds must be an array" });
+        const selection = selectReorderIds(req.body);
+        if (!selection.success) {
+            return res.status(400).json({ error: selection.message });
         }
-        if (trackIds !== undefined && !Array.isArray(trackIds)) {
-            return res.status(400).json({ error: "trackIds must be an array" });
-        }
-        const reorderIds = Array.isArray(itemIds)
-            ? itemIds
-            : Array.isArray(trackIds)
-              ? trackIds
-              : null;
-        if (!reorderIds) {
-            return res
-                .status(400)
-                .json({ error: "itemIds or trackIds must be an array" });
-        }
-        const reorderByItemId = Array.isArray(itemIds);
 
         // Check ownership
         const playlist = await prisma.playlist.findUnique({
@@ -1209,49 +1327,21 @@ router.put("/:id/items/reorder", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        if (reorderByItemId) {
-            const matchedItems = await prisma.playlistItem.findMany({
-                where: {
-                    playlistId: req.params.id,
-                    id: { in: reorderIds },
-                },
-                select: { id: true },
-            });
-            if (matchedItems.length !== reorderIds.length) {
-                return res.status(404).json({
-                    error: "One or more playlist items were not found in this playlist",
-                });
-            }
-        } else {
-            const requestedTrackIds = Array.from(new Set(reorderIds));
-            const matchedItems = await prisma.playlistItem.findMany({
-                where: {
-                    playlistId: req.params.id,
-                    trackId: { in: requestedTrackIds },
-                },
-                select: { trackId: true },
-            });
-            const matchedTrackIds = new Set(
-                matchedItems
-                    .map((item) => item.trackId)
-                    .filter(
-                        (trackId): trackId is string =>
-                            typeof trackId === "string",
-                    ),
-            );
-            const hasMissingTrackIds = requestedTrackIds.some(
-                (trackId) => !matchedTrackIds.has(trackId),
-            );
-            if (hasMissingTrackIds) {
-                return res.status(404).json({
-                    error: "One or more tracks were not found in this playlist",
-                });
-            }
+        const playlistItems = await prisma.playlistItem.findMany({
+            where: { playlistId: req.params.id },
+            select: { id: true, trackId: true },
+            take: PLAYLIST_REORDER_MAX_ITEMS + 1,
+        });
+        const invalidReorder = validateExactReorder(selection, playlistItems);
+        if (invalidReorder) {
+            return res
+                .status(invalidReorder.status)
+                .json({ error: invalidReorder.message });
         }
 
-        // Update sort order for each item, preferring explicit playlist item ids.
-        const updates = reorderIds.map((id, index) =>
-            reorderByItemId
+        // This bulk transaction is bounded by PLAYLIST_REORDER_MAX_ITEMS.
+        const updates = selection.ids.map((id, index) =>
+            selection.byItemId
                 ? prisma.playlistItem.update({
                       where: { id },
                       data: { sort: index },
@@ -1414,12 +1504,12 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
         }
 
         await prisma.playlistPendingTrack.delete({
-            where: { id: pendingTrackId },
+            where: { id: pendingTrackId, playlistId },
         });
 
         res.json({ message: "Pending track removed" });
-    } catch (error: any) {
-        if (error.code === "P2025") {
+    } catch (error: unknown) {
+        if (isPrismaRecordNotFound(error)) {
             return res.status(404).json({ error: "Pending track not found" });
         }
         logger.error("Delete pending track error:", error);
@@ -1459,18 +1549,31 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
  *               properties:
  *                 previewUrl:
  *                   type: string
+ *       403:
+ *         description: Access denied
  *       404:
- *         description: Pending track not found or no preview available
+ *         description: Playlist or pending track not found, or no preview available
  *       401:
  *         description: Not authenticated
  */
 router.get("/:id/pending/:trackId/preview", async (req, res) => {
     try {
-        const { trackId: pendingTrackId } = req.params;
+        const userId = req.user!.id;
+        const { id: playlistId, trackId: pendingTrackId } = req.params;
+
+        const playlist = await prisma.playlist.findUnique({
+            where: { id: playlistId },
+        });
+        if (!playlist) {
+            return res.status(404).json({ error: "Playlist not found" });
+        }
+        if (playlist.userId !== userId && !playlist.isPublic) {
+            return res.status(403).json({ error: "Access denied" });
+        }
 
         // Get the pending track
         const pendingTrack = await prisma.playlistPendingTrack.findUnique({
-            where: { id: pendingTrackId },
+            where: { id: pendingTrackId, playlistId },
         });
 
         if (!pendingTrack) {
@@ -1492,12 +1595,15 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
 
         // Update the stored preview URL for future use
         await prisma.playlistPendingTrack.update({
-            where: { id: pendingTrackId },
+            where: { id: pendingTrackId, playlistId },
             data: { deezerPreviewUrl: previewUrl },
         });
 
         res.json({ previewUrl });
-    } catch (error: any) {
+    } catch (error: unknown) {
+        if (isPrismaRecordNotFound(error)) {
+            return res.status(404).json({ error: "Pending track not found" });
+        }
         logger.error("Get preview URL error:", error);
         res.status(500).json({ error: "Failed to get preview URL" });
     }
@@ -1584,7 +1690,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
 
         // Get the pending track
         const pendingTrack = await prisma.playlistPendingTrack.findUnique({
-            where: { id: pendingTrackId },
+            where: { id: pendingTrackId, playlistId },
         });
 
         if (!pendingTrack) {
