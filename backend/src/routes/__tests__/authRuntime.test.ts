@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import express from "express";
+import request, { type Response } from "supertest";
 
 jest.mock("../../config", () => ({ config: { port: 3006 } }));
 
@@ -12,9 +14,10 @@ const mockLogger = {
 mockLogger.child.mockReturnValue(mockLogger);
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
-const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) =>
-    next(),
-);
+const mockRequireAuth = jest.fn((req: any, _res: any, next: () => void) => {
+    req.user ??= { id: "u1", username: "alice", role: "admin" };
+    next();
+});
 const mockRequireInteractiveSession = jest.fn(
     (_req: any, _res: any, next: () => void) => next(),
 );
@@ -105,9 +108,12 @@ jest.mock("../../utils/encryption", () => ({
 }));
 
 import { swaggerSpec } from "../../config/swagger";
+import { apiLimiter, authLimiter } from "../../middleware/rateLimiter";
 import router from "../auth";
 
-function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
+type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
+
+function getRouteLayer(path: string, method: HttpMethod) {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -115,6 +121,11 @@ function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
     if (!layer) {
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     }
+    return layer;
+}
+
+function getHandler(path: string, method: HttpMethod) {
+    const layer = getRouteLayer(path, method);
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
@@ -164,7 +175,38 @@ function expectLoginBodyMatchesOpenApi(body: Record<string, unknown>): void {
     }
 }
 
+const AUTH_FAILED_REQUEST_LIMIT = 40;
+const AUTH_LIMIT_MESSAGE =
+    "Too many login attempts, please try again in 15 minutes.";
+
+function createRouteApp() {
+    const app = express();
+    app.set("trust proxy", 1);
+    app.use(express.json());
+    app.use(router);
+    return app;
+}
+
+async function expectFailedRequestsAreThrottled(
+    send: () => Promise<Response>,
+    expectedFailureStatus: number,
+): Promise<void> {
+    for (
+        let requestCount = 0;
+        requestCount < AUTH_FAILED_REQUEST_LIMIT;
+        requestCount++
+    ) {
+        const response = await send();
+        expect(response.status).toBe(expectedFailureStatus);
+    }
+
+    const throttledResponse = await send();
+    expect(throttledResponse.status).toBe(429);
+    expect(throttledResponse.text).toBe(AUTH_LIMIT_MESSAGE);
+}
+
 describe("auth routes runtime", () => {
+    const routeApp = createRouteApp();
     const login = getHandler("/login", "post");
     const logout = getHandler("/logout", "post");
     const refresh = getHandler("/refresh", "post");
@@ -228,6 +270,142 @@ describe("auth routes runtime", () => {
             userId: "u1",
             tokenVersion: 1,
         });
+    });
+
+    it.each([
+        ["post", "/refresh", authLimiter],
+        ["get", "/me", apiLimiter],
+        ["post", "/change-password", authLimiter],
+        ["post", "/change-email", apiLimiter],
+        ["get", "/users", apiLimiter],
+        ["post", "/create-user", authLimiter],
+        ["patch", "/users/:id", authLimiter],
+        ["delete", "/users/:id", apiLimiter],
+        ["post", "/invite-codes", apiLimiter],
+        ["get", "/invite-codes", apiLimiter],
+        ["delete", "/invite-codes/:id", apiLimiter],
+        ["post", "/2fa/setup", authLimiter],
+        ["post", "/2fa/enable", authLimiter],
+        ["post", "/2fa/disable", authLimiter],
+        ["get", "/2fa/status", apiLimiter],
+        ["get", "/subsonic-password", apiLimiter],
+        ["post", "/subsonic-password", authLimiter],
+        ["delete", "/subsonic-password", authLimiter],
+    ] as const)(
+        "attaches the prescribed limiter first on %s %s",
+        (method, path, expectedLimiter) => {
+            const layer = getRouteLayer(path, method);
+
+            expect(layer.route.stack[0].handle).toBe(expectedLimiter);
+        },
+    );
+
+    it("throttles repeated invalid refresh tokens without blocking successful rotation", async () => {
+        const success = await request(routeApp)
+            .post("/refresh")
+            .set("X-Forwarded-For", "198.51.100.10")
+            .send({ refreshToken: "valid-refresh-token" });
+        expect(success.status).toBe(200);
+        expect(success.body).toEqual({
+            token: "jwt-access",
+            refreshToken: "jwt-refresh",
+        });
+
+        mockVerifyAuthToken.mockImplementation(() => {
+            throw new Error("bad token");
+        });
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/refresh")
+                    .set("X-Forwarded-For", "198.51.100.10")
+                    .send({ refreshToken: "invalid-refresh-token" }),
+            401,
+        );
+    });
+
+    it("throttles repeated invalid current passwords without blocking a password change", async () => {
+        const payload = {
+            currentPassword: "current-password",
+            newPassword: "new-password",
+        };
+        const success = await request(routeApp)
+            .post("/change-password")
+            .set("X-Forwarded-For", "198.51.100.11")
+            .send(payload);
+        expect(success.status).toBe(200);
+        expect(success.body).toEqual({
+            message: "Password changed successfully",
+        });
+
+        mockBcryptCompare.mockResolvedValue(false);
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/change-password")
+                    .set("X-Forwarded-For", "198.51.100.11")
+                    .send(payload),
+            401,
+        );
+    });
+
+    it("throttles repeated invalid 2FA disable passwords without blocking a valid disable", async () => {
+        const payload = { password: "current-password", token: "123456" };
+        const success = await request(routeApp)
+            .post("/2fa/disable")
+            .set("X-Forwarded-For", "198.51.100.12")
+            .send(payload);
+        expect(success.status).toBe(200);
+        expect(success.body).toEqual({ message: "2FA disabled successfully" });
+
+        mockBcryptCompare.mockResolvedValue(false);
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/2fa/disable")
+                    .set("X-Forwarded-For", "198.51.100.12")
+                    .send(payload),
+            401,
+        );
+    });
+
+    it("throttles repeated invalid create-user requests without blocking account creation", async () => {
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        const success = await request(routeApp)
+            .post("/create-user")
+            .set("X-Forwarded-For", "198.51.100.13")
+            .send({ username: "new-user", password: "123456" });
+        expect(success.status).toBe(200);
+        expect(success.body).toEqual(
+            expect.objectContaining({ id: "u-new", username: "new-user" }),
+        );
+
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/create-user")
+                    .set("X-Forwarded-For", "198.51.100.13")
+                    .send({}),
+            400,
+        );
+    });
+
+    it("throttles repeated invalid Subsonic passwords without blocking a valid credential", async () => {
+        const success = await request(routeApp)
+            .post("/subsonic-password")
+            .set("X-Forwarded-For", "198.51.100.14")
+            .send({ password: "my-subsonic-password" });
+        expect(success.status).toBe(200);
+        expect(success.body).toEqual({ success: true });
+
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/subsonic-password")
+                    .set("X-Forwarded-For", "198.51.100.14")
+                    .send({ password: "short" }),
+            400,
+        );
     });
 
     it("validates login payload and handles invalid credentials", async () => {
@@ -1103,8 +1281,8 @@ describe("auth routes runtime", () => {
         expect(badRes.statusCode).toBe(400);
 
         const randomSpy = jest
-            .spyOn(crypto, "randomBytes")
-            .mockReturnValue(Buffer.alloc(8, 0) as any);
+            .spyOn(crypto, "randomInt")
+            .mockImplementation((_min, _max) => 0);
         (prisma as any).inviteCode.findUnique.mockResolvedValue({
             id: "existing",
         });
@@ -1118,6 +1296,8 @@ describe("auth routes runtime", () => {
         expect(exhaustedRes.body).toEqual({
             error: "Failed to generate unique code",
         });
+        expect(randomSpy).toHaveBeenCalledTimes(80);
+        expect(randomSpy).toHaveBeenCalledWith(0, 32);
         randomSpy.mockRestore();
 
         (prisma as any).inviteCode.findUnique.mockResolvedValueOnce(null);
@@ -1221,6 +1401,40 @@ describe("auth routes runtime", () => {
         expect(revokeErrRes.body).toEqual({
             error: "Failed to revoke invite code",
         });
+    });
+
+    it("generates eight-character invite codes from the unchanged alphabet with bounded randomInt calls", async () => {
+        (prisma as any).inviteCode = {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockImplementation(({ data }) => ({
+                id: "ic-1",
+                ...data,
+                createdAt: new Date("2026-03-01T00:00:00.000Z"),
+            })),
+        };
+        const randomSpy = jest
+            .spyOn(crypto, "randomInt")
+            .mockImplementation((_min, max) => randomSpy.mock.calls.length - 1);
+        const createInvite = getHandler("/invite-codes", "post");
+        const res = createRes();
+
+        await createInvite(
+            {
+                user: { id: "admin-1" },
+                body: { ttl: "never", maxUses: 1 },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.code).toBe("ABCDEFGH");
+        expect(res.body.code).toHaveLength(8);
+        expect(res.body.code).toMatch(
+            /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/,
+        );
+        expect(randomSpy).toHaveBeenCalledTimes(8);
+        expect(randomSpy).toHaveBeenCalledWith(0, 32);
+        randomSpy.mockRestore();
     });
 
     it("covers register route branches including invite/user/email checks and transaction errors", async () => {

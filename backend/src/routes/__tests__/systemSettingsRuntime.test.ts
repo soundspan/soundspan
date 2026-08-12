@@ -1084,7 +1084,8 @@ describe("systemSettings runtime routes", () => {
         const failReq = { body: { username: "u", password: "bad" } } as any;
         const failRes = createRes();
         await testSoulseekHandler(failReq, failRes);
-        expect(failRes.statusCode).toBe(401);
+        expect(failRes.statusCode).toBe(502);
+        expect(failRes.statusCode).not.toBe(401);
         expect(failRes.body.error).toBe(
             "Invalid Soulseek credentials or connection failed",
         );
@@ -1166,7 +1167,11 @@ describe("systemSettings runtime routes", () => {
         const fanartReq = { body: { fanartApiKey: "fanart-key" } } as any;
         const fanartRes = createRes();
         await testFanartHandler(fanartReq, fanartRes);
-        expect(fanartRes.statusCode).toBe(401);
+        expect(fanartRes.statusCode).toBe(502);
+        expect(fanartRes.statusCode).not.toBe(401);
+        expect(fanartRes.body).toEqual({
+            error: "Invalid Fanart.tv API key",
+        });
 
         mockAxiosGet.mockResolvedValueOnce({
             data: { artist: { name: "The Beatles" } },
@@ -1283,7 +1288,8 @@ describe("systemSettings runtime routes", () => {
         const lastfmInvalidReq = { body: { lastfmApiKey: "bad-key" } } as any;
         const lastfmInvalidRes = createRes();
         await testLastfmHandler(lastfmInvalidReq, lastfmInvalidRes);
-        expect(lastfmInvalidRes.statusCode).toBe(401);
+        expect(lastfmInvalidRes.statusCode).toBe(502);
+        expect(lastfmInvalidRes.statusCode).not.toBe(401);
         expect(lastfmInvalidRes.body).toEqual({
             error: "Invalid Last.fm API key",
         });
@@ -1311,7 +1317,8 @@ describe("systemSettings runtime routes", () => {
         } as any;
         const absInvalidRes = createRes();
         await testAudiobookshelfHandler(absInvalidReq, absInvalidRes);
-        expect(absInvalidRes.statusCode).toBe(401);
+        expect(absInvalidRes.statusCode).toBe(502);
+        expect(absInvalidRes.statusCode).not.toBe(401);
         expect(absInvalidRes.body).toEqual({
             error: "Invalid Audiobookshelf API key",
         });
@@ -1348,7 +1355,7 @@ describe("systemSettings runtime routes", () => {
         expect(lastfmRes.body.error).toBe("Unexpected response from Last.fm");
     });
 
-    it("returns 401 for invalid Spotify credentials", async () => {
+    it("returns 502 for invalid Spotify credentials", async () => {
         mockAxiosPost.mockRejectedValueOnce({
             response: { data: { error_description: "invalid_client" } },
         });
@@ -1356,7 +1363,8 @@ describe("systemSettings runtime routes", () => {
         const req = { body: { clientId: "bad", clientSecret: "bad" } } as any;
         const res = createRes();
         await testSpotifyHandler(req, res);
-        expect(res.statusCode).toBe(401);
+        expect(res.statusCode).toBe(502);
+        expect(res.statusCode).not.toBe(401);
         expect(res.body).toEqual({
             error: "Invalid Spotify credentials",
         });
@@ -1374,7 +1382,13 @@ describe("systemSettings runtime routes", () => {
         const unauthReq = { body: {} } as any;
         const unauthRes = createRes();
         await testTidalHandler(unauthReq, unauthRes);
-        expect(unauthRes.statusCode).toBe(401);
+        expect(unauthRes.statusCode).toBe(502);
+        expect(unauthRes.statusCode).not.toBe(401);
+        expect(unauthRes.body).toEqual({
+            error: "Not authenticated to TIDAL",
+            details:
+                "Use the TIDAL settings panel to authenticate via device authorization.",
+        });
 
         mockTidalService.isSidecarHealthy.mockResolvedValueOnce(true);
         const okReq = { body: {} } as any;
@@ -1457,7 +1471,7 @@ describe("systemSettings runtime routes", () => {
         });
     });
 
-    it("uses Spotify token error fallback details", async () => {
+    it("maps a Spotify token request failure to invalid credentials", async () => {
         mockAxiosPost.mockRejectedValueOnce({
             message: "rate limited",
             response: { data: {} },
@@ -1470,7 +1484,25 @@ describe("systemSettings runtime routes", () => {
 
         await testSpotifyHandler(req, res);
 
-        expect(res.statusCode).toBe(401);
+        expect(res.statusCode).toBe(502);
+        expect(res.statusCode).not.toBe(401);
+        expect(res.body).toEqual({
+            error: "Invalid Spotify credentials",
+        });
+    });
+
+    it("maps a Spotify token response without an access token to invalid credentials", async () => {
+        mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+        const req = {
+            body: { clientId: "client-id", clientSecret: "client-secret" },
+        } as any;
+        const res = createRes();
+
+        await testSpotifyHandler(req, res);
+
+        expect(res.statusCode).toBe(502);
+        expect(res.statusCode).not.toBe(401);
         expect(res.body).toEqual({
             error: "Invalid Spotify credentials",
         });

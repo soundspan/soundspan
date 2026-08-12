@@ -61,6 +61,11 @@ const scopedLogger = {
 scopedLogger.child.mockReturnValue(scopedLogger);
 jest.mock("../../utils/logger", () => ({ logger: scopedLogger }));
 
+jest.mock("../../middleware/rateLimiter", () => ({
+    authLimiter: (_req: any, _res: any, next: () => void) => next(),
+    apiLimiter: (_req: any, _res: any, next: () => void) => next(),
+}));
+
 import router from "../auth";
 
 function createRes() {

@@ -293,7 +293,10 @@ describe("auth middleware", () => {
             expect(req.user).toBeUndefined();
             expect(mockApiKeyUpdate).not.toHaveBeenCalled();
             expect(res.statusCode).toBe(401);
-            expect(res.body).toEqual({ error: "Not authenticated" });
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
 
         it("authenticates via bearer token when tokenVersion matches", async () => {
@@ -337,7 +340,10 @@ describe("auth middleware", () => {
 
             expect(next).not.toHaveBeenCalled();
             expect(res.statusCode).toBe(401);
-            expect(res.body).toEqual({ error: "Not authenticated" });
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
 
         it("rejects stale bearer tokens after tokenVersion changes", async () => {
@@ -360,7 +366,10 @@ describe("auth middleware", () => {
             expect(next).not.toHaveBeenCalled();
             expect(req.user).toBeUndefined();
             expect(res.statusCode).toBe(401);
-            expect(res.body).toEqual({ error: "Not authenticated" });
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
     });
 
@@ -414,6 +423,10 @@ describe("auth middleware", () => {
             expect(req.user).toBeUndefined();
             expect(mockApiKeyUpdate).not.toHaveBeenCalled();
             expect(res.statusCode).toBe(401);
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
 
         it("accepts query param tokens for streaming routes", async () => {
@@ -478,7 +491,10 @@ describe("auth middleware", () => {
             expect(next).not.toHaveBeenCalled();
             expect(req.user).toBeUndefined();
             expect(res.statusCode).toBe(401);
-            expect(res.body).toEqual({ error: "Not authenticated" });
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
 
         it("falls back to bearer tokens when no query token is present", async () => {
@@ -545,6 +561,10 @@ describe("auth middleware", () => {
             );
             expect(next).not.toHaveBeenCalled();
             expect(res.statusCode).toBe(401);
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
         });
     });
 });

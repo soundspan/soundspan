@@ -333,6 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Admin “Test connection” failures for Audiobookshelf, Fanart.tv, Last.fm,
+  Soulseek, Spotify, and TIDAL no longer log the user out: upstream credential
+  failures now return 502 instead of 401, and the web client only treats
+  explicitly marked authentication responses as session expiry.
 - Queue auto-advance no longer stalls at track boundaries: engine listeners
   remain attached across playback state changes so end events cannot be dropped,
   a one-shot watchdog advances tracks if an end event is ever lost, and
@@ -732,6 +736,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cover-image storage operations validate IDs and contain all filesystem paths
   under the type-specific covers directory.
+- Account-management, 2FA, and Subsonic-credential routes now have dedicated
+  route-level rate limiting, and invite codes use unbiased cryptographic random
+  character selection.
 - Playlist pending-track operations are scoped to both the playlist and
   pending-track ids, closing a cross-user IDOR (#366).
 - API-key management and MFA setup/enable/disable now require an interactive
