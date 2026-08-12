@@ -198,6 +198,18 @@ describe("spotifyService", () => {
         ).toBeNull();
     });
 
+    it.each([
+        ["named", "&amp;lt;", "&lt;"],
+        ["numeric", "&#38;lt;", "&lt;"],
+    ])(
+        "decodes nested %s HTML entities exactly one level",
+        (_case, input, expected) => {
+            expect((spotifyService as any).decodeHtmlEntities(input)).toBe(
+                expected,
+            );
+        },
+    );
+
     it("rejects non-playlist URLs passed to getPlaylist", async () => {
         await expect(
             spotifyService.getPlaylist(

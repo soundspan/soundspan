@@ -422,8 +422,8 @@ test("PAUSE_REQUESTED while playing classifies the pause as user-intended", () =
     const { state, effects } = transitionNativeEngine(
         playingState({ playStartRetriesUsed: 2 }),
         {
-        type: "PAUSE_REQUESTED",
-        nowMs: 3_000,
+            type: "PAUSE_REQUESTED",
+            nowMs: 3_000,
         },
     );
     assert.equal(state.pauseClassification, "user");

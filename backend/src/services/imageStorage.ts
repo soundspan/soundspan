@@ -25,8 +25,7 @@ function getCoversBasePath(): string {
 }
 
 function getImageDirectory(type: ImageType): string {
-    const subdir =
-        type === "artist" ? ARTIST_IMAGES_DIR : ALBUM_IMAGES_DIR;
+    const subdir = type === "artist" ? ARTIST_IMAGES_DIR : ALBUM_IMAGES_DIR;
     return path.resolve(getCoversBasePath(), subdir);
 }
 

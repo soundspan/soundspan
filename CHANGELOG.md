@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Extracted the library route helpers into typed utility modules as the first
+  stage of the `library.ts` decomposition (#124); behavior is unchanged.
 - Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating
   current PyPI artifacts: `essentia-tensorflow` 2.1b6.dev1389 remains the newest
   CPython 3.11 manylinux x86-64 build, while 2.1b6.dev1438 is CPython 3.14-only.
@@ -740,6 +742,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Playlist import links now require canonical HTTP(S) URLs, and audiobook
   preflight responses now use the central deny-by-default CORS policy.
+- Hardened external-metadata escaping for Deezer and Spotify, and replaced
+  backtracking-prone normalization regexes with linear forms in Soulseek,
+  search, and Lidarr.
 - Cover-image storage operations validate IDs and contain all filesystem paths
   under the type-specific covers directory.
 - Account-management, 2FA, and Subsonic-credential routes now have dedicated
