@@ -24,8 +24,6 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
-    continue-on-error: true
     permissions:
       actions: read
       contents: read
