@@ -112,6 +112,7 @@ jest.mock("../../services/podcastCache", () => ({
     podcastCacheService: {
         syncAllCovers: jest.fn(async () => ({ synced: 0 })),
         syncEpisodeCovers: jest.fn(async () => ({ synced: 0 })),
+        getCoverCacheRoot: () => "/cache",
     },
 }));
 

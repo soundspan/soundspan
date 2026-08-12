@@ -108,7 +108,9 @@ import {
     persistHealedAlbumCover,
     resolveNativeCoverCacheHit,
     tryHealMissingNativeAlbumCover,
+    coversBaseDir,
 } from "../services/nativeCoverHealing";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = Router();
 
@@ -3874,9 +3876,12 @@ router.get<{ id?: string }>(
                     ...buildCoverArtCorsHeaders(req.headers.origin),
                 };
 
-                return res.sendFile(nativeCacheHit.cachePath, {
-                    headers,
-                });
+                return sendFileFromRoot(
+                    res,
+                    nativeCacheHit.cachePath,
+                    coversBaseDir(),
+                    { headers },
+                );
             }
 
             coverUrl = decodedUrl;
@@ -3937,9 +3942,12 @@ router.get<{ id?: string }>(
                         ...buildCoverArtCorsHeaders(req.headers.origin),
                     };
 
-                    return res.sendFile(nativeCacheHit.cachePath, {
-                        headers,
-                    });
+                    return sendFileFromRoot(
+                        res,
+                        nativeCacheHit.cachePath,
+                        coversBaseDir(),
+                        { headers },
+                    );
                 }
 
                 // Native cover file missing - try to find album and fetch from Deezer

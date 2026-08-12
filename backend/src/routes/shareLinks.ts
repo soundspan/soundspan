@@ -13,6 +13,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = Router();
 const zipLogger = logger.child("ShareLinks.ZipArchive");
@@ -360,10 +361,7 @@ function resolveNativeCoverPath(nativePath: string): string | null {
     if (trimmed.length > 0 && !trimmed.startsWith("albums/")) {
         candidates.push(`albums/${trimmed}`);
     }
-    const coversDir = path.resolve(
-        config.music.transcodeCachePath,
-        "../covers",
-    );
+    const coversDir = resolveNativeCoversDir();
     for (const candidate of candidates) {
         const resolved = safeResolvePath(coversDir, candidate);
         if (resolved && fs.existsSync(resolved)) {
@@ -371,6 +369,10 @@ function resolveNativeCoverPath(nativePath: string): string | null {
         }
     }
     return null;
+}
+
+function resolveNativeCoversDir(): string {
+    return path.resolve(config.music.transcodeCachePath, "../covers");
 }
 
 async function resolveTrackOwnership(
@@ -1047,7 +1049,7 @@ router.get("/access/:token/cover", async (req, res) => {
             }
             res.setHeader("Content-Type", "image/jpeg");
             res.setHeader("Cache-Control", "public, max-age=3600");
-            return res.sendFile(filePath);
+            return sendFileFromRoot(res, filePath, resolveNativeCoversDir());
         }
 
         const result = await fetchExternalImage({ url });
