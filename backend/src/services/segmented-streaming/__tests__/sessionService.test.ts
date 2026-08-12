@@ -15,7 +15,13 @@ const createBuildFailureSession = (assetType: string) => ({
     expiresAt: "2099-01-01T00:00:00.000Z",
 });
 
-const resolveSessionService = async () => {
+type ResolveSessionServiceOptions = {
+    useRealCacheService?: boolean;
+};
+
+const resolveSessionService = async (
+    options: ResolveSessionServiceOptions = {},
+) => {
     jest.resetModules();
 
     const mockTrackFindUnique = jest.fn();
@@ -29,6 +35,9 @@ const resolveSessionService = async () => {
     const mockClearSessionReference = jest.fn();
     const mockFsAccess = jest.fn();
     const mockFsReadFile = jest.fn();
+    const mockFsReaddir = jest.fn();
+    const mockFsRm = jest.fn();
+    const mockFsStat = jest.fn();
     const mockHasInFlightBuild = jest.fn();
     const mockGetBuildInFlightStatus = jest.fn(async (...args: unknown[]) => {
         const cacheKey = typeof args[0] === "string" ? args[0] : "";
@@ -48,6 +57,9 @@ const resolveSessionService = async () => {
         promises: {
             access: (...args: unknown[]) => mockFsAccess(...args),
             readFile: (...args: unknown[]) => mockFsReadFile(...args),
+            readdir: (...args: unknown[]) => mockFsReaddir(...args),
+            rm: (...args: unknown[]) => mockFsRm(...args),
+            stat: (...args: unknown[]) => mockFsStat(...args),
         },
     }));
 
@@ -79,6 +91,8 @@ const resolveSessionService = async () => {
             sessionSecret: "test-session-secret",
             music: {
                 musicPath: "/music",
+                transcodeCachePath: "/tmp/segmented",
+                transcodeCacheMaxGb: 10,
             },
         },
     }));
@@ -99,14 +113,18 @@ const resolveSessionService = async () => {
         },
     }));
 
-    jest.doMock("../cacheService", () => ({
-        segmentedStreamingCacheService: {
-            registerSessionReference: (...args: unknown[]) =>
-                mockRegisterSessionReference(...args),
-            clearSessionReference: (...args: unknown[]) =>
-                mockClearSessionReference(...args),
-        },
-    }));
+    if (options.useRealCacheService) {
+        jest.dontMock("../cacheService");
+    } else {
+        jest.doMock("../cacheService", () => ({
+            segmentedStreamingCacheService: {
+                registerSessionReference: (...args: unknown[]) =>
+                    mockRegisterSessionReference(...args),
+                clearSessionReference: (...args: unknown[]) =>
+                    mockClearSessionReference(...args),
+            },
+        }));
+    }
 
     jest.doMock("../segmentService", () => ({
         LOSSLESS_FILE_EXTENSION_REGEX:
@@ -126,10 +144,13 @@ const resolveSessionService = async () => {
     }));
 
     const module = await import("../sessionService");
+    const cacheModule = await import("../cacheService");
 
     return {
         segmentedStreamingSessionService:
             module.segmentedStreamingSessionService,
+        segmentedStreamingCacheService:
+            cacheModule.segmentedStreamingCacheService,
         mocks: {
             mockTrackFindUnique,
             mockUserSettingsFindUnique,
@@ -142,6 +163,9 @@ const resolveSessionService = async () => {
             mockClearSessionReference,
             mockFsAccess,
             mockFsReadFile,
+            mockFsReaddir,
+            mockFsRm,
+            mockFsStat,
             mockHasInFlightBuild,
             mockGetBuildInFlightStatus,
             mockGetBuildFailure,
@@ -151,6 +175,291 @@ const resolveSessionService = async () => {
         },
     };
 };
+
+const createLifecycleSessionRecord = (
+    sessionId: string,
+    createdAt: string,
+    expiresAt = "2099-01-01T00:00:00.000Z",
+    cacheKey = `cache-${sessionId}`,
+) => ({
+    sessionId,
+    userId: "user-1",
+    trackId: `track-${sessionId}`,
+    cacheKey,
+    quality: "medium" as const,
+    sourceType: "local" as const,
+    manifestProfile: "startup_single" as const,
+    manifestPath: `/tmp/segmented/${cacheKey}/manifest.mpd`,
+    assetDir: `/tmp/segmented/${cacheKey}`,
+    createdAt,
+    expiresAt,
+});
+
+describe("segmentedStreamingSessionService resource lifecycle", () => {
+    const segmentedEnvKeys = [
+        "SEGMENTED_STREAMING_CACHE_MAX_GB",
+        "SEGMENTED_STREAMING_CACHE_MIN_AGE_MS",
+        "SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO",
+    ] as const;
+    const originalSegmentedEnv = Object.fromEntries(
+        segmentedEnvKeys.map((key) => [key, process.env[key]]),
+    );
+
+    afterEach(() => {
+        for (const key of segmentedEnvKeys) {
+            const value = originalSegmentedEnv[key];
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+        jest.useRealTimers();
+        jest.restoreAllMocks();
+        jest.resetModules();
+        jest.dontMock("../../../utils/db");
+        jest.dontMock("../../../utils/redis");
+        jest.dontMock("fs");
+        jest.dontMock("../../../config");
+        jest.dontMock("../../../utils/logger");
+        jest.dontMock("../manifestService");
+        jest.dontMock("../cacheService");
+        jest.dontMock("../segmentService");
+    });
+
+    it("sweeps an abandoned expired session and makes its DASH asset prunable", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-02-23T00:00:00.000Z"),
+            timerLimit: 100,
+        });
+        process.env.SEGMENTED_STREAMING_CACHE_MAX_GB = String(
+            500 / (1024 * 1024 * 1024),
+        );
+        process.env.SEGMENTED_STREAMING_CACHE_MIN_AGE_MS = "1";
+        process.env.SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO = "0.5";
+
+        const {
+            segmentedStreamingSessionService,
+            segmentedStreamingCacheService,
+            mocks,
+        } = await resolveSessionService({ useRealCacheService: true });
+        const sessionRecord = createLifecycleSessionRecord(
+            "abandoned",
+            "2026-02-22T23:55:00.000Z",
+            "2026-02-23T00:05:00.000Z",
+            "abandoned-asset",
+        );
+        const dashRoot = "/tmp/segmented/segmented-dash";
+        const outputDir = `${dashRoot}/${sessionRecord.cacheKey}`;
+        const segmentPath = `${outputDir}/chunk-0-00001.m4s`;
+
+        mocks.mockFsReaddir.mockImplementation(async (candidatePath) => {
+            if (candidatePath === dashRoot) {
+                return [
+                    {
+                        name: sessionRecord.cacheKey,
+                        isDirectory: () => true,
+                    },
+                ];
+            }
+            if (candidatePath === outputDir) {
+                return [
+                    {
+                        name: "chunk-0-00001.m4s",
+                        isDirectory: () => false,
+                    },
+                ];
+            }
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        });
+        mocks.mockFsStat.mockResolvedValue({
+            size: 1_000,
+            mtimeMs: Date.now() - 60_000,
+        });
+        mocks.mockFsRm.mockResolvedValue(undefined);
+
+        await (segmentedStreamingSessionService as any).persistSession(
+            sessionRecord,
+        );
+        segmentedStreamingCacheService.registerSessionReference(
+            sessionRecord.cacheKey,
+            sessionRecord.sessionId,
+        );
+        (segmentedStreamingSessionService as any).markReadinessMicrocacheHit(
+            (segmentedStreamingSessionService as any).segmentReadyMicrocache,
+            `${sessionRecord.sessionId}:chunk-0-00001.m4s`,
+            sessionRecord.sessionId,
+        );
+
+        const protectedResult =
+            await segmentedStreamingCacheService.pruneDashCacheIfNeeded();
+        expect(protectedResult.skippedActiveEntries).toBe(1);
+        expect(mocks.mockFsRm).not.toHaveBeenCalled();
+
+        await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+        expect(
+            (segmentedStreamingSessionService as any).inMemorySessions.has(
+                sessionRecord.sessionId,
+            ),
+        ).toBe(false);
+        expect(
+            (segmentedStreamingSessionService as any).segmentReadyMicrocache
+                .size,
+        ).toBe(0);
+        expect(
+            segmentedStreamingCacheService.getSessionReferenceCount(
+                sessionRecord.cacheKey,
+            ),
+        ).toBe(0);
+
+        const prunedResult =
+            await segmentedStreamingCacheService.pruneDashCacheIfNeeded();
+        expect(prunedResult.removedEntries).toBe(1);
+        expect(mocks.mockFsRm).toHaveBeenCalledWith(outputDir, {
+            recursive: true,
+            force: true,
+        });
+        expect(mocks.mockFsStat).toHaveBeenCalledWith(segmentPath);
+
+        segmentedStreamingSessionService.dispose();
+    });
+
+    it("evicts the oldest session when the in-memory capacity is exceeded", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-02-23T00:00:00.000Z"),
+            timerLimit: 100,
+        });
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        const serviceState = segmentedStreamingSessionService as any;
+        const capacity = serviceState.maxInMemorySessionEntries as number;
+
+        expect(capacity).toBe(4_096);
+        for (let index = 0; index < 4_096; index += 1) {
+            const sessionId = `session-${index.toString().padStart(5, "0")}`;
+            serviceState.inMemorySessions.set(
+                sessionId,
+                createLifecycleSessionRecord(
+                    sessionId,
+                    new Date(Date.now() + index).toISOString(),
+                ),
+            );
+        }
+
+        const newestSession = createLifecycleSessionRecord(
+            "session-newest",
+            new Date(Date.now() + capacity).toISOString(),
+        );
+        await serviceState.persistSession(newestSession);
+
+        expect(serviceState.inMemorySessions.size).toBe(capacity);
+        expect(serviceState.inMemorySessions.has("session-00000")).toBe(false);
+        expect(serviceState.inMemorySessions.has(newestSession.sessionId)).toBe(
+            true,
+        );
+        expect(mocks.mockClearSessionReference).toHaveBeenCalledWith(
+            "cache-session-00000",
+            "session-00000",
+        );
+
+        segmentedStreamingSessionService.dispose();
+    });
+
+    it("evicts the oldest readiness entry when the microcache capacity is exceeded", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-02-23T00:00:00.000Z"),
+            timerLimit: 100,
+        });
+        const { segmentedStreamingSessionService } =
+            await resolveSessionService();
+        const serviceState = segmentedStreamingSessionService as any;
+        const capacity =
+            serviceState.maxSegmentReadyMicrocacheEntries as number;
+
+        expect(capacity).toBe(8_192);
+        for (let index = 0; index < 8_192; index += 1) {
+            serviceState.markReadinessMicrocacheHit(
+                serviceState.segmentReadyMicrocache,
+                `session-${index}:chunk-0-00001.m4s`,
+                `session-${index}`,
+            );
+        }
+
+        serviceState.markReadinessMicrocacheHit(
+            serviceState.segmentReadyMicrocache,
+            "session-newest:chunk-0-00001.m4s",
+            "session-newest",
+        );
+
+        expect(serviceState.segmentReadyMicrocache.size).toBe(capacity);
+        expect(
+            serviceState.segmentReadyMicrocache.has(
+                "session-0:chunk-0-00001.m4s",
+            ),
+        ).toBe(false);
+        expect(
+            serviceState.segmentReadyMicrocache.has(
+                "session-newest:chunk-0-00001.m4s",
+            ),
+        ).toBe(true);
+
+        segmentedStreamingSessionService.dispose();
+    });
+
+    it("keeps an active non-expired session through a sweep", async () => {
+        jest.useFakeTimers({
+            now: new Date("2026-02-23T00:00:00.000Z"),
+            timerLimit: 100,
+        });
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+        const activeSession = createLifecycleSessionRecord(
+            "active",
+            "2026-02-23T00:00:00.000Z",
+            "2026-02-23T00:05:00.000Z",
+        );
+
+        await (segmentedStreamingSessionService as any).persistSession(
+            activeSession,
+        );
+        await jest.advanceTimersByTimeAsync(60_000);
+
+        expect(
+            (segmentedStreamingSessionService as any).inMemorySessions.get(
+                activeSession.sessionId,
+            ),
+        ).toEqual(activeSession);
+        expect(mocks.mockClearSessionReference).not.toHaveBeenCalled();
+
+        segmentedStreamingSessionService.dispose();
+    });
+
+    it("unrefs its sweep timer and clears it once on dispose", async () => {
+        jest.useFakeTimers();
+        const unref = jest.fn();
+        const timer = { unref } as unknown as NodeJS.Timeout;
+        const setIntervalSpy = jest
+            .spyOn(global, "setInterval")
+            .mockReturnValue(timer);
+        const clearIntervalSpy = jest.spyOn(global, "clearInterval");
+
+        const { segmentedStreamingSessionService } =
+            await resolveSessionService();
+
+        expect(setIntervalSpy).toHaveBeenCalledWith(
+            expect.any(Function),
+            60_000,
+        );
+        expect(unref).toHaveBeenCalledTimes(1);
+
+        segmentedStreamingSessionService.dispose();
+        segmentedStreamingSessionService.dispose();
+
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+    });
+});
 
 describe("segmentedStreamingSessionService local quality handling", () => {
     afterEach(() => {

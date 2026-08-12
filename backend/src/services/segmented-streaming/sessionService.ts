@@ -39,6 +39,9 @@ const ASSET_READY_POLL_MIN_REMAINING_WINDOW_SAMPLES = 6;
 const ASSET_READY_TIMEOUT_MS = 20_000;
 const ASSET_CROSS_POD_GRACE_MS = 5_000;
 const READINESS_MICROCACHE_TTL_MS = 1_500;
+const SESSION_EXPIRY_SWEEP_INTERVAL_MS = 60_000;
+const MAX_IN_MEMORY_SESSION_ENTRIES = 4_096;
+const MAX_SEGMENT_READY_MICROCACHE_ENTRIES = 8_192;
 const STARTUP_MIN_TIMELINE_SEGMENTS = 3;
 const STARTUP_SEGMENT_EXTENSIONS = ["m4s", "webm"] as const;
 const TRANSIENT_BUILD_FAILURE_PATTERNS = [
@@ -179,19 +182,48 @@ interface ReadinessPollBackoffState {
     nextBaseDelayMs: number;
 }
 
+interface ReadinessMicrocacheEntry {
+    expiresAtMs: number;
+    sessionId: string;
+}
+
 class SegmentedSessionService {
+    private readonly maxInMemorySessionEntries = MAX_IN_MEMORY_SESSION_ENTRIES;
+    private readonly maxSegmentReadyMicrocacheEntries =
+        MAX_SEGMENT_READY_MICROCACHE_ENTRIES;
     private readonly inMemorySessions = new Map<
         string,
         SegmentedSessionRecord
     >();
     private readonly manifestReadyInFlight = new Map<string, Promise<void>>();
     private readonly segmentReadyInFlight = new Map<string, Promise<void>>();
-    private readonly segmentReadyMicrocache = new Map<string, number>();
+    private readonly segmentReadyMicrocache = new Map<
+        string,
+        ReadinessMicrocacheEntry
+    >();
     private readonly playbackErrorRepairInFlight = new Map<
         string,
         Promise<void>
     >();
     private readonly playbackErrorRepairQueued = new Set<string>();
+    private expirySweepInterval: NodeJS.Timeout | null;
+
+    constructor() {
+        this.expirySweepInterval = setInterval(() => {
+            this.sweepExpiredEntries();
+        }, SESSION_EXPIRY_SWEEP_INTERVAL_MS);
+        this.expirySweepInterval.unref?.();
+    }
+
+    /** Stops the owned expiry-sweep timer. */
+    dispose(): void {
+        if (!this.expirySweepInterval) {
+            return;
+        }
+
+        clearInterval(this.expirySweepInterval);
+        this.expirySweepInterval = null;
+    }
 
     async createLocalSession(
         input: CreateLocalSegmentedSessionInput,
@@ -658,6 +690,7 @@ class SegmentedSessionService {
                 this.markReadinessMicrocacheHit(
                     this.segmentReadyMicrocache,
                     segmentReadinessKey,
+                    session.sessionId,
                 );
             },
             {
@@ -685,15 +718,15 @@ class SegmentedSessionService {
     }
 
     private hasReadinessMicrocacheHit(
-        microcache: Map<string, number>,
+        microcache: Map<string, ReadinessMicrocacheEntry>,
         key: string,
     ): boolean {
-        const expiresAtMs = microcache.get(key);
-        if (expiresAtMs === undefined) {
+        const entry = microcache.get(key);
+        if (!entry) {
             return false;
         }
 
-        if (expiresAtMs <= Date.now()) {
+        if (entry.expiresAtMs <= Date.now()) {
             microcache.delete(key);
             return false;
         }
@@ -702,17 +735,32 @@ class SegmentedSessionService {
     }
 
     private markReadinessMicrocacheHit(
-        microcache: Map<string, number>,
+        microcache: Map<string, ReadinessMicrocacheEntry>,
         key: string,
+        sessionId = key.slice(0, key.indexOf(":")),
     ): void {
-        microcache.set(key, Date.now() + READINESS_MICROCACHE_TTL_MS);
+        microcache.delete(key);
+        if (microcache.size >= this.maxSegmentReadyMicrocacheEntries) {
+            this.evictExpiredReadinessEntries(Date.now());
+        }
+        if (microcache.size >= this.maxSegmentReadyMicrocacheEntries) {
+            const oldestKey = microcache.keys().next().value;
+            if (typeof oldestKey === "string") {
+                microcache.delete(oldestKey);
+            }
+        }
+
+        microcache.set(key, {
+            expiresAtMs: Date.now() + READINESS_MICROCACHE_TTL_MS,
+            sessionId,
+        });
     }
 
     private async persistSession(
         session: SegmentedSessionRecord,
     ): Promise<void> {
         const key = this.getSessionKey(session.sessionId);
-        this.inMemorySessions.set(session.sessionId, session);
+        this.storeSessionInMemory(session);
 
         try {
             await redisClient.setEx(
@@ -738,7 +786,7 @@ class SegmentedSessionService {
             if (payload) {
                 const parsed = parseSessionRecord(payload);
                 if (parsed) {
-                    this.inMemorySessions.set(sessionId, parsed);
+                    this.storeSessionInMemory(parsed);
                     return parsed;
                 }
             }
@@ -753,19 +801,112 @@ class SegmentedSessionService {
     }
 
     private async deleteSession(sessionId: string): Promise<void> {
-        const existingSession = this.inMemorySessions.get(sessionId);
-        this.inMemorySessions.delete(sessionId);
-        if (existingSession) {
-            segmentedStreamingCacheService.clearSessionReference(
-                existingSession.cacheKey,
-                existingSession.sessionId,
-            );
-        }
+        this.evictSessionFromMemory(sessionId);
         const key = this.getSessionKey(sessionId);
         try {
             await redisClient.del(key);
         } catch {
             // Intentionally ignored: key expiry fallback still applies.
+        }
+    }
+
+    private storeSessionInMemory(session: SegmentedSessionRecord): void {
+        const isNewEntry = !this.inMemorySessions.has(session.sessionId);
+        if (
+            isNewEntry &&
+            this.inMemorySessions.size >= this.maxInMemorySessionEntries
+        ) {
+            this.evictExpiredSessions(Date.now());
+        }
+        if (
+            isNewEntry &&
+            this.inMemorySessions.size >= this.maxInMemorySessionEntries
+        ) {
+            const oldestSessionId = this.findOldestSessionId();
+            if (oldestSessionId) {
+                this.evictSessionFromMemory(oldestSessionId);
+            }
+        }
+
+        this.inMemorySessions.set(session.sessionId, session);
+    }
+
+    private findOldestSessionId(): string | null {
+        const oldestSessionId = this.inMemorySessions.keys().next().value;
+        return typeof oldestSessionId === "string" ? oldestSessionId : null;
+    }
+
+    private sweepExpiredEntries(): void {
+        const nowMs = Date.now();
+        this.evictExpiredSessions(nowMs);
+        this.evictExpiredReadinessEntries(nowMs);
+    }
+
+    private evictExpiredSessions(nowMs: number): void {
+        const evictedSessionIds = new Set<string>();
+        let inspectedEntries = 0;
+
+        for (const session of this.inMemorySessions.values()) {
+            if (inspectedEntries >= this.maxInMemorySessionEntries) {
+                break;
+            }
+            inspectedEntries += 1;
+            if (!isSessionExpired(session, nowMs)) {
+                continue;
+            }
+
+            this.evictSessionRecord(session);
+            evictedSessionIds.add(session.sessionId);
+        }
+
+        if (evictedSessionIds.size > 0) {
+            this.clearReadinessEntriesForSessions(evictedSessionIds);
+        }
+    }
+
+    private evictExpiredReadinessEntries(nowMs: number): void {
+        let inspectedEntries = 0;
+        for (const [key, entry] of this.segmentReadyMicrocache) {
+            if (inspectedEntries >= this.maxSegmentReadyMicrocacheEntries) {
+                break;
+            }
+            inspectedEntries += 1;
+            if (entry.expiresAtMs <= nowMs) {
+                this.segmentReadyMicrocache.delete(key);
+            }
+        }
+    }
+
+    private evictSessionFromMemory(sessionId: string): void {
+        const session = this.inMemorySessions.get(sessionId);
+        if (!session) {
+            return;
+        }
+
+        this.evictSessionRecord(session);
+        this.clearReadinessEntriesForSessions(new Set([sessionId]));
+    }
+
+    private evictSessionRecord(session: SegmentedSessionRecord): void {
+        this.inMemorySessions.delete(session.sessionId);
+        segmentedStreamingCacheService.clearSessionReference(
+            session.cacheKey,
+            session.sessionId,
+        );
+    }
+
+    private clearReadinessEntriesForSessions(
+        sessionIds: ReadonlySet<string>,
+    ): void {
+        let inspectedEntries = 0;
+        for (const [key, entry] of this.segmentReadyMicrocache) {
+            if (inspectedEntries >= this.maxSegmentReadyMicrocacheEntries) {
+                break;
+            }
+            inspectedEntries += 1;
+            if (sessionIds.has(entry.sessionId)) {
+                this.segmentReadyMicrocache.delete(key);
+            }
         }
     }
 
@@ -1498,6 +1639,14 @@ const normalizePositionSec = (value: unknown): number | undefined =>
 
 const normalizeIsPlaying = (value: unknown): boolean | undefined =>
     typeof value === "boolean" ? value : undefined;
+
+const isSessionExpired = (
+    session: SegmentedSessionRecord,
+    nowMs: number,
+): boolean => {
+    const expiresAtMs = Date.parse(session.expiresAt);
+    return !Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs;
+};
 
 const isSegmentedSessionTokenPayload = (
     payload: unknown,
