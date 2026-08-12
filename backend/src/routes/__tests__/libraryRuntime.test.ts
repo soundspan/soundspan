@@ -13,7 +13,12 @@ jest.mock("dns/promises", () => ({
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
-    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAdmin: (req: Request, res: Response, next: () => void) => {
+        if (req.user?.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
 }));
@@ -484,6 +489,20 @@ function getHandler(
     return layer.route.stack[stackIndex].handle;
 }
 
+function getFinalHandler(
+    method: "get" | "post" | "delete" | "put" | "patch",
+    path: string,
+) {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === path && entry.route?.methods?.[method],
+    );
+    if (!layer) {
+        throw new Error(`Route not found: [${method}] ${path}`);
+    }
+    return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
 function createRes() {
     const res: any = {
         statusCode: 200,
@@ -610,7 +629,8 @@ function expectNoUnboundedIdPoolFetch() {
 
 describe("library scan and organize runtime coverage", () => {
     const scanHandler = getHandler("post", "/scan");
-    const scanStatusHandler = getHandler("get", "/scan/status/:jobId");
+    const scanStatusAccessHandler = getHandler("get", "/scan/status/:jobId");
+    const scanStatusHandler = getFinalHandler("get", "/scan/status/:jobId");
     const organizeHandler = getHandler("post", "/organize");
 
     beforeEach(() => {
@@ -820,11 +840,44 @@ describe("library scan and organize runtime coverage", () => {
         expect(res.body).toEqual({ error: "Job not found" });
     });
 
-    it("maps Bull job state, progress, and result to response payload", async () => {
+    it("rejects non-admin scan status access before reading the queue", async () => {
+        const req = {
+            params: { jobId: "job-123" },
+            user: { id: "user-1", role: "user" },
+        } as any;
+        const res = createRes();
+
+        await scanStatusAccessHandler(req, res, jest.fn());
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: "Admin access required" });
+        expect(mockScanQueueGetJob).not.toHaveBeenCalled();
+    });
+
+    it("maps Bull scan details to a sanitized response payload", async () => {
         const job = {
             getState: jest.fn().mockResolvedValue("completed"),
-            progress: jest.fn(() => 68),
-            returnvalue: { indexed: 241 },
+            progress: jest.fn(() => ({
+                percent: 68,
+                currentFile: "/music/private/Artist/track.flac",
+            })),
+            returnvalue: {
+                tracksAdded: 241,
+                tracksUpdated: 12,
+                tracksRemoved: 3,
+                errors: [
+                    {
+                        file: "/music/private/Artist/broken.flac",
+                        error: "decoder crashed at /usr/lib/private/codec.so",
+                    },
+                    {
+                        file: "C:\\Music\\private\\second.flac",
+                        error: "scanner exception with host diagnostics",
+                    },
+                ],
+                duration: 4321,
+                musicPath: "/music/private",
+            },
         };
         mockScanQueueGetJob.mockResolvedValueOnce(job);
 
@@ -837,8 +890,17 @@ describe("library scan and organize runtime coverage", () => {
         expect(res.body).toEqual({
             status: "completed",
             progress: 68,
-            result: { indexed: 241 },
+            result: {
+                tracksAdded: 241,
+                tracksUpdated: 12,
+                tracksRemoved: 3,
+                failedCount: 2,
+                duration: 4321,
+            },
         });
+        expect(JSON.stringify(res.body)).not.toContain("/music/private");
+        expect(JSON.stringify(res.body)).not.toContain("C:\\Music");
+        expect(JSON.stringify(res.body)).not.toContain("decoder crashed");
         expect(job.getState).toHaveBeenCalledTimes(1);
         expect(job.progress).toHaveBeenCalledTimes(1);
     });
@@ -852,6 +914,8 @@ describe("library scan and organize runtime coverage", () => {
         await invokeWithErrorHandler(scanStatusHandler, req, res);
 
         expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to get scan status" });
+        expect(JSON.stringify(res.body)).not.toContain("redis down");
     });
 
     it("starts manual organization in background", async () => {

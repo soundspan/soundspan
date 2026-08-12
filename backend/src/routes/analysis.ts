@@ -356,7 +356,6 @@ router.get<{ trackId: string }>(
                     id: true,
                     title: true,
                     analysisStatus: true,
-                    analysisError: true,
                     analyzedAt: true,
                     analysisVersion: true,
                     analysisMode: true,

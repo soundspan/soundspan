@@ -281,6 +281,52 @@ const finishOrganizationInBackground = async (
     }
 };
 
+interface SanitizedScanResult {
+    tracksAdded: number;
+    tracksUpdated: number;
+    tracksRemoved: number;
+    failedCount: number;
+    duration: number;
+}
+
+const toNonNegativeInteger = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? Math.floor(value)
+        : 0;
+
+const sanitizeScanProgress = (value: unknown): number => {
+    let percent = value;
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const fields = value as Record<string, unknown>;
+        if (typeof fields.percent === "number") {
+            percent = fields.percent;
+        } else if (
+            typeof fields.processed === "number" &&
+            typeof fields.total === "number" &&
+            fields.total > 0
+        ) {
+            percent = (fields.processed / fields.total) * 100;
+        }
+    }
+
+    return Math.min(100, toNonNegativeInteger(percent));
+};
+
+const sanitizeScanResult = (value: unknown): SanitizedScanResult | null => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+
+    const fields = value as Record<string, unknown>;
+    return {
+        tracksAdded: toNonNegativeInteger(fields.tracksAdded),
+        tracksUpdated: toNonNegativeInteger(fields.tracksUpdated),
+        tracksRemoved: toNonNegativeInteger(fields.tracksRemoved),
+        failedCount: Array.isArray(fields.errors) ? fields.errors.length : 0,
+        duration: toNonNegativeInteger(fields.duration),
+    };
+};
+
 const organizeBeforeLibraryScan = async (): Promise<void> => {
     try {
         libraryMaintenanceLogger.info(
@@ -860,33 +906,65 @@ router.post(
  *                 status:
  *                   type: string
  *                 progress:
- *                   type: object
+ *                   type: integer
+ *                   minimum: 0
+ *                   maximum: 100
  *                 result:
  *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     tracksAdded:
+ *                       type: integer
+ *                       minimum: 0
+ *                     tracksUpdated:
+ *                       type: integer
+ *                       minimum: 0
+ *                     tracksRemoved:
+ *                       type: integer
+ *                       minimum: 0
+ *                     failedCount:
+ *                       type: integer
+ *                       minimum: 0
+ *                     duration:
+ *                       type: integer
+ *                       minimum: 0
  *       404:
  *         description: Job not found
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to get scan status
  */
 // GET /library/scan/status/:jobId - Check scan job status
-router.get(
+router.get<{ jobId: string }>(
     "/scan/status/:jobId",
+    requireAdmin,
     asyncHandler(async (req, res) => {
-        const job = await scanQueue.getJob(req.params.jobId);
+        try {
+            const job = await scanQueue.getJob(req.params.jobId);
 
-        if (!job) {
-            return sendRouteError(res, 404, "Job not found");
+            if (!job) {
+                return sendRouteError(res, 404, "Job not found");
+            }
+
+            const state = await job.getState();
+            const progress = sanitizeScanProgress(job.progress());
+            const result = sanitizeScanResult(job.returnvalue);
+
+            return res.json({
+                status: state,
+                progress,
+                result,
+            });
+        } catch (error) {
+            libraryMaintenanceLogger.error("Failed to get scan status", {
+                jobId: req.params.jobId,
+                error,
+            });
+            return sendInternalRouteError(res, "Failed to get scan status");
         }
-
-        const state = await job.getState();
-        const progress = job.progress();
-        const result = job.returnvalue;
-
-        res.json({
-            status: state,
-            progress,
-            result,
-        });
     }),
 );
 

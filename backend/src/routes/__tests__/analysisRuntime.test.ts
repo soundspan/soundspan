@@ -419,18 +419,30 @@ describe("analysis routes runtime", () => {
         await getTrack(missingReq, missingRes);
         expect(missingRes.statusCode).toBe(404);
 
-        mockTrackFindUnique.mockResolvedValueOnce({
+        const storedTrack = {
             id: "t2",
             title: "Track Two",
-            analysisStatus: "completed",
-        });
+            analysisStatus: "failed",
+            analysisError:
+                "ffmpeg failed at /srv/soundspan/music/private/track.flac",
+        };
+        mockTrackFindUnique.mockImplementationOnce(async ({ select }) =>
+            Object.fromEntries(
+                Object.entries(storedTrack).filter(
+                    ([field]) => select[field] === true,
+                ),
+            ),
+        );
         const req = { params: { trackId: "t2" } } as any;
         const res = createRes();
         await getTrack(req, res);
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(
-            expect.objectContaining({ id: "t2", title: "Track Two" }),
-        );
+        expect(res.body).toEqual({
+            id: "t2",
+            title: "Track Two",
+            analysisStatus: "failed",
+        });
+        expect(JSON.stringify(res.body)).not.toContain("/srv/soundspan");
     });
 
     it("returns empty features when no analyzed tracks exist", async () => {
