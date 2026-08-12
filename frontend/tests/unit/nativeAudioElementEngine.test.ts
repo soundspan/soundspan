@@ -810,9 +810,7 @@ test("NotAllowedError schedules a bounded timer retry through the normal play pa
     harness.mainElement().fireLoadedMetadata(200);
     await flushMicrotasks();
 
-    const [retry] = harness.scheduler.timers.filter(
-        (timer) => !timer.cleared,
-    );
+    const [retry] = harness.scheduler.timers.filter((timer) => !timer.cleared);
     assert.ok(retry);
     assert.equal(retry.delayMs, NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS[0]);
 
