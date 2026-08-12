@@ -26,7 +26,7 @@ const ALLOWLIST = [
     "services/listenTogetherStateStore.ts",
     "services/segmented-streaming/cacheService.ts",
     "services/segmented-streaming/segmentService.ts",
-    "services/segmented-streaming/trace.ts",
+    "services/playbackTrace.ts",
     "services/youtubeMusic.ts",
     "utils/apiKeyHash.ts",
     "utils/configValidator.ts",
