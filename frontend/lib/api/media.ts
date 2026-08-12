@@ -8,6 +8,8 @@ import type {
 } from "../api";
 import type { ApiClientConstructor } from "./core";
 
+const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
+
 /** Add media-domain operations to an API client base class. */
 export function WithMedia<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class MediaApi extends Base {
@@ -65,6 +67,56 @@ export function WithMedia<TBase extends ApiClientConstructor>(Base: TBase) {
 
         getStreamingAuthToken(): string | null {
             return this.getCurrentToken();
+        }
+
+        /** Fetch a segmented-session manifest without altering its raw response. */
+        async fetchSegmentedStreamingManifest(
+            manifestUrl: string,
+            sessionToken: string,
+            signal: AbortSignal,
+        ): Promise<Response> {
+            return this.fetchSegmentedStreamingAsset(
+                manifestUrl,
+                sessionToken,
+                signal,
+            );
+        }
+
+        /** Fetch one segmented-session media asset without consuming its body. */
+        async fetchSegmentedStreamingSegment(
+            sessionId: string,
+            sessionToken: string,
+            segmentName: string,
+            signal: AbortSignal,
+        ): Promise<Response> {
+            const segmentUrl =
+                `/api/streaming/v1/sessions/${sessionId}/segments/${encodeURIComponent(segmentName)}?` +
+                `${SEGMENTED_SESSION_TOKEN_QUERY_PARAM}=${encodeURIComponent(sessionToken)}`;
+            return this.fetchSegmentedStreamingAsset(
+                segmentUrl,
+                sessionToken,
+                signal,
+            );
+        }
+
+        private async fetchSegmentedStreamingAsset(
+            url: string,
+            sessionToken: string,
+            signal: AbortSignal,
+        ): Promise<Response> {
+            const headers: Record<string, string> = {
+                "x-streaming-session-token": sessionToken,
+            };
+            const authToken = this.getStreamingAuthToken();
+            if (authToken) {
+                headers.Authorization = `Bearer ${authToken}`;
+            }
+            return fetch(url, {
+                method: "GET",
+                credentials: "include",
+                headers,
+                signal,
+            });
         }
 
         async heartbeatSegmentedStreamingSession(

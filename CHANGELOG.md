@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Consolidated component network calls behind the frontend API layer and added
+  a boundary ratchet that prevents new direct `fetch()` calls in frontend app,
+  component, and feature modules.
 - Consolidated environment configuration reads into the backend config module
   for 20 more production files; the config-boundary allowlist shrank from 39
   files to 19.

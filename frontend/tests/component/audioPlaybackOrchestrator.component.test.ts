@@ -444,6 +444,17 @@ const controlCalls = {
 const apiCalls = {
     getStreamUrl: [] as string[],
     createSegmentedStreamingSession: [] as Array<Record<string, unknown>>,
+    fetchSegmentedStreamingManifest: [] as Array<{
+        manifestUrl: string;
+        sessionToken: string;
+        signal: AbortSignal;
+    }>,
+    fetchSegmentedStreamingSegment: [] as Array<{
+        sessionId: string;
+        sessionToken: string;
+        segmentName: string;
+        signal: AbortSignal;
+    }>,
     handoffSegmentedStreamingSession: [] as Array<{
         sessionId: string;
         sessionToken: string;
@@ -485,6 +496,13 @@ let podcastCacheStatus = {
 let seekToleranceOverride: boolean | null = null;
 let segmentedStartupRetryDelayOverride: number | null = null;
 let mirrorMachineIntentToPlaybackState = false;
+let segmentedManifestFetchOverride:
+    | ((
+          manifestUrl: string,
+          sessionToken: string,
+          signal: AbortSignal,
+      ) => Promise<Response>)
+    | null = null;
 const segmentedStartupRetryDelayInputs: Array<{
     retryTimeoutMs: number;
     sourceKind: "segmented" | "direct";
@@ -612,6 +630,7 @@ const resetHarnessState = (): void => {
     seekToleranceOverride = null;
     segmentedStartupRetryDelayOverride = null;
     mirrorMachineIntentToPlaybackState = false;
+    segmentedManifestFetchOverride = null;
     segmentedStartupRetryDelayInputs.length = 0;
     segmentedSessionQueue.length = 0;
     handoffSessionQueue.length = 0;
@@ -889,6 +908,39 @@ mock.module("@/lib/api", {
                 const next = segmentedSessionQueue.shift();
                 if (next instanceof Error) throw next;
                 return next ?? makeSegmentedSession("default-segmented");
+            },
+            fetchSegmentedStreamingManifest: async (
+                manifestUrl: string,
+                sessionToken: string,
+                signal: AbortSignal,
+            ) => {
+                apiCalls.fetchSegmentedStreamingManifest.push({
+                    manifestUrl,
+                    sessionToken,
+                    signal,
+                });
+                if (segmentedManifestFetchOverride) {
+                    return segmentedManifestFetchOverride(
+                        manifestUrl,
+                        sessionToken,
+                        signal,
+                    );
+                }
+                return new Response("<MPD />", { status: 200 });
+            },
+            fetchSegmentedStreamingSegment: async (
+                sessionId: string,
+                sessionToken: string,
+                segmentName: string,
+                signal: AbortSignal,
+            ) => {
+                apiCalls.fetchSegmentedStreamingSegment.push({
+                    sessionId,
+                    sessionToken,
+                    segmentName,
+                    signal,
+                });
+                return new Response(null, { status: 204 });
             },
             handoffSegmentedStreamingSession: async (
                 sessionId: string,
@@ -2157,15 +2209,10 @@ test("aborts in-flight segmented prewarm validation when track changes", async (
         makeSegmentedSession("prewarm-session"),
     );
 
-    const originalFetch = globalThis.fetch;
     const abortReasons: unknown[] = [];
-    (globalThis as { fetch: typeof fetch }).fetch = ((
-        _input: Parameters<typeof fetch>[0],
-        init?: Parameters<typeof fetch>[1],
-    ) => {
-        const signal = init?.signal as AbortSignal | undefined;
-        return new Promise<Response>((_resolve, reject) => {
-            signal?.addEventListener(
+    segmentedManifestFetchOverride = (_manifestUrl, _sessionToken, signal) =>
+        new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener(
                 "abort",
                 () => {
                     abortReasons.push(signal.reason);
@@ -2176,36 +2223,73 @@ test("aborts in-flight segmented prewarm validation when track changes", async (
                 { once: true },
             );
         });
-    }) as typeof fetch;
 
-    try {
-        renderOrchestrator();
-        await flushAsync(20);
-        assert.ok(apiCalls.createSegmentedStreamingSession.length >= 2);
+    renderOrchestrator();
+    await flushAsync(20);
+    assert.ok(apiCalls.createSegmentedStreamingSession.length >= 2);
 
-        audioState.currentTrack = makeTrack("prewarm-replacement");
-        audioState.queue = [audioState.currentTrack];
-        rerenderOrchestrator();
-        await flushAsync(20);
+    audioState.currentTrack = makeTrack("prewarm-replacement");
+    audioState.queue = [audioState.currentTrack];
+    rerenderOrchestrator();
+    await flushAsync(20);
 
-        assert.ok(abortReasons.includes("track_change"));
-        const abortedMetrics = getClientMetricEvents(
-            "session.prewarm_validation_aborted",
-        );
-        assert.ok(
-            abortedMetrics.some(
-                (metric) =>
-                    metric.reason === "track_change" &&
-                    metric.trackId === "prewarm-next",
-            ),
-        );
-    } finally {
-        if (originalFetch) {
-            (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
-        } else {
-            delete (globalThis as { fetch?: typeof fetch }).fetch;
-        }
-    }
+    assert.ok(abortReasons.includes("track_change"));
+    const abortedMetrics = getClientMetricEvents(
+        "session.prewarm_validation_aborted",
+    );
+    assert.ok(
+        abortedMetrics.some(
+            (metric) =>
+                metric.reason === "track_change" &&
+                metric.trackId === "prewarm-next",
+        ),
+    );
+});
+
+test("validates prewarmed startup chunks through the API boundary", async () => {
+    runtimeEngineMode = "videojs";
+    playbackState.isPlaying = true;
+
+    const currentTrack = makeTrack("prewarm-api-current");
+    const nextTrack = makeTrack("prewarm-api-next");
+    audioState.currentTrack = currentTrack;
+    audioState.queue = [currentTrack, nextTrack];
+    audioState.currentIndex = 0;
+    segmentedSessionQueue.push(
+        makeSegmentedSession("prewarm-api-startup"),
+        makeSegmentedSession("prewarm-api-next-session"),
+    );
+    segmentedManifestFetchOverride = async () =>
+        new Response("chunk-a.m4s chunk-a.m4s chunk-b.webm chunk-c.m4s", {
+            status: 200,
+        });
+
+    renderOrchestrator();
+    await flushAsync(24);
+
+    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 1);
+    assert.deepEqual(
+        apiCalls.fetchSegmentedStreamingSegment.map((call) => ({
+            sessionId: call.sessionId,
+            sessionToken: call.sessionToken,
+            segmentName: call.segmentName,
+            signal: call.signal,
+        })),
+        [
+            {
+                sessionId: "prewarm-api-next-session",
+                sessionToken: "prewarm-api-next-session-token",
+                segmentName: "chunk-a.m4s",
+                signal: apiCalls.fetchSegmentedStreamingManifest[0].signal,
+            },
+            {
+                sessionId: "prewarm-api-next-session",
+                sessionToken: "prewarm-api-next-session-token",
+                segmentName: "chunk-b.webm",
+                signal: apiCalls.fetchSegmentedStreamingManifest[0].signal,
+            },
+        ],
+    );
 });
 
 test("consumes prewarmed segmented session while prewarm validation is still in-flight", async () => {
@@ -2223,41 +2307,31 @@ test("consumes prewarmed segmented session while prewarm validation is still in-
         makeSegmentedSession("inflight-prewarm"),
     );
 
-    const originalFetch = globalThis.fetch;
-    (globalThis as { fetch: typeof fetch }).fetch = (() =>
-        new Promise<Response>(() => undefined)) as typeof fetch;
+    segmentedManifestFetchOverride = async () =>
+        new Promise<Response>(() => undefined);
 
-    try {
-        renderOrchestrator();
-        await flushAsync(20);
-        assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
+    renderOrchestrator();
+    await flushAsync(20);
+    assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
 
-        audioState.currentTrack = nextTrack;
-        audioState.queue = [nextTrack];
-        audioState.currentIndex = 0;
-        rerenderOrchestrator();
-        await flushAsync(20);
+    audioState.currentTrack = nextTrack;
+    audioState.queue = [nextTrack];
+    audioState.currentIndex = 0;
+    rerenderOrchestrator();
+    await flushAsync(20);
 
-        assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
+    assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
 
-        const loadedSessionIds = engine.loadCalls
-            .map(
-                (call) =>
-                    (call.args[0] as { sessionId?: string } | undefined)
-                        ?.sessionId ?? null,
-            )
-            .filter(
-                (sessionId): sessionId is string =>
-                    typeof sessionId === "string",
-            );
-        assert.ok(loadedSessionIds.includes("inflight-prewarm"));
-    } finally {
-        if (originalFetch) {
-            (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
-        } else {
-            delete (globalThis as { fetch?: typeof fetch }).fetch;
-        }
-    }
+    const loadedSessionIds = engine.loadCalls
+        .map(
+            (call) =>
+                (call.args[0] as { sessionId?: string } | undefined)
+                    ?.sessionId ?? null,
+        )
+        .filter(
+            (sessionId): sessionId is string => typeof sessionId === "string",
+        );
+    assert.ok(loadedSessionIds.includes("inflight-prewarm"));
 });
 
 test("clears handoff listeners on track change while handoff load is pending", async () => {

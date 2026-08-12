@@ -53,6 +53,8 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "downloadYouTube",
     "endListenGroup",
     "executePlaylistImport",
+    "fetchSegmentedStreamingManifest",
+    "fetchSegmentedStreamingSegment",
     "generateDiscoverWeekly",
     "generateMoodMix",
     "get",
@@ -291,5 +293,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 271);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 273);
 });
