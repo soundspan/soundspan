@@ -24,7 +24,10 @@ const BASELINE = Object.freeze({
     "backend/src/routes/downloads.ts": 3,
     "backend/src/routes/enrichment.ts": 30,
     "backend/src/routes/homepage.ts": 2,
-    "backend/src/routes/library.ts": 5,
+    "backend/src/routes/library/albums.ts": 1,
+    "backend/src/routes/library/artists.ts": 2,
+    "backend/src/routes/library/maintenance.ts": 1,
+    "backend/src/routes/library/tracks.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
     "backend/src/routes/listeningState.ts": 3,
     "backend/src/routes/lyrics.ts": 1,
@@ -64,8 +67,8 @@ const LEAK_BASELINE = Object.freeze({
     // discover.ts +1: the same logger-only cleanup detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/routes/discover.ts": 2,
     "backend/src/routes/downloads.ts": 0,
-    // library.ts remaining 1: admin-only Lidarr connection-test diagnostics (~L5740 lidarrError = err?.message) returned in an admin settings probe response, not a general-user 500 leak.
-    "backend/src/routes/library.ts": 1,
+    // library/artists.ts remaining 1: admin-only Lidarr deletion diagnostics (lidarrError = err?.message) returned to the initiating admin, not a general-user 500 leak.
+    "backend/src/routes/library/artists.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
     // notifications.ts remaining 2: stored downloadJob.error strings from the soulseek retry result (~L702) and Lidarr fallback (~L864); stored-then-returned to the owning user via GET /api/downloads — client-reachable, flagged for follow-up sanitization under the slice-J scope guard (the POST retry response leak itself was sanitized).
     "backend/src/routes/notifications.ts": 2,

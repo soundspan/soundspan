@@ -59,7 +59,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | ID | St | Dimension | Sev | Eff | Risk | Brk | Epic | Title |
 |----|----|-----------|-----|-----|------|-----|------|-------|
 | [F1](#f1) | 🟡 | readability | high | L | medium |  | #14 | No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing error… |
-| [F2](#f2) | ⬜ | readability | high | L | medium |  | #14 | library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any… |
+| [F2](#f2) | ✅ | readability | high | L | medium |  | #14 | library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any… |
 | [F3](#f3) | 🟡 | readability | high | L | medium |  | #15 | 888+ `any` across strict:true backend silently defeat the type system, concentrated on … |
 | [F4](#f4) | ⬜ | readability | high | L | medium |  | #15 | frontend `type ApiData = any` erases types on ~90 return slots; strict:false + ES2017 h… |
 | [F5](#f5) | ⬜ | readability | high | L | medium |  | #16 | AudioPlaybackOrchestrator is a 7080-LOC headless god-component (97 refs, 24 effects) wh… |
@@ -101,7 +101,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F41](#f41) | ⬜ | extensibility | medium | M | low |  | #18 | AudioEngine interface declares ~13 optional methods, forcing runtime typeof-capability … |
 | [F42](#f42) | ⬜ | extensibility | medium | L | medium |  | #18 | ~50-entry recommender registry is hand-maintained with one near-duplicate bespoke metho… |
 | [F43](#f43) | ⬜ | extensibility | medium | L | medium |  | #18 | Per-external-source coupling: each media source is a parallel stack (route file + servi… |
-| [F44](#f44) | ⬜ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-r… _(dup F2)_ |
+| [F44](#f44) | ✅ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-r… _(dup F2)_ |
 | [F45](#f45) | 🟡 | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Reno… |
 | [F46](#f46) | 🟡 | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
 | [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
@@ -135,11 +135,13 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F2 — library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any`, no service layer, 1100-line helper preamble
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
+**✅ complete (#124)** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
 
 > **Audit note.** ✓ Duplicate of F44 (same `library.ts` god-file). The `any` count is ~64–70 depending on the matcher — treat as approximate, not the exact 66/70 in the title/body. The 8324-LOC anchor is exact.
+>
+> **Fix shipped (#124).** Stage A moved the shared helper/cache preamble into typed `utils/library*` modules and `services/libraryMaintenance.ts`, including Prisma-typed sort-map values. Stage B exported all 36 handlers by name and split registration across per-resource modules under `routes/library/`, re-aggregated by `routes/library/index.ts` behind the unchanged `routes/library.ts` default-export facade. The `/api/library` mount, route order, middleware chains, async-handler vs hand-rolled tails, and 14 current `$queryRaw` occurrences are unchanged. A typed LibraryService/Prisma-access layer remains the explicitly separate follow-up described by the audit correction, not unfinished F2 scope.
 
-**Files:** `backend/src/routes/library.ts`
+**Files:** `backend/src/routes/library.ts`, `backend/src/routes/library/*.ts`, `backend/src/utils/library*.ts`, `backend/src/services/libraryMaintenance.ts`
 
 **Problem.** library.ts mixes HTTP, data-access, caching and business logic in one 8324-line file: 121 direct prisma.* calls (no controller/service split), 66 `any` occurrences, untyped `let where: any = {}` query builders (e.g. the dual fast-path/fallback artist filter at 1811-1859), and 27 module-level helper functions + caches (audioInfoCache, nativeCoverHealInFlight, sort maps) packed into the first 1190 lines before the first route. Sort maps are typed `Record<string, any>` (lines 99-114), defeating Prisma orderBy type-safety. Routes group cleanly by prefix (/artists, /albums, /tracks, /genres, cover-art, scan) but live in one file, making the module impossible to navigate, review, or test without spinning up HTTP. By contrast subsonic.ts (same era) externalizes its helpers into utils/subsonic* and defines named handleX handlers — the in-repo model library.ts should follow.
 
@@ -864,11 +866,13 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F44 — library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-route, blocking reuse and a controller/service/repository layering
 
-**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #14 · duplicate of F2
+**✅ complete (#124)** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #14 · duplicate of F2
 
 > **Audit note.** ✓ Duplicate of F2 (same god-file); kept for the controller/service/repository angle. Don't double-count in dimension tallies.
+>
+> **Fix shipped (#124).** Completed through the audit-corrected first-stage scope documented in F2: named exported handlers, shared utility/service extraction, typed sort maps, and ordered per-resource sub-routers behind the unchanged mount facade. The larger typed LibraryService/Prisma-access extraction remains a separate follow-up and was deliberately not folded into this readability-only change.
 
-**Files:** `backend/src/routes/library.ts:1`, `backend/src/routes/library.ts:1806`, `backend/src/routes/library.ts:3128`
+**Files:** `backend/src/routes/library.ts`, `backend/src/routes/library/*.ts`, `backend/src/utils/library*.ts`, `backend/src/services/libraryMaintenance.ts`
 
 **Problem.** library.ts is a 305KB / 8324-LOC route god-file that fuses three layers: HTTP handling, business logic (counts-readiness fallbacks, genre aggregation, randomization), and data access (121 direct prisma.* calls, untyped `let where: any = {}` query objects built inline, 6 raw $queryRaw blocks). There is no LibraryService, so the same artist/album/track query logic cannot be reused by subsonic.ts or artists.ts (which re-implement similar queries), and none of it is testable without spinning up HTTP. The routes already group cleanly by resource prefix (/artists, /albums, /tracks, /genres) but live in one file. This is an extensibility problem, not just readability: any new consumer of library data (a new route, a new client, the recommender pipeline) must either go through HTTP or copy the inline Prisma logic, and there is no repository seam to swap query strategies.
 

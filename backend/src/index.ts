@@ -256,7 +256,8 @@ app.use("/api/settings", apiLimiter, settingsRoutes);
 app.use("/api/social", apiLimiter, socialRoutes);
 app.use("/api/system-settings", apiLimiter, systemSettingsRoutes);
 app.use("/api/listening-state", apiLimiter, listeningStateRoutes);
-app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
+// Playback-state routes use their dedicated high-volume limiter before auth.
+app.use("/api/playback-state", playbackStateRoutes);
 app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
 app.use("/api/share-links", apiLimiter, shareLinkRoutes);
@@ -607,6 +608,7 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
 
         app.use(
             "/api/admin/queues",
+            apiLimiter,
             requireAuth,
             requireAdmin,
             serverAdapter.getRouter(),

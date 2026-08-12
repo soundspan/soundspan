@@ -1,5 +1,11 @@
+import express from "express";
+import request from "supertest";
+
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireAuth: (req: any, _res: any, next: () => void) => {
+        req.user ??= { id: "u1" };
+        next();
+    },
 }));
 
 const mockLoggerWarn = jest.fn();
@@ -31,6 +37,8 @@ jest.mock("../../utils/db", () => ({
 }));
 
 import router from "../playbackState";
+import { requireAuth } from "../../middleware/auth";
+import { playbackStateLimiter } from "../../middleware/rateLimiter";
 import { prisma as prismaClient, Prisma as PrismaClient } from "../../utils/db";
 
 const mockFindUnique = prismaClient.playbackState.findUnique as jest.Mock;
@@ -38,6 +46,14 @@ const mockUpsert = prismaClient.playbackState.upsert as jest.Mock;
 const mockDeleteMany = prismaClient.playbackState.deleteMany as jest.Mock;
 
 function getHandler(method: "get" | "post" | "delete", path: string) {
+    const handlers = getRouteHandlers(method, path);
+    return handlers[handlers.length - 1];
+}
+
+function getRouteHandlers(
+    method: "get" | "post" | "delete",
+    path: string,
+) {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -47,7 +63,15 @@ function getHandler(method: "get" | "post" | "delete", path: string) {
         throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
     }
 
-    return layer.route.stack[layer.route.stack.length - 1].handle;
+    return layer.route.stack.map((entry: any) => entry.handle);
+}
+
+function createRuntimeApp() {
+    const app = express();
+    app.set("trust proxy", 1);
+    app.use(express.json());
+    app.use("/", router);
+    return app;
 }
 
 function createRes() {
@@ -78,6 +102,55 @@ describe("playbackState routes runtime", () => {
         mockUpsert.mockReset();
         mockDeleteMany.mockReset();
     });
+
+    it("attaches the playback-state limiter before auth on every route", () => {
+        for (const method of ["get", "post", "delete"] as const) {
+            const handlers = getRouteHandlers(method, "/");
+            expect(handlers).toHaveLength(3);
+            expect(handlers[0]).toBe(playbackStateLimiter);
+            expect(handlers[1]).toBe(requireAuth);
+        }
+    });
+
+    it("allows the normal four playback-state updates per minute", async () => {
+        mockUpsert.mockResolvedValue({ id: "state-normal-cadence" });
+        const app = createRuntimeApp();
+        const statuses: number[] = [];
+
+        for (let update = 0; update < 4; update += 1) {
+            const response = await request(app)
+                .post("/")
+                .set("X-Forwarded-For", "198.51.100.10")
+                .send({
+                    playbackType: "track",
+                    trackId: "track-1",
+                    currentTime: update * 15,
+                });
+            statuses.push(response.status);
+        }
+
+        expect(statuses).toEqual([200, 200, 200, 200]);
+        expect(mockUpsert).toHaveBeenCalledTimes(4);
+    });
+
+    it("returns 429 at the finite playback-state request boundary", async () => {
+        mockFindUnique.mockResolvedValue({ id: "state-rate-boundary" });
+        const app = createRuntimeApp();
+
+        for (let requestCount = 1; requestCount <= 600; requestCount += 1) {
+            const response = await request(app)
+                .get("/")
+                .set("X-Forwarded-For", "198.51.100.11");
+            expect(response.status).toBe(200);
+        }
+
+        const limitedResponse = await request(app)
+            .get("/")
+            .set("X-Forwarded-For", "198.51.100.11");
+
+        expect(limitedResponse.status).toBe(429);
+        expect(mockFindUnique).toHaveBeenCalledTimes(600);
+    }, 30_000);
 
     it("gets state for a device-specific record", async () => {
         mockFindUnique.mockResolvedValueOnce({

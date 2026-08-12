@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `[SegmentedStreaming]` scope to `[Playback]`. Genuinely segmented
   manifest, segment, session, and DASH lifecycle telemetry keeps its existing
   names.
+- Split the library routes into named, per-resource sub-routers while preserving
+  the `/api/library` mount surface and registration order, completing #124.
 - Extracted the library route helpers into typed utility modules as the first
   stage of the `library.ts` decomposition (#124); behavior is unchanged.
 - Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating
@@ -753,6 +755,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Playlist import links now require canonical HTTP(S) URLs, and audiobook
+  preflight responses now use the central deny-by-default CORS policy.
+- Account-management, 2FA, Subsonic-credential, admin queue-dashboard, and
+  playback-state sync routes now have route-level rate limiting; playback-state
+  uses a generous dedicated tier for its high-frequency cadence, and invite
+  codes use unbiased cryptographic random character selection.
 - Hardened external-metadata escaping for Deezer and Spotify, and replaced
   backtracking-prone normalization regexes with linear forms in Soulseek,
   search, and Lidarr.

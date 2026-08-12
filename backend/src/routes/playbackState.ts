@@ -2,6 +2,7 @@ import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
+import { playbackStateLimiter } from "../middleware/rateLimiter";
 import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
 import {
     normalizeCanonicalMediaProviderIdentity,
@@ -155,7 +156,7 @@ function sanitizeTrackQueueItem(item: any): Record<string, unknown> {
  *         description: Not authenticated
  */
 // Get current playback state for the authenticated user
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", playbackStateLimiter, requireAuth, async (req, res) => {
     try {
         const userId = req.user!.id;
         const deviceId = getPlaybackDeviceId(req);
@@ -280,7 +281,7 @@ router.get("/", requireAuth, async (req, res) => {
  *         description: Not authenticated
  */
 // Update current playback state for the authenticated user
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", playbackStateLimiter, requireAuth, async (req, res) => {
     try {
         const userId = req.user!.id;
         const deviceId = getPlaybackDeviceId(req);
@@ -463,7 +464,7 @@ router.post("/", requireAuth, async (req, res) => {
  *         description: Not authenticated
  */
 // Clear playback state (when user stops playback completely)
-router.delete("/", requireAuth, async (req, res) => {
+router.delete("/", playbackStateLimiter, requireAuth, async (req, res) => {
     try {
         const userId = req.user!.id;
         const deviceId = getPlaybackDeviceId(req);

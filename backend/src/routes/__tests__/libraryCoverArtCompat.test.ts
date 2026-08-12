@@ -203,6 +203,7 @@ jest.mock("../../services/coverArtResize", () => {
 import crypto from "crypto";
 import path from "path";
 import router from "../library";
+import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
@@ -256,7 +257,7 @@ const mockGetEffectiveYear = getEffectiveYear as jest.Mock;
 const mockGetDecadeFromYear = getDecadeFromYear as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 1) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) => entry.route?.path === path && entry.route?.methods?.get,
     );
     if (!layer) {
@@ -266,7 +267,7 @@ function getGetHandler(path: string, stackIndex = 1) {
 }
 
 function getPostHandler(path: string, stackIndex = 0) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.post,
     );

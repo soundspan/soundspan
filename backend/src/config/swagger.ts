@@ -33,7 +33,6 @@ const ANONYMOUS_OPERATIONS = [
     ["/api/podcasts/{id}/cover", "get"],
     ["/api/podcasts/episodes/{episodeId}/cover", "options"],
     ["/api/podcasts/episodes/{episodeId}/cover", "get"],
-    ["/api/audiobooks/{id}/cover", "options"],
     ["/api/webhooks/lidarr/verify", "get"],
 ] as const;
 
@@ -186,7 +185,7 @@ const options: swaggerJsdoc.Options = {
         },
         security: [{ sessionAuth: [] }, { bearerAuth: [] }, { apiKeyAuth: [] }],
     },
-    apis: ["./src/routes/*.ts"],
+    apis: ["./src/routes/*.ts", "./src/routes/library/*.ts"],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

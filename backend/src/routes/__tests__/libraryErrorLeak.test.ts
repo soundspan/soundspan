@@ -198,6 +198,7 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
 }));
 
 import router from "../library";
+import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { prisma as dbPrisma } from "../../utils/db";
 
 const mockArtistCount = dbPrisma.artist.count as jest.Mock;
@@ -205,7 +206,7 @@ const mockOwnedAlbumFindMany = dbPrisma.ownedAlbum.findMany as jest.Mock;
 const mockPrismaTransaction = dbPrisma.$transaction as jest.Mock;
 
 function getRouteHandler(path: string, method: "get" | "post" | "delete") {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
     );
