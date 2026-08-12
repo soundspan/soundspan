@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import type { WriteStream } from "node:fs";
 import path from "path";
 import axios, { type AxiosResponse } from "axios";
+import pLimit from "p-limit";
 import { BRAND_USER_AGENT } from "../config/brand";
 import {
     resolveSafeOutboundRedirectTarget,
@@ -35,9 +36,13 @@ const PODCAST_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MAX_PODCAST_DOWNLOAD_REDIRECTS = 5;
 const MAX_PODCAST_EPISODE_ID_LENGTH = 128;
 const PODCAST_EPISODE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const PODCAST_AUTO_CACHE_CONCURRENCY = 3;
+const PODCAST_AUTO_CACHE_QUEUE_CAPACITY = 32;
 /** Maximum declared or observed bytes accepted for one podcast download. */
 export const MAX_PODCAST_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
 const podcastDownloadLogger = logger.child("PodcastDownload");
+const autoCacheDownloadLimit = pLimit(PODCAST_AUTO_CACHE_CONCURRENCY);
+const admittedAutoCacheDownloads = new Set<Promise<void>>();
 
 class PodcastDownloadBlockedError extends Error {
     constructor(url: string) {
@@ -357,42 +362,106 @@ export async function getCachedFilePath(
     }
 }
 
+async function performAutoCacheDownload(
+    episodeId: string,
+    audioUrl: string,
+    userId: string,
+): Promise<void> {
+    try {
+        await performDownload(episodeId, audioUrl, userId);
+    } catch (error) {
+        podcastDownloadLogger.error(
+            `Background download failed for ${episodeId}`,
+            describePodcastDownloadError(error),
+        );
+    } finally {
+        downloadingEpisodes.delete(episodeId);
+    }
+}
+
+function enqueueAutoCacheDownload(
+    episodeId: string,
+    audioUrl: string,
+    userId: string,
+): boolean {
+    downloadingEpisodes.add(episodeId);
+    const task = autoCacheDownloadLimit(() =>
+        performAutoCacheDownload(episodeId, audioUrl, userId),
+    );
+    admittedAutoCacheDownloads.add(task);
+    void task.then(
+        () => admittedAutoCacheDownloads.delete(task),
+        (error: unknown) => {
+            admittedAutoCacheDownloads.delete(task);
+            downloadingEpisodes.delete(episodeId);
+            podcastDownloadLogger.error(
+                `Auto-cache queue failed for ${episodeId}`,
+                describePodcastDownloadError(error),
+            );
+        },
+    );
+    return true;
+}
+
+function rejectAutoCacheQueueOverflow(episodeId: string): false {
+    podcastDownloadLogger.warn(
+        "Podcast auto-cache queue at capacity; rejecting download",
+        {
+            episodeId,
+            active: autoCacheDownloadLimit.activeCount,
+            capacity: PODCAST_AUTO_CACHE_QUEUE_CAPACITY,
+            queued: autoCacheDownloadLimit.pendingCount,
+        },
+    );
+    return false;
+}
+
 /**
- * Start a background download for an episode
- * Returns immediately, download happens asynchronously
+ * Start a bounded background auto-cache download for an episode.
+ * Returns whether the work was admitted; duplicate, invalid, and overflow work
+ * is rejected without starting another download.
  */
 export function downloadInBackground(
     episodeId: string,
     audioUrl: string,
     userId: string,
-): void {
+): boolean {
     if (!resolvePodcastCacheFile(episodeId, "mp3")) {
         podcastDownloadLogger.warn("Rejected invalid podcast episode ID");
-        return;
+        return false;
     }
-
-    // Skip if already downloading
     if (downloadingEpisodes.has(episodeId)) {
         podcastDownloadLogger.debug(
             `Already downloading episode ${episodeId}, skipping`,
         );
-        return;
+        return false;
     }
+    if (
+        autoCacheDownloadLimit.pendingCount >= PODCAST_AUTO_CACHE_QUEUE_CAPACITY
+    ) {
+        return rejectAutoCacheQueueOverflow(episodeId);
+    }
+    return enqueueAutoCacheDownload(episodeId, audioUrl, userId);
+}
 
-    // Mark as downloading
-    downloadingEpisodes.add(episodeId);
+/** Return the process-wide podcast auto-cache queue state. */
+export function getAutoCacheDownloadQueueState(): {
+    active: number;
+    capacity: number;
+    concurrency: number;
+    queued: number;
+} {
+    return {
+        active: autoCacheDownloadLimit.activeCount,
+        capacity: PODCAST_AUTO_CACHE_QUEUE_CAPACITY,
+        concurrency: PODCAST_AUTO_CACHE_CONCURRENCY,
+        queued: autoCacheDownloadLimit.pendingCount,
+    };
+}
 
-    // Start download in background (don't await)
-    performDownload(episodeId, audioUrl, userId)
-        .catch((error: unknown) => {
-            podcastDownloadLogger.error(
-                `Background download failed for ${episodeId}`,
-                describePodcastDownloadError(error),
-            );
-        })
-        .finally(() => {
-            downloadingEpisodes.delete(episodeId);
-        });
+/** Wait until all podcast auto-cache downloads admitted so far have settled. */
+export async function drainAutoCacheDownloadQueue(): Promise<void> {
+    await Promise.allSettled([...admittedAutoCacheDownloads]);
 }
 
 interface PodcastDownloadPaths {
