@@ -112,9 +112,10 @@ function createResponse() {
         }),
         sendFile: jest.fn(function (
             filePath: string,
+            options: unknown,
             callback?: (error?: NodeJS.ErrnoException) => void,
         ) {
-            res.body = { filePath };
+            res.body = { filePath, options };
             callback?.();
             return res;
         }),
@@ -368,7 +369,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -401,7 +402,11 @@ describe("streaming route runtime", () => {
         );
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/manifest.mpd",
+            "manifest.mpd",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
         const metricCall = findSegmentedMetricLogCall(
@@ -424,7 +429,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -497,7 +502,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -526,7 +531,11 @@ describe("streaming route runtime", () => {
         );
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/manifest.mpd",
+            "manifest.mpd",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
     });
@@ -539,7 +548,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -555,6 +564,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 const error = Object.assign(new Error("manifest missing"), {
@@ -598,7 +608,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -647,7 +657,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -843,7 +853,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -877,7 +887,11 @@ describe("streaming route runtime", () => {
             "chunk-0-00001.m4s",
         );
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/assets/chunk-0-00001.m4s",
+            "chunk-0-00001.m4s",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
         const metricCall = findSegmentedMetricLogCall(
@@ -900,7 +914,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -935,7 +949,11 @@ describe("streaming route runtime", () => {
         );
         expect(res.type).toHaveBeenCalledWith("video/iso.segment");
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/assets/chunk-1-00001.m4s",
+            "chunk-1-00001.m4s",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
     });
@@ -948,7 +966,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -967,6 +985,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 const error = Object.assign(new Error("segment missing"), {
@@ -1008,7 +1027,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1027,6 +1046,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 res.headersSent = true;
@@ -1085,6 +1105,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 res.headersSent = true;
@@ -1113,7 +1134,7 @@ describe("streaming route runtime", () => {
             trackId: "track-1",
             quality: "medium",
             sourceType: "local",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1161,7 +1182,7 @@ describe("streaming route runtime", () => {
             trackId: "track-1",
             quality: "medium",
             sourceType: "local",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1211,7 +1232,7 @@ describe("streaming route runtime", () => {
             trackId: "track-1",
             quality: "medium",
             sourceType: "local",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1261,7 +1282,7 @@ describe("streaming route runtime", () => {
             trackId: "track-1",
             quality: "medium",
             sourceType: "local",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1307,7 +1328,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1343,7 +1364,11 @@ describe("streaming route runtime", () => {
             "chunk-0-00002.m4s",
         );
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/assets/chunk-0-00002.m4s",
+            "chunk-0-00002.m4s",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
         expect(res.type).toHaveBeenCalledWith("video/iso.segment");
@@ -1357,7 +1382,7 @@ describe("streaming route runtime", () => {
             quality: "original",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1394,7 +1419,11 @@ describe("streaming route runtime", () => {
         );
         expect(res.type).toHaveBeenCalledWith("video/webm");
         expect(res.sendFile).toHaveBeenCalledWith(
-            "/tmp/assets/chunk-0-00002.webm",
+            "chunk-0-00002.webm",
+            {
+                dotfiles: "ignore",
+                root: "/tmp/assets",
+            },
             expect.any(Function),
         );
     });
@@ -1407,7 +1436,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1577,7 +1606,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1592,6 +1621,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 const error = Object.assign(new Error("manifest fs failure"), {
@@ -1625,7 +1655,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1640,6 +1670,7 @@ describe("streaming route runtime", () => {
         res.sendFile.mockImplementationOnce(
             (
                 _filePath: string,
+                _options: unknown,
                 callback?: (error?: NodeJS.ErrnoException) => void,
             ) => {
                 callback?.(
@@ -1677,7 +1708,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1737,7 +1768,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
@@ -1861,7 +1892,7 @@ describe("streaming route runtime", () => {
             quality: "medium",
             sourceType: "local",
             cacheKey: "cache-1",
-            manifestPath: "/tmp/manifest.mpd",
+            manifestPath: "/tmp/assets/manifest.mpd",
             assetDir: "/tmp/assets",
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",

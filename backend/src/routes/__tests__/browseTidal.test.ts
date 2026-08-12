@@ -72,6 +72,7 @@ jest.mock("../../services/tidalStreaming", () => ({
 
 // ── Browse image cache — stub to avoid disk I/O ─────────────────
 jest.mock("../../services/browseImageCache", () => ({
+    getBrowseImageCacheRoot: () => os.tmpdir(),
     browseImageCacheKey: jest.fn((url: string) => `hash:${url}`),
     getBrowseImageFromCache: jest.fn(),
     fetchAndCacheBrowseImage: jest.fn(),

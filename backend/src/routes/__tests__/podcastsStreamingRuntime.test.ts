@@ -91,6 +91,7 @@ jest.mock("../../services/podcastCache", () => ({
     podcastCacheService: {
         syncAllCovers: jest.fn(async () => ({ synced: 0 })),
         syncEpisodeCovers: jest.fn(async () => ({ synced: 0 })),
+        getCoverCacheRoot: () => "/cache",
     },
 }));
 
@@ -246,8 +247,9 @@ function createRes() {
             }
             return res;
         }),
-        sendFile: jest.fn(function (filePath: string) {
+        sendFile: jest.fn(function (filePath: string, options: unknown) {
             res.sentFile = filePath;
+            res.sentFileOptions = options;
             res.headersSent = true;
             return res;
         }),
@@ -1493,7 +1495,11 @@ describe("podcasts streaming/runtime behavior", () => {
 
         const localRes = createRes();
         await coverHandler(req, localRes);
-        expect(localRes.sentFile).toBe("/cache/podcast-cover.jpg");
+        expect(localRes.sentFile).toBe("podcast-cover.jpg");
+        expect(localRes.sentFileOptions).toEqual({
+            dotfiles: "ignore",
+            root: "/cache",
+        });
 
         const redirectRes = createRes();
         await coverHandler(req, redirectRes);
@@ -1513,7 +1519,7 @@ describe("podcasts streaming/runtime behavior", () => {
 
         const epLocalRes = createRes();
         await episodeCoverHandler(req, epLocalRes);
-        expect(epLocalRes.sentFile).toBe("/cache/episode-cover.jpg");
+        expect(epLocalRes.sentFile).toBe("episode-cover.jpg");
 
         const epMissingRes = createRes();
         await episodeCoverHandler(req, epMissingRes);

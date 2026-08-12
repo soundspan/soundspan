@@ -42,6 +42,7 @@ jest.mock("../../services/tidalStreaming", () => ({
 }));
 
 jest.mock("../../services/browseImageCache", () => ({
+    getBrowseImageCacheRoot: () => "/tmp",
     browseImageCacheKey: jest.fn(() => "browse-image-cache-key"),
     getBrowseImageFromCache: jest.fn(() => null),
     fetchAndCacheBrowseImage: jest.fn(async () => null),

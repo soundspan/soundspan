@@ -12,6 +12,7 @@ import {
     readResponseBodyWithByteCap,
 } from "../services/imageProxy";
 import { sendRouteError } from "./routeErrorResponse";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = Router();
 
@@ -624,15 +625,15 @@ router.get<{ id: string }>(
                 select: { localCoverPath: true, coverUrl: true },
             });
 
+            const coverDir = path.join(
+                config.music.musicPath,
+                "cover-cache",
+                "audiobooks",
+            );
             let coverPath = audiobook?.localCoverPath;
 
             // Fallback: check if cover exists on disk even if DB path is empty
             if (!coverPath) {
-                const coverDir = path.join(
-                    config.music.musicPath,
-                    "cover-cache",
-                    "audiobooks",
-                );
                 const fallbackPath = safeResolvePath(coverDir, `${id}.jpg`);
                 if (fallbackPath && fs.existsSync(fallbackPath)) {
                     coverPath = fallbackPath;
@@ -655,7 +656,7 @@ router.get<{ id: string }>(
                     "public, max-age=31536000, immutable",
                 );
                 res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-                return res.sendFile(coverPath);
+                return sendFileFromRoot(res, coverPath, coverDir);
             }
 
             // Fallback: proxy from Audiobookshelf if coverUrl is available

@@ -18,6 +18,7 @@ import axios from "axios";
 import fs from "fs";
 import pLimit from "p-limit";
 import { sendRouteError } from "./routeErrorResponse";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
@@ -2162,7 +2163,11 @@ router.get("/:id/cover", async (req, res) => {
                 "public, max-age=31536000, immutable",
             );
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(podcast.localCoverPath);
+            return sendFileFromRoot(
+                res,
+                podcast.localCoverPath,
+                podcastCacheService.getCoverCacheRoot(),
+            );
         }
 
         // Fallback: redirect to original URL
@@ -2255,7 +2260,11 @@ router.get("/episodes/:episodeId/cover", async (req, res) => {
                 "public, max-age=31536000, immutable",
             );
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(episode.localCoverPath);
+            return sendFileFromRoot(
+                res,
+                episode.localCoverPath,
+                podcastCacheService.getCoverCacheRoot(),
+            );
         }
 
         // Fallback: redirect to original URL
