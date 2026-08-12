@@ -6,12 +6,17 @@ jest.mock("../../middleware/auth", () => ({
 }));
 
 jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-    },
+    logger: (() => {
+        const mockLogger = {
+            child: jest.fn(),
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        };
+        mockLogger.child.mockReturnValue(mockLogger);
+        return mockLogger;
+    })(),
 }));
 
 jest.mock("../../services/soulseek", () => ({
@@ -70,6 +75,7 @@ function getLastHandler(path: string, method: HttpMethod) {
 }
 
 function createRes() {
+    const headers = new Map<string, string>();
     const res: any = {
         statusCode: 200,
         body: undefined as unknown,
@@ -81,14 +87,45 @@ function createRes() {
             res.body = payload;
             return res;
         }),
+        setHeader: jest.fn(function (name: string, value: string) {
+            headers.set(name.toLowerCase(), value);
+            return res;
+        }),
+        getHeader: jest.fn((name: string) => headers.get(name.toLowerCase())),
     };
 
     return res;
 }
 
 async function flushPromises() {
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let turn = 0; turn < 8; turn += 1) {
+        await Promise.resolve();
+    }
+}
+
+const emptySearchResult = {
+    found: false,
+    bestMatch: null,
+    allMatches: [],
+};
+
+async function finishPendingSearches(
+    pending: Array<(result: typeof emptySearchResult) => void>,
+    total: number,
+) {
+    let resolved = 0;
+    for (let round = 0; round < total && resolved < total; round += 1) {
+        const available = pending.length;
+        for (
+            let pendingIndex = resolved;
+            pendingIndex < available;
+            pendingIndex += 1
+        ) {
+            pending[pendingIndex](emptySearchResult);
+        }
+        resolved = available;
+        await flushPromises();
+    }
 }
 
 describe("soulseek runtime routes", () => {
@@ -102,6 +139,7 @@ describe("soulseek runtime routes", () => {
         .stack[1].handle;
 
     beforeEach(() => {
+        jest.advanceTimersByTime(6 * 60 * 1000);
         jest.clearAllMocks();
 
         mockRandomUUID.mockReturnValue("search-default-id");
@@ -126,6 +164,10 @@ describe("soulseek runtime routes", () => {
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
         });
+    });
+
+    afterEach(async () => {
+        await flushPromises();
     });
 
     afterAll(() => {
@@ -244,7 +286,10 @@ describe("soulseek runtime routes", () => {
         });
 
         mockRandomUUID.mockReturnValueOnce("search-query-id");
-        const queryReq = { body: { query: "Daft Punk" } } as any;
+        const queryReq = {
+            user: { id: "user-query" },
+            body: { query: "Daft Punk" },
+        } as any;
         const queryRes = createRes();
         await searchHandler(queryReq, queryRes);
 
@@ -256,10 +301,15 @@ describe("soulseek runtime routes", () => {
         expect(mockSoulseekService.searchTrack).toHaveBeenCalledWith(
             "Daft Punk",
             "",
+            false,
+            15000,
         );
 
         mockRandomUUID.mockReturnValueOnce("search-track-id");
-        const trackReq = { body: { artist: "Artist", title: "Track" } } as any;
+        const trackReq = {
+            user: { id: "user-track" },
+            body: { artist: "Artist", title: "Track" },
+        } as any;
         const trackRes = createRes();
         await searchHandler(trackReq, trackRes);
 
@@ -271,6 +321,8 @@ describe("soulseek runtime routes", () => {
         expect(mockSoulseekService.searchTrack).toHaveBeenCalledWith(
             "Artist Track",
             "",
+            false,
+            15000,
         );
     });
 
@@ -283,6 +335,15 @@ describe("soulseek runtime routes", () => {
         expect(res.body).toEqual({
             error: "Either 'query' or both 'artist' and 'title' are required",
         });
+    });
+
+    it("rejects a search when authenticated user context is unavailable", async () => {
+        const res = createRes();
+        await searchHandler({ body: { query: "valid query" } } as any, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({ error: "Not authenticated" });
+        expect(mockSoulseekService.searchTrack).not.toHaveBeenCalled();
     });
 
     it("returns formatted search results and 404 when search session is missing", async () => {
@@ -304,7 +365,10 @@ describe("soulseek runtime routes", () => {
             ],
         });
 
-        const searchReq = { body: { query: "Artist Name My Song" } } as any;
+        const searchReq = {
+            user: { id: "user-results" },
+            body: { query: "Artist Name My Song" },
+        } as any;
         const searchRes = createRes();
         await searchHandler(searchReq, searchRes);
         await flushPromises();
@@ -363,7 +427,10 @@ describe("soulseek runtime routes", () => {
             ],
         } as any);
 
-        const searchReq = { body: { query: "bad file" } } as any;
+        const searchReq = {
+            user: { id: "user-bad-file" },
+            body: { query: "bad file" },
+        } as any;
         const searchRes = createRes();
         await searchHandler(searchReq, searchRes);
         await flushPromises();
@@ -387,7 +454,10 @@ describe("soulseek runtime routes", () => {
             new Error("search exploded"),
         );
 
-        const req = { body: { query: "broken query" } } as any;
+        const req = {
+            user: { id: "user-reject" },
+            body: { query: "broken query" },
+        } as any;
         const res = createRes();
         await searchHandler(req, res);
         await flushPromises();
@@ -397,9 +467,282 @@ describe("soulseek runtime routes", () => {
             searchId: "search-reject-id",
             message: "Search started",
         });
+        expect(mockLogger.error).toHaveBeenCalledWith("UI search failed", {
+            error: expect.any(Error),
+            searchId: "search-reject-id",
+            userId: "user-reject",
+        });
+    });
+
+    it("sanitizes synchronous search admission failures", async () => {
+        const failure = new Error("private admission detail");
+        mockRandomUUID.mockImplementationOnce(() => {
+            throw failure;
+        });
+        const res = createRes();
+
+        await searchHandler(
+            {
+                user: { id: "admission-failure-user" },
+                body: { query: "valid query" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Search failed" });
+        expect(JSON.stringify(res.body)).not.toContain(failure.message);
         expect(mockLogger.error).toHaveBeenCalledWith(
-            "[Soulseek] Search search-reject-id failed:",
-            "search exploded",
+            "UI search admission failed",
+            {
+                error: failure,
+            },
+        );
+    });
+
+    it("bounds global search concurrency and rejects work beyond the queue capacity", async () => {
+        const pending: Array<(result: typeof emptySearchResult) => void> = [];
+        mockSoulseekService.searchTrack.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    pending.push(resolve);
+                }),
+        );
+        mockRandomUUID.mockImplementation(
+            () => `global-search-${mockRandomUUID.mock.calls.length}`,
+        );
+
+        for (let index = 0; index < 24; index += 1) {
+            const res = createRes();
+            await searchHandler(
+                {
+                    user: { id: `global-user-${index}` },
+                    body: { query: `query ${index}` },
+                } as any,
+                res,
+            );
+            expect(res.statusCode).toBe(200);
+        }
+
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(4);
+
+        const overloadedRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "global-overload-user" },
+                body: { query: "overloaded query" },
+            } as any,
+            overloadedRes,
+        );
+
+        expect(overloadedRes.statusCode).toBe(503);
+        expect(overloadedRes.body).toEqual({
+            error: "Soulseek search capacity is full. Please try again later.",
+        });
+        expect(overloadedRes.getHeader("Retry-After")).toBe("15");
+
+        await finishPendingSearches(pending, 24);
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(24);
+    });
+
+    it("enforces per-user concurrency and queue fairness", async () => {
+        const pending: Array<(result: typeof emptySearchResult) => void> = [];
+        mockSoulseekService.searchTrack.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    pending.push(resolve);
+                }),
+        );
+        mockRandomUUID.mockImplementation(
+            () => `user-search-${mockRandomUUID.mock.calls.length}`,
+        );
+
+        for (let index = 0; index < 6; index += 1) {
+            const res = createRes();
+            await searchHandler(
+                {
+                    user: { id: "busy-user" },
+                    body: { query: `busy query ${index}` },
+                } as any,
+                res,
+            );
+            expect(res.statusCode).toBe(200);
+        }
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(2);
+
+        const busyUserRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "busy-user" },
+                body: { query: "one too many" },
+            } as any,
+            busyUserRes,
+        );
+        expect(busyUserRes.statusCode).toBe(503);
+
+        const otherUserRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "other-user" },
+                body: { query: "fair query" },
+            } as any,
+            otherUserRes,
+        );
+        expect(otherUserRes.statusCode).toBe(200);
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(3);
+
+        await finishPendingSearches(pending, 7);
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(7);
+    });
+
+    it("rate limits repeated searches per user and provides retry guidance", async () => {
+        mockRandomUUID.mockImplementation(
+            () => `rate-search-${mockRandomUUID.mock.calls.length}`,
+        );
+
+        for (let index = 0; index < 10; index += 1) {
+            const res = createRes();
+            await searchHandler(
+                {
+                    user: { id: "rate-user" },
+                    body: { query: `rate query ${index}` },
+                } as any,
+                res,
+            );
+            await flushPromises();
+            expect(res.statusCode).toBe(200);
+        }
+
+        const limitedRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "rate-user" },
+                body: { query: "rate query rejected" },
+            } as any,
+            limitedRes,
+        );
+
+        expect(limitedRes.statusCode).toBe(429);
+        expect(limitedRes.body).toEqual({
+            error: "Too many Soulseek searches. Please try again later.",
+        });
+        expect(limitedRes.getHeader("Retry-After")).toBe("60");
+
+        jest.advanceTimersByTime(60 * 1000);
+        const retryRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "rate-user" },
+                body: { query: "rate query accepted later" },
+            } as any,
+            retryRes,
+        );
+        expect(retryRes.statusCode).toBe(200);
+        await flushPromises();
+    });
+
+    it("rate limits aggregate searches across users", async () => {
+        mockRandomUUID.mockImplementation(
+            () => `aggregate-search-${mockRandomUUID.mock.calls.length}`,
+        );
+
+        for (let index = 0; index < 60; index += 1) {
+            const res = createRes();
+            await searchHandler(
+                {
+                    user: { id: `aggregate-user-${index}` },
+                    body: { query: `aggregate query ${index}` },
+                } as any,
+                res,
+            );
+            await flushPromises();
+            expect(res.statusCode).toBe(200);
+        }
+
+        const limitedRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "aggregate-limited-user" },
+                body: { query: "aggregate rejected" },
+            } as any,
+            limitedRes,
+        );
+        expect(limitedRes.statusCode).toBe(429);
+        expect(mockSoulseekService.searchTrack).toHaveBeenCalledTimes(60);
+    });
+
+    it("evicts the oldest retained session at the hard session cap", async () => {
+        mockRandomUUID.mockImplementation(
+            () => `retained-search-${mockRandomUUID.mock.calls.length}`,
+        );
+
+        for (let index = 0; index < 101; index += 1) {
+            if (index === 50 || index === 100) {
+                jest.advanceTimersByTime(60 * 1000);
+            }
+            const res = createRes();
+            await searchHandler(
+                {
+                    user: { id: `retained-user-${index}` },
+                    body: { query: `retained query ${index}` },
+                } as any,
+                res,
+            );
+            await flushPromises();
+            expect(res.statusCode).toBe(200);
+        }
+
+        const oldestRes = createRes();
+        await searchByIdHandler(
+            { params: { searchId: "retained-search-1" } } as any,
+            oldestRes,
+        );
+        expect(oldestRes.statusCode).toBe(404);
+
+        const newestRes = createRes();
+        await searchByIdHandler(
+            { params: { searchId: "retained-search-101" } } as any,
+            newestRes,
+        );
+        expect(newestRes.statusCode).toBe(200);
+    });
+
+    it("retains at most 100 results for a search session", async () => {
+        mockRandomUUID.mockReturnValueOnce("bounded-results-id");
+        mockSoulseekService.searchTrack.mockResolvedValueOnce({
+            found: true,
+            bestMatch: null,
+            allMatches: Array.from({ length: 101 }, (_, index) => ({
+                username: `peer-${index}`,
+                filename: `${index}.mp3`,
+                fullPath: `/library/Artist/Album/${index}.mp3`,
+                size: index,
+                bitRate: 320,
+                quality: "lossy" as const,
+                score: 1,
+            })),
+        });
+
+        const searchRes = createRes();
+        await searchHandler(
+            {
+                user: { id: "bounded-results-user" },
+                body: { query: "bounded results" },
+            } as any,
+            searchRes,
+        );
+        await flushPromises();
+
+        const resultsRes = createRes();
+        await searchByIdHandler(
+            { params: { searchId: "bounded-results-id" } } as any,
+            resultsRes,
+        );
+
+        expect(resultsRes.statusCode).toBe(200);
+        expect(resultsRes.body.count).toBe(100);
+        expect(resultsRes.body.results[99].path).toBe(
+            "/library/Artist/Album/99.mp3",
         );
     });
 

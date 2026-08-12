@@ -5,14 +5,31 @@ import { logger } from "../utils/logger";
  * Supports both general searches (for UI) and track-specific searches (for downloads)
  */
 
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { requireAdmin, requireAuth } from "../middleware/auth";
-import { soulseekService, SearchResult } from "../services/soulseek";
+import {
+    soulseekService,
+    SearchResult,
+    SearchTrackResult,
+} from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
 import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
+const searchLog = logger.child("SoulseekUiSearch");
+
+const UI_SEARCH_TIMEOUT_MS = 15_000;
+const SEARCH_RATE_WINDOW_MS = 60_000;
+const MAX_SEARCHES_PER_USER_PER_WINDOW = 10;
+const MAX_GLOBAL_SEARCHES_PER_WINDOW = 60;
+const MAX_CONCURRENT_SEARCHES = 4;
+const MAX_CONCURRENT_SEARCHES_PER_USER = 2;
+const MAX_QUEUED_SEARCHES = 20;
+const MAX_QUEUED_SEARCHES_PER_USER = 4;
+const MAX_SEARCH_SESSIONS = 100;
+const MAX_RESULTS_PER_SESSION = 100;
+const MAX_TRACKED_RATE_USERS = 256;
 
 // In-memory store for search results (with TTL cleanup)
 interface SearchSession {
@@ -21,19 +38,245 @@ interface SearchSession {
     createdAt: Date;
 }
 
+interface SearchJob {
+    searchId: string;
+    query: string;
+    userId: string;
+}
+
+interface RateWindow {
+    count: number;
+    startedAt: number;
+}
+
 const searchSessions = new Map<string, SearchSession>();
+const searchQueue: SearchJob[] = [];
+const activeSearchesByUser = new Map<string, number>();
+const queuedSearchesByUser = new Map<string, number>();
+const userRateWindows = new Map<string, RateWindow>();
+const globalRateWindow: RateWindow = { count: 0, startedAt: Date.now() };
+let activeSearches = 0;
 const SEARCH_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Cleanup old search sessions every minute
-const searchSessionCleanupTimer = setInterval(() => {
-    const now = Date.now();
+function cleanupExpiredSearchSessions(now: number): void {
+    let inspected = 0;
     for (const [searchId, session] of searchSessions.entries()) {
+        if (inspected >= MAX_SEARCH_SESSIONS) break;
+        inspected += 1;
         if (now - session.createdAt.getTime() > SEARCH_SESSION_TTL) {
             searchSessions.delete(searchId);
         }
     }
+}
+
+function removeOldestSearchSession(): void {
+    const oldestSearchId = searchSessions.keys().next().value;
+    if (typeof oldestSearchId === "string") {
+        searchSessions.delete(oldestSearchId);
+    }
+}
+
+function storeSearchSession(searchId: string, query: string): void {
+    cleanupExpiredSearchSessions(Date.now());
+    if (searchSessions.size >= MAX_SEARCH_SESSIONS) {
+        removeOldestSearchSession();
+    }
+    searchSessions.set(searchId, {
+        query,
+        results: [],
+        createdAt: new Date(),
+    });
+}
+
+// Cleanup old search sessions every minute
+const searchSessionCleanupTimer = setInterval(() => {
+    cleanupExpiredSearchSessions(Date.now());
 }, 60000);
 searchSessionCleanupTimer.unref?.();
+
+function refreshRateWindow(window: RateWindow, now: number): void {
+    if (now - window.startedAt >= SEARCH_RATE_WINDOW_MS) {
+        window.count = 0;
+        window.startedAt = now;
+    }
+}
+
+function getUserRateWindow(userId: string, now: number): RateWindow {
+    const existing = userRateWindows.get(userId);
+    if (existing) {
+        refreshRateWindow(existing, now);
+        userRateWindows.delete(userId);
+        userRateWindows.set(userId, existing);
+        return existing;
+    }
+    if (userRateWindows.size >= MAX_TRACKED_RATE_USERS) {
+        const oldestUserId = userRateWindows.keys().next().value;
+        if (typeof oldestUserId === "string")
+            userRateWindows.delete(oldestUserId);
+    }
+    const created = { count: 0, startedAt: now };
+    userRateWindows.set(userId, created);
+    return created;
+}
+
+function getRateLimitRetryAfter(userId: string, now: number): number | null {
+    refreshRateWindow(globalRateWindow, now);
+    if (globalRateWindow.count >= MAX_GLOBAL_SEARCHES_PER_WINDOW) {
+        return globalRateWindow.startedAt + SEARCH_RATE_WINDOW_MS - now;
+    }
+    const userWindow = getUserRateWindow(userId, now);
+    if (userWindow.count >= MAX_SEARCHES_PER_USER_PER_WINDOW) {
+        return userWindow.startedAt + SEARCH_RATE_WINDOW_MS - now;
+    }
+    return null;
+}
+
+function recordRateAdmission(userId: string, now: number): void {
+    refreshRateWindow(globalRateWindow, now);
+    globalRateWindow.count += 1;
+    getUserRateWindow(userId, now).count += 1;
+}
+
+function canStartSearch(userId: string): boolean {
+    return (
+        activeSearches < MAX_CONCURRENT_SEARCHES &&
+        (activeSearchesByUser.get(userId) ?? 0) <
+            MAX_CONCURRENT_SEARCHES_PER_USER
+    );
+}
+
+function canQueueSearch(userId: string): boolean {
+    return (
+        searchQueue.length < MAX_QUEUED_SEARCHES &&
+        (queuedSearchesByUser.get(userId) ?? 0) < MAX_QUEUED_SEARCHES_PER_USER
+    );
+}
+
+function changeUserCount(
+    counts: Map<string, number>,
+    userId: string,
+    delta: 1 | -1,
+): void {
+    const next = (counts.get(userId) ?? 0) + delta;
+    if (next <= 0) {
+        counts.delete(userId);
+        return;
+    }
+    counts.set(userId, next);
+}
+
+function enqueueSearch(job: SearchJob): void {
+    searchQueue.push(job);
+    changeUserCount(queuedSearchesByUser, job.userId, 1);
+}
+
+function dequeueSearch(): SearchJob | undefined {
+    const job = searchQueue.shift();
+    if (job) changeUserCount(queuedSearchesByUser, job.userId, -1);
+    return job;
+}
+
+function retainSearchResults(job: SearchJob, result: SearchTrackResult): void {
+    const session = searchSessions.get(job.searchId);
+    if (!session || !result.found || !Array.isArray(result.allMatches)) return;
+    session.results = result.allMatches
+        .slice(0, MAX_RESULTS_PER_SESSION)
+        .map((match) => ({
+            user: match.username,
+            file: match.fullPath,
+            size: match.size,
+            slots: true,
+            bitrate: match.bitRate,
+            speed: 0,
+        }));
+    searchLog.debug("UI search completed", {
+        resultCount: session.results.length,
+        searchId: job.searchId,
+        userId: job.userId,
+    });
+}
+
+async function runSearch(job: SearchJob): Promise<void> {
+    try {
+        const result = await soulseekService.searchTrack(
+            job.query,
+            "",
+            false,
+            UI_SEARCH_TIMEOUT_MS,
+        );
+        retainSearchResults(job, result);
+    } catch (error) {
+        searchLog.error("UI search failed", {
+            error,
+            searchId: job.searchId,
+            userId: job.userId,
+        });
+    } finally {
+        finishSearch(job);
+    }
+}
+
+function startSearch(job: SearchJob): void {
+    activeSearches += 1;
+    changeUserCount(activeSearchesByUser, job.userId, 1);
+    void runSearch(job).catch((error) => {
+        searchLog.error("UI search supervisor failed", {
+            error,
+            searchId: job.searchId,
+            userId: job.userId,
+        });
+    });
+}
+
+function drainSearchQueue(): void {
+    const jobsToInspect = Math.min(searchQueue.length, MAX_QUEUED_SEARCHES);
+    for (let index = 0; index < jobsToInspect; index += 1) {
+        if (activeSearches >= MAX_CONCURRENT_SEARCHES) break;
+        const job = dequeueSearch();
+        if (!job) break;
+        if (!searchSessions.has(job.searchId)) continue;
+        if (!canStartSearch(job.userId)) {
+            enqueueSearch(job);
+            continue;
+        }
+        startSearch(job);
+    }
+}
+
+function finishSearch(job: SearchJob): void {
+    activeSearches = Math.max(0, activeSearches - 1);
+    changeUserCount(activeSearchesByUser, job.userId, -1);
+    drainSearchQueue();
+}
+
+function admitSearch(job: SearchJob): boolean {
+    if (canStartSearch(job.userId)) {
+        startSearch(job);
+        return true;
+    }
+    if (!canQueueSearch(job.userId)) return false;
+    enqueueSearch(job);
+    return true;
+}
+
+function sendRateLimitError(res: Response, retryAfterMs: number): Response {
+    const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    return sendRouteError(
+        res,
+        429,
+        "Too many Soulseek searches. Please try again later.",
+    );
+}
+
+function sendCapacityError(res: Response): Response {
+    res.setHeader("Retry-After", String(UI_SEARCH_TIMEOUT_MS / 1000));
+    return sendRouteError(
+        res,
+        503,
+        "Soulseek search capacity is full. Please try again later.",
+    );
+}
 
 // Middleware to check if Soulseek credentials are configured
 async function requireSoulseekConfigured(req: any, res: any, next: any) {
@@ -165,13 +408,17 @@ router.post(
  *                 description: Track title (used with artist for track-specific search)
  *     responses:
  *       200:
- *         description: Search started; returns searchId for polling results
+ *         description: Search accepted; returns searchId for polling results
  *       400:
  *         description: Missing query or artist/title parameters
  *       401:
  *         description: Not authenticated
  *       403:
  *         description: Soulseek credentials not configured
+ *       429:
+ *         description: Per-user or global search rate limit exceeded
+ *       503:
+ *         description: Search concurrency queue is at capacity
  */
 /**
  * POST /soulseek/search
@@ -201,62 +448,40 @@ router.post(
                 });
             }
 
-            logger.debug(
-                `[Soulseek] Starting general search: "${searchQuery}"`,
-            );
+            const userId = req.user?.id;
+            if (!userId) {
+                return sendRouteError(res, 401, "Not authenticated");
+            }
 
-            // Create search session
-            const searchId = randomUUID();
-            searchSessions.set(searchId, {
-                query: searchQuery,
-                results: [],
-                createdAt: new Date(),
-            });
+            const now = Date.now();
+            const retryAfterMs = getRateLimitRetryAfter(userId, now);
+            if (retryAfterMs !== null) {
+                searchLog.warn("UI search rate limit exceeded", { userId });
+                return sendRateLimitError(res, retryAfterMs);
+            }
 
-            // Start async search (don't await - results come in over time)
-            // Use full 45s timeout for quality results from P2P network
-            soulseekService
-                .searchTrack(searchQuery, "")
-                .then((result) => {
-                    const session = searchSessions.get(searchId);
-                    if (session && result.found && result.allMatches) {
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} found ${result.allMatches.length} matches`,
-                        );
-                        // Store all matches for polling
-                        session.results = result.allMatches.map((match) => ({
-                            user: match.username,
-                            file: match.fullPath,
-                            size: match.size,
-                            slots: true, // Assume available since ranked
-                            bitrate: match.bitRate,
-                            speed: 0,
-                        }));
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} session updated with ${session.results.length} results`,
-                        );
-                    } else {
-                        logger.debug(
-                            `[Soulseek] Search ${searchId} completed with no matches (found: ${result.found})`,
-                        );
-                    }
-                })
-                .catch((err) => {
-                    logger.error(
-                        `[Soulseek] Search ${searchId} failed:`,
-                        err.message,
-                    );
-                });
+            const job = { searchId: randomUUID(), query: searchQuery, userId };
+            if (!canStartSearch(userId) && !canQueueSearch(userId)) {
+                searchLog.warn("UI search capacity exhausted", { userId });
+                return sendCapacityError(res);
+            }
+
+            storeSearchSession(job.searchId, searchQuery);
+            recordRateAdmission(userId, now);
+            if (!admitSearch(job)) {
+                searchSessions.delete(job.searchId);
+                return sendCapacityError(res);
+            }
 
             res.json({
-                searchId,
+                searchId: job.searchId,
                 message: "Search started",
             });
-        } catch (error: any) {
-            logger.error("Soulseek search error:", error.message);
-            res.status(500).json({
-                error: "Search failed",
+        } catch (error) {
+            searchLog.error("UI search admission failed", {
+                error,
             });
+            return sendRouteError(res, 500, "Search failed");
         }
     },
 );
