@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.0.0] - 2026-08-12
+
+### Added
+
 - Added an opt-in `SECRETS_DB_ONLY` flag (default `false`). When enabled, integration secrets (Last.fm, Fanart.tv, Lidarr, OpenAI, Deezer, Audiobookshelf API keys) are read exclusively from encrypted system settings — the `.env` fallback for those keys is ignored and the settings-driven `.env` sync omits them. Startup fails fast if the settings layer is not readable before services start. Default behavior is unchanged.
 - Added repo-wide Prettier and EditorConfig conventions, applied through
   mechanical per-package formatting commits. The six formatting-only commits
