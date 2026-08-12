@@ -536,6 +536,17 @@ describe("shareLinks routes runtime", () => {
         expect(res.statusCode).toBe(200);
     });
 
+    it("access endpoint rejects when its atomic session consume loses a race", async () => {
+        mockShareLinkUpdateMany.mockResolvedValueOnce({ count: 0 });
+        const req = createReq({ params: { token: "a".repeat(64) } });
+        const res = createRes();
+
+        await getSharedResource(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Share link not found" });
+    });
+
     it("access endpoint only updates lastStreamedAt within the session window", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce({
             id: "share-3",
@@ -565,11 +576,12 @@ describe("shareLinks routes runtime", () => {
 
         await getSharedResource(req, res);
 
-        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-            where: { id: "share-3" },
-            data: { lastStreamedAt: expect.any(Date) },
-        });
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: { lastStreamedAt: expect.any(Date) },
+            }),
+        );
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
     });
 
@@ -582,8 +594,9 @@ describe("shareLinks routes runtime", () => {
                 resourceId: "track-1",
                 revoked: false,
                 expiresAt: null,
-                maxPlays: null,
+                maxPlays: 2,
                 playCount: 0,
+                lastStreamedAt: null,
             });
             mockTrackFindUnique.mockResolvedValueOnce({
                 id: "track-1",
@@ -600,8 +613,118 @@ describe("shareLinks routes runtime", () => {
             const res = createRes();
             await getSharedStream(req, res);
 
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: {
+                        playCount: { increment: 1 },
+                        lastStreamedAt: expect.any(Date),
+                    },
+                }),
+            );
             expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();
             expect(mockDestroy).toHaveBeenCalled();
+        });
+
+        it("allows only one of two concurrent new sessions when one play remains", async () => {
+            const shareLink = {
+                id: "share-1",
+                token: "valid-token",
+                resourceType: "track",
+                resourceId: "track-1",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: 1,
+                playCount: 0,
+                lastStreamedAt: null,
+            };
+            mockShareLinkFindUnique
+                .mockResolvedValueOnce(shareLink)
+                .mockResolvedValueOnce(shareLink);
+            mockTrackFindUnique.mockResolvedValue({
+                id: "track-1",
+                title: "Track",
+                filePath: "a/b/track.flac",
+                fileModified: new Date(),
+            });
+            mockShareLinkUpdateMany
+                .mockResolvedValueOnce({ count: 1 })
+                .mockResolvedValueOnce({ count: 0 });
+
+            const firstResponse = createRes();
+            const secondResponse = createRes();
+            await Promise.all([
+                getSharedStream(
+                    createReq({
+                        params: {
+                            token: "valid-token",
+                            trackId: "track-1",
+                        },
+                        query: {},
+                        headers: {},
+                    }),
+                    firstResponse,
+                ),
+                getSharedStream(
+                    createReq({
+                        params: {
+                            token: "valid-token",
+                            trackId: "track-1",
+                        },
+                        query: {},
+                        headers: {},
+                    }),
+                    secondResponse,
+                ),
+            ]);
+
+            expect(
+                [firstResponse.statusCode, secondResponse.statusCode].sort(),
+            ).toEqual([200, 404]);
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledTimes(2);
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        AND: expect.arrayContaining([{ playCount: { lt: 1 } }]),
+                    }),
+                }),
+            );
+            expect(mockStreamFileWithRangeSupport).toHaveBeenCalledTimes(1);
+        });
+
+        it("streams an already-counted active session without another play", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce({
+                id: "share-1",
+                token: "valid-token",
+                resourceType: "track",
+                resourceId: "track-1",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: 1,
+                playCount: 1,
+                lastStreamedAt: new Date(Date.now() - 5 * 60 * 1000),
+            });
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "track-1",
+                title: "Track",
+                filePath: "a/b/track.flac",
+                fileModified: new Date(),
+            });
+
+            const req = createReq({
+                params: { token: "valid-token", trackId: "track-1" },
+                query: {},
+                headers: {},
+            });
+            const res = createRes();
+            await getSharedStream(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: { lastStreamedAt: expect.any(Date) },
+                }),
+            );
+            expect(mockStreamFileWithRangeSupport).toHaveBeenCalledTimes(1);
         });
 
         it("streams track belonging to shared album", async () => {
@@ -804,7 +927,7 @@ describe("shareLinks routes runtime", () => {
             );
         });
 
-        it("only updates lastStreamedAt for a new stream session", async () => {
+        it("consumes a play for a new stream session", async () => {
             mockShareLinkFindUnique.mockResolvedValueOnce({
                 id: "share-1",
                 token: "valid-token",
@@ -831,14 +954,18 @@ describe("shareLinks routes runtime", () => {
             const res = createRes();
             await getSharedStream(req, res);
 
-            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-            expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-                where: { id: "share-1" },
-                data: { lastStreamedAt: expect.any(Date) },
-            });
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: {
+                        playCount: { increment: 1 },
+                        lastStreamedAt: expect.any(Date),
+                    },
+                }),
+            );
+            expect(mockShareLinkUpdate).not.toHaveBeenCalled();
         });
 
-        it("only updates lastStreamedAt for an existing stream session", async () => {
+        it("only refreshes lastStreamedAt for an existing stream session", async () => {
             mockShareLinkFindUnique.mockResolvedValueOnce({
                 id: "share-1",
                 token: "valid-token",
@@ -865,11 +992,12 @@ describe("shareLinks routes runtime", () => {
             const res = createRes();
             await getSharedStream(req, res);
 
-            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-            expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-                where: { id: "share-1" },
-                data: { lastStreamedAt: expect.any(Date) },
-            });
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: { lastStreamedAt: expect.any(Date) },
+                }),
+            );
+            expect(mockShareLinkUpdate).not.toHaveBeenCalled();
         });
     });
 
@@ -886,6 +1014,47 @@ describe("shareLinks routes runtime", () => {
 
             expect(res.statusCode).toBe(404);
             expect(res.body).toEqual({ error: "Share link not found" });
+        });
+
+        it("returns 404 when the share play limit is exhausted", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce({
+                id: "share-zip",
+                token: "zip-token",
+                resourceType: "album",
+                resourceId: "album-1",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: 1,
+                playCount: 1,
+                lastStreamedAt: null,
+            });
+
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+
+            await getSharedZip(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({ error: "Share link not found" });
+            expect(mockAlbumFindUnique).not.toHaveBeenCalled();
+            expect(mockArchivePipe).not.toHaveBeenCalled();
+        });
+
+        it("returns 404 when its atomic session consume loses a race", async () => {
+            mockSingleTrackZipShare();
+            mockShareLinkUpdateMany.mockResolvedValueOnce({ count: 0 });
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+
+            await getSharedZip(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({ error: "Share link not found" });
+            expect(mockArchivePipe).not.toHaveBeenCalled();
         });
 
         it("streams a zip for a valid album share", async () => {
@@ -1057,7 +1226,7 @@ describe("shareLinks routes runtime", () => {
             expect(mockArchiveFinalize).not.toHaveBeenCalled();
         });
 
-        it("does not mutate play counts during zip download", async () => {
+        it("consumes a new play session before starting a zip download", async () => {
             mockShareLinkFindUnique.mockResolvedValueOnce({
                 id: "share-zip",
                 token: "zip-token",
@@ -1065,8 +1234,9 @@ describe("shareLinks routes runtime", () => {
                 resourceId: "album-1",
                 revoked: false,
                 expiresAt: null,
-                maxPlays: null,
+                maxPlays: 2,
                 playCount: 0,
+                lastStreamedAt: null,
             });
             mockAlbumFindUnique.mockResolvedValueOnce({
                 artist: { name: "Artist One" },
@@ -1094,7 +1264,15 @@ describe("shareLinks routes runtime", () => {
             await getSharedZip(req, res);
 
             expect(mockShareLinkUpdate).not.toHaveBeenCalled();
-            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: {
+                        playCount: { increment: 1 },
+                        lastStreamedAt: expect.any(Date),
+                    },
+                }),
+            );
+            expect(mockArchivePipe).toHaveBeenCalledWith(res);
         });
     });
 

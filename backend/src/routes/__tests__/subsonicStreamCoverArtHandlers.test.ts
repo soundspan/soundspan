@@ -1,5 +1,5 @@
 import fs from "fs";
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 
 const mockGetStreamFilePath = jest.fn();
 const mockStreamFileWithRangeSupport = jest.fn();

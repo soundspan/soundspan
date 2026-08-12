@@ -4,6 +4,53 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 
+const STREAM_HEADER_TIMEOUT_MS = 30_000;
+
+interface StreamDisconnectSource {
+    readonly aborted?: boolean;
+    readonly destroyed?: boolean;
+    once(event: "close" | "aborted", listener: () => void): unknown;
+    off(event: "close" | "aborted", listener: () => void): unknown;
+}
+
+interface StreamAcquisitionLifecycle {
+    request: StreamDisconnectSource;
+    response: StreamDisconnectSource;
+}
+
+function bindStreamDisconnect(
+    lifecycle: StreamAcquisitionLifecycle,
+    controller: AbortController,
+): () => void {
+    const onDisconnect = () => {
+        if (!controller.signal.aborted) {
+            controller.abort(
+                new Error("Client disconnected during stream acquisition"),
+            );
+        }
+    };
+
+    lifecycle.request.once("close", onDisconnect);
+    lifecycle.request.once("aborted", onDisconnect);
+    lifecycle.response.once("close", onDisconnect);
+    lifecycle.response.once("aborted", onDisconnect);
+
+    if (
+        lifecycle.request.aborted ||
+        lifecycle.request.destroyed ||
+        lifecycle.response.destroyed
+    ) {
+        onDisconnect();
+    }
+
+    return () => {
+        lifecycle.request.off("close", onDisconnect);
+        lifecycle.request.off("aborted", onDisconnect);
+        lifecycle.response.off("close", onDisconnect);
+        lifecycle.response.off("aborted", onDisconnect);
+    };
+}
+
 /**
  * Audiobookshelf API Service
  * Handles all interactions with the Audiobookshelf server
@@ -212,11 +259,12 @@ class AudiobookshelfService {
     /**
      * Get a specific audiobook by ID
      */
-    async getAudiobook(audiobookId: string) {
+    async getAudiobook(audiobookId: string, signal?: AbortSignal) {
         await this.ensureInitialized();
-        const response = await this.client!.get(
-            `/api/items/${audiobookId}?expanded=1`,
-        );
+        const path = `/api/items/${audiobookId}?expanded=1`;
+        const response = signal
+            ? await this.client!.get(path, { signal })
+            : await this.client!.get(path);
         return response.data;
     }
 
@@ -271,38 +319,54 @@ class AudiobookshelfService {
      * Stream an audiobook with authentication
      * Returns a readable stream that can be piped to the response
      */
-    async streamAudiobook(audiobookId: string, rangeHeader?: string) {
-        await this.ensureInitialized();
+    async streamAudiobook(
+        audiobookId: string,
+        rangeHeader?: string,
+        lifecycle?: StreamAcquisitionLifecycle,
+    ) {
+        const controller = new AbortController();
+        const detachDisconnect = lifecycle
+            ? bindStreamDisconnect(lifecycle, controller)
+            : () => undefined;
+        const timeoutError = new Error(
+            `Audiobookshelf stream headers timed out after ${STREAM_HEADER_TIMEOUT_MS}ms`,
+        );
+        const timeoutId = setTimeout(() => {
+            if (!controller.signal.aborted) controller.abort(timeoutError);
+        }, STREAM_HEADER_TIMEOUT_MS);
 
-        // First, get the audiobook to find the track file
-        const audiobook = await this.getAudiobook(audiobookId);
+        try {
+            await this.ensureInitialized();
+            const audiobook = await this.getAudiobook(
+                audiobookId,
+                controller.signal,
+            );
+            const contentUrl = audiobook.media?.tracks?.[0]?.contentUrl;
+            if (!contentUrl) {
+                throw new Error("No audio track found for this audiobook");
+            }
 
-        // Get the first track's content URL
-        const firstTrack = audiobook.media?.tracks?.[0];
-        if (!firstTrack || !firstTrack.contentUrl) {
-            throw new Error("No audio track found for this audiobook");
+            const headers: Record<string, string> = {};
+            if (rangeHeader) headers["Range"] = rangeHeader;
+            const response = await this.client!.get(contentUrl, {
+                responseType: "stream",
+                timeout: 0,
+                signal: controller.signal,
+                headers,
+                validateStatus: (status) => status >= 200 && status < 300,
+            });
+            return {
+                stream: response.data,
+                headers: response.headers,
+                status: response.status,
+            };
+        } catch (error) {
+            if (controller.signal.aborted) throw controller.signal.reason;
+            throw error;
+        } finally {
+            clearTimeout(timeoutId);
+            detachDisconnect();
         }
-
-        // Build request headers
-        const headers: Record<string, string> = {};
-        if (rangeHeader) {
-            headers["Range"] = rangeHeader;
-        }
-
-        // The contentUrl format is: /api/items/{id}/file/{ino}
-        const response = await this.client!.get(firstTrack.contentUrl, {
-            responseType: "stream",
-            timeout: 0, // No timeout for streaming
-            headers,
-            // Don't throw on 206 Partial Content
-            validateStatus: (status) => status >= 200 && status < 300,
-        });
-
-        return {
-            stream: response.data,
-            headers: response.headers,
-            status: response.status,
-        };
     }
 
     /**

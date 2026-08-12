@@ -161,6 +161,27 @@ MAX_FILE_SIZE_MB = get_int_env("MAX_FILE_SIZE_MB", 500)
 BATCH_ANALYSIS_TIMEOUT_SECONDS = get_int_env("BATCH_ANALYSIS_TIMEOUT_SECONDS", 900)
 
 
+def _resolve_music_path(file_path: str) -> str | None:
+    """Resolve a relative queue path beneath the configured music library."""
+    if not isinstance(file_path, str) or "\x00" in file_path:
+        return None
+
+    normalized_path = file_path.replace("\\", "/")
+    if os.path.isabs(normalized_path):
+        return None
+    if any(segment in {".", ".."} for segment in normalized_path.split("/")):
+        return None
+
+    try:
+        music_root = os.path.realpath(MUSIC_PATH)
+        resolved_path = os.path.realpath(os.path.join(music_root, normalized_path))
+        if os.path.commonpath((music_root, resolved_path)) != music_root:
+            return None
+    except (OSError, ValueError):
+        return None
+    return resolved_path
+
+
 class DatabaseConnection:
     """PostgreSQL connection manager"""
 
@@ -1197,9 +1218,10 @@ def _analyze_track_in_process(args: tuple[str, str]) -> tuple[str, str, dict[str
         if isinstance(file_path, bytes):
             file_path = file_path.decode("utf-8", errors="replace")
 
-        # Normalize path separators (Windows paths -> Unix)
-        normalized_path = file_path.replace("\\", "/")
-        full_path = os.path.join(MUSIC_PATH, normalized_path)
+        full_path = _resolve_music_path(file_path)
+        if full_path is None:
+            logger.warning("Rejected queued audio path outside the configured music library")
+            return (track_id, "", {"_error": "Invalid audio path", "_permanent": True})
 
         # Use os.fsencode/fsdecode for filesystem-safe encoding
         try:

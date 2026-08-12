@@ -139,6 +139,7 @@ function makeShareLink(overrides: Record<string, unknown> = {}) {
         expiresAt: null,
         maxPlays: null,
         playCount: 0,
+        lastStreamedAt: null,
         revoked: false,
         createdAt: CREATED_AT,
         ...overrides,
@@ -592,11 +593,12 @@ describe("share links routes integration", () => {
             );
 
             expect(res.status).toBe(200);
-            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-            expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-                where: { id: "share-1" },
-                data: { lastStreamedAt: expect.any(Date) },
-            });
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: { lastStreamedAt: expect.any(Date) },
+                }),
+            );
+            expect(mockShareLinkUpdate).not.toHaveBeenCalled();
         });
 
         it("returns 404 when maxPlays is exhausted before page load", async () => {
@@ -756,7 +758,7 @@ describe("share links routes integration", () => {
         },
     );
 
-    it("GET /api/share-links/access/:token/stream/:trackId on a new session only updates lastStreamedAt", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId consumes a new play session", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({
                 resourceType: "track",
@@ -770,14 +772,18 @@ describe("share links routes integration", () => {
             `/api/share-links/access/${TOKEN}/stream/track-1`,
         );
 
-        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-            where: { id: "share-1" },
-            data: { lastStreamedAt: expect.any(Date) },
-        });
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: {
+                    playCount: { increment: 1 },
+                    lastStreamedAt: expect.any(Date),
+                },
+            }),
+        );
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
     });
 
-    it("GET /api/share-links/access/:token/stream/:trackId on an existing session only updates lastStreamedAt", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId only refreshes an existing session", async () => {
         const recentStream = new Date(Date.now() - 5 * 60 * 1000);
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({
@@ -792,14 +798,15 @@ describe("share links routes integration", () => {
             `/api/share-links/access/${TOKEN}/stream/track-1`,
         );
 
-        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-            where: { id: "share-1" },
-            data: { lastStreamedAt: expect.any(Date) },
-        });
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: { lastStreamedAt: expect.any(Date) },
+            }),
+        );
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
     });
 
-    it("GET /api/share-links/access/:token/stream/:trackId after the session window still only updates lastStreamedAt", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId consumes a new play after the session window", async () => {
         const oldStream = new Date(Date.now() - 2 * 60 * 60 * 1000);
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({
@@ -814,11 +821,15 @@ describe("share links routes integration", () => {
             `/api/share-links/access/${TOKEN}/stream/track-1`,
         );
 
-        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-            where: { id: "share-1" },
-            data: { lastStreamedAt: expect.any(Date) },
-        });
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: {
+                    playCount: { increment: 1 },
+                    lastStreamedAt: expect.any(Date),
+                },
+            }),
+        );
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
     });
 
     it("GET /api/share-links/access/:token/stream/:trackId rejects when maxPlays is reached", async () => {

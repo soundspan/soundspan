@@ -9,7 +9,14 @@ import {
     formatUnifiedTrackItem,
     type UnifiedPlaylistItemRecord,
 } from "../services/unifiedTrackResponse";
-import { resolvePlaylistItemsForUser } from "../services/playlistTrackResolution";
+import {
+    resolvePlaylistItemsForUser,
+    type ResolvedPlaylistItem,
+} from "../services/playlistTrackResolution";
+import {
+    getUserProviderProfile,
+    type UserProviderProfile,
+} from "../services/listenTogetherResolution";
 
 const router = Router();
 
@@ -17,6 +24,8 @@ const PLAYLISTS_MAX_LIMIT = 1000;
 const PLAYLISTS_DEFAULT_LIMIT = 500;
 const PLAYLIST_PREVIEW_ITEMS = 12;
 const PLAYLIST_REORDER_MAX_ITEMS = 1000;
+const PLAYLIST_DETAIL_MAX_ITEMS = 1000;
+const PLAYLIST_DETAIL_QUERY_ITEMS = PLAYLIST_DETAIL_MAX_ITEMS + 1;
 const pendingRetryPath = "/:id/pending/:trackId/retry";
 
 type RetryRequest = Request<{ id: string; trackId: string }>;
@@ -32,6 +41,31 @@ type UnvalidatedReorderSelection =
 type ReorderPlaylistItem = {
     id: string;
     trackId: string | null;
+};
+
+type MappingAvailabilityRow = {
+    trackId: string | null;
+    trackTidalId: string | null;
+    trackYtMusicId: string | null;
+};
+
+type ResolutionPartition = {
+    delegatedItems: UnifiedPlaylistItemRecord[];
+    delegatedIndexes: number[];
+};
+
+type FallbackIds = {
+    tidalIds: string[];
+    ytIds: string[];
+};
+
+type PendingPlaylistItemRecord = {
+    id: string;
+    sort: number;
+    spotifyArtist: string;
+    spotifyTitle: string;
+    spotifyAlbum: string;
+    deezerPreviewUrl: string | null;
 };
 
 const reorderPayloadSchema = z.object({
@@ -183,6 +217,141 @@ const playlistItemInclude = {
     trackYtMusic: true,
 } as const;
 
+function getFallbackToken(
+    item: UnifiedPlaylistItemRecord,
+    profile: UserProviderProfile,
+): string | null {
+    if (item.trackTidalId && (!profile.hasTidal || !item.trackTidal)) {
+        return `t:${item.trackTidalId}`;
+    }
+    if (item.trackYtMusicId && (!profile.hasYtMusic || !item.trackYtMusic)) {
+        return `y:${item.trackYtMusicId}`;
+    }
+    return null;
+}
+
+function mappingSupportsProfile(
+    mapping: MappingAvailabilityRow,
+    profile: UserProviderProfile,
+): boolean {
+    return Boolean(
+        mapping.trackId ||
+        (mapping.trackTidalId && profile.hasTidal) ||
+        (mapping.trackYtMusicId && profile.hasYtMusic),
+    );
+}
+
+function addMappingTokens(
+    tokens: Set<string>,
+    mapping: MappingAvailabilityRow,
+): void {
+    if (mapping.trackTidalId) tokens.add(`t:${mapping.trackTidalId}`);
+    if (mapping.trackYtMusicId) tokens.add(`y:${mapping.trackYtMusicId}`);
+}
+
+function collectFallbackIds(
+    items: UnifiedPlaylistItemRecord[],
+    profile: UserProviderProfile,
+): FallbackIds {
+    const tidalIds = new Set<string>();
+    const ytIds = new Set<string>();
+    items.forEach((item) => {
+        const token = getFallbackToken(item, profile);
+        if (token?.startsWith("t:")) tidalIds.add(token.slice(2));
+        if (token?.startsWith("y:")) ytIds.add(token.slice(2));
+    });
+    return { tidalIds: Array.from(tidalIds), ytIds: Array.from(ytIds) };
+}
+
+async function loadFallbackMappings(
+    ids: FallbackIds,
+): Promise<MappingAvailabilityRow[]> {
+    if (ids.tidalIds.length === 0 && ids.ytIds.length === 0) return [];
+    return prisma.trackMapping.findMany({
+        where: {
+            stale: false,
+            OR: [
+                ...(ids.tidalIds.length > 0
+                    ? [{ trackTidalId: { in: ids.tidalIds } }]
+                    : []),
+                ...(ids.ytIds.length > 0
+                    ? [{ trackYtMusicId: { in: ids.ytIds } }]
+                    : []),
+            ],
+        },
+        select: {
+            trackId: true,
+            trackTidalId: true,
+            trackYtMusicId: true,
+        },
+    });
+}
+
+function collectUsableMappingTokens(
+    mappings: MappingAvailabilityRow[],
+    profile: UserProviderProfile,
+): Set<string> {
+    const usableTokens = new Set<string>();
+    for (const mapping of mappings) {
+        if (mappingSupportsProfile(mapping, profile)) {
+            addMappingTokens(usableTokens, mapping);
+        }
+    }
+    return usableTokens;
+}
+
+async function loadUsableFallbackTokens(
+    items: UnifiedPlaylistItemRecord[],
+    profile: UserProviderProfile,
+): Promise<Set<string>> {
+    const ids = collectFallbackIds(items, profile);
+    const mappings = await loadFallbackMappings(ids);
+    return collectUsableMappingTokens(mappings, profile);
+}
+
+function partitionResolutionItems(
+    items: UnifiedPlaylistItemRecord[],
+    profile: UserProviderProfile,
+    usableFallbackTokens: Set<string>,
+): ResolutionPartition {
+    const delegatedItems: UnifiedPlaylistItemRecord[] = [];
+    const delegatedIndexes: number[] = [];
+    items.forEach((item, index) => {
+        const fallbackToken = getFallbackToken(item, profile);
+        if (!fallbackToken || usableFallbackTokens.has(fallbackToken)) {
+            delegatedItems.push(item);
+            delegatedIndexes.push(index);
+        }
+    });
+    return { delegatedItems, delegatedIndexes };
+}
+
+async function resolvePlaylistDetailItems(
+    items: UnifiedPlaylistItemRecord[],
+    userId: string,
+): Promise<ResolvedPlaylistItem[]> {
+    if (items.length === 0) return [];
+    const profile = await getUserProviderProfile(userId);
+    const usableTokens = await loadUsableFallbackTokens(items, profile);
+    const partition = partitionResolutionItems(items, profile, usableTokens);
+    const delegated = await resolvePlaylistItemsForUser(
+        partition.delegatedItems,
+        userId,
+    );
+    const resolvedByIndex = new Map<number, ResolvedPlaylistItem>();
+    partition.delegatedIndexes.forEach((itemIndex, delegatedIndex) => {
+        resolvedByIndex.set(itemIndex, delegated[delegatedIndex]);
+    });
+    return items.map(
+        (item, index) =>
+            resolvedByIndex.get(index) ?? {
+                original: item,
+                effective: item,
+                resolution: { available: false, reason: "no-provider" },
+            },
+    );
+}
+
 const addTrackSchema = z
     .object({
         trackId: z.string().trim().min(1).optional(),
@@ -295,6 +464,92 @@ function unavailablePlaybackForReason(reason: string): {
         message:
             "Playback is unavailable because this playlist item no longer has an attached track source.",
     };
+}
+
+async function loadPlaylistDetail(playlistId: string, userId: string) {
+    return prisma.playlist.findUnique({
+        where: { id: playlistId },
+        include: {
+            user: { select: { username: true } },
+            hiddenByUsers: {
+                where: { userId },
+                select: { id: true },
+            },
+            _count: {
+                select: { items: true, pendingTracks: true },
+            },
+            items: {
+                include: playlistItemInclude,
+                orderBy: { sort: "asc" },
+                take: PLAYLIST_DETAIL_QUERY_ITEMS,
+            },
+            pendingTracks: {
+                orderBy: { sort: "asc" },
+                take: PLAYLIST_DETAIL_QUERY_ITEMS,
+            },
+        },
+    });
+}
+
+function selectBoundedPlaylistEntries<
+    TTrack extends { sort: number },
+    TPending extends { sort: number },
+>(items: TTrack[], pendingTracks: TPending[]) {
+    const entries = [
+        ...items.map((item) => ({ type: "track" as const, item })),
+        ...pendingTracks.map((item) => ({ type: "pending" as const, item })),
+    ]
+        .sort((a, b) => a.item.sort - b.item.sort)
+        .slice(0, PLAYLIST_DETAIL_MAX_ITEMS);
+    const boundedItems: TTrack[] = [];
+    const boundedPendingTracks: TPending[] = [];
+    entries.forEach((entry) => {
+        if (entry.type === "track") {
+            boundedItems.push(entry.item);
+        } else {
+            boundedPendingTracks.push(entry.item);
+        }
+    });
+    return {
+        items: boundedItems,
+        pendingTracks: boundedPendingTracks,
+    };
+}
+
+function formatResolvedPlaylistItems(resolvedItems: ResolvedPlaylistItem[]) {
+    return resolvedItems.map((resolvedItem) => {
+        const formatted = formatUnifiedTrackItem(resolvedItem.effective);
+        if (!resolvedItem.resolution.available) {
+            formatted.playback = unavailablePlaybackForReason(
+                resolvedItem.resolution.reason,
+            );
+        }
+        return formatted;
+    });
+}
+
+function formatPendingPlaylistItems(
+    pendingTracks: PendingPlaylistItemRecord[],
+) {
+    return pendingTracks.map((pending) => ({
+        id: pending.id,
+        type: "pending" as const,
+        sort: pending.sort,
+        provider: { source: "pending" as const, label: "PENDING" },
+        playback: {
+            isPlayable: false,
+            reason: "pending_import",
+            message:
+                "Playback is unavailable until this track is matched and imported.",
+        },
+        pending: {
+            id: pending.id,
+            artist: pending.spotifyArtist,
+            title: pending.spotifyTitle,
+            album: pending.spotifyAlbum,
+            previewUrl: pending.deezerPreviewUrl,
+        },
+    }));
 }
 
 /**
@@ -525,7 +780,30 @@ router.post("/", async (req, res) => {
  *         description: Playlist ID
  *     responses:
  *       200:
- *         description: Playlist details with merged items
+ *         description: Playlist details with merged items capped at 1000 combined track and pending items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalItemCount:
+ *                   type: integer
+ *                   description: Total number of track and pending items in the playlist before response truncation
+ *                 truncated:
+ *                   type: boolean
+ *                   description: True when the playlist contains more than 1000 combined items and this response was capped
+ *                 items:
+ *                   type: array
+ *                   maxItems: 1000
+ *                   description: Resolved track items included in the bounded detail response
+ *                 pendingTracks:
+ *                   type: array
+ *                   maxItems: 1000
+ *                   description: Pending items included in the bounded detail response
+ *                 mergedItems:
+ *                   type: array
+ *                   maxItems: 1000
+ *                   description: The first 1000 combined track and pending items in playlist sort order
  *       403:
  *         description: Access denied
  *       404:
@@ -541,27 +819,7 @@ router.get("/:id", async (req, res) => {
         }
         const userId = req.user.id;
 
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: req.params.id },
-            include: {
-                user: {
-                    select: {
-                        username: true,
-                    },
-                },
-                hiddenByUsers: {
-                    where: { userId },
-                    select: { id: true },
-                },
-                items: {
-                    include: playlistItemInclude,
-                    orderBy: { sort: "asc" },
-                },
-                pendingTracks: {
-                    orderBy: { sort: "asc" },
-                },
-            },
-        });
+        const playlist = await loadPlaylistDetail(req.params.id, userId);
 
         if (!playlist) {
             return res.status(404).json({ error: "Playlist not found" });
@@ -572,43 +830,21 @@ router.get("/:id", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        const resolvedItems = await resolvePlaylistItemsForUser(
-            playlist.items as UnifiedPlaylistItemRecord[],
+        const totalItemCount =
+            playlist._count.items + playlist._count.pendingTracks;
+        const bounded = selectBoundedPlaylistEntries(
+            playlist.items,
+            playlist.pendingTracks,
+        );
+
+        const resolvedItems = await resolvePlaylistDetailItems(
+            bounded.items,
             userId,
         );
-        const formattedItems = resolvedItems.map((resolvedItem) => {
-            const formatted = formatUnifiedTrackItem(resolvedItem.effective);
-            if (!resolvedItem.resolution.available) {
-                formatted.playback = unavailablePlaybackForReason(
-                    resolvedItem.resolution.reason,
-                );
-            }
-            return formatted;
-        });
-
-        // Format pending tracks
-        const formattedPending = playlist.pendingTracks.map((pending) => ({
-            id: pending.id,
-            type: "pending" as const,
-            sort: pending.sort,
-            provider: {
-                source: "pending" as const,
-                label: "PENDING",
-            },
-            playback: {
-                isPlayable: false,
-                reason: "pending_import",
-                message:
-                    "Playback is unavailable until this track is matched and imported.",
-            },
-            pending: {
-                id: pending.id,
-                artist: pending.spotifyArtist,
-                title: pending.spotifyTitle,
-                album: pending.spotifyAlbum,
-                previewUrl: pending.deezerPreviewUrl,
-            },
-        }));
+        const formattedItems = formatResolvedPlaylistItems(resolvedItems);
+        const formattedPending = formatPendingPlaylistItems(
+            bounded.pendingTracks,
+        );
 
         // Merge and sort by position
         const mergedItems = [
@@ -616,12 +852,15 @@ router.get("/:id", async (req, res) => {
             ...formattedPending,
         ].sort((a, b) => a.sort - b.sort);
 
+        const { _count, ...playlistFields } = playlist;
         res.json({
-            ...playlist,
+            ...playlistFields,
             isOwner: playlist.userId === userId,
             isHidden: playlist.hiddenByUsers.length > 0,
-            trackCount: playlist.items.length,
-            pendingCount: playlist.pendingTracks.length,
+            trackCount: _count.items,
+            pendingCount: _count.pendingTracks,
+            totalItemCount,
+            truncated: totalItemCount > PLAYLIST_DETAIL_MAX_ITEMS,
             items: formattedItems,
             pendingTracks: formattedPending,
             mergedItems,

@@ -449,6 +449,13 @@ describe("vibe search transport compatibility", () => {
                 text: "upbeat synthwave",
                 responseKey: "audio:text:embed:response:req-123",
             }),
+            {
+                TRIM: {
+                    strategy: "MAXLEN",
+                    strategyModifier: "~",
+                    threshold: 100,
+                },
+            },
         );
         expect(mockBlockingBlPop).toHaveBeenCalledWith(
             "audio:text:embed:response:req-123",
@@ -484,6 +491,13 @@ describe("vibe search transport compatibility", () => {
                 text: "melancholic piano",
                 responseKey: "audio:text:embed:response:req-123",
             }),
+            {
+                TRIM: {
+                    strategy: "MAXLEN",
+                    strategyModifier: "~",
+                    threshold: 100,
+                },
+            },
         );
         expect(mockRedisDel).toHaveBeenCalledWith(
             "audio:text:embed:response:req-123",
@@ -555,6 +569,23 @@ describe("vibe search transport compatibility", () => {
         expect(invalidEmbedRes.body).toEqual({
             error: "Failed to search tracks by vibe",
         });
+    });
+
+    it("rejects over-long search queries before admitting Redis work", async () => {
+        const req = {
+            body: { query: "q".repeat(513) },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await searchHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Query must be at most 512 characters",
+        });
+        expect(mockRedisXAdd).not.toHaveBeenCalled();
+        expect(mockBlockingBlPop).not.toHaveBeenCalled();
     });
 
     it("expands and reranks vibe search results when vocabulary matches exist", async () => {

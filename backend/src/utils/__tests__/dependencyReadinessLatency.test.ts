@@ -31,6 +31,9 @@ describe("dependency readiness tracker latency", () => {
             }
             return Promise.resolve(1);
         });
+        const transaction = jest.fn((operations: Array<Promise<unknown>>) =>
+            Promise.all(operations),
+        );
 
         const ping = jest.fn().mockImplementation(() => {
             if (state.redisReject) {
@@ -44,7 +47,9 @@ describe("dependency readiness tracker latency", () => {
                 return state.redisReady;
             },
             ping,
+            withCommandOptions: jest.fn(),
         };
+        redisClient.withCommandOptions.mockReturnValue(redisClient);
 
         const logger = {
             info: jest.fn(),
@@ -58,6 +63,7 @@ describe("dependency readiness tracker latency", () => {
         jest.doMock("../db", () => ({
             prisma: {
                 $queryRaw: queryRaw,
+                $transaction: transaction,
             },
         }));
         jest.doMock("../redis", () => ({ redisClient }));

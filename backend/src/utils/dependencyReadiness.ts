@@ -64,31 +64,38 @@ function initialSnapshot(): DependencyReadinessSnapshot {
     };
 }
 
-async function withTimeout<T>(
-    promise: Promise<T>,
+async function withAbortDeadline<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
     timeoutMs: number,
 ): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            reject(new Error(`timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
+    const controller = new AbortController();
+    const timeoutError = new Error(`timed out after ${timeoutMs}ms`);
+    const timeoutId = setTimeout(
+        () => controller.abort(timeoutError),
+        timeoutMs,
+    );
 
-        promise
-            .then((value) => {
-                clearTimeout(timeoutId);
-                resolve(value);
-            })
-            .catch((error) => {
-                clearTimeout(timeoutId);
-                reject(error);
-            });
-    });
+    try {
+        return await operation(controller.signal);
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw timeoutError;
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
 }
 
 async function probePostgres(timeoutMs: number): Promise<DependencyStatus> {
     const startedAt = Date.now();
+    const maxWait = Math.max(1, Math.floor(timeoutMs / 2));
+    const timeout = Math.max(1, timeoutMs - maxWait);
     try {
-        await withTimeout(prisma.$queryRaw`SELECT 1`, timeoutMs);
+        await prisma.$transaction([prisma.$queryRaw`SELECT 1`], {
+            maxWait,
+            timeout,
+        });
         return {
             ok: true,
             error: null,
@@ -114,7 +121,13 @@ async function probeRedis(timeoutMs: number): Promise<DependencyStatus> {
 
     const startedAt = Date.now();
     try {
-        await withTimeout(redisClient.ping(), timeoutMs);
+        await withAbortDeadline(
+            async (signal) =>
+                await redisClient
+                    .withCommandOptions({ abortSignal: signal })
+                    .ping(),
+            timeoutMs,
+        );
         return {
             ok: true,
             error: null,
