@@ -54,8 +54,9 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(9);
+        expect(mockRateLimit).toHaveBeenCalledTimes(10);
         expect(mod.apiLimiter).toBeDefined();
+        expect(mod.playbackStateLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
         expect(mod.downloadLimiter).toBeDefined();
@@ -67,14 +68,15 @@ describe("rateLimiter middleware config", () => {
 
         const expectedConfigs = [
             { index: 0, windowMs: 60_000, max: 5000 },
-            { index: 1, windowMs: 900_000, max: 40 },
-            { index: 2, windowMs: 60_000, max: 500 },
-            { index: 3, windowMs: 60_000, max: 100 },
-            { index: 4, windowMs: 60_000, max: 120 },
-            { index: 5, windowMs: 900_000, max: 20 },
-            { index: 6, windowMs: 60_000, max: 30 },
-            { index: 7, windowMs: 60_000, max: 20 },
-            { index: 8, windowMs: 60_000, max: 60 },
+            { index: 1, windowMs: 60_000, max: 600 },
+            { index: 2, windowMs: 900_000, max: 40 },
+            { index: 3, windowMs: 60_000, max: 500 },
+            { index: 4, windowMs: 60_000, max: 100 },
+            { index: 5, windowMs: 60_000, max: 120 },
+            { index: 6, windowMs: 900_000, max: 20 },
+            { index: 7, windowMs: 60_000, max: 30 },
+            { index: 8, windowMs: 60_000, max: 20 },
+            { index: 9, windowMs: 60_000, max: 60 },
         ];
 
         for (const config of expectedConfigs) {
@@ -86,7 +88,7 @@ describe("rateLimiter middleware config", () => {
             );
         }
 
-        expect(getOptions(1).skipSuccessfulRequests).toBe(true);
+        expect(getOptions(2).skipSuccessfulRequests).toBe(true);
     });
 
     it("uses standard headers, disables legacy headers, and disables trustProxy validation for all limiters", async () => {
@@ -167,7 +169,7 @@ describe("rateLimiter middleware config", () => {
 
     it("authLimiter handler logs the client IP and sends the configured limit response", async () => {
         await loadRateLimiterModule();
-        const handler = getOptions(1).handler as NonNullable<
+        const handler = getOptions(2).handler as NonNullable<
             RateLimitOptions["handler"]
         >;
         const res = {} as RateLimitHandlerResponse;
