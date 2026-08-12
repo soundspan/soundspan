@@ -5,11 +5,12 @@
 
 import slsk from "slsk-client";
 import path from "path";
-import { mkdir, rm, stat } from "fs/promises";
+import { mkdir, rename, rm, stat } from "fs/promises";
 import PQueue from "p-queue";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
 import { logger } from "../utils/logger";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 const log = logger.child("Soulseek");
 
@@ -51,6 +52,13 @@ export interface SearchTrackResult {
     bestMatch: TrackMatch | null;
     allMatches: TrackMatch[]; // All ranked matches for retry
 }
+
+interface DownloadDestination {
+    finalPath: string;
+    tempPath: string;
+}
+
+const INVALID_DOWNLOAD_DESTINATION = "Invalid download destination";
 
 class SoulseekService {
     private client: SlskClient | null = null;
@@ -687,6 +695,37 @@ class SoulseekService {
         return { type: "unknown", skipUser: false };
     }
 
+    private sanitizeDownloadComponent(name: string): string | null {
+        const sanitized = name.replace(/[<>:"/\\|?*]/g, "_").trim();
+        if (!sanitized || sanitized === "." || sanitized === "..") {
+            return null;
+        }
+        return sanitized;
+    }
+
+    private resolveDownloadDestination(
+        musicPath: string,
+        artistName: string,
+        albumName: string,
+        filename: string,
+    ): DownloadDestination | null {
+        const artist = this.sanitizeDownloadComponent(artistName);
+        const album = this.sanitizeDownloadComponent(albumName);
+        const file = this.sanitizeDownloadComponent(filename);
+        if (!artist || !album || !file) {
+            return null;
+        }
+
+        const relativePath = path.join(artist, album, file);
+        const singlesRoot = path.resolve(musicPath, "Singles");
+        const finalPath = safeResolvePath(singlesRoot, relativePath);
+        const tempPath = safeResolvePath(singlesRoot, `${relativePath}.part`);
+        if (!finalPath || !tempPath) {
+            return null;
+        }
+        return { finalPath, tempPath };
+    }
+
     /**
      * Rank all search results and return sorted matches (best first)
      * Filters out matches below minimum score threshold and blocked users
@@ -818,12 +857,17 @@ class SoulseekService {
     }
 
     /**
-     * Download a track directly to the music library with timeout
+     * Download a track to a temporary file and atomically finalize it.
+     * @param match - Remote Soulseek match to download.
+     * @param destPath - Final destination path.
+     * @param attemptNumber - Zero-based retry number used for timeout selection.
+     * @param tempPath - Prevalidated temporary path for the incomplete file.
      */
     async downloadTrack(
         match: TrackMatch,
         destPath: string,
         attemptNumber: number = 0,
+        tempPath: string = `${destPath}.part`,
     ): Promise<{ success: boolean; error?: string }> {
         // Track active downloads for concurrency monitoring
         this.activeDownloads++;
@@ -897,7 +941,7 @@ class SoulseekService {
                     // Clean up the partial file without blocking the event
                     // loop; force:true ignores ENOENT so no existence check is
                     // needed and cleanup errors are swallowed.
-                    void rm(destPath, { force: true }).catch(() => {
+                    void rm(tempPath, { force: true }).catch(() => {
                         // Ignore cleanup errors
                     });
                     resolve({ success: false, error: "Download timed out" });
@@ -918,7 +962,7 @@ class SoulseekService {
                 this.client!.download(
                     {
                         file: downloadFile,
-                        path: destPath,
+                        path: tempPath,
                     },
                     async (err) => {
                         if (resolved) return; // Already timed out
@@ -953,7 +997,8 @@ class SoulseekService {
 
                         // Verify file was written (stat throws if missing).
                         try {
-                            const stats = await stat(destPath);
+                            const stats = await stat(tempPath);
+                            await rename(tempPath, destPath);
                             sessionLog(
                                 "SOULSEEK",
                                 `✓ Downloaded: ${match.filename} (${Math.round(
@@ -961,7 +1006,15 @@ class SoulseekService {
                                 )}KB)`,
                             );
                             resolve({ success: true });
-                        } catch {
+                        } catch (finalizeError) {
+                            await rm(tempPath, { force: true }).catch(() => {
+                                // Ignore cleanup errors
+                            });
+                            log.error("Failed to finalize Soulseek download", {
+                                destPath,
+                                tempPath,
+                                error: finalizeError,
+                            });
                             sessionLog(
                                 "SOULSEEK",
                                 "File not found after download",
@@ -1013,8 +1066,6 @@ class SoulseekService {
             return { success: false, error: "No suitable match found" };
         }
 
-        const sanitize = (name: string) =>
-            name.replace(/[<>:"/\\|?*]/g, "_").trim();
         const errors: string[] = [];
 
         // Try up to MAX_DOWNLOAD_RETRIES different users
@@ -1033,17 +1084,23 @@ class SoulseekService {
                 } for ${match.filename}`,
             );
 
-            // Build destination path: Singles/Artist/Album/filename
-            const destPath = path.join(
+            const destination = this.resolveDownloadDestination(
                 musicPath,
-                "Singles",
-                sanitize(artistName),
-                sanitize(albumName),
-                sanitize(match.filename),
+                artistName,
+                albumName,
+                match.filename,
             );
+            if (!destination) {
+                return { success: false, error: INVALID_DOWNLOAD_DESTINATION };
+            }
 
             // Download with timeout
-            const downloadResult = await this.downloadTrack(match, destPath);
+            const downloadResult = await this.downloadTrack(
+                match,
+                destination.finalPath,
+                0,
+                destination.tempPath,
+            );
 
             if (downloadResult.success) {
                 if (attempt > 0) {
@@ -1054,7 +1111,7 @@ class SoulseekService {
                         })`,
                     );
                 }
-                return { success: true, filePath: destPath };
+                return { success: true, filePath: destination.finalPath };
             }
 
             // Log failure and try next user
@@ -1102,8 +1159,6 @@ class SoulseekService {
             return { success: false, error: "No matches provided" };
         }
 
-        const sanitize = (name: string) =>
-            name.replace(/[<>:"/\\|?*]/g, "_").trim();
         const errors: string[] = [];
 
         // Try up to MAX_DOWNLOAD_RETRIES different users
@@ -1119,17 +1174,23 @@ class SoulseekService {
                 }: Trying ${match.username}`,
             );
 
-            // Build destination path: Singles/Artist/Album/filename
-            const destPath = path.join(
+            const destination = this.resolveDownloadDestination(
                 musicPath,
-                "Singles",
-                sanitize(artistName),
-                sanitize(albumName),
-                sanitize(match.filename),
+                artistName,
+                albumName,
+                match.filename,
             );
+            if (!destination) {
+                return { success: false, error: INVALID_DOWNLOAD_DESTINATION };
+            }
 
             // Download with timeout
-            const downloadResult = await this.downloadTrack(match, destPath);
+            const downloadResult = await this.downloadTrack(
+                match,
+                destination.finalPath,
+                0,
+                destination.tempPath,
+            );
 
             if (downloadResult.success) {
                 if (attempt > 0) {
@@ -1140,7 +1201,7 @@ class SoulseekService {
                         })`,
                     );
                 }
-                return { success: true, filePath: destPath };
+                return { success: true, filePath: destination.finalPath };
             }
 
             // Log failure and try next user
@@ -1273,8 +1334,6 @@ class SoulseekService {
         allMatches: TrackMatch[],
         musicPath: string,
     ): Promise<{ success: boolean; filePath?: string; error?: string }> {
-        const sanitize = (name: string) =>
-            name.replace(/[<>:"/\\|?*]/g, "_").trim();
         const errors: string[] = [];
         const matchesToTry = allMatches.slice(0, this.MAX_DOWNLOAD_RETRIES);
 
@@ -1288,15 +1347,22 @@ class SoulseekService {
                 }: Trying ${match.username}`,
             );
 
-            const destPath = path.join(
+            const destination = this.resolveDownloadDestination(
                 musicPath,
-                "Singles",
-                sanitize(artistName),
-                sanitize(albumName),
-                sanitize(match.filename),
+                artistName,
+                albumName,
+                match.filename,
             );
+            if (!destination) {
+                return { success: false, error: INVALID_DOWNLOAD_DESTINATION };
+            }
 
-            const result = await this.downloadTrack(match, destPath, attempt);
+            const result = await this.downloadTrack(
+                match,
+                destination.finalPath,
+                attempt,
+                destination.tempPath,
+            );
             if (result.success) {
                 if (attempt > 0) {
                     sessionLog(
@@ -1306,7 +1372,7 @@ class SoulseekService {
                         }`,
                     );
                 }
-                return { success: true, filePath: destPath };
+                return { success: true, filePath: destination.finalPath };
             }
             errors.push(`${match.username}: ${result.error}`);
         }

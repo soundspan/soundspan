@@ -8,6 +8,7 @@ const mockFsExistsSync = jest.fn();
 const mockFsStatSync = jest.fn();
 const mockFsUnlinkSync = jest.fn();
 const mockMkdir = jest.fn();
+const mockRename = jest.fn();
 const mockRm = jest.fn();
 const mockStat = jest.fn();
 const mockLogInfo = jest.fn();
@@ -53,6 +54,7 @@ jest.mock("fs", () => ({
 
 jest.mock("fs/promises", () => ({
     mkdir: (...args: unknown[]) => mockMkdir(...args),
+    rename: (...args: unknown[]) => mockRename(...args),
     rm: (...args: unknown[]) => mockRm(...args),
     stat: (...args: unknown[]) => mockStat(...args),
 }));
@@ -100,6 +102,16 @@ function makeTrackMatch(overrides: Partial<TrackMatch> = {}): TrackMatch {
     };
 }
 
+function expectedDownloadDestination(
+    musicPath: string,
+    artist: string,
+    album: string,
+    filename: string,
+): { finalPath: string; tempPath: string } {
+    const finalPath = path.join(musicPath, "Singles", artist, album, filename);
+    return { finalPath, tempPath: `${finalPath}.part` };
+}
+
 function resetServiceState(): void {
     const service = soulseekService as any;
     service.client = null;
@@ -137,6 +149,7 @@ describe("soulseek service", () => {
             soulseekPassword: "test-pass",
         });
         mockMkdir.mockResolvedValue(undefined);
+        mockRename.mockResolvedValue(undefined);
         mockFsExistsSync.mockReturnValue(true);
         mockFsStatSync.mockReturnValue({ size: 2048 });
         mockFsUnlinkSync.mockImplementation(() => undefined);
@@ -984,39 +997,37 @@ describe("soulseek service", () => {
             [first, second],
             "/library",
         );
+        const firstDestination = expectedDownloadDestination(
+            "/library",
+            "Artist_One",
+            "Album_One",
+            "Bad_.mp3",
+        );
+        const secondDestination = expectedDownloadDestination(
+            "/library",
+            "Artist_One",
+            "Album_One",
+            "Good_.flac",
+        );
 
         expect(downloadTrackSpy).toHaveBeenCalledTimes(2);
         expect(downloadTrackSpy).toHaveBeenNthCalledWith(
             1,
             first,
-            path.join(
-                "/library",
-                "Singles",
-                "Artist_One",
-                "Album_One",
-                "Bad_.mp3",
-            ),
+            firstDestination.finalPath,
+            0,
+            firstDestination.tempPath,
         );
         expect(downloadTrackSpy).toHaveBeenNthCalledWith(
             2,
             second,
-            path.join(
-                "/library",
-                "Singles",
-                "Artist_One",
-                "Album_One",
-                "Good_.flac",
-            ),
+            secondDestination.finalPath,
+            0,
+            secondDestination.tempPath,
         );
         expect(result).toEqual({
             success: true,
-            filePath: path.join(
-                "/library",
-                "Singles",
-                "Artist_One",
-                "Album_One",
-                "Good_.flac",
-            ),
+            filePath: secondDestination.finalPath,
         });
     });
 
@@ -1034,6 +1045,37 @@ describe("soulseek service", () => {
             error: "No matches provided",
         });
     });
+
+    it.each([
+        ["empty artist", "   ", "Album", "Track.mp3"],
+        ["empty album", "Artist", "", "Track.mp3"],
+        ["empty filename", "Artist", "Album", "   "],
+        ["dot artist", "..", "Album", "Track.mp3"],
+        ["dot album", "Artist", ".", "Track.mp3"],
+        ["dot filename", "Artist", "Album", ".."],
+    ])(
+        "downloadBestMatch rejects an %s destination component",
+        async (_description, artist, album, filename) => {
+            const downloadTrackSpy = jest.spyOn(
+                soulseekService,
+                "downloadTrack",
+            );
+
+            await expect(
+                soulseekService.downloadBestMatch(
+                    artist,
+                    "Track",
+                    album,
+                    [makeTrackMatch({ filename })],
+                    "/library",
+                ),
+            ).resolves.toEqual({
+                success: false,
+                error: "Invalid download destination",
+            });
+            expect(downloadTrackSpy).not.toHaveBeenCalled();
+        },
+    );
 
     it("searchAndDownloadBatch retries per-track and returns mixed outcomes", async () => {
         const first = makeTrackMatch({
@@ -1095,23 +1137,39 @@ describe("soulseek service", () => {
             "/music",
             1,
         );
+        const firstDestination = expectedDownloadDestination(
+            "/music",
+            "Artist_One",
+            "Album_One",
+            "Retry_.flac",
+        );
+        const secondDestination = expectedDownloadDestination(
+            "/music",
+            "Artist_One",
+            "Album_One",
+            "Recovered_.flac",
+        );
 
         expect(searchTrackSpy).toHaveBeenCalledTimes(2);
         expect(downloadTrackSpy).toHaveBeenCalledTimes(2);
-        expect(downloadTrackSpy.mock.calls[0][2]).toBe(0);
-        expect(downloadTrackSpy.mock.calls[1][2]).toBe(1);
+        expect(downloadTrackSpy).toHaveBeenNthCalledWith(
+            1,
+            first,
+            firstDestination.finalPath,
+            0,
+            firstDestination.tempPath,
+        );
+        expect(downloadTrackSpy).toHaveBeenNthCalledWith(
+            2,
+            second,
+            secondDestination.finalPath,
+            1,
+            secondDestination.tempPath,
+        );
         expect(result).toEqual({
             successful: 1,
             failed: 1,
-            files: [
-                path.join(
-                    "/music",
-                    "Singles",
-                    "Artist_One",
-                    "Album_One",
-                    "Recovered_.flac",
-                ),
-            ],
+            files: [secondDestination.finalPath],
             errors: ["Artist Two - Missing Track: No match found on Soulseek"],
         });
     });
@@ -1154,6 +1212,30 @@ describe("soulseek service", () => {
                 "Artist - Track: batch-primary: timeout; batch-fallback: user offline",
             ],
         });
+    });
+
+    it("searchAndDownloadBatch rejects invalid destination components without downloading", async () => {
+        const match = makeTrackMatch({ filename: "Track.mp3" });
+        jest.spyOn(soulseekService, "searchTrack").mockResolvedValue({
+            found: true,
+            bestMatch: match,
+            allMatches: [match],
+        });
+        const downloadTrackSpy = jest.spyOn(soulseekService, "downloadTrack");
+
+        await expect(
+            soulseekService.searchAndDownloadBatch(
+                [{ artist: "Artist", title: "Track", album: ".." }],
+                "/music",
+                1,
+            ),
+        ).resolves.toEqual({
+            successful: 0,
+            failed: 1,
+            files: [],
+            errors: ["Artist - Track: Invalid download destination"],
+        });
+        expect(downloadTrackSpy).not.toHaveBeenCalled();
     });
 
     it("searchAndDownloadBatch counts no-match failures and download failures together", async () => {
@@ -1227,6 +1309,24 @@ describe("soulseek service", () => {
             success: false,
             error: "No suitable match found",
         });
+    });
+
+    it("searchAndDownload rejects invalid destination components without downloading", async () => {
+        const match = makeTrackMatch({ filename: "Track.mp3" });
+        jest.spyOn(soulseekService, "searchTrack").mockResolvedValue({
+            found: true,
+            bestMatch: match,
+            allMatches: [match],
+        });
+        const downloadTrackSpy = jest.spyOn(soulseekService, "downloadTrack");
+
+        await expect(
+            soulseekService.searchAndDownload("..", "Track", "Album", "/music"),
+        ).resolves.toEqual({
+            success: false,
+            error: "Invalid download destination",
+        });
+        expect(downloadTrackSpy).not.toHaveBeenCalled();
     });
 
     it("searchAndDownload aggregates all failed attempt errors", async () => {
@@ -1303,17 +1403,37 @@ describe("soulseek service", () => {
             "Album:One",
             "/music",
         );
+        const firstDestination = expectedDownloadDestination(
+            "/music",
+            "Artist_One",
+            "Album_One",
+            "Retry_.flac",
+        );
+        const secondDestination = expectedDownloadDestination(
+            "/music",
+            "Artist_One",
+            "Album_One",
+            "Recovered_.flac",
+        );
 
         expect(downloadTrackSpy).toHaveBeenCalledTimes(2);
+        expect(downloadTrackSpy).toHaveBeenNthCalledWith(
+            1,
+            first,
+            firstDestination.finalPath,
+            0,
+            firstDestination.tempPath,
+        );
+        expect(downloadTrackSpy).toHaveBeenNthCalledWith(
+            2,
+            second,
+            secondDestination.finalPath,
+            0,
+            secondDestination.tempPath,
+        );
         expect(result).toEqual({
             success: true,
-            filePath: path.join(
-                "/music",
-                "Singles",
-                "Artist_One",
-                "Album_One",
-                "Recovered_.flac",
-            ),
+            filePath: secondDestination.finalPath,
         });
     });
 
@@ -1413,7 +1533,7 @@ describe("soulseek service", () => {
                 success: false,
                 error: "Download timed out",
             });
-            expect(mockRm).toHaveBeenCalledWith("/music/timeout.flac", {
+            expect(mockRm).toHaveBeenCalledWith("/music/timeout.flac.part", {
                 force: true,
             });
             expect(
@@ -1498,7 +1618,7 @@ describe("soulseek service", () => {
                 soulseekService as any,
                 "ensureConnected",
             ).mockResolvedValueOnce(undefined);
-            // The post-download check is `await stat(destPath)`, which REJECTS
+            // The post-download check is `await stat(tempPath)`, which REJECTS
             // when the file is missing — that is the real "not written" path.
             // (Previously this test only set existsSync=false and left mockStat
             // returning undefined, so it passed for the wrong reason: reading
@@ -1529,7 +1649,7 @@ describe("soulseek service", () => {
 
             // The error comes from stat() rejecting on the missing file, not
             // from an incidental TypeError — assert the verification ran.
-            expect(mockStat).toHaveBeenCalledWith("/music/missing.flac");
+            expect(mockStat).toHaveBeenCalledWith("/music/missing.flac.part");
             expect(result).toEqual({
                 success: false,
                 error: "File not written",
@@ -1537,6 +1657,40 @@ describe("soulseek service", () => {
         });
 
         it("returns success when callback completes and file exists", async () => {
+            jest.spyOn(
+                soulseekService as any,
+                "ensureConnected",
+            ).mockResolvedValueOnce(undefined);
+            const download = jest.fn(
+                (
+                    _opts: unknown,
+                    cb: (err: Error | null, data?: { buffer: Buffer }) => void,
+                ) => cb(null, { buffer: Buffer.from("ok") }),
+            );
+            (soulseekService as any).client = {
+                search: jest.fn(),
+                download,
+            };
+            mockStat.mockResolvedValue({ size: 4096 });
+
+            const result = await soulseekService.downloadTrack(
+                makeTrackMatch(),
+                "/music/success.flac",
+            );
+
+            expect(result).toEqual({ success: true });
+            expect(download).toHaveBeenCalledWith(
+                expect.objectContaining({ path: "/music/success.flac.part" }),
+                expect.any(Function),
+            );
+            expect(mockStat).toHaveBeenCalledWith("/music/success.flac.part");
+            expect(mockRename).toHaveBeenCalledWith(
+                "/music/success.flac.part",
+                "/music/success.flac",
+            );
+        });
+
+        it("cleans the temporary file when finalization fails", async () => {
             jest.spyOn(
                 soulseekService as any,
                 "ensureConnected",
@@ -1554,13 +1708,28 @@ describe("soulseek service", () => {
                 ),
             };
             mockStat.mockResolvedValue({ size: 4096 });
+            mockRename.mockRejectedValueOnce(new Error("EACCES"));
+            mockRm.mockResolvedValue(undefined);
 
-            const result = await soulseekService.downloadTrack(
-                makeTrackMatch(),
-                "/music/success.flac",
+            await expect(
+                soulseekService.downloadTrack(
+                    makeTrackMatch(),
+                    "/music/finalize.flac",
+                ),
+            ).resolves.toEqual({
+                success: false,
+                error: "File not written",
+            });
+            expect(mockRm).toHaveBeenCalledWith("/music/finalize.flac.part", {
+                force: true,
+            });
+            expect(JSON.stringify(mockSessionLog.mock.calls)).not.toContain(
+                "EACCES",
             );
-
-            expect(result).toEqual({ success: true });
+            expect(mockLogError).toHaveBeenCalledWith(
+                "Failed to finalize Soulseek download",
+                expect.objectContaining({ error: expect.any(Error) }),
+            );
         });
     });
 
