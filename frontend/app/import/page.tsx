@@ -482,9 +482,7 @@ function ImportPageContent() {
                                     </p>
                                 </div>
                                 <button
-                                    onClick={() =>
-                                        void fetchPreview(urlInput)
-                                    }
+                                    onClick={() => void fetchPreview(urlInput)}
                                     disabled={
                                         isPreviewLoading || !urlInput.trim()
                                     }

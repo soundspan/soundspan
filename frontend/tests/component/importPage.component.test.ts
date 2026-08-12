@@ -282,9 +282,8 @@ test("playlist preview anchor renders only the canonical HTTP(S) URL", async () 
             await click(findButton(harness.container, "Preview Import"));
 
             assert.equal(previewCalls.at(-1), testCase.canonical);
-            const anchor = harness.container.querySelector(
-                'a[target="_blank"]',
-            );
+            const anchor =
+                harness.container.querySelector('a[target="_blank"]');
             assert.ok(
                 anchor instanceof HTMLAnchorElement,
                 "preview anchor missing",
