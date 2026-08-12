@@ -4036,7 +4036,7 @@ describe("lidarr service behavior", () => {
 
         const album = {
             id: 901,
-            title: "Exact Match Album (Deluxe Edition)",
+            title: "Exact Match Album ((Deluxe Edition) Remainder)",
             foreignAlbumId: "album-exact",
             artistId: 55,
         };
@@ -4075,7 +4075,7 @@ describe("lidarr service behavior", () => {
             lidarrService.addAlbum(
                 "different-mbid",
                 "Exact Match Band",
-                "Exact Match Album",
+                "Exact Match Album Remainder",
                 "/music",
                 "artist-exact",
             ),
@@ -4088,7 +4088,7 @@ describe("lidarr service behavior", () => {
 
         expect(logger.debug).toHaveBeenCalledWith(
             expect.stringContaining(
-                'Matched exact normalized: "Exact Match Album (Deluxe Edition)"',
+                'Matched exact normalized: "Exact Match Album ((Deluxe Edition) Remainder)"',
             ),
         );
 
@@ -4103,9 +4103,7 @@ describe("lidarr service behavior", () => {
         async (_case, openingDelimiter) => {
             const client = createClientMock();
             primeServiceWithClient(client);
-            const longTitle = `Long Album ${openingDelimiter}${"x".repeat(
-                50_000,
-            )}`;
+            const longTitle = `Long Album ${openingDelimiter.repeat(50_000)}`;
             const artist = {
                 id: 56,
                 artistName: "Long Match Band",

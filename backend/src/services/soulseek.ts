@@ -11,6 +11,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
+import { stripDelimitedSegments } from "../utils/stripDelimitedSegments";
 
 const log = logger.child("Soulseek");
 
@@ -119,11 +120,19 @@ class SoulseekService {
             .replace(/[×]/g, "x"); // Multiplication sign → x
 
         // Remove delimited content only when it contains a known descriptor.
-        normalized = normalized.replace(/\(([^)]*)\)/g, (match, segment) =>
-            TRACK_DESCRIPTOR_PATTERN.test(segment) ? " " : match,
+        normalized = stripDelimitedSegments(
+            normalized,
+            "(",
+            ")",
+            (segment) => TRACK_DESCRIPTOR_PATTERN.test(segment),
+            " ",
         );
-        normalized = normalized.replace(/\[([^\]]*)\]/g, (match, segment) =>
-            TRACK_DESCRIPTOR_PATTERN.test(segment) ? " " : match,
+        normalized = stripDelimitedSegments(
+            normalized,
+            "[",
+            "]",
+            (segment) => TRACK_DESCRIPTOR_PATTERN.test(segment),
+            " ",
         );
 
         // Remove trailing dash content (often contains year or version info)

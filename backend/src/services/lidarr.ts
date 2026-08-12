@@ -4,6 +4,7 @@ import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
 import { getSystemSettings } from "../utils/systemSettings";
 import { stripAlbumEdition } from "../utils/artistNormalization";
+import { stripDelimitedSegments } from "../utils/stripDelimitedSegments";
 
 /**
  * Error types for music acquisition failures
@@ -1030,10 +1031,11 @@ class LidarrService {
 
                 // Normalize title for matching - remove parenthetical suffixes, edition markers, etc.
                 const normalizeTitle = (title: string) =>
-                    title
-                        .toLowerCase()
-                        .replace(/\([^)]*\)/g, "") // Remove parenthetical content (deluxe edition, remaster, etc.)
-                        .replace(/\[[^\]]*\]/g, "") // Remove bracketed content
+                    stripDelimitedSegments(
+                        stripDelimitedSegments(title.toLowerCase(), "(", ")"),
+                        "[",
+                        "]",
+                    )
                         .replace(
                             /[-–—]\s*(deluxe|remaster|bonus|special|anniversary|expanded|limited|collector).*$/i,
                             "",
