@@ -20,6 +20,32 @@ compile --upgrade-package`; if the resolver can select a compatible fixed
 release, remove the corresponding advisory ID in the same change. New IDs are
 never added automatically.
 
+## npm dependency audit exception
+
+The backend dependency graph currently resolves `uuid` 8.3.2 through Bull 4
+and its Bull Board integration. This is an owned, temporary exception:
+
+| Advisory | Reachability assessment | Removal condition |
+| --- | --- | --- |
+| [`GHSA-w5hq-g745-h8pq`](https://github.com/advisories/GHSA-w5hq-g745-h8pq) (`uuid <11.1.1`) | The affected UUID v3, v5, and v6-with-caller-buffer paths are not exercised; Bull uses UUID v4 without a caller-provided buffer. | Upgrade Bull and `@bull-board/*` when their dependency graph can resolve a fixed `uuid`, then remove the exception. |
+
+`npm audit fix --force` is not an acceptable remediation: it proposes
+downgrading Bull to 1.1.3, which is a breaking queue-runtime change. Revisit
+this exception whenever Bull or Bull Board is upgraded, even if the transitive
+`uuid` range does not change.
+
+## Container-image scan stream
+
+Trivy image SARIF currently reports approximately 95 OS and package CVEs in the
+pinned analyzer and sidecar images, including findings in `keras`, `wandb`,
+`pip`, and `cryptography`. Under the repository's pinned-analyzer-stack policy,
+maintainers review these findings with a tested stack or base-image upgrade
+rather than dismissing individual alerts ad hoc.
+
+This stream is separate from dependency-lock auditing. The compatibility-owned
+Python advisories and their removal conditions remain in the
+[pip-audit exception table](#python-dependency-audit-exceptions) above.
+
 ## CodeQL alert dismissal record
 
 All open CodeQL alerts were triaged before the 2.0.0 release: 33 were fixed in

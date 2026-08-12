@@ -14,6 +14,11 @@ the operator and client actions below; complete the checklist before rollout.
   rejected. Generate new application secrets with `openssl rand -base64 32`,
   keep the same `INTERNAL_API_SECRET` on the backend and sidecars, and do not
   reuse the retired `soundspan-internal-secret-change-me` value.
+- **Pass split-stack database settings as `POSTGRES_*` components.** Compose
+  deployments now build `DATABASE_URL` inside the application and safely
+  percent-encode credentials, including passwords with URL-reserved
+  characters. An explicit `DATABASE_URL` still takes precedence for custom
+  deployments.
 - **Strengthen weak custom secrets before starting 2.0.0.** Encryption and
   internal-auth secrets must be at least 32 characters. An operator-supplied
   `JWT_SECRET` must also be at least 32 characters; deployments that omit it
@@ -67,22 +72,56 @@ the operator and client actions below; complete the checklist before rollout.
   deletion” setting. A completely empty mount is protected, but a partially
   mounted or incomplete library can still reconcile missing paths away.
 
+## Playback reliability and telemetry
+
+- Queue auto-advance is fixed across the full track-end path. The native engine
+  now accepts the browser's end-of-stream pause, listeners remain stable while
+  playback state changes, and a one-shot watchdog recovers a lost end event.
+- If a browser blocks the next track in a hidden or unfocused window, bounded
+  retries run on a timer and again on visibility or focus. The player also
+  preserves the load's autoplay intent, so a successful advance no longer
+  pauses itself immediately after the next track starts.
+- Server-visible client telemetry now records `load_autoplay_decision`,
+  `track_end_*`, and `playback_start_blocked` events. Operators can alert on
+  the `autoplay_intent_conflict` tripwire to catch future load/play intent
+  regressions.
+
+## Cover art and session UX
+
+- Cover art and segmented-streaming assets no longer return 404 when a cache
+  lives in a dot-directory such as `/music/.soundspan`. Cover files are served
+  from an explicitly pinned root with stronger containment checks.
+- Failed media-server **Test connection** attempts for Audiobookshelf,
+  Fanart.tv, Last.fm, Soulseek, Spotify, and TIDAL no longer end the current
+  Soundspan session. Upstream credential failures return 502, while the web
+  client logs out only for responses carrying the explicit `AUTH_REQUIRED`
+  marker. Wrong current-password entries now stay inline instead of being
+  mistaken for session expiry.
+
 ## Security hardening
 
+- The pre-release CodeQL backlog is fully dispositioned: every alert was fixed
+  or recorded with an owned justification and re-evaluation condition.
 - Access-token verification is centralized, pins HS256, validates payloads,
   and rejects refresh tokens outside the refresh exchange. TOTP moved from the
   unmaintained `speakeasy` package to `otplib` while preserving existing 2FA
   enrollments.
+- Account, 2FA, Subsonic credential, admin queue-dashboard, and playback-state
+  synchronization routes now have route-specific rate limits; the playback
+  tier remains generous enough for its normal high-frequency cadence.
 - Authorization was tightened across API-key and device management, MFA,
   enrichment, shared downloads, import logs, artist discovery, audiobook
   covers, Listen Together group ending, and recovery or retry operations.
 - Client-facing failures now use curated messages across backend routes,
   segmented streaming, stored download jobs, and TIDAL/YouTube Music sidecars;
   raw paths, upstream bodies, and exception details remain in server logs.
-- Native streams, share-link streams, downloads, cache files, and analyzer or
-  repair paths enforce media-root containment. Podcast audio, remote images,
-  and Audiobookshelf cover access gained DNS-aware SSRF, redirect, namespace,
-  and input validation.
+- Native streams, share-link streams, downloads, cache files, cover-image
+  storage, and analyzer or repair paths enforce root containment. Podcast
+  audio, remote images, and Audiobookshelf cover access gained DNS-aware SSRF,
+  redirect, namespace, and input validation.
+- Playlist imports accept only canonical HTTP(S) links, text normalization and
+  delimited-content stripping now run in linear time, and audiobook preflight
+  handling uses the centralized deny-by-default CORS policy.
 - Secret-bearing `.env` writes are atomic and owner-only. YouTube Music OAuth
   files are also mode `0600`, and chart-managed workloads drop Linux
   capabilities, use `RuntimeDefault` seccomp, and do not mount service-account
@@ -91,6 +130,21 @@ the operator and client actions below; complete the checklist before rollout.
   `SECRETS_DB_ONLY=true`. Legacy decrypt fail-closed mode remains opt-in and
   should be enabled only after the secrets-status endpoint reports zero legacy
   rows.
+
+## Observability migration
+
+Update saved searches, dashboards, and alerts that use the renamed player
+signals:
+
+| Previous name | 2.0.0 name | Scope |
+| --- | --- | --- |
+| `player.howler_startup` | `player.engine_startup` | Audio-engine startup |
+| `route.client.signal` | `playback.client.signal` | Ingested client signals |
+| `[SegmentedStreaming.Trace] client.signal` | `[Playback.Trace] client.signal` | Client trace logs |
+| `[SegmentedStreaming][Metric] client.signal` | `[Playback.Metric] client.signal` | Client metric logs |
+
+Manifest, segment, session, and DASH lifecycle traces that are genuinely
+specific to segmented streaming keep their existing names.
 
 ## Reliability and performance
 
@@ -111,12 +165,22 @@ the operator and client actions below; complete the checklist before rollout.
 - Import jobs now run durably on the worker queue with recovery and
   deduplication, while queue cleaning is claimed by workers instead of repeated
   by every API replica.
-- Background playback, token refresh, polling, and Listen Together recovery
+- Token refresh, visibility-aware polling, and Listen Together recovery
   received focused fixes so long sessions, hidden tabs, large queues, and
   cross-replica ready gates recover more predictably.
-- The native audio engine no longer misreads the browser's end-of-track pause
-  as an unexpected stop, fixing queues that intermittently froze between
-  tracks instead of auto-advancing (worst in hidden tabs).
+
+## Quality and maintainability
+
+- The frontend now compiles in TypeScript strict mode. Python sidecars run
+  mypy in strict mode, with measured and documented exceptions where the
+  pinned analyzer stack requires them.
+- The large library router is decomposed into named per-resource routers and
+  typed helper modules without changing its mounted URLs or behavior.
+- Backend environment reads continue moving behind the typed configuration
+  boundary; its temporary allowlist shrank from 39 production files to 19.
+- Component network calls now go through the shared frontend API layer, with a
+  ratchet that prevents new direct `fetch()` calls in app, component, and
+  feature modules.
 
 ## Platform and deployment
 
@@ -130,9 +194,14 @@ the operator and client actions below; complete the checklist before rollout.
 - Analyzer health probes and GPU scheduling are now effective in the Helm chart,
   while PostgreSQL credentials are safely encoded and application images can be
   pinned by digest.
+- API-key settings show each key's expiry date and flag keys that are expired or
+  expiring soon, making the 90-day rotation policy visible before clients stop
+  authenticating.
 - Base images and build inputs are digest- or hash-pinned, Python quality and
   sidecar test lanes are part of CI, and the remaining mutable GitHub Actions
   and scanner image references are pinned.
+- CodeQL analysis and the release quality/enforcement gates now run as blocking
+  required checks rather than visibility-only signals.
 
 ## Also in this release
 
@@ -142,8 +211,7 @@ the operator and client actions below; complete the checklist before rollout.
   and the audio orchestrator avoid clock-driven rerenders. Visibility-aware
   polling also stops unnecessary work in hidden tabs.
 - Settings actions use consistent in-app confirmation dialogs, theme colors have
-  accessible contrast and focus guards, and API/client internals were split into
-  smaller domain modules without changing their public surfaces.
+  accessible contrast and focus guards.
 
 ## Deployment and distribution
 

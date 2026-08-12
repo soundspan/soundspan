@@ -1058,6 +1058,18 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 **Shape.** soundspan is a **modular monolith + Python sidecars**: a Next.js PWA (custom server proxy, one `ApiClient.request<T>()` chokepoint, AudioEngine adapter strategy) → an Express API + Bull workers in one codebase (role-split by `BACKEND_PROCESS_ROLE`, one Prisma gateway) → Postgres 16 + pgvector, Redis (queues + locks + embed streams), and four Python sidecars. The two analyzers are **`BRPOP` workers that write results straight to Postgres** (DB-as-contract), not HTTP services — a deliberate, good seam.
 
+### Deferred modernization after 2.0.0
+
+These items are deliberately deferred past the 2.0.0 release because each is
+invasive and offers little immediate consumer value compared with the release
+risk:
+
+| Area | Owned decision |
+| --- | --- |
+| Backend module format | Defer the CommonJS-to-ESM migration. Revisit it as a coordinated runtime, build, test, and dependency change rather than a pre-release conversion. |
+| Python sidecar layout | Defer a shared `src/`-layout re-architecture. Revisit it with an explicit packaging and container-entrypoint plan across all sidecars. |
+| Frontend lint debt | Keep the current 0-error/182-warning result as a tracked ratchet: no warning growth, with warning classes burned down in focused follow-ups. |
+
 ### The kernel — preserve and lean into (do not rewrite)
 
 The most important architectural fact the issue-by-issue review never states: **the codebase already has the two things that make aggressive cleanup — by a human or a future big model — safe rather than reckless.**
