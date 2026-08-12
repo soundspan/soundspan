@@ -25,6 +25,38 @@ const ffmpegBinaryPath = resolveFfmpegBinaryPath(
 inspectFfmpegVersion(ffmpegBinaryPath);
 ffmpeg.setFfmpegPath(ffmpegBinaryPath);
 
+const DEFAULT_TRANSCODE_CONCURRENCY = 3;
+const MAX_TRANSCODE_CONCURRENCY = 32;
+const DEFAULT_TRANSCODE_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_TRANSCODE_TIMEOUT_MS = 60 * 60 * 1000;
+
+function readBoundedPositiveInteger(
+    value: string | undefined,
+    fallback: number,
+    maximum: number,
+): number {
+    const normalized = value?.trim();
+    if (!normalized || !/^\d+$/.test(normalized)) return fallback;
+
+    const parsed = Number(normalized);
+    return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum
+        ? parsed
+        : fallback;
+}
+
+const transcodeConcurrency = readBoundedPositiveInteger(
+    process.env.TRANSCODE_CONCURRENCY,
+    DEFAULT_TRANSCODE_CONCURRENCY,
+    MAX_TRANSCODE_CONCURRENCY,
+);
+const transcodeTimeoutMs = readBoundedPositiveInteger(
+    process.env.TRANSCODE_TIMEOUT_MS,
+    DEFAULT_TRANSCODE_TIMEOUT_MS,
+    MAX_TRANSCODE_TIMEOUT_MS,
+);
+const transcodeQueue = new PQueue({ concurrency: transcodeConcurrency });
+const inflightTranscodes = new Map<string, Promise<string>>();
+
 // Quality settings
 export const QUALITY_SETTINGS = {
     original: { bitrate: null, format: null }, // No transcoding
@@ -44,8 +76,6 @@ interface StreamFileInfo {
  * Represents the AudioStreamingService class.
  */
 export class AudioStreamingService {
-    private transcodeQueue = new PQueue({ concurrency: 3 });
-    private inflightTranscodes = new Map<string, Promise<string>>();
     private musicPath: string;
     private transcodeCachePath: string;
     private transcodeCacheMaxGb: number;
@@ -235,10 +265,17 @@ export class AudioStreamingService {
     ): Promise<string> {
         const dedupeKey = `${trackId}-${quality}`;
         return coalesceInFlightByKey(
-            this.inflightTranscodes,
+            inflightTranscodes,
             dedupeKey,
             () =>
-                this.doTranscode(trackId, quality, sourcePath, sourceModified),
+                transcodeQueue.add(() =>
+                    this.doTranscode(
+                        trackId,
+                        quality,
+                        sourcePath,
+                        sourceModified,
+                    ),
+                ),
             {
                 onCoalescedWait: () =>
                     logger.debug(
@@ -266,7 +303,6 @@ export class AudioStreamingService {
             );
         }
 
-        // Generate cache file path
         const hash = crypto
             .createHash("md5")
             .update(`${trackId}-${quality}`)
@@ -274,85 +310,78 @@ export class AudioStreamingService {
         const cacheFileName = `${hash}.${settings.format}`;
         const cachePath = path.join(this.transcodeCachePath, cacheFileName);
 
+        await this.runFfmpeg(
+            sourcePath,
+            cachePath,
+            settings.bitrate,
+            settings.format,
+            trackId,
+            quality,
+        );
+        await this.persistTranscode(
+            trackId,
+            quality,
+            cacheFileName,
+            cachePath,
+            sourceModified,
+        );
+        return cachePath;
+    }
+
+    private runFfmpeg(
+        sourcePath: string,
+        cachePath: string,
+        bitrate: number,
+        format: string,
+        trackId: string,
+        quality: Quality,
+    ): Promise<void> {
         return new Promise((resolve, reject) => {
+            let settled = false;
+            let deadline: NodeJS.Timeout | undefined;
+            const clearDeadline = (): void => {
+                if (deadline === undefined) return;
+                clearTimeout(deadline);
+                deadline = undefined;
+            };
+            const rejectOnce = (error: AppError): void => {
+                if (settled) return;
+                settled = true;
+                clearDeadline();
+                reject(error);
+            };
+
             try {
-                ffmpeg(sourcePath)
-                    .audioBitrate(settings.bitrate)
+                const command = ffmpeg(sourcePath)
+                    .audioBitrate(bitrate)
                     .audioCodec("libmp3lame")
-                    .format(settings.format)
-                    .on("error", (err) => {
-                        // Check if error is due to missing FFmpeg
-                        const errorMsg = err.message.toLowerCase();
-                        if (
-                            errorMsg.includes("ffmpeg") &&
-                            errorMsg.includes("not found")
-                        ) {
-                            reject(
-                                new AppError(
-                                    ErrorCode.FFMPEG_NOT_FOUND,
-                                    ErrorCategory.FATAL,
-                                    "FFmpeg not installed. Please install FFmpeg to enable transcoding.",
-                                    { trackId, quality },
-                                ),
-                            );
-                        } else {
-                            reject(
-                                new AppError(
-                                    ErrorCode.TRANSCODE_FAILED,
-                                    ErrorCategory.RECOVERABLE,
-                                    `Transcoding failed: ${err.message}`,
-                                    { trackId, quality, source: sourcePath },
-                                ),
-                            );
-                        }
-                    })
-                    .on("end", async () => {
-                        try {
-                            // Get file size
-                            const stats = await fs.promises.stat(cachePath);
-
-                            // Save to database (upsert to handle concurrent transcodes for same track+quality)
-                            await prisma.transcodedFile.upsert({
-                                where: {
-                                    trackId_quality: { trackId, quality },
-                                },
-                                create: {
-                                    trackId,
-                                    quality,
-                                    cachePath: cacheFileName,
-                                    cacheSize: stats.size,
-                                    sourceModified,
-                                    lastAccessed: new Date(),
-                                },
-                                update: {
-                                    cacheSize: stats.size,
-                                    sourceModified,
-                                    lastAccessed: new Date(),
-                                },
-                            });
-
-                            logger.debug(
-                                `[STREAM] Transcode complete: ${cacheFileName} (${(
-                                    stats.size /
-                                    1024 /
-                                    1024
-                                ).toFixed(2)}MB)`,
-                            );
-                            resolve(cachePath);
-                        } catch (err: any) {
-                            reject(
-                                new AppError(
-                                    ErrorCode.DB_QUERY_ERROR,
-                                    ErrorCategory.RECOVERABLE,
-                                    `Failed to save transcode record: ${err.message}`,
-                                    { trackId, quality },
-                                ),
-                            );
-                        }
-                    })
-                    .save(cachePath);
-            } catch (err: any) {
-                reject(
+                    .format(format);
+                command.on("error", (error) => {
+                    rejectOnce(
+                        this.toFfmpegError(error, trackId, quality, sourcePath),
+                    );
+                });
+                command.on("end", () => {
+                    if (settled) return;
+                    settled = true;
+                    clearDeadline();
+                    resolve();
+                });
+                deadline = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    this.cleanupTimedOutTranscode(
+                        command,
+                        cachePath,
+                        trackId,
+                        quality,
+                        sourcePath,
+                        reject,
+                    );
+                }, transcodeTimeoutMs);
+                command.save(cachePath);
+            } catch {
+                rejectOnce(
                     new AppError(
                         ErrorCode.FFMPEG_NOT_FOUND,
                         ErrorCategory.FATAL,
@@ -362,6 +391,101 @@ export class AudioStreamingService {
                 );
             }
         });
+    }
+
+    private cleanupTimedOutTranscode(
+        command: { kill(signal: string): unknown },
+        cachePath: string,
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+        reject: (reason?: unknown) => void,
+    ): void {
+        try {
+            command.kill("SIGKILL");
+        } catch {
+            // Continue cleanup when the process already exited.
+        }
+        fs.unlink(cachePath, () => {
+            reject(
+                new AppError(
+                    ErrorCode.TRANSCODE_FAILED,
+                    ErrorCategory.RECOVERABLE,
+                    `Transcoding timed out after ${transcodeTimeoutMs}ms`,
+                    { trackId, quality, source: sourcePath },
+                ),
+            );
+        });
+    }
+
+    private toFfmpegError(
+        error: Error,
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+    ): AppError {
+        const errorMessage = error.message.toLowerCase();
+        if (
+            errorMessage.includes("ffmpeg") &&
+            errorMessage.includes("not found")
+        ) {
+            return new AppError(
+                ErrorCode.FFMPEG_NOT_FOUND,
+                ErrorCategory.FATAL,
+                "FFmpeg not installed. Please install FFmpeg to enable transcoding.",
+                { trackId, quality },
+            );
+        }
+        return new AppError(
+            ErrorCode.TRANSCODE_FAILED,
+            ErrorCategory.RECOVERABLE,
+            `Transcoding failed: ${error.message}`,
+            { trackId, quality, source: sourcePath },
+        );
+    }
+
+    private async persistTranscode(
+        trackId: string,
+        quality: Quality,
+        cacheFileName: string,
+        cachePath: string,
+        sourceModified: Date,
+    ): Promise<void> {
+        try {
+            const stats = await fs.promises.stat(cachePath);
+            await prisma.transcodedFile.upsert({
+                where: { trackId_quality: { trackId, quality } },
+                create: {
+                    trackId,
+                    quality,
+                    cachePath: cacheFileName,
+                    cacheSize: stats.size,
+                    sourceModified,
+                    lastAccessed: new Date(),
+                },
+                update: {
+                    cacheSize: stats.size,
+                    sourceModified,
+                    lastAccessed: new Date(),
+                },
+            });
+            logger.debug(
+                `[STREAM] Transcode complete: ${cacheFileName} (${(
+                    stats.size /
+                    1024 /
+                    1024
+                ).toFixed(2)}MB)`,
+            );
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Unknown error";
+            throw new AppError(
+                ErrorCode.DB_QUERY_ERROR,
+                ErrorCategory.RECOVERABLE,
+                `Failed to save transcode record: ${message}`,
+                { trackId, quality },
+            );
+        }
     }
 
     /**

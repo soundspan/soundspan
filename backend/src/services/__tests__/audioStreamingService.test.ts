@@ -13,6 +13,10 @@ const mockFsCreateReadStream = jest.fn();
 const mockFsStat = jest.fn();
 const mockPipeline = jest.fn();
 const mockFsUnlink = jest.fn();
+const mockFsUnlinkCallback = jest.fn(
+    (_path: string, callback: (error: NodeJS.ErrnoException | null) => void) =>
+        callback(null),
+);
 
 const mockPrisma = {
     transcodedFile: {
@@ -44,17 +48,46 @@ const mockConfig = {
     },
 };
 
-type FfmpegMode = "success" | "error" | "throw";
+type FfmpegMode = "success" | "error" | "pending" | "throw";
+
+type CommandStartWaiter = {
+    count: number;
+    resolve: () => void;
+};
 
 const ffmpegControl: {
     mode: FfmpegMode;
     errorMessage: string;
     outputPath?: string;
     lastCommand?: any;
+    commands: any[];
+    startWaiters: CommandStartWaiter[];
 } = {
     mode: "success",
     errorMessage: "",
+    commands: [],
+    startWaiters: [],
 };
+
+function waitForFfmpegCommandCount(count: number): Promise<void> {
+    if (ffmpegControl.commands.length >= count) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+        ffmpegControl.startWaiters.push({ count, resolve });
+    });
+}
+
+function notifyFfmpegCommandStarted(): void {
+    const readyWaiters = ffmpegControl.startWaiters.filter(
+        ({ count }) => ffmpegControl.commands.length >= count,
+    );
+    ffmpegControl.startWaiters = ffmpegControl.startWaiters.filter(
+        ({ count }) => ffmpegControl.commands.length < count,
+    );
+    readyWaiters.forEach(({ resolve }) => resolve());
+}
 
 const mockSetFfmpegPath = jest.fn();
 const mockFfmpeg = jest.fn((sourcePath: string) => {
@@ -68,6 +101,7 @@ const mockFfmpeg = jest.fn((sourcePath: string) => {
         audioBitrate: jest.fn().mockReturnThis(),
         audioCodec: jest.fn().mockReturnThis(),
         format: jest.fn().mockReturnThis(),
+        kill: jest.fn().mockReturnThis(),
         on: jest.fn((event: string, handler: (...args: any[]) => any) => {
             handlers[event] = handler;
             return command;
@@ -88,6 +122,8 @@ const mockFfmpeg = jest.fn((sourcePath: string) => {
     };
 
     ffmpegControl.lastCommand = command;
+    ffmpegControl.commands.push(command);
+    notifyFfmpegCommandStarted();
     return command;
 });
 
@@ -95,6 +131,7 @@ jest.mock("fs", () => ({
     existsSync: mockFsExistsSync,
     mkdirSync: mockFsMkdirSync,
     createReadStream: mockFsCreateReadStream,
+    unlink: mockFsUnlinkCallback,
     promises: {
         stat: mockFsStat,
         unlink: mockFsUnlink,
@@ -107,10 +144,43 @@ jest.mock("node:stream/promises", () => ({
 
 jest.mock("p-queue", () => {
     return class MockPQueue {
-        constructor(_options?: unknown) {}
+        private readonly concurrency: number;
+        private pending = 0;
+        private readonly waiting: Array<{
+            task: () => Promise<unknown> | unknown;
+            resolve: (value: unknown) => void;
+            reject: (reason?: unknown) => void;
+        }> = [];
+
+        constructor(options?: { concurrency?: number }) {
+            this.concurrency = options?.concurrency ?? Number.POSITIVE_INFINITY;
+        }
 
         add<T>(task: () => Promise<T> | T): Promise<T> {
-            return Promise.resolve().then(task);
+            return new Promise<T>((resolve, reject) => {
+                this.waiting.push({
+                    task,
+                    resolve: resolve as (value: unknown) => void,
+                    reject,
+                });
+                this.startAvailableTasks();
+            });
+        }
+
+        private startAvailableTasks(): void {
+            while (this.pending < this.concurrency && this.waiting.length > 0) {
+                const queued = this.waiting.shift();
+                if (!queued) return;
+
+                this.pending += 1;
+                Promise.resolve()
+                    .then(queued.task)
+                    .then(queued.resolve, queued.reject)
+                    .finally(() => {
+                        this.pending -= 1;
+                        this.startAvailableTasks();
+                    });
+            }
         }
     };
 });
@@ -238,6 +308,8 @@ describe("AudioStreamingService", () => {
         ffmpegControl.errorMessage = "";
         ffmpegControl.outputPath = undefined;
         ffmpegControl.lastCommand = undefined;
+        ffmpegControl.commands = [];
+        ffmpegControl.startWaiters = [];
 
         setIntervalSpy = jest
             .spyOn(global, "setInterval")
@@ -251,6 +323,12 @@ describe("AudioStreamingService", () => {
         mockFsCreateReadStream.mockReturnValue(createMockReadStream());
         mockFsStat.mockResolvedValue({ size: 1024 });
         mockFsUnlink.mockResolvedValue(undefined);
+        mockFsUnlinkCallback.mockImplementation(
+            (
+                _path: string,
+                callback: (error: NodeJS.ErrnoException | null) => void,
+            ) => callback(null),
+        );
 
         mockPrisma.transcodedFile.findFirst.mockResolvedValue(null);
         mockPrisma.transcodedFile.delete.mockResolvedValue(undefined);
@@ -635,6 +713,129 @@ describe("AudioStreamingService", () => {
             );
             expect(ffmpegCallsForDedup).toHaveLength(1);
             expect(mockPrisma.transcodedFile.upsert).toHaveBeenCalledTimes(1);
+        });
+
+        it("coalesces identical transcodes across service instances", async () => {
+            const firstService = createService();
+            const secondService = createService();
+            const sourceModified = new Date("2025-01-10T00:00:00.000Z");
+            ffmpegControl.mode = "pending";
+
+            const first = (firstService as any).transcodeToCache(
+                "track-shared-flight",
+                "high",
+                "/music/source.flac",
+                sourceModified,
+            );
+            const second = (secondService as any).transcodeToCache(
+                "track-shared-flight",
+                "high",
+                "/music/source.flac",
+                sourceModified,
+            );
+
+            expect(second).toBe(first);
+            await waitForFfmpegCommandCount(1);
+            expect(mockFfmpeg).toHaveBeenCalledTimes(1);
+
+            ffmpegControl.commands[0].__handlers.end();
+            await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+            expect(mockPrisma.transcodedFile.upsert).toHaveBeenCalledTimes(1);
+        });
+
+        it("bounds concurrent transcodes across service instances", async () => {
+            const firstService = createService();
+            const secondService = createService();
+            const sourceModified = new Date("2025-01-10T00:00:00.000Z");
+            ffmpegControl.mode = "pending";
+
+            const transcodes = [
+                (firstService as any).transcodeToCache(
+                    "track-concurrency-1",
+                    "high",
+                    "/music/source-1.flac",
+                    sourceModified,
+                ),
+                (secondService as any).transcodeToCache(
+                    "track-concurrency-2",
+                    "high",
+                    "/music/source-2.flac",
+                    sourceModified,
+                ),
+                (firstService as any).transcodeToCache(
+                    "track-concurrency-3",
+                    "high",
+                    "/music/source-3.flac",
+                    sourceModified,
+                ),
+                (secondService as any).transcodeToCache(
+                    "track-concurrency-4",
+                    "high",
+                    "/music/source-4.flac",
+                    sourceModified,
+                ),
+            ];
+
+            await waitForFfmpegCommandCount(3);
+            expect(mockFfmpeg).toHaveBeenCalledTimes(3);
+
+            ffmpegControl.commands[0].__handlers.end();
+            await waitForFfmpegCommandCount(4);
+            expect(mockFfmpeg).toHaveBeenCalledTimes(4);
+
+            ffmpegControl.commands.slice(1).forEach((command) => {
+                command.__handlers.end();
+            });
+            await expect(Promise.all(transcodes)).resolves.toHaveLength(4);
+        });
+
+        it("kills timed-out transcodes, removes partial output, and permits retry", async () => {
+            const service = createService();
+            const sourceModified = new Date("2025-01-10T00:00:00.000Z");
+            let deadlineHandler: (() => void) | undefined;
+            const setTimeoutSpy = jest
+                .spyOn(global, "setTimeout")
+                .mockImplementation(((handler: () => void, delay: number) => {
+                    expect(delay).toBe(5 * 60 * 1000);
+                    deadlineHandler = handler;
+                    return 6789 as unknown as NodeJS.Timeout;
+                }) as typeof setTimeout);
+            ffmpegControl.mode = "pending";
+
+            const timedOut = (service as any).transcodeToCache(
+                "track-timeout",
+                "high",
+                "/music/source.flac",
+                sourceModified,
+            );
+            await waitForFfmpegCommandCount(1);
+
+            expect(deadlineHandler).toBeDefined();
+            deadlineHandler?.();
+            await expect(timedOut).rejects.toMatchObject({
+                code: ErrorCode.TRANSCODE_FAILED,
+                category: ErrorCategory.RECOVERABLE,
+                message: expect.stringContaining("timed out"),
+            });
+            expect(ffmpegControl.commands[0].kill).toHaveBeenCalledWith(
+                "SIGKILL",
+            );
+            expect(mockFsUnlinkCallback).toHaveBeenCalledWith(
+                ffmpegControl.outputPath,
+                expect.any(Function),
+            );
+
+            setTimeoutSpy.mockRestore();
+            ffmpegControl.mode = "success";
+            await expect(
+                (service as any).transcodeToCache(
+                    "track-timeout",
+                    "high",
+                    "/music/source.flac",
+                    sourceModified,
+                ),
+            ).resolves.toEqual(expect.stringMatching(/\.mp3$/));
+            expect(mockFfmpeg).toHaveBeenCalledTimes(2);
         });
 
         it("removes inflight entry after transcode failure so retries work", async () => {
