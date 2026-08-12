@@ -22,9 +22,9 @@ services:
                 media-metadata-contract: ./packages/media-metadata-contract
         environment:
             # Database
-            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            DATABASE_URL: "postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}@postgres:5432/${POSTGRES_DB:-soundspan}"
             POSTGRES_USER: ${POSTGRES_USER:-soundspan}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}"
             POSTGRES_DB: ${POSTGRES_DB:-soundspan}
             REDIS_URL: redis://redis:6379
             # Preserve Redis streams/groups across restarts unless explicitly overridden
@@ -160,9 +160,9 @@ services:
                 media-metadata-contract: ./packages/media-metadata-contract
             target: worker-runtime
         environment:
-            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            DATABASE_URL: "postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}@postgres:5432/${POSTGRES_DB:-soundspan}"
             POSTGRES_USER: ${POSTGRES_USER:-soundspan}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}"
             POSTGRES_DB: ${POSTGRES_DB:-soundspan}
             REDIS_URL: redis://redis:6379
             # Preserve Redis streams/groups across restarts unless explicitly overridden
@@ -209,10 +209,20 @@ services:
 
     postgres:
         image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        entrypoint:
+            - /bin/sh
+            - -ec
+            - |
+                if [ "$${POSTGRES_PASSWORD}" = "changeme" ]; then
+                    echo "POSTGRES_PASSWORD must not be changeme" >&2
+                    exit 1
+                fi
+                exec docker-entrypoint.sh "$$@"
+            - --
         container_name: ${SOUNDSPAN_DB_CONTAINER_NAME:-soundspan_db}
         environment:
             POSTGRES_USER: ${POSTGRES_USER:-soundspan}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}"
             POSTGRES_DB: ${POSTGRES_DB:-soundspan}
         volumes:
             - postgres_data:/var/lib/postgresql/data
@@ -376,7 +386,7 @@ services:
         container_name: ${SOUNDSPAN_AUDIO_ANALYZER_CONTAINER_NAME:-soundspan_audio_analyzer}
         environment:
             REDIS_URL: redis://redis:6379
-            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            DATABASE_URL: "postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}@postgres:5432/${POSTGRES_DB:-soundspan}"
             MUSIC_PATH: /music
             BATCH_SIZE: ${AUDIO_ANALYSIS_BATCH_SIZE:-10}
             SLEEP_INTERVAL: ${AUDIO_ANALYSIS_INTERVAL:-5}
@@ -436,7 +446,7 @@ services:
         container_name: ${SOUNDSPAN_CLAP_CONTAINER_NAME:-soundspan_audio_analyzer_clap}
         environment:
             REDIS_URL: redis://redis:6379
-            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            DATABASE_URL: "postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -base64 32}@postgres:5432/${POSTGRES_DB:-soundspan}"
             BACKEND_URL: http://backend:3006
             MUSIC_PATH: /music
             SLEEP_INTERVAL: ${CLAP_SLEEP_INTERVAL:-5}
