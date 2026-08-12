@@ -49,6 +49,11 @@ loadVocabulary();
 const TEXT_EMBED_REQUEST_STREAM = "audio:text:embed:requests";
 const TEXT_EMBED_RESPONSE_PREFIX = "audio:text:embed:response:";
 const TEXT_EMBED_TIMEOUT_SECONDS = 30;
+const MAX_TEXT_SEARCH_QUERY_LENGTH = 512;
+// The CLAP consumer handles one request per replica at a time and callers wait
+// at most 30 seconds. Retaining 100 entries leaves burst headroom without
+// allowing timed-out request payloads to accumulate indefinitely.
+const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
 
 interface TextSearchResult {
     id: string;
@@ -1107,6 +1112,7 @@ interface TextEmbedResponsePayload {
  *               query:
  *                 type: string
  *                 minLength: 2
+ *                 maxLength: 512
  *                 description: Natural language search query (e.g. "chill acoustic guitar", "aggressive punk rock")
  *               limit:
  *                 type: integer
@@ -1140,7 +1146,7 @@ interface TextEmbedResponsePayload {
  *                 debug:
  *                   type: object
  *       400:
- *         description: Query must be at least 2 characters
+ *         description: Query must contain between 2 and 512 characters
  *       401:
  *         description: Not authenticated
  *       504:
@@ -1153,11 +1159,23 @@ router.post(
         try {
             const { query, limit: requestedLimit, minSimilarity } = req.body;
 
-            if (
-                !query ||
-                typeof query !== "string" ||
-                query.trim().length < 2
-            ) {
+            if (!query || typeof query !== "string") {
+                return sendRouteError(
+                    res,
+                    400,
+                    "Query must be at least 2 characters",
+                );
+            }
+
+            if (query.length > MAX_TEXT_SEARCH_QUERY_LENGTH) {
+                return sendRouteError(
+                    res,
+                    400,
+                    `Query must be at most ${MAX_TEXT_SEARCH_QUERY_LENGTH} characters`,
+                );
+            }
+
+            if (query.trim().length < 2) {
                 return sendRouteError(
                     res,
                     400,
@@ -1184,11 +1202,22 @@ router.post(
             try {
                 // Queue text-embedding request via Redis Streams to ensure a single
                 // CLAP replica claims and processes each request.
-                await redisClient.xAdd(TEXT_EMBED_REQUEST_STREAM, "*", {
-                    requestId,
-                    text: normalizedQuery,
-                    responseKey,
-                });
+                await redisClient.xAdd(
+                    TEXT_EMBED_REQUEST_STREAM,
+                    "*",
+                    {
+                        requestId,
+                        text: normalizedQuery,
+                        responseKey,
+                    },
+                    {
+                        TRIM: {
+                            strategy: "MAXLEN",
+                            strategyModifier: "~",
+                            threshold: TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH,
+                        },
+                    },
+                );
 
                 // Wait for response from the CLAP worker.
                 const response = await blockingBlPop(
