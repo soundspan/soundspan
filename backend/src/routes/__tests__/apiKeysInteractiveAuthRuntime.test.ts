@@ -1,9 +1,12 @@
 process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY ||
     "api-keys-interactive-auth-test-pepper-123456";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireInteractiveSession: jest.requireActual("../../middleware/auth")
+        .requireInteractiveSession,
 }));
 
 const prisma = {

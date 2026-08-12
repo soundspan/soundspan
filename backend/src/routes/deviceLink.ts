@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import {
+    requireAuthOrToken,
+    requireInteractiveSession,
+} from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { hashApiKey } from "../utils/apiKeyHash";
 import crypto from "crypto";
@@ -30,63 +33,72 @@ function generateApiKey(): string {
  *     tags: [Device Link]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Generated link code with expiry information
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  */
-// POST /device-link/generate - Generate a new device link code (requires auth)
-router.post("/generate", requireAuthOrToken, async (req, res) => {
-    try {
-        const userId = req.user!.id;
+// POST /device-link/generate - Generate a new device link code (requires interactive auth)
+router.post(
+    "/generate",
+    requireAuthOrToken,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            const userId = req.user!.id;
 
-        // Delete any existing unused codes for this user
-        await prisma.deviceLinkCode.deleteMany({
-            where: {
-                userId,
-                usedAt: null,
-            },
-        });
+            // Delete any existing unused codes for this user
+            await prisma.deviceLinkCode.deleteMany({
+                where: {
+                    userId,
+                    usedAt: null,
+                },
+            });
 
-        // Generate a unique code
-        let code: string;
-        let attempts = 0;
-        do {
-            code = generateLinkCode();
-            attempts++;
-            if (attempts > 10) {
-                return res
-                    .status(500)
-                    .json({ error: "Failed to generate unique code" });
-            }
-        } while (
-            await prisma.deviceLinkCode.findUnique({
-                where: { code },
-            })
-        );
+            // Generate a unique code
+            let code: string;
+            let attempts = 0;
+            do {
+                code = generateLinkCode();
+                attempts++;
+                if (attempts > 10) {
+                    return res
+                        .status(500)
+                        .json({ error: "Failed to generate unique code" });
+                }
+            } while (
+                await prisma.deviceLinkCode.findUnique({
+                    where: { code },
+                })
+            );
 
-        // Create the code with 5-minute expiry
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        const linkCode = await prisma.deviceLinkCode.create({
-            data: {
-                code,
-                userId,
-                expiresAt,
-            },
-        });
+            // Create the code with 5-minute expiry
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+            const linkCode = await prisma.deviceLinkCode.create({
+                data: {
+                    code,
+                    userId,
+                    expiresAt,
+                },
+            });
 
-        res.json({
-            code: linkCode.code,
-            expiresAt: linkCode.expiresAt,
-            expiresIn: 300, // 5 minutes in seconds
-        });
-    } catch (error) {
-        logger.error("Generate device link code error:", error);
-        res.status(500).json({ error: "Failed to generate device link code" });
-    }
-});
+            res.json({
+                code: linkCode.code,
+                expiresAt: linkCode.expiresAt,
+                expiresIn: 300, // 5 minutes in seconds
+            });
+        } catch (error) {
+            logger.error("Generate device link code error:", error);
+            res.status(500).json({
+                error: "Failed to generate device link code",
+            });
+        }
+    },
+);
 
 /**
  * @openapi

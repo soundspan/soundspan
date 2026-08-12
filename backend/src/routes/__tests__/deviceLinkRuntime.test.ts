@@ -3,9 +3,12 @@
 process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY ||
     "device-link-test-pepper-1234567890123456";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: any, _res: any, next: () => void) => next(),
+    requireInteractiveSession: jest.requireActual("../../middleware/auth")
+        .requireInteractiveSession,
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -94,6 +97,37 @@ function createRes() {
     return res;
 }
 
+async function executeGenerate(req: any, res: any): Promise<void> {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === "/generate" && entry.route?.methods?.post,
+    );
+    if (!layer) {
+        throw new Error("Route not found: POST /generate");
+    }
+
+    const maxRouteHandlers = 4;
+    for (let index = 0; index < maxRouteHandlers; index++) {
+        const handler = layer.route.stack[index]?.handle;
+        if (!handler) {
+            return;
+        }
+
+        let continued = false;
+        await handler(req, res, (error?: unknown) => {
+            if (error) {
+                throw error;
+            }
+            continued = true;
+        });
+        if (!continued) {
+            return;
+        }
+    }
+
+    throw new Error("POST /generate exceeded the test handler limit");
+}
+
 describe("deviceLink routes runtime", () => {
     const postGenerate = getHandler("/generate", "post");
     const postVerify = getHandler("/verify", "post");
@@ -131,11 +165,33 @@ describe("deviceLink routes runtime", () => {
         mockApiKeyDelete.mockResolvedValue({ id: "api-key-1" });
     });
 
-    it("generates a unique link code and returns expiry metadata", async () => {
-        const req = { user: { id: "u1" } } as any;
+    it("rejects API-key callers before minting a code or API key", async () => {
+        const req = {
+            headers: { "x-api-key": "stolen-key" },
+            user: { id: "u1" },
+        } as any;
         const res = createRes();
 
-        await postGenerate(req, res);
+        await executeGenerate(req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({
+            error: "Interactive session authentication required",
+        });
+        expect(mockDeviceCodeDeleteMany).not.toHaveBeenCalled();
+        expect(mockDeviceCodeCreate).not.toHaveBeenCalled();
+        expect(mockApiKeyCreate).not.toHaveBeenCalled();
+    });
+
+    it("generates a unique link code for an interactive session", async () => {
+        const req = {
+            headers: {},
+            session: { userId: "u1" },
+            user: { id: "u1" },
+        } as any;
+        const res = createRes();
+
+        await executeGenerate(req, res);
 
         expect(mockDeviceCodeDeleteMany).toHaveBeenCalledWith({
             where: { userId: "u1", usedAt: null },

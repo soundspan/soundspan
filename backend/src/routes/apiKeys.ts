@@ -1,6 +1,6 @@
-import { NextFunction, Request, Response, Router } from "express";
+import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireInteractiveSession } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { getApiKeyExpiresAt, hashApiKey } from "../utils/apiKeyHash";
 import crypto from "crypto";
@@ -8,22 +8,6 @@ import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 const routeLogger = logger.child("ApiKeys");
-
-function requireInteractiveSession(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-) {
-    // Interactive password/current-factor step-up is a documented frontend follow-up outside this slice.
-    if (req.headers["x-api-key"] !== undefined) {
-        return sendRouteError(
-            res,
-            403,
-            "Interactive session authentication required",
-        );
-    }
-    return next();
-}
 
 // All API key routes require authentication (session-based)
 router.use(requireAuth);

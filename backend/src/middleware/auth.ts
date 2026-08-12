@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
+import { sendRouteError } from "../routes/routeErrorResponse";
 
 // JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
 // docker-entrypoint.sh fails fast when it is missing) is the fallback.
@@ -253,6 +254,23 @@ export async function requireAuth(
         return next();
     }
     return res.status(401).json({ error: "Not authenticated" });
+}
+
+/** Requires an interactive session or bearer-authenticated request. */
+export function requireInteractiveSession(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+) {
+    // Interactive password/current-factor step-up is a documented frontend follow-up outside this slice.
+    if (req.headers["x-api-key"] !== undefined) {
+        return sendRouteError(
+            res,
+            403,
+            "Interactive session authentication required",
+        );
+    }
+    return next();
 }
 
 /** Enforces administrator role access after `requireAuth` has populated `req.user`. */
