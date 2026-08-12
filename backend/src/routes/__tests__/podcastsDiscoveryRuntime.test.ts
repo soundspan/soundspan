@@ -11,6 +11,11 @@ jest.mock("../../utils/logger", () => ({
         debug: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -160,11 +165,7 @@ describe("podcasts discovery runtime behavior", () => {
         expect(res.body[1489]).toEqual([]);
     });
 
-    it("falls back to default search term for unknown discover genre ids", async () => {
-        mockAxiosGet.mockResolvedValueOnce({
-            data: { results: [] },
-        });
-
+    it("rejects unknown discover genre ids without outbound work", async () => {
         const req = {
             query: { genres: "9999" },
             user: { id: "user-1" },
@@ -173,19 +174,87 @@ describe("podcasts discovery runtime behavior", () => {
 
         await discoverGenresHandler(req, res);
 
-        expect(mockAxiosGet).toHaveBeenCalledWith(
-            "https://itunes.apple.com/search",
-            expect.objectContaining({
-                params: expect.objectContaining({
-                    term: "podcast",
-                    media: "podcast",
-                    entity: "podcast",
-                    limit: 10,
-                }),
-            }),
-        );
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "genres contains an unsupported genre ID",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it("rejects requests containing more than seven genre IDs", async () => {
+        const req = {
+            query: {
+                genres: "1303,1324,1489,1488,1321,1545,1502,1303",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await discoverGenresHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "A maximum of 7 genres may be requested",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it("deduplicates genres before issuing outbound requests", async () => {
+        mockAxiosGet.mockResolvedValue({ data: { results: [] } });
+        const req = {
+            query: { genres: "1303,1303,1489" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await discoverGenresHandler(req, res);
+
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual({ 9999: [] });
+        expect(res.body).toEqual({ 1303: [], 1489: [] });
+        expect(mockAxiosGet).toHaveBeenCalledTimes(2);
+    });
+
+    it("limits concurrent genre discovery requests to three", async () => {
+        let activeRequests = 0;
+        let maxActiveRequests = 0;
+        const releaseRequests: Array<() => void> = [];
+        mockAxiosGet.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    activeRequests += 1;
+                    maxActiveRequests = Math.max(
+                        maxActiveRequests,
+                        activeRequests,
+                    );
+                    releaseRequests.push(() => {
+                        activeRequests -= 1;
+                        resolve({ data: { results: [] } });
+                    });
+                }),
+        );
+
+        const req = {
+            query: { genres: "1303,1324,1489,1488,1321,1545,1502" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        const responsePromise = discoverGenresHandler(req, res);
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(mockAxiosGet).toHaveBeenCalledTimes(3);
+        releaseRequests.splice(0).forEach((release) => release());
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(mockAxiosGet).toHaveBeenCalledTimes(6);
+        releaseRequests.splice(0).forEach((release) => release());
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(mockAxiosGet).toHaveBeenCalledTimes(7);
+        releaseRequests.splice(0).forEach((release) => release());
+        await responsePromise;
+
+        expect(res.statusCode).toBe(200);
+        expect(maxActiveRequests).toBe(3);
     });
 
     it("returns an empty object when discover genre preprocessing throws", async () => {

@@ -31,18 +31,7 @@ jobs:
                   fi
 
                   RELEASE_TAG="${{ github.event.release.tag_name }}"
-                  if [ -z "${RELEASE_TAG}" ]; then
-                    echo "Release tag is missing." >&2
-                    exit 1
-                  fi
-                  if [[ "${RELEASE_TAG}" == v* ]]; then
-                    echo "Release tags must be plain semantic versions without a 'v' prefix (example: 1.2.3)." >&2
-                    exit 1
-                  fi
-                  if ! [[ "${RELEASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-                    echo "Release tag must be container-tag-compatible semantic versioning (example: 1.2.3 or 1.2.3-rc.1)." >&2
-                    exit 1
-                  fi
+                  ./scripts/release/validate-release-version.sh "${RELEASE_TAG}"
 
                   FRONTEND_VERSION="$(node -p "require('./frontend/package.json').version")"
                   if [ "${FRONTEND_VERSION}" != "${RELEASE_TAG}" ]; then

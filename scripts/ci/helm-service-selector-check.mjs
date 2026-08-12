@@ -12,7 +12,7 @@ function fail(message) {
 
 function parseLabels(block, indent) {
     if (block === undefined) fail("label block is undefined");
-    if (indent !== 4 && indent !== 8) fail("label indentation is invalid");
+    if (![4, 6, 8].includes(indent)) fail("label indentation is invalid");
 
     const labels = new Map();
     const pattern = new RegExp(
@@ -77,14 +77,24 @@ function parseService(document, name) {
 }
 
 function parseWorkload(document, kind, name) {
-    const block = document.match(
+    const selectorBlock = document.match(
+        /^  selector:\s*\n    matchLabels:\s*\n((?:^      \S[^\n]*\n?)*)/m,
+    )?.[1];
+    if (selectorBlock === undefined)
+        fail(`${kind} ${name} is missing matchLabels`);
+    const podLabelBlock = document.match(
         /^  template:\s*\n    metadata:\s*\n      labels:\s*\n((?:^        \S[^\n]*\n?)*)/m,
     )?.[1];
-    if (block === undefined)
+    if (podLabelBlock === undefined)
         fail(`${kind} ${name} is missing pod template labels`);
     return {
         type: "workload",
-        resource: { kind, name, labels: parseLabels(block, 8) },
+        resource: {
+            kind,
+            name,
+            labels: parseLabels(podLabelBlock, 8),
+            selector: parseLabels(selectorBlock, 6),
+        },
     };
 }
 
@@ -139,6 +149,12 @@ function assertServiceIsolated(service, workloads) {
     }
 }
 
+function assertWorkloadSelectorMatchesPod(workload) {
+    if (workload === undefined) fail("workload is undefined");
+    if (selectorMatches(workload.selector, workload.labels)) return;
+    fail(`${workload.kind} ${workload.name} selector does not match its pods`);
+}
+
 function componentOf(workload) {
     return workload.labels.get("app.kubernetes.io/component") ?? "<unlabeled>";
 }
@@ -168,6 +184,10 @@ function main(args) {
     }
     const yaml = readManifest(args[0]);
     const { services, workloads } = parseResources(yaml);
+    for (let index = 0; index < MAX_RESOURCES; index += 1) {
+        if (index >= workloads.length) break;
+        assertWorkloadSelectorMatchesPod(workloads[index]);
+    }
     for (let index = 0; index < services.length; index += 1) {
         assertServiceIsolated(services[index], workloads);
     }

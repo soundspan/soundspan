@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>

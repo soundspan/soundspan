@@ -16,11 +16,118 @@ import {
 } from "../services/outboundUrlSafety";
 import axios from "axios";
 import fs from "fs";
+import pLimit from "p-limit";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
 const PODCAST_PRISMA_RETRY_ATTEMPTS = 3;
 const MAX_AUDIO_REDIRECTS = 5;
+const MAX_PODCAST_DISCOVERY_GENRES = 7;
+const MAX_PODCAST_GENRES_QUERY_LENGTH = 64;
+const PODCAST_GENRE_FETCH_CONCURRENCY = 3;
+const podcastGenreDiscoveryLogger = logger.child("PodcastGenreDiscovery");
+
+const PODCAST_GENRE_SEARCH_TERMS = {
+    "1303": "comedy podcast",
+    "1324": "society culture podcast",
+    "1489": "news podcast",
+    "1488": "true crime podcast",
+    "1321": "business podcast",
+    "1545": "sports podcast",
+    "1502": "gaming hobbies podcast",
+} as const;
+
+type PodcastGenreId = keyof typeof PODCAST_GENRE_SEARCH_TERMS;
+
+type PodcastGenreIdsResult =
+    | { ok: true; genreIds: PodcastGenreId[] }
+    | { ok: false; error: string };
+
+function isPodcastGenreId(value: string): value is PodcastGenreId {
+    return Object.prototype.hasOwnProperty.call(
+        PODCAST_GENRE_SEARCH_TERMS,
+        value,
+    );
+}
+
+function parsePodcastGenreIds(genres: string): PodcastGenreIdsResult {
+    if (genres.length > MAX_PODCAST_GENRES_QUERY_LENGTH) {
+        return {
+            ok: false,
+            error: `A maximum of ${MAX_PODCAST_DISCOVERY_GENRES} genres may be requested`,
+        };
+    }
+
+    const requestedIds = genres.split(",");
+    if (requestedIds.length > MAX_PODCAST_DISCOVERY_GENRES) {
+        return {
+            ok: false,
+            error: `A maximum of ${MAX_PODCAST_DISCOVERY_GENRES} genres may be requested`,
+        };
+    }
+
+    const normalizedIds = requestedIds.map((id) => id.trim());
+    if (!normalizedIds.every(isPodcastGenreId)) {
+        return {
+            ok: false,
+            error: "genres contains an unsupported genre ID",
+        };
+    }
+
+    return { ok: true, genreIds: Array.from(new Set(normalizedIds)) };
+}
+
+function formatDiscoveredPodcast(podcast: any) {
+    return {
+        id: podcast.collectionId.toString(),
+        title: podcast.collectionName,
+        author: podcast.artistName,
+        coverUrl: podcast.artworkUrl600 || podcast.artworkUrl100,
+        feedUrl: podcast.feedUrl,
+        genres: podcast.genres || [],
+        episodeCount: podcast.trackCount || 0,
+        itunesId: podcast.collectionId,
+        isExternal: true,
+    };
+}
+
+async function fetchPodcastGenre(genreId: PodcastGenreId) {
+    const searchTerm = PODCAST_GENRE_SEARCH_TERMS[genreId];
+    podcastGenreDiscoveryLogger.debug("Searching iTunes genre", {
+        genreId,
+        searchTerm,
+    });
+
+    try {
+        const itunesResponse = await axios.get(
+            "https://itunes.apple.com/search",
+            {
+                params: {
+                    term: searchTerm,
+                    media: "podcast",
+                    entity: "podcast",
+                    limit: 10,
+                },
+                timeout: ITUNES_DISCOVER_TIMEOUT_MS,
+            },
+        );
+        const podcasts = itunesResponse.data.results.map(
+            formatDiscoveredPodcast,
+        );
+        podcastGenreDiscoveryLogger.debug("Fetched iTunes genre", {
+            genreId,
+            podcastCount: podcasts.length,
+        });
+        return { genreId, podcasts };
+    } catch (error: unknown) {
+        podcastGenreDiscoveryLogger.warn(
+            "iTunes genre search failed; returning an empty genre list",
+            { genreId, error: describeAxiosError(error) },
+        );
+        return { genreId, podcasts: [] };
+    }
+}
 
 const subscribeSchema = z
     .object({
@@ -394,12 +501,12 @@ router.get("/discover/top", requireAuthOrToken, async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: Comma-separated genre IDs (e.g. "1303,1324")
+ *         description: Up to 7 comma-separated supported genre IDs (e.g. "1303,1324")
  *     responses:
  *       200:
  *         description: Podcasts grouped by genre ID
  *       400:
- *         description: genres parameter required
+ *         description: genres parameter missing, unsupported, or over the request limit
  *       401:
  *         description: Not authenticated
  */
@@ -411,78 +518,27 @@ router.get("/discover/genres", async (req, res) => {
     try {
         const { genres } = req.query; // Comma-separated genre IDs
 
-        logger.debug(`\n[GENRE PODCASTS] Request (genres: ${genres})`);
-
         if (!genres || typeof genres !== "string") {
-            return res.status(400).json({
-                error: "genres parameter required (comma-separated genre IDs)",
-            });
+            return sendRouteError(
+                res,
+                400,
+                "genres parameter required (comma-separated genre IDs)",
+            );
         }
 
-        const genreIds = genres.split(",").map((id) => parseInt(id.trim(), 10));
+        const parsedGenreIds = parsePodcastGenreIds(genres);
+        if (!parsedGenreIds.ok) {
+            return sendRouteError(res, 400, parsedGenreIds.error);
+        }
 
-        // Map genre IDs to search terms - same approach as the working search!
-        const genreSearchTerms: { [key: number]: string } = {
-            1303: "comedy podcast", // Comedy
-            1324: "society culture podcast", // Society & Culture
-            1489: "news podcast", // News
-            1488: "true crime podcast", // True Crime
-            1321: "business podcast", // Business
-            1545: "sports podcast", // Sports
-            1502: "gaming hobbies podcast", // Leisure (Gaming & Hobbies)
-        };
-
-        // Fetch podcasts for each genre using simple iTunes search - PARALLEL execution
-        const genreFetchPromises = genreIds.map(async (genreId) => {
-            const searchTerm = genreSearchTerms[genreId] || "podcast";
-            logger.debug(`    Searching for "${searchTerm}"...`);
-
-            try {
-                // Simple iTunes search - same as the working search bar!
-                const itunesResponse = await axios.get(
-                    "https://itunes.apple.com/search",
-                    {
-                        params: {
-                            term: searchTerm,
-                            media: "podcast",
-                            entity: "podcast",
-                            limit: 10,
-                        },
-                        timeout: ITUNES_DISCOVER_TIMEOUT_MS,
-                    },
-                );
-
-                const podcasts = itunesResponse.data.results.map(
-                    (podcast: any) => ({
-                        id: podcast.collectionId.toString(),
-                        title: podcast.collectionName,
-                        author: podcast.artistName,
-                        coverUrl:
-                            podcast.artworkUrl600 || podcast.artworkUrl100,
-                        feedUrl: podcast.feedUrl,
-                        genres: podcast.genres || [],
-                        episodeCount: podcast.trackCount || 0,
-                        itunesId: podcast.collectionId,
-                        isExternal: true,
-                    }),
-                );
-
-                logger.debug(
-                    `      Found ${podcasts.length} podcasts for genre ${genreId}`,
-                );
-                return { genreId, podcasts };
-            } catch (error: unknown) {
-                logger.warn(
-                    `       iTunes search failed for "${searchTerm}", returning empty genre list. ${describeAxiosError(
-                        error,
-                    )}`,
-                );
-                return { genreId, podcasts: [] };
-            }
-        });
-
-        // Wait for all genre searches to complete in parallel
-        const genreResults = await Promise.all(genreFetchPromises);
+        // The input is capped above, and p-limit bounds active iTunes calls to
+        // three even when all supported genres are requested together.
+        const limitGenreFetch = pLimit(PODCAST_GENRE_FETCH_CONCURRENCY);
+        const genreResults = await Promise.all(
+            parsedGenreIds.genreIds.map((genreId) =>
+                limitGenreFetch(() => fetchPodcastGenre(genreId)),
+            ),
+        );
 
         // Convert array of results to object keyed by genreId
         const results: any = {};
@@ -490,15 +546,14 @@ router.get("/discover/genres", async (req, res) => {
             results[genreId] = podcasts;
         }
 
-        logger.debug(
-            `   Fetched podcasts for ${genreIds.length} genres (parallel)`,
-        );
+        podcastGenreDiscoveryLogger.debug("Completed genre discovery", {
+            genreCount: parsedGenreIds.genreIds.length,
+        });
         res.json(results);
     } catch (error: unknown) {
-        logger.warn(
-            `[GENRE PODCASTS] Failed to fetch genre discovery, returning empty result. ${describeAxiosError(
-                error,
-            )}`,
+        podcastGenreDiscoveryLogger.warn(
+            "Genre discovery failed; returning an empty result",
+            { error: describeAxiosError(error) },
         );
         res.json({});
     }

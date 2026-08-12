@@ -425,62 +425,105 @@ if id redis >/dev/null 2>&1; then
 fi
 
 # Resolve application secrets: operator environment, persisted file, generated.
-if [ -n "$SESSION_SECRET" ]; then
-    printf '%s' "$SESSION_SECRET" > /data/secrets/session_secret
-elif [ -f /data/secrets/session_secret ]; then
-    SESSION_SECRET=$(cat /data/secrets/session_secret)
-else
-    SESSION_SECRET=$(openssl rand -hex 32)
-    printf '%s' "$SESSION_SECRET" > /data/secrets/session_secret
-fi
-chmod 600 /data/secrets/session_secret
-chown soundspan:soundspan /data/secrets/session_secret 2>/dev/null || true
-if [ "$SESSION_SECRET" = "changeme-generate-secure-key" ] || [ "${#SESSION_SECRET}" -lt 32 ]; then
-    echo "ERROR: SESSION_SECRET must be at least 32 characters and must not use the published default." >&2
+resolve_secret_candidate() {
+    local candidate="$1"
+    local secret_file="$2"
+
+    SECRET_NEEDS_PERSIST=false
+    if [ -n "$candidate" ]; then
+        RESOLVED_SECRET="$candidate"
+        SECRET_NEEDS_PERSIST=true
+    elif [ -f "$secret_file" ]; then
+        RESOLVED_SECRET=$(cat "$secret_file")
+    else
+        RESOLVED_SECRET=$(openssl rand -hex 32)
+        SECRET_NEEDS_PERSIST=true
+    fi
+}
+
+validate_critical_secret() {
+    local secret_name="$1"
+    local secret_value="$2"
+    local published_default="$3"
+
+    if [ -z "$secret_value" ] || [ "$secret_value" = "$published_default" ] || [ "${#secret_value}" -lt 32 ]; then
+        echo "ERROR: ${secret_name} is missing, uses the published default, or is shorter than 32 characters." >&2
+        return 1
+    fi
+}
+
+persist_secret_atomically() {
+    local secret_value="$1"
+    local secret_file="$2"
+    local temporary_file
+
+    temporary_file=$(mktemp "${secret_file}.tmp.XXXXXX")
+    if ! printf '%s' "$secret_value" > "$temporary_file"; then
+        rm -f -- "$temporary_file"
+        return 1
+    fi
+    if ! chmod 600 "$temporary_file"; then
+        rm -f -- "$temporary_file"
+        return 1
+    fi
+    chown soundspan:soundspan "$temporary_file" 2>/dev/null || true
+    if ! mv -f -- "$temporary_file" "$secret_file"; then
+        rm -f -- "$temporary_file"
+        return 1
+    fi
+}
+
+secure_secret_file() {
+    local secret_file="$1"
+
+    chmod 600 "$secret_file"
+    chown soundspan:soundspan "$secret_file" 2>/dev/null || true
+}
+
+resolve_secret_candidate "${SESSION_SECRET:-}" /data/secrets/session_secret
+SESSION_SECRET="$RESOLVED_SECRET"
+SESSION_SECRET_NEEDS_PERSIST="$SECRET_NEEDS_PERSIST"
+resolve_secret_candidate "${SETTINGS_ENCRYPTION_KEY:-}" /data/secrets/encryption_key
+SETTINGS_ENCRYPTION_KEY="$RESOLVED_SECRET"
+SETTINGS_ENCRYPTION_KEY_NEEDS_PERSIST="$SECRET_NEEDS_PERSIST"
+resolve_secret_candidate "${INTERNAL_API_SECRET:-}" /data/secrets/internal_api_secret
+INTERNAL_API_SECRET="$RESOLVED_SECRET"
+INTERNAL_API_SECRET_NEEDS_PERSIST="$SECRET_NEEDS_PERSIST"
+resolve_secret_candidate "${POSTGRES_PASSWORD:-}" /data/secrets/postgres_password
+POSTGRES_PASSWORD="$RESOLVED_SECRET"
+POSTGRES_PASSWORD_NEEDS_PERSIST="$SECRET_NEEDS_PERSIST"
+unset RESOLVED_SECRET SECRET_NEEDS_PERSIST
+
+# Validate every resolved candidate before changing any persisted secret.
+validate_critical_secret SESSION_SECRET "$SESSION_SECRET" "changeme-generate-secure-key"
+validate_critical_secret SETTINGS_ENCRYPTION_KEY "$SETTINGS_ENCRYPTION_KEY" "default-encryption-key-change-me"
+validate_critical_secret INTERNAL_API_SECRET "$INTERNAL_API_SECRET" "soundspan-internal-secret-change-me"
+if [ -z "$POSTGRES_PASSWORD" ]; then
+    echo "ERROR: POSTGRES_PASSWORD must not be empty." >&2
     exit 1
 fi
 
-if [ -n "$SETTINGS_ENCRYPTION_KEY" ]; then
-    printf '%s' "$SETTINGS_ENCRYPTION_KEY" > /data/secrets/encryption_key
-elif [ -f /data/secrets/encryption_key ]; then
-    SETTINGS_ENCRYPTION_KEY=$(cat /data/secrets/encryption_key)
-else
-    SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)
-    printf '%s' "$SETTINGS_ENCRYPTION_KEY" > /data/secrets/encryption_key
+if [ "$SESSION_SECRET_NEEDS_PERSIST" = true ]; then
+    persist_secret_atomically "$SESSION_SECRET" /data/secrets/session_secret
 fi
-chmod 600 /data/secrets/encryption_key
-chown soundspan:soundspan /data/secrets/encryption_key 2>/dev/null || true
-if [ "$SETTINGS_ENCRYPTION_KEY" = "default-encryption-key-change-me" ]; then
-    echo "ERROR: SETTINGS_ENCRYPTION_KEY must not use the published default." >&2
-    exit 1
+if [ "$SETTINGS_ENCRYPTION_KEY_NEEDS_PERSIST" = true ]; then
+    persist_secret_atomically "$SETTINGS_ENCRYPTION_KEY" /data/secrets/encryption_key
 fi
+if [ "$INTERNAL_API_SECRET_NEEDS_PERSIST" = true ]; then
+    persist_secret_atomically "$INTERNAL_API_SECRET" /data/secrets/internal_api_secret
+fi
+if [ "$POSTGRES_PASSWORD_NEEDS_PERSIST" = true ]; then
+    persist_secret_atomically "$POSTGRES_PASSWORD" /data/secrets/postgres_password
+fi
+unset SESSION_SECRET_NEEDS_PERSIST SETTINGS_ENCRYPTION_KEY_NEEDS_PERSIST
+unset INTERNAL_API_SECRET_NEEDS_PERSIST POSTGRES_PASSWORD_NEEDS_PERSIST
 
-if [ -n "$INTERNAL_API_SECRET" ]; then
-    printf '%s' "$INTERNAL_API_SECRET" > /data/secrets/internal_api_secret
-elif [ -f /data/secrets/internal_api_secret ]; then
-    INTERNAL_API_SECRET=$(cat /data/secrets/internal_api_secret)
-else
-    INTERNAL_API_SECRET=$(openssl rand -hex 32)
-    printf '%s' "$INTERNAL_API_SECRET" > /data/secrets/internal_api_secret
-fi
-chmod 600 /data/secrets/internal_api_secret
-chown soundspan:soundspan /data/secrets/internal_api_secret 2>/dev/null || true
-if [ "$INTERNAL_API_SECRET" = "soundspan-internal-secret-change-me" ]; then
-    echo "ERROR: INTERNAL_API_SECRET must not use the published default." >&2
-    exit 1
-fi
+secure_secret_file /data/secrets/session_secret
+secure_secret_file /data/secrets/encryption_key
+secure_secret_file /data/secrets/internal_api_secret
+secure_secret_file /data/secrets/postgres_password
 
-# Resolve and persist the PostgreSQL password for fresh and existing volumes.
-if [ -n "$POSTGRES_PASSWORD" ]; then
-    printf '%s' "$POSTGRES_PASSWORD" > /data/secrets/postgres_password
-elif [ -f /data/secrets/postgres_password ]; then
-    POSTGRES_PASSWORD=$(cat /data/secrets/postgres_password)
-else
-    POSTGRES_PASSWORD=$(openssl rand -hex 32)
-    printf '%s' "$POSTGRES_PASSWORD" > /data/secrets/postgres_password
-fi
-chmod 600 /data/secrets/postgres_password
-chown soundspan:soundspan /data/secrets/postgres_password 2>/dev/null || true
+# Resolve the PostgreSQL URL after its validated password is persisted.
 DATABASE_URL=$(/app/aio-postgres-credentials.sh database-url)
 
 # Clean up stale PID file if exists

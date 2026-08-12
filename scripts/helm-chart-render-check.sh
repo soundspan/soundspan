@@ -69,17 +69,19 @@ tmp_aio_sidecars="$(mktemp)"
 tmp_aio_rotated_secrets="$(mktemp)"
 tmp_aio_secret_overrides="$(mktemp)"
 tmp_aio_digests="$(mktemp)"
+tmp_aio_reserved_labels="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
 tmp_individual_component_database="$(mktemp)"
 tmp_individual_external_database="$(mktemp)"
 tmp_individual_digests="$(mktemp)"
+tmp_individual_reserved_labels="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -95,6 +97,14 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   exit 1
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
+
+echo "[CHECK] reserved selector labels override global labels in AIO mode"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set-string 'global.labels.app\.kubernetes\.io/name=user-name' \
+  --set-string 'global.labels.app\.kubernetes\.io/instance=user-instance' \
+  --set-string 'global.labels.app\.kubernetes\.io/component=user-component' \
+  >"$tmp_aio_reserved_labels"
+assert_service_selectors_isolated "AIO with reserved global labels" "$tmp_aio_reserved_labels"
 
 for key in INTERNAL_API_SECRET POSTGRES_PASSWORD; do
   if ! perl -0777 -ne '
@@ -194,6 +204,20 @@ if ! perl -0777 -ne 'exit((/name:\s+LISTEN_TOGETHER_STATE_STORE_ENABLED\s+value:
   exit 1
 fi
 assert_service_selectors_isolated "HA individual" "$tmp_individual_ha"
+
+echo "[CHECK] reserved selector labels override global labels in individual mode"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set tidalSidecar.enabled=true \
+  --set ytmusicStreamer.enabled=true \
+  --set audioAnalyzer.enabled=true \
+  --set audioAnalyzerClap.enabled=true \
+  --set-string 'global.labels.app\.kubernetes\.io/name=user-name' \
+  --set-string 'global.labels.app\.kubernetes\.io/instance=user-instance' \
+  --set-string 'global.labels.app\.kubernetes\.io/component=user-component' \
+  >"$tmp_individual_reserved_labels"
+assert_service_selectors_isolated "individual with reserved global labels" "$tmp_individual_reserved_labels"
 
 echo "[CHECK] construct component DATABASE_URL values with percent-encoded credentials"
 helm template "$RELEASE_NAME" "$CHART_PATH" \

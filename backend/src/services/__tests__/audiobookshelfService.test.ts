@@ -1,3 +1,5 @@
+import { EventEmitter } from "events";
+
 const logger = {
     debug: jest.fn(),
     warn: jest.fn(),
@@ -49,10 +51,29 @@ function createClient() {
     };
 }
 
+function createStreamLifecycle() {
+    return {
+        request: new EventEmitter(),
+        response: new EventEmitter(),
+    };
+}
+
+function expectStreamListeners(
+    lifecycle: ReturnType<typeof createStreamLifecycle>,
+    count: number,
+) {
+    expect(lifecycle.request.listenerCount("close")).toBe(count);
+    expect(lifecycle.request.listenerCount("aborted")).toBe(count);
+    expect(lifecycle.response.listenerCount("close")).toBe(count);
+    expect(lifecycle.response.listenerCount("aborted")).toBe(count);
+}
+
 describe("audiobookshelf service behavior", () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
+        jest.useRealTimers();
+        jest.restoreAllMocks();
         jest.clearAllMocks();
         process.env = { ...originalEnv };
         delete process.env.AUDIOBOOKSHELF_URL;
@@ -330,6 +351,7 @@ describe("audiobookshelf service behavior", () => {
         expect(client.get).toHaveBeenCalledWith("/api/items/book-1/file/123", {
             responseType: "stream",
             timeout: 0,
+            signal: expect.any(AbortSignal),
             headers: {
                 Range: "bytes=0-99",
             },
@@ -340,6 +362,141 @@ describe("audiobookshelf service behavior", () => {
         await expect(
             audiobookshelfService.streamAudiobook("book-2"),
         ).rejects.toThrow("No audio track found for this audiobook");
+    });
+
+    it("aborts stream acquisition on an early client disconnect and detaches listeners", async () => {
+        const client = createClient();
+        const lifecycle = createStreamLifecycle();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                },
+            } as any,
+        );
+        client.get.mockImplementationOnce(
+            (_url: string, options: { signal: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                    if (options.signal.aborted) {
+                        reject(options.signal.reason);
+                        return;
+                    }
+                    options.signal.addEventListener(
+                        "abort",
+                        () => reject(options.signal.reason),
+                        { once: true },
+                    );
+                }),
+        );
+        const abortSpy = jest.spyOn(AbortController.prototype, "abort");
+
+        const acquisition = audiobookshelfService.streamAudiobook(
+            "book-1",
+            undefined,
+            lifecycle,
+        );
+        await Promise.resolve();
+        expectStreamListeners(lifecycle, 1);
+
+        const rejectedAcquisition = expect(acquisition).rejects.toThrow(
+            "Client disconnected",
+        );
+        lifecycle.request.emit("aborted");
+
+        await rejectedAcquisition;
+        expect(abortSpy).toHaveBeenCalledTimes(1);
+        expectStreamListeners(lifecycle, 0);
+    });
+
+    it("aborts stream acquisition when the header deadline expires", async () => {
+        jest.useFakeTimers();
+        const client = createClient();
+        const lifecycle = createStreamLifecycle();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                },
+            } as any,
+        );
+        client.get.mockImplementationOnce(
+            (_url: string, options: { signal: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                    if (options.signal.aborted) {
+                        reject(options.signal.reason);
+                        return;
+                    }
+                    options.signal.addEventListener(
+                        "abort",
+                        () => reject(options.signal.reason),
+                        { once: true },
+                    );
+                }),
+        );
+        const abortSpy = jest.spyOn(AbortController.prototype, "abort");
+
+        const acquisition = audiobookshelfService.streamAudiobook(
+            "book-1",
+            undefined,
+            lifecycle,
+        );
+        await Promise.resolve();
+        const rejectedAcquisition = expect(acquisition).rejects.toThrow(
+            "Audiobookshelf stream headers timed out after 30000ms",
+        );
+        await jest.advanceTimersByTimeAsync(30_000);
+
+        await rejectedAcquisition;
+        expect(abortSpy).toHaveBeenCalledTimes(1);
+        expectStreamListeners(lifecycle, 0);
+    });
+
+    it("hands off a connected stream and detaches acquisition listeners", async () => {
+        const client = createClient();
+        const lifecycle = createStreamLifecycle();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                },
+            } as any,
+        );
+        const stream = { pipe: jest.fn() };
+        client.get.mockResolvedValueOnce({
+            data: stream,
+            headers: { "content-type": "audio/mpeg" },
+            status: 200,
+        });
+        const abortSpy = jest.spyOn(AbortController.prototype, "abort");
+
+        const result = await audiobookshelfService.streamAudiobook(
+            "book-1",
+            undefined,
+            lifecycle,
+        );
+
+        expect(result).toEqual({
+            stream,
+            headers: { "content-type": "audio/mpeg" },
+            status: 200,
+        });
+        expect(abortSpy).not.toHaveBeenCalled();
+        expectStreamListeners(lifecycle, 0);
     });
 
     it("streams podcast episodes and handles missing episodes/files", async () => {
