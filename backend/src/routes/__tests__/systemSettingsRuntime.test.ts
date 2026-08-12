@@ -450,6 +450,27 @@ describe("systemSettings runtime routes", () => {
         );
     });
 
+    it("preserves omitted environment settings during a partial update", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: { lidarrUrl: "http://new-lidarr:8686" },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockWriteEnvFile).toHaveBeenCalledWith({
+            LIDARR_ENABLED: undefined,
+            LIDARR_URL: "http://new-lidarr:8686",
+            LIDARR_API_KEY: undefined,
+            FANART_API_KEY: undefined,
+            OPENAI_API_KEY: undefined,
+            AUDIOBOOKSHELF_URL: undefined,
+            AUDIOBOOKSHELF_API_KEY: undefined,
+        });
+    });
+
     it("env sync clears secrets only on explicit null", async () => {
         mockSystemSettingsUpsert.mockResolvedValueOnce({
             id: "default",
@@ -465,9 +486,44 @@ describe("systemSettings runtime routes", () => {
         await postSettingsHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(mockWriteEnvFile).toHaveBeenCalledWith(
-            expect.objectContaining({ OPENAI_API_KEY: null }),
-        );
+        expect(mockWriteEnvFile).toHaveBeenCalledWith({
+            LIDARR_ENABLED: undefined,
+            LIDARR_URL: undefined,
+            LIDARR_API_KEY: undefined,
+            FANART_API_KEY: undefined,
+            OPENAI_API_KEY: null,
+            AUDIOBOOKSHELF_URL: undefined,
+            AUDIOBOOKSHELF_API_KEY: undefined,
+        });
+    });
+
+    it("writes every environment setting supplied by a full update", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                lidarrEnabled: false,
+                lidarrUrl: "http://lidarr:8686",
+                lidarrApiKey: "new-lidarr-key",
+                fanartApiKey: "new-fanart-key",
+                openaiApiKey: "new-openai-key",
+                audiobookshelfUrl: "http://audiobookshelf:13378",
+                audiobookshelfApiKey: "new-audiobookshelf-key",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockWriteEnvFile).toHaveBeenCalledWith({
+            LIDARR_ENABLED: "false",
+            LIDARR_URL: "http://lidarr:8686",
+            LIDARR_API_KEY: "new-lidarr-key",
+            FANART_API_KEY: "new-fanart-key",
+            OPENAI_API_KEY: "new-openai-key",
+            AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
+            AUDIOBOOKSHELF_API_KEY: "new-audiobookshelf-key",
+        });
     });
 
     it("clears a stored secret only on an explicit null", async () => {

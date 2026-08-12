@@ -179,6 +179,46 @@ const systemSettingsSchema = z.object({
     showVersion: z.boolean().optional(),
 });
 
+type SystemSettingsUpdate = z.infer<typeof systemSettingsSchema>;
+type SystemSettingsSecret =
+    (typeof ENCRYPTED_SETTINGS_COLUMNS.systemSettings)[number];
+type EffectiveSecret = (field: SystemSettingsSecret) => string | null;
+
+function buildEnvironmentUpdate(
+    data: SystemSettingsUpdate,
+    effectiveSecret: EffectiveSecret,
+): Record<string, string | null | undefined> {
+    const isSupplied = (field: keyof SystemSettingsUpdate): boolean =>
+        Object.prototype.hasOwnProperty.call(data, field) &&
+        data[field] !== undefined;
+
+    return {
+        LIDARR_ENABLED: isSupplied("lidarrEnabled")
+            ? data.lidarrEnabled
+                ? "true"
+                : "false"
+            : undefined,
+        LIDARR_URL: isSupplied("lidarrUrl")
+            ? data.lidarrUrl || null
+            : undefined,
+        LIDARR_API_KEY: isSupplied("lidarrApiKey")
+            ? effectiveSecret("lidarrApiKey")
+            : undefined,
+        FANART_API_KEY: isSupplied("fanartApiKey")
+            ? effectiveSecret("fanartApiKey")
+            : undefined,
+        OPENAI_API_KEY: isSupplied("openaiApiKey")
+            ? effectiveSecret("openaiApiKey")
+            : undefined,
+        AUDIOBOOKSHELF_URL: isSupplied("audiobookshelfUrl")
+            ? data.audiobookshelfUrl || null
+            : undefined,
+        AUDIOBOOKSHELF_API_KEY: isSupplied("audiobookshelfApiKey")
+            ? effectiveSecret("audiobookshelfApiKey")
+            : undefined,
+    };
+}
+
 /**
  * @openapi
  * /api/system-settings:
@@ -409,15 +449,7 @@ router.post("/", async (req, res) => {
 
         // Write to .env file for Docker containers
         try {
-            await writeEnvFile({
-                LIDARR_ENABLED: data.lidarrEnabled ? "true" : "false",
-                LIDARR_URL: data.lidarrUrl || null,
-                LIDARR_API_KEY: effectiveSecret("lidarrApiKey"),
-                FANART_API_KEY: effectiveSecret("fanartApiKey"),
-                OPENAI_API_KEY: effectiveSecret("openaiApiKey"),
-                AUDIOBOOKSHELF_URL: data.audiobookshelfUrl || null,
-                AUDIOBOOKSHELF_API_KEY: effectiveSecret("audiobookshelfApiKey"),
-            });
+            await writeEnvFile(buildEnvironmentUpdate(data, effectiveSecret));
             logger.debug(".env file synchronized with database settings");
         } catch (envError) {
             if (envError instanceof EnvFileSyncSkippedError) {
