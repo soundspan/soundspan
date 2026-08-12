@@ -71,6 +71,27 @@ describe("listenTogetherStateStore", () => {
         jest.doMock("../../utils/logger", () => ({
             logger,
         }));
+        const parsedTtlSeconds = Number.parseInt(
+            process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS || "21600",
+            10,
+        );
+        jest.doMock("../../config", () => ({
+            config: {
+                listenTogether: {
+                    stateStoreEnabled:
+                        process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED !==
+                        "false",
+                    stateStoreKeyPrefix:
+                        process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX ||
+                        "listen-together:state",
+                    stateStoreTtlSeconds:
+                        Number.isFinite(parsedTtlSeconds) &&
+                        parsedTtlSeconds > 0
+                            ? parsedTtlSeconds
+                            : 21_600,
+                },
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {

@@ -108,6 +108,18 @@ describe("listenTogetherClusterSync", () => {
         jest.doMock("../../utils/logger", () => ({
             logger,
         }));
+        jest.doMock("../../config", () => ({
+            config: {
+                listenTogether: {
+                    stateSyncEnabled:
+                        process.env.LISTEN_TOGETHER_STATE_SYNC_ENABLED !==
+                        "false",
+                    stateSyncChannel:
+                        process.env.LISTEN_TOGETHER_STATE_SYNC_CHANNEL ||
+                        "listen-together:state-sync",
+                },
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {

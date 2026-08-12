@@ -33,7 +33,7 @@ export interface ImageResult {
  * Represents the ImageProviderService class.
  */
 export class ImageProviderService {
-    private readonly FANART_API_KEY = process.env.FANART_API_KEY;
+    private readonly FANART_API_KEY = config.fanart.apiKey;
     private readonly DEEZER_API_URL = "https://api.deezer.com";
     private readonly FANART_API_URL = "https://webservice.fanart.tv/v3";
     private fanartSettingsWarningShown = false;

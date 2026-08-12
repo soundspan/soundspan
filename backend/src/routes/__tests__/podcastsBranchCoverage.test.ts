@@ -180,6 +180,8 @@ jest.mock("axios", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({ config: { podcastDebug: false } }));
+
 import router, { refreshPodcastFeed } from "../podcasts";
 
 type RouteMethod = "get" | "post" | "delete";

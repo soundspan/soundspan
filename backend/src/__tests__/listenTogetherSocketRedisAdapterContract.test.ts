@@ -15,13 +15,6 @@ describe("listen together socket redis adapter contract", () => {
     const source = fs.readFileSync(socketServicePath, "utf8");
     const frontendSource = fs.readFileSync(frontendSocketPath, "utf8");
 
-    it("supports env flag to disable redis adapter", () => {
-        expect(source).toContain("LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED");
-        expect(source).toContain(
-            'process.env.LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED !== "false"',
-        );
-    });
-
     it("initializes socket.io redis adapter and redis clients", () => {
         expect(source).toContain("@socket.io/redis-adapter");
         expect(source).toContain("createIORedisClient");

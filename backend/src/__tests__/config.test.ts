@@ -474,6 +474,11 @@ describe("config module", () => {
             mutationLockEnabled: true,
             mutationLockTtlMs: 3000,
             mutationLockPrefix: "listen-together:mutation-lock",
+            stateSyncEnabled: true,
+            stateSyncChannel: "listen-together:state-sync",
+            stateStoreEnabled: true,
+            stateStoreKeyPrefix: "listen-together:state",
+            stateStoreTtlSeconds: 21_600,
         });
     });
 
@@ -485,6 +490,11 @@ describe("config module", () => {
             LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "false",
             LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "4500",
             LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: "custom-lock",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+            LISTEN_TOGETHER_STATE_SYNC_CHANNEL: "custom-sync",
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: "false",
+            LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX: "custom-state",
+            LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS: "10800",
         });
         expect(overridden.config.listenTogether).toEqual({
             reconnectSloMs: 7500,
@@ -493,14 +503,101 @@ describe("config module", () => {
             mutationLockEnabled: false,
             mutationLockTtlMs: 4500,
             mutationLockPrefix: "custom-lock",
+            stateSyncEnabled: false,
+            stateSyncChannel: "custom-sync",
+            stateStoreEnabled: false,
+            stateStoreKeyPrefix: "custom-state",
+            stateStoreTtlSeconds: 10_800,
         });
 
         const invalid = await loadConfigModule({
             LISTEN_TOGETHER_RECONNECT_SLO_MS: "0",
             LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "malformed",
+            LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS: "0",
         });
         expect(invalid.config.listenTogether.reconnectSloMs).toBe(5000);
         expect(invalid.config.listenTogether.mutationLockTtlMs).toBe(3000);
+        expect(invalid.config.listenTogether.stateStoreTtlSeconds).toBe(21_600);
+    });
+
+    it("exposes migrated route, integration, logging, and worker values", async () => {
+        const { config } = await loadConfigModule({
+            npm_package_version: "2.0.0-test",
+            DEBUG_WEBHOOKS: "true",
+            PODCAST_DEBUG: "1",
+            SUBSONIC_TRACE_LOGS: "true",
+            SOUNDSPAN_CALLBACK_URL: "http://soundspan-api:3006",
+            FANART_API_KEY: "fanart-fixture",
+            AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
+            AUDIOBOOKSHELF_API_KEY: "audiobookshelf-fixture",
+            PLAYLIST_LOG_DIR: "/tmp/playlist-logs",
+            MOOD_BUCKET_CLAIM_TTL_MS: "120001",
+            ENRICHMENT_CLAIM_TTL_MS: "900001",
+        });
+
+        expect(config.appVersion).toBe("2.0.0-test");
+        expect(config.debugWebhooks).toBe(true);
+        expect(config.podcastDebug).toBe(true);
+        expect(config.subsonicTraceLogs).toBe(true);
+        expect(config.soundspanCallbackUrl).toBe("http://soundspan-api:3006");
+        expect(config.fanart.apiKey).toBe("fanart-fixture");
+        expect(config.audiobookshelfEnv).toEqual({
+            url: "http://audiobookshelf:13378",
+            apiKey: "audiobookshelf-fixture",
+        });
+        expect(config.playlistLogDir).toBe("/tmp/playlist-logs");
+        expect(config.workers).toEqual({
+            moodBucketClaimTtlMs: 120_001,
+            enrichmentClaimTtlMs: 900_001,
+        });
+    });
+
+    it("preserves migrated value defaults and literal flag parsing", async () => {
+        const { config } = await loadConfigModule({
+            npm_package_version: undefined,
+            DEBUG_WEBHOOKS: "TRUE",
+            PODCAST_DEBUG: "true",
+            SUBSONIC_TRACE_LOGS: "1",
+            SOUNDSPAN_CALLBACK_URL: undefined,
+            FANART_API_KEY: undefined,
+            AUDIOBOOKSHELF_URL: undefined,
+            AUDIOBOOKSHELF_API_KEY: undefined,
+            PLAYLIST_LOG_DIR: "",
+            MOOD_BUCKET_CLAIM_TTL_MS: "invalid",
+            ENRICHMENT_CLAIM_TTL_MS: "0",
+        });
+
+        expect(config.appVersion).toBe("unknown");
+        expect(config.debugWebhooks).toBe(false);
+        expect(config.podcastDebug).toBe(false);
+        expect(config.subsonicTraceLogs).toBe(false);
+        expect(config.soundspanCallbackUrl).toBe("http://backend:3006");
+        expect(config.fanart.apiKey).toBeUndefined();
+        expect(config.audiobookshelfEnv).toEqual({ url: "", apiKey: "" });
+        expect(config.playlistLogDir).toBeUndefined();
+        expect(config.workers).toEqual({
+            moodBucketClaimTtlMs: 120_000,
+            enrichmentClaimTtlMs: 900_000,
+        });
+    });
+
+    it("keeps request-time config accessors lazy", async () => {
+        const { config } = await loadConfigModule({
+            DEBUG_WEBHOOKS: "false",
+            PODCAST_DEBUG: "0",
+            SOUNDSPAN_CALLBACK_URL: "http://initial:3006",
+            FANART_API_KEY: "initial-fanart",
+        });
+
+        process.env.DEBUG_WEBHOOKS = "true";
+        process.env.PODCAST_DEBUG = "1";
+        process.env.SOUNDSPAN_CALLBACK_URL = "http://updated:3006";
+        process.env.FANART_API_KEY = "updated-fanart";
+
+        expect(config.debugWebhooks).toBe(true);
+        expect(config.podcastDebug).toBe(true);
+        expect(config.soundspanCallbackUrl).toBe("http://updated:3006");
+        expect(config.fanart.apiKey).toBe("updated-fanart");
     });
 
     it("uses readiness defaults and honors explicit overrides", async () => {

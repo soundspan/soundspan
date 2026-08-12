@@ -32,6 +32,8 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({ config: { nodeEnv: "test" } }));
+
 const ytMusicService = {
     isAvailable: jest.fn(),
     getAuthStatus: jest.fn(),

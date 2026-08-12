@@ -84,6 +84,7 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        fanart: { apiKey: undefined },
         features: {
             audioAnalysis: true,
             discovery: true,

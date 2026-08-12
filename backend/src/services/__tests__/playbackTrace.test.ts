@@ -38,6 +38,22 @@ jest.mock("../../utils/logger", () => ({
     logger: mockRootLogger,
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        segmentedStreaming: {
+            get traceEnabled() {
+                const truthy = new Set(["1", "true", "yes", "on"]);
+                return [
+                    process.env.STREAMING_TRACE_LOGS,
+                    process.env.SEGMENTED_STREAMING_TRACE_LOGS,
+                ].some((value) =>
+                    truthy.has(value?.trim().toLowerCase() || ""),
+                );
+            },
+        },
+    },
+}));
+
 describe("playback trace identity", () => {
     const originalStreamingTraceLogs = process.env.STREAMING_TRACE_LOGS;
     const originalSegmentedStreamingTraceLogs =

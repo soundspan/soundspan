@@ -41,7 +41,7 @@ import { safeResolvePath } from "../utils/safeResolvePath";
 import { fetchExternalImage } from "../services/imageProxy";
 
 const router = Router();
-const SUBSONIC_TRACE_LOGS = process.env.SUBSONIC_TRACE_LOGS === "true";
+const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 
 const LIBRARY_LOCATION = "LIBRARY";
 const SUBSONIC_COVER_CACHE_CONTROL = "public, max-age=86400";

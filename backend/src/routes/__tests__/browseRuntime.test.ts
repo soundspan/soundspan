@@ -53,6 +53,8 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
 }));
 
+jest.mock("../../config", () => ({ config: { ytmusicRegion: "US" } }));
+
 import router from "../browse";
 import { createMockJsonResponse } from "./helpers/mockJsonResponse";
 

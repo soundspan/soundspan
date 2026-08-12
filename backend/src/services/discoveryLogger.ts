@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { logger } from "../utils/logger";
 import * as path from "path";
+import { config } from "../config";
 
 const log = logger.child("Discovery");
 
@@ -15,7 +16,7 @@ class DiscoveryLogger {
     constructor() {
         // Store logs in /app/logs/discovery (matches Dockerfile directory)
         this.logDir =
-            process.env.NODE_ENV === "production"
+            config.nodeEnv === "production"
                 ? "/app/logs/discovery"
                 : path.join(process.cwd(), "data", "logs", "discovery");
     }

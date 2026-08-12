@@ -97,6 +97,7 @@ jest.mock("../../utils/db", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        fanart: { apiKey: undefined },
         features: {
             audioAnalysis: true,
             discovery: true,

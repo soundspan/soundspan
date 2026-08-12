@@ -1,21 +1,12 @@
 import type { Request } from "express";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
-const TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const playbackMetricLogger = logger.child("Playback.Metric");
 const playbackTraceLogger = logger.child("Playback.Trace");
 
-const isTruthy = (value: string | undefined): boolean => {
-    const normalized = value?.trim().toLowerCase();
-    return normalized ? TRUTHY_VALUES.has(normalized) : false;
-};
-
-const resolveTraceEnabled = (): boolean =>
-    isTruthy(process.env.STREAMING_TRACE_LOGS) ||
-    isTruthy(process.env.SEGMENTED_STREAMING_TRACE_LOGS);
-
 /** Whether playback trace logs were enabled when this module loaded. */
-export const playbackTraceEnabled = resolveTraceEnabled();
+export const playbackTraceEnabled = config.segmentedStreaming.traceEnabled;
 
 /** Return the non-negative elapsed time for a playback trace operation. */
 export const playbackTraceDurationMs = (startedAtMs: number): number =>

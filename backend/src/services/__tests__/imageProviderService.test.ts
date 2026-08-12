@@ -7,7 +7,14 @@ jest.mock("../../utils/logger", () => ({
     logger,
 }));
 
-const mockConfig = { secretsDbOnly: false };
+const mockConfig = {
+    secretsDbOnly: false,
+    fanart: {
+        get apiKey() {
+            return process.env.FANART_API_KEY;
+        },
+    },
+};
 jest.mock("../../config", () => ({ config: mockConfig }));
 
 const mockGetSystemSettings = jest.fn();

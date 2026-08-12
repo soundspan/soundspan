@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Consolidated environment configuration reads into the backend config module
+  for 20 more production files; the config-boundary allowlist shrank from 39
+  files to 19.
 - Renamed playback telemetry so log names match their emitters:
   `player.howler_startup` → `player.engine_startup`;
   `route.client.signal` / `[SegmentedStreaming.Trace]` →

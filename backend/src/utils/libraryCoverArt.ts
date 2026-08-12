@@ -70,10 +70,9 @@ export const sendAudiobookCover = async (
     const coverArtLogger = logger.child("CoverArt");
     const settings = await getSystemSettings();
     const audiobookshelfUrl =
-        settings?.audiobookshelfUrl || process.env.AUDIOBOOKSHELF_URL || "";
+        settings?.audiobookshelfUrl || config.audiobookshelfEnv.url;
     const audiobookshelfApiKey =
-        settings?.audiobookshelfApiKey ||
-        (config.secretsDbOnly ? "" : process.env.AUDIOBOOKSHELF_API_KEY || "");
+        settings?.audiobookshelfApiKey || config.audiobookshelfEnv.apiKey;
     const coverUrl = buildSafeAudiobookCoverUrl(
         audiobookPath,
         audiobookshelfUrl.replace(/\/$/, ""),

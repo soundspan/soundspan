@@ -15,6 +15,7 @@ import {
     getBrowseImageCacheRoot,
 } from "../services/browseImageCache";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
+import { config } from "../config";
 
 const router = Router();
 
@@ -116,7 +117,7 @@ async function ensureYtMusicEnabled(res: Response): Promise<boolean> {
     return true;
 }
 
-const YTMUSIC_REGION = process.env.YTMUSIC_REGION || "US";
+const YTMUSIC_REGION = config.ytmusicRegion;
 
 // All routes require authentication
 router.use(requireAuthOrToken);

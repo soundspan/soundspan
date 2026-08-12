@@ -67,6 +67,9 @@ describe("discoveryLogger", () => {
         }));
 
         jest.doMock("../../utils/logger", () => ({ logger }));
+        jest.doMock("../../config", () => ({
+            config: { nodeEnv: process.env.NODE_ENV || "development" },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod =

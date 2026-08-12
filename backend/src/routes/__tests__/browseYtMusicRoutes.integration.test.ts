@@ -71,6 +71,8 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
 }));
 
+jest.mock("../../config", () => ({ config: { ytmusicRegion: "US" } }));
+
 import { ytMusicService } from "../../services/youtubeMusic";
 import { logger } from "../../utils/logger";
 import router, { _resetYtBrowseCache } from "../browse";

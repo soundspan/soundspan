@@ -14,16 +14,8 @@ describe("listen together state store contract", () => {
         "services",
         "listenTogether.ts",
     );
-    const stateStorePath = path.join(
-        __dirname,
-        "..",
-        "services",
-        "listenTogetherStateStore.ts",
-    );
-
     const socketSource = fs.readFileSync(socketServicePath, "utf8");
     const serviceSource = fs.readFileSync(listenTogetherServicePath, "utf8");
-    const stateStoreSource = fs.readFileSync(stateStorePath, "utf8");
 
     it("loads authoritative snapshot from redis store before locked mutations", () => {
         expect(socketSource).toContain(
@@ -50,18 +42,6 @@ describe("listen together state store contract", () => {
         );
         expect(serviceSource).toContain(
             "groupManager.applyExternalSnapshot(storedSnapshot);",
-        );
-    });
-
-    it("defines env-driven controls for authoritative store", () => {
-        expect(stateStoreSource).toContain(
-            "LISTEN_TOGETHER_STATE_STORE_ENABLED",
-        );
-        expect(stateStoreSource).toContain(
-            "LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS",
-        );
-        expect(stateStoreSource).toContain(
-            "LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX",
         );
     });
 });

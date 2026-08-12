@@ -88,6 +88,8 @@ jest.mock("crypto", () => ({
     randomUUID: () => mockRandomUUID(),
 }));
 
+jest.mock("../../config", () => ({ config: { nodeEnv: "test" } }));
+
 import router from "../youtubeMusic";
 
 function getRouteLayer(

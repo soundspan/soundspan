@@ -77,6 +77,8 @@ jest.mock("axios", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({ config: { podcastDebug: false } }));
+
 import router from "../podcasts";
 
 function getGetHandler(path: string) {

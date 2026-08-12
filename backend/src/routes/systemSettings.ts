@@ -11,6 +11,7 @@ import { ENCRYPTED_SETTINGS_COLUMNS } from "../utils/encryptedColumns";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
 import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import { config } from "../config";
 
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
@@ -471,8 +472,7 @@ router.post("/", async (req, res) => {
                 const apiKey = effectiveLidarrApiKey;
 
                 // In Docker, services communicate via service/network names.
-                const callbackHost =
-                    process.env.SOUNDSPAN_CALLBACK_URL || "http://backend:3006";
+                const callbackHost = config.soundspanCallbackUrl;
                 const webhookUrl = `${callbackHost}/api/webhooks/lidarr`;
 
                 logger.debug(`   Webhook URL: ${webhookUrl}`);

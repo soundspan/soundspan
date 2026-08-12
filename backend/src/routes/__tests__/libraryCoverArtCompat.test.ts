@@ -63,6 +63,12 @@ jest.mock("../../utils/redis", () => ({
 jest.mock("../../config", () => ({
     config: {
         audiobookshelf: undefined,
+        get audiobookshelfEnv() {
+            return {
+                url: process.env.AUDIOBOOKSHELF_URL || "",
+                apiKey: process.env.AUDIOBOOKSHELF_API_KEY || "",
+            };
+        },
         music: {
             musicPath: "/music",
             transcodeCachePath: "/tmp/soundspan-cache",

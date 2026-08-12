@@ -1,23 +1,14 @@
 import { logger } from "../utils/logger";
 import { createIORedisClient } from "../utils/ioredis";
 import type { GroupSnapshot } from "./listenTogetherManager";
+import { config } from "../config";
 
 const LISTEN_TOGETHER_STATE_STORE_ENABLED =
-    process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED !== "false";
+    config.listenTogether.stateStoreEnabled;
 const LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX =
-    process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX ||
-    "listen-together:state";
-const DEFAULT_LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS = 21_600; // 6 hours
-const parsedStateStoreTtlSeconds = Number.parseInt(
-    process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS ||
-        `${DEFAULT_LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
-    10,
-);
+    config.listenTogether.stateStoreKeyPrefix;
 const LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS =
-    Number.isFinite(parsedStateStoreTtlSeconds) &&
-    parsedStateStoreTtlSeconds > 0
-        ? parsedStateStoreTtlSeconds
-        : DEFAULT_LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS;
+    config.listenTogether.stateStoreTtlSeconds;
 
 function isLikelyGroupSnapshot(value: unknown): value is GroupSnapshot {
     if (!value || typeof value !== "object") return false;

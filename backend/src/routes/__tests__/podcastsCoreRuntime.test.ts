@@ -111,6 +111,14 @@ jest.mock("axios", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        get podcastDebug() {
+            return process.env.PODCAST_DEBUG === "1";
+        },
+    },
+}));
+
 import router, {
     refreshPodcastFeed,
     refreshAllPodcastFeeds,

@@ -55,6 +55,7 @@ jest.mock("../../utils/encryption", () => ({
 }));
 
 import { EventEmitter } from "node:events";
+jest.mock("../../config", () => ({ config: { nodeEnv: "test" } }));
 import router from "../tidalStreaming";
 
 function getRouteLayer(

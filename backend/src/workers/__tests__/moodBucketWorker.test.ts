@@ -65,6 +65,11 @@ describe("moodBucketWorker", () => {
         jest.doMock("../../services/moodBucketService", () => ({
             moodBucketService,
         }));
+        jest.doMock("../../config", () => ({
+            config: {
+                workers: { moodBucketClaimTtlMs: 2 * 60 * 1000 },
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../moodBucketWorker");

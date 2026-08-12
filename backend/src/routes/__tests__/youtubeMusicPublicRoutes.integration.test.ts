@@ -99,6 +99,7 @@ import {
     ytMusicService,
 } from "../../services/youtubeMusic";
 import { getSystemSettings } from "../../utils/systemSettings";
+jest.mock("../../config", () => ({ config: { nodeEnv: "test" } }));
 import router from "../youtubeMusic";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 

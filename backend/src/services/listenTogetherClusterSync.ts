@@ -2,12 +2,12 @@ import { randomUUID } from "crypto";
 import { createIORedisClient } from "../utils/ioredis";
 import { logger } from "../utils/logger";
 import type { GroupSnapshot } from "./listenTogetherManager";
+import { config } from "../config";
 
 const LISTEN_TOGETHER_STATE_SYNC_ENABLED =
-    process.env.LISTEN_TOGETHER_STATE_SYNC_ENABLED !== "false";
+    config.listenTogether.stateSyncEnabled;
 const LISTEN_TOGETHER_STATE_SYNC_CHANNEL =
-    process.env.LISTEN_TOGETHER_STATE_SYNC_CHANNEL ||
-    "listen-together:state-sync";
+    config.listenTogether.stateSyncChannel;
 
 interface ListenTogetherStateSyncEvent {
     type: "group-snapshot";
