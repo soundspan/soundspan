@@ -32,14 +32,16 @@ interface DiskCacheEntry {
 }
 
 /**
- * Resolves the browse image cache directory path, creating it lazily on first call.
+ * Returns the canonical root used for server-managed browse images.
  */
+export function getBrowseImageCacheRoot(): string {
+    return path.resolve(config.music.transcodeCachePath, "../covers/browse");
+}
+
+/** Resolves the browse image cache root, creating it lazily on first call. */
 function ensureCacheDir(): Promise<string> {
     if (cacheDirPromise) return cacheDirPromise;
-    const cacheDir = path.join(
-        config.music.transcodeCachePath,
-        "../covers/browse",
-    );
+    const cacheDir = getBrowseImageCacheRoot();
     cacheDirPromise = fs
         .mkdir(cacheDir, { recursive: true })
         .then(() => cacheDir);

@@ -1276,8 +1276,10 @@ describe("library cover-art proxy compatibility", () => {
             const queryRes = createRes();
             await coverArtHandler(queryReq, queryRes);
             expect(queryRes.sendFile).toHaveBeenCalledWith(
-                "/tmp/covers/albums/native-query.jpg",
+                "albums/native-query.jpg",
                 expect.objectContaining({
+                    dotfiles: "ignore",
+                    root: "/tmp/covers",
                     headers: expect.objectContaining({
                         "Access-Control-Allow-Origin":
                             "https://frontend.example",
@@ -1294,8 +1296,10 @@ describe("library cover-art proxy compatibility", () => {
             const idRes = createRes();
             await coverArtHandler(idReq, idRes);
             expect(idRes.sendFile).toHaveBeenCalledWith(
-                "/tmp/covers/albums/native-id.jpg",
+                "albums/native-id.jpg",
                 expect.objectContaining({
+                    dotfiles: "ignore",
+                    root: "/tmp/covers",
                     headers: expect.objectContaining({
                         "Access-Control-Allow-Origin": "*",
                     }),
@@ -1340,8 +1344,10 @@ describe("library cover-art proxy compatibility", () => {
             const allowedRes = createRes();
             await coverArtHandler(allowedReq, allowedRes);
             expect(allowedRes.sendFile).toHaveBeenCalledWith(
-                "/tmp/covers/albums/native-query.jpg",
+                "albums/native-query.jpg",
                 expect.objectContaining({
+                    dotfiles: "ignore",
+                    root: "/tmp/covers",
                     headers: expect.objectContaining({
                         "Access-Control-Allow-Origin":
                             "https://allowed.example",
@@ -1373,8 +1379,8 @@ describe("library cover-art proxy compatibility", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(queryRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/legacy-query.jpg",
-            expect.any(Object),
+            "albums/legacy-query.jpg",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "legacy-query" },
@@ -1391,8 +1397,8 @@ describe("library cover-art proxy compatibility", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(idRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/legacy-id.jpg",
-            expect.any(Object),
+            "albums/legacy-id.jpg",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "legacy-id" },
@@ -1429,12 +1435,12 @@ describe("library cover-art proxy compatibility", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(queryRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/legacy-fail-query.jpg",
-            expect.any(Object),
+            "albums/legacy-fail-query.jpg",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         expect(idRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/legacy-fail-id.jpg",
-            expect.any(Object),
+            "albums/legacy-fail-id.jpg",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         existsSpy.mockRestore();
     });
@@ -1470,12 +1476,12 @@ describe("library cover-art proxy compatibility", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(queryRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/nested",
-            expect.any(Object),
+            "albums/nested",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         expect(idRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/nested",
-            expect.any(Object),
+            "albums/nested",
+            expect.objectContaining({ root: "/tmp/covers" }),
         );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "nested" },

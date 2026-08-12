@@ -101,6 +101,7 @@ function createRes() {
         body: undefined as unknown,
         headers: {} as Record<string, string>,
         sentFilePath: undefined as string | undefined,
+        sentFileOptions: undefined as unknown,
         status: jest.fn(function (code: number) {
             res.statusCode = code;
             return res;
@@ -115,8 +116,9 @@ function createRes() {
             res.headersSent = true;
             return res;
         }),
-        sendFile: jest.fn(function (filePath: string) {
+        sendFile: jest.fn(function (filePath: string, options: unknown) {
             res.sentFilePath = filePath;
+            res.sentFileOptions = options;
             res.headersSent = true;
             return res;
         }),
@@ -292,14 +294,14 @@ describe("audiobooks advanced runtime", () => {
     it("serves local cover paths and fallback disk covers", async () => {
         prisma.audiobook.findUnique
             .mockResolvedValueOnce({
-                localCoverPath: "/cache/book-1.jpg",
+                localCoverPath: "/music/cover-cache/audiobooks/book-1.jpg",
                 coverUrl: null,
             })
             .mockResolvedValueOnce({ localCoverPath: null, coverUrl: null });
 
         fsExistsSync.mockImplementation(
             (targetPath: string) =>
-                targetPath === "/cache/book-1.jpg" ||
+                targetPath === "/music/cover-cache/audiobooks/book-1.jpg" ||
                 targetPath === "/music/cover-cache/audiobooks/book-2.jpg",
         );
 
@@ -312,7 +314,11 @@ describe("audiobooks advanced runtime", () => {
             localRes,
         );
         expect(localRes.statusCode).toBe(200);
-        expect(localRes.sentFilePath).toBe("/cache/book-1.jpg");
+        expect(localRes.sentFilePath).toBe("book-1.jpg");
+        expect(localRes.sentFileOptions).toEqual({
+            dotfiles: "ignore",
+            root: "/music/cover-cache/audiobooks",
+        });
         expect(localRes.headers["Cache-Control"]).toBe(
             "public, max-age=31536000, immutable",
         );
@@ -329,9 +335,7 @@ describe("audiobooks advanced runtime", () => {
                 localCoverPath: "/music/cover-cache/audiobooks/book-2.jpg",
             },
         });
-        expect(fallbackRes.sentFilePath).toBe(
-            "/music/cover-cache/audiobooks/book-2.jpg",
-        );
+        expect(fallbackRes.sentFilePath).toBe("book-2.jpg");
     });
 
     it("proxies cover from audiobookshelf and handles proxy miss/error", async () => {

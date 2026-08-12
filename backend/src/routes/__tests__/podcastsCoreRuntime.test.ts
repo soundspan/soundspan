@@ -83,6 +83,7 @@ jest.mock("../../services/rssParser", () => ({
 const podcastCacheService = {
     syncAllCovers: jest.fn(async () => ({ synced: 0 })),
     syncEpisodeCovers: jest.fn(async () => ({ synced: 0 })),
+    getCoverCacheRoot: () => "/cache",
 };
 jest.mock("../../services/podcastCache", () => ({
     podcastCacheService,

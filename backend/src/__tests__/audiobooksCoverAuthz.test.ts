@@ -206,7 +206,12 @@ describe("audiobook cover authorization and path containment", () => {
 
     it("serves a valid cover from the database path", async () => {
         const coverBytes = Buffer.from("database-cover-bytes");
-        const localCoverPath = path.join(mockTempRoot, "db-cover.jpg");
+        const localCoverPath = path.join(
+            mockMusicPath,
+            "cover-cache",
+            "audiobooks",
+            "db-cover.jpg",
+        );
         writeCover(localCoverPath, coverBytes);
         mockPrisma.audiobook.findUnique.mockResolvedValue({
             localCoverPath,
