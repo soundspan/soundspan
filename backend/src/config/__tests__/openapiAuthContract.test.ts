@@ -68,11 +68,6 @@ const AUTH_MATRIX: AuthExpectation[] = [
         anonymous: true,
     },
     {
-        method: "options",
-        path: "/api/audiobooks/{id}/cover",
-        anonymous: true,
-    },
-    {
         method: "get",
         path: "/api/webhooks/lidarr/verify",
         anonymous: true,

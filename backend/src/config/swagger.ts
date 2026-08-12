@@ -33,7 +33,6 @@ const ANONYMOUS_OPERATIONS = [
     ["/api/podcasts/{id}/cover", "get"],
     ["/api/podcasts/episodes/{episodeId}/cover", "options"],
     ["/api/podcasts/episodes/{episodeId}/cover", "get"],
-    ["/api/audiobooks/{id}/cover", "options"],
     ["/api/webhooks/lidarr/verify", "get"],
 ] as const;
 
