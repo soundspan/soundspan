@@ -1,11 +1,12 @@
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-    },
-}));
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) =>
     next(),
@@ -29,6 +30,7 @@ const prisma = {
     user: {
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
     },
 };
 
@@ -121,6 +123,7 @@ describe("auth TOTP behavior", () => {
         jest.spyOn(Date, "now").mockReturnValue(FIXED_EPOCH_MS);
 
         prisma.user.update.mockResolvedValue({});
+        prisma.user.updateMany.mockResolvedValue({ count: 1 });
         mockBcryptCompare.mockResolvedValue(true);
         mockGenerateToken.mockReturnValue("tok");
         mockGenerateRefreshToken.mockReturnValue("rtok");
@@ -150,8 +153,8 @@ describe("auth TOTP behavior", () => {
                 /^[A-F0-9]{8}$/.test(code),
             ),
         );
-        expect(prisma.user.update).toHaveBeenCalledWith({
-            where: { id: "u1" },
+        expect(prisma.user.updateMany).toHaveBeenCalledWith({
+            where: { id: "u1", twoFactorEnabled: false },
             data: {
                 twoFactorEnabled: true,
                 twoFactorSecret: `enc(${SECRET_B32})`,
@@ -188,7 +191,7 @@ describe("auth TOTP behavior", () => {
         await twoFaEnable(req, res);
 
         expect(res.statusCode).toBe(401);
-        expect(prisma.user.update).not.toHaveBeenCalled();
+        expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it("logs in with a valid TOTP token", async () => {

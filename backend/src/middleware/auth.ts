@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { findApiKeyRecord } from "../utils/apiKeyHash";
+import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
 
 // JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
@@ -188,7 +188,11 @@ async function authenticateRequest(
                 }),
             );
 
-            if (apiKeyRecord && apiKeyRecord.user) {
+            if (
+                apiKeyRecord &&
+                apiKeyRecord.user &&
+                !isApiKeyExpired(apiKeyRecord.createdAt)
+            ) {
                 // Update last used timestamp (async, don't block)
                 prisma.apiKey
                     .update({
@@ -302,7 +306,11 @@ export async function requireAuthOrToken(
                 }),
             );
 
-            if (apiKeyRecord && apiKeyRecord.user) {
+            if (
+                apiKeyRecord &&
+                apiKeyRecord.user &&
+                !isApiKeyExpired(apiKeyRecord.createdAt)
+            ) {
                 // Update last used timestamp (async, don't block)
                 prisma.apiKey
                     .update({

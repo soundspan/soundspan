@@ -10,6 +10,9 @@ import {
     planApiKeyHashing,
     getPepperSource,
     getPepperFingerprint,
+    getApiKeyExpiresAt,
+    isApiKeyExpired,
+    API_KEY_LIFETIME_MS,
     HASHED_KEY_PREFIX,
 } from "../apiKeyHash";
 
@@ -28,6 +31,20 @@ describe("apiKeyHash", () => {
 
     it("produces different hashes for different keys", () => {
         expect(hashApiKey("key-one")).not.toBe(hashApiKey("key-two"));
+    });
+
+    it("assigns and enforces a bounded API-key lifetime", () => {
+        const createdAt = new Date("2026-01-01T00:00:00.000Z");
+        const expiresAt = getApiKeyExpiresAt(createdAt);
+
+        expect(expiresAt.getTime() - createdAt.getTime()).toBe(
+            API_KEY_LIFETIME_MS,
+        );
+        expect(
+            isApiKeyExpired(createdAt, new Date(expiresAt.getTime() - 1)),
+        ).toBe(false);
+        expect(isApiKeyExpired(createdAt, expiresAt)).toBe(true);
+        expect(isApiKeyExpired("invalid-date", createdAt)).toBe(true);
     });
 
     it("isHashedApiKey distinguishes migrated values from legacy plaintext keys", () => {

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
@@ -17,6 +17,7 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
+import { sendRouteError } from "./routeErrorResponse";
 
 async function verifyTotpToken(
     secret: string,
@@ -41,6 +42,21 @@ async function verifyTotpToken(
 }
 
 const router = Router();
+function requireInteractiveSession(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+) {
+    // Interactive password/current-factor step-up is a documented frontend follow-up outside this slice.
+    if (req.headers["x-api-key"] !== undefined) {
+        return sendRouteError(
+            res,
+            403,
+            "Interactive session authentication required",
+        );
+    }
+    return next();
+}
 
 const loginSchema = z.object({
     username: z.string().min(1),
@@ -119,6 +135,7 @@ const decrypt2FASecret = decrypt;
  *   post:
  *     summary: Login with username and password
  *     tags: [Authentication]
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -140,7 +157,9 @@ const decrypt2FASecret = decrypt;
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/User'
+ *               oneOf:
+ *                 - $ref: '#/components/schemas/LoginTokenResponse'
+ *                 - $ref: '#/components/schemas/LoginTwoFactorChallenge'
  *       401:
  *         description: Invalid credentials
  *         content:
@@ -270,6 +289,7 @@ router.post("/login", async (req, res) => {
  *   post:
  *     summary: Logout the current user
  *     tags: [Authentication]
+ *     security: []
  *     responses:
  *       200:
  *         description: Logged out successfully
@@ -287,6 +307,7 @@ router.post("/logout", (req, res) => {
  *   post:
  *     summary: Refresh access token using a refresh token
  *     tags: [Authentication]
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1081,6 +1102,7 @@ router.delete<{ id: string }>(
  *   post:
  *     summary: Register a new user account with an invite code
  *     tags: [Authentication]
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1266,7 +1288,7 @@ router.post("/register", async (req, res) => {
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: 2FA secret and QR code generated
@@ -1278,41 +1300,48 @@ router.post("/register", async (req, res) => {
  *         description: User not found
  */
 // POST /auth/2fa/setup - Generate 2FA secret and QR code
-router.post("/2fa/setup", requireAuth, async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-            select: { username: true, twoFactorEnabled: true },
-        });
+router.post(
+    "/2fa/setup",
+    requireAuth,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            const user = await prisma.user.findUnique({
+                where: { id: req.user!.id },
+                select: { username: true, twoFactorEnabled: true },
+            });
 
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            if (user.twoFactorEnabled) {
+                return res
+                    .status(400)
+                    .json({ error: "2FA is already enabled" });
+            }
+
+            // Generate secret
+            const secret = generateSecret();
+            const otpauthUrl = generateURI({
+                issuer: BRAND_NAME,
+                label: user.username,
+                secret,
+            });
+
+            // Generate QR code
+            const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+            res.json({
+                secret,
+                qrCode: qrCodeDataUrl,
+            });
+        } catch (error) {
+            logger.error("2FA setup error:", error);
+            res.status(500).json({ error: "Failed to setup 2FA" });
         }
-
-        if (user.twoFactorEnabled) {
-            return res.status(400).json({ error: "2FA is already enabled" });
-        }
-
-        // Generate secret
-        const secret = generateSecret();
-        const otpauthUrl = generateURI({
-            issuer: BRAND_NAME,
-            label: user.username,
-            secret,
-        });
-
-        // Generate QR code
-        const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
-
-        res.json({
-            secret,
-            qrCode: qrCodeDataUrl,
-        });
-    } catch (error) {
-        logger.error("2FA setup error:", error);
-        res.status(500).json({ error: "Failed to setup 2FA" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -1322,7 +1351,7 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1348,65 +1377,78 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
  *         description: Invalid token or not authenticated
  */
 // POST /auth/2fa/enable - Verify token and enable 2FA
-router.post("/2fa/enable", requireAuth, async (req, res) => {
-    try {
-        const { secret, token } = req.body;
+router.post(
+    "/2fa/enable",
+    requireAuth,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            const { secret, token } = req.body;
 
-        if (!secret || !token) {
-            return res
-                .status(400)
-                .json({ error: "Secret and token are required" });
-        }
+            if (!secret || !token) {
+                return res
+                    .status(400)
+                    .json({ error: "Secret and token are required" });
+            }
 
-        // Verify the token with the secret
-        const verified = await verifyTotpToken(secret, token);
+            // Verify the token with the secret
+            const verified = await verifyTotpToken(secret, token);
 
-        if (!verified) {
-            return res
-                .status(401)
-                .json({ error: "Invalid token. Please try again." });
-        }
+            if (!verified) {
+                return res
+                    .status(401)
+                    .json({ error: "Invalid token. Please try again." });
+            }
 
-        // Generate 10 recovery codes
-        const recoveryCodes: string[] = [];
-        const hashedRecoveryCodes: string[] = [];
+            // Generate 10 recovery codes
+            const recoveryCodes: string[] = [];
+            const hashedRecoveryCodes: string[] = [];
 
-        for (let i = 0; i < 10; i++) {
-            // Generate 8-character alphanumeric code
-            const code = crypto.randomBytes(4).toString("hex").toUpperCase();
-            recoveryCodes.push(code);
-            // Hash the code before storing
-            hashedRecoveryCodes.push(
-                crypto.createHash("sha256").update(code).digest("hex"),
+            for (let i = 0; i < 10; i++) {
+                // Generate 8-character alphanumeric code
+                const code = crypto
+                    .randomBytes(4)
+                    .toString("hex")
+                    .toUpperCase();
+                recoveryCodes.push(code);
+                // Hash the code before storing
+                hashedRecoveryCodes.push(
+                    crypto.createHash("sha256").update(code).digest("hex"),
+                );
+            }
+
+            // Encrypt the hashed codes for storage
+            const encryptedRecoveryCodes = encrypt2FASecret(
+                hashedRecoveryCodes.join(","),
             );
+
+            // Encrypt and save the secret
+            const encryptedSecret = encrypt2FASecret(secret);
+            const enabled = await prisma.user.updateMany({
+                where: { id: req.user!.id, twoFactorEnabled: false },
+                data: {
+                    twoFactorEnabled: true,
+                    twoFactorSecret: encryptedSecret,
+                    twoFactorRecoveryCodes: encryptedRecoveryCodes,
+                },
+            });
+            if (enabled.count !== 1) {
+                return res
+                    .status(409)
+                    .json({ error: "2FA is already enabled" });
+            }
+
+            // Return the plain recovery codes to the user (only time they'll see them)
+            res.json({
+                message: "2FA enabled successfully",
+                recoveryCodes: recoveryCodes,
+            });
+        } catch (error) {
+            logger.error("2FA enable error:", error);
+            res.status(500).json({ error: "Failed to enable 2FA" });
         }
-
-        // Encrypt the hashed codes for storage
-        const encryptedRecoveryCodes = encrypt2FASecret(
-            hashedRecoveryCodes.join(","),
-        );
-
-        // Encrypt and save the secret
-        const encryptedSecret = encrypt2FASecret(secret);
-        await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                twoFactorEnabled: true,
-                twoFactorSecret: encryptedSecret,
-                twoFactorRecoveryCodes: encryptedRecoveryCodes,
-            },
-        });
-
-        // Return the plain recovery codes to the user (only time they'll see them)
-        res.json({
-            message: "2FA enabled successfully",
-            recoveryCodes: recoveryCodes,
-        });
-    } catch (error) {
-        logger.error("2FA enable error:", error);
-        res.status(500).json({ error: "Failed to enable 2FA" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -1416,7 +1458,7 @@ router.post("/2fa/enable", requireAuth, async (req, res) => {
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1444,56 +1486,64 @@ router.post("/2fa/enable", requireAuth, async (req, res) => {
  *         description: User not found
  */
 // POST /auth/2fa/disable - Disable 2FA
-router.post("/2fa/disable", requireAuth, async (req, res) => {
-    try {
-        const { password, token } = req.body;
+router.post(
+    "/2fa/disable",
+    requireAuth,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            const { password, token } = req.body;
 
-        if (!password || !token) {
-            return res
-                .status(400)
-                .json({ error: "Password and current 2FA token are required" });
-        }
-
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-        });
-
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
-        // Verify password
-        const validPassword = await bcrypt.compare(password, user.passwordHash);
-        if (!validPassword) {
-            return res.status(401).json({ error: "Invalid password" });
-        }
-
-        // Verify 2FA token
-        if (user.twoFactorSecret) {
-            const secret = decrypt2FASecret(user.twoFactorSecret);
-            const verified = await verifyTotpToken(secret, token);
-
-            if (!verified) {
-                return res.status(401).json({ error: "Invalid 2FA token" });
+            if (!password || !token) {
+                return res.status(400).json({
+                    error: "Password and current 2FA token are required",
+                });
             }
+
+            const user = await prisma.user.findUnique({
+                where: { id: req.user!.id },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Verify password
+            const validPassword = await bcrypt.compare(
+                password,
+                user.passwordHash,
+            );
+            if (!validPassword) {
+                return res.status(401).json({ error: "Invalid password" });
+            }
+
+            // Verify 2FA token
+            if (user.twoFactorSecret) {
+                const secret = decrypt2FASecret(user.twoFactorSecret);
+                const verified = await verifyTotpToken(secret, token);
+
+                if (!verified) {
+                    return res.status(401).json({ error: "Invalid 2FA token" });
+                }
+            }
+
+            // Disable 2FA
+            await prisma.user.update({
+                where: { id: req.user!.id },
+                data: {
+                    twoFactorEnabled: false,
+                    twoFactorSecret: null,
+                    twoFactorRecoveryCodes: null,
+                },
+            });
+
+            res.json({ message: "2FA disabled successfully" });
+        } catch (error) {
+            logger.error("2FA disable error:", error);
+            res.status(500).json({ error: "Failed to disable 2FA" });
         }
-
-        // Disable 2FA
-        await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                twoFactorEnabled: false,
-                twoFactorSecret: null,
-                twoFactorRecoveryCodes: null,
-            },
-        });
-
-        res.json({ message: "2FA disabled successfully" });
-    } catch (error) {
-        logger.error("2FA disable error:", error);
-        res.status(500).json({ error: "Failed to disable 2FA" });
-    }
-});
+    },
+);
 
 /**
  * @openapi

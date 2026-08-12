@@ -31,7 +31,7 @@ import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { hashApiKey } from "../../utils/apiKeyHash";
+import { API_KEY_LIFETIME_MS, hashApiKey } from "../../utils/apiKeyHash";
 
 // API-key hashing needs a pepper. This suite deletes SESSION_SECRET to exercise
 // the JWT_SECRET path, so provide SETTINGS_ENCRYPTION_KEY explicitly as the
@@ -247,6 +247,7 @@ describe("auth middleware", () => {
         it("authenticates via API key and updates lastUsed", async () => {
             mockApiKeyFindUnique.mockResolvedValue({
                 id: "key-1",
+                createdAt: new Date(),
                 user: { id: "u2", username: "api-user", role: "admin" },
             });
 
@@ -273,6 +274,26 @@ describe("auth middleware", () => {
                 role: "admin",
             });
             expect(next).toHaveBeenCalledTimes(1);
+        });
+
+        it("rejects an API key after its bounded lifetime", async () => {
+            mockApiKeyFindUnique.mockResolvedValue({
+                id: "expired-key",
+                createdAt: new Date(Date.now() - API_KEY_LIFETIME_MS - 1),
+                user: { id: "u2", username: "api-user", role: "admin" },
+            });
+
+            const req = createReq({ headers: { "x-api-key": "expired" } });
+            const res = createRes();
+            const next = jest.fn();
+
+            await requireAuth(asRequest(req), asResponse(res), asNext(next));
+
+            expect(next).not.toHaveBeenCalled();
+            expect(req.user).toBeUndefined();
+            expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+            expect(res.statusCode).toBe(401);
+            expect(res.body).toEqual({ error: "Not authenticated" });
         });
 
         it("authenticates via bearer token when tokenVersion matches", async () => {
@@ -372,6 +393,29 @@ describe("auth middleware", () => {
     });
 
     describe("requireAuthOrToken", () => {
+        it("rejects an expired API key", async () => {
+            mockApiKeyFindUnique.mockResolvedValue({
+                id: "expired-stream-key",
+                createdAt: new Date(Date.now() - API_KEY_LIFETIME_MS - 1),
+                user: { id: "u2", username: "api-user", role: "user" },
+            });
+
+            const req = createReq({ headers: { "x-api-key": "expired" } });
+            const res = createRes();
+            const next = jest.fn();
+
+            await requireAuthOrToken(
+                asRequest(req),
+                asResponse(res),
+                asNext(next),
+            );
+
+            expect(next).not.toHaveBeenCalled();
+            expect(req.user).toBeUndefined();
+            expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+            expect(res.statusCode).toBe(401);
+        });
+
         it("accepts query param tokens for streaming routes", async () => {
             mockJwtVerify.mockReturnValue({
                 userId: "stream-user",

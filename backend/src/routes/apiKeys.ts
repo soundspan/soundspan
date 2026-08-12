@@ -1,11 +1,29 @@
-import { Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { hashApiKey } from "../utils/apiKeyHash";
+import { getApiKeyExpiresAt, hashApiKey } from "../utils/apiKeyHash";
 import crypto from "crypto";
+import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
+const routeLogger = logger.child("ApiKeys");
+
+function requireInteractiveSession(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+) {
+    // Interactive password/current-factor step-up is a documented frontend follow-up outside this slice.
+    if (req.headers["x-api-key"] !== undefined) {
+        return sendRouteError(
+            res,
+            403,
+            "Interactive session authentication required",
+        );
+    }
+    return next();
+}
 
 // All API key routes require authentication (session-based)
 router.use(requireAuth);
@@ -18,6 +36,7 @@ router.use(requireAuth);
  *     tags: [API Keys]
  *     security:
  *       - sessionAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -49,6 +68,9 @@ router.use(requireAuth);
  *                 createdAt:
  *                   type: string
  *                   format: date-time
+ *                 expiresAt:
+ *                   type: string
+ *                   format: date-time
  *                 message:
  *                   type: string
  *                   example: "API key created successfully. Save this key - you won't see it again!"
@@ -65,7 +87,7 @@ router.use(requireAuth);
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post("/", async (req, res) => {
+router.post("/", requireInteractiveSession, async (req, res) => {
     try {
         const { deviceName } = req.body;
 
@@ -91,7 +113,7 @@ router.post("/", async (req, res) => {
             },
         });
 
-        logger.debug(`API key created for user ${userId}: ${deviceName}`);
+        routeLogger.debug("API key created", { userId, deviceName });
 
         res.status(201).json({
             // Return the raw key (not the stored hash) — the caller can never
@@ -99,11 +121,12 @@ router.post("/", async (req, res) => {
             apiKey: apiKeyValue,
             name: apiKey.name,
             createdAt: apiKey.createdAt,
+            expiresAt: getApiKeyExpiresAt(apiKey.createdAt),
             message:
                 "API key created successfully. Save this key - you won't see it again!",
         });
     } catch (error) {
-        logger.error("Create API key error:", error);
+        routeLogger.error("Create API key error", { error });
         res.status(500).json({ error: "Failed to create API key" });
     }
 });
@@ -116,6 +139,8 @@ router.post("/", async (req, res) => {
  *     tags: [API Keys]
  *     security:
  *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
  *     responses:
  *       200:
  *         description: List of API keys (without the actual key values for security)
@@ -155,9 +180,14 @@ router.get("/", async (req, res) => {
             orderBy: { createdAt: "desc" },
         });
 
-        res.json({ apiKeys: keys });
+        res.json({
+            apiKeys: keys.map((key) => ({
+                ...key,
+                expiresAt: getApiKeyExpiresAt(key.createdAt),
+            })),
+        });
     } catch (error) {
-        logger.error("List API keys error:", error);
+        routeLogger.error("List API keys error", { error });
         res.status(500).json({ error: "Failed to list API keys" });
     }
 });
@@ -170,6 +200,7 @@ router.get("/", async (req, res) => {
  *     tags: [API Keys]
  *     security:
  *       - sessionAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -201,7 +232,7 @@ router.get("/", async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireInteractiveSession, async (req, res) => {
     try {
         // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth
         const userId = req.user?.id || req.session?.userId;
@@ -209,6 +240,9 @@ router.delete("/:id", async (req, res) => {
             return res.status(401).json({ error: "Not authenticated" });
         }
         const keyId = req.params.id;
+        if (typeof keyId !== "string" || keyId.length === 0) {
+            return sendRouteError(res, 400, "API key ID is required");
+        }
 
         // Only allow users to delete their own keys
         const deleted = await prisma.apiKey.deleteMany({
@@ -224,11 +258,11 @@ router.delete("/:id", async (req, res) => {
                 .json({ error: "API key not found or already deleted" });
         }
 
-        logger.debug(`API key ${keyId} revoked by user ${userId}`);
+        routeLogger.debug("API key revoked", { keyId, userId });
 
         res.json({ message: "API key revoked successfully" });
     } catch (error) {
-        logger.error("Delete API key error:", error);
+        routeLogger.error("Delete API key error", { error });
         res.status(500).json({ error: "Failed to revoke API key" });
     }
 });

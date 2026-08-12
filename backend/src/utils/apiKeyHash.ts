@@ -13,6 +13,31 @@ import { createHmac } from "crypto";
  */
 export const HASHED_KEY_PREFIX = "hmac:";
 
+/** Maximum lifetime of an API key, measured from its persisted creation time. */
+export const API_KEY_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** Derive the externally visible expiry from an API key's creation time. */
+export function getApiKeyExpiresAt(createdAt: Date): Date {
+    const createdAtMs = createdAt.getTime();
+    if (!Number.isFinite(createdAtMs)) {
+        throw new TypeError("API key creation time must be a valid Date");
+    }
+    return new Date(createdAtMs + API_KEY_LIFETIME_MS);
+}
+
+/** Fail closed when an API key has reached its lifetime or has an invalid timestamp. */
+export function isApiKeyExpired(
+    createdAt: unknown,
+    now: Date = new Date(),
+): boolean {
+    if (!(createdAt instanceof Date) || !Number.isFinite(createdAt.getTime())) {
+        return true;
+    }
+    const nowMs = now.getTime();
+    if (!Number.isFinite(nowMs)) return true;
+    return getApiKeyExpiresAt(createdAt).getTime() <= nowMs;
+}
+
 /**
  * Resolve the HMAC pepper. Prefers a dedicated `API_KEY_PEPPER` (Helm-managed,
  * stabilized like the other secrets), falling back to `SETTINGS_ENCRYPTION_KEY`

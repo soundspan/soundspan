@@ -8,14 +8,15 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-    },
-}));
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 const prisma = {
     apiKey: {
@@ -139,7 +140,11 @@ describe("apiKeys routes runtime", () => {
                 name: "My Phone",
                 message:
                     "API key created successfully. Save this key - you won't see it again!",
+                expiresAt: expect.any(Date),
             }),
+        );
+        expect(res.body.expiresAt.getTime()).toBeGreaterThan(
+            res.body.createdAt.getTime(),
         );
     });
 
@@ -176,7 +181,11 @@ describe("apiKeys routes runtime", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             apiKeys: expect.arrayContaining([
-                expect.objectContaining({ id: "k1", name: "My Phone" }),
+                expect.objectContaining({
+                    id: "k1",
+                    name: "My Phone",
+                    expiresAt: expect.any(Date),
+                }),
             ]),
         });
 

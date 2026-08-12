@@ -1,13 +1,16 @@
 import crypto from "crypto";
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-    },
-}));
+jest.mock("../../config", () => ({ config: { port: 3006 } }));
+
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
 const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) =>
     next(),
@@ -33,6 +36,7 @@ const prisma = {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         delete: jest.fn(),
     },
     userSettings: {
@@ -96,6 +100,7 @@ jest.mock("../../utils/encryption", () => ({
     decrypt: mockDecrypt,
 }));
 
+import { swaggerSpec } from "../../config/swagger";
 import router from "../auth";
 
 function getHandler(path: string, method: "get" | "post" | "put" | "delete") {
@@ -125,6 +130,36 @@ function createRes() {
     return res;
 }
 
+function expectLoginBodyMatchesOpenApi(body: Record<string, unknown>): void {
+    const document = swaggerSpec as any;
+    const oneOf =
+        document.paths["/api/auth/login"].post.responses["200"].content[
+            "application/json"
+        ].schema.oneOf;
+    const schemas = document.components.schemas;
+    const matchingSchemas = oneOf.filter((candidate: { $ref: string }) => {
+        const schemaName = candidate.$ref.split("/").at(-1);
+        if (!schemaName) return false;
+        const schema = schemas[schemaName];
+        return (
+            schema.required.every((key: string) => key in body) &&
+            Object.keys(body).every((key) => key in schema.properties)
+        );
+    });
+
+    expect(matchingSchemas).toHaveLength(1);
+    if ("user" in body) {
+        const user = body.user as Record<string, unknown>;
+        const userSchema = schemas.LoginUser;
+        expect(userSchema.required.every((key: string) => key in user)).toBe(
+            true,
+        );
+        expect(
+            Object.keys(user).every((key) => key in userSchema.properties),
+        ).toBe(true);
+    }
+}
+
 describe("auth routes runtime", () => {
     const login = getHandler("/login", "post");
     const logout = getHandler("/logout", "post");
@@ -151,6 +186,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValue({
             id: "u1",
             username: "alice",
+            displayName: null,
             role: "user",
             passwordHash: "hash-1",
             tokenVersion: 1,
@@ -170,6 +206,7 @@ describe("auth routes runtime", () => {
             createdAt: new Date("2026-02-01T00:00:00.000Z"),
         });
         prisma.user.update.mockResolvedValue({});
+        prisma.user.updateMany.mockResolvedValue({ count: 1 });
         prisma.user.delete.mockResolvedValue({});
         prisma.userSettings.create.mockResolvedValue({});
 
@@ -226,6 +263,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValue({
             id: "u1",
             username: "alice",
+            displayName: null,
             role: "user",
             passwordHash: "hash-1",
             tokenVersion: 1,
@@ -244,6 +282,7 @@ describe("auth routes runtime", () => {
             requires2FA: true,
             message: "2FA token required",
         });
+        expectLoginBodyMatchesOpenApi(challengeRes.body);
 
         mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         const totpReq = {
@@ -258,9 +297,11 @@ describe("auth routes runtime", () => {
             user: {
                 id: "u1",
                 username: "alice",
+                displayName: null,
                 role: "user",
             },
         });
+        expectLoginBodyMatchesOpenApi(totpRes.body);
 
         const recoveryReq = {
             body: { username: "alice", password: "pw", token: "ABCDEF12" },
@@ -670,6 +711,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "u1",
             passwordHash: "hash-1",
+            twoFactorEnabled: true,
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(false);
@@ -684,6 +726,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "u1",
             passwordHash: "hash-1",
+            twoFactorEnabled: true,
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
@@ -699,6 +742,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "u1",
             passwordHash: "hash-1",
+            twoFactorEnabled: true,
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
@@ -746,7 +790,7 @@ describe("auth routes runtime", () => {
 
     it("returns 500 for 2FA enable failures", async () => {
         mockOtplibVerify.mockResolvedValueOnce({ valid: true });
-        prisma.user.update.mockRejectedValueOnce(new Error("db"));
+        prisma.user.updateMany.mockRejectedValueOnce(new Error("db"));
 
         const req = {
             user: { id: "u1" },
@@ -763,6 +807,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "u1",
             passwordHash: "hash-1",
+            twoFactorEnabled: true,
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
@@ -1447,6 +1492,7 @@ describe("auth routes runtime", () => {
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "u1",
             passwordHash: "hash-1",
+            twoFactorEnabled: true,
             twoFactorSecret: null,
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
