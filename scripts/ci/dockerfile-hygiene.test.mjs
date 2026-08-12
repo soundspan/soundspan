@@ -35,7 +35,7 @@ function isExternalImage(reference) {
     return /[:@/]/.test(reference);
 }
 
-function composeConfig(postgresPassword, { noInterpolate = false } = {}) {
+function composeConfig(postgresPassword) {
     const environment = {
         ...process.env,
         INTERNAL_API_SECRET: "test-internal-secret",
@@ -57,7 +57,6 @@ function composeConfig(postgresPassword, { noInterpolate = false } = {}) {
         "-f",
         path.join(repoRoot, "docker-compose.yml"),
         "config",
-        ...(noInterpolate ? ["--no-interpolate"] : []),
         "--format",
         "json",
     ];
@@ -67,6 +66,43 @@ function composeConfig(postgresPassword, { noInterpolate = false } = {}) {
         encoding: "utf8",
         env: environment,
     });
+}
+
+function composeServiceBlock(compose, serviceName) {
+    const lines = compose.split(/\r?\n/);
+    const startIndex = lines.findIndex(
+        (line) => line.trimStart() === `${serviceName}:`,
+    );
+    assert.notEqual(
+        startIndex,
+        -1,
+        `docker-compose.yml: ${serviceName} service must exist`,
+    );
+
+    const indentation = lines[startIndex].match(/^\s*/)[0];
+    const endOffset = lines
+        .slice(startIndex + 1)
+        .findIndex(
+            (line) =>
+                line.startsWith(indentation) &&
+                /^[A-Za-z0-9_-]+:\s*$/.test(line.slice(indentation.length)),
+        );
+    const endIndex =
+        endOffset === -1 ? lines.length : startIndex + endOffset + 1;
+    return lines.slice(startIndex, endIndex).join("\n");
+}
+
+function requiredSecretSubstitution(serviceBlock, serviceName, secretName) {
+    const pattern = new RegExp(
+        `^\\s*${secretName}:\\s*"?(\\$\\{${secretName}:\\?[^}\\r\\n]*\\})"?\\s*$`,
+        "m",
+    );
+    const match = serviceBlock.match(pattern);
+    assert.ok(
+        match,
+        `docker-compose.yml: ${serviceName} must require ${secretName} with \${${secretName}:?...}`,
+    );
+    return match[1];
 }
 
 function runPostgresEntrypoint(postgres, postgresPassword, executablePath) {
@@ -241,14 +277,9 @@ test("8. split-stack compose applies the configured PostgreSQL password everywhe
 });
 
 test("9. split-stack worker requires its startup secrets", () => {
-    const result = composeConfig("test-explicit-postgres-password", {
-        noInterpolate: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-
-    const services = JSON.parse(result.stdout).services;
-    const backendEnvironment = services.backend.environment;
-    const workerEnvironment = services["backend-worker"].environment;
+    const compose = readRepoFile("docker-compose.yml");
+    const backendBlock = composeServiceBlock(compose, "backend");
+    const workerBlock = composeServiceBlock(compose, "backend-worker");
     const requiredSecrets = [
         "SESSION_SECRET",
         "SETTINGS_ENCRYPTION_KEY",
@@ -256,16 +287,20 @@ test("9. split-stack worker requires its startup secrets", () => {
     ];
 
     for (const secret of requiredSecrets) {
-        const workerSubstitution = workerEnvironment[secret];
+        const backendSubstitution = requiredSecretSubstitution(
+            backendBlock,
+            "backend",
+            secret,
+        );
+        const workerSubstitution = requiredSecretSubstitution(
+            workerBlock,
+            "backend-worker",
+            secret,
+        );
         assert.equal(
             workerSubstitution,
-            backendEnvironment[secret],
+            backendSubstitution,
             `backend-worker must use backend's required substitution for ${secret}`,
-        );
-        assert.equal(typeof workerSubstitution, "string");
-        assert.ok(
-            workerSubstitution.startsWith(`\${${secret}:?`),
-            `backend-worker must fail closed when ${secret} is unset`,
         );
     }
 });
