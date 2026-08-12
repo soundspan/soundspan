@@ -39,6 +39,17 @@ import {
     isNativePath,
 } from "../imageStorage";
 
+function createImageResponse(
+    byteLength: number,
+    contentType: string,
+    status = 200,
+): Response {
+    return new Response(new Uint8Array(byteLength), {
+        status,
+        headers: { "content-type": contentType },
+    });
+}
+
 describe("imageStorage service", () => {
     const fetchMock = jest.fn();
     const timeoutMock = jest.fn();
@@ -63,12 +74,9 @@ describe("imageStorage service", () => {
             if (target.includes("/covers/artists")) return false;
             return true;
         });
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            headers: { get: () => "image/jpeg" },
-            arrayBuffer: async () => new Uint8Array(1600).buffer,
-        });
+        fetchMock.mockResolvedValueOnce(
+            createImageResponse(1600, "image/jpeg"),
+        );
 
         const result = await downloadAndStoreImage(
             "https://img.example.com/a.jpg",
@@ -115,12 +123,9 @@ describe("imageStorage service", () => {
     });
 
     it("returns null for non-ok fetch responses", async () => {
-        fetchMock.mockResolvedValueOnce({
-            ok: false,
-            status: 404,
-            headers: { get: () => "image/jpeg" },
-            arrayBuffer: async () => new Uint8Array(2000).buffer,
-        });
+        fetchMock.mockResolvedValueOnce(
+            createImageResponse(2000, "image/jpeg", 404),
+        );
 
         const result = await downloadAndStoreImage(
             "https://img.example.com/missing.jpg",
@@ -132,12 +137,7 @@ describe("imageStorage service", () => {
     });
 
     it("returns null when content-type is not image", async () => {
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            headers: { get: () => "text/html" },
-            arrayBuffer: async () => new Uint8Array(2000).buffer,
-        });
+        fetchMock.mockResolvedValueOnce(createImageResponse(2000, "text/html"));
 
         const result = await downloadAndStoreImage(
             "https://img.example.com/not-image",
@@ -149,12 +149,7 @@ describe("imageStorage service", () => {
     });
 
     it("returns null when image is too small", async () => {
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            headers: { get: () => "image/png" },
-            arrayBuffer: async () => new Uint8Array(100).buffer,
-        });
+        fetchMock.mockResolvedValueOnce(createImageResponse(100, "image/png"));
 
         const result = await downloadAndStoreImage(
             "https://img.example.com/tiny.png",
