@@ -342,7 +342,7 @@ describe("enrichment route runtime behavior", () => {
         mockSystemSettingsFindUnique.mockResolvedValue({
             autoEnrichMetadata: true,
         });
-        mockGetFailures.mockResolvedValue({ items: [], total: 0 });
+        mockGetFailures.mockResolvedValue({ failures: [], total: 0 });
         mockGetFailureCounts.mockResolvedValue({
             artist: 1,
             track: 2,
@@ -1022,7 +1022,7 @@ describe("enrichment route runtime behavior", () => {
             offset: 10,
         });
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual({ items: [], total: 0 });
+        expect(res.body).toEqual({ failures: [], total: 0 });
 
         mockGetFailures.mockRejectedValueOnce(new Error("bad query"));
         const errorRes = createRes();
