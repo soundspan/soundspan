@@ -128,7 +128,8 @@ export function AudiobookHero({
                         </div>
 
                         {/* Series & Genre tags - compact */}
-                        {(audiobook.series || audiobook.genres?.length > 0) && (
+                        {(audiobook.series ||
+                            (audiobook.genres?.length ?? 0) > 0) && (
                             <div className="hidden md:flex flex-wrap gap-1.5 mt-3">
                                 {audiobook.series && (
                                     <span className="px-2.5 py-0.5 bg-white/10 rounded-full text-xs text-white/80">

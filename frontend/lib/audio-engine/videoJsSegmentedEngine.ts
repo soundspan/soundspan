@@ -788,8 +788,9 @@ export class VideoJsSegmentedEngine implements AudioEngine {
 
     setMuted(value: boolean): void {
         this.player.muted(Boolean(value));
+        const currentVolume = this.player.volume();
         this.emit("volume", {
-            volume: this.player.volume(),
+            volume: isFiniteNumber(currentVolume) ? currentVolume : 0,
             muted: this.player.muted(),
         });
     }

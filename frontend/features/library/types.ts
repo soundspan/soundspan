@@ -4,7 +4,7 @@ export interface Artist {
     id: string;
     mbid?: string;
     name: string;
-    coverArt?: string;
+    coverArt?: string | null;
     albumCount?: number;
     trackCount?: number;
 }
@@ -12,7 +12,7 @@ export interface Artist {
 export interface Album {
     id: string;
     title: string;
-    coverArt?: string;
+    coverArt?: string | null;
     year?: number;
     artist?: {
         id: string;
@@ -29,7 +29,7 @@ export interface Track {
     album?: {
         id: string;
         title: string;
-        coverArt?: string;
+        coverArt?: string | null;
         artist?: {
             id: string;
             name: string;

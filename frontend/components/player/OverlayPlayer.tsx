@@ -393,14 +393,26 @@ export function OverlayPlayer() {
         return [...relatedTracks].sort((a, b) => {
             const scoreA =
                 (a.inLibrary ? 1000 : 0) +
-                (Number.isFinite(a.matchConfidence) ? a.matchConfidence : 0) *
+                (typeof a.matchConfidence === "number" &&
+                Number.isFinite(a.matchConfidence)
+                    ? a.matchConfidence
+                    : 0) *
                     2 +
-                (Number.isFinite(a.similarity) ? a.similarity * 100 : 0);
+                (typeof a.similarity === "number" &&
+                Number.isFinite(a.similarity)
+                    ? a.similarity * 100
+                    : 0);
             const scoreB =
                 (b.inLibrary ? 1000 : 0) +
-                (Number.isFinite(b.matchConfidence) ? b.matchConfidence : 0) *
+                (typeof b.matchConfidence === "number" &&
+                Number.isFinite(b.matchConfidence)
+                    ? b.matchConfidence
+                    : 0) *
                     2 +
-                (Number.isFinite(b.similarity) ? b.similarity * 100 : 0);
+                (typeof b.similarity === "number" &&
+                Number.isFinite(b.similarity)
+                    ? b.similarity * 100
+                    : 0);
             return scoreB - scoreA;
         });
     }, [relatedTracks]);
@@ -2496,6 +2508,13 @@ export function OverlayPlayer() {
                                                                         trackKey;
                                                                     const isInLibrary =
                                                                         !!track.inLibrary;
+                                                                    const albumCover =
+                                                                        track
+                                                                            .album
+                                                                            ?.coverArt ||
+                                                                        track
+                                                                            .album
+                                                                            ?.coverUrl;
                                                                     return (
                                                                         <button
                                                                             key={`${track.id || track.title}-${idx}`}
@@ -2508,20 +2527,10 @@ export function OverlayPlayer() {
                                                                             className="group flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
                                                                         >
                                                                             <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
-                                                                                {track
-                                                                                    .album
-                                                                                    ?.coverArt ||
-                                                                                track
-                                                                                    .album
-                                                                                    ?.coverUrl ? (
+                                                                                {albumCover ? (
                                                                                     <Image
                                                                                         src={api.getCoverArtUrl(
-                                                                                            track
-                                                                                                .album
-                                                                                                .coverArt ||
-                                                                                                track
-                                                                                                    .album
-                                                                                                    .coverUrl,
+                                                                                            albumCover,
                                                                                             100,
                                                                                         )}
                                                                                         alt={

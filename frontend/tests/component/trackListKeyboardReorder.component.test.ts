@@ -77,13 +77,14 @@ async function mountTrackList(
 ) {
     const { createRoot } = await import("react-dom/client");
     const { TrackList } = await import("../../components/track");
+    const TypedTrackList = TrackList<(typeof items)[number]>;
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
 
     await React.act(async () => {
         root.render(
-            React.createElement(TrackList, {
+            React.createElement(TypedTrackList, {
                 items,
                 toRowItem,
                 onPlay: (item: (typeof items)[number]) =>

@@ -14,6 +14,10 @@ const state = {
         id: "track-1",
         duration: 200,
         audioFeatures: null as null | Record<string, number>,
+    } as null | {
+        id: string;
+        duration: number;
+        audioFeatures: null | Record<string, number>;
     },
     currentAudiobook: null as null | {
         id: string;

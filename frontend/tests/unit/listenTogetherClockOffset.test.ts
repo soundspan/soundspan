@@ -41,7 +41,9 @@ class FakeSocket {
         const ack = args.at(-1);
         assert.equal(typeof ack, "function");
         const serverTime = this.serverTimesMs.shift();
-        assert.notEqual(serverTime, undefined);
+        if (serverTime === undefined) {
+            throw new Error("missing test server time");
+        }
         (ack as (response: { serverTime: number }) => void)({ serverTime });
         return this;
     }
@@ -99,7 +101,9 @@ function createClockSampler(options: {
         getToken: () => "test-token",
         now: () => {
             const now = localTimesMs.shift();
-            assert.notEqual(now, undefined);
+            if (now === undefined) {
+                throw new Error("missing test local time");
+            }
             return now;
         },
         setInterval: (callback) => {
@@ -117,7 +121,9 @@ function createClockSampler(options: {
         socket,
         fakeSocket,
         sampleAgain: () => {
-            assert.ok(intervalCallback);
+            if (!intervalCallback) {
+                throw new Error("clock sample interval was not registered");
+            }
             intervalCallback();
         },
     };
@@ -228,7 +234,9 @@ function invokeResumeAndCapture(
         setListenTogetherSessionSnapshot(null);
         listenTogetherSocket.disconnect();
     }
-    assert.notEqual(targetSec, null);
+    if (targetSec === null) {
+        throw new Error("resume did not emit a seek target");
+    }
     return targetSec;
 }
 

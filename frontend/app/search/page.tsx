@@ -125,14 +125,15 @@ export default function SearchPage() {
     const discoverPodcastResults = discoverResults.filter(
         (result) => result.type === "podcast",
     );
+    const libraryTracks = libraryResults?.tracks ?? [];
+    const libraryAlbums = libraryResults?.albums ?? [];
+    const libraryPodcasts = libraryResults?.podcasts ?? [];
     const hasPodcastResults =
-        (libraryResults?.podcasts?.length || 0) > 0 ||
-        discoverPodcastResults.length > 0;
+        libraryPodcasts.length > 0 || discoverPodcastResults.length > 0;
 
     // Determine if we should show the 2-column layout
     const hasTopResult = libraryResults?.artists?.[0] || topArtist;
-    const hasTracks =
-        libraryResults?.tracks?.length > 0 || soulseekResults.length > 0;
+    const hasTracks = libraryTracks.length > 0 || soulseekResults.length > 0;
     const show2ColumnLayout =
         hasSearched &&
         hasTopResult &&
@@ -351,10 +352,9 @@ export default function SearchPage() {
                                         </div>
                                     ))}
                                 </div>
-                            ) : showLibrary &&
-                              libraryResults?.tracks?.length > 0 ? (
+                            ) : showLibrary && libraryTracks.length > 0 ? (
                                 <LibraryTracksList
-                                    tracks={libraryResults.tracks}
+                                    tracks={libraryTracks}
                                     limit={isTracksView ? null : 10}
                                 />
                             ) : null}
@@ -438,7 +438,7 @@ export default function SearchPage() {
                             showLibrary &&
                             !isPodcastTab &&
                             (sectionView === null || isTracksView) &&
-                            libraryResults?.tracks?.length > 0 && (
+                            libraryTracks.length > 0 && (
                                 <section>
                                     <h2 className="text-2xl font-bold text-white mb-6">
                                         <Link
@@ -449,7 +449,7 @@ export default function SearchPage() {
                                         </Link>
                                     </h2>
                                     <LibraryTracksList
-                                        tracks={libraryResults.tracks}
+                                        tracks={libraryTracks}
                                         limit={isTracksView ? null : 10}
                                     />
                                 </section>
@@ -462,7 +462,7 @@ export default function SearchPage() {
                     showLibrary &&
                     !isPodcastTab &&
                     (sectionView === null || isAlbumsView) &&
-                    libraryResults?.albums?.length > 0 && (
+                    libraryAlbums.length > 0 && (
                         <section>
                             <h2 className="text-2xl font-bold text-white mb-6">
                                 <Link
@@ -473,7 +473,7 @@ export default function SearchPage() {
                                 </Link>
                             </h2>
                             <LibraryAlbumsGrid
-                                albums={libraryResults.albums}
+                                albums={libraryAlbums}
                                 limit={isAlbumsView ? null : 6}
                             />
                         </section>
@@ -483,13 +483,13 @@ export default function SearchPage() {
                 {hasSearched &&
                     showPodcastResults &&
                     !isSectionView &&
-                    libraryResults?.podcasts?.length > 0 && (
+                    libraryPodcasts.length > 0 && (
                         <section>
                             <h2 className="text-2xl font-bold text-white mb-6">
                                 Podcasts in Your Library
                             </h2>
                             <LibraryPodcastsGrid
-                                podcasts={libraryResults.podcasts}
+                                podcasts={libraryPodcasts}
                                 limit={isPodcastTab ? null : 6}
                             />
                         </section>

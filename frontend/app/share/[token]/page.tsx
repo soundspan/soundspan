@@ -206,7 +206,14 @@ export default function SharePage() {
     }, [data]);
 
     const playlistFilteredItems = useMemo(
-        () => playlistSortedItems.filter((item) => item.track !== null),
+        () =>
+            playlistSortedItems.filter(
+                (
+                    item,
+                ): item is PlaylistItemResource & {
+                    track: NonNullable<PlaylistItemResource["track"]>;
+                } => item.track !== null,
+            ),
         [playlistSortedItems],
     );
 

@@ -219,10 +219,7 @@ export function resolveServerPlaybackPollDecision(
         input.localPlaybackType === "track" && input.localMediaId
             ? input.localMediaId
             : null;
-    const hasActiveLocalTrackQueue =
-        Boolean(localActiveTrackId) && input.localQueue.length > 0;
-
-    if (hasActiveLocalTrackQueue) {
+    if (localActiveTrackId && input.localQueue.length > 0) {
         if (isServerQueueTruncatedPrefix(input.localQueue, input.serverQueue)) {
             return {
                 shouldApplyServerSnapshot: false,

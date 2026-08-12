@@ -19,6 +19,10 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 type EngineKind = "howler" | "videojs";
 type AnyAudioEventHandler = (payload: unknown) => void;
+interface PendingLazyLoad {
+    sequence: number;
+    autoplayOverride: boolean | null;
+}
 
 /** Which concrete engine occupies the direct-playback slot. */
 export type DirectEngineDescriptor = "howler" | "native" | "tauri-native";
@@ -155,10 +159,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     // of acting on the stale active engine. Non-null only while the most
     // recent load() is deferred; autoplayOverride wins over the original
     // load options when set.
-    private pendingLazyLoad: {
-        sequence: number;
-        autoplayOverride: boolean | null;
-    } | null = null;
+    private pendingLazyLoad: PendingLazyLoad | null = null;
     private isDestroyed = false;
     private outputVolume = DEFAULT_AUDIO_VOLUME;
     private outputMuted = false;
@@ -256,7 +257,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
             // unless a newer load superseded it in the meantime. play()/pause()
             // in the interim adjust autoplay via pendingLazyLoad rather than
             // cancelling the load (see those methods).
-            const pendingLazyLoad: NonNullable<typeof this.pendingLazyLoad> = {
+            const pendingLazyLoad: PendingLazyLoad = {
                 sequence,
                 autoplayOverride: null,
             };

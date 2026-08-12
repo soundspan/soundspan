@@ -16,7 +16,10 @@ import {
     setListenTogetherSessionSnapshot,
     type ListenTogetherSessionSnapshot,
 } from "../../lib/listen-together-session";
-import { listenTogetherSocket } from "../../lib/listen-together-socket";
+import {
+    listenTogetherSocket,
+    type ListenTogetherSocketCallbacks,
+} from "../../lib/listen-together-socket";
 import { api } from "@/lib/api";
 
 GlobalRegistrator.register();
@@ -106,8 +109,8 @@ async function waitFor(
 }
 
 function clearWindowStorage(): void {
-    delete globalScope.window;
-    delete globalScope.localStorage;
+    Reflect.deleteProperty(globalScope, "window");
+    Reflect.deleteProperty(globalScope, "localStorage");
 }
 
 const snapshot: ListenTogetherSessionSnapshot = {
@@ -136,13 +139,13 @@ afterEach(() => {
     setListenTogetherMembershipPending(false);
 
     if (typeof previousWindow === "undefined") {
-        delete (globalScope as any).window;
+        Reflect.deleteProperty(globalScope, "window");
     } else {
         (globalScope as any).window = previousWindow;
     }
 
     if (typeof previousLocalStorage === "undefined") {
-        delete (globalScope as any).localStorage;
+        Reflect.deleteProperty(globalScope, "localStorage");
     } else {
         (globalScope as any).localStorage = previousLocalStorage;
     }
@@ -740,33 +743,6 @@ type MockGroupSnapshot = {
     }>;
 };
 
-type ListenTogetherCallbacks = {
-    onPlaybackDelta: (delta: {
-        isPlaying: boolean;
-        positionMs: number;
-        serverTime: number;
-        stateVersion: number;
-        currentIndex: number;
-        trackId: string | null;
-    }) => void;
-    onAvailability: (data: {
-        availability: Array<{
-            queueIndex: number;
-            available: boolean;
-            source?: "local" | "tidal" | "youtube";
-            localTrackId?: string;
-        }>;
-        stateVersion: number;
-    }) => void;
-    onWaiting: (data: { trackId: string | null; currentIndex: number }) => void;
-    onPlayAt: (data: {
-        positionMs: number;
-        serverTime: number;
-        stateVersion: number;
-    }) => void;
-    onConnect: () => void;
-};
-
 const providerAuthState = {
     userId: "host-id",
 };
@@ -774,7 +750,7 @@ const providerApiState: { group: MockGroupSnapshot | null } = {
     group: null,
 };
 const providerSocketState = {
-    callbacks: null as ListenTogetherCallbacks | null,
+    callbacks: null as ListenTogetherSocketCallbacks | null,
     seekCalls: [] as number[],
     reportReadyCalls: 0,
 };
@@ -849,10 +825,28 @@ const providerControls = {
     },
 };
 
-const providerSocket = {
+type ProviderSocketStub = {
+    isConnected: boolean;
+    probeRoute: typeof listenTogetherSocket.probeRoute;
+    connect: typeof listenTogetherSocket.connect;
+    disconnect: typeof listenTogetherSocket.disconnect;
+    joinGroup: typeof listenTogetherSocket.joinGroup;
+    reportReady: typeof listenTogetherSocket.reportReady;
+    play: typeof listenTogetherSocket.play;
+    pause: typeof listenTogetherSocket.pause;
+    seek: typeof listenTogetherSocket.seek;
+    next: typeof listenTogetherSocket.next;
+    previous: typeof listenTogetherSocket.previous;
+    setTrack: typeof listenTogetherSocket.setTrack;
+    addToQueue: typeof listenTogetherSocket.addToQueue;
+    removeFromQueue: typeof listenTogetherSocket.removeFromQueue;
+    clearQueue: typeof listenTogetherSocket.clearQueue;
+};
+
+const providerSocket: ProviderSocketStub = {
     isConnected: false,
     probeRoute: async () => ({ ok: true }),
-    connect: (callbacks: ListenTogetherCallbacks) => {
+    connect: (callbacks) => {
         providerSocketState.callbacks = callbacks;
     },
     disconnect: () => {
@@ -870,7 +864,11 @@ const providerSocket = {
     next: async () => undefined,
     previous: async () => undefined,
     setTrack: async () => undefined,
-    addToQueue: async () => undefined,
+    addToQueue: async (tracks) => ({
+        acceptedCount: tracks.length,
+        skippedCount: 0,
+        truncated: false,
+    }),
     removeFromQueue: async () => undefined,
     clearQueue: async () => undefined,
 };
@@ -1243,9 +1241,11 @@ test("availability remaps update queue identity idempotently and preserve swap p
     };
     providerAudioStateCalls.currentIndex = [];
     providerAudioStateCalls.currentTrack = [];
+    const onAvailability = host.callbacks().onAvailability;
+    assert.ok(onAvailability);
 
     await host.act(() =>
-        host.callbacks().onAvailability({
+        onAvailability({
             availability: [
                 {
                     queueIndex: 0,
@@ -1265,7 +1265,7 @@ test("availability remaps update queue identity idempotently and preserve swap p
     providerEngineState.currentTime = 37.25;
     providerControlCalls.seek = [];
     await host.act(() =>
-        host.callbacks().onAvailability({
+        onAvailability({
             availability: [
                 {
                     queueIndex: 0,

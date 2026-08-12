@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Frontend TypeScript now compiles under strict mode.
 - Renamed playback telemetry so log names match their emitters:
   `player.howler_startup` → `player.engine_startup`;
   `route.client.signal` / `[SegmentedStreaming.Trace]` →

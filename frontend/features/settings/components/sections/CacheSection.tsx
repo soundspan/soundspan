@@ -211,6 +211,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         placeholderData: keepPreviousData,
         retry: 3,
     });
+    const failedAnalysisCount = enrichmentProgress?.audioAnalysis?.failed ?? 0;
 
     // Fetch enrichment state
     const { data: enrichmentState } = useQuery({
@@ -1292,7 +1293,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             ? "Cleaning..."
                             : "Cleanup Stale Jobs"}
                     </button>
-                    {enrichmentProgress?.audioAnalysis?.failed > 0 && (
+                    {failedAnalysisCount > 0 && (
                         <button
                             onClick={handleRetryFailedAnalysis}
                             disabled={retryingFailed || isEnrichmentActive}
@@ -1301,7 +1302,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         >
                             {retryingFailed
                                 ? "Retrying..."
-                                : `Retry Failed Analysis (${enrichmentProgress.audioAnalysis.failed})`}
+                                : `Retry Failed Analysis (${failedAnalysisCount})`}
                         </button>
                     )}
                     <button

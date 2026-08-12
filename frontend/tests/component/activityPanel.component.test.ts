@@ -326,7 +326,7 @@ test("activity panel toggle can disable polling when panel is open", async () =>
         await import("../../components/layout/ActivityPanel");
 
     renderToStaticMarkup(
-        React.createElement(ActivityPanelToggle, {
+        React.createElement<{ pollingEnabled?: boolean }>(ActivityPanelToggle, {
             pollingEnabled: false,
         }),
     );

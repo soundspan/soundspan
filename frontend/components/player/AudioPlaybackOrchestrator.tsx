@@ -3637,7 +3637,7 @@ export const AudioPlaybackOrchestrator = memo(
             ) {
                 activeSegmentedPlaybackTrackIdRef.current = null;
             }
-            if (!resolveSegmentedTrackContext(currentTrack)) {
+            if (!currentTrack || !resolveSegmentedTrackContext(currentTrack)) {
                 activeSegmentedSessionRef.current = null;
                 activeSegmentedPlaybackTrackIdRef.current = null;
                 segmentedHeartbeatConsecutiveFailureCountRef.current = 0;
@@ -5109,7 +5109,9 @@ export const AudioPlaybackOrchestrator = memo(
                                 null,
                             sourceType:
                                 activeSegmentedSessionRef.current?.sourceType ??
-                                resolveDirectTrackSourceType(currentTrack),
+                                (currentTrack
+                                    ? resolveDirectTrackSourceType(currentTrack)
+                                    : "unknown"),
                         });
                         playbackStateMachine.forceTransition("LOADING");
                         setIsBuffering(true);
@@ -5693,9 +5695,8 @@ export const AudioPlaybackOrchestrator = memo(
             ) => engineEventHandlersRef.current?.handleLoad(payload);
             const stableHandleEnd: AudioEngineEventHandler<"end"> = () =>
                 engineEventHandlersRef.current?.handleEnd(false);
-            const stableHandleError: AudioEngineEventHandler<"loaderror"> = (
-                payload,
-            ) => engineEventHandlersRef.current?.handleError(payload);
+            const stableHandleError = (payload: AudioEngineErrorPayload) =>
+                engineEventHandlersRef.current?.handleError(payload);
             const stableHandlePlay: AudioEngineEventHandler<"play"> = () =>
                 engineEventHandlersRef.current?.handlePlay();
             const stableHandlePause: AudioEngineEventHandler<"pause"> = () =>
@@ -5704,10 +5705,9 @@ export const AudioPlaybackOrchestrator = memo(
                 "vhsresponse"
             > = (payload) =>
                 engineEventHandlersRef.current?.handleVhsResponse(payload);
-            const stableHandleManifestStall: AudioEngineEventHandler<
-                "manifeststall"
-            > = (payload) =>
-                engineEventHandlersRef.current?.handleManifestStall(payload);
+            const stableHandleManifestStall = (
+                payload: AudioEngineManifestStallPayload,
+            ) => engineEventHandlersRef.current?.handleManifestStall(payload);
 
             audioEngine.on("timeupdate", stableHandleTimeUpdate);
             audioEngine.on("load", stableHandleLoad);

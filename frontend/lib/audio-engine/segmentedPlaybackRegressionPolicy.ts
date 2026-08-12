@@ -1,7 +1,7 @@
 export interface TrustedTrackPositionInput {
     fallbackPositionSec: number;
     fallbackTrackId?: string | null;
-    playbackType: string;
+    playbackType: string | null;
     currentTrackId: string | null;
     targetTrackId: string;
     isLoading: boolean;

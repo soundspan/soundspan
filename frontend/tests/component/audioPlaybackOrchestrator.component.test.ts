@@ -1951,12 +1951,14 @@ test("native engine startup reaches the client-signal pipeline with neutral tele
     const startupFields = startupSignals[0]?.fields as
         | Record<string, unknown>
         | undefined;
-    assert.equal(typeof startupFields?.durationMs, "number");
-    assert.ok(Number.isFinite(startupFields.durationMs));
+    assert.ok(startupFields);
+    const durationMs = startupFields.durationMs;
+    assert.equal(typeof durationMs, "number");
+    assert.ok(typeof durationMs === "number" && Number.isFinite(durationMs));
     assert.deepEqual(startupSignals[0]?.fields, {
         engineMode: "native",
         activeEngine: "native",
-        durationMs: startupFields.durationMs,
+        durationMs,
         trackId: "native-startup",
         sourceType: "local",
         playbackType: "track",

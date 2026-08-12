@@ -154,7 +154,7 @@ export function ActiveDownloadsTab({
                                     >
                                         {download.status}
                                     </span>
-                                    {download.metadata?.statusText && (
+                                    {Boolean(download.metadata?.statusText) && (
                                         <>
                                             <span className="text-xs text-white/30">
                                                 •
@@ -163,15 +163,15 @@ export function ActiveDownloadsTab({
                                                 className={cn(
                                                     "text-xs font-medium",
                                                     download.metadata
-                                                        .currentSource ===
+                                                        ?.currentSource ===
                                                         "lidarr"
                                                         ? "text-ai-hover"
                                                         : download.metadata
-                                                                .currentSource ===
+                                                                ?.currentSource ===
                                                             "tidal"
                                                           ? "text-cyan-400"
                                                           : download.metadata
-                                                                  .currentSource ===
+                                                                  ?.currentSource ===
                                                               "youtube"
                                                             ? "text-red-400"
                                                             : "text-teal-400",
@@ -179,7 +179,7 @@ export function ActiveDownloadsTab({
                                             >
                                                 {String(
                                                     download.metadata
-                                                        .statusText,
+                                                        ?.statusText,
                                                 )}
                                             </span>
                                         </>

@@ -10,8 +10,8 @@ export interface Album {
     };
     year?: number;
     genre?: string;
-    coverArt?: string;
-    coverUrl?: string;
+    coverArt?: string | null;
+    coverUrl?: string | null;
     duration?: number;
     trackCount?: number;
     playCount?: number;
@@ -40,7 +40,7 @@ export interface Track {
     album?: {
         id?: string;
         title?: string;
-        coverArt?: string;
+        coverArt?: string | null;
     };
     // Metadata override fields
     displayTitle?: string | null;
@@ -61,8 +61,8 @@ export interface SimilarAlbum {
         id: string;
         name: string;
     };
-    coverArt?: string;
-    coverUrl?: string;
+    coverArt?: string | null;
+    coverUrl?: string | null;
     year?: number;
     owned?: boolean;
     mbid?: string;

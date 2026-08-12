@@ -18,7 +18,7 @@ interface ArtistsGridProps {
     hidePlayButtons?: boolean;
 }
 
-const getArtistImageSrc = (coverArt?: string): string | null => {
+const getArtistImageSrc = (coverArt?: string | null): string | null => {
     if (!coverArt) return null;
     return api.getCoverArtUrl(coverArt, 200);
 };

@@ -71,6 +71,8 @@ export function WithDiscover<TBase extends ApiClientConstructor>(Base: TBase) {
                 id: string;
                 userId: string;
                 playlistSize: number;
+                exclusionMonths: number;
+                downloadRatio: number;
                 enabled: boolean;
                 lastGeneratedAt: string | null;
             }>("/discover/config");
@@ -78,12 +80,16 @@ export function WithDiscover<TBase extends ApiClientConstructor>(Base: TBase) {
 
         async updateDiscoverConfig(config: {
             playlistSize?: number;
+            exclusionMonths?: number;
+            downloadRatio?: number;
             enabled?: boolean;
         }) {
             return this.request<{
                 id: string;
                 userId: string;
                 playlistSize: number;
+                exclusionMonths: number;
+                downloadRatio: number;
                 enabled: boolean;
                 lastGeneratedAt: string | null;
             }>("/discover/config", {

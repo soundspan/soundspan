@@ -23,10 +23,8 @@ test("keeps only the latest queued arg while in flight", async () => {
     const state = createLatestAsyncOperationState<number>();
     const executed: number[] = [];
 
-    let releaseFirst: (() => void) | null = null;
-    const firstGate = new Promise<void>((resolve) => {
-        releaseFirst = resolve;
-    });
+    const { promise: firstGate, resolve: releaseFirst } =
+        Promise.withResolvers<void>();
 
     const runner = async (arg: number) => {
         executed.push(arg);
@@ -39,7 +37,7 @@ test("keeps only the latest queued arg while in flight", async () => {
     enqueueLatestAsyncOperation(state, 2, runner);
     enqueueLatestAsyncOperation(state, 3, runner);
 
-    releaseFirst?.();
+    releaseFirst();
     await waitForDrain(state);
 
     assert.deepEqual(executed, [1, 3]);
@@ -50,10 +48,8 @@ test("calls onError for queued latest operation failures", async () => {
     const executed: number[] = [];
     const failedArgs: number[] = [];
 
-    let releaseFirst: (() => void) | null = null;
-    const firstGate = new Promise<void>((resolve) => {
-        releaseFirst = resolve;
-    });
+    const { promise: firstGate, resolve: releaseFirst } =
+        Promise.withResolvers<void>();
 
     const runner = async (arg: number) => {
         executed.push(arg);
@@ -75,7 +71,7 @@ test("calls onError for queued latest operation failures", async () => {
         },
     });
 
-    releaseFirst?.();
+    releaseFirst();
     await waitForDrain(state);
 
     assert.deepEqual(executed, [1, 2]);
@@ -86,10 +82,8 @@ test("LT host rapid double-next preserves both sequential intents under contenti
     const state = createLatestAsyncOperationState<"next">();
     const emitted: string[] = [];
 
-    let releaseFirst: (() => void) | null = null;
-    const firstGate = new Promise<void>((resolve) => {
-        releaseFirst = resolve;
-    });
+    const { promise: firstGate, resolve: releaseFirst } =
+        Promise.withResolvers<void>();
 
     const runner = async (arg: "next") => {
         emitted.push(arg);
@@ -101,7 +95,7 @@ test("LT host rapid double-next preserves both sequential intents under contenti
     enqueueLatestAsyncOperation(state, "next", runner);
     enqueueLatestAsyncOperation(state, "next", runner);
 
-    releaseFirst?.();
+    releaseFirst();
     await waitForDrain(state);
 
     assert.deepEqual(emitted, ["next", "next"]);
@@ -112,10 +106,8 @@ test("LT host queue collapses intermediate actions to latest pending intent", as
     const state = createLatestAsyncOperationState<HostAction>();
     const emitted: HostAction[] = [];
 
-    let releaseFirst: (() => void) | null = null;
-    const firstGate = new Promise<void>((resolve) => {
-        releaseFirst = resolve;
-    });
+    const { promise: firstGate, resolve: releaseFirst } =
+        Promise.withResolvers<void>();
 
     const runner = async (arg: HostAction) => {
         emitted.push(arg);
@@ -128,7 +120,7 @@ test("LT host queue collapses intermediate actions to latest pending intent", as
     enqueueLatestAsyncOperation(state, "previous", runner);
     enqueueLatestAsyncOperation(state, "set-track:7", runner);
 
-    releaseFirst?.();
+    releaseFirst();
     await waitForDrain(state);
 
     assert.deepEqual(emitted, ["next", "set-track:7"]);

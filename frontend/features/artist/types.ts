@@ -3,7 +3,7 @@ export type ArtistSource = "library" | "discovery";
 export interface Artist {
     id: string;
     name: string;
-    coverArt?: string;
+    coverArt?: string | null;
     image?: string;
     heroUrl?: string;
     bio?: string;
@@ -28,8 +28,8 @@ export interface Album {
     id: string;
     title: string;
     year?: number;
-    coverArt?: string;
-    coverUrl?: string;
+    coverArt?: string | null;
+    coverUrl?: string | null;
     trackCount?: number;
     songCount?: number;
     type?: string;
@@ -59,7 +59,7 @@ export interface Track {
     album?: {
         id?: string;
         title?: string;
-        coverArt?: string;
+        coverArt?: string | null;
     };
     artist?: {
         id?: string;
@@ -80,7 +80,7 @@ export interface SimilarArtist {
     id: string;
     mbid?: string;
     name: string;
-    coverArt?: string;
+    coverArt?: string | null;
     image?: string;
     albumCount?: number;
     ownedAlbumCount?: number;
