@@ -133,6 +133,37 @@ describe("config module", () => {
         ]);
     });
 
+    it("constructs DATABASE_URL from percent-encoded PostgreSQL components", async () => {
+        const { config } = await loadConfigModule({
+            DATABASE_URL: "",
+            POSTGRES_HOST: "postgres",
+            POSTGRES_PORT: "5432",
+            POSTGRES_USER: "user@:/?#% 雪",
+            POSTGRES_PASSWORD: "pass@:/?#% 雪",
+            POSTGRES_DB: "soundspan",
+        });
+
+        expect(config.databaseUrl).toBe(
+            "postgresql://user%40%3A%2F%3F%23%25%20%E9%9B%AA:" +
+                "pass%40%3A%2F%3F%23%25%20%E9%9B%AA@postgres:5432/soundspan",
+        );
+    });
+
+    it("preserves an explicit DATABASE_URL unchanged", async () => {
+        const explicitDatabaseUrl =
+            "postgresql://explicit:raw%2Fvalue@external:6432/custom?schema=tenant";
+        const { config } = await loadConfigModule({
+            DATABASE_URL: explicitDatabaseUrl,
+            POSTGRES_HOST: "postgres",
+            POSTGRES_PORT: "5432",
+            POSTGRES_USER: "component-user",
+            POSTGRES_PASSWORD: "component-password",
+            POSTGRES_DB: "soundspan",
+        });
+
+        expect(config.databaseUrl).toBe(explicitDatabaseUrl);
+    });
+
     it("retains integration secret env fallbacks by default", async () => {
         const { config } = await loadConfigModule({
             SECRETS_DB_ONLY: undefined,
@@ -660,6 +691,11 @@ describe("config module", () => {
         await expect(
             loadConfigModule({
                 DATABASE_URL: undefined,
+                POSTGRES_HOST: undefined,
+                POSTGRES_PORT: undefined,
+                POSTGRES_USER: undefined,
+                POSTGRES_PASSWORD: undefined,
+                POSTGRES_DB: undefined,
             }),
         ).rejects.toThrow("process.exit:1");
 

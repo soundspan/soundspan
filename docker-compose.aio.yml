@@ -29,6 +29,9 @@ services:
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      # AIO uses fixed internal host/user/database components; its verified
+      # credential helper URL-encodes this separately supplied password.
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - BROWSE_IMAGE_CACHE_MAX_BYTES=${BROWSE_IMAGE_CACHE_MAX_BYTES:-268435456}
       - BROWSE_IMAGE_CACHE_MAX_ENTRIES=${BROWSE_IMAGE_CACHE_MAX_ENTRIES:-2048}
       # Runtime streaming-engine selector. Accepted: native | howler | videojs.

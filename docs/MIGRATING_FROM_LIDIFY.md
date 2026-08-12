@@ -78,10 +78,12 @@ if grep -q '^LIDIFY_CALLBACK_URL=' .env; then
   sed -i 's/^LIDIFY_CALLBACK_URL=/SOUNDSPAN_CALLBACK_URL=/' .env
 fi
 
-# Ensure legacy DB defaults are preserved if they were implicit in Lidify
+# Ensure legacy DB names are preserved if they were implicit in Lidify.
+# Services receive these components separately and URL-encode credentials, so
+# keep POSTGRES_PASSWORD raw here even when it contains URL-reserved characters.
 grep -q '^POSTGRES_USER=' .env || echo 'POSTGRES_USER=lidifydb' >> .env
 grep -q '^POSTGRES_DB=' .env || echo 'POSTGRES_DB=lidify' >> .env
-grep -q '^POSTGRES_PASSWORD=' .env || echo 'POSTGRES_PASSWORD=changeme' >> .env
+grep -q '^POSTGRES_PASSWORD=' .env || echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
 
 # AIO image repository changed to GHCR
 if grep -q '^SOUNDSPAN_AIO_IMAGE=' .env; then

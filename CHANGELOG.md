@@ -347,6 +347,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Compose deployments now construct `DATABASE_URL` from `POSTGRES_*`
+  components in-app with percent-encoded credentials, so passwords containing
+  URL-reserved characters work; explicit `DATABASE_URL` still wins.
 - Queue auto-advance no longer pauses itself right after the next track starts:
   the ready-state transition no longer erases the advance's play intent, the
   deferred-play path re-asserts it explicitly, and load/play-intent decisions

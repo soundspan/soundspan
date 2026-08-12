@@ -20,8 +20,15 @@ import {
     type CriticalSecretFailure,
 } from "./config/secretsPolicy";
 
+const { resolveDatabaseUrl } = require("../databaseUrl") as {
+    resolveDatabaseUrl: (environment: NodeJS.ProcessEnv) => string | undefined;
+};
+
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
+
+const databaseUrl = resolveDatabaseUrl(process.env);
+if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 
 const secretsDbOnly = isSecretsDbOnlyEnabled();
 
@@ -192,7 +199,7 @@ export const config = {
     port: parseEnvInt(process.env.PORT, 3006),
     nodeEnv: process.env.NODE_ENV || "development",
     // DATABASE_URL and REDIS_URL are validated by envSchema above, so they're guaranteed to exist
-    databaseUrl: process.env.DATABASE_URL!,
+    databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
     sessionSecret: process.env.SESSION_SECRET!,
 

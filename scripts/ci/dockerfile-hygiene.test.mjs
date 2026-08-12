@@ -42,6 +42,7 @@ function composeConfig(postgresPassword) {
         SESSION_SECRET: "test-session-secret",
         SETTINGS_ENCRYPTION_KEY: "test-settings-key",
     };
+    delete environment.DATABASE_URL;
     if (postgresPassword === undefined) {
         delete environment.POSTGRES_PASSWORD;
     } else {
@@ -247,36 +248,52 @@ test("7. split-stack compose refuses a missing or empty PostgreSQL password", ()
     assert.match(emptyResult.stderr, /POSTGRES_PASSWORD is required/);
 });
 
-test("8. split-stack compose applies the configured PostgreSQL password everywhere", () => {
-    const password = "test-explicit-postgres-password";
+test("8. split-stack compose passes PostgreSQL components to database consumers", () => {
+    const password = "test@:/?#% password 雪";
     const result = composeConfig(password);
 
     assert.equal(result.status, 0, result.stderr);
     const services = JSON.parse(result.stdout).services;
-    const databaseUrl = `postgresql://soundspan:${password}@postgres:5432/soundspan`;
+    const databaseConsumers = [
+        "backend",
+        "backend-worker",
+        "audio-analyzer",
+        "audio-analyzer-clap",
+    ];
 
-    assert.equal(services.backend.environment.POSTGRES_PASSWORD, password);
-    assert.equal(services.backend.environment.DATABASE_URL, databaseUrl);
-    assert.equal(
-        services["backend-worker"].environment.POSTGRES_PASSWORD,
-        password,
-    );
-    assert.equal(
-        services["backend-worker"].environment.DATABASE_URL,
-        databaseUrl,
-    );
+    for (const serviceName of databaseConsumers) {
+        const environment = services[serviceName].environment;
+        assert.equal(environment.DATABASE_URL, "");
+        assert.equal(environment.POSTGRES_HOST, "postgres");
+        assert.equal(environment.POSTGRES_PORT, "5432");
+        assert.equal(environment.POSTGRES_USER, "soundspan");
+        assert.equal(environment.POSTGRES_PASSWORD, password);
+        assert.equal(environment.POSTGRES_DB, "soundspan");
+    }
     assert.equal(services.postgres.environment.POSTGRES_PASSWORD, password);
-    assert.equal(
-        services["audio-analyzer"].environment.DATABASE_URL,
-        databaseUrl,
-    );
-    assert.equal(
-        services["audio-analyzer-clap"].environment.DATABASE_URL,
-        databaseUrl,
+});
+
+test("9. compose files never interpolate PostgreSQL components into DATABASE_URL", () => {
+    for (const relativePath of [
+        "docker-compose.yml",
+        "docker-compose.aio.yml",
+    ]) {
+        const compose = readRepoFile(relativePath);
+        assert.doesNotMatch(
+            compose,
+            /^\s*-?\s*DATABASE_URL\s*[:=][^\r\n]*\$\{POSTGRES_(?:HOST|PORT|USER|PASSWORD|DB)/m,
+            `${relativePath}: DATABASE_URL must not interpolate raw PostgreSQL components`,
+        );
+    }
+
+    assert.match(
+        readRepoFile("docker-compose.aio.yml"),
+        /^\s*- POSTGRES_PASSWORD=\$\{POSTGRES_PASSWORD:-\}\s*$/m,
+        "docker-compose.aio.yml: AIO must receive its separately supplied PostgreSQL password",
     );
 });
 
-test("9. split-stack worker requires its startup secrets", () => {
+test("10. split-stack worker requires its startup secrets", () => {
     const compose = readRepoFile("docker-compose.yml");
     const backendBlock = composeServiceBlock(compose, "backend");
     const workerBlock = composeServiceBlock(compose, "backend-worker");
@@ -305,7 +322,7 @@ test("9. split-stack worker requires its startup secrets", () => {
     }
 });
 
-test("10. split-stack PostgreSQL startup rejects the published sentinel", (t) => {
+test("11. split-stack PostgreSQL startup rejects the published sentinel", (t) => {
     const configResult = composeConfig("changeme");
     assert.equal(configResult.status, 0, configResult.stderr);
 

@@ -19,6 +19,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 # Prisma 7 CLI reads schema/migrations/datasource config from prisma.config.ts
 COPY prisma.config.ts ./
+COPY databaseUrl.js ./
 
 # Install all deps (includes dev deps needed for tsx/prisma CLI)
 RUN npm ci && \
@@ -57,6 +58,7 @@ COPY --from=worker-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=worker-deps --chown=node:node /app/package*.json ./
 COPY --from=worker-deps --chown=node:node /app/prisma ./prisma
 COPY --from=worker-deps --chown=node:node /app/dist ./dist
+COPY --from=worker-deps --chown=node:node /app/databaseUrl.js ./databaseUrl.js
 COPY --from=worker-deps --chown=node:node /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Create writable runtime dirs and harden image
@@ -98,6 +100,7 @@ COPY --from=api-deps --chown=node:node /app/package*.json ./
 COPY --from=build --chown=node:node /app/prisma ./prisma
 COPY --from=build --chown=node:node /app/prisma.config.ts ./
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/databaseUrl.js ./databaseUrl.js
 COPY --from=build --chown=node:node /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Healthcheck + entrypoint
