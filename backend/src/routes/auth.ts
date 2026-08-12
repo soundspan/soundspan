@@ -18,6 +18,7 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
+import { apiLimiter, authLimiter } from "../middleware/rateLimiter";
 
 async function verifyTotpToken(
     secret: string,
@@ -78,10 +79,10 @@ const registerSchema = z
 const INVITE_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateInviteCode(): string {
-    const bytes = crypto.randomBytes(8);
     let code = "";
     for (let i = 0; i < 8; i++) {
-        code += INVITE_CODE_CHARS[bytes[i] % INVITE_CODE_CHARS.length];
+        code +=
+            INVITE_CODE_CHARS[crypto.randomInt(0, INVITE_CODE_CHARS.length)];
     }
     return code;
 }
@@ -313,7 +314,7 @@ router.post("/logout", (req, res) => {
  *         description: Invalid or expired refresh token
  */
 // POST /auth/refresh - Refresh access token using refresh token
-router.post("/refresh", async (req, res) => {
+router.post("/refresh", authLimiter, async (req, res) => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
@@ -384,7 +385,7 @@ router.post("/refresh", async (req, res) => {
  *               $ref: '#/components/schemas/Error'
  */
 // GET /auth/me
-router.get("/me", requireAuth, async (req, res) => {
+router.get("/me", apiLimiter, requireAuth, async (req, res) => {
     const user = await prisma.user.findUnique({
         where: { id: req.user!.id },
         select: {
@@ -442,7 +443,7 @@ router.get("/me", requireAuth, async (req, res) => {
  *         description: User not found
  */
 // POST /auth/change-password
-router.post("/change-password", requireAuth, async (req, res) => {
+router.post("/change-password", authLimiter, requireAuth, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
@@ -522,7 +523,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
  *         description: Not authenticated
  */
 // POST /auth/change-email
-router.post("/change-email", requireAuth, async (req, res) => {
+router.post("/change-email", apiLimiter, requireAuth, async (req, res) => {
     try {
         const schema = z.object({ email: z.string().email() });
         const { email } = schema.parse(req.body);
@@ -566,26 +567,32 @@ router.post("/change-email", requireAuth, async (req, res) => {
  *         description: Admin access required
  */
 // GET /auth/users (Admin only)
-router.get("/users", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const users = await prisma.user.findMany({
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                role: true,
-                onboardingComplete: true,
-                createdAt: true,
-            },
-            orderBy: { createdAt: "asc" },
-        });
+router.get(
+    "/users",
+    apiLimiter,
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const users = await prisma.user.findMany({
+                select: {
+                    id: true,
+                    username: true,
+                    email: true,
+                    role: true,
+                    onboardingComplete: true,
+                    createdAt: true,
+                },
+                orderBy: { createdAt: "asc" },
+            });
 
-        res.json(users);
-    } catch (error) {
-        logger.error("Get users error:", error);
-        res.status(500).json({ error: "Failed to get users" });
-    }
-});
+            res.json(users);
+        } catch (error) {
+            logger.error("Get users error:", error);
+            res.status(500).json({ error: "Failed to get users" });
+        }
+    },
+);
 
 /**
  * @openapi
@@ -625,68 +632,76 @@ router.get("/users", requireAuth, requireAdmin, async (req, res) => {
  *         description: Admin access required
  */
 // POST /auth/create-user (Admin only)
-router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const { username, password, role } = req.body;
+router.post(
+    "/create-user",
+    authLimiter,
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { username, password, role } = req.body;
 
-        if (!username || !password) {
-            return res
-                .status(400)
-                .json({ error: "Username and password are required" });
+            if (!username || !password) {
+                return res
+                    .status(400)
+                    .json({ error: "Username and password are required" });
+            }
+
+            if (password.length < 6) {
+                return res
+                    .status(400)
+                    .json({ error: "Password must be at least 6 characters" });
+            }
+
+            if (role && !["user", "admin"].includes(role)) {
+                return res.status(400).json({ error: "Invalid role" });
+            }
+
+            // Check if username exists
+            const existing = await prisma.user.findUnique({
+                where: { username },
+            });
+
+            if (existing) {
+                return res
+                    .status(400)
+                    .json({ error: "Username already taken" });
+            }
+
+            // Create user
+            const passwordHash = await bcrypt.hash(password, 10);
+            const user = await prisma.user.create({
+                data: {
+                    username,
+                    passwordHash,
+                    role: role || "user",
+                    onboardingComplete: true, // Skip onboarding for created users
+                },
+            });
+
+            // Create default user settings
+            await prisma.userSettings.create({
+                data: {
+                    userId: user.id,
+                    playbackQuality: "original",
+                    wifiOnly: false,
+                    offlineEnabled: false,
+                    maxCacheSizeMb: 10240,
+                },
+            });
+
+            res.json({
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                createdAt: user.createdAt,
+            });
+        } catch (error) {
+            logger.error("Create user error:", error);
+            res.status(500).json({ error: "Failed to create user" });
         }
-
-        if (password.length < 6) {
-            return res
-                .status(400)
-                .json({ error: "Password must be at least 6 characters" });
-        }
-
-        if (role && !["user", "admin"].includes(role)) {
-            return res.status(400).json({ error: "Invalid role" });
-        }
-
-        // Check if username exists
-        const existing = await prisma.user.findUnique({
-            where: { username },
-        });
-
-        if (existing) {
-            return res.status(400).json({ error: "Username already taken" });
-        }
-
-        // Create user
-        const passwordHash = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: {
-                username,
-                passwordHash,
-                role: role || "user",
-                onboardingComplete: true, // Skip onboarding for created users
-            },
-        });
-
-        // Create default user settings
-        await prisma.userSettings.create({
-            data: {
-                userId: user.id,
-                playbackQuality: "original",
-                wifiOnly: false,
-                offlineEnabled: false,
-                maxCacheSizeMb: 10240,
-            },
-        });
-
-        res.json({
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            createdAt: user.createdAt,
-        });
-    } catch (error) {
-        logger.error("Create user error:", error);
-        res.status(500).json({ error: "Failed to create user" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -734,6 +749,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
 // PATCH /auth/users/:id (Admin only) - Edit user's username, email, or password
 router.patch<{ id: string }>(
     "/users/:id",
+    authLimiter,
     requireAuth,
     requireAdmin,
     async (req, res) => {
@@ -857,6 +873,7 @@ router.patch<{ id: string }>(
 // DELETE /auth/users/:id (Admin only)
 router.delete<{ id: string }>(
     "/users/:id",
+    apiLimiter,
     requireAuth,
     requireAdmin,
     async (req, res) => {
@@ -923,55 +940,61 @@ router.delete<{ id: string }>(
  *         description: Admin access required
  */
 // POST /auth/invite-codes - Generate a new invite code (admin only)
-router.post("/invite-codes", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const { ttl, maxUses } = inviteCodeSchema.parse(req.body);
-        const expiresAt = ttlToExpiresAt(ttl);
+router.post(
+    "/invite-codes",
+    apiLimiter,
+    requireAuth,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { ttl, maxUses } = inviteCodeSchema.parse(req.body);
+            const expiresAt = ttlToExpiresAt(ttl);
 
-        // Retry loop for uniqueness
-        let code: string;
-        let attempts = 0;
-        do {
-            code = generateInviteCode();
-            const existing = await prisma.inviteCode.findUnique({
-                where: { code },
+            // Retry loop for uniqueness
+            let code: string;
+            let attempts = 0;
+            do {
+                code = generateInviteCode();
+                const existing = await prisma.inviteCode.findUnique({
+                    where: { code },
+                });
+                if (!existing) break;
+                attempts++;
+            } while (attempts < 10);
+
+            if (attempts >= 10) {
+                return res
+                    .status(500)
+                    .json({ error: "Failed to generate unique code" });
+            }
+
+            const inviteCode = await prisma.inviteCode.create({
+                data: {
+                    code,
+                    createdBy: req.user!.id,
+                    expiresAt,
+                    maxUses,
+                },
             });
-            if (!existing) break;
-            attempts++;
-        } while (attempts < 10);
 
-        if (attempts >= 10) {
-            return res
-                .status(500)
-                .json({ error: "Failed to generate unique code" });
+            res.json({
+                id: inviteCode.id,
+                code: inviteCode.code,
+                expiresAt: inviteCode.expiresAt,
+                maxUses: inviteCode.maxUses,
+                createdAt: inviteCode.createdAt,
+            });
+        } catch (err) {
+            if (err instanceof z.ZodError) {
+                return res
+                    .status(400)
+                    .json({ error: "Invalid request", details: err.issues });
+            }
+            logger.error("Create invite code error:", err);
+            res.status(500).json({ error: "Failed to create invite code" });
         }
-
-        const inviteCode = await prisma.inviteCode.create({
-            data: {
-                code,
-                createdBy: req.user!.id,
-                expiresAt,
-                maxUses,
-            },
-        });
-
-        res.json({
-            id: inviteCode.id,
-            code: inviteCode.code,
-            expiresAt: inviteCode.expiresAt,
-            maxUses: inviteCode.maxUses,
-            createdAt: inviteCode.createdAt,
-        });
-    } catch (err) {
-        if (err instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
-        }
-        logger.error("Create invite code error:", err);
-        res.status(500).json({ error: "Failed to create invite code" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -991,47 +1014,53 @@ router.post("/invite-codes", requireAuth, requireAdmin, async (req, res) => {
  *         description: Admin access required
  */
 // GET /auth/invite-codes - List all invite codes (admin only)
-router.get("/invite-codes", requireAuth, requireAdmin, async (_req, res) => {
-    try {
-        const codes = await prisma.inviteCode.findMany({
-            orderBy: { createdAt: "desc" },
-            include: {
-                creator: {
-                    select: { username: true },
+router.get(
+    "/invite-codes",
+    apiLimiter,
+    requireAuth,
+    requireAdmin,
+    async (_req, res) => {
+        try {
+            const codes = await prisma.inviteCode.findMany({
+                orderBy: { createdAt: "desc" },
+                include: {
+                    creator: {
+                        select: { username: true },
+                    },
                 },
-            },
-        });
+            });
 
-        const now = new Date();
-        const codesWithStatus = codes.map((c) => {
-            let status: string;
-            if (c.revoked) {
-                status = "revoked";
-            } else if (c.useCount >= c.maxUses) {
-                status = "exhausted";
-            } else if (c.expiresAt && c.expiresAt < now) {
-                status = "expired";
-            } else {
-                status = "active";
-            }
-            return {
-                id: c.id,
-                code: c.code,
-                status,
-                maxUses: c.maxUses,
-                useCount: c.useCount,
-                expiresAt: c.expiresAt,
-                createdAt: c.createdAt,
-                createdBy: c.creator.username,
-            };
-        });
+            const now = new Date();
+            const codesWithStatus = codes.map((c) => {
+                let status: string;
+                if (c.revoked) {
+                    status = "revoked";
+                } else if (c.useCount >= c.maxUses) {
+                    status = "exhausted";
+                } else if (c.expiresAt && c.expiresAt < now) {
+                    status = "expired";
+                } else {
+                    status = "active";
+                }
+                return {
+                    id: c.id,
+                    code: c.code,
+                    status,
+                    maxUses: c.maxUses,
+                    useCount: c.useCount,
+                    expiresAt: c.expiresAt,
+                    createdAt: c.createdAt,
+                    createdBy: c.creator.username,
+                };
+            });
 
-        res.json(codesWithStatus);
-    } catch (err) {
-        logger.error("List invite codes error:", err);
-        res.status(500).json({ error: "Failed to list invite codes" });
-    }
-});
+            res.json(codesWithStatus);
+        } catch (err) {
+            logger.error("List invite codes error:", err);
+            res.status(500).json({ error: "Failed to list invite codes" });
+        }
+    },
+);
 
 /**
  * @openapi
@@ -1062,6 +1091,7 @@ router.get("/invite-codes", requireAuth, requireAdmin, async (_req, res) => {
 // DELETE /auth/invite-codes/:id - Revoke an invite code (admin only)
 router.delete<{ id: string }>(
     "/invite-codes/:id",
+    apiLimiter,
     requireAuth,
     requireAdmin,
     async (req, res) => {
@@ -1287,6 +1317,7 @@ router.post("/register", async (req, res) => {
 // POST /auth/2fa/setup - Generate 2FA secret and QR code
 router.post(
     "/2fa/setup",
+    authLimiter,
     requireAuth,
     requireInteractiveSession,
     async (req, res) => {
@@ -1364,6 +1395,7 @@ router.post(
 // POST /auth/2fa/enable - Verify token and enable 2FA
 router.post(
     "/2fa/enable",
+    authLimiter,
     requireAuth,
     requireInteractiveSession,
     async (req, res) => {
@@ -1473,6 +1505,7 @@ router.post(
 // POST /auth/2fa/disable - Disable 2FA
 router.post(
     "/2fa/disable",
+    authLimiter,
     requireAuth,
     requireInteractiveSession,
     async (req, res) => {
@@ -1548,7 +1581,7 @@ router.post(
  *         description: User not found
  */
 // GET /auth/2fa/status - Check if 2FA is enabled
-router.get("/2fa/status", requireAuth, async (req, res) => {
+router.get("/2fa/status", apiLimiter, requireAuth, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
@@ -1584,7 +1617,7 @@ router.get("/2fa/status", requireAuth, async (req, res) => {
  *         description: User not found
  */
 // GET /auth/subsonic-password - Check if Subsonic password is configured
-router.get("/subsonic-password", requireAuth, async (req, res) => {
+router.get("/subsonic-password", apiLimiter, requireAuth, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
@@ -1640,6 +1673,7 @@ router.get("/subsonic-password", requireAuth, async (req, res) => {
 // POST /auth/subsonic-password - Set Subsonic password
 router.post(
     "/subsonic-password",
+    authLimiter,
     requireAuth,
     requireInteractiveSession,
     async (req, res) => {
@@ -1688,6 +1722,7 @@ router.post(
 // DELETE /auth/subsonic-password - Clear Subsonic password
 router.delete(
     "/subsonic-password",
+    authLimiter,
     requireAuth,
     requireInteractiveSession,
     async (req, res) => {

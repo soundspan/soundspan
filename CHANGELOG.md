@@ -723,6 +723,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Account-management, 2FA, and Subsonic-credential routes now have dedicated
+  route-level rate limiting, and invite codes use unbiased cryptographic random
+  character selection.
 - Playlist pending-track operations are scoped to both the playlist and
   pending-track ids, closing a cross-user IDOR (#366).
 - API-key management and MFA setup/enable/disable now require an interactive
