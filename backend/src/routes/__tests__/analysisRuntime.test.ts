@@ -402,12 +402,7 @@ describe("analysis routes runtime", () => {
         async (_caller, req) => {
             const res = createRes();
 
-            await invokeRouteStack(
-                "post",
-                "/analyze/:trackId",
-                req,
-                res,
-            );
+            await invokeRouteStack("post", "/analyze/:trackId", req, res);
 
             expect(res.statusCode).toBe(403);
             expect(res.body).toEqual({ error: "Admin access required" });

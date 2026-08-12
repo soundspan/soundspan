@@ -57,9 +57,7 @@ describe("Subsonic API key expiry", () => {
         ["missing", undefined],
         ["invalid", new Date(Number.NaN)],
     ])("rejects a %s API key at a /rest endpoint", async (_case, createdAt) => {
-        mockApiKeyFindUnique.mockResolvedValue(
-            buildApiKeyRecord(createdAt),
-        );
+        mockApiKeyFindUnique.mockResolvedValue(buildApiKeyRecord(createdAt));
 
         const response = await request(app).get("/rest/ping.view").query({
             v: "1.16.1",
