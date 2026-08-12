@@ -934,6 +934,18 @@ export function usePodcastsQuery() {
     });
 }
 
+function isPodcastNotFoundError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    const status = "status" in error ? error.status : undefined;
+    const message = "message" in error ? error.message : undefined;
+    return (
+        status === 404 ||
+        (typeof message === "string" &&
+            (message.includes("not found") ||
+                message.includes("not subscribed")))
+    );
+}
+
 /**
  * Hook to fetch a single podcast
  *
@@ -952,11 +964,7 @@ export function usePodcastQuery(id: string | undefined) {
                 return await api.getPodcast(id);
             } catch (error) {
                 // If podcast not found (404), return null to allow preview mode
-                if (
-                    error?.status === 404 ||
-                    error?.message?.includes("not found") ||
-                    error?.message?.includes("not subscribed")
-                ) {
+                if (isPodcastNotFoundError(error)) {
                     return null;
                 }
                 // For other errors, throw to trigger error state

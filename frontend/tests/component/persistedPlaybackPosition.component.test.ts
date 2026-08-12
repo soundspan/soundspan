@@ -48,13 +48,13 @@ beforeEach(() => {
 
 afterEach(() => {
     if (typeof previousWindow === "undefined") {
-        delete (globalScope as any).window;
+        Reflect.deleteProperty(globalScope, "window");
     } else {
         (globalScope as any).window = previousWindow;
     }
 
     if (typeof previousLocalStorage === "undefined") {
-        delete (globalScope as any).localStorage;
+        Reflect.deleteProperty(globalScope, "localStorage");
     } else {
         (globalScope as any).localStorage = previousLocalStorage;
     }
@@ -86,8 +86,8 @@ test("ignores storage write failures", () => {
 });
 
 test("no-ops when window is unavailable", () => {
-    delete globalScope.window;
-    delete globalScope.localStorage;
+    Reflect.deleteProperty(globalScope, "window");
+    Reflect.deleteProperty(globalScope, "localStorage");
 
     assert.doesNotThrow(() => {
         resetPersistedTrackStartPosition("track-11");

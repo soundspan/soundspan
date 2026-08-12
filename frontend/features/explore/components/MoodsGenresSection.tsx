@@ -52,7 +52,7 @@ function CategoryRow({
                         <button
                             key={item.params ?? i}
                             onClick={() => {
-                                if (item.params) {
+                                if (item.params && item.title) {
                                     onPillClick(item.params, item.title);
                                 }
                             }}

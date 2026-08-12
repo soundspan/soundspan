@@ -16,13 +16,13 @@ interface MetadataEditorProps {
     currentData: {
         name?: string;
         title?: string;
-        bio?: string;
+        bio?: string | null;
         genres?: string[];
-        year?: number;
+        year?: number | null;
         mbid?: string;
         rgMbid?: string;
-        coverUrl?: string;
-        heroUrl?: string;
+        coverUrl?: string | null;
+        heroUrl?: string | null;
         // Original values for comparison (when user overrides exist)
         _originalName?: string;
         _originalBio?: string | null;
@@ -258,6 +258,7 @@ export function MetadataEditor({
         }
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
+    const previewImageUrl = formData.heroUrl || formData.coverUrl;
 
     return (
         <>
@@ -554,13 +555,10 @@ export function MetadataEditor({
                                         </p>
                                     )}
                                 {/* Image Preview */}
-                                {(formData.heroUrl || formData.coverUrl) && (
+                                {previewImageUrl && (
                                     <div className="mt-2">
                                         <Image
-                                            src={
-                                                formData.heroUrl ||
-                                                formData.coverUrl
-                                            }
+                                            src={previewImageUrl}
                                             alt="Preview"
                                             width={128}
                                             height={128}

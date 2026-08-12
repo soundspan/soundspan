@@ -88,7 +88,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         enrichedTracks: tidalEnrichedTracks,
         isMatching: isTidalMatching,
         isStatusResolved: isTidalStatusResolved,
-    } = useTidalGapFill(rawAlbum, source);
+    } = useTidalGapFill(rawAlbum, source ?? undefined);
     const tidalAlbum = rawAlbum
         ? { ...rawAlbum, tracks: tidalEnrichedTracks || rawAlbum.tracks }
         : rawAlbum;

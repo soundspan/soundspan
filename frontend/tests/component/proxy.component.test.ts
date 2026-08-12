@@ -1,43 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { NextRequest } from "next/server";
 
 type ProxyModule = {
-    proxy: (request: { url: string; nextUrl: URL }) => Response;
+    proxy: typeof import("../../proxy").proxy;
     config: { matcher: string[] };
 };
 
 async function loadProxyModule(): Promise<ProxyModule> {
     const mod = await import("../../proxy");
-    const proxy =
-        (
-            mod as {
-                proxy?: ProxyModule["proxy"];
-                default?: { proxy?: ProxyModule["proxy"] };
-            }
-        ).proxy ??
-        (mod as { default?: { proxy?: ProxyModule["proxy"] } }).default?.proxy;
-    const config =
-        (
-            mod as {
-                config?: ProxyModule["config"];
-                default?: { config?: ProxyModule["config"] };
-            }
-        ).config ??
-        (mod as { default?: { config?: ProxyModule["config"] } }).default
-            ?.config;
-
-    assert.ok(proxy, "proxy export is available");
-    assert.ok(config, "config export is available");
-
-    return { proxy, config };
+    return { proxy: mod.proxy, config: mod.config };
 }
 
 function request(pathname: string) {
     const url = `https://soundspan.test${pathname}`;
-    return {
-        url,
-        nextUrl: new URL(url),
-    };
+    return new NextRequest(url);
 }
 
 test("proxy keeps /api/* routes as passthrough responses", async () => {

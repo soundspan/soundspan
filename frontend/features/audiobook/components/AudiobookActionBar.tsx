@@ -30,8 +30,9 @@ export function AudiobookActionBar({
     formatTime = defaultFormatTime,
 }: AudiobookActionBarProps) {
     const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
-    const hasProgress = audiobook.progress && audiobook.progress.progress > 0;
-    const isFinished = audiobook.progress?.isFinished;
+    const progress = audiobook.progress;
+    const hasProgress = (progress?.progress ?? 0) > 0;
+    const isFinished = progress?.isFinished;
     const showingPause = isThisBookPlaying && isPlaying;
     const handlePlayPauseClick = () => {
         if (!onPlayPause) return;
@@ -75,7 +76,7 @@ export function AudiobookActionBar({
                             {formatTime(
                                 isThisBookPlaying
                                     ? currentTime
-                                    : audiobook.progress.currentTime,
+                                    : (progress?.currentTime ?? 0),
                             )}
                         </span>
                         <span className="text-white/40 mx-1">/</span>
@@ -87,7 +88,7 @@ export function AudiobookActionBar({
                         <div
                             className="h-full bg-brand rounded-full transition-all"
                             style={{
-                                width: `${isThisBookPlaying ? (currentTime / audiobook.duration) * 100 : audiobook.progress.progress}%`,
+                                width: `${isThisBookPlaying ? (currentTime / audiobook.duration) * 100 : (progress?.progress ?? 0)}%`,
                             }}
                         />
                     </div>

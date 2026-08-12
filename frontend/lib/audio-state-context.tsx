@@ -103,7 +103,7 @@ export interface Track {
     id: string;
     title: string;
     artist: { name: string; id?: string; mbid?: string };
-    album: { title: string; coverArt?: string; id?: string };
+    album: { title: string; coverArt?: string | null; id?: string };
     duration: number;
     filePath?: string;
     // Streaming source fields

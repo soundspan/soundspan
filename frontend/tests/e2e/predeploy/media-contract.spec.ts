@@ -54,6 +54,7 @@ test.describe("Media Contract", () => {
         baseURL,
     }) => {
         test.skip(!baseURL, "Skipping: Playwright baseURL is required");
+        if (!baseURL) return;
 
         const requestOrigin = new URL(baseURL).origin;
         const tracksResponse = await page.request.get(
@@ -68,6 +69,7 @@ test.describe("Media Contract", () => {
             !trackId,
             "Skipping: no library tracks available for media contract checks",
         );
+        if (!trackId) return;
 
         const directStreamResponse = await page.request.get(
             `/api/library/tracks/${encodeURIComponent(trackId)}/stream?quality=original`,

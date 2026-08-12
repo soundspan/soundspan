@@ -159,8 +159,8 @@ export async function loadOwnedArtistTracksNewestFirst({
             "Unknown Album";
         const resolvedAlbumId = toOptionalString(albumData.id) || seedAlbum.id;
         const resolvedCoverArt =
-            toOptionalString(albumData.coverArt) ||
-            toOptionalString(albumData.coverUrl) ||
+            toOptionalString(albumData.coverArt) ??
+            toOptionalString(albumData.coverUrl) ??
             seedAlbum.coverArt;
 
         sortedTracks.forEach((track: Record<string, unknown>) => {

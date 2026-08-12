@@ -72,10 +72,10 @@ mock.module("@/features/explore/hooks/useUserSettingsExplorePrefs", {
 mock.module("@/hooks/useQueries", {
     namedExports: {
         mapYtMusicChartsToFeaturedPlaylists: (
-            charts: Record<string, unknown[]>,
+            charts: Record<string, Array<{ videoId: string; title: string }>>,
         ) => {
             const entries = Object.values(charts ?? {}).flat();
-            return entries.map((e: Record<string, string>) => ({
+            return entries.map((e) => ({
                 id: e.videoId,
                 title: e.title,
             }));

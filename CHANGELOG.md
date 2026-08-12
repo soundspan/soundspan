@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidated environment configuration reads into the backend config module
   for 20 more production files; the config-boundary allowlist shrank from 39
   files to 19.
+- Frontend TypeScript now compiles under strict mode.
 - Renamed playback telemetry so log names match their emitters:
   `player.howler_startup` → `player.engine_startup`;
   `route.client.signal` / `[SegmentedStreaming.Trace]` →
@@ -764,9 +765,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   playback-state sync routes now have route-level rate limiting; playback-state
   uses a generous dedicated tier for its high-frequency cadence, and invite
   codes use unbiased cryptographic random character selection.
-- Hardened external-metadata escaping for Deezer and Spotify, and replaced
-  backtracking-prone normalization regexes with linear forms in Soulseek,
-  search, and Lidarr.
+- Hardened external-metadata escaping for Deezer and Spotify; Soulseek and
+  Lidarr delimited-content stripping now uses a single-pass linear scanner
+  instead of regex rescans, while search normalization uses linear regex forms.
 - Cover-image storage operations validate IDs and contain all filesystem paths
   under the type-specific covers directory.
 - Account-management, 2FA, and Subsonic-credential routes now have dedicated

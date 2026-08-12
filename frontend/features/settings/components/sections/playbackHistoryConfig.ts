@@ -18,15 +18,12 @@ export const HISTORY_RANGE_OPTIONS: Array<{
     { value: "365d", label: "Past year" },
     { value: "all", label: "All time" },
 ];
-const HISTORY_RANGE_SUMMARY_KEYS: Record<
-    HistoryRange,
-    keyof PlayHistorySummary
-> = {
+const HISTORY_RANGE_SUMMARY_KEYS = {
     "7d": "last7Days",
     "30d": "last30Days",
     "365d": "last365Days",
     all: "allTime",
-};
+} satisfies Record<HistoryRange, keyof PlayHistorySummary>;
 
 /**
  * Executes getImpactedHistoryCount.

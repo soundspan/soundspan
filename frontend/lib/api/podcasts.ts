@@ -1,5 +1,16 @@
 import { type ApiClientConstructor, type ApiData } from "./core";
 
+/** Podcast summary returned by the grouped genre-discovery endpoint. */
+export interface PodcastDiscoveryItem {
+    id: string;
+    title: string;
+    author?: string;
+    coverUrl?: string;
+    feedUrl?: string;
+    trackCount?: number;
+    itunesId?: number;
+}
+
 /** Add podcast-domain operations to an API client base class. */
 export function WithPodcasts<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class PodcastsApi extends Base {
@@ -109,7 +120,7 @@ export function WithPodcasts<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         async getPodcastsByGenre(genreIds: number[]) {
-            return this.request<ApiData>(
+            return this.request<Record<string, PodcastDiscoveryItem[]>>(
                 `/podcasts/discover/genres?genres=${genreIds.join(",")}`,
             );
         }

@@ -202,6 +202,7 @@ function usePolling({
 }: PollingEffectArgs): void {
     useEffect(() => {
         if (phase !== "polling" || !session) return;
+        const activeSession = session;
         const runId = generationRef.current;
         const delay = Math.max(1, session.pollIntervalMs);
         const active = () => generationRef.current === runId;
@@ -221,7 +222,9 @@ function usePolling({
             if (!active()) return;
             let outcome: DeviceAuthPollOutcome;
             try {
-                outcome = await optionsRef.current.poll(session.deviceCode);
+                outcome = await optionsRef.current.poll(
+                    activeSession.deviceCode,
+                );
             } catch {
                 if (active()) schedule();
                 return;

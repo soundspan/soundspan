@@ -8,7 +8,7 @@ interface AudiobookCardProps {
     id: string;
     title: string;
     author: string;
-    coverUrl: string | null;
+    coverUrl?: string | null;
     progress?: {
         progress: number;
         isFinished: boolean;

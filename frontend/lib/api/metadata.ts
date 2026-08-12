@@ -7,10 +7,10 @@ export function WithMetadata<TBase extends ApiClientConstructor>(Base: TBase) {
             artistId: string,
             data: {
                 name?: string;
-                bio?: string;
+                bio?: string | null;
                 genres?: string[];
                 mbid?: string;
-                heroUrl?: string;
+                heroUrl?: string | null;
             },
         ) {
             return this.request<ApiData>(
@@ -26,10 +26,10 @@ export function WithMetadata<TBase extends ApiClientConstructor>(Base: TBase) {
             albumId: string,
             data: {
                 title?: string;
-                year?: number;
+                year?: number | null;
                 genres?: string[];
                 rgMbid?: string;
-                coverUrl?: string;
+                coverUrl?: string | null;
             },
         ) {
             return this.request<ApiData>(

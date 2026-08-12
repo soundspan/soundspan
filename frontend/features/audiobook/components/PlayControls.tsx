@@ -24,8 +24,9 @@ export function PlayControls({
     onPlayPause,
     formatTime,
 }: PlayControlsProps) {
-    const hasProgress = audiobook.progress && audiobook.progress.progress > 0;
-    const isFinished = audiobook.progress?.isFinished;
+    const progress = audiobook.progress;
+    const hasProgress = (progress?.progress ?? 0) > 0;
+    const isFinished = progress?.isFinished;
 
     return (
         <section>
@@ -59,7 +60,7 @@ export function PlayControls({
                             {formatTime(
                                 isThisBookPlaying
                                     ? currentTime
-                                    : audiobook.progress.currentTime,
+                                    : (progress?.currentTime ?? 0),
                             )}{" "}
                             / {formatTime(audiobook.duration)}
                         </div>
@@ -72,7 +73,7 @@ export function PlayControls({
                                             ? (currentTime /
                                                   audiobook.duration) *
                                               100
-                                            : audiobook.progress.progress
+                                            : (progress?.progress ?? 0)
                                     }%`,
                                 }}
                             />

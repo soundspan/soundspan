@@ -54,7 +54,7 @@ const PLAYBACK_TYPE_KEY = createMigratingStorageKey("playback_type");
 const isAudiobookshelfConfigStatus = (
     value: unknown,
 ): value is AudiobookshelfConfigStatus => {
-    return Boolean(value) && typeof value === "object" && "configured" in value;
+    return typeof value === "object" && value !== null && "configured" in value;
 };
 
 /**

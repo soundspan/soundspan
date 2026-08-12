@@ -10,7 +10,7 @@ interface UseTVNavigationOptions {
 }
 
 interface UseTVNavigationResult {
-    containerRef: React.RefObject<HTMLElement>;
+    containerRef: React.RefObject<HTMLElement | null>;
     focusedSectionIndex: number;
     focusedCardIndex: number;
     isContentFocused: boolean;

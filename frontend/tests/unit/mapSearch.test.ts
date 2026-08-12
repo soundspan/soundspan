@@ -4,8 +4,9 @@ import { searchMapTracks } from "../../components/vibe/mapSearch";
 import type { MapTrack } from "../../components/vibe/types";
 
 function track(overrides: Partial<MapTrack> & { id: string }): MapTrack {
+    const { id, ...rest } = overrides;
     return {
-        id: overrides.id,
+        id,
         x: 0.5,
         y: 0.5,
         title: overrides.title ?? "Untitled",
@@ -17,7 +18,7 @@ function track(overrides: Partial<MapTrack> & { id: string }): MapTrack {
         moodScore: 0.5,
         energy: 0.5,
         valence: 0.5,
-        ...overrides,
+        ...rest,
     };
 }
 

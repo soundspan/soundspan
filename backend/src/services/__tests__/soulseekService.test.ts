@@ -561,17 +561,25 @@ describe("soulseek service", () => {
 
         const fallback = (soulseekService as any).normalizeTrackTitle("(Live)");
         expect(fallback).toBe("(Live)");
+
+        const nestedDescriptor = (soulseekService as any).normalizeTrackTitle(
+            "Song ((Live) Cut)",
+        );
+        expect(nestedDescriptor).toBe("Song Cut)");
+
+        const nestedLiteral = (soulseekService as any).normalizeTrackTitle(
+            "Song ((Studio) Cut)",
+        );
+        expect(nestedLiteral).toBe("Song ((Studio) Cut)");
     });
 
     it.each([
-        ["parenthetical", "(", "live "],
-        ["bracket", "[", "remaster "],
+        ["parenthetical", "("],
+        ["bracket", "["],
     ])(
-        "leaves long unmatched %s descriptors unchanged without excessive backtracking",
-        (_case, openingDelimiter, descriptor) => {
-            const title = `Song ${openingDelimiter}${descriptor.repeat(
-                9_999,
-            )}${descriptor.trim()}`;
+        "leaves 50,000 unmatched %s openers unchanged within the regression bound",
+        (_case, openingDelimiter) => {
+            const title = `Song ${openingDelimiter.repeat(50_000)}`;
             const startedAt = performance.now();
 
             const normalized = (soulseekService as any).normalizeTrackTitle(

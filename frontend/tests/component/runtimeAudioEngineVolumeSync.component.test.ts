@@ -162,10 +162,8 @@ test("supports an async Video.js engine factory (lazy import path)", async () =>
 test("ignores a stale DASH load that resolves after a newer direct load", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -180,7 +178,7 @@ test("ignores a stale DASH load that resolves after a newer direct load", async 
     runtimeEngine.load("https://example.test/track.mp3", {
         autoplay: false,
     });
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     assert.equal(howlerEngine.loadCalls.length, 1);
@@ -190,10 +188,8 @@ test("ignores a stale DASH load that resolves after a newer direct load", async 
 test("cancels a pending lazy DASH engine load when the user stops playback", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -206,7 +202,7 @@ test("cancels a pending lazy DASH engine load when the user stops playback", asy
         mimeType: "application/dash+xml",
     });
     runtimeEngine.stop();
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     assert.equal(videoJsEngine.loadCalls.length, 0);
@@ -215,10 +211,8 @@ test("cancels a pending lazy DASH engine load when the user stops playback", asy
 test("completes a pending lazy DASH engine load without autoplay when the user pauses", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -234,7 +228,7 @@ test("completes a pending lazy DASH engine load without autoplay when the user p
         { autoplay: true },
     );
     runtimeEngine.pause();
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     // The queued track must still finish loading (so the UI's current
@@ -247,10 +241,8 @@ test("completes a pending lazy DASH engine load without autoplay when the user p
 test("play() during a pending lazy DASH load defers to the queued track instead of restarting the stale source", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -269,7 +261,7 @@ test("play() during a pending lazy DASH load defers to the queued track instead 
         { autoplay: false },
     );
     runtimeEngine.play();
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     // play() must not restart the previous, already-halted howler source
@@ -283,10 +275,8 @@ test("play() during a pending lazy DASH load defers to the queued track instead 
 test("re-arms autoplay when the user presses play after pausing a pending lazy DASH load", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -303,7 +293,7 @@ test("re-arms autoplay when the user presses play after pausing a pending lazy D
     );
     runtimeEngine.pause();
     runtimeEngine.play();
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     assert.equal(videoJsEngine.loadCalls.length, 1);
@@ -313,10 +303,8 @@ test("re-arms autoplay when the user presses play after pausing a pending lazy D
 test("stops in-progress playback before the lazy video.js import resolves", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
-    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
-    const enginePromise = new Promise<AudioEngine>((resolve) => {
-        resolveEngine = resolve;
-    });
+    const { promise: enginePromise, resolve: resolveEngine } =
+        Promise.withResolvers<AudioEngine>();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
         createVideoJsEngine: () => enginePromise,
@@ -337,7 +325,7 @@ test("stops in-progress playback before the lazy video.js import resolves", asyn
     // not after the (potentially slow) video.js chunk download.
     assert.equal(howlerEngine.stopCalls, 1);
 
-    resolveEngine?.(videoJsEngine);
+    resolveEngine(videoJsEngine);
     await flushAsyncEngineInit();
 
     assert.equal(videoJsEngine.loadCalls.length, 1);
