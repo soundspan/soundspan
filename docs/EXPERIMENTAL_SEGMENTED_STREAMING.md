@@ -75,13 +75,13 @@ Correlation headers the frontend can send:
 
 ## Startup Observability Queries
 
-Use these field groups from `[SegmentedStreaming][Metric]` logs during rollout waves:
+Use the scoped logger shown for each field group during rollout waves:
 
-- Startup timeline (client): `event=player.startup_timeline`, `totalToAudibleMs`, `outcome`, `startupRetryCount`, `retryBudgetRemaining`, `startupCorrelationId`
-- Session create (server): `event=session.create`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
-- Manifest fetch (server): `event=manifest.fetch`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
-- Segment fetch (server): `event=segment.fetch`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
-- Retry exhaustion (client): `event=session.startup_retry_exhausted`, `stage`, `attempts`, `windowElapsedMs`, `sessionResetsUsed`
+- Startup timeline (client, `[Playback.Metric] client.signal`): `event=player.startup_timeline`, `totalToAudibleMs`, `outcome`, `startupRetryCount`, `retryBudgetRemaining`, `startupCorrelationId`
+- Session create (server, `[SegmentedStreaming][Metric]`): `event=session.create`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
+- Manifest fetch (server, `[SegmentedStreaming][Metric]`): `event=manifest.fetch`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
+- Segment fetch (server, `[SegmentedStreaming][Metric]`): `event=segment.fetch`, `status`, `latencyMs`, `startupLoadId`, `startupCorrelationId`
+- Retry exhaustion (client, `[Playback][ClientMetric]`): `event=session.startup_retry_exhausted`, `stage`, `attempts`, `windowElapsedMs`, `sessionResetsUsed`
 
 For baseline-vs-wave summaries:
 

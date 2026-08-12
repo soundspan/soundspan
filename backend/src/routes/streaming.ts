@@ -14,9 +14,16 @@ import {
     buildSegmentedRouteTraceErrorFields,
     logSegmentedStreamingTrace,
 } from "../services/segmented-streaming/trace";
+import {
+    buildPlaybackRouteTraceFields,
+    logPlaybackMetric,
+    logPlaybackTrace,
+    playbackTraceDurationMs,
+} from "../services/playbackTrace";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = express.Router();
+const playbackRouteLogger = logger.child("Playback");
 
 const createSessionSchema = z.object({
     trackId: z.string().min(1),
@@ -711,9 +718,9 @@ const handleSegmentFetch = async (
                 status: "success",
                 sessionId: session.sessionId,
                 sourceType: session.sourceType,
-                segmentName: req.params.segmentName,
-                ...startupCorrelationFields,
-                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            segmentName: req.params.segmentName,
+            ...startupCorrelationFields,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
             });
             logSegmentedStreamingTrace(
                 "route.segment.success",
@@ -1469,7 +1476,7 @@ router.post(
  * @openapi
  * /api/streaming/v1/client-metrics:
  *   post:
- *     summary: Ingest client-side streaming metrics and signals
+ *     summary: Ingest client-side playback metrics and signals
  *     tags: [Streaming]
  *     security:
  *       - sessionAuth: []
@@ -1490,7 +1497,7 @@ router.post(
  *                 type: object
  *     responses:
  *       202:
- *         description: Metric accepted
+ *         description: Playback signal accepted
  *       400:
  *         description: Invalid request body
  *       401:
@@ -1501,20 +1508,20 @@ router.post("/v1/client-metrics", requireAuth, async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            logSegmentedStreamingMetric("client.signal", {
+            logPlaybackMetric("client.signal", {
                 status: "reject",
                 reason: "unauthorized",
-                latencyMs: segmentedMetricDurationMs(startedAtMs),
+                latencyMs: playbackTraceDurationMs(startedAtMs),
             });
             return res.status(401).json({ error: "Unauthorized" });
         }
 
         const parsedBody = clientMetricSchema.safeParse(req.body ?? {});
         if (!parsedBody.success) {
-            logSegmentedStreamingMetric("client.signal", {
+            logPlaybackMetric("client.signal", {
                 status: "reject",
                 reason: "invalid_request",
-                latencyMs: segmentedMetricDurationMs(startedAtMs),
+                latencyMs: playbackTraceDurationMs(startedAtMs),
             });
             return res.status(400).json({
                 error: "Invalid request body",
@@ -1569,7 +1576,7 @@ router.post("/v1/client-metrics", requireAuth, async (req, res) => {
             }
         }
 
-        logSegmentedStreamingMetric("client.signal", {
+        logPlaybackMetric("client.signal", {
             status: "success",
             event: parsedBody.data.event,
             sessionId,
@@ -1577,11 +1584,11 @@ router.post("/v1/client-metrics", requireAuth, async (req, res) => {
             trackId,
             userId,
             ...startupTimelineFields,
-            latencyMs: segmentedMetricDurationMs(startedAtMs),
+            latencyMs: playbackTraceDurationMs(startedAtMs),
         });
-        logSegmentedStreamingTrace(
-            "route.client.signal",
-            buildSegmentedRouteTraceFields(req, startedAtMs, {
+        logPlaybackTrace(
+            "playback.client.signal",
+            buildPlaybackRouteTraceFields(req, startedAtMs, {
                 event: parsedBody.data.event,
                 sessionId,
                 sourceType,
@@ -1606,15 +1613,12 @@ router.post("/v1/client-metrics", requireAuth, async (req, res) => {
 
         return res.status(202).json({ accepted: true });
     } catch (error) {
-        logSegmentedStreamingMetric("client.signal", {
+        logPlaybackMetric("client.signal", {
             status: "error",
             ...getSegmentedMetricErrorFields(error),
-            latencyMs: segmentedMetricDurationMs(startedAtMs),
+            latencyMs: playbackTraceDurationMs(startedAtMs),
         });
-        logger.error(
-            "[SegmentedStreaming] Failed to ingest client signal:",
-            error,
-        );
+        playbackRouteLogger.error("Failed to ingest client signal", error);
         return res
             .status(500)
             .json({ error: "Failed to ingest client signal" });

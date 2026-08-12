@@ -178,8 +178,9 @@ class FakeAudioEngine {
     // native-engine soak): reports "videojs" while the segmented engine is
     // active, else the direct-slot descriptor. This fake has one slot, so it
     // keys off the same runtimeEngineMode the engineMode mock uses.
-    getActiveEngineDescriptor(): "howler" | "videojs" {
-        return runtimeEngineMode === "videojs" ? "videojs" : "howler";
+    getActiveEngineDescriptor(): "howler" | "native" | "videojs" {
+        if (runtimeEngineMode === "videojs") return "videojs";
+        return runtimeEngineMode === "native" ? "native" : "howler";
     }
 
     quarantineRepresentation(): null {
@@ -471,7 +472,7 @@ const preemptChecks: Array<{
 const toastErrors: string[] = [];
 const listenTogetherResyncCalls: string[] = [];
 
-let runtimeEngineMode: "howler" | "videojs" = "howler";
+let runtimeEngineMode: "howler" | "native" | "videojs" = "howler";
 let listenTogetherSnapshot: {
     groupId?: string;
     isHost?: boolean;
@@ -1725,6 +1726,36 @@ test("loads direct track, applies output state, and syncs play/pause transitions
     rerenderOrchestrator();
     await flushAsync();
     assert.ok(engine.playCalls >= 2);
+});
+
+test("native engine startup reaches the client-signal pipeline with neutral telemetry naming", async () => {
+    enableWindowMetrics();
+    runtimeEngineMode = "native";
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("native-startup");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    const startupSignals = getServerSignalEvents("player.engine_startup");
+    assert.equal(startupSignals.length, 1);
+    const startupFields = startupSignals[0]?.fields as
+        | Record<string, unknown>
+        | undefined;
+    assert.equal(typeof startupFields?.durationMs, "number");
+    assert.ok(Number.isFinite(startupFields.durationMs));
+    assert.deepEqual(startupSignals[0]?.fields, {
+        engineMode: "native",
+        activeEngine: "native",
+        durationMs: startupFields.durationMs,
+        trackId: "native-startup",
+        sourceType: "local",
+        playbackType: "track",
+    });
+    assert.equal(getServerSignalEvents("player.howler_startup").length, 0);
 });
 
 test("preempts in-flight load when track switches before initial load settles", async () => {

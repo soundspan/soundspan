@@ -97,14 +97,17 @@ const resolveSessionService = async (
         },
     }));
 
-    jest.doMock("../../../utils/logger", () => ({
-        logger: {
+    jest.doMock("../../../utils/logger", () => {
+        const logger = {
             debug: jest.fn(),
             info: jest.fn(),
             warn: jest.fn(),
             error: (...args: unknown[]) => mockLoggerError(...args),
-        },
-    }));
+            child: jest.fn(),
+        };
+        logger.child.mockReturnValue(logger);
+        return { logger };
+    });
 
     jest.doMock("../manifestService", () => ({
         segmentedManifestService: {

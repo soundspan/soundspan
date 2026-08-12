@@ -1,26 +1,21 @@
 import type { Request } from "express";
-import { createLogger, logger } from "../../utils/logger";
+import {
+    buildPlaybackRouteTraceErrorFields,
+    buildPlaybackRouteTraceFields,
+    playbackTraceDurationMs,
+    playbackTraceEnabled,
+} from "../playbackTrace";
+import { logger } from "../../utils/logger";
 
-const TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
-const traceLogger =
-    typeof createLogger === "function"
-        ? createLogger("SegmentedStreaming.Trace")
-        : logger;
+const traceLogger = logger.child("SegmentedStreaming.Trace");
 
-const isTruthy = (value: string | undefined): boolean => {
-    const normalized = value?.trim().toLowerCase();
-    return normalized ? TRUTHY_VALUES.has(normalized) : false;
-};
+/** Whether segmented-streaming trace logs were enabled at module load. */
+export const segmentedStreamingTraceEnabled = playbackTraceEnabled;
 
-const resolveTraceEnabled = (): boolean =>
-    isTruthy(process.env.STREAMING_TRACE_LOGS) ||
-    isTruthy(process.env.SEGMENTED_STREAMING_TRACE_LOGS);
+/** Return non-negative elapsed time for segmented-streaming trace work. */
+export const segmentedTraceDurationMs = playbackTraceDurationMs;
 
-export const segmentedStreamingTraceEnabled = resolveTraceEnabled();
-
-export const segmentedTraceDurationMs = (startedAtMs: number): number =>
-    Math.max(0, Date.now() - startedAtMs);
-
+/** Convert an unknown segmented-streaming failure into stable trace fields. */
 export const toSegmentedTraceErrorFields = (
     error: unknown,
 ): { errorCode: string; errorMessage: string } => {
@@ -39,28 +34,29 @@ export const toSegmentedTraceErrorFields = (
     };
 };
 
+/** Add route context to a segmented-streaming trace event. */
 export const buildSegmentedRouteTraceFields = (
     req: Request,
     startedAtMs: number,
     fields: Record<string, unknown> = {},
-): Record<string, unknown> => ({
-    ...fields,
-    requestPath: req.originalUrl || req.path,
-    latencyMs: segmentedTraceDurationMs(startedAtMs),
-});
+): Record<string, unknown> =>
+    buildPlaybackRouteTraceFields(req, startedAtMs, fields);
 
+/** Add error and route context to a segmented-streaming trace event. */
 export const buildSegmentedRouteTraceErrorFields = (
     req: Request,
     startedAtMs: number,
     errorFields: Record<string, unknown>,
     fields: Record<string, unknown> = {},
-): Record<string, unknown> => ({
-    ...fields,
-    requestPath: req.originalUrl || req.path,
-    ...errorFields,
-    latencyMs: segmentedTraceDurationMs(startedAtMs),
-});
+): Record<string, unknown> =>
+    buildPlaybackRouteTraceErrorFields(
+        req,
+        startedAtMs,
+        errorFields,
+        fields,
+    );
 
+/** Emit a gated trace event under the segmented-streaming logger identity. */
 export const logSegmentedStreamingTrace = (
     event: string,
     fields: Record<string, unknown> = {},

@@ -75,6 +75,15 @@ All playback client metrics (`[Playback][ClientMetric]` log lines and the backen
 - `engineMode` — the deployment flag (`STREAMING_ENGINE_MODE` as resolved). Identifies the rollout cohort.
 - `activeEngine` — the engine actually driving playback at the moment of the event (`howler`, `native`, `tauri-native`, or `videojs`). Platform pins (Android WebView → howler), the Tauri upgrade, and per-source videojs routing make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
 
+For 2.0.0 log queries, `player.howler_startup` became
+`player.engine_startup`, and client-signal ingestion moved from
+`route.client.signal` / `[SegmentedStreaming.Trace]` to
+`playback.client.signal` / `[Playback.Trace]`. The always-on client-signal
+metric log identity likewise moved from `[SegmentedStreaming][Metric]` to
+`[Playback.Metric]`, and client-ingestion errors moved from the
+`[SegmentedStreaming]` scope to `[Playback]`. Segmented manifest, segment, and
+session traces retain their existing segmented-streaming names.
+
 This makes howler and native directly comparable over a soak window: playback error events by `MEDIA_ERR` code, playback-start latency, and recovery attempts. The engine additionally emits `[NativeAudioEngine][Telemetry]` events (`playback_start_latency`, `recovery_attempt`, `playback_error`, `load_retry_applied`) tagged `engineMode: native`.
 
 Those were the exit criteria for flipping the default (met during the 1.7.0 soak: no metric regression against the howler baseline, zero new double-play/background-death reports). They remain the criteria for evaluating any deployment that reverts to `howler` and considers switching back.

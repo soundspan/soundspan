@@ -72,6 +72,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/outboundUrlSafety.ts` | Core |
 | `backend/src/services/playlistImportService.ts` | Core |
 | `backend/src/services/playlistTrackResolution.ts` | Core |
+| `backend/src/services/playbackTrace.ts` | Playback telemetry |
 | `backend/src/services/podcastCache.ts` | Core |
 | `backend/src/services/podcastDownload.ts` | Core |
 | `backend/src/services/programmaticPlaylistArtistCap.ts` | Core |

@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed playback telemetry so log names match their emitters:
+  `player.howler_startup` → `player.engine_startup`;
+  `route.client.signal` / `[SegmentedStreaming.Trace]` →
+  `playback.client.signal` / `[Playback.Trace]` for client signals; and
+  `[SegmentedStreaming][Metric] client.signal` →
+  `[Playback.Metric] client.signal`, with client-ingestion errors moving from
+  the `[SegmentedStreaming]` scope to `[Playback]`. Genuinely segmented
+  manifest, segment, session, and DASH lifecycle telemetry keeps its existing
+  names.
 - Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating
   current PyPI artifacts: `essentia-tensorflow` 2.1b6.dev1389 remains the newest
   CPython 3.11 manylinux x86-64 build, while 2.1b6.dev1438 is CPython 3.14-only.

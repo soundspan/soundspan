@@ -1,5 +1,43 @@
 import { Request, Response } from "express";
 
+const mockPlaybackRouteLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+const mockPlaybackMetricLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+const mockPlaybackTraceLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+const mockSegmentedTraceLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+const mockLoggerChild = jest.fn((scope: string) => {
+    if (scope === "Playback") return mockPlaybackRouteLogger;
+    if (scope === "Playback.Metric") return mockPlaybackMetricLogger;
+    if (scope === "Playback.Trace") return mockPlaybackTraceLogger;
+    if (scope === "SegmentedStreaming.Trace") {
+        return mockSegmentedTraceLogger;
+    }
+    throw new Error(`Unexpected logger scope: ${scope}`);
+});
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
@@ -10,6 +48,7 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: mockLoggerChild,
     },
 }));
 
@@ -727,16 +766,16 @@ describe("streaming route runtime", () => {
         expect(mockHeartbeatSession).not.toHaveBeenCalled();
     });
 
-    it("accepts segmented client signal metrics", async () => {
+    it("accepts native engine startup through the playback client-signal pipeline", async () => {
         const req = {
             user: { id: "user-1" },
             body: {
-                event: "player.rebuffer",
+                event: "player.engine_startup",
                 fields: {
-                    sessionId: "session-1",
+                    engineMode: "native",
+                    activeEngine: "native",
                     sourceType: "local",
                     trackId: "track-1",
-                    reason: "heartbeat_stall",
                 },
             },
         } as any;
@@ -746,6 +785,16 @@ describe("streaming route runtime", () => {
 
         expect(res.statusCode).toBe(202);
         expect(res.body).toEqual({ accepted: true });
+        expect(mockPlaybackMetricLogger.info).toHaveBeenCalledWith(
+            "client.signal",
+            expect.objectContaining({
+                status: "success",
+                event: "player.engine_startup",
+                sourceType: "local",
+                trackId: "track-1",
+                userId: "user-1",
+            }),
+        );
         expect(mockSchedulePlaybackErrorRepair).not.toHaveBeenCalled();
     });
 
@@ -826,7 +875,7 @@ describe("streaming route runtime", () => {
         });
     });
 
-    it("returns 400 for invalid segmented client signal payloads", async () => {
+    it("returns 400 for invalid playback client signal payloads", async () => {
         const req = {
             user: { id: "user-1" },
             body: {
@@ -2053,9 +2102,11 @@ describe("streaming route runtime", () => {
         await postClientMetric(req, res);
 
         expect(res.statusCode).toBe(202);
-        const metricCall = (logger.info as jest.Mock).mock.calls.find(
+        const metricCall = (
+            mockPlaybackMetricLogger.info as jest.Mock
+        ).mock.calls.find(
             (call: unknown[]) =>
-                call[0] === "[SegmentedStreaming][Metric] client.signal" &&
+                call[0] === "client.signal" &&
                 (call[1] as Record<string, unknown>)?.event ===
                     "player.startup_timeline",
         ) as [string, Record<string, unknown>] | undefined;
@@ -2103,6 +2154,10 @@ describe("streaming route runtime", () => {
         expect(failingRes.body).toEqual({
             error: "Failed to ingest client signal",
         });
+        expect(mockPlaybackRouteLogger.error).toHaveBeenCalledWith(
+            "Failed to ingest client signal",
+            expect.any(Error),
+        );
     });
 
     it("handles unauthorized session create and unknown session-create errors", async () => {

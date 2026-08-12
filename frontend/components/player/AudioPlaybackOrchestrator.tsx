@@ -251,7 +251,7 @@ function logPlaybackClientMetric(
 }
 
 const PLAYBACK_CLIENT_SIGNAL_EVENTS = new Set<string>([
-    "player.howler_startup",
+    "player.engine_startup",
     "player.rebuffer",
     "player.rebuffer_timeout",
     "player.rebuffer_timeout_deferred",
@@ -4732,7 +4732,7 @@ export const AudioPlaybackOrchestrator = memo(
                     const durationMs =
                         Date.now() - howlerLoadStartMsRef.current;
                     howlerLoadStartMsRef.current = 0;
-                    logPlaybackClientMetric("player.howler_startup", {
+                    logPlaybackClientMetric("player.engine_startup", {
                         durationMs,
                         trackId: currentTrack?.id ?? null,
                         sourceType: currentTrack
