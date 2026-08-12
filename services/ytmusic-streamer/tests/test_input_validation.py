@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import types
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 VALID_ID = "dQw4w9WgXcQ"
 
 
 @pytest.fixture()
-def stream_recorder(monkeypatch):
+def stream_recorder(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Record extraction calls while returning deterministic stream metadata."""
     import app
 
@@ -25,23 +27,30 @@ def stream_recorder(monkeypatch):
         "abr": 128,
         "acodec": "aac",
     }
+
+    def record_music_stream(user_id: Any, video_id: Any, quality: Any = "HIGH") -> Any:
+        calls.append((user_id, video_id, quality))
+        return stub
+
+    def record_youtube_stream(video_id: Any, quality: Any = "HIGH") -> Any:
+        calls.append(("yt", video_id, quality))
+        return stub
+
     monkeypatch.setattr(
         app,
         "_get_stream_url_sync",
-        lambda user_id, video_id, quality="HIGH": (
-            calls.append((user_id, video_id, quality)) or stub
-        ),
+        record_music_stream,
     )
     monkeypatch.setattr(
         app,
         "_get_yt_stream_url_sync",
-        lambda video_id, quality="HIGH": calls.append(("yt", video_id, quality)) or stub,
+        record_youtube_stream,
     )
     yield calls
 
 
 @pytest.mark.anyio
-async def test_stream_rejects_malformed_video_id(client, stream_recorder):
+async def test_stream_rejects_malformed_video_id(client: AsyncClient, stream_recorder: Any) -> None:
     """Malformed stream IDs are rejected before extraction begins."""
     for bad in ["short", "waytoolongvideoid123", "bad.chars!!x"]:
         response = await client.get(f"/stream/{bad}?user_id=__public__")
@@ -51,7 +60,7 @@ async def test_stream_rejects_malformed_video_id(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_stream_accepts_valid_video_id(client, stream_recorder):
+async def test_stream_accepts_valid_video_id(client: AsyncClient, stream_recorder: Any) -> None:
     """A valid stream ID reaches extraction with the default quality."""
     response = await client.get(f"/stream/{VALID_ID}?user_id=__public__")
     assert response.status_code == 200
@@ -59,7 +68,7 @@ async def test_stream_accepts_valid_video_id(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_stream_rejects_bad_quality(client, stream_recorder):
+async def test_stream_rejects_bad_quality(client: AsyncClient, stream_recorder: Any) -> None:
     """An unsupported stream quality is rejected before extraction."""
     response = await client.get(f"/stream/{VALID_ID}?user_id=__public__&quality=bogus")
     assert response.status_code == 400
@@ -68,7 +77,9 @@ async def test_stream_rejects_bad_quality(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_stream_normalizes_lowercase_quality(client, stream_recorder):
+async def test_stream_normalizes_lowercase_quality(
+    client: AsyncClient, stream_recorder: Any
+) -> None:
     """A supported lowercase stream quality is normalized before use."""
     response = await client.get(f"/stream/{VALID_ID}?user_id=__public__&quality=lossless")
     assert response.status_code == 200
@@ -76,7 +87,7 @@ async def test_stream_normalizes_lowercase_quality(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_proxy_rejects_malformed_video_id(client, stream_recorder):
+async def test_proxy_rejects_malformed_video_id(client: AsyncClient, stream_recorder: Any) -> None:
     """The music proxy rejects a malformed ID before extraction."""
     response = await client.get("/proxy/bad.id!?user_id=__public__")
     assert response.status_code == 400
@@ -84,7 +95,7 @@ async def test_proxy_rejects_malformed_video_id(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_proxy_rejects_bad_quality(client, stream_recorder):
+async def test_proxy_rejects_bad_quality(client: AsyncClient, stream_recorder: Any) -> None:
     """The music proxy rejects an unsupported quality before extraction."""
     response = await client.get(f"/proxy/{VALID_ID}?user_id=__public__&quality=ULTRA")
     assert response.status_code == 400
@@ -92,7 +103,9 @@ async def test_proxy_rejects_bad_quality(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_yt_proxy_rejects_malformed_video_id(client, stream_recorder):
+async def test_yt_proxy_rejects_malformed_video_id(
+    client: AsyncClient, stream_recorder: Any
+) -> None:
     """The YouTube proxy rejects a malformed ID before extraction."""
     response = await client.get("/yt/proxy/nope")
     assert response.status_code == 400
@@ -100,7 +113,7 @@ async def test_yt_proxy_rejects_malformed_video_id(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_yt_proxy_rejects_bad_quality(client, stream_recorder):
+async def test_yt_proxy_rejects_bad_quality(client: AsyncClient, stream_recorder: Any) -> None:
     """The YouTube proxy rejects an unsupported quality before extraction."""
     response = await client.get(f"/yt/proxy/{VALID_ID}?quality=extreme")
     assert response.status_code == 400
@@ -108,7 +121,7 @@ async def test_yt_proxy_rejects_bad_quality(client, stream_recorder):
 
 
 @pytest.mark.anyio
-async def test_song_rejects_malformed_video_id(client):
+async def test_song_rejects_malformed_video_id(client: AsyncClient) -> None:
     """The song route rejects a malformed ID before metadata extraction."""
     response = await client.get("/song/tiny?user_id=__public__")
     assert response.status_code == 400
@@ -116,7 +129,9 @@ async def test_song_rejects_malformed_video_id(client):
 
 
 @pytest.mark.anyio
-async def test_song_accepts_valid_video_id(client, monkeypatch):
+async def test_song_accepts_valid_video_id(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The song route accepts a valid ID and returns its metadata."""
     import app
 
@@ -141,13 +156,15 @@ async def test_song_accepts_valid_video_id(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_batch_search_rejects_more_than_50_queries(client, monkeypatch):
+async def test_batch_search_rejects_more_than_50_queries(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Batch search rejects oversized requests before search work starts."""
     import app
 
     calls = []
 
-    def fake_search(*args, **kwargs):
+    def fake_search(*args: Any, **kwargs: Any) -> Any:
         calls.append("called")
         return [], "native"
 
@@ -162,13 +179,15 @@ async def test_batch_search_rejects_more_than_50_queries(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_batch_search_accepts_50_queries(client, monkeypatch):
+async def test_batch_search_accepts_50_queries(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Batch search accepts requests at the configured query cap."""
     import app
 
     calls = []
 
-    def fake_search(*args, **kwargs):
+    def fake_search(*args: Any, **kwargs: Any) -> Any:
         calls.append("called")
         return [], "native"
 

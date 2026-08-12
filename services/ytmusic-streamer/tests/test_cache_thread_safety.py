@@ -5,11 +5,12 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 
 
-def test_cross_thread_cache_locks_exist():
+def test_cross_thread_cache_locks_exist() -> None:
     import app
 
     lock_type = type(threading.Lock())
@@ -31,7 +32,9 @@ def test_cross_thread_cache_locks_exist():
         ("_search_cache", "_search_cache_lock", "_clean_search_cache"),
     ),
 )
-def test_cache_cleanup_waits_for_owning_lock(cache_name, lock_name, cleaner_name):
+def test_cache_cleanup_waits_for_owning_lock(
+    cache_name: Any, lock_name: Any, cleaner_name: Any
+) -> None:
     import app
 
     cache = getattr(app, cache_name)
@@ -52,14 +55,15 @@ def test_cache_cleanup_waits_for_owning_lock(cache_name, lock_name, cleaner_name
     assert expired_key not in cache
 
 
-def test_search_cache_concurrent_access_is_safe():
+def test_search_cache_concurrent_access_is_safe() -> None:
     import app
 
     def exercise_cache(worker_id: int) -> None:
         for iteration in range(200):
             query = f"query-{worker_id}-{iteration}"
-            app._set_cached_search(str(worker_id), query, None, 5, "native", [query])
-            assert app._get_cached_search(str(worker_id), query, None, 5, "native") == [query]
+            result = {"query": query}
+            app._set_cached_search(str(worker_id), query, None, 5, "native", [result])
+            assert app._get_cached_search(str(worker_id), query, None, 5, "native") == [result]
             with app._search_cache_lock:
                 app._search_cache[f"expired-{worker_id}-{iteration}"] = {
                     "expires_at": time.time() - 1,
@@ -79,7 +83,7 @@ def test_search_cache_concurrent_access_is_safe():
             app._search_cache.clear()
 
 
-def test_stream_cache_concurrent_access_is_safe():
+def test_stream_cache_concurrent_access_is_safe() -> None:
     import app
 
     def exercise_cache(worker_id: int) -> None:

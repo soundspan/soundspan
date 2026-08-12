@@ -12,25 +12,27 @@ in SystemSettings and use an Authorization: Bearer header, with deprecated
 query-parameter support retained for one release.
 """
 
-import asyncio
+import asyncio as asyncio
 import logging
 import os
 import shutil
 import sys
 import threading
-import time
+import time as time
 from base64 import b64decode
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, Protocol, cast
+from xml.etree.ElementTree import Element
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
 import httpx
-import tidalapi
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from tidalapi.media import Quality
+from tidalapi.session import Config, Session
 
 SERVICES_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICES_ROOT) not in sys.path:
@@ -43,13 +45,43 @@ from common.sidecar_runtime_utils import (
     register_error_handlers,
     require_internal_secret,
 )
-from tiddl.core.api import ApiError, TidalAPI, TidalClient
+from tiddl.core.api import ApiError as ApiError
+from tiddl.core.api import TidalAPI, TidalClient
 
 # ── tiddl core imports ──────────────────────────────────────────────
 from tiddl.core.auth import AuthAPI, AuthClientError
 from tiddl.core.metadata import Cover, add_track_metadata
 from tiddl.core.utils import parse_track_stream
 from tiddl.core.utils.format import format_template
+
+JsonObject = dict[str, Any]
+
+
+class TrackDownloadAPIProtocol(Protocol):
+    """Typed boundary for the subset needed to download one track."""
+
+    def get_track(self, track_id: int) -> Any: ...
+
+    def get_album(self, album_id: int) -> Any: ...
+
+    def get_track_stream(self, *, track_id: int, quality: str) -> Any: ...
+
+
+class AlbumAPIProtocol(Protocol):
+    """Typed boundary for the subset needed to inspect an album."""
+
+    def get_album(self, album_id: int) -> Any: ...
+
+    def get_album_items(self, album_id: int, *, limit: int, offset: int) -> Any: ...
+
+
+class TidalAPIProtocol(TrackDownloadAPIProtocol, AlbumAPIProtocol, Protocol):
+    """Typed boundary for the complete tiddl surface used by the service."""
+
+    def get_session(self) -> Any: ...
+
+    def get_search(self, query: str) -> Any: ...
+
 
 # ── Logging ─────────────────────────────────────────────────────────
 log = configure_service_logger("tidal-downloader")
@@ -94,7 +126,7 @@ async def _run_stream_cache_cleanup() -> None:
 
 
 @asynccontextmanager
-async def _app_lifespan(_app: FastAPI):
+async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Own and stop the stream-cache maintenance task with the application."""
     cleanup_task = asyncio.create_task(
         _run_stream_cache_cleanup(),
@@ -128,13 +160,13 @@ TIDDL_PATH = Path(os.getenv("TIDDL_PATH", "/data/.tiddl"))
 MUSIC_PATH = Path(os.getenv("MUSIC_PATH", "/music"))
 
 # ── Per-user API instances for streaming ───────────────────────────
-_user_apis: dict[str, TidalAPI] = {}
+_user_apis: dict[str, TidalAPIProtocol] = {}
 _user_api_locks: dict[str, asyncio.Lock] = {}
 _user_auth_state: dict[str, dict[str, str]] = {}
 _user_auth_state_lock = threading.Lock()
 
 # ── Stream URL cache (per-user, keyed by (user_id, track_id, quality)) ─────
-_stream_cache: dict[tuple[str, int, str], dict] = {}
+_stream_cache: dict[tuple[str, int, str], JsonObject] = {}
 _stream_cache_lock = threading.Lock()
 STREAM_CACHE_TTL = 600  # 10 minutes
 _STREAM_CACHE_MAX_ENTRIES = 1000
@@ -148,27 +180,27 @@ STREAM_QUALITY_OPTIONS = {"LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"}
 #   Quality.low_320k    = "HIGH"
 #   Quality.high_lossless = "LOSSLESS"
 #   Quality.hi_res_lossless = "HI_RES_LOSSLESS"
-TIDDL_TO_TIDALAPI_QUALITY: dict[str, tidalapi.Quality] = {
-    "LOW": tidalapi.Quality.low_96k,
-    "HIGH": tidalapi.Quality.low_320k,
-    "LOSSLESS": tidalapi.Quality.high_lossless,
-    "HI_RES_LOSSLESS": tidalapi.Quality.hi_res_lossless,
+TIDDL_TO_TIDALAPI_QUALITY: dict[str, Quality] = {
+    "LOW": Quality.low_96k,
+    "HIGH": Quality.low_320k,
+    "LOSSLESS": Quality.high_lossless,
+    "HI_RES_LOSSLESS": Quality.hi_res_lossless,
 }
-TIDALAPI_DEFAULT_QUALITY = tidalapi.Quality.high_lossless
+TIDALAPI_DEFAULT_QUALITY = Quality.high_lossless
 
 # ── Per-user tidalapi browse sessions ─────────────────────────────
 # Keyed by "user_id:quality" so changing quality creates a new session.
-_browse_sessions: dict[str, tidalapi.Session] = {}
+_browse_sessions: dict[str, Session] = {}
 _browse_sessions_lock = threading.Lock()
 _BROWSE_SESSION_MAX = 50
-_public_browse_sessions: dict[str, tidalapi.Session] = {}
+_public_browse_sessions: dict[str, Session] = {}
 _public_browse_sessions_lock = threading.Lock()
 _PUBLIC_BROWSE_SESSION_MAX = 8
 _BATCH_SEARCH_MAX_QUERIES = 50
 _BATCH_SEARCH_CONCURRENCY = 5
 
 
-def _build_browse_session(user_id: str, quality: str | None = None) -> tidalapi.Session:
+def _build_browse_session(user_id: str, quality: str | None = None) -> Session:
     """Get or create a tidalapi Session for browse endpoints.
 
     quality: tiddl-style quality string (LOW/HIGH/LOSSLESS/HI_RES_LOSSLESS).
@@ -192,7 +224,7 @@ def _build_browse_session(user_id: str, quality: str | None = None) -> tidalapi.
             detail=f"No TIDAL session for user {user_id}. Restore credentials first.",
         )
 
-    session = tidalapi.Session(tidalapi.Config(quality=api_quality))
+    session = Session(Config(quality=api_quality))
     session.load_oauth_session(
         token_type="Bearer",  # noqa: S106 -- OAuth token scheme, not a credential
         access_token=creds_snapshot["access_token"],
@@ -208,7 +240,7 @@ def _build_browse_session(user_id: str, quality: str | None = None) -> tidalapi.
     return session
 
 
-def _build_public_browse_session(quality: str | None = None) -> tidalapi.Session:
+def _build_public_browse_session(quality: str | None = None) -> Session:
     """Get or create an unauthenticated tidalapi Session for public browse."""
     normalized = _normalize_stream_quality(quality) if quality else None
     api_quality = TIDDL_TO_TIDALAPI_QUALITY.get(normalized or "", TIDALAPI_DEFAULT_QUALITY)
@@ -219,7 +251,7 @@ def _build_public_browse_session(quality: str | None = None) -> tidalapi.Session
     if cached is not None:
         return cached
 
-    session = tidalapi.Session(tidalapi.Config(quality=api_quality))
+    session = Session(Config(quality=api_quality))
     with _public_browse_sessions_lock:
         while len(_public_browse_sessions) >= _PUBLIC_BROWSE_SESSION_MAX:
             oldest_key = next(iter(_public_browse_sessions))
@@ -425,7 +457,7 @@ def _is_playlist_not_found_error(error: Exception) -> bool:
     return "not found" in message or "404" in message
 
 
-def _build_api(access_token: str, user_id: str, country_code: str) -> TidalAPI:
+def _build_api(access_token: str, user_id: str, country_code: str) -> TidalAPIProtocol:
     """Create a fresh TidalAPI client from stored credentials."""
     cache_path = TIDDL_PATH / "api_cache"
     client = TidalClient(
@@ -433,16 +465,17 @@ def _build_api(access_token: str, user_id: str, country_code: str) -> TidalAPI:
         cache_name=str(cache_path),
         omit_cache=True,  # We always want fresh data in a service context
     )
-    return TidalAPI(client, user_id=user_id, country_code=country_code)
+    # tiddl has no typing metadata; this Protocol records the methods consumed here.
+    return cast(TidalAPIProtocol, TidalAPI(client, user_id=user_id, country_code=country_code))
 
 
 def _download_track_sync(
-    api: TidalAPI,
+    api: TrackDownloadAPIProtocol,
     track_id: int,
     quality: str,
     output_template: str,
     dest_base: Path,
-) -> dict:
+) -> JsonObject:
     """
     Download a single track synchronously.
 
@@ -529,7 +562,7 @@ def _download_track_sync(
 # ════════════════════════════════════════════════════════════════════
 
 
-def _get_user_api(user_id: str) -> TidalAPI:
+def _get_user_api(user_id: str) -> TidalAPIProtocol:
     """
     Get or raise for a per-user TidalAPI instance.
     The backend must call /user/auth/restore first.
@@ -555,7 +588,7 @@ def _clear_stream_cache(
     user_id: str,
     track_id: int | None = None,
     quality: str | None = None,
-):
+) -> None:
     """Clear cached stream URLs for a user, optionally scoped by track/quality."""
     normalized_quality = _normalize_stream_quality(quality) if quality is not None else None
     with _stream_cache_lock:
@@ -573,7 +606,7 @@ def _clear_stream_cache(
             _stream_cache.pop(key, None)
 
 
-def _invalidate_user_api(user_id: str):
+def _invalidate_user_api(user_id: str) -> None:
     """Remove a user's API instance (e.g. on logout)."""
     _user_apis.pop(user_id, None)
     with _user_auth_state_lock:
@@ -620,11 +653,11 @@ def _clear_refreshed_session_caches(user_id: str) -> None:
 def _commit_refreshed_session(
     user_id: str,
     creds: dict[str, str],
-    refreshed_api: TidalAPI,
+    refreshed_api: TidalAPIProtocol,
     access_token: str,
     tidal_user_id: str,
     country_code: str,
-) -> TidalAPI | None:
+) -> TidalAPIProtocol | None:
     """Commit a refresh only while its captured credentials remain current."""
     with _user_auth_state_lock:
         if _user_auth_state.get(user_id) is not creds:
@@ -637,7 +670,7 @@ def _commit_refreshed_session(
         return refreshed_api
 
 
-async def _refresh_user_api(user_id: str) -> TidalAPI:
+async def _refresh_user_api(user_id: str) -> TidalAPIProtocol:
     """Refresh a user's token under a per-user lock to prevent stampedes."""
     lock = _get_user_lock(user_id)
 
@@ -700,7 +733,7 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
 
 async def _run_user_api_call(
     user_id: str,
-    func: Callable[[TidalAPI], Any],
+    func: Callable[[TidalAPIProtocol], Any],
     operation: str,
 ) -> Any:
     """
@@ -727,7 +760,7 @@ _MAX_MANIFEST_BYTES = 1 * 1024 * 1024
 _DASH_NS = "{urn:mpeg:dash:schema:mpd:2011}"
 
 
-def _parse_dash_mpd(manifest_b64: str):
+def _parse_dash_mpd(manifest_b64: str) -> Element | None:
     """Decode and parse a base64-encoded DASH MPD manifest.
 
     Returns the parsed ElementTree root, or ``None`` if the manifest is
@@ -745,7 +778,7 @@ def _parse_dash_mpd(manifest_b64: str):
         return None
 
 
-def _find_segment_template(tree):
+def _find_segment_template(tree: Element) -> Element | None:
     """Locate the SegmentTemplate element in a DASH MPD.
 
     DASH allows SegmentTemplate at either the Representation level or the
@@ -793,7 +826,7 @@ def _resolve_dash_codec(manifest_b64: str) -> str | None:
     return None
 
 
-def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> dict:
+def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> JsonObject:
     """
     Extract stream URL for a TIDAL track (synchronous — run in thread).
     Uses tiddl's stream extraction. Results are cached for STREAM_CACHE_TTL.
@@ -898,15 +931,15 @@ def _clean_stream_cache() -> None:
 # ════════════════════════════════════════════════════════════════════
 
 
-def _tidal_image_url(image_id, w=480, h=480):
+def _tidal_image_url(image_id: Any, w: int = 480, h: int = 480) -> str | None:
     """Convert a TIDAL image UUID to a resources.tidal.com URL."""
     if not image_id:
         return None
-    uuid_path = image_id.replace("-", "/")
+    uuid_path = str(image_id).replace("-", "/")
     return f"https://resources.tidal.com/images/{uuid_path}/{w}x{h}.jpg"
 
 
-def _serialize_page_item(item):
+def _serialize_page_item(item: Any) -> JsonObject:
     """Serialize a single item from a tidalapi PageCategory."""
     result = {"title": getattr(item, "name", None) or getattr(item, "title", None) or ""}
 
@@ -944,7 +977,7 @@ def _serialize_page_item(item):
     return result
 
 
-def _serialize_page(page):
+def _serialize_page(page: Any) -> list[JsonObject]:
     """Serialize a tidalapi Page to shelf format.
 
     Categories whose items cannot be serialized into playable shelf
@@ -971,7 +1004,7 @@ def _serialize_page(page):
     return shelves
 
 
-def _extract_page_links(page) -> list[dict]:
+def _extract_page_links(page: Any) -> list[JsonObject]:
     """Extract individual PageLink items from a genre/mood Page.
 
     tidalapi returns Page objects whose categories are PageLinks containers,
@@ -985,7 +1018,7 @@ def _extract_page_links(page) -> list[dict]:
     return results
 
 
-def _serialize_genre(genre):
+def _serialize_genre(genre: Any) -> JsonObject:
     """Serialize a tidalapi genre/mood PageLink or category to dict."""
     img = None
     # PageLink objects store image as .image_id (UUID string)
@@ -1016,7 +1049,7 @@ def _serialize_genre(genre):
     }
 
 
-def _serialize_mix(mix):
+def _serialize_mix(mix: Any) -> JsonObject:
     """Serialize a tidalapi Mix to dict."""
     img = None
     if callable(getattr(mix, "image", None)):
@@ -1032,7 +1065,7 @@ def _serialize_mix(mix):
     }
 
 
-def _serialize_track(track):
+def _serialize_track(track: Any) -> JsonObject:
     """Serialize a tidalapi Track to dict."""
     artist = track.artist if hasattr(track, "artist") else None
     artist_name = getattr(artist, "name", "Unknown") if artist else "Unknown"
@@ -1062,7 +1095,7 @@ def _serialize_track(track):
     }
 
 
-def _serialize_playlist_preview(playlist):
+def _serialize_playlist_preview(playlist: Any) -> JsonObject:
     """Serialize a tidalapi Playlist to a preview dict (no tracks)."""
     img = None
     if callable(getattr(playlist, "image", None)):
@@ -1078,7 +1111,7 @@ def _serialize_playlist_preview(playlist):
     }
 
 
-def _serialize_playlist_detail(playlist):
+def _serialize_playlist_detail(playlist: Any) -> JsonObject:
     """Serialize a tidalapi Playlist to a detail dict with tracks."""
     img = None
     if callable(getattr(playlist, "image", None)):
@@ -1102,7 +1135,7 @@ def _serialize_playlist_detail(playlist):
 
 
 @app.get("/health")
-async def health():
+async def health() -> JsonObject:
     return {"status": "ok", "service": "tidal-downloader"}
 
 
@@ -1110,7 +1143,7 @@ async def health():
 
 
 @app.post("/auth/device")
-async def auth_device():
+async def auth_device() -> JsonObject:
     """Step 1: Initiate device-code OAuth flow. Returns a verification URL."""
     try:
         auth_api = AuthAPI()
@@ -1133,7 +1166,7 @@ async def auth_device():
 
 
 @app.post("/auth/token")
-async def auth_token(req: AuthTokenRequest):
+async def auth_token(req: AuthTokenRequest) -> JsonObject:
     """Step 2: Poll for token after user has authorised the device code."""
     try:
         auth_api = AuthAPI()
@@ -1164,7 +1197,7 @@ async def auth_token(req: AuthTokenRequest):
 
 
 @app.post("/auth/refresh")
-async def auth_refresh(req: RefreshRequest):
+async def auth_refresh(req: RefreshRequest) -> JsonObject:
     """Refresh an expired access token."""
     try:
         auth_api = AuthAPI()
@@ -1192,7 +1225,7 @@ async def auth_refresh(req: RefreshRequest):
 
 
 @app.post("/auth/session")
-async def auth_session(tokens: SessionCheckPayload):
+async def auth_session(tokens: SessionCheckPayload) -> JsonObject:
     """Verify that the stored tokens are still valid by calling /sessions."""
     try:
         api = _build_api(tokens.access_token, tokens.user_id, tokens.country_code)
@@ -1220,7 +1253,7 @@ async def auth_session(tokens: SessionCheckPayload):
 async def search(
     req: SearchRequest,
     creds: AdminCredentials = Depends(require_admin_credentials),
-):
+) -> JsonObject:
     """Search using bearer-header auth or the one-release query fallback."""
     api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
@@ -1271,7 +1304,7 @@ async def search(
 _ALBUM_PAGE_HARD_CAP = 1000
 
 
-def _get_album_tracks(api: TidalAPI, album_id: int) -> list[Any]:
+def _get_album_tracks(api: AlbumAPIProtocol, album_id: int) -> list[Any]:
     """Fetch downloadable album tracks with bounded offset pagination."""
     assert album_id is not None  # noqa: S101 -- internal typed invariant before paginated API calls
 
@@ -1293,7 +1326,7 @@ def _get_album_tracks(api: TidalAPI, album_id: int) -> list[Any]:
     return tracks
 
 
-def _get_album_with_tracks(api: TidalAPI, album_id: int) -> tuple[Any, list[Any]]:
+def _get_album_with_tracks(api: AlbumAPIProtocol, album_id: int) -> tuple[Any, list[Any]]:
     """Fetch album metadata and its paginated tracks synchronously."""
     album = api.get_album(album_id)
     tracks = _get_album_tracks(api, album_id)
@@ -1301,10 +1334,10 @@ def _get_album_with_tracks(api: TidalAPI, album_id: int) -> tuple[Any, list[Any]
 
 
 async def _download_album_tracks(
-    api: TidalAPI,
+    api: TrackDownloadAPIProtocol,
     tracks: list[Any],
     req: DownloadAlbumRequest,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[JsonObject], list[JsonObject]]:
     """Download album tracks sequentially and return successes and failures."""
     results = []
     errors = []
@@ -1344,7 +1377,7 @@ async def _download_album_tracks(
 async def download_track(
     req: DownloadTrackRequest,
     creds: AdminCredentials = Depends(require_admin_credentials),
-):
+) -> JsonObject:
     """Download using bearer-header auth or the one-release query fallback."""
     api = _build_api(creds.access_token, creds.user_id, creds.country_code)
 
@@ -1374,7 +1407,7 @@ async def download_track(
 async def download_album(
     req: DownloadAlbumRequest,
     creds: AdminCredentials = Depends(require_admin_credentials),
-):
+) -> JsonObject:
     """Download using bearer-header auth or the one-release query fallback."""
     api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
@@ -1410,7 +1443,7 @@ async def download_album(
 
 def _store_user_session(
     soundspan_user_id: str,
-    api: TidalAPI,
+    api: TidalAPIProtocol,
     access_token: str,
     refresh_token: str,
     tidal_user_id: str,
@@ -1433,7 +1466,7 @@ def _store_user_session(
 async def _refresh_and_restore_user(
     req: UserAuthRestoreRequest,
     soundspan_user_id: str,
-) -> dict:
+) -> JsonObject:
     """Refresh expired TIDAL credentials and restore the per-user session."""
     auth_api = AuthAPI()
     auth_response = await asyncio.to_thread(auth_api.refresh_token, req.refresh_token)
@@ -1461,14 +1494,14 @@ async def _refresh_and_restore_user(
 
 
 @app.get("/user/auth/status")
-async def user_auth_status(user_id: str = Query(...)):
+async def user_auth_status(user_id: str = Query(...)) -> JsonObject:
     """Check if a user has an active TIDAL session."""
     has_session = user_id in _user_apis
     return {"authenticated": has_session, "user_id": user_id}
 
 
 @app.post("/user/auth/restore")
-async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(...)):
+async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(...)) -> JsonObject:
     """Restore a user's credentials, refreshing an expired token if needed."""
     try:
         api = _build_api(req.access_token, req.user_id, req.country_code)
@@ -1507,7 +1540,7 @@ async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(..
 
 
 @app.post("/user/auth/clear")
-async def user_auth_clear(user_id: str = Query(...)):
+async def user_auth_clear(user_id: str = Query(...)) -> JsonObject:
     """Clear a user's TIDAL session."""
     async with _get_user_lock(user_id):
         _invalidate_user_api(user_id)
@@ -1519,7 +1552,7 @@ async def user_auth_clear(user_id: str = Query(...)):
 async def user_search(
     req: SearchRequest,
     user_id: str = Query(...),
-):
+) -> JsonObject:
     """Search TIDAL using a user's own credentials."""
     try:
         results = await _run_user_api_call(
@@ -1577,7 +1610,7 @@ async def user_search(
 async def user_search_batch(
     queries: list[BatchSearchQuery],
     user_id: str = Query(...),
-):
+) -> JsonObject:
     """
     Batch search — run multiple search queries in one request.
     Used for gap-fill matching (find streaming versions of unowned tracks).
@@ -1590,7 +1623,7 @@ async def user_search_batch(
 
     semaphore = asyncio.Semaphore(_BATCH_SEARCH_CONCURRENCY)
 
-    async def _run_one(q: BatchSearchQuery) -> dict:
+    async def _run_one(q: BatchSearchQuery) -> JsonObject:
         try:
             async with semaphore:
                 results = await _run_user_api_call(
@@ -1622,7 +1655,7 @@ async def user_stream_info(
     track_id: int,
     user_id: str = Query(...),
     quality: str = "HIGH",
-):
+) -> JsonObject:
     """Get stream metadata for a TIDAL track (quality, codec, etc.)."""
     try:
         info = await _run_user_api_call(
@@ -1652,10 +1685,10 @@ async def user_stream_info(
 @app.get("/user/stream/{track_id}")
 async def user_stream_proxy(
     track_id: int,
+    request: Request,
     user_id: str = Query(...),
     quality: str = "HIGH",
-    request: Request = None,  # type: ignore[assignment]  # FastAPI injects Request despite the sentinel default
-):
+) -> StreamingResponse:
     """
     Proxy the audio stream from TIDAL. The Node.js backend pipes this
     to the frontend player. Stream URLs are IP-locked to the server,
@@ -1694,7 +1727,9 @@ async def user_stream_proxy(
             len(all_urls),
         )
 
-        async def _open_dash_stream_start():
+        async def _open_dash_stream_start() -> tuple[
+            httpx.AsyncClient, httpx.Response, list[str], str
+        ]:
             """Open the first DASH segment and retry once after cache refresh on 401/403."""
             dash_urls = list(all_urls)
             resolved_content_type = content_type
@@ -1768,7 +1803,7 @@ async def user_stream_proxy(
             dash_content_type,
         ) = await _open_dash_stream_start()
 
-        async def dash_concat_stream():
+        async def dash_concat_stream() -> AsyncIterator[bytes]:
             """Fetch each DASH segment sequentially and yield bytes."""
             try:
                 try:
@@ -1826,7 +1861,7 @@ async def user_stream_proxy(
         )
 
     # ── BTS single-URL delivery (LOW/HIGH/LOSSLESS) ──────────────
-    async def _open_upstream_stream():
+    async def _open_upstream_stream() -> tuple[httpx.AsyncClient, httpx.Response]:
         """
         Open a stream from the current URL cache, and retry once with a fresh
         URL when upstream rejects the cached URL (401/403).
@@ -1892,7 +1927,7 @@ async def user_stream_proxy(
     if "content-range" in upstream.headers:
         response_headers["Content-Range"] = upstream.headers["content-range"]
 
-    async def proxy_stream():
+    async def proxy_stream() -> AsyncIterator[bytes]:
         try:
             async for chunk in upstream.aiter_bytes(chunk_size=65536):
                 yield chunk
@@ -1913,7 +1948,7 @@ async def user_stream_proxy(
 async def user_get_track(
     track_id: int,
     user_id: str = Query(...),
-):
+) -> JsonObject:
     """Get track metadata from TIDAL."""
     try:
         track = await _run_user_api_call(
@@ -1949,7 +1984,7 @@ async def user_get_track(
 @app.get("/user/browse/home")
 async def user_browse_home(
     user_id: str = Query(...), limit: int = Query(6), quality: str | None = Query(None)
-):
+) -> JsonObject:
     """Get personalized TIDAL home page shelves."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -1970,7 +2005,7 @@ async def user_browse_home(
 @app.get("/user/browse/explore")
 async def user_browse_explore(
     user_id: str = Query(...), limit: int = Query(6), quality: str | None = Query(None)
-):
+) -> JsonObject:
     """Get TIDAL editorial/new releases shelves."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -1989,7 +2024,9 @@ async def user_browse_explore(
 
 
 @app.get("/user/browse/genres")
-async def user_browse_genres(user_id: str = Query(...), quality: str | None = Query(None)):
+async def user_browse_genres(
+    user_id: str = Query(...), quality: str | None = Query(None)
+) -> JsonObject:
     """Get TIDAL genre categories."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -2008,7 +2045,9 @@ async def user_browse_genres(user_id: str = Query(...), quality: str | None = Qu
 
 
 @app.get("/user/browse/moods")
-async def user_browse_moods(user_id: str = Query(...), quality: str | None = Query(None)):
+async def user_browse_moods(
+    user_id: str = Query(...), quality: str | None = Query(None)
+) -> JsonObject:
     """Get TIDAL mood categories."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -2027,7 +2066,9 @@ async def user_browse_moods(user_id: str = Query(...), quality: str | None = Que
 
 
 @app.get("/user/browse/mixes")
-async def user_browse_mixes(user_id: str = Query(...), quality: str | None = Query(None)):
+async def user_browse_mixes(
+    user_id: str = Query(...), quality: str | None = Query(None)
+) -> JsonObject:
     """Get personal TIDAL mixes (daily discovery, etc.)."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -2053,7 +2094,7 @@ async def user_browse_genre_playlists(
     user_id: str = Query(...),
     path: str = Query(...),
     quality: str | None = Query(None),
-):
+) -> JsonObject:
     """Get playlists for a specific genre/mood path."""
     # Sanitize path to prevent directory traversal / injection
     import re
@@ -2094,7 +2135,7 @@ async def browse_playlist(
     playlist_uuid: str,
     limit: int = Query(100),
     quality: str | None = Query(None),
-):
+) -> JsonObject:
     """Get public TIDAL playlist details with tracks."""
     try:
         session = _build_public_browse_session(quality)
@@ -2118,7 +2159,7 @@ async def user_browse_playlist(
     user_id: str = Query(...),
     limit: int = Query(100),
     quality: str | None = Query(None),
-):
+) -> JsonObject:
     """Get TIDAL playlist details with tracks."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)
@@ -2141,7 +2182,7 @@ async def user_browse_mix(
     mix_id: str,
     user_id: str = Query(...),
     quality: str | None = Query(None),
-):
+) -> JsonObject:
     """Get TIDAL mix details with tracks."""
     try:
         session = await asyncio.to_thread(_build_browse_session, user_id, quality)

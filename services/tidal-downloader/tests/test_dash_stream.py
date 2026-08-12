@@ -10,8 +10,10 @@ Verifies that:
 from __future__ import annotations
 
 from base64 import b64encode
+from typing import Any
 
 import pytest
+from httpx import AsyncClient
 
 # ── Minimal DASH MPD fixtures ──────────────────────────────────────
 
@@ -74,14 +76,14 @@ def _encode_manifest(xml_str: str) -> str:
 class TestExtractDashInitUrl:
     """Tests for _extract_dash_init_url."""
 
-    def test_extracts_init_url_from_valid_mpd(self):
+    def test_extracts_init_url_from_valid_mpd(self) -> None:
         from app import _extract_dash_init_url
 
         mpd = _build_mpd(init_url="https://cdn.tidal.com/tracks/123/init.mp4")
         result = _extract_dash_init_url(_encode_manifest(mpd))
         assert result == "https://cdn.tidal.com/tracks/123/init.mp4"
 
-    def test_extracts_init_url_from_adaptation_level_template(self):
+    def test_extracts_init_url_from_adaptation_level_template(self) -> None:
         from app import _extract_dash_init_url
 
         mpd = _build_mpd(
@@ -91,7 +93,7 @@ class TestExtractDashInitUrl:
         result = _extract_dash_init_url(_encode_manifest(mpd))
         assert result == "https://cdn.tidal.com/adapt/init.mp4"
 
-    def test_returns_none_when_no_segment_template(self):
+    def test_returns_none_when_no_segment_template(self) -> None:
         from app import _extract_dash_init_url
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
@@ -101,7 +103,7 @@ class TestExtractDashInitUrl:
         result = _extract_dash_init_url(_encode_manifest(mpd))
         assert result is None
 
-    def test_returns_none_when_no_initialization_attribute(self):
+    def test_returns_none_when_no_initialization_attribute(self) -> None:
         from app import _extract_dash_init_url
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
@@ -115,19 +117,19 @@ class TestExtractDashInitUrl:
         result = _extract_dash_init_url(_encode_manifest(mpd))
         assert result is None
 
-    def test_returns_none_on_invalid_base64(self):
+    def test_returns_none_on_invalid_base64(self) -> None:
         from app import _extract_dash_init_url
 
         result = _extract_dash_init_url("not-valid-base64!!!")
         assert result is None
 
-    def test_returns_none_on_invalid_xml(self):
+    def test_returns_none_on_invalid_xml(self) -> None:
         from app import _extract_dash_init_url
 
         result = _extract_dash_init_url(_encode_manifest("<not-xml"))
         assert result is None
 
-    def test_returns_none_on_oversized_manifest(self):
+    def test_returns_none_on_oversized_manifest(self) -> None:
         from app import _MAX_MANIFEST_BYTES, _extract_dash_init_url
 
         # Manifest that exceeds the size cap when decoded
@@ -142,34 +144,34 @@ class TestExtractDashInitUrl:
 class TestResolveDashCodec:
     """Tests for _resolve_dash_codec."""
 
-    def test_returns_flac_codec(self):
+    def test_returns_flac_codec(self) -> None:
         from app import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="flac")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "flac"
 
-    def test_returns_aac_codec(self):
+    def test_returns_aac_codec(self) -> None:
         from app import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="mp4a.40.2")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "mp4a.40.2"
 
-    def test_returns_alac_codec(self):
+    def test_returns_alac_codec(self) -> None:
         from app import _resolve_dash_codec
 
         mpd = _build_mpd(codecs="alac")
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result == "alac"
 
-    def test_returns_none_on_invalid_manifest(self):
+    def test_returns_none_on_invalid_manifest(self) -> None:
         from app import _resolve_dash_codec
 
         result = _resolve_dash_codec("bad-input")
         assert result is None
 
-    def test_returns_none_when_no_representation(self):
+    def test_returns_none_when_no_representation(self) -> None:
         from app import _resolve_dash_codec
 
         mpd = """<?xml version="1.0" encoding="UTF-8"?>
@@ -179,7 +181,7 @@ class TestResolveDashCodec:
         result = _resolve_dash_codec(_encode_manifest(mpd))
         assert result is None
 
-    def test_returns_none_on_oversized_manifest(self):
+    def test_returns_none_on_oversized_manifest(self) -> None:
         from app import _MAX_MANIFEST_BYTES, _resolve_dash_codec
 
         big_xml = "<MPD>" + "x" * (_MAX_MANIFEST_BYTES + 1) + "</MPD>"
@@ -193,26 +195,26 @@ class TestResolveDashCodec:
 class TestParseDashMpd:
     """Tests for the shared MPD parser."""
 
-    def test_parses_valid_manifest(self):
+    def test_parses_valid_manifest(self) -> None:
         from app import _parse_dash_mpd
 
         mpd = _build_mpd()
         result = _parse_dash_mpd(_encode_manifest(mpd))
         assert result is not None
 
-    def test_returns_none_for_empty_string(self):
+    def test_returns_none_for_empty_string(self) -> None:
         from app import _parse_dash_mpd
 
         result = _parse_dash_mpd("")
         assert result is None
 
-    def test_returns_none_for_non_base64(self):
+    def test_returns_none_for_non_base64(self) -> None:
         from app import _parse_dash_mpd
 
         result = _parse_dash_mpd("not-valid-base64!!!")
         assert result is None
 
-    def test_returns_none_for_oversized_manifest(self):
+    def test_returns_none_for_oversized_manifest(self) -> None:
         from app import _MAX_MANIFEST_BYTES, _parse_dash_mpd
 
         big_xml = "<MPD>" + "x" * (_MAX_MANIFEST_BYTES + 1) + "</MPD>"
@@ -221,44 +223,46 @@ class TestParseDashMpd:
 
 
 class _FakeDashSegmentResponse:
-    def __init__(self, status_code: int, chunks: list[bytes] | None = None):
+    def __init__(self, status_code: int, chunks: list[bytes] | None = None) -> None:
         self.status_code = status_code
-        self.headers = {}
+        self.headers: dict[str, str] = {}
         self._chunks = chunks or []
 
-    async def aiter_bytes(self, chunk_size: int = 65536):
+    async def aiter_bytes(self, chunk_size: int = 65536) -> Any:
         for chunk in self._chunks:
             yield chunk
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         return None
 
 
 class _FakeDashClient:
-    def __init__(self, responses: list[_FakeDashSegmentResponse]):
+    def __init__(self, responses: list[_FakeDashSegmentResponse]) -> None:
         self._responses = list(responses)
         self.sent_urls: list[str] = []
 
-    def build_request(self, method: str, url: str, headers=None):
+    def build_request(self, method: str, url: str, headers: Any = None) -> Any:
         return {"method": method, "url": url, "headers": headers or {}}
 
-    async def send(self, request, stream: bool = False):
+    async def send(self, request: Any, stream: bool = False) -> Any:
         self.sent_urls.append(request["url"])
         if not self._responses:
             raise AssertionError("Unexpected extra segment request in test")
         return self._responses.pop(0)
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         return None
 
 
 @pytest.mark.anyio
-async def test_dash_proxy_returns_502_when_first_segment_is_rejected(client, monkeypatch):
+async def test_dash_proxy_returns_502_when_first_segment_is_rejected(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app as app_module
 
     cleared_cache_calls = {"count": 0}
 
-    async def _fake_run_user_api_call(user_id, callback, operation):
+    async def _fake_run_user_api_call(user_id: Any, callback: Any, operation: Any) -> Any:
         return {
             "is_dash": True,
             "urls": ["https://segment.example/seg-1.m4s"],
@@ -291,12 +295,14 @@ async def test_dash_proxy_returns_502_when_first_segment_is_rejected(client, mon
 
 
 @pytest.mark.anyio
-async def test_dash_proxy_refreshes_url_once_after_403_then_streams(client, monkeypatch):
+async def test_dash_proxy_refreshes_url_once_after_403_then_streams(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app as app_module
 
     call_count = {"count": 0}
 
-    async def _fake_run_user_api_call(user_id, callback, operation):
+    async def _fake_run_user_api_call(user_id: Any, callback: Any, operation: Any) -> Any:
         call_count["count"] += 1
         if call_count["count"] == 1:
             return {
@@ -336,13 +342,15 @@ async def test_dash_proxy_refreshes_url_once_after_403_then_streams(client, monk
 
 
 @pytest.mark.anyio
-async def test_dash_proxy_refreshes_url_once_after_401_then_streams(client, monkeypatch):
+async def test_dash_proxy_refreshes_url_once_after_401_then_streams(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import app as app_module
 
     call_count = {"count": 0}
     cleared_cache_calls = {"count": 0}
 
-    async def _fake_run_user_api_call(user_id, callback, operation):
+    async def _fake_run_user_api_call(user_id: Any, callback: Any, operation: Any) -> Any:
         call_count["count"] += 1
         if call_count["count"] == 1:
             return {

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
 # Sample data returned by ytmusicapi's get_library_playlists()
@@ -60,7 +62,7 @@ class TestLibraryPlaylists:
     """Verify /library/playlists returns user's library playlists."""
 
     @pytest.mark.anyio
-    async def test_returns_playlists_for_authenticated_user(self, client):
+    async def test_returns_playlists_for_authenticated_user(self, client: AsyncClient) -> None:
         """Should return formatted playlist data for an authenticated user."""
         mock_run = MagicMock(
             side_effect=lambda uid, operation, func: func(
@@ -83,11 +85,11 @@ class TestLibraryPlaylists:
         assert first["description"] == "A mix of everything you love"
 
     @pytest.mark.anyio
-    async def test_returns_401_when_no_oauth(self, client):
+    async def test_returns_401_when_no_oauth(self, client: AsyncClient) -> None:
         """Should return 401 when user has no OAuth credentials."""
         from fastapi import HTTPException
 
-        def raise_401(uid, operation, func):
+        def raise_401(uid: Any, operation: Any, func: Any) -> Any:
             raise HTTPException(status_code=401, detail="No OAuth credentials")
 
         with patch("app._run_ytmusic_with_auth_retry", side_effect=raise_401):
@@ -96,17 +98,17 @@ class TestLibraryPlaylists:
         assert resp.status_code == 401
 
     @pytest.mark.anyio
-    async def test_requires_user_id_parameter(self, client):
+    async def test_requires_user_id_parameter(self, client: AsyncClient) -> None:
         """Should return 422 when user_id is missing."""
         resp = await client.get("/library/playlists")
         assert resp.status_code == 422
 
     @pytest.mark.anyio
-    async def test_passes_limit_to_ytmusicapi(self, client):
+    async def test_passes_limit_to_ytmusicapi(self, client: AsyncClient) -> None:
         """Should forward the limit parameter to get_library_playlists."""
         captured_calls = []
 
-        def capture_run(uid, operation, func):
+        def capture_run(uid: Any, operation: Any, func: Any) -> Any:
             mock_yt = MagicMock()
             mock_yt.get_library_playlists.return_value = []
             result = func(mock_yt)
@@ -120,7 +122,7 @@ class TestLibraryPlaylists:
         assert captured_calls[0] == ((10,),) or captured_calls[0].kwargs.get("limit") == 10
 
     @pytest.mark.anyio
-    async def test_mixes_only_filter(self, client):
+    async def test_mixes_only_filter(self, client: AsyncClient) -> None:
         """When mixes_only=true, should filter to auto-generated playlists only."""
         mock_run = MagicMock(
             side_effect=lambda uid, operation, func: func(

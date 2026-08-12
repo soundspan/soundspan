@@ -205,9 +205,7 @@ class DatabaseConnection:
         """Lazily connect and return a RealDictCursor-factory cursor."""
         if not self.conn:
             self.connect()
-        return self.conn.cursor(  # type: ignore[union-attr]  # connect initializes the connection
-            cursor_factory=RealDictCursor
-        )
+        return self.conn.cursor(cursor_factory=RealDictCursor)
 
     def commit(self):
         """Commit transaction"""
@@ -1247,7 +1245,7 @@ def _analyze_track_in_process(args: tuple[str, str]) -> tuple[str, str, dict[str
                 )
 
         # Run analysis
-        features = _process_analyzer.analyze(full_path)  # type: ignore[union-attr]  # worker initialization sets the analyzer
+        features = _process_analyzer.analyze(full_path)
         return (track_id, file_path, features)
 
     except UnicodeDecodeError as e:
@@ -2102,10 +2100,7 @@ class AnalysisWorker:
 
         start_time = time.monotonic()
         finalized_track_ids: set[str] = set()
-        futures = {
-            self.executor.submit(_analyze_track_in_process, t): t  # type: ignore[union-attr]  # _ensure_pool initializes the executor
-            for t in tracks
-        }
+        futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
         counts = {"completed": 0, "failed": 0, "permanent_failed": 0}
         requeued = 0
         try:
