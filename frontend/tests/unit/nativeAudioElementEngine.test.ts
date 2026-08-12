@@ -10,6 +10,7 @@ import { IosStandaloneAudioContextBridge } from "../../lib/audio-engine/iosStand
 import {
     NATIVE_ENGINE_END_PAUSE_EPSILON_SEC,
     NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES,
+    NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS,
 } from "../../lib/audio-engine/nativeAudioElementPolicy";
 
 type ElementListener = (event: unknown) => void;
@@ -796,7 +797,7 @@ test("NotAllowedError emits playerror and retries exactly once on the next gestu
     );
 });
 
-test("no automatic retry timers are scheduled for NotAllowedError", async () => {
+test("NotAllowedError schedules a bounded timer retry through the normal play path", async () => {
     const harness = createHarness();
     harness.engine.load("https://stream.example/track.flac", {
         autoplay: true,
@@ -808,9 +809,22 @@ test("no automatic retry timers are scheduled for NotAllowedError", async () => 
     };
     harness.mainElement().fireLoadedMetadata(200);
     await flushMicrotasks();
-    assert.equal(
-        harness.scheduler.timers.filter((timer) => !timer.cleared).length,
-        0,
+
+    const [retry] = harness.scheduler.timers.filter(
+        (timer) => !timer.cleared,
+    );
+    assert.ok(retry);
+    assert.equal(retry.delayMs, NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS[0]);
+
+    harness.mainElement().playBehavior = { kind: "resolve" };
+    harness.scheduler.firePendingTimer();
+    await flushMicrotasks();
+    assert.equal(harness.mainElement().playCalls, 2);
+    assert.deepEqual(
+        harness.telemetryEvents.find(
+            (entry) => entry.event === "playback_retry_fired",
+        )?.fields,
+        { via: "timer" },
     );
 });
 
@@ -996,6 +1010,13 @@ test("NotAllowedError in a hidden tab retries automatically when the page become
             !binding.removed,
     );
     assert.equal(visibilityBindings.length, 1, "visibility retry armed");
+    const focusBindings = harness.bindings.filter(
+        (binding) =>
+            binding.target === "window" &&
+            binding.type === "focus" &&
+            !binding.removed,
+    );
+    assert.equal(focusBindings.length, 1, "focus retry armed");
 
     // A visibility event while still hidden must not retry.
     visibilityBindings[0].handler({});
@@ -1010,13 +1031,25 @@ test("NotAllowedError in a hidden tab retries automatically when the page become
     assert.equal(harness.mainElement().playCalls, 2);
     assert.ok(
         harness.bindings
-            .filter((binding) => binding.type === "visibilitychange")
+            .filter(
+                (binding) =>
+                    binding.type === "visibilitychange" ||
+                    binding.type === "focus",
+            )
             .every((binding) => binding.removed),
-        "visibility retry disarmed after firing",
+        "visibility and focus retries disarmed together after firing",
+    );
+    assert.deepEqual(
+        harness.telemetryEvents.find(
+            (entry) =>
+                entry.event === "playback_retry_fired" &&
+                entry.fields.via === "visibility",
+        )?.fields,
+        { via: "visibility" },
     );
 });
 
-test("NotAllowedError in a visible tab does not arm a visibility retry", async () => {
+test("NotAllowedError in a visible unfocused window retries on focus and first event wins", async () => {
     const harness = createHarness();
     harness.engine.load("https://stream.example/track.flac", {
         autoplay: true,
@@ -1028,10 +1061,121 @@ test("NotAllowedError in a visible tab does not arm a visibility retry", async (
     };
     harness.mainElement().fireLoadedMetadata(200);
     await flushMicrotasks();
+
+    const visibilityBinding = harness.bindings.find(
+        (binding) =>
+            binding.target === "document" &&
+            binding.type === "visibilitychange" &&
+            !binding.removed,
+    );
+    const focusBinding = harness.bindings.find(
+        (binding) =>
+            binding.target === "window" &&
+            binding.type === "focus" &&
+            !binding.removed,
+    );
+    assert.ok(visibilityBinding, "visibility retry armed while visible");
+    assert.ok(focusBinding, "focus retry armed while visible");
+
+    harness.mainElement().playBehavior = { kind: "resolve" };
+    focusBinding.handler({});
+    await flushMicrotasks();
+    assert.equal(harness.mainElement().playCalls, 2, "focus retries once");
+    assert.equal(visibilityBinding.removed, true);
+    assert.equal(focusBinding.removed, true);
+
+    visibilityBinding.handler({});
+    await flushMicrotasks();
     assert.equal(
-        harness.bindings.filter(
-            (binding) => binding.type === "visibilitychange",
-        ).length,
+        harness.mainElement().playCalls,
+        2,
+        "stale second listener cannot retry again",
+    );
+    assert.deepEqual(
+        harness.telemetryEvents.find(
+            (entry) =>
+                entry.event === "playback_retry_fired" &&
+                entry.fields.via === "focus",
+        )?.fields,
+        { via: "focus" },
+    );
+});
+
+test("user pause and a new load disarm blocked-start listeners and clear timer retries", async () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track-1.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().playBehavior = {
+        kind: "reject",
+        name: "NotAllowedError",
+        message: "blocked",
+    };
+    harness.mainElement().fireLoadedMetadata(200);
+    await flushMicrotasks();
+
+    harness.engine.pause();
+    assert.ok(
+        harness.bindings
+            .filter(
+                (binding) =>
+                    binding.type === "visibilitychange" ||
+                    binding.type === "focus",
+            )
+            .every((binding) => binding.removed),
+        "pause removes focus and visibility listeners",
+    );
+    assert.equal(
+        harness.scheduler.timers.filter((timer) => !timer.cleared).length,
+        0,
+        "pause clears the retry timer",
+    );
+
+    harness.mainElement().playBehavior = {
+        kind: "reject",
+        name: "NotAllowedError",
+        message: "blocked again",
+    };
+    harness.engine.play();
+    await flushMicrotasks();
+    harness.engine.load("https://stream.example/track-2.flac", {
+        autoplay: false,
+    });
+    assert.ok(
+        harness.bindings
+            .filter(
+                (binding) =>
+                    binding.type === "visibilitychange" ||
+                    binding.type === "focus",
+            )
+            .every((binding) => binding.removed),
+        "new load removes focus and visibility listeners",
+    );
+    assert.equal(
+        harness.scheduler.timers.filter((timer) => !timer.cleared).length,
+        0,
+        "new load clears the retry timer",
+    );
+});
+
+test("destroy removes both blocked-start listeners and its retry timer", async () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().playBehavior = {
+        kind: "reject",
+        name: "NotAllowedError",
+        message: "blocked",
+    };
+    harness.mainElement().fireLoadedMetadata(200);
+    await flushMicrotasks();
+
+    harness.engine.destroy();
+
+    assert.ok(harness.bindings.every((binding) => binding.removed));
+    assert.equal(
+        harness.scheduler.timers.filter((timer) => !timer.cleared).length,
         0,
     );
 });

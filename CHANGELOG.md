@@ -333,6 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Queue auto-advance now recovers when the browser blocks the next track's
+  playback start in a background or unfocused window, using bounded automatic
+  retries plus a retry on window focus, with blocked and recovery-attempt states
+  visible in server telemetry.
 - Admin “Test connection” failures for Audiobookshelf, Fanart.tv, Last.fm,
   Soulseek, Spotify, and TIDAL no longer log the user out: upstream credential
   failures now return 502 instead of 401, and the web client only treats

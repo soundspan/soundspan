@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     NATIVE_ENGINE_MAX_AUTOMATIC_RETRIES,
+    NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS,
     NATIVE_ENGINE_SEEK_MARK_MS,
     NATIVE_ENGINE_SEEK_MARK_TOLERANCE_SEC,
     NATIVE_ENGINE_STALE_SOURCE_PAUSE_MS,
@@ -59,6 +60,7 @@ test("initial state is idle with no source and no retry debt", () => {
     assert.equal(state.status, "idle");
     assert.equal(state.hasSource, false);
     assert.equal(state.automaticRetriesUsed, 0);
+    assert.equal(state.playStartRetriesUsed, 0);
     assert.equal(state.pendingSeekSec, null);
     assert.equal(state.seekMarkUntilMs, null);
 });
@@ -100,9 +102,10 @@ test("LOAD_REQUESTED with a start position queues the seek for readiness", () =>
     assert.equal(state.pendingSeekSec, 42);
 });
 
-test("LOAD_REQUESTED resets retry budget, gesture retry, and pending seeks from prior load", () => {
+test("LOAD_REQUESTED resets retry budgets, gesture retry, and pending seeks from prior load", () => {
     const prior = loadedState({
         automaticRetriesUsed: 2,
+        playStartRetriesUsed: 2,
         gestureRetryUsed: true,
         pendingSeekSec: 10,
         seekTargetSec: 10,
@@ -115,11 +118,14 @@ test("LOAD_REQUESTED resets retry budget, gesture retry, and pending seeks from 
         nowMs: 2_000,
     });
     assert.equal(state.automaticRetriesUsed, 0);
+    assert.equal(state.playStartRetriesUsed, 0);
     assert.equal(state.gestureRetryUsed, false);
     assert.equal(state.pendingSeekSec, null);
     assert.equal(state.seekTargetSec, null);
     assert.equal(state.seekMarkUntilMs, null);
     assert.ok(kinds(effects).includes("disarmGestureRetry"));
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
+    assert.ok(kinds(effects).includes("cancelRetry"));
 });
 
 test("same-source load while playing is deduped (howler parity — LT resync must not restart the track)", () => {
@@ -413,12 +419,18 @@ test("PLAY_REQUESTED in error state recovers by reloading from source at positio
 });
 
 test("PAUSE_REQUESTED while playing classifies the pause as user-intended", () => {
-    const { state, effects } = transitionNativeEngine(playingState(), {
+    const { state, effects } = transitionNativeEngine(
+        playingState({ playStartRetriesUsed: 2 }),
+        {
         type: "PAUSE_REQUESTED",
         nowMs: 3_000,
-    });
+        },
+    );
     assert.equal(state.pauseClassification, "user");
+    assert.equal(state.playStartRetriesUsed, 0);
     assert.ok(kinds(effects).includes("callPause"));
+    assert.ok(kinds(effects).includes("cancelRetry"));
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
 });
 
 test("PAUSE_REQUESTED during load cancels captured autoplay without a pause call", () => {
@@ -440,17 +452,22 @@ test("PAUSE_REQUESTED during load cancels captured autoplay without a pause call
 });
 
 test("STOP_REQUESTED halts playback, keeps the source, and emits stop", () => {
-    const { state, effects } = transitionNativeEngine(playingState(), {
-        type: "STOP_REQUESTED",
-        nowMs: 3_000,
-    });
+    const { state, effects } = transitionNativeEngine(
+        playingState({ playStartRetriesUsed: 2 }),
+        {
+            type: "STOP_REQUESTED",
+            nowMs: 3_000,
+        },
+    );
     assert.equal(state.status, "idle");
     assert.equal(state.hasSource, true);
     assert.equal(state.autoplay, false);
+    assert.equal(state.playStartRetriesUsed, 0);
     assert.ok(kinds(effects).includes("haltPlayback"));
     assert.ok(kinds(effects).includes("stopTicker"));
     assert.ok(kinds(effects).includes("emitStop"));
     assert.ok(kinds(effects).includes("cancelRetry"));
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
 });
 
 test("STOP_REQUESTED without a source is a no-op", () => {
@@ -467,15 +484,22 @@ test("STOP_REQUESTED without a source is a no-op", () => {
 
 test("ELEMENT_PLAYING enters playing, starts the ticker, resets retries, and reports start latency", () => {
     const { state, effects } = transitionNativeEngine(
-        loadedState({ autoplay: true, automaticRetriesUsed: 2 }),
+        loadedState({
+            autoplay: true,
+            automaticRetriesUsed: 2,
+            playStartRetriesUsed: 2,
+        }),
         { type: "ELEMENT_PLAYING", nowMs: 1_500 },
     );
     assert.equal(state.status, "playing");
     assert.equal(state.automaticRetriesUsed, 0);
+    assert.equal(state.playStartRetriesUsed, 0);
     assert.equal(state.gestureRetryUsed, false);
     assert.equal(state.loadRequestedAtMs, null);
     assert.ok(kinds(effects).includes("startTicker"));
     assert.ok(kinds(effects).includes("emitPlay"));
+    assert.ok(kinds(effects).includes("cancelRetry"));
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
     const telemetry = findEffect(effects, "telemetry");
     assert.equal(telemetry?.event, "playback_start_latency");
     assert.equal(telemetry?.fields.latencyMs, 500);
@@ -1202,7 +1226,7 @@ test("fatal src-not-supported errors fail immediately without retries", () => {
 // Autoplay policy — play() promise rejections
 // ---------------------------------------------------------------------------
 
-test("NotAllowedError parks paused, surfaces the gesture requirement, and arms one gesture retry", () => {
+test("NotAllowedError reports the block and arms gesture, visibility, and bounded timer retries", () => {
     const { state, effects } = transitionNativeEngine(
         loadedState({ autoplay: true }),
         {
@@ -1215,10 +1239,73 @@ test("NotAllowedError parks paused, surfaces the gesture requirement, and arms o
     );
     assert.equal(state.status, "paused");
     assert.equal(state.gestureRetryUsed, true);
+    assert.equal(state.playStartRetriesUsed, 1);
     assert.ok(kinds(effects).includes("armGestureRetry"));
+    assert.ok(kinds(effects).includes("armVisibilityRetry"));
     const error = findEffect(effects, "emitPlayError");
     assert.equal(error?.code, "NotAllowedError");
-    assert.equal(kinds(effects).includes("scheduleRetry"), false);
+    const retry = findEffect(effects, "scheduleRetry");
+    assert.equal(retry?.attempt, 1);
+    assert.equal(retry?.delayMs, NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS[0]);
+    const telemetry = effects.find(
+        (effect) =>
+            effect.kind === "telemetry" &&
+            effect.event === "playback_start_blocked",
+    );
+    assert.deepEqual(
+        telemetry && "fields" in telemetry ? telemetry.fields : undefined,
+        { code: "NotAllowedError", isPageHidden: false },
+    );
+});
+
+test("NotAllowedError play-start retries stop at the fixed attempt cap", () => {
+    let state = loadedState({ autoplay: true });
+    const scheduledDelays: number[] = [];
+
+    for (
+        let rejection = 0;
+        rejection <= NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS.length;
+        rejection += 1
+    ) {
+        const transition = transitionNativeEngine(state, {
+            type: "PLAY_PROMISE_REJECTED",
+            errorName: "NotAllowedError",
+            errorMessage: "blocked",
+            isPageHidden: false,
+            nowMs: 2_000 + rejection,
+        });
+        state = transition.state;
+        const retry = findEffect(transition.effects, "scheduleRetry");
+        if (retry) {
+            scheduledDelays.push(retry.delayMs);
+        }
+    }
+
+    assert.deepEqual(scheduledDelays, [1_000, 3_000, 7_000]);
+    assert.equal(
+        state.playStartRetriesUsed,
+        NATIVE_ENGINE_PLAY_RETRY_DELAYS_MS.length,
+    );
+});
+
+test("user pause after a blocked start clears the retry timer and retry debt", () => {
+    const blocked = transitionNativeEngine(loadedState({ autoplay: true }), {
+        type: "PLAY_PROMISE_REJECTED",
+        errorName: "NotAllowedError",
+        errorMessage: "blocked",
+        isPageHidden: false,
+        nowMs: 2_000,
+    });
+    const paused = transitionNativeEngine(blocked.state, {
+        type: "PAUSE_REQUESTED",
+        nowMs: 2_100,
+    });
+
+    assert.equal(paused.state.autoplay, false);
+    assert.equal(paused.state.playStartRetriesUsed, 0);
+    assert.ok(kinds(paused.effects).includes("cancelRetry"));
+    assert.ok(kinds(paused.effects).includes("disarmGestureRetry"));
+    assert.ok(kinds(paused.effects).includes("disarmVisibilityRetry"));
 });
 
 test("a second NotAllowedError does not re-arm the gesture retry (never loop)", () => {
@@ -1256,6 +1343,9 @@ test("GESTURE_RETRY_FIRED plays once and disarms", () => {
     });
     assert.ok(kinds(effects).includes("callPlay"));
     assert.ok(kinds(effects).includes("disarmGestureRetry"));
+    const telemetry = findEffect(effects, "telemetry");
+    assert.equal(telemetry?.event, "playback_retry_fired");
+    assert.deepEqual(telemetry?.fields, { via: "gesture" });
 });
 
 test("AbortError from an interrupted play() is ignored", () => {
@@ -1363,7 +1453,7 @@ test("NotAllowedError while hidden arms a visibility retry alongside the gesture
     assert.ok(kinds(effects).includes("armGestureRetry"));
 });
 
-test("NotAllowedError while visible does not arm a visibility retry", () => {
+test("NotAllowedError while visible arms a focus-or-visibility retry", () => {
     const { effects } = transitionNativeEngine(
         loadedState({ autoplay: true }),
         {
@@ -1374,7 +1464,7 @@ test("NotAllowedError while visible does not arm a visibility retry", () => {
             nowMs: 2_000,
         },
     );
-    assert.equal(kinds(effects).includes("armVisibilityRetry"), false);
+    assert.ok(kinds(effects).includes("armVisibilityRetry"));
 });
 
 test("VISIBILITY_RETRY_FIRED plays once and disarms", () => {
@@ -1390,10 +1480,14 @@ test("VISIBILITY_RETRY_FIRED plays once and disarms", () => {
     );
     const { effects } = transitionNativeEngine(blocked, {
         type: "VISIBILITY_RETRY_FIRED",
+        via: "visibility",
         nowMs: 3_000,
     });
     assert.ok(kinds(effects).includes("callPlay"));
     assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
+    const telemetry = findEffect(effects, "telemetry");
+    assert.equal(telemetry?.event, "playback_retry_fired");
+    assert.deepEqual(telemetry?.fields, { via: "visibility" });
 });
 
 test("VISIBILITY_RETRY_FIRED after a user pause disarms without playing", () => {
@@ -1409,7 +1503,11 @@ test("VISIBILITY_RETRY_FIRED after a user pause disarms without playing", () => 
     );
     const { effects } = transitionNativeEngine(
         { ...blocked, pauseClassification: "user" },
-        { type: "VISIBILITY_RETRY_FIRED", nowMs: 3_000 },
+        {
+            type: "VISIBILITY_RETRY_FIRED",
+            via: "focus",
+            nowMs: 3_000,
+        },
     );
     assert.equal(kinds(effects).includes("callPlay"), false);
     assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
@@ -1418,8 +1516,31 @@ test("VISIBILITY_RETRY_FIRED after a user pause disarms without playing", () => 
 test("VISIBILITY_RETRY_FIRED while already playing only disarms", () => {
     const { effects } = transitionNativeEngine(playingState(), {
         type: "VISIBILITY_RETRY_FIRED",
+        via: "focus",
         nowMs: 3_000,
     });
     assert.equal(kinds(effects).includes("callPlay"), false);
     assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
+});
+
+test("RETRY_TIMER_FIRED retries a blocked play through the normal play path", () => {
+    const { state: blocked } = transitionNativeEngine(
+        loadedState({ autoplay: true }),
+        {
+            type: "PLAY_PROMISE_REJECTED",
+            errorName: "NotAllowedError",
+            errorMessage: "blocked",
+            isPageHidden: false,
+            nowMs: 2_000,
+        },
+    );
+    const { effects } = transitionNativeEngine(blocked, {
+        type: "RETRY_TIMER_FIRED",
+        nowMs: 3_000,
+    });
+
+    assert.ok(kinds(effects).includes("callPlay"));
+    const telemetry = findEffect(effects, "telemetry");
+    assert.equal(telemetry?.event, "playback_retry_fired");
+    assert.deepEqual(telemetry?.fields, { via: "timer" });
 });
