@@ -36,6 +36,7 @@ interface SearchSession {
     query: string;
     results: SearchResult[];
     createdAt: Date;
+    userId: string;
 }
 
 interface SearchJob {
@@ -76,7 +77,11 @@ function removeOldestSearchSession(): void {
     }
 }
 
-function storeSearchSession(searchId: string, query: string): void {
+function storeSearchSession(
+    searchId: string,
+    query: string,
+    userId: string,
+): void {
     cleanupExpiredSearchSessions(Date.now());
     if (searchSessions.size >= MAX_SEARCH_SESSIONS) {
         removeOldestSearchSession();
@@ -85,6 +90,7 @@ function storeSearchSession(searchId: string, query: string): void {
         query,
         results: [],
         createdAt: new Date(),
+        userId,
     });
 }
 
@@ -466,7 +472,7 @@ router.post(
                 return sendCapacityError(res);
             }
 
-            storeSearchSession(job.searchId, searchQuery);
+            storeSearchSession(job.searchId, searchQuery, userId);
             recordRateAdmission(userId, now);
             if (!admitSearch(job)) {
                 searchSessions.delete(job.searchId);
@@ -522,6 +528,14 @@ router.get<{ searchId: string }>(
             const session = searchSessions.get(searchId);
 
             if (!session) {
+                return res.status(404).json({
+                    error: "Search not found or expired",
+                    results: [],
+                    count: 0,
+                });
+            }
+
+            if (session.userId !== req.user!.id) {
                 return res.status(404).json({
                     error: "Search not found or expired",
                     results: [],

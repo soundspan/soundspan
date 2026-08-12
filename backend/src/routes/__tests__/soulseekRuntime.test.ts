@@ -346,7 +346,7 @@ describe("soulseek runtime routes", () => {
         expect(mockSoulseekService.searchTrack).not.toHaveBeenCalled();
     });
 
-    it("returns formatted search results and 404 when search session is missing", async () => {
+    it("stores the search owner, returns their results, and hides them from other users", async () => {
         mockRandomUUID.mockReturnValueOnce("search-results-id");
         mockSoulseekService.searchTrack.mockResolvedValueOnce({
             found: true,
@@ -373,7 +373,10 @@ describe("soulseek runtime routes", () => {
         await searchHandler(searchReq, searchRes);
         await flushPromises();
 
-        const resultsReq = { params: { searchId: "search-results-id" } } as any;
+        const resultsReq = {
+            user: { id: "user-results" },
+            params: { searchId: "search-results-id" },
+        } as any;
         const resultsRes = createRes();
         await searchByIdHandler(resultsReq, resultsRes);
 
@@ -394,6 +397,22 @@ describe("soulseek runtime routes", () => {
             ],
             count: 1,
         });
+
+        const otherUserReq = {
+            user: { id: "other-user" },
+            params: { searchId: "search-results-id" },
+        } as any;
+        const otherUserRes = createRes();
+        await searchByIdHandler(otherUserReq, otherUserRes);
+
+        expect(otherUserRes.statusCode).toBe(404);
+        expect(otherUserRes.body).toEqual({
+            error: "Search not found or expired",
+            results: [],
+            count: 0,
+        });
+        expect(JSON.stringify(otherUserRes.body)).not.toContain("peer-1");
+        expect(JSON.stringify(otherUserRes.body)).not.toContain("/library/");
 
         const missingReq = {
             params: { searchId: "missing-session-id" },
@@ -436,6 +455,7 @@ describe("soulseek runtime routes", () => {
         await flushPromises();
 
         const resultsReq = {
+            user: { id: "user-bad-file" },
             params: { searchId: "search-bad-file-id" },
         } as any;
         const resultsRes = createRes();
@@ -701,7 +721,10 @@ describe("soulseek runtime routes", () => {
 
         const newestRes = createRes();
         await searchByIdHandler(
-            { params: { searchId: "retained-search-101" } } as any,
+            {
+                user: { id: "retained-user-100" },
+                params: { searchId: "retained-search-101" },
+            } as any,
             newestRes,
         );
         expect(newestRes.statusCode).toBe(200);
@@ -735,7 +758,10 @@ describe("soulseek runtime routes", () => {
 
         const resultsRes = createRes();
         await searchByIdHandler(
-            { params: { searchId: "bounded-results-id" } } as any,
+            {
+                user: { id: "bounded-results-user" },
+                params: { searchId: "bounded-results-id" },
+            } as any,
             resultsRes,
         );
 
