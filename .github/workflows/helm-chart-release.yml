@@ -45,19 +45,7 @@ jobs:
             RELEASE_TAG="${{ inputs.release_tag }}"
           fi
 
-          RELEASE_TAG="$(echo "${RELEASE_TAG}" | xargs)"
-          if [ -z "${RELEASE_TAG}" ]; then
-            echo "Release tag is required." >&2
-            exit 1
-          fi
-          if [[ "${RELEASE_TAG}" == v* ]]; then
-            echo "Release tags must be plain semantic versions without a 'v' prefix (example: 1.6.0)." >&2
-            exit 1
-          fi
-          if ! [[ "${RELEASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must be a semantic version (example: 1.6.0 or 1.6.0-rc.1)." >&2
-            exit 1
-          fi
+          ./scripts/release/validate-release-version.sh "${RELEASE_TAG}"
 
           REPO_OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
           REPO_NAME="${GITHUB_REPOSITORY#*/}"

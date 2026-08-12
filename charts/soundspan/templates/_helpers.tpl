@@ -32,15 +32,16 @@ Create chart name and version as used by the chart label.
 Common labels
 */}}
 {{- define "soundspan.labels" -}}
-helm.sh/chart: {{ include "soundspan.chart" . }}
-{{ include "soundspan.selectorLabels" . }}
+{{- $standardLabels := dict
+  "helm.sh/chart" (include "soundspan.chart" .)
+  "app.kubernetes.io/managed-by" .Release.Service
+-}}
 {{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- $_ := set $standardLabels "app.kubernetes.io/version" .Chart.AppVersion -}}
 {{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- with .Values.global.labels }}
-{{ toYaml . }}
-{{- end }}
+{{- $globalLabels := deepCopy (.Values.global.labels | default dict) -}}
+{{- $selectorLabels := include "soundspan.selectorLabels" . | fromYaml -}}
+{{- mustMergeOverwrite $standardLabels $globalLabels $selectorLabels | toYaml }}
 {{- end }}
 
 {{/*
@@ -179,8 +180,9 @@ Component labels helper — adds a component label to the standard set
 Usage: include "soundspan.componentLabels" (dict "context" . "component" "backend")
 */}}
 {{- define "soundspan.componentLabels" -}}
-{{ include "soundspan.labels" .context }}
-app.kubernetes.io/component: {{ .component }}
+{{- $labels := include "soundspan.labels" .context | fromYaml -}}
+{{- $selectorLabels := include "soundspan.componentSelectorLabels" . | fromYaml -}}
+{{- mustMergeOverwrite $labels $selectorLabels | toYaml }}
 {{- end }}
 
 {{/*
@@ -190,6 +192,16 @@ Usage: include "soundspan.componentSelectorLabels" (dict "context" . "component"
 {{- define "soundspan.componentSelectorLabels" -}}
 {{ include "soundspan.selectorLabels" .context }}
 app.kubernetes.io/component: {{ .component }}
+{{- end }}
+
+{{/*
+Pod labels helper — user labels are merged before immutable selector labels
+Usage: include "soundspan.componentPodLabels" (dict "context" . "component" "backend")
+*/}}
+{{- define "soundspan.componentPodLabels" -}}
+{{- $globalLabels := deepCopy (.context.Values.global.labels | default dict) -}}
+{{- $selectorLabels := include "soundspan.componentSelectorLabels" . | fromYaml -}}
+{{- mustMergeOverwrite $globalLabels $selectorLabels | toYaml }}
 {{- end }}
 
 {{/*

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
+import stat
+import subprocess
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
@@ -48,18 +52,14 @@ def _run_blocks(dockerfile: str) -> list[str]:
     return blocks
 
 
-def _assert_operator_secret_precedes_file_read(
-    start_script: str, env_name: str, secret_file: str
-) -> None:
-    """Require an operator-secret branch before the persisted secret is read."""
-    condition = re.search(
-        rf'if\s+\[\s+-n\s+"\$(?:\{{{env_name}\}}|{env_name})"\s+\]',
-        start_script,
-    )
-    file_read = re.search(rf"cat\s+[\"']?{re.escape(secret_file)}", start_script)
-    assert condition is not None, f"missing operator override check for {env_name}"
-    assert file_read is not None, f"missing persisted secret read for {env_name}"
-    assert condition.start() < file_read.start()
+def _secret_resolution_block(start_script: str, secret_directory: Path) -> str:
+    """Return the executable AIO critical-secret resolution block."""
+    start_marker = "# Resolve application secrets: operator environment, persisted file, generated."
+    end_marker = "# Resolve the PostgreSQL URL after its validated password is persisted."
+    start = start_script.index(start_marker)
+    end = start_script.index(end_marker, start)
+    block = start_script[start:end].replace("/data/secrets", str(secret_directory))
+    return f"set -euo pipefail\n{block}"
 
 
 def test_dockerfile_creates_nonroot_app_user() -> None:
@@ -92,30 +92,95 @@ def test_supervisord_runs_services_as_nonroot() -> None:
     )
 
 
-def test_start_sh_honors_operator_session_secret_env() -> None:
+def test_start_sh_honors_operator_secret_env(tmp_path: Path) -> None:
     """Operator-provided secrets must take precedence over persisted values."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     start_script = _heredoc(dockerfile, "/app/start.sh")
+    replacements = {
+        "SESSION_SECRET": ("session_secret", "replacement-session-secret-0000000000"),
+        "SETTINGS_ENCRYPTION_KEY": (
+            "encryption_key",
+            "replacement-settings-key-00000000000",
+        ),
+        "INTERNAL_API_SECRET": (
+            "internal_api_secret",
+            "replacement-internal-secret-000000000",
+        ),
+        "POSTGRES_PASSWORD": ("postgres_password", "replacement-postgres-password"),
+    }
+    for filename, _value in replacements.values():
+        (tmp_path / filename).write_text("persisted-value", encoding="utf-8")
+    environment = {
+        **os.environ,
+        **{name: value for name, (_filename, value) in replacements.items()},
+    }
 
-    _assert_operator_secret_precedes_file_read(
-        start_script, "SESSION_SECRET", "/data/secrets/session_secret"
-    )
-    _assert_operator_secret_precedes_file_read(
-        start_script, "SETTINGS_ENCRYPTION_KEY", "/data/secrets/encryption_key"
-    )
-    _assert_operator_secret_precedes_file_read(
-        start_script, "INTERNAL_API_SECRET", "/data/secrets/internal_api_secret"
+    result = subprocess.run(
+        ["bash", "-c", _secret_resolution_block(start_script, tmp_path)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
     )
 
+    assert result.returncode == 0, result.stderr
+    for filename, value in replacements.values():
+        secret_file = tmp_path / filename
+        assert secret_file.read_text(encoding="utf-8") == value
+        assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
+        assert value not in result.stdout
+        assert value not in result.stderr
+    assert not list(tmp_path.glob("*.tmp.*"))
 
-def test_start_sh_writes_secrets_through_to_data() -> None:
-    """Operator-supplied secrets must be persisted to the data volume."""
+
+@pytest.mark.parametrize(
+    ("invalid_name", "invalid_value"),
+    [
+        ("SESSION_SECRET", "short-session-secret"),
+        ("SESSION_SECRET", "changeme-generate-secure-key"),
+        ("SETTINGS_ENCRYPTION_KEY", "short-settings-key"),
+        ("SETTINGS_ENCRYPTION_KEY", "default-encryption-key-change-me"),
+        ("INTERNAL_API_SECRET", "short-internal-secret"),
+        ("INTERNAL_API_SECRET", "soundspan-internal-secret-change-me"),
+    ],
+)
+def test_invalid_replacement_preserves_persisted_secrets(
+    tmp_path: Path, invalid_name: str, invalid_value: str
+) -> None:
+    """Invalid replacements must fail closed before any persisted secret changes."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     start_script = _heredoc(dockerfile, "/app/start.sh")
+    persisted = {
+        "session_secret": "persisted-session-secret-000000000000",
+        "encryption_key": "persisted-settings-key-0000000000000",
+        "internal_api_secret": "persisted-internal-secret-00000000000",
+    }
+    for filename, value in persisted.items():
+        (tmp_path / filename).write_text(value, encoding="utf-8")
 
-    assert re.search(r'>\s*"?/data/secrets/session_secret"?', start_script)
-    assert re.search(r'>\s*"?/data/secrets/encryption_key"?', start_script)
-    assert re.search(r'>\s*"?/data/secrets/internal_api_secret"?', start_script)
+    environment = {
+        **os.environ,
+        "SESSION_SECRET": "replacement-session-secret-0000000000",
+        "SETTINGS_ENCRYPTION_KEY": "replacement-settings-key-00000000000",
+        "INTERNAL_API_SECRET": "replacement-internal-secret-000000000",
+        invalid_name: invalid_value,
+    }
+    result = subprocess.run(
+        ["bash", "-c", _secret_resolution_block(start_script, tmp_path)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode != 0
+    assert invalid_name in result.stderr
+    assert invalid_value not in result.stdout
+    assert invalid_value not in result.stderr
+    for filename, value in persisted.items():
+        assert (tmp_path / filename).read_text(encoding="utf-8") == value
 
 
 def test_start_sh_rejects_known_default_secrets() -> None:
@@ -135,12 +200,15 @@ def test_secret_files_are_chmod_600() -> None:
     start_script = _heredoc(dockerfile, "/app/start.sh")
 
     assert re.search(r"chmod\s+700\s+/data/secrets\b", start_script)
+    assert re.search(r'chmod\s+600\s+"\$temporary_file"', start_script)
+    assert re.search(r'mv\s+-f\s+--\s+"\$temporary_file"\s+"\$secret_file"', start_script)
     for secret_file in (
         "/data/secrets/session_secret",
         "/data/secrets/encryption_key",
         "/data/secrets/internal_api_secret",
+        "/data/secrets/postgres_password",
     ):
-        assert re.search(rf"chmod\s+600\s+{re.escape(secret_file)}\b", start_script)
+        assert f"secure_secret_file {secret_file}" in start_script
     assert re.search(
         r"ENVEOF\s*\n\s*chmod\s+600\s+/app/backend/\.env\b", start_script
     )

@@ -141,6 +141,80 @@ describe("podcast download runtime behavior", () => {
         }) as typeof setTimeout);
     }
 
+    function createSuccessfulDownloadResponse(onComplete: () => void) {
+        const listeners = new Map<string, (...args: any[]) => void>();
+        return {
+            status: 200,
+            headers: { "content-length": "3" },
+            data: {
+                on: jest.fn(
+                    (event: string, callback: (...args: any[]) => void) => {
+                        listeners.set(event, callback);
+                    },
+                ),
+                pipe: jest.fn(() => {
+                    listeners.get("data")?.(Buffer.from("abc"));
+                    onComplete();
+                    listeners.get("end")?.();
+                }),
+                destroy: jest.fn(),
+            },
+        };
+    }
+
+    function mockUncachedThreeByteEpisodes(
+        mocks: ReturnType<typeof setupPodcastDownloadMocks>,
+    ): void {
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.fsPromises.stat as jest.Mock).mockImplementation(
+            async (targetPath: string) =>
+                targetPath.endsWith(".tmp") ? { size: 3 } : { size: 1_048_576 },
+        );
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(
+            { fileSize: 3, podcastId: "podcast-1" },
+        );
+    }
+
+    function mockControlledSuccessfulDownloads(
+        mocks: ReturnType<typeof setupPodcastDownloadMocks>,
+    ) {
+        let active = 0;
+        let completed = 0;
+        let peak = 0;
+        let releaseDownloads = () => {};
+        const releaseGate = new Promise<void>((resolve) => {
+            releaseDownloads = resolve;
+        });
+
+        mockUncachedThreeByteEpisodes(mocks);
+        (mocks.axiosGet as jest.Mock).mockImplementation(async () => {
+            active += 1;
+            peak = Math.max(peak, active);
+            await releaseGate;
+            return createSuccessfulDownloadResponse(() => {
+                active -= 1;
+                completed += 1;
+            });
+        });
+
+        return {
+            getCompleted: () => completed,
+            getPeak: () => peak,
+            releaseDownloads,
+        };
+    }
+
+    async function waitForCount(
+        readCount: () => number,
+        expected: number,
+    ): Promise<void> {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (readCount() === expected) return;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        throw new Error(`Timed out waiting for count ${expected}`);
+    }
+
     it("validates a cached podcast file and updates access metadata", async () => {
         const mocks = setupPodcastDownloadMocks();
 
@@ -332,6 +406,110 @@ describe("podcast download runtime behavior", () => {
             });
         }
         expect(mocks.axiosGet).toHaveBeenCalledTimes(1);
+    });
+
+    it("limits auto-cache download concurrency across queued episodes", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const controls = mockControlledSuccessfulDownloads(mocks);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        const { concurrency } =
+            podcastDownload.getAutoCacheDownloadQueueState();
+        const episodeCount = concurrency + 2;
+
+        for (let index = 0; index < episodeCount; index += 1) {
+            expect(
+                podcastDownload.downloadInBackground(
+                    `episode-queued-${index}`,
+                    `https://example.com/episode-queued-${index}.mp3`,
+                    "user-1",
+                ),
+            ).toBe(true);
+        }
+
+        await waitForCount(
+            () => (mocks.axiosGet as jest.Mock).mock.calls.length,
+            concurrency,
+        );
+        expect(controls.getPeak()).toBe(concurrency);
+
+        controls.releaseDownloads();
+        await podcastDownload.drainAutoCacheDownloadQueue();
+
+        expect(controls.getPeak()).toBe(concurrency);
+        expect(controls.getCompleted()).toBe(episodeCount);
+    });
+
+    it("rejects auto-cache work deterministically when queue capacity is full", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const controls = mockControlledSuccessfulDownloads(mocks);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        const initialState = podcastDownload.getAutoCacheDownloadQueueState();
+        const admittedCount = initialState.concurrency + initialState.capacity;
+
+        for (let index = 0; index < admittedCount; index += 1) {
+            expect(
+                podcastDownload.downloadInBackground(
+                    `episode-capacity-${index}`,
+                    `https://example.com/episode-capacity-${index}.mp3`,
+                    "user-1",
+                ),
+            ).toBe(true);
+        }
+        await waitForCount(
+            () => (mocks.axiosGet as jest.Mock).mock.calls.length,
+            initialState.concurrency,
+        );
+
+        expect(podcastDownload.getAutoCacheDownloadQueueState()).toEqual({
+            active: initialState.concurrency,
+            capacity: initialState.capacity,
+            concurrency: initialState.concurrency,
+            queued: initialState.capacity,
+        });
+        expect(
+            podcastDownload.downloadInBackground(
+                "episode-overflow",
+                "https://example.com/episode-overflow.mp3",
+                "user-1",
+            ),
+        ).toBe(false);
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            "Podcast auto-cache queue at capacity; rejecting download",
+            expect.objectContaining({ episodeId: "episode-overflow" }),
+        );
+
+        controls.releaseDownloads();
+        await podcastDownload.drainAutoCacheDownloadQueue();
+    });
+
+    it("downloads every episode in a normal small auto-cache feed", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const controls = mockControlledSuccessfulDownloads(mocks);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        controls.releaseDownloads();
+
+        for (let index = 0; index < 2; index += 1) {
+            expect(
+                podcastDownload.downloadInBackground(
+                    `episode-small-feed-${index}`,
+                    `https://example.com/episode-small-feed-${index}.mp3`,
+                    "user-1",
+                ),
+            ).toBe(true);
+        }
+        await podcastDownload.drainAutoCacheDownloadQueue();
+
+        expect(controls.getCompleted()).toBe(2);
+        expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalledTimes(2);
+        expect(podcastDownload.getAutoCacheDownloadQueueState()).toEqual(
+            expect.objectContaining({ active: 0, queued: 0 }),
+        );
     });
 
     it("clamps runtime progress to 100% while still downloading", async () => {
