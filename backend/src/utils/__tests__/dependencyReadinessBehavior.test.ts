@@ -2,6 +2,7 @@ describe("dependency readiness tracker behavior", () => {
     const originalEnv = process.env;
 
     afterEach(() => {
+        jest.useRealTimers();
         process.env = originalEnv;
         jest.resetModules();
         jest.clearAllMocks();
@@ -34,30 +35,92 @@ describe("dependency readiness tracker behavior", () => {
             redisReject: options?.redisReject,
         };
 
+        let activePostgresOperations = 0;
+        let activeRedisOperations = 0;
+        let rejectPostgresOperation: ((error: Error) => void) | undefined;
+        const postgresCancel = jest.fn(() => {
+            rejectPostgresOperation?.(
+                new Error("postgres transaction timed out"),
+            );
+        });
+        const redisCancel = jest.fn();
+
         const queryRaw = jest.fn().mockImplementation(() => {
             if (options?.postgresHang) {
-                return new Promise(() => undefined);
+                activePostgresOperations += 1;
+                return new Promise((_resolve, reject) => {
+                    rejectPostgresOperation = (error: Error) => {
+                        activePostgresOperations -= 1;
+                        reject(error);
+                    };
+                });
             }
             if (state.postgresReject) {
                 return Promise.reject(new Error(state.postgresReject));
             }
             return Promise.resolve(1);
         });
-        const ping = jest.fn().mockImplementation(() => {
+        const transaction = jest
+            .fn()
+            .mockImplementation(
+                async (
+                    operation:
+                        | Array<Promise<unknown>>
+                        | ((client: {
+                              $queryRaw: typeof queryRaw;
+                          }) => Promise<unknown>),
+                    deadline: { timeout: number },
+                ) => {
+                    const operationPromise = Array.isArray(operation)
+                        ? Promise.all(operation)
+                        : operation({ $queryRaw: queryRaw });
+                    if (!options?.postgresHang) {
+                        return await operationPromise;
+                    }
+
+                    const timeoutId = setTimeout(
+                        postgresCancel,
+                        deadline.timeout,
+                    );
+                    try {
+                        return await operationPromise;
+                    } finally {
+                        clearTimeout(timeoutId);
+                    }
+                },
+            );
+        const ping = jest.fn().mockImplementation((signal?: AbortSignal) => {
             if (options?.redisHang) {
-                return new Promise(() => undefined);
+                activeRedisOperations += 1;
+                return new Promise((_resolve, reject) => {
+                    signal?.addEventListener(
+                        "abort",
+                        () => {
+                            redisCancel();
+                            activeRedisOperations -= 1;
+                            reject(signal.reason);
+                        },
+                        { once: true },
+                    );
+                });
             }
             if (state.redisReject) {
                 return Promise.reject(new Error(state.redisReject));
             }
             return Promise.resolve("PONG");
         });
+        const withCommandOptions = jest.fn(
+            ({ abortSignal }: { abortSignal: AbortSignal }) => ({
+                ping: () => ping(abortSignal),
+            }),
+        );
 
         const redisClient = {
             get isReady() {
                 return state.redisReady;
             },
             ping,
+            withCommandOptions,
         };
 
         const logger = {
@@ -72,6 +135,7 @@ describe("dependency readiness tracker behavior", () => {
         jest.doMock("../db", () => ({
             prisma: {
                 $queryRaw: queryRaw,
+                $transaction: transaction,
             },
         }));
         jest.doMock("../redis", () => ({ redisClient }));
@@ -85,8 +149,18 @@ describe("dependency readiness tracker behavior", () => {
         return {
             tracker,
             queryRaw,
+            transaction,
             ping,
+            withCommandOptions,
             logger,
+            postgresCancel,
+            redisCancel,
+            getActiveOperations() {
+                return {
+                    postgres: activePostgresOperations,
+                    redis: activeRedisOperations,
+                };
+            },
             setRedisReady(value: boolean) {
                 state.redisReady = value;
             },
@@ -98,6 +172,39 @@ describe("dependency readiness tracker behavior", () => {
             },
         };
     }
+
+    it("cancels and awaits timed-out dependency work before completing the probe", async () => {
+        jest.useFakeTimers();
+        const {
+            tracker,
+            transaction,
+            withCommandOptions,
+            postgresCancel,
+            redisCancel,
+            getActiveOperations,
+        } = loadTracker({
+            required: true,
+            postgresHang: true,
+            redisHang: true,
+            timeoutMs: "10",
+        });
+
+        const probePromise = tracker.probe(true);
+        await jest.advanceTimersByTimeAsync(10);
+        const snapshot = await probePromise;
+
+        expect(snapshot.overallHealthy).toBe(false);
+        expect(transaction).toHaveBeenCalledWith(expect.any(Array), {
+            maxWait: expect.any(Number),
+            timeout: expect.any(Number),
+        });
+        expect(withCommandOptions).toHaveBeenCalledWith({
+            abortSignal: expect.any(AbortSignal),
+        });
+        expect(postgresCancel).toHaveBeenCalledTimes(1);
+        expect(redisCancel).toHaveBeenCalledTimes(1);
+        expect(getActiveOperations()).toEqual({ postgres: 0, redis: 0 });
+    });
 
     it("reports healthy without probing dependencies when dependency checks are disabled", async () => {
         const { tracker, queryRaw, ping } = loadTracker({ required: false });
