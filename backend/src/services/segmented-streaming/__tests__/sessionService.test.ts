@@ -89,6 +89,7 @@ const resolveSessionService = async (
         config: {
             jwtSecret: "test-session-secret",
             sessionSecret: "test-session-secret",
+            segmentedStreaming: { traceEnabled: false },
             music: {
                 musicPath: "/music",
                 transcodeCachePath: "/tmp/segmented",

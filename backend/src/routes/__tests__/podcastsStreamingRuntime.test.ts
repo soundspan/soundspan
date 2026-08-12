@@ -191,6 +191,14 @@ jest.mock("fs", () => ({
     createReadStream: (...args: any[]) => mockCreateReadStream(...args),
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        get podcastDebug() {
+            return process.env.PODCAST_DEBUG === "1";
+        },
+    },
+}));
+
 import router from "../podcasts";
 
 function getHandler(

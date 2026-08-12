@@ -53,16 +53,7 @@ let lastRunTime = 0;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
 const ENRICHMENT_CLAIM_KEY = "enrichment:cycle:claim";
 const ENRICHMENT_CLAIM_OWNER_ID = randomUUID();
-const DEFAULT_ENRICHMENT_CLAIM_TTL_MS = 15 * 60 * 1000;
-const parsedEnrichmentClaimTtlMs = Number.parseInt(
-    process.env.ENRICHMENT_CLAIM_TTL_MS || `${DEFAULT_ENRICHMENT_CLAIM_TTL_MS}`,
-    10,
-);
-const ENRICHMENT_CLAIM_TTL_MS =
-    Number.isFinite(parsedEnrichmentClaimTtlMs) &&
-    parsedEnrichmentClaimTtlMs > 0
-        ? parsedEnrichmentClaimTtlMs
-        : DEFAULT_ENRICHMENT_CLAIM_TTL_MS;
+const ENRICHMENT_CLAIM_TTL_MS = config.workers.enrichmentClaimTtlMs;
 
 // Batch failure tracking
 interface BatchFailures {

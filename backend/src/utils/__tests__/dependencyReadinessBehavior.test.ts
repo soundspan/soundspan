@@ -140,6 +140,28 @@ describe("dependency readiness tracker behavior", () => {
         }));
         jest.doMock("../redis", () => ({ redisClient }));
         jest.doMock("../logger", () => ({ logger }));
+        const parsePositiveInt = (value: string, fallback: number): number => {
+            const parsed = Number.parseInt(value, 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+        };
+        jest.doMock("../../config", () => ({
+            config: {
+                readiness: {
+                    dependencyCheckIntervalMs: parsePositiveInt(
+                        process.env.READINESS_DEPENDENCY_CHECK_INTERVAL_MS ||
+                            "5000",
+                        5000,
+                    ),
+                    dependencyCheckTimeoutMs: parsePositiveInt(
+                        process.env.READINESS_DEPENDENCY_CHECK_TIMEOUT_MS ||
+                            "2000",
+                        2000,
+                    ),
+                    requireDependencies:
+                        process.env.READINESS_REQUIRE_DEPENDENCIES !== "false",
+                },
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {

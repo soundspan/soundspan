@@ -47,6 +47,11 @@ describe("playlist logger utilities", () => {
         jest.doMock("../logger", () => ({
             logger,
         }));
+        jest.doMock("../../config", () => ({
+            config: {
+                playlistLogDir: process.env.PLAYLIST_LOG_DIR || undefined,
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod =

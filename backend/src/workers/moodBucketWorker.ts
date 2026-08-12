@@ -16,6 +16,7 @@ import type Redis from "ioredis";
 import { prisma } from "../utils/db";
 import { moodBucketService } from "../services/moodBucketService";
 import { createIORedisClient } from "../utils/ioredis";
+import { config } from "../config";
 
 const log = logger.child("MoodBucket");
 
@@ -28,17 +29,7 @@ let workerInterval: NodeJS.Timeout | null = null;
 let moodBucketClaimRedis: Redis | null = null;
 const MOOD_BUCKET_CLAIM_KEY = "mood-bucket:cycle:claim";
 const MOOD_BUCKET_CLAIM_OWNER_ID = randomUUID();
-const DEFAULT_MOOD_BUCKET_CLAIM_TTL_MS = 2 * 60 * 1000;
-const parsedMoodBucketClaimTtlMs = Number.parseInt(
-    process.env.MOOD_BUCKET_CLAIM_TTL_MS ||
-        `${DEFAULT_MOOD_BUCKET_CLAIM_TTL_MS}`,
-    10,
-);
-const MOOD_BUCKET_CLAIM_TTL_MS =
-    Number.isFinite(parsedMoodBucketClaimTtlMs) &&
-    parsedMoodBucketClaimTtlMs > 0
-        ? parsedMoodBucketClaimTtlMs
-        : DEFAULT_MOOD_BUCKET_CLAIM_TTL_MS;
+const MOOD_BUCKET_CLAIM_TTL_MS = config.workers.moodBucketClaimTtlMs;
 
 function getMoodBucketClaimRedis() {
     if (!moodBucketClaimRedis) {

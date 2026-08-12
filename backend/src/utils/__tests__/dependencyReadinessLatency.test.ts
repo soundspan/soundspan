@@ -68,6 +68,15 @@ describe("dependency readiness tracker latency", () => {
         }));
         jest.doMock("../redis", () => ({ redisClient }));
         jest.doMock("../logger", () => ({ logger }));
+        jest.doMock("../../config", () => ({
+            config: {
+                readiness: {
+                    dependencyCheckIntervalMs: 60_000,
+                    dependencyCheckTimeoutMs: 1000,
+                    requireDependencies: true,
+                },
+            },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const {

@@ -138,9 +138,37 @@ describe("listen together socket runtime behavior", () => {
 
         // Mutable config mock so tests can exercise ALLOWED_ORIGINS allowlist
         // semantics ([] = unset → deny cross-origin in production).
+        const positiveIntEnvOr = (
+            value: string | undefined,
+            fallback: number,
+        ): number => {
+            const parsed = Number.parseInt(value || `${fallback}`, 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+        };
         const configMock = {
             nodeEnv: "production",
             allowedOrigins: [] as boolean | string[],
+            listenTogether: {
+                reconnectSloMs: positiveIntEnvOr(
+                    process.env.LISTEN_TOGETHER_RECONNECT_SLO_MS,
+                    5000,
+                ),
+                allowPolling:
+                    process.env.LISTEN_TOGETHER_ALLOW_POLLING === "true",
+                redisAdapterEnabled:
+                    process.env.LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED !==
+                    "false",
+                mutationLockEnabled:
+                    process.env.LISTEN_TOGETHER_MUTATION_LOCK_ENABLED !==
+                    "false",
+                mutationLockTtlMs: positiveIntEnvOr(
+                    process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
+                    3000,
+                ),
+                mutationLockPrefix:
+                    process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
+                    "listen-together:mutation-lock",
+            },
         };
 
         jest.doMock("socket.io", () => ({ Server: MockServer }));

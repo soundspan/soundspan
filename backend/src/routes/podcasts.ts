@@ -19,6 +19,7 @@ import fs from "fs";
 import pLimit from "p-limit";
 import { sendRouteError } from "./routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
+import { config } from "../config";
 
 const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
@@ -1390,7 +1391,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
     try {
         const { podcastId, episodeId } = req.params;
         const userId = req.user?.id;
-        const podcastDebug = process.env.PODCAST_DEBUG === "1";
+        const podcastDebug = config.podcastDebug;
 
         logger.debug(`\n [PODCAST STREAM] Request:`);
         logger.debug(`   Podcast ID: ${podcastId}`);

@@ -20,8 +20,15 @@ import {
     type CriticalSecretFailure,
 } from "./config/secretsPolicy";
 
+const { resolveDatabaseUrl } = require("../databaseUrl") as {
+    resolveDatabaseUrl: (environment: NodeJS.ProcessEnv) => string | undefined;
+};
+
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
+
+const databaseUrl = resolveDatabaseUrl(process.env);
+if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 
 const secretsDbOnly = isSecretsDbOnlyEnabled();
 
@@ -191,8 +198,24 @@ export async function initializeMusicConfig() {
 export const config = {
     port: parseEnvInt(process.env.PORT, 3006),
     nodeEnv: process.env.NODE_ENV || "development",
+    get appVersion(): string {
+        return process.env.npm_package_version || "unknown";
+    },
+    get debugWebhooks(): boolean {
+        return process.env.DEBUG_WEBHOOKS === "true";
+    },
+    get podcastDebug(): boolean {
+        return process.env.PODCAST_DEBUG === "1";
+    },
+    subsonicTraceLogs: process.env.SUBSONIC_TRACE_LOGS === "true",
+    get soundspanCallbackUrl(): string {
+        return process.env.SOUNDSPAN_CALLBACK_URL || "http://backend:3006";
+    },
+    get playlistLogDir(): string | undefined {
+        return process.env.PLAYLIST_LOG_DIR || undefined;
+    },
     // DATABASE_URL and REDIS_URL are validated by envSchema above, so they're guaranteed to exist
-    databaseUrl: process.env.DATABASE_URL!,
+    databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
     sessionSecret: process.env.SESSION_SECRET!,
 
@@ -318,6 +341,12 @@ export const config = {
         apiKey: secretsDbOnly ? "" : process.env.DEEZER_API_KEY || "", // Fallback to DB
     },
 
+    fanart: {
+        get apiKey(): string | undefined {
+            return process.env.FANART_API_KEY;
+        },
+    },
+
     discover: {
         mode:
             process.env.DISCOVERY_MODE === "legacy"
@@ -354,6 +383,30 @@ export const config = {
         mutationLockPrefix:
             process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
             "listen-together:mutation-lock",
+        get stateSyncEnabled(): boolean {
+            return process.env.LISTEN_TOGETHER_STATE_SYNC_ENABLED !== "false";
+        },
+        get stateSyncChannel(): string {
+            return (
+                process.env.LISTEN_TOGETHER_STATE_SYNC_CHANNEL ||
+                "listen-together:state-sync"
+            );
+        },
+        get stateStoreEnabled(): boolean {
+            return process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED !== "false";
+        },
+        get stateStoreKeyPrefix(): string {
+            return (
+                process.env.LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX ||
+                "listen-together:state"
+            );
+        },
+        get stateStoreTtlSeconds(): number {
+            return positiveIntEnvOr(
+                process.env.LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS,
+                21_600,
+            );
+        },
     },
 
     readiness: {
@@ -413,6 +466,15 @@ export const config = {
         return url && apiKey ? { url, apiKey } : undefined;
     },
 
+    get audiobookshelfEnv(): { url: string; apiKey: string } {
+        return {
+            url: process.env.AUDIOBOOKSHELF_URL || "",
+            apiKey: secretsDbOnly
+                ? ""
+                : process.env.AUDIOBOOKSHELF_API_KEY || "",
+        };
+    },
+
     // YouTube Music region hint for browse/discovery proxies.
     ytmusicRegion: process.env.YTMUSIC_REGION || "US",
 
@@ -439,6 +501,21 @@ export const config = {
             process.env.LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED,
             false,
         ),
+    },
+
+    workers: {
+        get moodBucketClaimTtlMs(): number {
+            return positiveIntEnvOr(
+                process.env.MOOD_BUCKET_CLAIM_TTL_MS,
+                2 * 60 * 1000,
+            );
+        },
+        get enrichmentClaimTtlMs(): number {
+            return positiveIntEnvOr(
+                process.env.ENRICHMENT_CLAIM_TTL_MS,
+                15 * 60 * 1000,
+            );
+        },
     },
 
     // Because CORS credentials are enabled, production denies cross-origin

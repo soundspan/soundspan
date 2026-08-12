@@ -18,8 +18,7 @@ import { logger } from "../utils/logger";
 import type { CanonicalMediaSearchResult } from "@soundspan/media-metadata-contract";
 
 // ── Sidecar URL ────────────────────────────────────────────────────
-const YTMUSIC_STREAMER_URL =
-    process.env.YTMUSIC_STREAMER_URL || "http://127.0.0.1:8586";
+const YTMUSIC_STREAMER_URL = config.ytmusicStreamer.url;
 const SIDECAR_AGENT_OPTIONS = {
     keepAlive: true,
     maxSockets: 64,

@@ -1,5 +1,12 @@
 import { Request, Response } from "express";
 
+// The streaming route now reaches the config module through the playback
+// trace import; real config validates the full environment at load, so this
+// suite substitutes the minimal shape the chain reads.
+jest.mock("../../config", () => ({
+    config: { segmentedStreaming: { traceEnabled: true } },
+}));
+
 const mockPlaybackRouteLogger = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -35,7 +42,15 @@ const mockLoggerChild = jest.fn((scope: string) => {
     if (scope === "SegmentedStreaming.Trace") {
         return mockSegmentedTraceLogger;
     }
-    throw new Error(`Unexpected logger scope: ${scope}`);
+    // Modules reached through the config import chain register their own
+    // scopes at load; give them inert loggers without widening assertions.
+    return {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        child: jest.fn(),
+    };
 });
 
 jest.mock("../../middleware/auth", () => ({

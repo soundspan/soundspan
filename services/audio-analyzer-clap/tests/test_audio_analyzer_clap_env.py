@@ -178,6 +178,55 @@ def test_worker_applies_bounded_socket_timeout_to_queue_client(
     assert redis_calls == [((module.REDIS_URL,), {"socket_timeout": 23})]
 
 
+def test_clap_analyzer_builds_database_url_from_encoded_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("POSTGRES_HOST", "postgres")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_USER", "user@:/?#% 雪")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "pass@:/?#% 雪")
+    monkeypatch.setenv("POSTGRES_DB", "soundspan")
+
+    module = _load_analyzer_with_recording_redis(monkeypatch, [], [])
+
+    assert module.DATABASE_URL == (
+        "postgresql://user%40%3A%2F%3F%23%25%20%E9%9B%AA:"
+        "pass%40%3A%2F%3F%23%25%20%E9%9B%AA@postgres:5432/soundspan"
+    )
+
+
+def test_clap_analyzer_preserves_explicit_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit_database_url = "postgresql://explicit:raw@external:6432/custom?schema=tenant"
+    monkeypatch.setenv("DATABASE_URL", explicit_database_url)
+    monkeypatch.setenv("POSTGRES_HOST", "postgres")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_USER", "component-user")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "component-password")
+    monkeypatch.setenv("POSTGRES_DB", "soundspan")
+
+    module = _load_analyzer_with_recording_redis(monkeypatch, [], [])
+
+    assert explicit_database_url == module.DATABASE_URL
+
+
+def test_clap_analyzer_keeps_database_url_empty_without_all_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("POSTGRES_HOST", "postgres")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_USER", "soundspan")
+    monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+    monkeypatch.setenv("POSTGRES_DB", "soundspan")
+
+    module = _load_analyzer_with_recording_redis(monkeypatch, [], [])
+
+    assert module.DATABASE_URL == ""
+
+
 def test_configure_thread_env_without_tensorflow_sets_only_blas(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

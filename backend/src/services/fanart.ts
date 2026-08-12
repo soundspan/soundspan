@@ -68,8 +68,8 @@ class FanartService {
         }
 
         // Fallback to .env
-        if (process.env.FANART_API_KEY) {
-            this.apiKey = process.env.FANART_API_KEY;
+        if (config.fanart.apiKey) {
+            this.apiKey = config.fanart.apiKey;
             logger.debug("Fanart.tv configured from .env");
         }
         // Note: Not logging "not configured" here - it's optional and logs are spammy

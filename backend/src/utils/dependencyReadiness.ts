@@ -1,34 +1,13 @@
 import { prisma } from "./db";
 import { redisClient } from "./redis";
 import { logger, type Logger } from "./logger";
+import { config } from "../config";
 
-const DEFAULT_DEPENDENCY_CHECK_INTERVAL_MS = 5_000;
-const DEFAULT_DEPENDENCY_CHECK_TIMEOUT_MS = 2_000;
-
-const parsedDependencyCheckIntervalMs = Number.parseInt(
-    process.env.READINESS_DEPENDENCY_CHECK_INTERVAL_MS ||
-        `${DEFAULT_DEPENDENCY_CHECK_INTERVAL_MS}`,
-    10,
-);
 const READINESS_DEPENDENCY_CHECK_INTERVAL_MS =
-    Number.isFinite(parsedDependencyCheckIntervalMs) &&
-    parsedDependencyCheckIntervalMs > 0
-        ? parsedDependencyCheckIntervalMs
-        : DEFAULT_DEPENDENCY_CHECK_INTERVAL_MS;
-
-const parsedDependencyCheckTimeoutMs = Number.parseInt(
-    process.env.READINESS_DEPENDENCY_CHECK_TIMEOUT_MS ||
-        `${DEFAULT_DEPENDENCY_CHECK_TIMEOUT_MS}`,
-    10,
-);
+    config.readiness.dependencyCheckIntervalMs;
 const READINESS_DEPENDENCY_CHECK_TIMEOUT_MS =
-    Number.isFinite(parsedDependencyCheckTimeoutMs) &&
-    parsedDependencyCheckTimeoutMs > 0
-        ? parsedDependencyCheckTimeoutMs
-        : DEFAULT_DEPENDENCY_CHECK_TIMEOUT_MS;
-
-const READINESS_REQUIRE_DEPENDENCIES =
-    process.env.READINESS_REQUIRE_DEPENDENCIES !== "false";
+    config.readiness.dependencyCheckTimeoutMs;
+const READINESS_REQUIRE_DEPENDENCIES = config.readiness.requireDependencies;
 
 interface DependencyStatus {
     ok: boolean;

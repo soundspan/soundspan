@@ -89,37 +89,18 @@ let io: Server | null = null;
 const LISTEN_TOGETHER_PING_INTERVAL_MS = 25_000;
 const LISTEN_TOGETHER_PING_TIMEOUT_MS = 60_000;
 const DISCONNECT_MEMBER_GRACE_MS = 60_000;
-const DEFAULT_LISTEN_TOGETHER_RECONNECT_SLO_MS = 5_000;
-const parsedReconnectSloMs = Number.parseInt(
-    process.env.LISTEN_TOGETHER_RECONNECT_SLO_MS ||
-        `${DEFAULT_LISTEN_TOGETHER_RECONNECT_SLO_MS}`,
-    10,
-);
-const LISTEN_TOGETHER_RECONNECT_SLO_MS =
-    Number.isFinite(parsedReconnectSloMs) && parsedReconnectSloMs > 0
-        ? parsedReconnectSloMs
-        : DEFAULT_LISTEN_TOGETHER_RECONNECT_SLO_MS;
-const LISTEN_TOGETHER_ALLOW_POLLING =
-    process.env.LISTEN_TOGETHER_ALLOW_POLLING === "true";
+const LISTEN_TOGETHER_RECONNECT_SLO_MS = config.listenTogether.reconnectSloMs;
+const LISTEN_TOGETHER_ALLOW_POLLING = config.listenTogether.allowPolling;
 const LISTEN_TOGETHER_SOCKET_TRANSPORTS: Array<"websocket" | "polling"> =
     LISTEN_TOGETHER_ALLOW_POLLING ? ["websocket", "polling"] : ["websocket"];
 const LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED =
-    process.env.LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED !== "false";
+    config.listenTogether.redisAdapterEnabled;
 const LISTEN_TOGETHER_MUTATION_LOCK_ENABLED =
-    process.env.LISTEN_TOGETHER_MUTATION_LOCK_ENABLED !== "false";
-const DEFAULT_LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS = 3_000;
-const parsedMutationLockTtlMs = Number.parseInt(
-    process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS ||
-        `${DEFAULT_LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS}`,
-    10,
-);
+    config.listenTogether.mutationLockEnabled;
 const LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS =
-    Number.isFinite(parsedMutationLockTtlMs) && parsedMutationLockTtlMs > 0
-        ? parsedMutationLockTtlMs
-        : DEFAULT_LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS;
+    config.listenTogether.mutationLockTtlMs;
 const LISTEN_TOGETHER_MUTATION_LOCK_PREFIX =
-    process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
-    "listen-together:mutation-lock";
+    config.listenTogether.mutationLockPrefix;
 const LISTEN_TOGETHER_CONFLICT_RETRY_AFTER_MS = Math.min(
     500,
     Math.max(75, Math.floor(LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS / 10)),

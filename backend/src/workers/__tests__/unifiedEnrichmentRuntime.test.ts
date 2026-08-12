@@ -188,6 +188,17 @@ describe("unified enrichment runtime behavior", () => {
                     autoPlaylists: true,
                     ...(options?.configFeatures || {}),
                 },
+                workers: {
+                    get enrichmentClaimTtlMs() {
+                        const parsed = Number.parseInt(
+                            process.env.ENRICHMENT_CLAIM_TTL_MS || "900000",
+                            10,
+                        );
+                        return Number.isFinite(parsed) && parsed > 0
+                            ? parsed
+                            : 900_000;
+                    },
+                },
             },
         }));
         jest.doMock("../../services/enrichmentState", () => ({

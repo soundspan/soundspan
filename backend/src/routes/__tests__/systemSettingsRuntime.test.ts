@@ -146,6 +146,10 @@ jest.mock("../../services/soulseek", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: { soundspanCallbackUrl: "http://backend:3006" },
+}));
+
 import router from "../systemSettings";
 import { prisma } from "../../utils/db";
 import { writeEnvFile, EnvFileSyncSkippedError } from "../../utils/envWriter";

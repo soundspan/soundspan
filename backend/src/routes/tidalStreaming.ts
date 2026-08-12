@@ -28,11 +28,11 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
 import { trackMappingService } from "../services/trackMappingService";
 import { coalesceInFlightByKey } from "../utils/singleflight";
+import { config } from "../config";
 
 const router = Router();
-const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
-const OAUTH_NEGATIVE_CACHE_TTL_MS =
-    process.env.NODE_ENV === "test" ? 0 : 15_000;
+const OAUTH_CACHE_TTL_MS = config.nodeEnv === "test" ? 0 : 60_000;
+const OAUTH_NEGATIVE_CACHE_TTL_MS = config.nodeEnv === "test" ? 0 : 15_000;
 const tidalOauthSessionCache = new Map<
     string,
     { authenticated: boolean; expiresAt: number }

@@ -78,6 +78,8 @@ jest.mock("../../services/browseImageCache", () => ({
     fetchAndCacheBrowseImage: jest.fn(),
 }));
 
+jest.mock("../../config", () => ({ config: { ytmusicRegion: "US" } }));
+
 import router, { _resetTidalBrowseCache } from "../browse";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 

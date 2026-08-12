@@ -23,6 +23,12 @@ jest.mock("../../services/simpleDownloadManager", () => ({
 }));
 
 const mockConfig = {
+    get appVersion() {
+        return process.env.npm_package_version || "unknown";
+    },
+    get debugWebhooks() {
+        return process.env.DEBUG_WEBHOOKS === "true";
+    },
     webhooks: {
         lidarrAllowUnauthenticated: true,
     },

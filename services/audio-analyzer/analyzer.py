@@ -23,6 +23,7 @@ from services.common.analyzer_env import (
     get_blocking_socket_timeout,
     get_int_env,
 )
+from services.common.database_url import resolve_database_url
 from services.common.logging_utils import configure_service_logger
 
 # Get thread configuration from environment (default to 1 for safety)
@@ -115,7 +116,7 @@ TensorflowPredictMusiCNN = None  # Loaded in worker processes
 
 # Configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = resolve_database_url(os.environ)
 MUSIC_PATH = os.getenv("MUSIC_PATH", "/music")
 BATCH_SIZE = get_int_env("BATCH_SIZE", 10)
 SLEEP_INTERVAL = get_int_env("SLEEP_INTERVAL", 5)

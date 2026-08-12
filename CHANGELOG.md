@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Mypy now runs in strict mode with enumerated, justified per-module exceptions;
   tidal-downloader and ytmusic-streamer are fully strict, including their tests.
+- Consolidated environment configuration reads into the backend config module
+  for 20 more production files; the config-boundary allowlist shrank from 39
+  files to 19.
 - Frontend TypeScript now compiles under strict mode.
 - Renamed playback telemetry so log names match their emitters:
   `player.howler_startup` → `player.engine_startup`;
@@ -349,6 +352,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Compose deployments now construct `DATABASE_URL` from `POSTGRES_*`
+  components in-app with percent-encoded credentials, so passwords containing
+  URL-reserved characters work; explicit `DATABASE_URL` still wins.
 - Queue auto-advance no longer pauses itself right after the next track starts:
   the ready-state transition no longer erases the advance's play intent, the
   deferred-play path re-asserts it explicitly, and load/play-intent decisions

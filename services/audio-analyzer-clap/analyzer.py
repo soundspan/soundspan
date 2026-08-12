@@ -53,6 +53,7 @@ from services.common.analyzer_env import (
     get_blocking_socket_timeout,
     get_int_env,
 )
+from services.common.database_url import resolve_database_url
 from services.common.logging_utils import configure_service_logger
 
 # CPU thread limiting must be set before importing torch
@@ -80,7 +81,7 @@ logger = configure_service_logger("clap-analyzer")
 
 # Configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = resolve_database_url(os.environ)
 MUSIC_PATH = os.getenv("MUSIC_PATH", "/music")
 SLEEP_INTERVAL = get_int_env("SLEEP_INTERVAL", 5)
 REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(

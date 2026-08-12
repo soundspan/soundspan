@@ -52,7 +52,7 @@ router.get("/lidarr/verify", (req, res) => {
         timestamp: new Date().toISOString(),
         service: BRAND_SLUG,
         legacyServiceAliases: LEGACY_SERVICE_ALIASES,
-        version: process.env.npm_package_version || "unknown",
+        version: config.appVersion,
     });
 });
 
@@ -140,7 +140,7 @@ router.post("/lidarr", webhookLimiter, async (req, res) => {
         logger.debug(`[WEBHOOK] Lidarr event: ${eventType}`);
 
         // Log payload in debug mode only (avoid verbose logs in production)
-        if (process.env.DEBUG_WEBHOOKS === "true") {
+        if (config.debugWebhooks) {
             logger.debug(`   Payload:`, JSON.stringify(req.body, null, 2));
         }
 

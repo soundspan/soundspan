@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { logger } from "./logger";
 import * as path from "path";
+import { config } from "../config";
 
 const log = logger.child("Playlist");
 
@@ -18,8 +19,8 @@ const log = logger.child("Playlist");
  * - events.log - Persistent event log
  */
 
-const LOGS_DIR = process.env.PLAYLIST_LOG_DIR
-    ? path.resolve(process.env.PLAYLIST_LOG_DIR)
+const LOGS_DIR = config.playlistLogDir
+    ? path.resolve(config.playlistLogDir)
     : path.join(process.cwd(), "logs", "playlists");
 const SESSION_LOG = path.join(LOGS_DIR, "session.log");
 

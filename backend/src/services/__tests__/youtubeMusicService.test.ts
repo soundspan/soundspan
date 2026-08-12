@@ -7,7 +7,10 @@ const mockAxiosCreate = jest.fn((_config?: any) => mockClient);
 
 // youtubeMusic.ts now reads config.internalApiSecret; mock config so the real
 // module (which process.exit(1)s on missing env) never loads under jest.
-const mockConfig: { internalApiSecret?: string } = {};
+const mockConfig: {
+    internalApiSecret?: string;
+    ytmusicStreamer: { url: string };
+} = { ytmusicStreamer: { url: "http://127.0.0.1:8586" } };
 
 jest.mock("../../config", () => ({ config: mockConfig }));
 
