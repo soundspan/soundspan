@@ -730,6 +730,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Cover-image storage operations validate IDs and contain all filesystem paths
+  under the type-specific covers directory.
 - Playlist pending-track operations are scoped to both the playlist and
   pending-track ids, closing a cross-user IDOR (#366).
 - API-key management and MFA setup/enable/disable now require an interactive

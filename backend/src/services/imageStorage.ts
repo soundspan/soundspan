@@ -9,10 +9,13 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { safeResolvePath } from "../utils/safeResolvePath";
 import { fetchExternalImage } from "./imageProxy";
 
 const ARTIST_IMAGES_DIR = "artists";
 const ALBUM_IMAGES_DIR = "albums";
+const IMAGE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+type ImageType = "artist" | "album";
 
 /**
  * Get the base covers directory path
@@ -21,16 +24,38 @@ function getCoversBasePath(): string {
     return path.join(config.music.transcodeCachePath, "../covers");
 }
 
+function getImageDirectory(type: ImageType): string {
+    const subdir =
+        type === "artist" ? ARTIST_IMAGES_DIR : ALBUM_IMAGES_DIR;
+    return path.resolve(getCoversBasePath(), subdir);
+}
+
+function resolveImagePath(id: string, type: ImageType): string | null {
+    if (!IMAGE_ID_PATTERN.test(id)) return null;
+    return safeResolvePath(getImageDirectory(type), `${id}.jpg`);
+}
+
+function resolveNativeImagePath(nativePath: string): string | null {
+    const artistPrefix = `native:${ARTIST_IMAGES_DIR}/`;
+    const albumPrefix = `native:${ALBUM_IMAGES_DIR}/`;
+    const type = nativePath.startsWith(artistPrefix) ? "artist" : "album";
+    const prefix = type === "artist" ? artistPrefix : albumPrefix;
+    if (!nativePath.startsWith(prefix) || !nativePath.endsWith(".jpg")) {
+        return null;
+    }
+
+    const id = nativePath.slice(prefix.length, -".jpg".length);
+    return resolveImagePath(id, type);
+}
+
 /**
  * Ensure the covers directory exists
  */
-function ensureCoversDir(subdir: string): string {
-    const dirPath = path.join(getCoversBasePath(), subdir);
+function ensureCoversDir(dirPath: string): void {
     if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
         logger.debug(`[ImageStorage] Created directory: ${dirPath}`);
     }
-    return dirPath;
 }
 
 /**
@@ -40,14 +65,14 @@ function ensureCoversDir(subdir: string): string {
 export async function downloadAndStoreImage(
     url: string,
     id: string,
-    type: "artist" | "album",
+    type: ImageType,
 ): Promise<string | null> {
-    if (!url) return null;
+    const filePath = resolveImagePath(id, type);
+    if (!url || !filePath) return null;
 
     const subdir = type === "artist" ? ARTIST_IMAGES_DIR : ALBUM_IMAGES_DIR;
-    const dirPath = ensureCoversDir(subdir);
     const filename = `${id}.jpg`;
-    const filePath = path.join(dirPath, filename);
+    ensureCoversDir(path.dirname(filePath));
 
     try {
         logger.debug(
@@ -95,10 +120,8 @@ export async function downloadAndStoreImage(
  * Check if a local image exists
  */
 export function localImageExists(nativePath: string): boolean {
-    if (!nativePath.startsWith("native:")) return false;
-
-    const relativePath = nativePath.replace("native:", "");
-    const fullPath = path.join(getCoversBasePath(), relativePath);
+    const fullPath = resolveNativeImagePath(nativePath);
+    if (!fullPath) return false;
     return fs.existsSync(fullPath);
 }
 
@@ -106,10 +129,8 @@ export function localImageExists(nativePath: string): boolean {
  * Get the full filesystem path for a native image path
  */
 export function getLocalImagePath(nativePath: string): string | null {
-    if (!nativePath.startsWith("native:")) return null;
-
-    const relativePath = nativePath.replace("native:", "");
-    const fullPath = path.join(getCoversBasePath(), relativePath);
+    const fullPath = resolveNativeImagePath(nativePath);
+    if (!fullPath) return null;
 
     if (!fs.existsSync(fullPath)) return null;
     return fullPath;

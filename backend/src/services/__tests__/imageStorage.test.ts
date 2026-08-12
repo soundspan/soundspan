@@ -39,6 +39,13 @@ import {
     isNativePath,
 } from "../imageStorage";
 
+const INVALID_IMAGE_PATH_CASES = [
+    ["parent traversal", "../escape", "native:albums/../escape.jpg"],
+    ["absolute path", "/tmp/escape", "native:/tmp/escape.jpg"],
+    ["null byte", "cover\0escape", "native:albums/cover\0escape.jpg"],
+    ["dotted segment", "./escape", "native:albums/./escape.jpg"],
+] as const;
+
 function createImageResponse(
     byteLength: number,
     contentType: string,
@@ -68,6 +75,23 @@ describe("imageStorage service", () => {
         expect(result).toBeNull();
         expect(fetchMock).not.toHaveBeenCalled();
     });
+
+    it.each(INVALID_IMAGE_PATH_CASES)(
+        "rejects %s ids before write or network access",
+        async (_caseName, id) => {
+            const result = await downloadAndStoreImage(
+                "https://img.example.com/a.jpg",
+                id,
+                "artist",
+            );
+
+            expect(result).toBeNull();
+            expect(mockExistsSync).not.toHaveBeenCalled();
+            expect(mockMkdirSync).not.toHaveBeenCalled();
+            expect(mockWriteFileSync).not.toHaveBeenCalled();
+            expect(fetchMock).not.toHaveBeenCalled();
+        },
+    );
 
     it("downloads and stores artist image on valid response", async () => {
         mockExistsSync.mockImplementation((target: string) => {
@@ -191,6 +215,22 @@ describe("imageStorage service", () => {
         );
     });
 
+    it.each(INVALID_IMAGE_PATH_CASES)(
+        "localImageExists rejects %s native paths before filesystem access",
+        (_caseName, _id, nativePath) => {
+            expect(localImageExists(nativePath)).toBe(false);
+            expect(mockExistsSync).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(INVALID_IMAGE_PATH_CASES)(
+        "getLocalImagePath rejects %s native paths before filesystem access",
+        (_caseName, _id, nativePath) => {
+            expect(getLocalImagePath(nativePath)).toBeNull();
+            expect(mockExistsSync).not.toHaveBeenCalled();
+        },
+    );
+
     it("deletes local image when file exists and handles failure", () => {
         mockExistsSync.mockImplementation((target: string) =>
             target.endsWith("/covers/albums/album-6.jpg"),
@@ -208,6 +248,23 @@ describe("imageStorage service", () => {
         expect(deleteLocalImage("native:albums/album-6.jpg")).toBe(false);
 
         expect(deleteLocalImage("native:albums/missing.jpg")).toBe(false);
+    });
+
+    it.each(INVALID_IMAGE_PATH_CASES)(
+        "deleteLocalImage rejects %s native paths before filesystem access",
+        (_caseName, _id, nativePath) => {
+            expect(deleteLocalImage(nativePath)).toBe(false);
+            expect(mockExistsSync).not.toHaveBeenCalled();
+            expect(mockUnlinkSync).not.toHaveBeenCalled();
+        },
+    );
+
+    it("does not delete a path outside the covers root", () => {
+        expect(
+            deleteLocalImage("native:albums/../../outside.jpg"),
+        ).toBe(false);
+        expect(mockExistsSync).not.toHaveBeenCalled();
+        expect(mockUnlinkSync).not.toHaveBeenCalled();
     });
 
     it("classifies external and native URLs", () => {
