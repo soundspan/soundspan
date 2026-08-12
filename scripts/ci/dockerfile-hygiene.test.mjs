@@ -35,7 +35,7 @@ function isExternalImage(reference) {
     return /[:@/]/.test(reference);
 }
 
-function composeConfig(postgresPassword) {
+function composeConfig(postgresPassword, { noInterpolate = false } = {}) {
     const environment = {
         ...process.env,
         INTERNAL_API_SECRET: "test-internal-secret",
@@ -48,22 +48,25 @@ function composeConfig(postgresPassword) {
         environment.POSTGRES_PASSWORD = postgresPassword;
     }
 
-    return childProcess.spawnSync(
-        "docker",
-        [
-            "compose",
-            "--env-file",
-            os.devNull,
-            "--profile",
-            "*",
-            "-f",
-            path.join(repoRoot, "docker-compose.yml"),
-            "config",
-            "--format",
-            "json",
-        ],
-        { cwd: repoRoot, encoding: "utf8", env: environment },
-    );
+    const args = [
+        "compose",
+        "--env-file",
+        os.devNull,
+        "--profile",
+        "*",
+        "-f",
+        path.join(repoRoot, "docker-compose.yml"),
+        "config",
+        ...(noInterpolate ? ["--no-interpolate"] : []),
+        "--format",
+        "json",
+    ];
+
+    return childProcess.spawnSync("docker", args, {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: environment,
+    });
 }
 
 function runPostgresEntrypoint(postgres, postgresPassword, executablePath) {
@@ -237,7 +240,37 @@ test("8. split-stack compose applies the configured PostgreSQL password everywhe
     );
 });
 
-test("9. split-stack PostgreSQL startup rejects the published sentinel", (t) => {
+test("9. split-stack worker requires its startup secrets", () => {
+    const result = composeConfig("test-explicit-postgres-password", {
+        noInterpolate: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const services = JSON.parse(result.stdout).services;
+    const backendEnvironment = services.backend.environment;
+    const workerEnvironment = services["backend-worker"].environment;
+    const requiredSecrets = [
+        "SESSION_SECRET",
+        "SETTINGS_ENCRYPTION_KEY",
+        "INTERNAL_API_SECRET",
+    ];
+
+    for (const secret of requiredSecrets) {
+        const workerSubstitution = workerEnvironment[secret];
+        assert.equal(
+            workerSubstitution,
+            backendEnvironment[secret],
+            `backend-worker must use backend's required substitution for ${secret}`,
+        );
+        assert.equal(typeof workerSubstitution, "string");
+        assert.ok(
+            workerSubstitution.startsWith(`\${${secret}:?`),
+            `backend-worker must fail closed when ${secret} is unset`,
+        );
+    }
+});
+
+test("10. split-stack PostgreSQL startup rejects the published sentinel", (t) => {
     const configResult = composeConfig("changeme");
     assert.equal(configResult.status, 0, configResult.stderr);
 
