@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Split the library routes into named, per-resource sub-routers while preserving
+  the `/api/library` mount surface and registration order, completing #124.
 - Extracted the library route helpers into typed utility modules as the first
   stage of the `library.ts` decomposition (#124); behavior is unchanged.
 - Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating

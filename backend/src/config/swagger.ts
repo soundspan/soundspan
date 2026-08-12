@@ -186,7 +186,7 @@ const options: swaggerJsdoc.Options = {
         },
         security: [{ sessionAuth: [] }, { bearerAuth: [] }, { apiKeyAuth: [] }],
     },
-    apis: ["./src/routes/*.ts"],
+    apis: ["./src/routes/*.ts", "./src/routes/library/*.ts"],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

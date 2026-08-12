@@ -186,6 +186,7 @@ jest.mock("../../services/imageProxy", () => ({
 }));
 
 import router from "../library";
+import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
 import { prisma } from "../../utils/db";
 
@@ -198,7 +199,7 @@ const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) => entry.route?.path === path && entry.route?.methods?.get,
     );
     if (!layer) {

@@ -316,6 +316,7 @@ jest.mock("../../services/radioVibeEngine", () => ({
 }));
 
 import router from "../library";
+import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
 import { prisma } from "../../utils/db";
 import {
@@ -360,7 +361,7 @@ const mockComputeAggregateFeatureVector =
 const mockScoreTracksAgainstSeed = scoreTracksAgainstSeed as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) => entry.route?.path === path && entry.route?.methods?.get,
     );
     if (!layer) {
@@ -438,12 +439,12 @@ describe("library branch coverage focus", () => {
     const radioHandler = getGetHandler("/radio");
     const likedHandler = getGetHandler("/liked");
     const trackPreferenceGetHandler = getGetHandler("/tracks/:id/preference");
-    const trackPreferencePostHandler = (router as any).stack.find(
+    const trackPreferencePostHandler = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === "/tracks/:id/preference" &&
             entry.route?.methods?.post,
     ).route.stack[0].handle;
-    const albumPreferencePostHandler = (router as any).stack.find(
+    const albumPreferencePostHandler = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === "/albums/:id/preference" &&
             entry.route?.methods?.post,
@@ -451,14 +452,14 @@ describe("library branch coverage focus", () => {
     const remotePreferenceGetHandler = getGetHandler(
         "/remote-tracks/:id/preference",
     );
-    const remotePreferencePostHandler = (router as any).stack.find(
+    const remotePreferencePostHandler = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === "/remote-tracks/:id/preference" &&
             entry.route?.methods?.post,
     ).route.stack[0].handle;
     const audioInfoHandler = getGetHandler("/tracks/:id/audio-info", 1);
     const artistsHandler = getGetHandler("/artists");
-    const remoteBackfillHandler = (router as any).stack.find(
+    const remoteBackfillHandler = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === "/backfill-remote-artists" &&
             entry.route?.methods?.post,

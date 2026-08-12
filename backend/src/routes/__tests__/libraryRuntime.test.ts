@@ -328,6 +328,7 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
 }));
 
 import router from "../library";
+import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
 import { errorHandler } from "../../middleware/errorHandler";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
@@ -479,7 +480,7 @@ function getHandler(
     path: string,
     stackIndex = 0,
 ) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
     );
@@ -493,7 +494,7 @@ function getFinalHandler(
     method: "get" | "post" | "delete" | "put" | "patch",
     path: string,
 ) {
-    const layer = (router as any).stack.find(
+    const layer = flattenLibraryRouteLayers(router).find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
     );
