@@ -45,14 +45,14 @@ const BASELINE = Object.freeze({
     "backend/src/routes/settings.ts": 5,
     "backend/src/routes/shareLinks.ts": 6,
     "backend/src/routes/social.ts": 3,
-    "backend/src/routes/soulseek.ts": 7,
-    "backend/src/routes/spotify.ts": 8,
+    "backend/src/routes/soulseek.ts": 6,
+    "backend/src/routes/spotify.ts": 7,
     "backend/src/routes/streaming.ts": 3,
     "backend/src/routes/system.ts": 2,
-    "backend/src/routes/systemSettings.ts": 13,
+    "backend/src/routes/systemSettings.ts": 12,
     "backend/src/routes/tidalStreaming.ts": 10,
     "backend/src/routes/trackMappings.ts": 2,
-    "backend/src/routes/webhooks.ts": 1,
+    "backend/src/routes/webhooks.ts": 0,
     "backend/src/routes/youtube.ts": 1,
     "backend/src/routes/youtubeMusic.ts": 18,
 });
@@ -107,8 +107,7 @@ const LEAK_BASELINE = Object.freeze({
     // enrichmentState.ts +1: Redis retry classification's ternary-consequent error.message (~L77); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/enrichmentState.ts": 1,
     // genericImportJobRunner.ts remaining 1: latestJob.error passthrough on user cancel (~L91); import-job state plumbing, frozen under the slice-J scope guard.
-    // genericImportJobRunner.ts +1: failed-job persistence's ternary-consequent error.message (~L99); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/genericImportJobRunner.ts": 2,
+    "backend/src/services/genericImportJobRunner.ts": 1,
     // imageProxy.ts +1: image-fetch result's ternary-consequent lastError.message (~L248); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/imageProxy.ts": 1,
     // importJobStore.ts remaining 1: persisted input.error passthrough (~L192); job-state plumbing, frozen under the slice-J scope guard.

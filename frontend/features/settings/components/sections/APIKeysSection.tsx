@@ -3,7 +3,40 @@ import { useAPIKeys } from "@/features/settings/hooks/useAPIKeys";
 import { Modal } from "@/components/ui/Modal";
 import { Copy, Trash2 } from "lucide-react";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { Badge, type BadgeProps } from "@/components/ui/Badge";
 import { SettingsSection } from "../ui";
+
+const EXPIRING_SOON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function getExpiryBadge(
+    expiresAt: string,
+): { label: string; variant: BadgeProps["variant"] } | null {
+    const remainingMs = Date.parse(expiresAt) - Date.now();
+    if (!Number.isFinite(remainingMs)) return null;
+    if (remainingMs <= 0) return { label: "Expired", variant: "error" };
+    if (remainingMs <= EXPIRING_SOON_WINDOW_MS) {
+        return { label: "Expires soon", variant: "warning" };
+    }
+    return null;
+}
+
+function formatDate(dateString: string): string {
+    return new Date(dateString).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+    });
+}
+
+function ApiKeyExpiry({ expiresAt }: { expiresAt: string }) {
+    const badge = getExpiryBadge(expiresAt);
+    return (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+            <span>{formatDate(expiresAt)}</span>
+            {badge && <Badge variant={badge.variant}>{badge.label}</Badge>}
+        </div>
+    );
+}
 
 export const APIKeysSection: React.FC = () => {
     const {
@@ -82,14 +115,6 @@ export const APIKeysSection: React.FC = () => {
         setCopied(false);
     };
 
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-        });
-    };
-
     return (
         <SettingsSection
             id="api-keys"
@@ -166,6 +191,9 @@ export const APIKeysSection: React.FC = () => {
                                 Last Used
                             </th>
                             <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">
+                                Expires
+                            </th>
+                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">
                                 Actions
                             </th>
                         </tr>
@@ -174,7 +202,7 @@ export const APIKeysSection: React.FC = () => {
                         {loadingApiKeys ? (
                             <tr>
                                 <td
-                                    colSpan={5}
+                                    colSpan={6}
                                     className="py-8 text-center text-sm text-gray-400"
                                 >
                                     Loading API keys...
@@ -183,7 +211,7 @@ export const APIKeysSection: React.FC = () => {
                         ) : apiKeys.length === 0 ? (
                             <tr>
                                 <td
-                                    colSpan={5}
+                                    colSpan={6}
                                     className="py-8 text-center text-sm text-gray-400"
                                 >
                                     No API keys yet
@@ -208,6 +236,11 @@ export const APIKeysSection: React.FC = () => {
                                         {key.lastUsedAt
                                             ? formatDate(key.lastUsedAt)
                                             : "Never"}
+                                    </td>
+                                    <td className="py-3 px-4 text-sm text-gray-400">
+                                        <ApiKeyExpiry
+                                            expiresAt={key.expiresAt}
+                                        />
                                     </td>
                                     <td className="py-3 px-4 text-sm">
                                         <button

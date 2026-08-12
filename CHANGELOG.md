@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- API-key settings now show each key's expiry date with expired and
+  expiring-soon badges, while API-key, linked-device, and two-factor setup
+  actions surface interactive-session step-up failures inline.
 - Consolidated environment configuration reads into the backend config module
   for 20 more production files; the config-boundary allowlist shrank from 39
   files to 19.

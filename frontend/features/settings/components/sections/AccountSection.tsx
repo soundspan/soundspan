@@ -152,6 +152,18 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
         }
     };
 
+    const handleSetup2FA = async () => {
+        setTfaStatus("loading");
+        setTfaMessage("");
+        try {
+            await setup2FA();
+            setTfaStatus("idle");
+        } catch (error: unknown) {
+            setTfaStatus("error");
+            setTfaMessage(error instanceof Error ? error.message : "Failed");
+        }
+    };
+
     // Handle 2FA disable
     const handleDisable2FA = async () => {
         setTfaStatus("loading");
@@ -316,19 +328,36 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                     {!settingUpTwoFactor &&
                         !showDisableFlow &&
                         (twoFactorEnabled ? (
-                            <button
-                                onClick={() => setShowDisableFlow(true)}
-                                className="text-sm text-red-400 hover:text-red-300"
-                            >
-                                Disable
-                            </button>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowDisableFlow(true)}
+                                    className="text-sm text-red-400 hover:text-red-300"
+                                >
+                                    Disable
+                                </button>
+                                <InlineStatus
+                                    status={tfaStatus}
+                                    message={tfaMessage}
+                                    onClear={() => setTfaStatus("idle")}
+                                />
+                            </div>
                         ) : (
-                            <button
-                                onClick={setup2FA}
-                                className="text-sm text-white hover:underline"
-                            >
-                                Enable
-                            </button>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={handleSetup2FA}
+                                    disabled={tfaStatus === "loading"}
+                                    className="text-sm text-white hover:underline disabled:opacity-50"
+                                >
+                                    {tfaStatus === "loading"
+                                        ? "Starting..."
+                                        : "Enable"}
+                                </button>
+                                <InlineStatus
+                                    status={tfaStatus}
+                                    message={tfaMessage}
+                                    onClear={() => setTfaStatus("idle")}
+                                />
+                            </div>
                         ))}
                 </SettingsRow>
 

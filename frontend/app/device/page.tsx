@@ -49,6 +49,7 @@ export default function DeviceLinkPage() {
     const [isLoadingDevices, setIsLoadingDevices] = useState(true);
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [deviceError, setDeviceError] = useState<string | null>(null);
 
     // Redirect if not authenticated
     useEffect(() => {
@@ -152,6 +153,7 @@ export default function DeviceLinkPage() {
 
     // Revoke a device
     const revokeDevice = async (deviceId: string) => {
+        setDeviceError(null);
         try {
             await api.request(`/device-link/devices/${deviceId}`, {
                 method: "DELETE",
@@ -159,6 +161,9 @@ export default function DeviceLinkPage() {
             setDevices((prev) => prev.filter((d) => d.id !== deviceId));
         } catch (err) {
             sharedFrontendLogger.error("Failed to revoke device:", err);
+            setDeviceError(
+                err instanceof Error ? err.message : "Failed to revoke device",
+            );
         }
     };
 
@@ -350,6 +355,13 @@ export default function DeviceLinkPage() {
                         <h2 className="text-xl font-bold text-white mb-4">
                             Linked Devices
                         </h2>
+
+                        {deviceError && (
+                            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4" />
+                                {deviceError}
+                            </div>
+                        )}
 
                         {isLoadingDevices ? (
                             <div className="flex items-center justify-center py-8">

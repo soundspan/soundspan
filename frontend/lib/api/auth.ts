@@ -182,6 +182,7 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
             apiKey: string;
             name: string;
             createdAt: string;
+            expiresAt: string;
             message: string;
         }> {
             return this.post("/api-keys", { deviceName });
@@ -192,6 +193,7 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
                 id: string;
                 name: string;
                 createdAt: string;
+                expiresAt: string;
                 lastUsed: string | null;
             }>;
         }> {

@@ -112,6 +112,32 @@ test("preserves the session and response body for an unmarked upstream 401", asy
     }
 });
 
+test("preserves the interactive-session message from a 403 response", async (testContext) => {
+    const sessionExpiry = trackSessionExpiry();
+    const client = new TestApiClient("http://soundspan.test");
+    client.setToken("access-current", "refresh-current");
+    const fetchMock = mockFetch(testContext, () =>
+        Response.json(
+            { error: "Interactive session authentication required" },
+            { status: 403 },
+        ),
+    );
+
+    try {
+        await assert.rejects(client.post("/api-keys"), {
+            message: "Interactive session authentication required",
+            status: 403,
+            data: { error: "Interactive session authentication required" },
+        });
+        assert.equal(fetchMock.mock.callCount(), 1);
+        assert.equal(client.getToken(), "access-current");
+        assert.equal(sessionExpiry.count(), 0);
+    } finally {
+        sessionExpiry.stop();
+        client.clearToken();
+    }
+});
+
 test("keeps direct auth refresh 401 handling unchanged without the marker", async (testContext) => {
     const sessionExpiry = trackSessionExpiry();
     const client = new TestApiClient("http://soundspan.test");
