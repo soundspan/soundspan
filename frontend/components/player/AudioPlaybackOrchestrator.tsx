@@ -358,7 +358,6 @@ const SEGMENTED_STARTUP_RETRY_BUDGET_MAX =
         SEGMENTED_STARTUP_STAGE_MAX_ATTEMPTS.engine_load) *
     (SEGMENTED_STARTUP_MAX_SESSION_RESETS + 1);
 const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
-const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
 const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_KEY =
     "SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS";
 const LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED_KEY =
@@ -1706,20 +1705,12 @@ export const AudioPlaybackOrchestrator = memo(
                 ]);
 
                 try {
-                    const requestHeaders: Record<string, string> = {
-                        "x-streaming-session-token": session.sessionToken,
-                    };
-                    const authToken = api.getStreamingAuthToken();
-                    if (authToken) {
-                        requestHeaders.Authorization = `Bearer ${authToken}`;
-                    }
-
-                    const manifestResponse = await fetch(session.manifestUrl, {
-                        method: "GET",
-                        credentials: "include",
-                        headers: requestHeaders,
-                        signal: composedSignal,
-                    });
+                    const manifestResponse =
+                        await api.fetchSegmentedStreamingManifest(
+                            session.manifestUrl,
+                            session.sessionToken,
+                            composedSignal,
+                        );
                     if (!manifestResponse.ok) {
                         throw new Error(
                             `manifest_http_${manifestResponse.status}`,
@@ -1730,15 +1721,13 @@ export const AudioPlaybackOrchestrator = memo(
                     const startupChunkNames =
                         resolveStartupChunkNamesFromManifest(manifestContents);
                     for (const chunkName of startupChunkNames) {
-                        const segmentUrl =
-                            `/api/streaming/v1/sessions/${sessionId}/segments/${encodeURIComponent(chunkName)}?` +
-                            `${SEGMENTED_SESSION_TOKEN_QUERY_PARAM}=${encodeURIComponent(session.sessionToken)}`;
-                        const segmentResponse = await fetch(segmentUrl, {
-                            method: "GET",
-                            credentials: "include",
-                            headers: requestHeaders,
-                            signal: composedSignal,
-                        });
+                        const segmentResponse =
+                            await api.fetchSegmentedStreamingSegment(
+                                sessionId,
+                                session.sessionToken,
+                                chunkName,
+                                composedSignal,
+                            );
                         if (!segmentResponse.ok) {
                             throw new Error(
                                 `segment_http_${segmentResponse.status}:${chunkName}`,
