@@ -20,7 +20,8 @@ const findEffect = <K extends NativeEnginePolicyEffect["kind"]>(
     kind: K,
 ): Extract<NativeEnginePolicyEffect, { kind: K }> | undefined =>
     effects.find((effect) => effect.kind === kind) as
-        Extract<NativeEnginePolicyEffect, { kind: K }> | undefined;
+        | Extract<NativeEnginePolicyEffect, { kind: K }>
+        | undefined;
 
 const loadedState = (
     overrides: Partial<NativeEnginePolicyState> = {},

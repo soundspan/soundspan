@@ -21,7 +21,12 @@
 
 /** Engine lifecycle status. Seeking is tracked via seek-mark fields. */
 export type NativeEngineStatus =
-    "idle" | "loading" | "playing" | "paused" | "ended" | "error";
+    | "idle"
+    | "loading"
+    | "playing"
+    | "paused"
+    | "ended"
+    | "error";
 
 /** Who caused the most recent pause: the user, or the platform/OS. */
 export type NativePauseClassification = "user" | "external" | null;

@@ -15,7 +15,8 @@ import {
 type ElementListener = (event: unknown) => void;
 
 type PlayBehavior =
-    { kind: "resolve" } | { kind: "reject"; name: string; message: string };
+    | { kind: "resolve" }
+    | { kind: "reject"; name: string; message: string };
 
 class FakeAudioElement implements NativeAudioElementLike {
     currentTime = 0;
