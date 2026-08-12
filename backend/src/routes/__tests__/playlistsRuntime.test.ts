@@ -236,6 +236,7 @@ describe("playlists route runtime", () => {
             userId: "u1",
             isPublic: false,
             hiddenByUsers: [],
+            _count: { items: 0, pendingTracks: 0 },
             items: [],
             pendingTracks: [],
             user: { username: "owner" },
@@ -631,6 +632,209 @@ describe("playlists route runtime", () => {
         expect(errRes.body).toEqual({ error: "Failed to get playlist" });
     });
 
+    it("truncates oversized playlist detail with bounded bulk resolution", async () => {
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-oversized",
+            userId: "u-oversized",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            _count: { items: 1000, pendingTracks: 1 },
+            items: Array.from({ length: 1000 }, (_, index) => ({
+                id: `pli-${index + 1}`,
+                playlistId: "pl-oversized",
+                trackId: null,
+                trackTidalId: `tt-${index + 1}`,
+                trackYtMusicId: null,
+                sort: index + 1,
+                track: null,
+                trackTidal: {
+                    id: `tt-${index + 1}`,
+                    tidalId: 1000 + index,
+                    title: `Tidal Song ${index}`,
+                    artist: "Tidal Artist",
+                    album: "Tidal Album",
+                    duration: 180,
+                },
+                trackYtMusic: null,
+            })),
+            pendingTracks: [
+                {
+                    id: "pt-first",
+                    sort: 0,
+                    spotifyArtist: "Pending Artist",
+                    spotifyTitle: "Pending Song",
+                    spotifyAlbum: "Pending Album",
+                    deezerPreviewUrl: null,
+                },
+            ],
+        });
+
+        const req = {
+            user: { id: "u-oversized" },
+            params: { id: "pl-oversized" },
+        } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items).toHaveLength(999);
+        expect(res.body.pendingTracks).toHaveLength(1);
+        expect(res.body.mergedItems).toHaveLength(1000);
+        expect(res.body.totalItemCount).toBe(1001);
+        expect(res.body.truncated).toBe(true);
+        expect(res.body.items[998].id).toBe("pli-999");
+        expect(res.body.items).not.toContainEqual(
+            expect.objectContaining({ id: "pli-1000" }),
+        );
+        expect(res.body.mergedItems[0].id).toBe("pt-first");
+        expect(prisma.playlist.findUnique).toHaveBeenCalledWith(
+            expect.objectContaining({
+                include: expect.objectContaining({
+                    _count: {
+                        select: { items: true, pendingTracks: true },
+                    },
+                    items: expect.objectContaining({ take: 1001 }),
+                    pendingTracks: expect.objectContaining({ take: 1001 }),
+                }),
+            }),
+        );
+        expect(prisma.trackMapping.findMany).toHaveBeenCalledTimes(1);
+        const mappingQuery = prisma.trackMapping.findMany.mock.calls[0][0];
+        const tidalIds = mappingQuery.where.OR.find(
+            (clause: any) => clause.trackTidalId,
+        ).trackTidalId.in;
+        expect(tidalIds).toHaveLength(999);
+        expect(tidalIds[998]).toBe("tt-999");
+        expect(tidalIds).not.toContain("tt-1000");
+        expect(prisma.trackMapping.findFirst).not.toHaveBeenCalled();
+        expect(prisma.trackMapping.findUnique).not.toHaveBeenCalled();
+        expect(prisma.trackTidal.findUnique).not.toHaveBeenCalled();
+    });
+
+    it("bulk-resolves cross-provider mappings and misses without per-item queries", async () => {
+        const itemCount = 50;
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-bounded-resolution",
+            userId: "u-bounded-resolution",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            _count: { items: itemCount, pendingTracks: 0 },
+            items: Array.from({ length: itemCount }, (_, index) => ({
+                id: `pli-tidal-${index}`,
+                playlistId: "pl-bounded-resolution",
+                trackId: null,
+                trackTidalId: `tt-${index}`,
+                trackYtMusicId: null,
+                sort: index,
+                track: null,
+                trackTidal: {
+                    id: `tt-${index}`,
+                    tidalId: 1000 + index,
+                    title: `Tidal Song ${index}`,
+                    artist: "Tidal Artist",
+                    album: "Tidal Album",
+                    duration: 180,
+                },
+                trackYtMusic: null,
+            })),
+            pendingTracks: [],
+        });
+        prisma.trackMapping.findMany.mockImplementation(async (args: any) => {
+            if (args?.where?.id?.in) {
+                return [
+                    {
+                        id: "map-tt-0-yt",
+                        stale: false,
+                        confidence: 0.95,
+                        trackId: null,
+                        trackTidal: {
+                            id: "tt-0",
+                            tidalId: 1000,
+                            duration: 180,
+                        },
+                        trackYtMusic: {
+                            id: "yt-fallback",
+                            videoId: "yt-fallback-video",
+                            duration: 180,
+                        },
+                    },
+                ];
+            }
+            if (args?.select?.id) {
+                return [
+                    {
+                        id: "map-tt-0-yt",
+                        trackId: null,
+                        trackTidalId: "tt-0",
+                        trackYtMusicId: "yt-fallback",
+                        source: "import-match",
+                        confidence: 0.95,
+                        createdAt: new Date("2026-08-01T00:00:00.000Z"),
+                    },
+                ];
+            }
+            return [
+                {
+                    trackId: null,
+                    trackTidalId: "tt-0",
+                    trackYtMusicId: "yt-fallback",
+                },
+            ];
+        });
+        prisma.trackTidal.findMany.mockResolvedValueOnce([
+            { id: "tt-0", tidalId: 1000, duration: 180 },
+        ]);
+        prisma.trackYtMusic.findMany.mockResolvedValueOnce([
+            {
+                id: "yt-fallback",
+                videoId: "yt-fallback-video",
+                title: "Fallback Song",
+                artist: "Fallback Artist",
+                album: "Fallback Album",
+                duration: 180,
+                thumbnailUrl: "https://yt/fallback.jpg",
+            },
+        ]);
+
+        const req = {
+            user: { id: "u-bounded-resolution" },
+            params: { id: "pl-bounded-resolution" },
+        } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items).toHaveLength(itemCount);
+        expect(res.body.items[0].provider.source).toBe("youtube");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+        expect(res.body.items[0].track.youtubeVideoId).toBe(
+            "yt-fallback-video",
+        );
+        expect(
+            res.body.items
+                .slice(1)
+                .every(
+                    (item: any) =>
+                        item.provider.source === "tidal" &&
+                        item.playback.reason === "provider_unavailable",
+                ),
+        ).toBe(true);
+        expect(prisma.trackMapping.findMany).toHaveBeenCalledTimes(3);
+        expect(prisma.trackMapping.findFirst).not.toHaveBeenCalled();
+        expect(prisma.trackMapping.findUnique).not.toHaveBeenCalled();
+        expect(prisma.trackTidal.findUnique).not.toHaveBeenCalled();
+    });
+
     it("formats playlist detail with provider/playability metadata and merged items", async () => {
         prisma.trackTidal.findMany.mockResolvedValueOnce([
             {
@@ -652,6 +856,7 @@ describe("playlists route runtime", () => {
             isPublic: false,
             user: { username: "owner" },
             hiddenByUsers: [{ id: "hidden-1" }],
+            _count: { items: 4, pendingTracks: 1 },
             items: [
                 {
                     id: "pli-1",
@@ -745,6 +950,8 @@ describe("playlists route runtime", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.trackCount).toBe(4);
         expect(res.body.pendingCount).toBe(1);
+        expect(res.body.totalItemCount).toBe(5);
+        expect(res.body.truncated).toBe(false);
         expect(res.body.isOwner).toBe(true);
         expect(res.body.isHidden).toBe(true);
         expect(res.body.items[0].track.album.coverArt).toBe(
@@ -795,6 +1002,7 @@ describe("playlists route runtime", () => {
             isPublic: false,
             user: { username: "owner" },
             hiddenByUsers: [],
+            _count: { items: 1, pendingTracks: 0 },
             items: [
                 {
                     id: "pli-yt-1",
@@ -895,6 +1103,7 @@ describe("playlists route runtime", () => {
             isPublic: false,
             user: { username: "owner" },
             hiddenByUsers: [],
+            _count: { items: 1, pendingTracks: 0 },
             items: [
                 {
                     id: "pli-yt-conflict",
@@ -1027,6 +1236,7 @@ describe("playlists route runtime", () => {
             isPublic: false,
             user: { username: "owner" },
             hiddenByUsers: [],
+            _count: { items: 1, pendingTracks: 0 },
             items: [
                 {
                     id: "pli-tidal-1",
@@ -1082,6 +1292,7 @@ describe("playlists route runtime", () => {
             isPublic: false,
             user: { username: "owner" },
             hiddenByUsers: [],
+            _count: { items: 1, pendingTracks: 0 },
             items: [
                 {
                     id: "pli-yt-1",
