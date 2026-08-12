@@ -34,6 +34,18 @@ assert_service_selectors_isolated() {
   fi
 }
 
+assert_database_urls() {
+  local mode="$1"
+  local manifest_file="$2"
+  shift 2
+  local checker="${BASH_SOURCE[0]%/*}/ci/helm-database-url-check.mjs"
+
+  if ! node "$checker" "$mode" "$manifest_file" "$@"; then
+    echo "[ERROR] DATABASE_URL check failed (${mode})" >&2
+    exit 1
+  fi
+}
+
 assert_deployment_image() {
   local render_name="$1"
   local manifest_file="$2"
@@ -58,6 +70,7 @@ tmp_aio_rotated_secrets="$(mktemp)"
 tmp_aio_secret_overrides="$(mktemp)"
 tmp_aio_digests="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
+tmp_individual_component_database="$(mktemp)"
 tmp_individual_external_database="$(mktemp)"
 tmp_individual_digests="$(mktemp)"
 tmp_global_env="$(mktemp)"
@@ -66,7 +79,7 @@ tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_individual_ha" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -182,29 +195,49 @@ if ! perl -0777 -ne 'exit((/name:\s+LISTEN_TOGETHER_STATE_STORE_ENABLED\s+value:
 fi
 assert_service_selectors_isolated "HA individual" "$tmp_individual_ha"
 
-echo "[CHECK] render analyzers with external DATABASE_URL and core-only existing Secret"
+echo "[CHECK] construct component DATABASE_URL values with percent-encoded credentials"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set deploymentMode=individual \
-  --set postgresql.enabled=false \
-  --set postgresql.external.url='postgresql://external-user:external-password@database.example.com:5432/soundspan?sslmode=require' \
+  --set-string secrets.postgresUser='user@tenant' \
+  --set-string secrets.postgresPassword='p@ss:w/rd' \
+  --set backendWorker.enabled=true \
+  --set audioAnalyzer.enabled=true \
+  --set audioAnalyzerClap.enabled=true \
+  >"$tmp_individual_component_database"
+
+if ! line_match '^  POSTGRES_PASSWORD: "p@ss:w/rd"$' "$tmp_individual_component_database"; then
+  echo "[ERROR] component database render did not preserve the reserved-character Secret value" >&2
+  exit 1
+fi
+POSTGRES_USER='user@tenant' \
+  POSTGRES_PASSWORD='p@ss:w/rd' \
+  POSTGRES_DB='soundspan' \
+  assert_database_urls \
+  component \
+  "$tmp_individual_component_database" \
+  "${RELEASE_NAME}-backend" \
+  "${RELEASE_NAME}-backend-worker" \
+  "${RELEASE_NAME}-audio-analyzer" \
+  "${RELEASE_NAME}-audio-analyzer-clap"
+
+echo "[CHECK] preserve external DATABASE_URL across individual workloads"
+external_database_url='postgresql://external-user:literal%2Fpassword@database.example.com:5432/soundspan?sslmode=require'
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set-string postgresql.external.url="$external_database_url" \
   --set secrets.existingSecret=core-only-secret \
+  --set backendWorker.enabled=true \
   --set audioAnalyzer.enabled=true \
   --set audioAnalyzerClap.enabled=true \
   >"$tmp_individual_external_database"
 
-for analyzer in audio-analyzer audio-analyzer-clap; do
-  if ! perl -0777 -ne '
-      for my $doc (split /^---/m, $_) {
-          next unless $doc =~ /kind:\s*Deployment/;
-          next unless $doc =~ /^  name: '"$RELEASE_NAME"'-'"$analyzer"'$/m;
-          next if $doc =~ /name:\s+POSTGRES_(?:USER|PASSWORD|DB)\b/;
-          exit 0 if $doc =~ /name:\s+DATABASE_URL\s+value:\s+"postgresql:\/\/external-user:external-password\@database\.example\.com:5432\/soundspan\?sslmode=require"/s;
-      }
-      exit 1' "$tmp_individual_external_database"; then
-    echo "[ERROR] ${analyzer} must use external DATABASE_URL without POSTGRES_* secret refs" >&2
-    exit 1
-  fi
-done
+EXPECTED_DATABASE_URL="$external_database_url" assert_database_urls \
+  external \
+  "$tmp_individual_external_database" \
+  "${RELEASE_NAME}-backend" \
+  "${RELEASE_NAME}-backend-worker" \
+  "${RELEASE_NAME}-audio-analyzer" \
+  "${RELEASE_NAME}-audio-analyzer-clap"
 
 digest_aio="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 digest_backend="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

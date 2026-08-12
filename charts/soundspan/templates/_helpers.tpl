@@ -90,18 +90,51 @@ Usage: include "soundspan.image" .Values.backend.image
 {{- end }}
 
 {{/*
-PostgreSQL connection URL
+Complete external PostgreSQL connection URL
 */}}
 {{- define "soundspan.databaseUrl" -}}
-{{- if eq .Values.deploymentMode "aio" }}
-{{- printf "postgresql://soundspan:soundspan@localhost:5432/soundspan" }}
-{{- else if .Values.postgresql.external.url }}
+{{- if .Values.postgresql.external.url -}}
 {{- printf "%s" .Values.postgresql.external.url }}
-{{- else if .Values.postgresql.enabled }}
-{{- printf "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@%s-postgresql:%d/$(POSTGRES_DB)" (include "soundspan.fullname" .) (.Values.postgresql.port | int) }}
 {{- else }}
-{{- printf "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@%s:%d/$(POSTGRES_DB)" .Values.postgresql.external.host (.Values.postgresql.external.port | int) }}
+{{- fail "soundspan.databaseUrl requires a complete postgresql.external.url" }}
 {{- end }}
+{{- end }}
+
+{{/*
+PostgreSQL component host and port used by startup-time DATABASE_URL builders.
+*/}}
+{{- define "soundspan.databaseHost" -}}
+{{- if .Values.postgresql.enabled -}}
+{{- printf "%s-postgresql" (include "soundspan.fullname" .) }}
+{{- else -}}
+{{- printf "%s" .Values.postgresql.external.host }}
+{{- end -}}
+{{- end }}
+
+{{- define "soundspan.databasePort" -}}
+{{- if .Values.postgresql.enabled -}}
+{{- .Values.postgresql.port | int }}
+{{- else -}}
+{{- .Values.postgresql.external.port | int }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Build DATABASE_URL after Kubernetes has populated Secret-backed component env.
+The final command is supplied as positional parameters and replaces the shell.
+*/}}
+{{- define "soundspan.nodeDatabaseUrlStartup" -}}
+# soundspan-database-url-start
+export DATABASE_URL="$(node -e 'const env = process.env; process.stdout.write("postgresql://" + encodeURIComponent(env.POSTGRES_USER) + ":" + encodeURIComponent(env.POSTGRES_PASSWORD) + "@" + env.SOUNDSPAN_DATABASE_HOST + ":" + env.SOUNDSPAN_DATABASE_PORT + "/" + env.POSTGRES_DB)')"
+# soundspan-database-url-end
+exec "$@"
+{{- end }}
+
+{{- define "soundspan.pythonDatabaseUrlStartup" -}}
+# soundspan-database-url-start
+export DATABASE_URL="$(python3 -c 'import os; from urllib.parse import quote; env = os.environ; print("postgresql://{}:{}@{}:{}/{}".format(quote(env["POSTGRES_USER"], safe=""), quote(env["POSTGRES_PASSWORD"], safe=""), env["SOUNDSPAN_DATABASE_HOST"], env["SOUNDSPAN_DATABASE_PORT"], env["POSTGRES_DB"]), end="")')"
+# soundspan-database-url-end
+exec "$@"
 {{- end }}
 
 {{/*

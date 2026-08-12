@@ -41,10 +41,39 @@ spec:
         - name: backend-worker
           image: {{ include "soundspan.image" .Values.backendWorker.image | quote }}
           imagePullPolicy: {{ .Values.backendWorker.image.pullPolicy }}
+          {{- $backendWorkerEnv := .Values.backendWorker.env | default (dict) }}
+          {{- $backendWorkerBuildDatabaseUrl := and (not (hasKey $backendWorkerEnv "DATABASE_URL")) (not .Values.postgresql.external.url) }}
           ports:
             - name: health
               containerPort: {{ .Values.backendWorker.health.port }}
               protocol: TCP
+          {{- if $backendWorkerBuildDatabaseUrl }}
+          command:
+            - /usr/bin/tini
+            - --
+            - /bin/sh
+            - -c
+          args:
+            - |-
+              {{- include "soundspan.nodeDatabaseUrlStartup" . | nindent 14 }}
+            - soundspan-database-url
+            {{- with .Values.backendWorker.command }}
+            {{- toYaml . | nindent 12 }}
+            {{- with .Values.backendWorker.args }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - node
+            - dist/worker.js
+            {{- end }}
+            {{- else }}
+            {{- with .Values.backendWorker.args }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - node
+            - dist/worker.js
+            {{- end }}
+            {{- end }}
+          {{- else }}
           {{- with .Values.backendWorker.command }}
           command:
             {{- toYaml . | nindent 12 }}
@@ -53,10 +82,10 @@ spec:
           args:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
-          {{- $backendWorkerEnv := .Values.backendWorker.env | default (dict) }}
-          {{- $backendWorkerHasPostgresSecretEnv := or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
+          {{- $backendWorkerHasPostgresSecretEnv := not .Values.postgresql.external.url }}
           {{- $backendWorkerExplicitEnvKeys := dict
             "NODE_ENV" true
             "PORT" true
@@ -72,6 +101,8 @@ spec:
             "POSTGRES_USER" true
             "POSTGRES_PASSWORD" true
             "POSTGRES_DB" true
+            "SOUNDSPAN_DATABASE_HOST" true
+            "SOUNDSPAN_DATABASE_PORT" true
             "DATABASE_URL" true
             "REDIS_URL" true
             "REDIS_FLUSH_ON_STARTUP" true
@@ -204,10 +235,16 @@ spec:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_DB
             {{- end }}
+            {{- if $backendWorkerBuildDatabaseUrl }}
+            - name: SOUNDSPAN_DATABASE_HOST
+              value: {{ include "soundspan.databaseHost" . | quote }}
+            - name: SOUNDSPAN_DATABASE_PORT
+              value: {{ include "soundspan.databasePort" . | quote }}
+            {{- end }}
             {{- if hasKey $backendWorkerEnv "DATABASE_URL" }}
             - name: DATABASE_URL
               value: {{ index $backendWorkerEnv "DATABASE_URL" | quote }}
-            {{- else }}
+            {{- else if .Values.postgresql.external.url }}
             - name: DATABASE_URL
               value: {{ include "soundspan.databaseUrl" . | quote }}
             {{- end }}

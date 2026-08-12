@@ -268,6 +268,8 @@ WORKDIR /app
 
 # Copy healthcheck script
 COPY healthcheck-prod.js /app/healthcheck.js
+COPY scripts/aio-postgres-credentials.sh /app/aio-postgres-credentials.sh
+RUN chmod 500 /app/aio-postgres-credentials.sh
 
 # Create supervisord config - logs to stdout/stderr for Docker visibility
 RUN cat > /etc/supervisor/conf.d/soundspan.conf << 'EOF'
@@ -479,7 +481,7 @@ else
 fi
 chmod 600 /data/secrets/postgres_password
 chown soundspan:soundspan /data/secrets/postgres_password 2>/dev/null || true
-DATABASE_URL="postgresql://soundspan:${POSTGRES_PASSWORD}@localhost:5432/soundspan"
+DATABASE_URL=$(/app/aio-postgres-credentials.sh database-url)
 
 # Clean up stale PID file if exists
 rm -f /data/postgres/postmaster.pid 2>/dev/null || true
@@ -505,9 +507,7 @@ fi
 gosu postgres $PG_BIN/pg_ctl -D /data/postgres -o "-c listen_addresses=127.0.0.1" -w start
 
 # Create the user if needed, then always synchronize its persisted password.
-gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'soundspan'" | grep -q 1 || \
-    gosu postgres psql -c "CREATE USER soundspan WITH PASSWORD '${POSTGRES_PASSWORD}';"
-gosu postgres psql -c "ALTER USER soundspan WITH PASSWORD '${POSTGRES_PASSWORD}';"
+/app/aio-postgres-credentials.sh sync-role
 gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'soundspan'" | grep -q 1 || \
     gosu postgres psql -c "CREATE DATABASE soundspan OWNER soundspan;"
 
