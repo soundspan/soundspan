@@ -1,5 +1,15 @@
+const originalJwtSecret = process.env.JWT_SECRET;
+process.env.JWT_SECRET =
+    process.env.JWT_SECRET || "auth-interactive-route-test-secret";
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireInteractiveSession: (req: any, res: any, next: () => void) =>
+        jest
+            .requireActual<
+                typeof import("../../middleware/auth")
+            >("../../middleware/auth")
+            .requireInteractiveSession(req, res, next),
     requireAdmin: (_req: any, _res: any, next: () => void) => next(),
     generateToken: jest.fn(),
     generateRefreshToken: jest.fn(),
@@ -69,12 +79,18 @@ function createRes() {
     return res;
 }
 
-async function executeRoute(path: string, req: any, res: any): Promise<void> {
+async function executeRoute(
+    path: string,
+    req: any,
+    res: any,
+    method: "post" | "delete" = "post",
+): Promise<void> {
     const layer = (router as any).stack.find(
         (entry: any) =>
-            entry.route?.path === path && entry.route?.methods?.post,
+            entry.route?.path === path && entry.route?.methods?.[method],
     );
-    if (!layer) throw new Error(`Missing POST route ${path}`);
+    if (!layer)
+        throw new Error(`Missing ${method.toUpperCase()} route ${path}`);
 
     const dispatch = async (index: number): Promise<void> => {
         const handler = layer.route.stack[index]?.handle;
@@ -90,12 +106,29 @@ async function executeRoute(path: string, req: any, res: any): Promise<void> {
 function interactiveRequest(body: Record<string, unknown>): any {
     return {
         body,
-        headers: { authorization: "Bearer access-token" },
+        headers: {},
+        session: { userId: "u1" },
         user: { id: "u1", username: "alice", role: "user" },
     };
 }
 
-describe("MFA management interactive authentication", () => {
+function apiKeyRequest(body: Record<string, unknown>): any {
+    return {
+        body,
+        headers: { "x-api-key": "stolen-key" },
+        user: { id: "u1", username: "alice", role: "user" },
+    };
+}
+
+describe("interactive authentication for sensitive credential management", () => {
+    afterAll(() => {
+        if (originalJwtSecret === undefined) {
+            delete process.env.JWT_SECRET;
+        } else {
+            process.env.JWT_SECRET = originalJwtSecret;
+        }
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
         mockBcryptCompare.mockResolvedValue(true);
@@ -116,11 +149,9 @@ describe("MFA management interactive authentication", () => {
         ["/2fa/enable", { secret: "NEW-SECRET", token: "123456" }],
         ["/2fa/disable", { password: "secret", token: "123456" }],
     ] as const)("rejects API-key authentication on %s", async (path, body) => {
-        const req = interactiveRequest(body);
-        req.headers["x-api-key"] = "stolen-key";
         const res = createRes();
 
-        await executeRoute(path, req, res);
+        await executeRoute(path, apiKeyRequest(body), res);
 
         expect(res.statusCode).toBe(403);
         expect(res.body).toEqual({
@@ -129,6 +160,62 @@ describe("MFA management interactive authentication", () => {
         expect(prisma.user.findUnique).not.toHaveBeenCalled();
         expect(prisma.user.update).not.toHaveBeenCalled();
         expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ["post", { password: "my-subsonic-password" }],
+        ["delete", {}],
+    ] as const)(
+        "rejects API-key authentication on %s /subsonic-password without mutating credentials",
+        async (method, body) => {
+            const res = createRes();
+
+            await executeRoute(
+                "/subsonic-password",
+                apiKeyRequest(body),
+                res,
+                method,
+            );
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body).toEqual({
+                error: "Interactive session authentication required",
+            });
+            expect(prisma.user.update).not.toHaveBeenCalled();
+        },
+    );
+
+    it("allows an interactive session to create a Subsonic credential", async () => {
+        const res = createRes();
+
+        await executeRoute(
+            "/subsonic-password",
+            interactiveRequest({ password: "my-subsonic-password" }),
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(prisma.user.update).toHaveBeenCalledWith({
+            where: { id: "u1" },
+            data: { subsonicPassword: "enc(my-subsonic-password)" },
+        });
+    });
+
+    it("allows an interactive session to delete a Subsonic credential", async () => {
+        const res = createRes();
+
+        await executeRoute(
+            "/subsonic-password",
+            interactiveRequest({}),
+            res,
+            "delete",
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(prisma.user.update).toHaveBeenCalledWith({
+            where: { id: "u1" },
+            data: { subsonicPassword: null },
+        });
     });
 
     it("allows setup with the existing empty payload", async () => {

@@ -15,6 +15,9 @@ jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) =>
     next(),
 );
+const mockRequireInteractiveSession = jest.fn(
+    (_req: any, _res: any, next: () => void) => next(),
+);
 const mockRequireAdmin = jest.fn((_req: any, _res: any, next: () => void) =>
     next(),
 );
@@ -24,6 +27,7 @@ const mockVerifyAuthToken = jest.fn();
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: mockRequireAuth,
+    requireInteractiveSession: mockRequireInteractiveSession,
     requireAdmin: mockRequireAdmin,
     generateToken: mockGenerateToken,
     generateRefreshToken: mockGenerateRefreshToken,

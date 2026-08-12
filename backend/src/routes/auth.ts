@@ -1,4 +1,4 @@
-import { NextFunction, Request, Response, Router } from "express";
+import { Router } from "express";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
@@ -8,6 +8,7 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import {
     requireAuth,
+    requireInteractiveSession,
     requireAdmin,
     generateToken,
     generateRefreshToken,
@@ -17,7 +18,6 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
-import { sendRouteError } from "./routeErrorResponse";
 
 async function verifyTotpToken(
     secret: string,
@@ -42,21 +42,6 @@ async function verifyTotpToken(
 }
 
 const router = Router();
-function requireInteractiveSession(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-) {
-    // Interactive password/current-factor step-up is a documented frontend follow-up outside this slice.
-    if (req.headers["x-api-key"] !== undefined) {
-        return sendRouteError(
-            res,
-            403,
-            "Interactive session authentication required",
-        );
-    }
-    return next();
-}
 
 const loginSchema = z.object({
     username: z.string().min(1),
@@ -1627,7 +1612,7 @@ router.get("/subsonic-password", requireAuth, async (req, res) => {
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1649,32 +1634,39 @@ router.get("/subsonic-password", requireAuth, async (req, res) => {
  *         description: Invalid password
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  */
 // POST /auth/subsonic-password - Set Subsonic password
-router.post("/subsonic-password", requireAuth, async (req, res) => {
-    try {
-        const { password } = subsonicPasswordSchema.parse(req.body);
+router.post(
+    "/subsonic-password",
+    requireAuth,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            const { password } = subsonicPasswordSchema.parse(req.body);
 
-        await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                subsonicPassword: encrypt(password),
-            },
-        });
-
-        return res.json({ success: true });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                error: "Password must be between 8 and 128 characters",
+            await prisma.user.update({
+                where: { id: req.user!.id },
+                data: {
+                    subsonicPassword: encrypt(password),
+                },
             });
+
+            return res.json({ success: true });
+        } catch (error) {
+            if (error instanceof z.ZodError) {
+                return res.status(400).json({
+                    error: "Password must be between 8 and 128 characters",
+                });
+            }
+            logger.error("Set Subsonic password error:", error);
+            return res
+                .status(500)
+                .json({ error: "Failed to set Subsonic password" });
         }
-        logger.error("Set Subsonic password error:", error);
-        return res
-            .status(500)
-            .json({ error: "Failed to set Subsonic password" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -1684,30 +1676,37 @@ router.post("/subsonic-password", requireAuth, async (req, res) => {
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Subsonic password deleted successfully
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  */
 // DELETE /auth/subsonic-password - Clear Subsonic password
-router.delete("/subsonic-password", requireAuth, async (req, res) => {
-    try {
-        await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                subsonicPassword: null,
-            },
-        });
+router.delete(
+    "/subsonic-password",
+    requireAuth,
+    requireInteractiveSession,
+    async (req, res) => {
+        try {
+            await prisma.user.update({
+                where: { id: req.user!.id },
+                data: {
+                    subsonicPassword: null,
+                },
+            });
 
-        return res.json({ success: true });
-    } catch (error) {
-        logger.error("Delete Subsonic password error:", error);
-        return res
-            .status(500)
-            .json({ error: "Failed to delete Subsonic password" });
-    }
-});
+            return res.json({ success: true });
+        } catch (error) {
+            logger.error("Delete Subsonic password error:", error);
+            return res
+                .status(500)
+                .json({ error: "Failed to delete Subsonic password" });
+        }
+    },
+);
 
 export default router;
