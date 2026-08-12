@@ -541,37 +541,6 @@ router.get<{ seriesName: string }>(
 /**
  * @openapi
  * /api/audiobooks/{id}/cover:
- *   options:
- *     summary: CORS preflight for audiobook cover images
- *     tags: [Audiobooks]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Audiobook ID
- *     responses:
- *       204:
- *         description: CORS preflight response
- */
-/**
- * OPTIONS /audiobooks/:id/cover
- * Handle CORS preflight request for cover images
- */
-router.options("/:id/cover", (req, res) => {
-    const origin = req.headers.origin || "http://localhost:3030";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    res.status(204).end();
-});
-
-/**
- * @openapi
- * /api/audiobooks/{id}/cover:
  *   get:
  *     summary: Serve audiobook cover image
  *     tags: [Audiobooks]
