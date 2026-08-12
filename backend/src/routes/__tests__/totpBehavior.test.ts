@@ -14,6 +14,9 @@ const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) =>
 const mockRequireAdmin = jest.fn((_req: any, _res: any, next: () => void) =>
     next(),
 );
+const mockRequireInteractiveSession = jest.fn(
+    (_req: any, _res: any, next: () => void) => next(),
+);
 const mockGenerateToken = jest.fn();
 const mockGenerateRefreshToken = jest.fn();
 const mockVerifyAuthToken = jest.fn();
@@ -21,6 +24,7 @@ const mockVerifyAuthToken = jest.fn();
 jest.mock("../../middleware/auth", () => ({
     requireAuth: mockRequireAuth,
     requireAdmin: mockRequireAdmin,
+    requireInteractiveSession: mockRequireInteractiveSession,
     generateToken: mockGenerateToken,
     generateRefreshToken: mockGenerateRefreshToken,
     verifyAuthToken: mockVerifyAuthToken,
