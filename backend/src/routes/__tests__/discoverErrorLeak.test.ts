@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
+    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({

@@ -263,6 +263,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
 router.post<{ trackId: string }>(
     "/analyze/:trackId",
     requireAuth,
+    requireAdmin,
     async (req, res) => {
         try {
             const { trackId } = req.params;

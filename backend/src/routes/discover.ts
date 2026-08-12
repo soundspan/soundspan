@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
+import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { lastFmService } from "../services/lastfm";
 import { startOfWeek, endOfWeek } from "date-fns";
@@ -2159,8 +2159,10 @@ router.delete("/exclusions/:id", async (req, res) => {
  *         description: Only available in legacy discovery mode
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
-router.post("/cleanup-lidarr", async (req, res) => {
+router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {
             return res.status(410).json({

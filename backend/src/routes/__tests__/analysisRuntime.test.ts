@@ -1,8 +1,22 @@
 import os from "os";
 
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: any, _res: any, next: () => void) => next(),
-    requireAdmin: (_req: any, _res: any, next: () => void) => next(),
+    requireAuth: (req: any, _res: any, next: () => void) => {
+        if (req.headers?.["x-api-key"] === "non-admin-key") {
+            req.user = {
+                id: "api-key-user",
+                username: "api-key-user",
+                role: "user",
+            };
+        }
+        next();
+    },
+    requireAdmin: (req: any, res: any, next: () => void) => {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -111,6 +125,30 @@ function getHandler(method: "get" | "post" | "put", path: string) {
     if (!layer)
         throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+const MAX_ROUTE_HANDLERS = 4;
+
+async function invokeRouteStack(
+    method: "get" | "post" | "put",
+    path: string,
+    req: any,
+    res: any,
+) {
+    const layer = findRouteLayer((router as any).stack, method, path);
+    const stack = layer.route.stack;
+    if (stack.length > MAX_ROUTE_HANDLERS) {
+        throw new Error(`Too many route handlers: ${stack.length}`);
+    }
+    for (let index = 0; index < MAX_ROUTE_HANDLERS; index += 1) {
+        const entry = stack[index];
+        if (!entry) return;
+        let nextCalled = false;
+        await entry.handle(req, res, () => {
+            nextCalled = true;
+        });
+        if (!nextCalled) return;
+    }
 }
 
 // The internal vibe endpoints are guarded by the per-route
@@ -339,6 +377,45 @@ describe("analysis routes runtime", () => {
             trackId: "t100",
         });
     });
+
+    it.each([
+        [
+            "authenticated user",
+            {
+                user: {
+                    id: "non-admin-user",
+                    username: "non-admin-user",
+                    role: "user",
+                },
+                params: { trackId: "track-1" },
+            },
+        ],
+        [
+            "API-key caller",
+            {
+                headers: { "x-api-key": "non-admin-key" },
+                params: { trackId: "track-1" },
+            },
+        ],
+    ])(
+        "rejects a non-admin %s before analysis queue or database effects",
+        async (_caller, req) => {
+            const res = createRes();
+
+            await invokeRouteStack(
+                "post",
+                "/analyze/:trackId",
+                req,
+                res,
+            );
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body).toEqual({ error: "Admin access required" });
+            expect(mockRedisRPush).not.toHaveBeenCalled();
+            expect(mockTrackFindUnique).not.toHaveBeenCalled();
+            expect(mockTrackUpdate).not.toHaveBeenCalled();
+        },
+    );
 
     it("returns track analysis payload or 404", async () => {
         mockTrackFindUnique.mockResolvedValueOnce(null);

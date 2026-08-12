@@ -471,6 +471,7 @@ describe("requireSubsonicAuth", () => {
     it("authenticates apiKey mode without password/token parameters", async () => {
         mockApiKeyFindUnique.mockResolvedValue({
             id: "key-1",
+            createdAt: new Date(),
             user: {
                 id: "u1",
                 username: "alice",
@@ -536,6 +537,7 @@ describe("requireSubsonicAuth", () => {
     it("rejects apiKey auth when provided username does not match key owner", async () => {
         mockApiKeyFindUnique.mockResolvedValue({
             id: "key-1",
+            createdAt: new Date(),
             user: {
                 id: "u1",
                 username: "alice",
@@ -567,6 +569,7 @@ describe("requireSubsonicAuth", () => {
     it("authenticates apiKey mode even when lastUsed update fails", async () => {
         mockApiKeyFindUnique.mockResolvedValue({
             id: "key-1",
+            createdAt: new Date(),
             user: {
                 id: "u1",
                 username: "alice",

@@ -6,7 +6,7 @@ import { runDummyBcrypt } from "../utils/dummyCredential";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { prisma } from "../utils/db";
 import { decrypt } from "../utils/encryption";
-import { findApiKeyRecord } from "../utils/apiKeyHash";
+import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import { logger } from "../utils/logger";
 import {
     getResponseFormat,
@@ -133,6 +133,17 @@ export async function requireSubsonicAuth(
                 res,
                 SubsonicErrorCode.INVALID_API_KEY,
                 "Invalid API key",
+                format,
+                callback,
+            );
+            return;
+        }
+
+        if (isApiKeyExpired(apiKeyRecord.createdAt)) {
+            sendSubsonicError(
+                res,
+                SubsonicErrorCode.WRONG_CREDENTIALS,
+                "Wrong username or password",
                 format,
                 callback,
             );
