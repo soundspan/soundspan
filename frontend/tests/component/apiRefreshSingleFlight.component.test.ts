@@ -50,7 +50,10 @@ test("shares one token refresh across concurrent 401 responses", async () => {
                 ok: false,
                 status: 401,
                 statusText: "Unauthorized",
-                json: async () => ({ error: "unauthorized" }),
+                json: async () => ({
+                    error: "Not authenticated",
+                    code: "AUTH_REQUIRED",
+                }),
             } as Response;
         }
         if (authorization === "Bearer access-new") {

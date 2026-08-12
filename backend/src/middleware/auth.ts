@@ -253,7 +253,9 @@ export async function requireAuth(
         req.user = user;
         return next();
     }
-    return res.status(401).json({ error: "Not authenticated" });
+    return res
+        .status(401)
+        .json({ error: "Not authenticated", code: "AUTH_REQUIRED" });
 }
 
 /** Requires an interactive session or bearer-authenticated request. */
@@ -385,5 +387,7 @@ export async function requireAuthOrToken(
         }
     }
 
-    return res.status(401).json({ error: "Not authenticated" });
+    return res
+        .status(401)
+        .json({ error: "Not authenticated", code: "AUTH_REQUIRED" });
 }

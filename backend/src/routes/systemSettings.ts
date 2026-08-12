@@ -819,6 +819,8 @@ router.post("/test-openai", async (req, res) => {
  *         description: Admin access required
  *       500:
  *         description: Failed to connect to Fanart.tv
+ *       502:
+ *         description: Invalid Fanart.tv API key
  */
 // Test Fanart.tv connection
 router.post("/test-fanart", async (req, res) => {
@@ -850,7 +852,7 @@ router.post("/test-fanart", async (req, res) => {
     } catch (error: any) {
         logger.error("Fanart.tv test error:", error.message);
         if (error.response?.status === 401) {
-            res.status(401).json({
+            res.status(502).json({
                 error: "Invalid Fanart.tv API key",
             });
         } else {
@@ -891,6 +893,8 @@ router.post("/test-fanart", async (req, res) => {
  *         description: Admin access required
  *       500:
  *         description: Failed to connect to Last.fm
+ *       502:
+ *         description: Invalid Last.fm API key
  */
 // Test Last.fm connection
 router.post("/test-lastfm", async (req, res) => {
@@ -933,7 +937,7 @@ router.post("/test-lastfm", async (req, res) => {
             error.response?.status === 403 ||
             error.response?.data?.error === 10
         ) {
-            res.status(401).json({
+            res.status(502).json({
                 error: "Invalid Last.fm API key",
             });
         } else {
@@ -976,6 +980,8 @@ router.post("/test-lastfm", async (req, res) => {
  *         description: Admin access required
  *       500:
  *         description: Failed to connect to Audiobookshelf
+ *       502:
+ *         description: Invalid Audiobookshelf API key
  */
 // Test Audiobookshelf connection
 router.post("/test-audiobookshelf", async (req, res) => {
@@ -1010,7 +1016,7 @@ router.post("/test-audiobookshelf", async (req, res) => {
     } catch (error: any) {
         logger.error("Audiobookshelf test error:", error.message);
         if (error.response?.status === 401 || error.response?.status === 403) {
-            res.status(401).json({
+            res.status(502).json({
                 error: "Invalid Audiobookshelf API key",
             });
         } else {
@@ -1053,6 +1059,8 @@ router.post("/test-audiobookshelf", async (req, res) => {
  *         description: Admin access required
  *       500:
  *         description: Failed to test Soulseek connection
+ *       502:
+ *         description: Invalid Soulseek credentials or connection failed
  */
 // Test Soulseek connection (direct via slsk-client)
 router.post("/test-soulseek", async (req, res) => {
@@ -1101,7 +1109,7 @@ router.post("/test-soulseek", async (req, res) => {
             });
         } catch (connectError: any) {
             logger.error(`[SOULSEEK-TEST] Error: ${connectError.message}`);
-            res.status(401).json({
+            res.status(502).json({
                 error: "Invalid Soulseek credentials or connection failed",
             });
         }
@@ -1145,6 +1153,8 @@ router.post("/test-soulseek", async (req, res) => {
  *         description: Admin access required
  *       500:
  *         description: Failed to test Spotify credentials
+ *       502:
+ *         description: Invalid Spotify credentials
  */
 // Test Spotify credentials
 router.post("/test-spotify", async (req, res) => {
@@ -1180,12 +1190,12 @@ router.post("/test-spotify", async (req, res) => {
                     message: "Spotify credentials are valid",
                 });
             } else {
-                res.status(401).json({
+                res.status(502).json({
                     error: "Invalid Spotify credentials",
                 });
             }
         } catch (tokenError: any) {
-            res.status(401).json({
+            res.status(502).json({
                 error: "Invalid Spotify credentials",
             });
         }
@@ -1210,9 +1220,11 @@ router.post("/test-spotify", async (req, res) => {
  *       200:
  *         description: TIDAL session is valid
  *       401:
- *         description: Not authenticated or no valid TIDAL session
+ *         description: Not authenticated
  *       403:
  *         description: Admin access required
+ *       502:
+ *         description: No valid TIDAL session
  *       503:
  *         description: TIDAL service is not running
  */
@@ -1241,7 +1253,7 @@ router.post("/test-tidal", async (req, res) => {
         }
 
         // No valid session — return info so the UI can trigger device auth
-        return res.status(401).json({
+        return res.status(502).json({
             error: "Not authenticated to TIDAL",
             details:
                 "Use the TIDAL settings panel to authenticate via device authorization.",

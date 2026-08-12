@@ -333,6 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Admin “Test connection” failures for Audiobookshelf, Fanart.tv, Last.fm,
+  Soulseek, Spotify, and TIDAL no longer log the user out: upstream credential
+  failures now return 502 instead of 401, and the web client only treats
+  explicitly marked authentication responses as session expiry.
 - Fixed the native audio engine treating the browser's spec-mandated
   end-of-stream pause as unexpected, which intermittently froze queue
   auto-advance at track boundaries, especially in hidden tabs; the Howler path

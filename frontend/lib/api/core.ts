@@ -519,9 +519,12 @@ export abstract class ApiClientCore {
                     );
                 }
 
-                // Handle 401 with token refresh (retry once)
+                const isAuthRequired =
+                    response.status === 401 && error.code === "AUTH_REQUIRED";
+
+                // Handle marked session-auth failures with token refresh (retry once)
                 if (
-                    response.status === 401 &&
+                    isAuthRequired &&
                     _retryCount === 0 &&
                     endpoint !== "/auth/refresh"
                 ) {
@@ -536,7 +539,10 @@ export abstract class ApiClientCore {
                     }
                 }
 
-                if (response.status === 401) {
+                if (
+                    isAuthRequired ||
+                    (response.status === 401 && endpoint === "/auth/refresh")
+                ) {
                     // Token is invalid and refresh failed — clear stale credentials
                     // and notify the app so the auth context can redirect to login.
                     this.clearToken();
