@@ -4,7 +4,12 @@ import fs from "fs";
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
         next(),
-    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAdmin: (req: any, res: any, next: () => void) => {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+        next();
+    },
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -169,6 +174,28 @@ function getRouteHandler(
         throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
     }
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+async function invokePostRouteStack(path: string, req: any, res: any) {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === path && entry.route?.methods?.post,
+    );
+    if (!layer) throw new Error(`Route not found: POST ${path}`);
+
+    const maxRouteHandlers = 3;
+    for (let index = 0; index < maxRouteHandlers; index += 1) {
+        const handler = layer.route.stack[index]?.handle;
+        if (!handler) return;
+
+        let continued = false;
+        await handler(req, res, () => {
+            continued = true;
+        });
+        if (!continued) return;
+    }
+
+    throw new Error(`POST ${path} exceeded the test handler limit`);
 }
 
 function createRes() {
@@ -1345,6 +1372,57 @@ describe("discover legacy-mode runtime behavior", () => {
             ownedRecordsRemoved: 1,
             fixedArtists: ["Fix Artist"],
         });
+    });
+
+    it("allows only admins to invoke global tagging repair", async () => {
+        const nonAdminRes = createRes();
+        await invokePostRouteStack(
+            "/fix-tagging",
+            {
+                headers: {},
+                session: { userId: "user-1" },
+                user: { id: "user-1", role: "user" },
+            },
+            nonAdminRes,
+        );
+
+        expect(nonAdminRes.statusCode).toBe(403);
+        expect(nonAdminRes.body).toEqual({ error: "Admin access required" });
+        expect(prisma.discoveryAlbum.findMany).not.toHaveBeenCalled();
+
+        const apiKeyRes = createRes();
+        await invokePostRouteStack(
+            "/fix-tagging",
+            {
+                headers: { "x-api-key": "device-key" },
+                user: { id: "user-1", role: "user" },
+            },
+            apiKeyRes,
+        );
+
+        expect(apiKeyRes.statusCode).toBe(403);
+        expect(apiKeyRes.body).toEqual({ error: "Admin access required" });
+        expect(prisma.discoveryAlbum.findMany).not.toHaveBeenCalled();
+
+        const adminRes = createRes();
+        await invokePostRouteStack(
+            "/fix-tagging",
+            {
+                headers: {},
+                session: { userId: "admin-1" },
+                user: { id: "admin-1", role: "admin" },
+            },
+            adminRes,
+        );
+
+        expect(adminRes.statusCode).toBe(200);
+        expect(adminRes.body).toEqual({
+            success: true,
+            albumsFixed: 0,
+            ownedRecordsRemoved: 0,
+            fixedArtists: [],
+        });
+        expect(prisma.discoveryAlbum.findMany).toHaveBeenCalledTimes(1);
     });
 
     it("returns 500 when fix-tagging fails", async () => {

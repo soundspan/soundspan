@@ -320,7 +320,6 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
  *     tags: [Device Link]
  *     security:
  *       - sessionAuth: []
- *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -335,11 +334,14 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
  *         description: Device not found
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  */
-// DELETE /device-link/devices/:id - Revoke a device (requires auth)
+// DELETE /device-link/devices/:id - Revoke a device (requires interactive auth)
 router.delete<{ id: string }>(
     "/devices/:id",
     requireAuthOrToken,
+    requireInteractiveSession,
     async (req, res) => {
         try {
             const userId = req.user!.id;

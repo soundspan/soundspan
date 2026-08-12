@@ -128,6 +128,32 @@ async function executeGenerate(req: any, res: any): Promise<void> {
     throw new Error("POST /generate exceeded the test handler limit");
 }
 
+async function executeDeleteDevice(req: any, res: any): Promise<void> {
+    const layer = (router as any).stack.find(
+        (entry: any) =>
+            entry.route?.path === "/devices/:id" &&
+            entry.route?.methods?.delete,
+    );
+    if (!layer) {
+        throw new Error("Route not found: DELETE /devices/:id");
+    }
+
+    const maxRouteHandlers = 4;
+    for (let index = 0; index < maxRouteHandlers; index += 1) {
+        const handler = layer.route.stack[index]?.handle;
+        if (!handler) return;
+
+        let continued = false;
+        await handler(req, res, (error?: unknown) => {
+            if (error) throw error;
+            continued = true;
+        });
+        if (!continued) return;
+    }
+
+    throw new Error("DELETE /devices/:id exceeded the test handler limit");
+}
+
 describe("deviceLink routes runtime", () => {
     const postGenerate = getHandler("/generate", "post");
     const postVerify = getHandler("/verify", "post");
@@ -496,5 +522,44 @@ describe("deviceLink routes runtime", () => {
         await deleteDevice(req, errorRes);
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({ error: "Failed to revoke device" });
+    });
+
+    it("rejects API-key device revocation while allowing an interactive session", async () => {
+        const apiKeyRes = createRes();
+        await executeDeleteDevice(
+            {
+                headers: { "x-api-key": "device-key" },
+                user: { id: "u1" },
+                params: { id: "api-key-1" },
+            },
+            apiKeyRes,
+        );
+
+        expect(apiKeyRes.statusCode).toBe(403);
+        expect(apiKeyRes.body).toEqual({
+            error: "Interactive session authentication required",
+        });
+        expect(mockApiKeyFindFirst).not.toHaveBeenCalled();
+        expect(mockApiKeyDelete).not.toHaveBeenCalled();
+
+        const sessionRes = createRes();
+        await executeDeleteDevice(
+            {
+                headers: {},
+                session: { userId: "u1" },
+                user: { id: "u1" },
+                params: { id: "api-key-1" },
+            },
+            sessionRes,
+        );
+
+        expect(sessionRes.statusCode).toBe(200);
+        expect(sessionRes.body).toEqual({ success: true });
+        expect(mockApiKeyFindFirst).toHaveBeenCalledWith({
+            where: { id: "api-key-1", userId: "u1" },
+        });
+        expect(mockApiKeyDelete).toHaveBeenCalledWith({
+            where: { id: "api-key-1" },
+        });
     });
 });

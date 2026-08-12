@@ -2320,8 +2320,10 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
  *         description: Only available in legacy discovery mode
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
-router.post("/fix-tagging", async (req, res) => {
+router.post("/fix-tagging", requireAdmin, async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {
             return res.status(410).json({
