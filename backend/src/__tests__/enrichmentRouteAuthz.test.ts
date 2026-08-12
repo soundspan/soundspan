@@ -7,6 +7,8 @@
  *   - POST /api/enrichment/start (same worker as the admin-gated /full)
  *   - POST /api/enrichment/artist/:id and /album/:id (apply enrichment
  *     results library-wide and make outbound API calls)
+ *   - GET /api/enrichment/failures and /failures/counts (global operational
+ *     failure data has no user ownership scope)
  *
  * Deliberately NOT admin-gated (user-facing by design):
  *   - GET/PUT /settings (per-user settings)
@@ -23,6 +25,14 @@ const mockEnrichArtist = jest.fn(async () => ({ confidence: 0.9 }));
 const mockEnrichAlbum = jest.fn(async () => ({ confidence: 0.9 }));
 const mockApplyArtistEnrichment = jest.fn(async () => undefined);
 const mockApplyAlbumEnrichment = jest.fn(async () => undefined);
+const mockGetFailures = jest.fn(async () => ({ failures: [], total: 0 }));
+const mockGetFailureCounts = jest.fn(async () => ({
+    artist: 0,
+    track: 0,
+    audio: 0,
+    vibe: 0,
+    total: 0,
+}));
 const mockSystemSettingsFindUnique = jest.fn(async () => ({
     autoEnrichMetadata: true,
 }));
@@ -70,7 +80,10 @@ jest.mock("../services/enrichmentState", () => ({
 }));
 
 jest.mock("../services/enrichmentFailureService", () => ({
-    enrichmentFailureService: {},
+    enrichmentFailureService: {
+        getFailures: mockGetFailures,
+        getFailureCounts: mockGetFailureCounts,
+    },
 }));
 
 jest.mock("../services/musicbrainz", () => ({
@@ -221,5 +234,51 @@ describe("enrichment router authorization", () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(mockEnrichAlbum).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects non-admin users on GET /failures", async () => {
+        const response = await request(buildApp())
+            .get("/api/enrichment/failures")
+            .set("x-test-role", "user");
+
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({ error: "Admin access required" });
+        expect(mockGetFailures).not.toHaveBeenCalled();
+    });
+
+    it("allows admins on GET /failures", async () => {
+        const response = await request(buildApp())
+            .get("/api/enrichment/failures")
+            .set("x-test-role", "admin");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ failures: [], total: 0 });
+        expect(mockGetFailures).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects non-admin users on GET /failures/counts", async () => {
+        const response = await request(buildApp())
+            .get("/api/enrichment/failures/counts")
+            .set("x-test-role", "user");
+
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({ error: "Admin access required" });
+        expect(mockGetFailureCounts).not.toHaveBeenCalled();
+    });
+
+    it("allows admins on GET /failures/counts", async () => {
+        const response = await request(buildApp())
+            .get("/api/enrichment/failures/counts")
+            .set("x-test-role", "admin");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+            artist: 0,
+            track: 0,
+            audio: 0,
+            vibe: 0,
+            total: 0,
+        });
+        expect(mockGetFailureCounts).toHaveBeenCalledTimes(1);
     });
 });

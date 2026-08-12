@@ -15,7 +15,10 @@ import {
     enrichmentStateService,
     type EnrichmentState,
 } from "../services/enrichmentState";
-import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import {
+    enrichmentFailureService,
+    type EnrichmentFailure,
+} from "../services/enrichmentFailureService";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import {
@@ -40,6 +43,30 @@ const MBID_UUID_REGEX =
 
 function isValidMusicBrainzId(value: string): boolean {
     return MBID_UUID_REGEX.test(value);
+}
+
+type ClientSafeEnrichmentFailure = Omit<
+    EnrichmentFailure,
+    "errorMessage" | "errorCode" | "metadata"
+>;
+
+function toClientSafeEnrichmentFailure(
+    failure: EnrichmentFailure,
+): ClientSafeEnrichmentFailure {
+    return {
+        id: failure.id,
+        entityType: failure.entityType,
+        entityId: failure.entityId,
+        entityName: failure.entityName,
+        retryCount: failure.retryCount,
+        maxRetries: failure.maxRetries,
+        firstFailedAt: failure.firstFailedAt,
+        lastFailedAt: failure.lastFailedAt,
+        skipped: failure.skipped,
+        skippedAt: failure.skippedAt,
+        resolved: failure.resolved,
+        resolvedAt: failure.resolvedAt,
+    };
 }
 
 /**
@@ -944,7 +971,7 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
  * @openapi
  * /api/enrichment/failures:
  *   get:
- *     summary: Get all enrichment failures with filtering
+ *     summary: Get all enrichment failures with filtering (admin only)
  *     tags: [Enrichment]
  *     security:
  *       - sessionAuth: []
@@ -987,12 +1014,14 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
  *         description: List of enrichment failures
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 /**
  * GET /enrichment/failures
- * Get all enrichment failures with filtering
+ * Get all enrichment failures with filtering (admin only)
  */
-router.get("/failures", async (req, res) => {
+router.get("/failures", requireAdmin, async (req, res) => {
     try {
         const { entityType, includeSkipped, includeResolved, limit, offset } =
             req.query;
@@ -1005,7 +1034,10 @@ router.get("/failures", async (req, res) => {
         options.offset = parseBoundedInt(req.query.offset, 0, 0, 1_000_000);
 
         const result = await enrichmentFailureService.getFailures(options);
-        res.json(result);
+        res.json({
+            failures: result.failures.map(toClientSafeEnrichmentFailure),
+            total: result.total,
+        });
     } catch (error) {
         logger.error("Get failures error:", error);
         res.status(500).json({ error: "Failed to get failures" });
@@ -1016,7 +1048,7 @@ router.get("/failures", async (req, res) => {
  * @openapi
  * /api/enrichment/failures/counts:
  *   get:
- *     summary: Get enrichment failure counts by type
+ *     summary: Get enrichment failure counts by type (admin only)
  *     tags: [Enrichment]
  *     security:
  *       - sessionAuth: []
@@ -1026,12 +1058,14 @@ router.get("/failures", async (req, res) => {
  *         description: Failure counts grouped by entity type
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 /**
  * GET /enrichment/failures/counts
- * Get failure counts by type
+ * Get failure counts by type (admin only)
  */
-router.get("/failures/counts", async (req, res) => {
+router.get("/failures/counts", requireAdmin, async (req, res) => {
     try {
         const counts = await enrichmentFailureService.getFailureCounts();
         res.json(counts);

@@ -181,4 +181,58 @@ describe("GET /api/enrichment/failures bounded query parameters", () => {
             offset: 0,
         });
     });
+
+    it("returns a client-safe DTO without worker errors or filesystem metadata", async () => {
+        mockGetFailures.mockResolvedValueOnce({
+            failures: [
+                {
+                    id: "failure-1",
+                    entityType: "audio",
+                    entityId: "track-1",
+                    entityName: "Example Track",
+                    errorMessage: "SECRET_LEAK_MARKER: decoder crashed",
+                    errorCode: "WORKER_SECRET_CODE",
+                    retryCount: 2,
+                    maxRetries: 3,
+                    firstFailedAt: new Date("2026-08-10T12:00:00.000Z"),
+                    lastFailedAt: new Date("2026-08-11T12:00:00.000Z"),
+                    skipped: false,
+                    skippedAt: null,
+                    resolved: false,
+                    resolvedAt: null,
+                    metadata: {
+                        track: { filePath: "/srv/music/private/track.flac" },
+                    },
+                },
+            ],
+            total: 1,
+        });
+
+        const response = await request(app).get("/api/enrichment/failures");
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+            failures: [
+                {
+                    id: "failure-1",
+                    entityType: "audio",
+                    entityId: "track-1",
+                    entityName: "Example Track",
+                    retryCount: 2,
+                    maxRetries: 3,
+                    firstFailedAt: "2026-08-10T12:00:00.000Z",
+                    lastFailedAt: "2026-08-11T12:00:00.000Z",
+                    skipped: false,
+                    skippedAt: null,
+                    resolved: false,
+                    resolvedAt: null,
+                },
+            ],
+            total: 1,
+        });
+        expect(JSON.stringify(response.body)).not.toContain(
+            "SECRET_LEAK_MARKER",
+        );
+        expect(JSON.stringify(response.body)).not.toContain("/srv/music");
+    });
 });
