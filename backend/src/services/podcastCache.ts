@@ -86,6 +86,11 @@ export class PodcastCacheService {
         );
     }
 
+    /** Returns the canonical root used for server-managed podcast covers. */
+    getCoverCacheRoot(): string {
+        return this.coverCacheDir;
+    }
+
     /**
      * Sync cover images for all podcasts
      */

@@ -34,6 +34,7 @@ jest.mock("../../config", () => ({
 }));
 
 jest.mock("../../services/browseImageCache", () => ({
+    getBrowseImageCacheRoot: () => "/tmp",
     cacheExternalImage: jest.fn(),
     getOrCacheImage: jest.fn(),
 }));

@@ -5109,8 +5109,10 @@ describe("library catalog list runtime coverage", () => {
 
             expect(presentRes.statusCode).toBe(200);
             expect(presentRes.body).toEqual({
-                filePath: "/tmp/covers/cover-present.jpg",
+                filePath: "cover-present.jpg",
                 options: {
+                    dotfiles: "ignore",
+                    root: "/tmp/covers",
                     headers: {
                         "Content-Type": "image/jpeg",
                         "Cache-Control": "public, max-age=7776000, immutable",

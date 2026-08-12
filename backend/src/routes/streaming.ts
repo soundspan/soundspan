@@ -14,6 +14,7 @@ import {
     buildSegmentedRouteTraceErrorFields,
     logSegmentedStreamingTrace,
 } from "../services/segmented-streaming/trace";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = express.Router();
 
@@ -683,7 +684,7 @@ const handleSegmentFetch = async (
                 ? "video/webm"
                 : "video/iso.segment",
         );
-        res.sendFile(segmentPath, (error) => {
+        sendFileFromRoot(res, segmentPath, session.assetDir, {}, (error) => {
             if (error) {
                 handleSegmentedSendFileError({
                     req,
@@ -1005,44 +1006,50 @@ router.get(
                 "private, no-cache, must-revalidate",
             );
             res.type("application/dash+xml");
-            res.sendFile(session.manifestPath, (error) => {
-                if (error) {
-                    handleSegmentedSendFileError({
-                        req,
-                        res,
-                        error,
-                        stage: "manifest",
-                        metricEvent: "manifest.fetch",
-                        startedAtMs,
-                        sessionId: session.sessionId,
-                        sourceType: session.sourceType,
-                        startupCorrelationFields,
-                        responseProfile: {
-                            notFoundError: "Manifest not found",
-                            notFoundReason: "manifest_not_found",
-                            loadFailedError: "Failed to load manifest",
-                            loadFailedReason: "manifest_load_failed",
-                        },
-                    });
-                    return;
-                }
+            sendFileFromRoot(
+                res,
+                session.manifestPath,
+                session.assetDir,
+                {},
+                (error) => {
+                    if (error) {
+                        handleSegmentedSendFileError({
+                            req,
+                            res,
+                            error,
+                            stage: "manifest",
+                            metricEvent: "manifest.fetch",
+                            startedAtMs,
+                            sessionId: session.sessionId,
+                            sourceType: session.sourceType,
+                            startupCorrelationFields,
+                            responseProfile: {
+                                notFoundError: "Manifest not found",
+                                notFoundReason: "manifest_not_found",
+                                loadFailedError: "Failed to load manifest",
+                                loadFailedReason: "manifest_load_failed",
+                            },
+                        });
+                        return;
+                    }
 
-                logSegmentedStreamingMetric("manifest.fetch", {
-                    status: "success",
-                    sessionId: session.sessionId,
-                    sourceType: session.sourceType,
-                    ...startupCorrelationFields,
-                    latencyMs: segmentedMetricDurationMs(startedAtMs),
-                });
-                logSegmentedStreamingTrace(
-                    "route.manifest.success",
-                    buildSegmentedRouteTraceFields(req, startedAtMs, {
+                    logSegmentedStreamingMetric("manifest.fetch", {
+                        status: "success",
                         sessionId: session.sessionId,
                         sourceType: session.sourceType,
                         ...startupCorrelationFields,
-                    }),
-                );
-            });
+                        latencyMs: segmentedMetricDurationMs(startedAtMs),
+                    });
+                    logSegmentedStreamingTrace(
+                        "route.manifest.success",
+                        buildSegmentedRouteTraceFields(req, startedAtMs, {
+                            sessionId: session.sessionId,
+                            sourceType: session.sourceType,
+                            ...startupCorrelationFields,
+                        }),
+                    );
+                },
+            );
             return res;
         } catch (error) {
             const errorFields = getSegmentedMetricErrorFields(error);

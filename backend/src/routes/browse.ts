@@ -12,7 +12,9 @@ import {
     browseImageCacheKey,
     getBrowseImageFromCache,
     fetchAndCacheBrowseImage,
+    getBrowseImageCacheRoot,
 } from "../services/browseImageCache";
+import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 
 const router = Router();
 
@@ -192,7 +194,11 @@ router.get(
         if (cached) {
             res.set("Content-Type", cached.contentType);
             res.set("Cache-Control", "public, max-age=604800, immutable");
-            return res.sendFile(cached.filePath);
+            return sendFileFromRoot(
+                res,
+                cached.filePath,
+                getBrowseImageCacheRoot(),
+            );
         }
 
         // Fetch, cache, and serve
@@ -203,7 +209,7 @@ router.get(
 
         res.set("Content-Type", entry.contentType);
         res.set("Cache-Control", "public, max-age=604800, immutable");
-        return res.sendFile(entry.filePath);
+        return sendFileFromRoot(res, entry.filePath, getBrowseImageCacheRoot());
     },
 );
 
@@ -1113,7 +1119,11 @@ router.get(
         if (cached) {
             res.set("Content-Type", cached.contentType);
             res.set("Cache-Control", "public, max-age=604800, immutable");
-            return res.sendFile(cached.filePath);
+            return sendFileFromRoot(
+                res,
+                cached.filePath,
+                getBrowseImageCacheRoot(),
+            );
         }
 
         // Fetch, cache, and serve
@@ -1124,7 +1134,7 @@ router.get(
 
         res.set("Content-Type", entry.contentType);
         res.set("Cache-Control", "public, max-age=604800, immutable");
-        return res.sendFile(entry.filePath);
+        return sendFileFromRoot(res, entry.filePath, getBrowseImageCacheRoot());
     },
 );
 
