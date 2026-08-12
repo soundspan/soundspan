@@ -39,6 +39,7 @@ const tidalOauthSessionCache = new Map<
 >();
 const tidalOauthRestoreInFlight = new Map<string, Promise<boolean>>();
 const tidalOauthClearInFlight = new Map<string, Promise<void>>();
+const tidalOauthCredentialInFlight = new Map<string, Set<Promise<unknown>>>();
 const tidalOauthGeneration = new Map<string, number>();
 const setTidalOAuthCache = (
     userId: string,
@@ -90,6 +91,42 @@ const isCurrentTidalOAuthGeneration = (
     generation: number,
 ): boolean => getTidalOAuthGeneration(userId) === generation;
 
+function trackTidalOAuthCredentialOperation<T>(
+    userId: string,
+    factory: () => Promise<T>,
+): Promise<T> {
+    const operations =
+        tidalOauthCredentialInFlight.get(userId) ?? new Set<Promise<unknown>>();
+    tidalOauthCredentialInFlight.set(userId, operations);
+
+    let trackedOperation: Promise<T>;
+    trackedOperation = Promise.resolve()
+        .then(factory)
+        .finally(() => {
+            operations.delete(trackedOperation);
+            if (operations.size === 0) {
+                tidalOauthCredentialInFlight.delete(userId);
+            }
+        });
+    operations.add(trackedOperation);
+    return trackedOperation;
+}
+
+async function runTidalOAuthCredentialOperation<T>(
+    userId: string,
+    factory: (generation: number) => Promise<T>,
+): Promise<T> {
+    const clearInFlight = tidalOauthClearInFlight.get(userId);
+    if (clearInFlight) {
+        await clearInFlight;
+    }
+
+    const generation = getTidalOAuthGeneration(userId);
+    return trackTidalOAuthCredentialOperation(userId, () =>
+        factory(generation),
+    );
+}
+
 // ── Guard middleware ───────────────────────────────────────────────
 
 /**
@@ -123,19 +160,15 @@ async function requireTidalStreamingEnabled(
  * sidecar. Called before any per-user streaming request.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
-    const clearInFlight = tidalOauthClearInFlight.get(userId);
-    if (clearInFlight) {
-        await clearInFlight;
-    }
-
     const cached = getCachedTidalOAuth(userId);
     if (cached !== null) {
         return cached;
     }
 
-    const generation = getTidalOAuthGeneration(userId);
-    return coalesceInFlightByKey(tidalOauthRestoreInFlight, userId, () =>
-        restoreTidalUserOAuth(userId, generation),
+    return runTidalOAuthCredentialOperation(userId, (generation) =>
+        coalesceInFlightByKey(tidalOauthRestoreInFlight, userId, () =>
+            restoreTidalUserOAuth(userId, generation),
+        ),
     );
 }
 
@@ -204,11 +237,13 @@ async function clearTidalUserOAuth(userId: string): Promise<void> {
     }
 
     const generation = invalidateTidalOAuthGeneration(userId);
-    const pendingRestore = tidalOauthRestoreInFlight.get(userId);
+    const pendingCredentials = [
+        ...(tidalOauthCredentialInFlight.get(userId) ?? []),
+    ];
     const clearOperation = performTidalOAuthClear(
         userId,
         generation,
-        pendingRestore,
+        pendingCredentials,
     ).finally(() => {
         if (tidalOauthClearInFlight.get(userId) === clearOperation) {
             tidalOauthClearInFlight.delete(userId);
@@ -221,13 +256,9 @@ async function clearTidalUserOAuth(userId: string): Promise<void> {
 async function performTidalOAuthClear(
     userId: string,
     generation: number,
-    pendingRestore?: Promise<boolean>,
+    pendingCredentials: ReadonlyArray<Promise<unknown>>,
 ): Promise<void> {
-    try {
-        await pendingRestore;
-    } catch {
-        // Continue: logout must still remove DB and sidecar state.
-    }
+    await Promise.allSettled(pendingCredentials);
     await prisma.userSettings.update({
         where: { userId },
         data: { tidalOAuthJson: null },
@@ -236,6 +267,82 @@ async function performTidalOAuthClear(
     if (isCurrentTidalOAuthGeneration(userId, generation)) {
         setTidalOAuthCache(userId, false);
     }
+}
+
+async function rollbackTidalOAuthCredential(userId: string): Promise<void> {
+    await prisma.userSettings.update({
+        where: { userId },
+        data: { tidalOAuthJson: null },
+    });
+    await tidalStreamingService.clearAuth(userId);
+}
+
+async function persistTidalOAuthCredential(
+    userId: string,
+    generation: number,
+    oauthJson: string,
+): Promise<boolean> {
+    const encryptedOAuth = encrypt(oauthJson);
+    if (!isCurrentTidalOAuthGeneration(userId, generation)) return false;
+
+    await prisma.userSettings.upsert({
+        where: { userId },
+        update: { tidalOAuthJson: encryptedOAuth },
+        create: { userId, tidalOAuthJson: encryptedOAuth },
+    });
+    if (!isCurrentTidalOAuthGeneration(userId, generation)) {
+        await rollbackTidalOAuthCredential(userId);
+        return false;
+    }
+
+    await tidalStreamingService.restoreOAuth(userId, oauthJson);
+    if (!isCurrentTidalOAuthGeneration(userId, generation)) {
+        await rollbackTidalOAuthCredential(userId);
+        return false;
+    }
+
+    setTidalOAuthCache(userId, true);
+    return true;
+}
+
+type TidalOAuthPollResponse =
+    | { status: "pending" }
+    | {
+          status: "success";
+          username: string | undefined;
+          country_code: string;
+      };
+
+async function pollTidalOAuthCredential(
+    userId: string,
+    generation: number,
+    deviceCode: string,
+): Promise<TidalOAuthPollResponse> {
+    if (!isCurrentTidalOAuthGeneration(userId, generation)) {
+        return { status: "pending" };
+    }
+    const tokens = await tidalStreamingService.pollDeviceAuth(deviceCode);
+    if (!tokens) return { status: "pending" };
+
+    const oauthJson = JSON.stringify({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        tidal_user_id: tokens.user_id,
+        country_code: tokens.country_code,
+        username: tokens.username,
+    });
+    const persisted = await persistTidalOAuthCredential(
+        userId,
+        generation,
+        oauthJson,
+    );
+    if (!persisted) return { status: "pending" };
+
+    return {
+        status: "success",
+        username: tokens.username,
+        country_code: tokens.country_code,
+    };
 }
 
 // ── Routes ─────────────────────────────────────────────────────────
@@ -410,41 +517,16 @@ router.post(
         const userId = req.user!.id;
 
         try {
-            const tokens = await tidalStreamingService.pollDeviceAuth(
-                parsed.data.deviceCode,
+            const result = await runTidalOAuthCredentialOperation(
+                userId,
+                (generation) =>
+                    pollTidalOAuthCredential(
+                        userId,
+                        generation,
+                        parsed.data.deviceCode,
+                    ),
             );
-
-            if (!tokens) {
-                return res.json({ status: "pending" });
-            }
-
-            // Save encrypted OAuth JSON to UserSettings
-            const oauthJson = JSON.stringify({
-                access_token: tokens.access_token,
-                refresh_token: tokens.refresh_token,
-                tidal_user_id: tokens.user_id,
-                country_code: tokens.country_code,
-                username: tokens.username,
-            });
-
-            await prisma.userSettings.upsert({
-                where: { userId },
-                update: { tidalOAuthJson: encrypt(oauthJson) },
-                create: {
-                    userId,
-                    tidalOAuthJson: encrypt(oauthJson),
-                },
-            });
-
-            // Restore to sidecar immediately
-            await tidalStreamingService.restoreOAuth(userId, oauthJson);
-            setTidalOAuthCache(userId, true);
-
-            res.json({
-                status: "success",
-                username: tokens.username,
-                country_code: tokens.country_code,
-            });
+            res.json(result);
         } catch (err: unknown) {
             logger.error(
                 "[TIDAL-STREAM] Poll auth failed:",
@@ -508,23 +590,16 @@ router.post(
         const userId = req.user!.id;
 
         try {
-            await prisma.userSettings.upsert({
-                where: { userId },
-                update: { tidalOAuthJson: encrypt(parsed.data.oauthJson) },
-                create: {
-                    userId,
-                    tidalOAuthJson: encrypt(parsed.data.oauthJson),
-                },
-            });
-
-            // Restore to sidecar
-            await tidalStreamingService.restoreOAuth(
+            const success = await runTidalOAuthCredentialOperation(
                 userId,
-                parsed.data.oauthJson,
+                (generation) =>
+                    persistTidalOAuthCredential(
+                        userId,
+                        generation,
+                        parsed.data.oauthJson,
+                    ),
             );
-            setTidalOAuthCache(userId, true);
-
-            res.json({ success: true });
+            res.json({ success });
         } catch (err: any) {
             logger.error("[TIDAL-STREAM] Save token failed:", err.message);
             res.status(500).json({ error: "Failed to save TIDAL token" });

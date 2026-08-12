@@ -333,6 +333,7 @@ describe("youtube music route runtime behavior", () => {
         const firstRequest = librarySongsHandler(req, firstRes);
         const secondRequest = librarySongsHandler(req, secondRes);
         await Promise.resolve();
+        await Promise.resolve();
         expect(ytMusicService.getAuthStatus).toHaveBeenCalledTimes(1);
 
         resolveAuthStatus({ authenticated: false });
@@ -386,6 +387,90 @@ describe("youtube music route runtime behavior", () => {
         expect(clearRes.body).toEqual({ success: true });
         expect(sidecarAuthenticated).toBe(false);
         expect(ytMusicService.getLibrarySongs).not.toHaveBeenCalled();
+    });
+
+    it("does not persist a device poll that becomes stale before completion", async () => {
+        let sidecarAuthenticated = false;
+        let resolvePoll!: () => void;
+        let markPollStarted!: () => void;
+        const pollStarted = new Promise<void>((resolve) => {
+            markPollStarted = resolve;
+        });
+        const pollGate = new Promise<void>((resolve) => {
+            resolvePoll = resolve;
+        });
+        ytMusicService.pollDeviceAuth.mockImplementationOnce(async () => {
+            markPollStarted();
+            await pollGate;
+            sidecarAuthenticated = true;
+            return {
+                status: "success",
+                oauth_json: '{"access_token":"stale"}',
+                error: null,
+            };
+        });
+        ytMusicService.clearAuth.mockImplementation(async () => {
+            sidecarAuthenticated = false;
+        });
+        const userId = "logout-poll-race";
+        const pollRes = createRes();
+        const clearRes = createRes();
+
+        const pollRequest = pollDeviceCodeHandler(
+            {
+                user: { id: userId },
+                body: { deviceCode: "device-code" },
+            } as any,
+            pollRes,
+        );
+        await pollStarted;
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        resolvePoll();
+        await Promise.all([pollRequest, clearRequest]);
+
+        expect(pollRes.body).toEqual({ status: "pending" });
+        expect(clearRes.body).toEqual({ success: true });
+        expect(prisma.userSettings.upsert).toHaveBeenCalledTimes(1);
+        expect(prisma.userSettings.upsert).toHaveBeenCalledWith({
+            where: { userId },
+            create: { userId, ytMusicOAuthJson: null },
+            update: { ytMusicOAuthJson: null },
+        });
+        expect(sidecarAuthenticated).toBe(false);
+    });
+
+    it("does not persist a manual token save whose generation is stale", async () => {
+        const userId = "logout-save-race";
+        const saveRes = createRes();
+        const clearRes = createRes();
+
+        const saveRequest = saveTokenHandler(
+            {
+                user: { id: userId },
+                body: { oauthJson: '{"access_token":"stale"}' },
+            } as any,
+            saveRes,
+        );
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        await Promise.all([saveRequest, clearRequest]);
+
+        expect(saveRes.body).toEqual({ success: false });
+        expect(clearRes.body).toEqual({ success: true });
+        expect(prisma.userSettings.upsert).toHaveBeenCalledTimes(1);
+        expect(prisma.userSettings.upsert).toHaveBeenCalledWith({
+            where: { userId },
+            create: { userId, ytMusicOAuthJson: null },
+            update: { ytMusicOAuthJson: null },
+        });
+        expect(
+            ytMusicService.restoreOAuthWithCredentials,
+        ).not.toHaveBeenCalled();
     });
 
     it("validates and initiates device auth with error fallback", async () => {

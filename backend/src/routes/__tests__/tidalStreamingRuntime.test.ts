@@ -248,6 +248,7 @@ describe("tidal streaming route runtime", () => {
         const firstRequest = searchHandler(req, firstRes);
         const secondRequest = searchHandler(req, secondRes);
         await Promise.resolve();
+        await Promise.resolve();
         expect(
             tidalStreamingService.checkSidecarAuthStatus,
         ).toHaveBeenCalledTimes(1);
@@ -305,6 +306,86 @@ describe("tidal streaming route runtime", () => {
         expect(clearRes.body).toEqual({ success: true });
         expect(sidecarAuthenticated).toBe(false);
         expect(tidalStreamingService.search).not.toHaveBeenCalled();
+    });
+
+    it("does not persist a device poll that becomes stale before completion", async () => {
+        let sidecarAuthenticated = false;
+        let resolvePoll!: () => void;
+        let markPollStarted!: () => void;
+        const pollStarted = new Promise<void>((resolve) => {
+            markPollStarted = resolve;
+        });
+        const pollGate = new Promise<void>((resolve) => {
+            resolvePoll = resolve;
+        });
+        tidalStreamingService.pollDeviceAuth.mockImplementationOnce(
+            async () => {
+                markPollStarted();
+                await pollGate;
+                return {
+                    access_token: "stale-access",
+                    refresh_token: "stale-refresh",
+                    user_id: "stale-user",
+                    country_code: "US",
+                    username: "stale-name",
+                };
+            },
+        );
+        tidalStreamingService.restoreOAuth.mockImplementation(async () => {
+            sidecarAuthenticated = true;
+            return true;
+        });
+        tidalStreamingService.clearAuth.mockImplementation(async () => {
+            sidecarAuthenticated = false;
+        });
+        const userId = "logout-poll-race";
+        const pollRes = createRes();
+        const clearRes = createRes();
+
+        const pollRequest = pollHandler(
+            {
+                user: { id: userId },
+                body: { deviceCode: "device-code" },
+            } as any,
+            pollRes,
+        );
+        await pollStarted;
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        resolvePoll();
+        await Promise.all([pollRequest, clearRequest]);
+
+        expect(pollRes.body).toEqual({ status: "pending" });
+        expect(clearRes.body).toEqual({ success: true });
+        expect(prisma.userSettings.upsert).not.toHaveBeenCalled();
+        expect(tidalStreamingService.restoreOAuth).not.toHaveBeenCalled();
+        expect(sidecarAuthenticated).toBe(false);
+    });
+
+    it("does not persist a manual token save whose generation is stale", async () => {
+        const userId = "logout-save-race";
+        const saveRes = createRes();
+        const clearRes = createRes();
+
+        const saveRequest = saveTokenHandler(
+            {
+                user: { id: userId },
+                body: { oauthJson: '{"access_token":"stale"}' },
+            } as any,
+            saveRes,
+        );
+        const clearRequest = clearAuthHandler(
+            { user: { id: userId } } as any,
+            clearRes,
+        );
+        await Promise.all([saveRequest, clearRequest]);
+
+        expect(saveRes.body).toEqual({ success: false });
+        expect(clearRes.body).toEqual({ success: true });
+        expect(prisma.userSettings.upsert).not.toHaveBeenCalled();
+        expect(tidalStreamingService.restoreOAuth).not.toHaveBeenCalled();
     });
 
     it("evaluates the tidal-enabled middleware for 404, 503, and success", async () => {

@@ -17,6 +17,7 @@ import {
     ytMusicService,
     normalizeYtMusicStreamQuality,
 } from "../services/youtubeMusic";
+import type { YtMusicDeviceCodePollResult } from "../services/youtubeMusic";
 import { getSystemSettings } from "../utils/systemSettings";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
@@ -39,6 +40,7 @@ const ytOauthSessionCache = new Map<
 >();
 const ytOauthRestoreInFlight = new Map<string, Promise<boolean>>();
 const ytOauthClearInFlight = new Map<string, Promise<void>>();
+const ytOauthCredentialInFlight = new Map<string, Set<Promise<unknown>>>();
 const ytOauthGeneration = new Map<string, number>();
 
 const setYtOAuthCache = (
@@ -91,6 +93,40 @@ const isCurrentYtOAuthGeneration = (
     generation: number,
 ): boolean => getYtOAuthGeneration(userId) === generation;
 
+function trackYtOAuthCredentialOperation<T>(
+    userId: string,
+    factory: () => Promise<T>,
+): Promise<T> {
+    const operations =
+        ytOauthCredentialInFlight.get(userId) ?? new Set<Promise<unknown>>();
+    ytOauthCredentialInFlight.set(userId, operations);
+
+    let trackedOperation: Promise<T>;
+    trackedOperation = Promise.resolve()
+        .then(factory)
+        .finally(() => {
+            operations.delete(trackedOperation);
+            if (operations.size === 0) {
+                ytOauthCredentialInFlight.delete(userId);
+            }
+        });
+    operations.add(trackedOperation);
+    return trackedOperation;
+}
+
+async function runYtOAuthCredentialOperation<T>(
+    userId: string,
+    factory: (generation: number) => Promise<T>,
+): Promise<T> {
+    const clearInFlight = ytOauthClearInFlight.get(userId);
+    if (clearInFlight) {
+        await clearInFlight;
+    }
+
+    const generation = getYtOAuthGeneration(userId);
+    return trackYtOAuthCredentialOperation(userId, () => factory(generation));
+}
+
 // ── Guard middleware ───────────────────────────────────────────────
 
 async function requireYtMusicEnabled(
@@ -119,19 +155,15 @@ async function requireYtMusicEnabled(
  * if already restored.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
-    const clearInFlight = ytOauthClearInFlight.get(userId);
-    if (clearInFlight) {
-        await clearInFlight;
-    }
-
     const cached = getCachedYtOAuth(userId);
     if (cached !== null) {
         return cached;
     }
 
-    const generation = getYtOAuthGeneration(userId);
-    return coalesceInFlightByKey(ytOauthRestoreInFlight, userId, () =>
-        restoreYtUserOAuth(userId, generation),
+    return runYtOAuthCredentialOperation(userId, (generation) =>
+        coalesceInFlightByKey(ytOauthRestoreInFlight, userId, () =>
+            restoreYtUserOAuth(userId, generation),
+        ),
     );
 }
 
@@ -203,11 +235,13 @@ async function clearYtUserOAuth(userId: string): Promise<void> {
     }
 
     const generation = invalidateYtOAuthGeneration(userId);
-    const pendingRestore = ytOauthRestoreInFlight.get(userId);
+    const pendingCredentials = [
+        ...(ytOauthCredentialInFlight.get(userId) ?? []),
+    ];
     const clearOperation = performYtOAuthClear(
         userId,
         generation,
-        pendingRestore,
+        pendingCredentials,
     ).finally(() => {
         if (ytOauthClearInFlight.get(userId) === clearOperation) {
             ytOauthClearInFlight.delete(userId);
@@ -220,13 +254,9 @@ async function clearYtUserOAuth(userId: string): Promise<void> {
 async function performYtOAuthClear(
     userId: string,
     generation: number,
-    pendingRestore?: Promise<boolean>,
+    pendingCredentials: ReadonlyArray<Promise<unknown>>,
 ): Promise<void> {
-    try {
-        await pendingRestore;
-    } catch {
-        // Continue: logout must still remove DB and sidecar state.
-    }
+    await Promise.allSettled(pendingCredentials);
     await ytMusicService.clearAuth(userId);
     await prisma.userSettings.upsert({
         where: { userId },
@@ -236,6 +266,128 @@ async function performYtOAuthClear(
     if (isCurrentYtOAuthGeneration(userId, generation)) {
         setYtOAuthCache(userId, false);
     }
+}
+
+async function rollbackYtOAuthCredential(userId: string): Promise<void> {
+    await ytMusicService.clearAuth(userId);
+    await prisma.userSettings.upsert({
+        where: { userId },
+        create: { userId, ytMusicOAuthJson: null },
+        update: { ytMusicOAuthJson: null },
+    });
+}
+
+async function persistYtPolledOAuthCredential(
+    userId: string,
+    generation: number,
+    oauthJson: string,
+): Promise<boolean> {
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        await ytMusicService.clearAuth(userId);
+        return false;
+    }
+
+    const encryptedOAuth = encrypt(oauthJson);
+    if (!isCurrentYtOAuthGeneration(userId, generation)) return false;
+    await prisma.userSettings.upsert({
+        where: { userId },
+        create: { userId, ytMusicOAuthJson: encryptedOAuth },
+        update: { ytMusicOAuthJson: encryptedOAuth },
+    });
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        await rollbackYtOAuthCredential(userId);
+        return false;
+    }
+
+    setYtOAuthCache(userId, true);
+    return true;
+}
+
+async function persistYtManualOAuthCredential(
+    userId: string,
+    generation: number,
+    oauthJson: string,
+): Promise<boolean> {
+    if (!isCurrentYtOAuthGeneration(userId, generation)) return false;
+    const settings = await getSystemSettings();
+    const encryptedOAuth = encrypt(oauthJson);
+    if (!isCurrentYtOAuthGeneration(userId, generation)) return false;
+
+    await prisma.userSettings.upsert({
+        where: { userId },
+        create: { userId, ytMusicOAuthJson: encryptedOAuth },
+        update: { ytMusicOAuthJson: encryptedOAuth },
+    });
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        await rollbackYtOAuthCredential(userId);
+        return false;
+    }
+
+    await ytMusicService.restoreOAuthWithCredentials(
+        userId,
+        oauthJson,
+        settings?.ytMusicClientId || undefined,
+        settings?.ytMusicClientSecret || undefined,
+    );
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        await rollbackYtOAuthCredential(userId);
+        return false;
+    }
+
+    setYtOAuthCache(userId, true);
+    return true;
+}
+
+type YtOAuthPollOperationResult =
+    | { credentialsConfigured: false }
+    | {
+          credentialsConfigured: true;
+          response: YtMusicDeviceCodePollResult;
+      };
+
+async function pollYtOAuthCredential(
+    userId: string,
+    generation: number,
+    deviceCode: string,
+): Promise<YtOAuthPollOperationResult> {
+    const settings = await getSystemSettings();
+    if (!settings?.ytMusicClientId || !settings?.ytMusicClientSecret) {
+        return { credentialsConfigured: false };
+    }
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        return { credentialsConfigured: true, response: { status: "pending" } };
+    }
+
+    const result = await ytMusicService.pollDeviceAuth(
+        userId,
+        settings.ytMusicClientId,
+        settings.ytMusicClientSecret,
+        deviceCode,
+    );
+    if (!isCurrentYtOAuthGeneration(userId, generation)) {
+        if (result.status === "success") await ytMusicService.clearAuth(userId);
+        return { credentialsConfigured: true, response: { status: "pending" } };
+    }
+
+    if (result.status === "success" && result.oauth_json) {
+        const persisted = await persistYtPolledOAuthCredential(
+            userId,
+            generation,
+            result.oauth_json,
+        );
+        if (!persisted) {
+            return {
+                credentialsConfigured: true,
+                response: { status: "pending" },
+            };
+        }
+        logger.info(`[YTMusic] Device code auth completed for user ${userId}`);
+    }
+
+    return {
+        credentialsConfigured: true,
+        response: { status: result.status, error: result.error },
+    };
 }
 
 async function requireUserOAuth(
@@ -473,43 +625,17 @@ router.post(
                     .json({ error: "deviceCode is required" });
             }
 
-            const settings = await getSystemSettings();
-            if (!settings?.ytMusicClientId || !settings?.ytMusicClientSecret) {
+            const result = await runYtOAuthCredentialOperation(
+                userId,
+                (generation) =>
+                    pollYtOAuthCredential(userId, generation, deviceCode),
+            );
+            if (!result.credentialsConfigured) {
                 return res.status(400).json({
                     error: "YouTube Music Client ID and Secret not configured",
                 });
             }
-
-            const result = await ytMusicService.pollDeviceAuth(
-                userId,
-                settings.ytMusicClientId,
-                settings.ytMusicClientSecret,
-                deviceCode,
-            );
-
-            // If we got a successful token, save it encrypted in the DB
-            if (result.status === "success" && result.oauth_json) {
-                await prisma.userSettings.upsert({
-                    where: { userId },
-                    create: {
-                        userId,
-                        ytMusicOAuthJson: encrypt(result.oauth_json),
-                    },
-                    update: {
-                        ytMusicOAuthJson: encrypt(result.oauth_json),
-                    },
-                });
-                setYtOAuthCache(userId, true);
-                logger.info(
-                    `[YTMusic] Device code auth completed for user ${userId}`,
-                );
-            }
-
-            // Don't send raw oauth_json to the frontend
-            res.json({
-                status: result.status,
-                error: result.error,
-            });
+            res.json(result.response);
         } catch (err: any) {
             logger.error("[YTMusic Route] Device code poll failed:", err);
             res.status(500).json({
@@ -571,30 +697,21 @@ router.post(
                     .json({ error: "Invalid JSON in oauthJson" });
             }
 
-            // Encrypt and save to UserSettings
-            await prisma.userSettings.upsert({
-                where: { userId },
-                create: {
-                    userId,
-                    ytMusicOAuthJson: encrypt(oauthJson),
-                },
-                update: {
-                    ytMusicOAuthJson: encrypt(oauthJson),
-                },
-            });
-
-            // Restore to sidecar so it's immediately usable
-            const settings = await getSystemSettings();
-            await ytMusicService.restoreOAuthWithCredentials(
+            const success = await runYtOAuthCredentialOperation(
                 userId,
-                oauthJson,
-                settings?.ytMusicClientId || undefined,
-                settings?.ytMusicClientSecret || undefined,
+                (generation) =>
+                    persistYtManualOAuthCredential(
+                        userId,
+                        generation,
+                        oauthJson,
+                    ),
             );
-            setYtOAuthCache(userId, true);
-
-            logger.info(`[YTMusic] OAuth credentials saved for user ${userId}`);
-            res.json({ success: true });
+            if (success) {
+                logger.info(
+                    `[YTMusic] OAuth credentials saved for user ${userId}`,
+                );
+            }
+            res.json({ success });
         } catch (err: any) {
             logger.error("[YTMusic Route] Save OAuth token failed:", err);
             res.status(500).json({
