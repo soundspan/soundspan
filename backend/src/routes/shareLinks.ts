@@ -53,6 +53,30 @@ const shareTokenSchema = z.object({
     token: z.string().trim().min(1),
 });
 
+type AllowedImageMime = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+
+const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
+const PNG_SIGNATURE = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const GIF_SIGNATURE = Buffer.from("GIF8", "ascii");
+const RIFF_SIGNATURE = Buffer.from("RIFF", "ascii");
+const WEBP_SIGNATURE = Buffer.from("WEBP", "ascii");
+
+/** Detect an allowlisted image MIME type from file-signature bytes. */
+export function detectImageMime(buffer: Buffer): AllowedImageMime | null {
+    if (buffer.subarray(0, 3).equals(JPEG_SIGNATURE)) return "image/jpeg";
+    if (buffer.subarray(0, 8).equals(PNG_SIGNATURE)) return "image/png";
+    if (buffer.subarray(0, 4).equals(GIF_SIGNATURE)) return "image/gif";
+    if (
+        buffer.subarray(0, 4).equals(RIFF_SIGNATURE) &&
+        buffer.subarray(8, 12).equals(WEBP_SIGNATURE)
+    ) {
+        return "image/webp";
+    }
+    return null;
+}
+
 function isExpired(expiresAt: Date | null): boolean {
     if (!expiresAt) return false;
     return expiresAt.getTime() <= Date.now();
@@ -1031,7 +1055,14 @@ router.get("/access/:token/cover", async (req, res) => {
             return res.status(404).json({ error: "Cover image not found" });
         }
 
-        res.setHeader("Content-Type", result.contentType || "image/jpeg");
+        const contentType = detectImageMime(result.buffer);
+        if (!contentType) {
+            return res.status(404).json({ error: "Cover image not found" });
+        }
+
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Content-Disposition", "inline");
+        res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("Cache-Control", "public, max-age=3600");
         if (result.etag) {
             res.setHeader("ETag", result.etag);

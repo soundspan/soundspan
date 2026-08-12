@@ -7,6 +7,10 @@ const ROLE_HEADER = "x-test-role";
 const TOKEN = "t".repeat(64);
 const CREATED_AT = new Date("2026-03-26T10:00:00.000Z");
 const FILE_MODIFIED = new Date("2026-03-26T09:00:00.000Z");
+const PNG_BUFFER = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const JPEG_BUFFER = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
 
 const mockRequireAuth = jest.fn(
     (req: Request, res: Response, next: NextFunction) => {
@@ -205,7 +209,7 @@ describe("share links routes integration", () => {
 
         mockFetchExternalImage.mockResolvedValue({
             ok: true,
-            buffer: Buffer.from("cover-image"),
+            buffer: PNG_BUFFER,
             contentType: "image/png",
             etag: "cover-etag",
         });
@@ -911,24 +915,87 @@ describe("share links routes integration", () => {
         },
     );
 
-    it("GET /api/share-links/access/:token/cover proxies external cover art without auth", async () => {
-        mockShareLinkFindUnique.mockResolvedValueOnce(
-            makeShareLink({ resourceType: "album", resourceId: "album-1" }),
-        );
+    it.each([
+        {
+            label: "PNG",
+            buffer: PNG_BUFFER,
+            upstreamContentType: "application/octet-stream",
+            expectedContentType: "image/png",
+        },
+        {
+            label: "JPEG",
+            buffer: JPEG_BUFFER,
+            upstreamContentType: "text/html",
+            expectedContentType: "image/jpeg",
+        },
+    ])(
+        "GET /api/share-links/access/:token/cover serves valid $label bytes with server-chosen headers",
+        async ({ buffer, upstreamContentType, expectedContentType }) => {
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({
+                    resourceType: "album",
+                    resourceId: "album-1",
+                }),
+            );
+            mockFetchExternalImage.mockResolvedValueOnce({
+                ok: true,
+                buffer,
+                contentType: upstreamContentType,
+                etag: "cover-etag",
+            });
 
-        const res = await request(app)
-            .get(`/api/share-links/access/${TOKEN}/cover`)
-            .query({ url: "https://images.example.test/cover.png" });
+            const res = await request(app)
+                .get(`/api/share-links/access/${TOKEN}/cover`)
+                .query({ url: "https://images.example.test/cover" });
 
-        expect(res.status).toBe(200);
-        expect(mockFetchExternalImage).toHaveBeenCalledWith({
-            url: "https://images.example.test/cover.png",
-        });
-        expect(res.headers["content-type"]).toContain("image/png");
-        expect(res.headers["cache-control"]).toBe("public, max-age=3600");
-        expect(res.headers.etag).toBe("cover-etag");
-        expect(res.body).toEqual(Buffer.from("cover-image"));
-    });
+            expect(res.status).toBe(200);
+            expect(mockFetchExternalImage).toHaveBeenCalledWith({
+                url: "https://images.example.test/cover",
+            });
+            expect(res.headers["content-type"]).toBe(expectedContentType);
+            expect(res.headers["content-disposition"]).toBe("inline");
+            expect(res.headers["x-content-type-options"]).toBe("nosniff");
+            expect(res.headers["cache-control"]).toBe("public, max-age=3600");
+            expect(res.headers.etag).toBe("cover-etag");
+            expect(res.body).toEqual(buffer);
+        },
+    );
+
+    it.each([
+        {
+            upstreamContentType: "text/html",
+            buffer: Buffer.from("<!doctype html><script>alert(1)</script>"),
+        },
+        {
+            upstreamContentType: "application/javascript",
+            buffer: Buffer.from("globalThis.pwned = true"),
+        },
+    ])(
+        "GET /api/share-links/access/:token/cover rejects $upstreamContentType bytes without reflecting the type",
+        async ({ upstreamContentType, buffer }) => {
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({
+                    resourceType: "album",
+                    resourceId: "album-1",
+                }),
+            );
+            mockFetchExternalImage.mockResolvedValueOnce({
+                ok: true,
+                buffer,
+                contentType: upstreamContentType,
+            });
+
+            const res = await request(app)
+                .get(`/api/share-links/access/${TOKEN}/cover`)
+                .query({ url: "https://attacker.example.test/payload" });
+
+            expect(res.status).toBe(404);
+            expect(res.body).toEqual({ error: "Cover image not found" });
+            expect(res.headers["content-type"]).not.toContain(
+                upstreamContentType,
+            );
+        },
+    );
 
     it("GET /api/share-links/access/:token/cover validates the url parameter", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce(

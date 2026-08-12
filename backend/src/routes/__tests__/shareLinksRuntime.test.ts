@@ -94,7 +94,7 @@ jest.mock("archiver", () => ({
 const mockFetchExternalImage = jest.fn().mockResolvedValue({
     ok: true,
     url: "https://example.com/cover.jpg",
-    buffer: Buffer.from("fake-image"),
+    buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
     contentType: "image/jpeg",
     etag: "abc123",
 });
