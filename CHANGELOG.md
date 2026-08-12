@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Retained the Python 3.11 Essentia analyzer platform matrix after reevaluating
+  current PyPI artifacts: `essentia-tensorflow` 2.1b6.dev1389 remains the newest
+  CPython 3.11 manylinux x86-64 build, while 2.1b6.dev1438 is CPython 3.14-only.
+  Documented its embedded TensorFlow C 2.5.0 runtime separately from the locked
+  TensorFlow 2.15.1 Python package and established a deterministic MusiCNN model
+  load/inference baseline without changing analyzer or AIO dependency locks.
 - The Rediscover daily mix now builds its candidates from a bounded, indexed
   pool (overplayed tracks excluded via a grouped play query, then a capped track
   fetch) instead of loading and counting plays for the entire track library on

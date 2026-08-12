@@ -4,19 +4,23 @@
 # installs with `pip install --require-hashes`. Keep this file and the lock in
 # sync — regenerate the lock (see its header) after any edit here.
 
-# TensorFlow + Essentia (MusiCNN). essentia-tensorflow links against the
-# TF 2.13–2.15 ABI; on Python 3.11 this resolves to TF 2.15.x (matching the AIO
-# image's requirements-aio.lock resolution).
+# Validated linux/amd64 platform matrix (issue #202, 2026-08-12): Python 3.11,
+# TensorFlow 2.15.1, essentia-tensorflow 2.1b6.dev1389, NumPy 1.26.4, and
+# redis-py 8.1.0. PyPI's newer essentia-tensorflow 2.1b6.dev1438 publishes only
+# CPython 3.14 wheels, so dev1389 remains the newest build available for this
+# image. Its wheel embeds TensorFlow C 2.5.0 and declares no Python TensorFlow
+# dependency; retain TensorFlow 2.15.x as the jointly locked, inference-validated
+# companion rather than treating the two packages as one shared ABI.
 tensorflow>=2.13.0,<2.16.0
 # Essentia publishes only pre-release dev builds, making uv's unpinned selection
-# cache-sensitive across cold builds. Pin the AIO lock build for one TF 2.15 ABI
-# and identical model behavior in both analyzers (roadmap F50 reproducible lock).
+# cache-sensitive across cold builds. Pin the newest CPython 3.11 build for
+# identical model behavior in both analyzers (roadmap F50 reproducible lock).
 essentia-tensorflow==2.1b6.dev1389
 
 # Queue and database
 redis>=4.5.0
 psycopg2-binary>=2.9.0
 
-# NumPy 1.26.x is the last 1.x line and matches the TF 2.15/Essentia ABI used by
-# AIO, keeping analyzer output identical; NumPy 2.x remains ABI-incompatible.
+# NumPy 1.26.x is the last 1.x line and matches the jointly locked TensorFlow
+# 2.15 companion set used by AIO; TensorFlow 2.15 does not accept NumPy 2.x.
 numpy>=1.26.0,<2.0.0
