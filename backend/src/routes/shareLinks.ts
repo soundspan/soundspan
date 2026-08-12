@@ -12,10 +12,11 @@ import { fetchExternalImage } from "../services/imageProxy";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
-import { sendInternalRouteError } from "./routeErrorResponse";
+import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
 const zipLogger = logger.child("ShareLinks.ZipArchive");
+const SHARE_SESSION_WINDOW_MS = 60 * 60 * 1000;
 
 const playlistItemInclude = {
     track: {
@@ -57,6 +58,11 @@ function isExpired(expiresAt: Date | null): boolean {
     return expiresAt.getTime() <= Date.now();
 }
 
+function isActiveSession(lastStreamedAt: Date | null, now: Date): boolean {
+    if (!lastStreamedAt) return false;
+    return lastStreamedAt.getTime() >= now.getTime() - SHARE_SESSION_WINDOW_MS;
+}
+
 async function validateShareLink(token: string) {
     const shareLink = await prisma.shareLink.findUnique({ where: { token } });
     if (!shareLink) return null;
@@ -64,10 +70,49 @@ async function validateShareLink(token: string) {
     if (isExpired(shareLink.expiresAt)) return null;
     if (
         shareLink.maxPlays !== null &&
-        shareLink.playCount >= shareLink.maxPlays
+        shareLink.playCount >= shareLink.maxPlays &&
+        !isActiveSession(shareLink.lastStreamedAt, new Date())
     )
         return null;
     return shareLink;
+}
+
+async function consumeShareSession(shareLink: {
+    id: string;
+    maxPlays: number | null;
+    lastStreamedAt: Date | null;
+}): Promise<boolean> {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - SHARE_SESSION_WINDOW_MS);
+    const activeSession = isActiveSession(shareLink.lastStreamedAt, now);
+    const sessionCondition = activeSession
+        ? { lastStreamedAt: { gte: windowStart } }
+        : {
+              OR: [
+                  { lastStreamedAt: null },
+                  { lastStreamedAt: { lt: windowStart } },
+              ],
+          };
+    const result = await prisma.shareLink.updateMany({
+        where: {
+            id: shareLink.id,
+            revoked: false,
+            AND: [
+                { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+                sessionCondition,
+                ...(!activeSession && shareLink.maxPlays !== null
+                    ? [{ playCount: { lt: shareLink.maxPlays } }]
+                    : []),
+            ],
+        },
+        data: activeSession
+            ? { lastStreamedAt: now }
+            : {
+                  playCount: { increment: 1 },
+                  lastStreamedAt: now,
+              },
+    });
+    return result.count === 1;
 }
 
 const trackStreamSelect = {
@@ -646,46 +691,8 @@ router.get("/access/:token", async (req, res) => {
             return res.status(404).json({ error: "Share link not found" });
         }
 
-        const sessionWindowMs = 60 * 60 * 1000;
-        const now = new Date();
-        const windowStart = new Date(now.getTime() - sessionWindowMs);
-        const isNewSession =
-            shareLink.lastStreamedAt === null ||
-            shareLink.lastStreamedAt < windowStart;
-
-        if (isNewSession) {
-            await prisma.shareLink.updateMany({
-                where: {
-                    id: shareLink.id,
-                    revoked: false,
-                    AND: [
-                        {
-                            OR: [
-                                { expiresAt: null },
-                                { expiresAt: { gt: now } },
-                            ],
-                        },
-                        {
-                            OR: [
-                                { lastStreamedAt: null },
-                                { lastStreamedAt: { lt: windowStart } },
-                            ],
-                        },
-                        ...(shareLink.maxPlays !== null
-                            ? [{ playCount: { lt: shareLink.maxPlays } }]
-                            : []),
-                    ],
-                },
-                data: {
-                    playCount: { increment: 1 },
-                    lastStreamedAt: now,
-                },
-            });
-        } else {
-            await prisma.shareLink.update({
-                where: { id: shareLink.id },
-                data: { lastStreamedAt: now },
-            });
+        if (!(await consumeShareSession(shareLink))) {
+            return sendRouteError(res, 404, "Share link not found");
         }
 
         res.json({
@@ -751,11 +758,6 @@ router.get("/access/:token/stream/:trackId", async (req, res) => {
                 .json({ error: "Track not available for streaming" });
         }
 
-        await prisma.shareLink.update({
-            where: { id: shareLink.id },
-            data: { lastStreamedAt: new Date() },
-        });
-
         const normalizedFilePath = track.filePath.replace(/\\/g, "/");
         const absolutePath = safeResolvePath(
             config.music.musicPath,
@@ -765,6 +767,10 @@ router.get("/access/:token/stream/:trackId", async (req, res) => {
             return res
                 .status(404)
                 .json({ error: "Track not available for streaming" });
+        }
+
+        if (!(await consumeShareSession(shareLink))) {
+            return sendRouteError(res, 404, "Share link not found");
         }
 
         const streamingService = new AudioStreamingService(
@@ -942,6 +948,10 @@ router.get("/access/:token/zip", async (req, res) => {
             return res
                 .status(404)
                 .json({ error: "No streamable tracks found" });
+        }
+
+        if (!(await consumeShareSession(shareLink))) {
+            return sendRouteError(res, 404, "Share link not found");
         }
 
         // archiver v8 is ESM-only with named class exports; node 24 loads it via require(esm)
