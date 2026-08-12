@@ -43,6 +43,8 @@ const mockResolveFfmpegBinaryPath = jest.fn(
 const mockConfig = {
     nodeEnv: "production",
     allowedOrigins: [] as boolean | string[],
+    transcodeConcurrency: 3,
+    transcodeTimeoutMs: 5 * 60 * 1000,
     segmentedStreaming: {
         ffmpegPathOverride: undefined as string | undefined,
     },

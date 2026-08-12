@@ -25,36 +25,7 @@ const ffmpegBinaryPath = resolveFfmpegBinaryPath(
 inspectFfmpegVersion(ffmpegBinaryPath);
 ffmpeg.setFfmpegPath(ffmpegBinaryPath);
 
-const DEFAULT_TRANSCODE_CONCURRENCY = 3;
-const MAX_TRANSCODE_CONCURRENCY = 32;
-const DEFAULT_TRANSCODE_TIMEOUT_MS = 5 * 60 * 1000;
-const MAX_TRANSCODE_TIMEOUT_MS = 60 * 60 * 1000;
-
-function readBoundedPositiveInteger(
-    value: string | undefined,
-    fallback: number,
-    maximum: number,
-): number {
-    const normalized = value?.trim();
-    if (!normalized || !/^\d+$/.test(normalized)) return fallback;
-
-    const parsed = Number(normalized);
-    return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum
-        ? parsed
-        : fallback;
-}
-
-const transcodeConcurrency = readBoundedPositiveInteger(
-    process.env.TRANSCODE_CONCURRENCY,
-    DEFAULT_TRANSCODE_CONCURRENCY,
-    MAX_TRANSCODE_CONCURRENCY,
-);
-const transcodeTimeoutMs = readBoundedPositiveInteger(
-    process.env.TRANSCODE_TIMEOUT_MS,
-    DEFAULT_TRANSCODE_TIMEOUT_MS,
-    MAX_TRANSCODE_TIMEOUT_MS,
-);
-const transcodeQueue = new PQueue({ concurrency: transcodeConcurrency });
+const transcodeQueue = new PQueue({ concurrency: config.transcodeConcurrency });
 const inflightTranscodes = new Map<string, Promise<string>>();
 
 // Quality settings
@@ -378,7 +349,7 @@ export class AudioStreamingService {
                         sourcePath,
                         reject,
                     );
-                }, transcodeTimeoutMs);
+                }, config.transcodeTimeoutMs);
                 command.save(cachePath);
             } catch {
                 rejectOnce(
@@ -411,7 +382,7 @@ export class AudioStreamingService {
                 new AppError(
                     ErrorCode.TRANSCODE_FAILED,
                     ErrorCategory.RECOVERABLE,
-                    `Transcoding timed out after ${transcodeTimeoutMs}ms`,
+                    `Transcoding timed out after ${config.transcodeTimeoutMs}ms`,
                     { trackId, quality, source: sourcePath },
                 ),
             );

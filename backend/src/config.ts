@@ -35,6 +35,17 @@ const positiveIntEnvOr = (
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const boundedPositiveIntEnvOr = (
+    value: string | undefined,
+    fallback: number,
+    maximum: number,
+): number => {
+    const parsed = parseEnvInt(value, fallback);
+    return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum
+        ? parsed
+        : fallback;
+};
+
 // Lenient positive-int override; null when unset/empty/non-positive.
 const positiveIntEnvOrNull = (value: string | undefined): number | null => {
     const raw = value?.trim();
@@ -142,6 +153,17 @@ let musicConfig: MusicConfig = {
         process.env.TRANSCODE_CACHE_PATH || "./cache/transcodes",
     transcodeCacheMaxGb: parseEnvInt(process.env.TRANSCODE_CACHE_MAX_GB, 10),
 };
+
+const transcodeConcurrency = boundedPositiveIntEnvOr(
+    process.env.TRANSCODE_CONCURRENCY,
+    3,
+    32,
+);
+const transcodeTimeoutMs = boundedPositiveIntEnvOr(
+    process.env.TRANSCODE_TIMEOUT_MS,
+    5 * 60 * 1000,
+    60 * 60 * 1000,
+);
 
 const allowedOriginsFromEnv = parseEnvCsv(process.env.ALLOWED_ORIGINS);
 
@@ -266,6 +288,8 @@ export const config = {
 
     // Music library configuration (self-contained native music system)
     // Access via config.music - will be updated after initialization
+    transcodeConcurrency,
+    transcodeTimeoutMs,
     get music() {
         return musicConfig;
     },
