@@ -259,6 +259,8 @@ const PLAYBACK_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.startup_timeline",
     "player.unexpected_stop",
     "player.unexpected_pause",
+    "player.load_autoplay_decision",
+    "player.autoplay_intent_conflict",
     "player.track_end_rejected",
     "player.track_end_advanced",
     "player.playback_error",
@@ -372,6 +374,7 @@ const LISTEN_TOGETHER_FOLLOWER_RECOVERY_COOLDOWN_MS = 1_500;
 const STARTUP_PLAYBACK_RECOVERY_DELAY_MS = 1400;
 const STARTUP_PLAYBACK_RECOVERY_RECHECK_DELAY_MS = 900;
 const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
+const AUTOPLAY_INTENT_CONFLICT_WINDOW_MS = 3_000;
 const AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS = 8000;
 const SEGMENTED_HEARTBEAT_INTERVAL_MS = 15_000;
 const SEGMENTED_HANDOFF_MAX_ATTEMPTS = 4;
@@ -465,6 +468,12 @@ interface SegmentedStartupTimelineSnapshot {
     audibleAtMs: number | null;
     startupRetryCount: number;
     emitted: boolean;
+}
+
+interface DesiredLoadPlayIntent {
+    loadId: number;
+    shouldPlay: boolean;
+    decidedAtMs: number;
 }
 
 type SegmentedHandoffListenerPhase =
@@ -682,6 +691,8 @@ export const AudioPlaybackOrchestrator = memo(
             isMuted,
         });
         const loadIdRef = useRef<number>(0);
+        const desiredLoadPlayRef = useRef<DesiredLoadPlayIntent | null>(null);
+        const cancelledLoadPlayIdRef = useRef<number | null>(null);
         const cachePollingRef = useRef<NodeJS.Timeout | null>(null);
         const seekCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
         const cacheStatusPollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -2155,7 +2166,13 @@ export const AudioPlaybackOrchestrator = memo(
                     startupRecoveryTimeoutRef.current = null;
 
                     if (playbackTypeRef.current !== "track") return;
-                    if (!lastPlayingStateRef.current) return;
+                    const desiredLoadPlay = desiredLoadPlayRef.current;
+                    const hasDesiredLoadPlay = Boolean(
+                        desiredLoadPlay?.shouldPlay &&
+                        desiredLoadPlay.loadId === loadIdRef.current,
+                    );
+                    if (!lastPlayingStateRef.current && !hasDesiredLoadPlay)
+                        return;
                     if (currentTrackRef.current?.id !== trackId) return;
                     const listenTogetherSession =
                         getListenTogetherSessionSnapshot();
@@ -2219,7 +2236,13 @@ export const AudioPlaybackOrchestrator = memo(
                         startupRecoveryLoadListenerRef.current = null;
 
                         if (playbackTypeRef.current !== "track") return;
-                        if (!lastPlayingStateRef.current) return;
+                        const desiredLoadPlay = desiredLoadPlayRef.current;
+                        const hasDesiredLoadPlay = Boolean(
+                            desiredLoadPlay?.shouldPlay &&
+                            desiredLoadPlay.loadId === loadIdRef.current,
+                        );
+                        if (!lastPlayingStateRef.current && !hasDesiredLoadPlay)
+                            return;
                         if (currentTrackRef.current?.id !== trackId) return;
                         if (audioEngine.isPlaying()) return;
                         const listenTogetherSession =
@@ -4712,15 +4735,27 @@ export const AudioPlaybackOrchestrator = memo(
                 );
                 clearTransientTrackRecovery(true);
 
-                // Transition state machine - load complete
-                if (playbackStateMachine.getState() === "LOADING") {
+                const desiredLoadPlay = desiredLoadPlayRef.current;
+                const shouldPlayAfterLoad = Boolean(
+                    desiredLoadPlay?.shouldPlay &&
+                    desiredLoadPlay.loadId === loadIdRef.current,
+                );
+
+                // Autoplaying loads remain transitional until the engine's play
+                // event lands. READY deliberately means the load should stay paused.
+                if (
+                    playbackStateMachine.getState() === "LOADING" &&
+                    !shouldPlayAfterLoad
+                ) {
                     playbackStateMachine.transition("READY");
                 }
 
                 if (
                     playbackType === "track" &&
                     currentTrack?.id &&
-                    (lastPlayingStateRef.current || isPlaying)
+                    (lastPlayingStateRef.current ||
+                        isPlaying ||
+                        shouldPlayAfterLoad)
                 ) {
                     scheduleStartupPlaybackRecovery(currentTrack.id);
                 }
@@ -5847,6 +5882,8 @@ export const AudioPlaybackOrchestrator = memo(
 
             if (!currentMediaId) {
                 trackEndWatchdogRef.current?.clear();
+                desiredLoadPlayRef.current = null;
+                cancelledLoadPlayIdRef.current = null;
                 wasPlayingWhenHiddenRef.current = false;
                 markSegmentedStartupRampWindow(null, "media_cleared");
                 setStreamProfile(null);
@@ -5953,6 +5990,8 @@ export const AudioPlaybackOrchestrator = memo(
             lastTrackIdRef.current = currentMediaId;
             loadIdRef.current += 1;
             const thisLoadId = loadIdRef.current;
+            desiredLoadPlayRef.current = null;
+            cancelledLoadPlayIdRef.current = null;
             const hasAdvancePlayIntent = isAdvancePlayIntentFresh(
                 advancePlayIntentAtMsRef.current,
                 Date.now(),
@@ -6150,6 +6189,7 @@ export const AudioPlaybackOrchestrator = memo(
                     | "on_demand"
                     | null = null;
                 let forceFreshSegmentedSession = false;
+                let capturedLoadPlayIntent: DesiredLoadPlayIntent | null = null;
 
                 const resolveSourceForLoad = async (): Promise<void> => {
                     if (sourceResolved) {
@@ -6826,20 +6866,52 @@ export const AudioPlaybackOrchestrator = memo(
                         return;
                     }
 
-                    const listenTogetherSnapshotForLoad =
-                        getListenTogetherSessionSnapshot();
-                    const shouldAutoPlayOnLoad = resolveLoadAutoplayDecision({
-                        wasPlayingBeforeLoad:
+                    const deferAutoplay =
+                        typeof sourceForLoad === "string" && startTime > 0;
+                    if (!capturedLoadPlayIntent) {
+                        const listenTogetherSnapshotForLoad =
+                            getListenTogetherSessionSnapshot();
+                        const wasPlayingBeforeLoad =
                             lastPlayingStateRef.current ||
-                            wasEnginePlayingBeforeLoad,
-                        hasAdvancePlayIntent,
-                        // Followers start playback via the LT play-at/delta
-                        // resume, never from local state (audible-blip fix).
-                        isListenTogetherFollower: Boolean(
-                            listenTogetherSnapshotForLoad?.groupId &&
-                            !listenTogetherSnapshotForLoad.isHost,
-                        ),
-                    });
+                            wasEnginePlayingBeforeLoad;
+                        const resolvedShouldAutoPlay =
+                            resolveLoadAutoplayDecision({
+                                wasPlayingBeforeLoad,
+                                hasAdvancePlayIntent,
+                                // Followers start playback via the LT play-at/delta
+                                // resume, never from local state (audible-blip fix).
+                                isListenTogetherFollower: Boolean(
+                                    listenTogetherSnapshotForLoad?.groupId &&
+                                    !listenTogetherSnapshotForLoad.isHost,
+                                ),
+                            });
+                        const shouldAutoPlayOnLoad =
+                            cancelledLoadPlayIdRef.current === thisLoadId
+                                ? false
+                                : resolvedShouldAutoPlay;
+                        capturedLoadPlayIntent = {
+                            loadId: thisLoadId,
+                            shouldPlay: shouldAutoPlayOnLoad,
+                            decidedAtMs: Date.now(),
+                        };
+                        desiredLoadPlayRef.current = capturedLoadPlayIntent;
+                        logPlaybackClientMetric(
+                            "player.load_autoplay_decision",
+                            {
+                                loadId: thisLoadId,
+                                shouldAutoPlayOnLoad,
+                                deferAutoplay,
+                                hasAdvancePlayIntent,
+                                wasPlayingBeforeLoad,
+                                startTime,
+                            },
+                        );
+                    }
+                    const desiredLoadPlay = desiredLoadPlayRef.current;
+                    const shouldAutoPlayOnLoad = Boolean(
+                        desiredLoadPlay?.shouldPlay &&
+                        desiredLoadPlay.loadId === thisLoadId,
+                    );
 
                     if (typeof sourceForLoad === "string") {
                         activeSegmentedPlaybackTrackIdRef.current = null;
@@ -6849,7 +6921,6 @@ export const AudioPlaybackOrchestrator = memo(
                         // Passing autoplay=true here would cause Howler's onload to
                         // play() from position 0 before handleLoaded can seek,
                         // producing overlapping audio streams.
-                        const deferAutoplay = startTime > 0;
                         audioEngine.load(
                             sourceForLoad,
                             deferAutoplay ? false : shouldAutoPlayOnLoad,
@@ -6944,25 +7015,24 @@ export const AudioPlaybackOrchestrator = memo(
 
                         const listenTogetherSnapshotAtLoaded =
                             getListenTogetherSessionSnapshot();
-                        const shouldAutoPlay = resolveLoadAutoplayDecision({
-                            wasPlayingBeforeLoad:
-                                lastPlayingStateRef.current ||
-                                wasEnginePlayingBeforeLoad,
-                            hasAdvancePlayIntent,
+                        const desiredLoadPlay = desiredLoadPlayRef.current;
+                        const shouldAutoPlay = Boolean(
+                            desiredLoadPlay?.shouldPlay &&
+                            desiredLoadPlay.loadId === thisLoadId &&
                             // Same follower rule as the load-time decision: the
                             // deferred (seek-then-play) path must not start
                             // follower playback from local state either.
-                            isListenTogetherFollower: Boolean(
+                            !(
                                 listenTogetherSnapshotAtLoaded?.groupId &&
-                                !listenTogetherSnapshotAtLoaded.isHost,
+                                !listenTogetherSnapshotAtLoaded.isHost
                             ),
-                        });
+                        );
 
-                        if (shouldAutoPlay && !audioEngine.isPlaying()) {
-                            applyCurrentOutputState();
-                            audioEngine.play();
-                            if (!lastPlayingStateRef.current) {
-                                setIsPlaying(true);
+                        if (shouldAutoPlay) {
+                            setIsPlaying(true);
+                            if (!audioEngine.isPlaying()) {
+                                applyCurrentOutputState();
+                                audioEngine.play();
                             }
                         }
 
@@ -7453,6 +7523,25 @@ export const AudioPlaybackOrchestrator = memo(
         // Skip if a track change is in progress -- the track-change effect handles playback.
         // This prevents doubled audio when next() sets both currentTrack and isPlaying simultaneously.
         useEffect(() => {
+            if (!isPlaying) {
+                const desiredLoadPlay = desiredLoadPlayRef.current;
+                const shouldReportAutoplayConflict = Boolean(
+                    !isLoadingRef.current &&
+                    audioEngine.isPlaying() &&
+                    desiredLoadPlay?.shouldPlay &&
+                    desiredLoadPlay.loadId === loadIdRef.current &&
+                    Date.now() - desiredLoadPlay.decidedAtMs <=
+                        AUTOPLAY_INTENT_CONFLICT_WINDOW_MS,
+                );
+                if (shouldReportAutoplayConflict && desiredLoadPlay) {
+                    logPlaybackClientMetric("player.autoplay_intent_conflict", {
+                        loadId: desiredLoadPlay.loadId,
+                    });
+                }
+                desiredLoadPlayRef.current = null;
+                cancelledLoadPlayIdRef.current = loadIdRef.current;
+            }
+
             if (isLoadingRef.current) return;
 
             isUserInitiatedRef.current = true;
@@ -7990,6 +8079,8 @@ export const AudioPlaybackOrchestrator = memo(
             const segmentedPrewarmRetryTimeouts =
                 segmentedPrewarmRetryTimeoutsRef.current;
             return () => {
+                desiredLoadPlayRef.current = null;
+                cancelledLoadPlayIdRef.current = null;
                 audioEngine.stop();
 
                 if (progressSaveIntervalRef.current) {

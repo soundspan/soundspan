@@ -335,6 +335,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Queue auto-advance no longer pauses itself right after the next track starts:
+  the ready-state transition no longer erases the advance's play intent, the
+  deferred-play path re-asserts it explicitly, and load/play-intent decisions
+  are now visible in server telemetry.
 - Queue auto-advance now recovers when the browser blocks the next track's
   playback start in a background or unfocused window, using bounded automatic
   retries plus a retry on window focus, with blocked and recovery-attempt states
@@ -742,6 +746,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Playlist import links now require canonical HTTP(S) URLs, and audiobook
   preflight responses now use the central deny-by-default CORS policy.
+- Account-management, 2FA, Subsonic-credential, admin queue-dashboard, and
+  playback-state sync routes now have route-level rate limiting; playback-state
+  uses a generous dedicated tier for its high-frequency cadence, and invite
+  codes use unbiased cryptographic random character selection.
 - Hardened external-metadata escaping for Deezer and Spotify, and replaced
   backtracking-prone normalization regexes with linear forms in Soulseek,
   search, and Lidarr.

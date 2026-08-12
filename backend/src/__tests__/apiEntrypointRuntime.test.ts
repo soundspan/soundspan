@@ -707,8 +707,12 @@ describe("api entrypoint runtime behavior", () => {
             (args: unknown[]) => args[0] === "/api/admin/queues",
         );
         expect(queuesCall).toBeDefined();
-        expect(queuesCall![1]).toBe(mocks.requireAuth);
-        expect(queuesCall![2]).toBe(mocks.requireAdmin);
+        expect(queuesCall!.slice(1)).toEqual([
+            "api-limiter",
+            mocks.requireAuth,
+            mocks.requireAdmin,
+            "bull-router",
+        ]);
     });
 
     it("mounts /api/device-link behind the stricter authLimiter", async () => {

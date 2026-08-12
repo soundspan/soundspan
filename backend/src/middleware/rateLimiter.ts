@@ -43,6 +43,17 @@ export const apiLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
+// Playback-state clients persist progress every 15 seconds (4 requests/minute).
+// Allow 600 requests/minute so even 150 normally syncing devices behind one IP fit.
+export const playbackStateLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 600,
+    message: "Too many playback state requests. Please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...trustProxyValidation,
+});
+
 // Auth limiter for login endpoints (40 attempts/15min per IP)
 // More lenient for self-hosted apps where users may have password manager issues
 export const authLimiter = rateLimit({
