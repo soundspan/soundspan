@@ -1,0 +1,5 @@
+# Parallel PRs each append entries to the changelog; take both sides on
+# overlapping hunks instead of conflicting. Release rollovers restructure the
+# file in a single serialized PR, where union semantics are equally safe. The
+# changelog heading lint (release tooling) guards against duplicated headings.
+CHANGELOG.md merge=union
