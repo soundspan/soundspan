@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [2.0.1] - 2026-08-13
+
+### Added
+
+### Changed
+
+### Fixed
+
 - The CLAP analyzer image now ships `pgrep` so the Helm chart's default liveness and readiness probes work (#448).
 
 ## [2.0.0] - 2026-08-13
