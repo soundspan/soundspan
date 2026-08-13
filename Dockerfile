@@ -196,6 +196,7 @@ COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
 # Prisma 7 CLI reads schema/migrations/datasource config from prisma.config.ts
 COPY backend/prisma.config.ts ./
+COPY backend/databaseUrl.js ./
 RUN echo "=== Migrations copied ===" && ls -la prisma/migrations/ && echo "=== End migrations ==="
 RUN npm ci && npm cache clean --force
 RUN npx prisma generate

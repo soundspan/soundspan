@@ -1,9 +1,8 @@
 name: CodeQL
 
 # Static analysis via GitHub's default-setup-style CodeQL (docs/modernization-
-# roadmap.md F45, epic #10, #59 WS2.4). Alerts surface in the Security tab
-# and are non-blocking by nature; the `continue-on-error` below is defense
-# in depth for the same day-one non-blocking posture as security-scanning.yml.
+# roadmap.md F45, epic #10, #59 WS2.4). Analysis is a blocking pull-request
+# and main-branch check, with alerts surfaced in the Security tab.
 on:
   pull_request:
     branches: [main]

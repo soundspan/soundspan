@@ -316,7 +316,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 const leastPlayedTracks = await prisma.$queryRaw<
                     { id: string }[]
                 >`
-                        SELECT t.id 
+                        SELECT t.id
                         FROM "Track" t
                         LEFT JOIN "Play" p ON p."trackId" = t.id
                         GROUP BY t.id

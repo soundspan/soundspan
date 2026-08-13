@@ -1069,6 +1069,7 @@ risk:
 | Backend module format | Defer the CommonJS-to-ESM migration. Revisit it as a coordinated runtime, build, test, and dependency change rather than a pre-release conversion. |
 | Python sidecar layout | Defer a shared `src/`-layout re-architecture. Revisit it with an explicit packaging and container-entrypoint plan across all sidecars. |
 | Frontend lint debt | Keep the current 0-error/182-warning result as a tracked ratchet: no warning growth, with warning classes burned down in focused follow-ups. |
+| Branch governance | Keep `enforce_admins`, required approvals, required conversation resolution, and rulesets off (owner decision, 2026-08-13). The project has one maintainer and an auto-merge flow that these settings would block. 21 status checks are required. Revisit per issue #441 when a second contributor joins or fork PRs open. |
 
 ### The kernel — preserve and lean into (do not rewrite)
 
