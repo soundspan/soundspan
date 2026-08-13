@@ -358,6 +358,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The all-in-one image builds again by copying the Prisma config's database-URL
+  helper into every stage that runs the Prisma CLI, with a static CI guard
+  covering both backend Dockerfiles.
 - Compose deployments now construct `DATABASE_URL` from `POSTGRES_*`
   components in-app with percent-encoded credentials, so passwords containing
   URL-reserved characters work; explicit `DATABASE_URL` still wins.

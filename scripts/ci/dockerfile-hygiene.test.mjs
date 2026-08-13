@@ -35,6 +35,85 @@ function isExternalImage(reference) {
     return /[:@/]/.test(reference);
 }
 
+function relativeImportFiles(configPath) {
+    const config = readRepoFile(configPath);
+    const configDirectory = path.posix.dirname(configPath);
+    const importPattern =
+        /(?:\bfrom\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)["'](\.[^"']+)["']/g;
+    const imports = [...config.matchAll(importPattern)].map(
+        (match) => match[1],
+    );
+
+    return imports.map((importPath) => {
+        const unresolvedPath = path.posix.join(configDirectory, importPath);
+        const candidates = [
+            unresolvedPath,
+            `${unresolvedPath}.js`,
+            `${unresolvedPath}.ts`,
+        ];
+        const resolvedPath = candidates.find((candidate) =>
+            fs.existsSync(path.join(repoRoot, candidate)),
+        );
+        assert.ok(resolvedPath, `${configPath}: cannot resolve ${importPath}`);
+        return resolvedPath;
+    });
+}
+
+function dockerfileStages(dockerfile) {
+    return dockerfile
+        .split(/(?=^FROM )/gim)
+        .filter((stage) => /^FROM /i.test(stage))
+        .map((text, index) => {
+            const header = text.split(/\r?\n/, 1)[0];
+            const match = header.match(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/i);
+            assert.ok(match, `invalid Dockerfile stage header: ${header}`);
+            return {
+                base: match[1],
+                name: match[2] ?? `stage-${index + 1}`,
+                text,
+            };
+        });
+}
+
+function dockerCopySources(stage) {
+    return stage.split(/\r?\n/).flatMap((line) => {
+        const match = line.match(/^\s*COPY\s+(.+)$/i);
+        if (!match) return [];
+        const tokens = match[1].trim().split(/\s+/);
+        const operands = tokens.filter((token) => !token.startsWith("--"));
+        return operands.slice(0, -1);
+    });
+}
+
+function sourceCopiesFile(source, relativePath) {
+    const normalizedSource = path.posix.normalize(source.replaceAll('"', ""));
+    const normalizedPath = path.posix.normalize(relativePath);
+    return (
+        path.posix.basename(normalizedSource) ===
+            path.posix.basename(normalizedPath) ||
+        normalizedSource === "." ||
+        normalizedPath.startsWith(`${normalizedSource}/`)
+    );
+}
+
+function stageRunsPrisma(stage) {
+    const commands = stage
+        .split(/\r?\n/)
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n");
+    return /\bnpx\s+prisma\s+(?:generate|migrate)\b/i.test(commands);
+}
+
+function effectiveStageCopies(stages) {
+    const copiesByStage = new Map();
+    return stages.map((stage) => {
+        const inheritedCopies = copiesByStage.get(stage.base) ?? [];
+        const copies = [...inheritedCopies, ...dockerCopySources(stage.text)];
+        copiesByStage.set(stage.name, copies);
+        return { ...stage, copies };
+    });
+}
+
 function composeConfig(postgresPassword) {
     const environment = {
         ...process.env,
@@ -342,4 +421,48 @@ test("11. split-stack PostgreSQL startup rejects the published sentinel", (t) =>
     assert.notEqual(sentinelResult.status, 0);
     assert.match(sentinelResult.stderr, /must not be changeme/);
     assert.equal(configuredResult.status, 0, configuredResult.stderr);
+});
+
+test("12. Prisma CLI stages copy relative prisma.config.ts imports", () => {
+    const configPath = "backend/prisma.config.ts";
+    const importedFiles = relativeImportFiles(configPath);
+    const dockerfiles = [
+        {
+            relativePath: "Dockerfile",
+            configCopyPath: configPath,
+            importedCopyPaths: importedFiles,
+        },
+        {
+            relativePath: "backend/Dockerfile",
+            configCopyPath: path.posix.basename(configPath),
+            importedCopyPaths: importedFiles.map((importedFile) =>
+                path.posix.relative("backend", importedFile),
+            ),
+        },
+    ];
+
+    for (const dockerfile of dockerfiles) {
+        const stages = effectiveStageCopies(
+            dockerfileStages(readRepoFile(dockerfile.relativePath)),
+        );
+        for (const stage of stages) {
+            const copiesConfig = stage.copies.some((source) =>
+                sourceCopiesFile(source, dockerfile.configCopyPath),
+            );
+            if (!copiesConfig && !stageRunsPrisma(stage.text)) continue;
+
+            assert.ok(
+                copiesConfig,
+                `${dockerfile.relativePath} ${stage.name}: Prisma CLI stage must copy ${dockerfile.configCopyPath}`,
+            );
+            for (const importedFile of dockerfile.importedCopyPaths) {
+                assert.ok(
+                    stage.copies.some((source) =>
+                        sourceCopiesFile(source, importedFile),
+                    ),
+                    `${dockerfile.relativePath} ${stage.name}: Prisma config import ${importedFile} must be copied into the stage`,
+                );
+            }
+        }
+    }
 });
