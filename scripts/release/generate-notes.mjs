@@ -26,6 +26,7 @@ const RELEASE_CATEGORY_ALIASES = {
     fixed: ["Fixed", "Fixes"],
     added: ["Added", "New"],
     changed: ["Changed", "Updated"],
+    accessibility: ["Accessibility"],
     admin: ["Admin/Operations", "Admin", "Operations", "Database Migrations"],
     breaking: ["Breaking Changes", "Breaking"],
     security: ["Security"],
@@ -201,6 +202,15 @@ function buildReleaseSummary(counts, manualSummary) {
     if (counts.changed > 0) {
         parts.push(formatCount(counts.changed, "change", "changes"));
     }
+    if (counts.accessibility > 0) {
+        parts.push(
+            formatCount(
+                counts.accessibility,
+                "accessibility improvement",
+                "accessibility improvements",
+            ),
+        );
+    }
     if (counts.admin > 0) {
         parts.push(
             `${formatCount(counts.admin, "admin/operations update", "admin/operations updates")}`,
@@ -279,6 +289,10 @@ function loadReleaseItemsFromChangelog(version) {
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.changed,
     );
+    const accessibility = pickBulletsByHeadingAliases(
+        bulletsByHeading,
+        RELEASE_CATEGORY_ALIASES.accessibility,
+    );
     const admin = pickBulletsByHeadingAliases(
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.admin,
@@ -294,6 +308,7 @@ function loadReleaseItemsFromChangelog(version) {
         security,
         added,
         changed,
+        accessibility,
         admin,
         breaking,
     };
@@ -337,6 +352,7 @@ function main() {
         security: categorized.security.length,
         added: categorized.added.length,
         changed: categorized.changed.length,
+        accessibility: categorized.accessibility.length,
         admin: categorized.admin.length,
     };
 
@@ -367,6 +383,10 @@ function main() {
         "{{CHANGED_ITEMS}}": formatBulletBlock(
             categorized.changed,
             "No behavior changes documented in this release.",
+        ),
+        "{{ACCESSIBILITY_ITEMS}}": formatBulletBlock(
+            categorized.accessibility,
+            "No accessibility improvements documented in this release.",
         ),
         "{{ADMIN_ITEMS}}": formatBulletBlock(
             categorized.admin,

@@ -16,6 +16,10 @@
 
 {{CHANGED_ITEMS}}
 
+## Accessibility
+
+{{ACCESSIBILITY_ITEMS}}
+
 ## Admin/Operations
 
 {{ADMIN_ITEMS}}

@@ -24,7 +24,7 @@
         "verify:gates": "node scripts/ci/check-route-error-canon.mjs && npm run check:error-canon:test && npm run check:infra-release:test && node --test scripts/ci/dockerfile-hygiene.test.mjs && npm --prefix frontend run lint:hex && npm --prefix backend test -- --maxWorkers=2 src/config/__tests__/openapiRouteSync.test.ts && npm run format:check",
         "check:error-canon": "node scripts/ci/check-route-error-canon.mjs",
         "check:error-canon:test": "node --test scripts/ci/__tests__/check-route-error-canon.test.mjs",
-        "check:infra-release:test": "node --test scripts/ci/__tests__/helm-service-selector-check.test.mjs scripts/ci/__tests__/release-version-validator.test.mjs",
+        "check:infra-release:test": "node --test scripts/ci/__tests__/helm-service-selector-check.test.mjs scripts/ci/__tests__/release-version-validator.test.mjs scripts/release/__tests__/generate-notes.test.mjs",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"
     }
