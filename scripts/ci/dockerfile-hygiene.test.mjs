@@ -16,6 +16,36 @@ const dockerfilePaths = [
     "services/audio-analyzer-clap/Dockerfile",
 ];
 
+const chartComponentDockerfiles = new Map([
+    ["aio", "Dockerfile"],
+    ["backend", "backend/Dockerfile"],
+    ["backendWorker", "backend/Dockerfile"],
+    ["frontend", "frontend/Dockerfile"],
+    ["tidalSidecar", "services/tidal-downloader/Dockerfile"],
+    ["ytmusicStreamer", "services/ytmusic-streamer/Dockerfile"],
+    ["audioAnalyzer", "services/audio-analyzer/Dockerfile"],
+    ["audioAnalyzerClap", "services/audio-analyzer-clap/Dockerfile"],
+]);
+
+const binaryPackageProviders = new Map([["pgrep", "procps"]]);
+
+// These assumptions are deliberately narrow. The chart's repo-built Python and
+// Node images use the official Debian slim families, which provide /bin/sh and
+// their named language executables. Add a binary only when the base contract is
+// documented; distro utilities such as pgrep must be installed explicitly.
+const baseImageFamilyBinaries = [
+    {
+        pattern: /^python:[^@]+-slim@sha256:/,
+        binaries: new Set(["python", "python3", "sh"]),
+    },
+    {
+        pattern: /^node:[^@]+-slim@sha256:/,
+        binaries: new Set(["node", "sh"]),
+    },
+];
+
+const probeNames = ["livenessProbe", "readinessProbe"];
+
 function readRepoFile(relativePath) {
     return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
@@ -73,6 +103,99 @@ function dockerfileStages(dockerfile) {
                 text,
             };
         });
+}
+
+function execProbeReference(component, probeName) {
+    const probe = component.text.match(
+        new RegExp(
+            `^  ${probeName}:\\s*$([\\s\\S]*?)(?=^  [A-Za-z][A-Za-z0-9]*:|(?![\\s\\S]))`,
+            "m",
+        ),
+    )?.[1];
+    if (!probe || !/^    exec:\s*$/m.test(probe)) return [];
+
+    const command = probe.match(
+        /^\s{6}command:\s*\[\s*(?:"([^"]+)"|'([^']+)'|([^,\]\s]+))/m,
+    );
+    assert.ok(
+        command,
+        `charts/soundspan/values.yaml: ${component.name}.${probeName} exec command must use an inline argv array`,
+    );
+    return [
+        {
+            component: component.name,
+            probeName,
+            binary: path.posix.basename(command[1] ?? command[2] ?? command[3]),
+        },
+    ];
+}
+
+function execProbeReferences(values) {
+    return values
+        .split(/(?=^[A-Za-z][A-Za-z0-9]*:\s*$)/gm)
+        .map((text) => ({
+            name: text.match(/^([A-Za-z][A-Za-z0-9]*):\s*$/m)?.[1],
+            text,
+        }))
+        .filter(
+            (component) =>
+                component.name && /^  image:\s*$/m.test(component.text),
+        )
+        .flatMap((component) =>
+            probeNames.flatMap((probeName) =>
+                execProbeReference(component, probeName),
+            ),
+        );
+}
+
+function dockerfileInstallsPackage(dockerfile, packageName) {
+    // Intentional string heuristic: the provider name must occur in the same
+    // RUN instruction as a recognized system package-manager install command.
+    const packagePattern = new RegExp(
+        `(?:^|\\s)${packageName.replaceAll("-", "\\-")}(?:[=\\s\\\\]|$)`,
+    );
+    return dockerfile
+        .split(/(?=^[A-Z][A-Z0-9]*\s)/gm)
+        .some(
+            (instruction) =>
+                /^RUN\s/i.test(instruction) &&
+                /\b(?:apt-get\s+install|apk\s+add|dnf\s+install|yum\s+install)\b/i.test(
+                    instruction,
+                ) &&
+                packagePattern.test(instruction),
+        );
+}
+
+function dockerfileProvesBinary(relativePath, binary) {
+    const dockerfile = readRepoFile(relativePath);
+    const baseImages = fromImageReferences(dockerfile);
+
+    // Fail closed on multi-stage files. Searching every stage could mistake a
+    // build-only package for a runtime binary; add explicit stage handling when
+    // a multi-stage chart image gains an exec probe.
+    assert.equal(
+        baseImages.length,
+        1,
+        `${relativePath}: exec-probe guard requires explicit runtime-stage handling`,
+    );
+    const packageName = binaryPackageProviders.get(binary);
+    if (packageName && dockerfileInstallsPackage(dockerfile, packageName)) {
+        return true;
+    }
+
+    return baseImageFamilyBinaries.some(
+        (family) =>
+            family.pattern.test(baseImages[0]) && family.binaries.has(binary),
+    );
+}
+
+function componentDockerfile(componentName) {
+    const relativePath = chartComponentDockerfiles.get(componentName);
+    assert.ok(
+        relativePath,
+        `charts/soundspan/values.yaml: ${componentName} exec probes need a Dockerfile mapping`,
+    );
+    return relativePath;
 }
 
 function dockerCopySources(stage) {
@@ -464,5 +587,21 @@ test("12. Prisma CLI stages copy relative prisma.config.ts imports", () => {
                 );
             }
         }
+    }
+});
+
+test("13. Helm exec probe binaries exist in component runtime images", () => {
+    const references = execProbeReferences(
+        readRepoFile("charts/soundspan/values.yaml"),
+    );
+    assert.ok(references.length > 0, "expected at least one chart exec probe");
+
+    for (const reference of references) {
+        const relativePath = componentDockerfile(reference.component);
+        const packageName = binaryPackageProviders.get(reference.binary);
+        assert.ok(
+            dockerfileProvesBinary(relativePath, reference.binary),
+            `charts/soundspan/values.yaml: ${reference.component}.${reference.probeName} exec binary "${reference.binary}" is not proven present in ${relativePath}; install ${packageName ?? "a mapped provider package"} in the runtime image or document a base-image family assumption`,
+        );
     }
 });
