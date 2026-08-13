@@ -1,6 +1,6 @@
 {
     "name": "soundspan-backend",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "engines": {
         "node": ">=24.0.0"
     },
