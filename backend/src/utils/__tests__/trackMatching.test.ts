@@ -1,4 +1,5 @@
 import {
+    buildM3UMatchIndex,
     matchM3UEntryAgainstLibrary,
     matchTrackAgainstLibrary,
     normalizeAlbumForMatching,
@@ -253,8 +254,39 @@ describe("trackMatching utilities", () => {
                 }),
             ];
 
-            expect(matchM3UEntryAgainstLibrary(entry, candidates)).toEqual({
+            expect(
+                matchM3UEntryAgainstLibrary(
+                    entry,
+                    buildM3UMatchIndex(candidates),
+                ),
+            ).toEqual({
                 trackId: "path-hit",
+                matchType: "path",
+                matchConfidence: 100,
+            });
+        });
+
+        it("matches when the library path is longer than the entry path", () => {
+            const entry: M3UEntry = {
+                filePath: "Artist/Album/02 - Deep Cut.flac",
+                artist: null,
+                title: null,
+                durationSeconds: null,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "suffix-hit",
+                    filePath: "/srv/music/Artist/Album/02 - Deep Cut.flac",
+                }),
+            ];
+
+            expect(
+                matchM3UEntryAgainstLibrary(
+                    entry,
+                    buildM3UMatchIndex(candidates),
+                ),
+            ).toEqual({
+                trackId: "suffix-hit",
                 matchType: "path",
                 matchConfidence: 100,
             });
@@ -274,11 +306,146 @@ describe("trackMatching utilities", () => {
                 }),
             ];
 
-            expect(matchM3UEntryAgainstLibrary(entry, candidates)).toEqual({
+            expect(
+                matchM3UEntryAgainstLibrary(
+                    entry,
+                    buildM3UMatchIndex(candidates),
+                ),
+            ).toEqual({
                 trackId: "filename-hit",
                 matchType: "filename",
                 matchConfidence: 98,
             });
+        });
+
+        it("resolves filename ties to the candidate first in (filePath, id) order", () => {
+            const entry: M3UEntry = {
+                filePath: "X:/Somewhere/Duplicate Song.mp3",
+                artist: null,
+                title: null,
+                durationSeconds: null,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "later",
+                    filePath: "Library/Z Artist/Duplicate Song.mp3",
+                }),
+                makeCandidate({
+                    id: "earlier",
+                    filePath: "Library/A Artist/Duplicate Song.mp3",
+                }),
+            ];
+
+            expect(
+                matchM3UEntryAgainstLibrary(
+                    entry,
+                    buildM3UMatchIndex(candidates),
+                ),
+            ).toEqual({
+                trackId: "earlier",
+                matchType: "filename",
+                matchConfidence: 98,
+            });
+        });
+
+        it("falls back to exact metadata matching when path tiers miss", () => {
+            const entry: M3UEntry = {
+                filePath: "Missing/Path/No Match Here.flac",
+                artist: "The Metadata Band",
+                title: "Exact Song - 2011 Remastered Version",
+                durationSeconds: 200,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "metadata-hit",
+                    filePath: "Library/The Metadata Band/Exact Song.flac",
+                    artistName: "The Metadata Band",
+                    title: "Exact Song",
+                }),
+            ];
+
+            expect(
+                matchM3UEntryAgainstLibrary(
+                    entry,
+                    buildM3UMatchIndex(candidates),
+                ),
+            ).toEqual({
+                trackId: "metadata-hit",
+                matchType: "exact",
+                matchConfidence: 100,
+            });
+        });
+
+        it("falls back to fuzzy metadata matching as the last tier", () => {
+            const entry: M3UEntry = {
+                filePath: "Missing/Path/Nowhere.flac",
+                artist: "Fuzzy Artist",
+                title: "Fuzzy Song Title Extended",
+                durationSeconds: 200,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "fuzzy-hit",
+                    filePath: "Library/Fuzzy Artist/Fuzzy Song Title.flac",
+                    artistName: "Fuzzy Artist",
+                    title: "Fuzzy Song Title",
+                }),
+            ];
+
+            const result = matchM3UEntryAgainstLibrary(
+                entry,
+                buildM3UMatchIndex(candidates),
+            );
+            expect(result).not.toBeNull();
+            expect(result?.trackId).toBe("fuzzy-hit");
+            expect(result?.matchType).toBe("fuzzy");
+            expect(result?.matchConfidence).toBeGreaterThanOrEqual(70);
+        });
+
+        it("returns null when the index has no candidates", () => {
+            const entry: M3UEntry = {
+                filePath: "Anything.mp3",
+                artist: "Artist",
+                title: "Title",
+                durationSeconds: null,
+            };
+
+            expect(
+                matchM3UEntryAgainstLibrary(entry, buildM3UMatchIndex([])),
+            ).toBeNull();
+        });
+
+        it("matches many entries against one prebuilt index", () => {
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "a",
+                    filePath: "Library/One/Alpha.mp3",
+                }),
+                makeCandidate({
+                    id: "b",
+                    filePath: "Library/Two/Beta.mp3",
+                }),
+            ];
+            const index = buildM3UMatchIndex(candidates);
+            const entries: M3UEntry[] = [
+                {
+                    filePath: "C:/Alpha.mp3",
+                    artist: null,
+                    title: null,
+                    durationSeconds: null,
+                },
+                {
+                    filePath: "C:/Beta.mp3",
+                    artist: null,
+                    title: null,
+                    durationSeconds: null,
+                },
+            ];
+
+            const results = entries.map((e) =>
+                matchM3UEntryAgainstLibrary(e, index),
+            );
+            expect(results.map((r) => r?.trackId)).toEqual(["a", "b"]);
         });
     });
 });

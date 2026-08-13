@@ -17,6 +17,7 @@ import { ytMusicService } from "./youtubeMusic";
 import { tidalStreamingService } from "./tidalStreaming";
 import { trackMappingService } from "./trackMappingService";
 import {
+    buildM3UMatchIndex,
     matchM3UEntryAgainstLibrary,
     matchTrackAgainstLibrary,
     type LocalTrackCandidate,
@@ -501,9 +502,10 @@ class PlaylistImportService {
     }> {
         const entries = parseM3U(content);
         const localCandidates = await this.getLocalLibraryCandidates();
+        const matchIndex = buildM3UMatchIndex(localCandidates);
 
         const resolved = entries.map((entry, index) => {
-            const match = matchM3UEntryAgainstLibrary(entry, localCandidates);
+            const match = matchM3UEntryAgainstLibrary(entry, matchIndex);
             return {
                 index,
                 artist: entry.artist || "",

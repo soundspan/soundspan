@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- M3U playlist import previews no longer fail with a 15-second timeout on
+  large libraries. The frontend now gives the M3U preview the same 60-second
+  window as URL imports. The backend now matches entries against a prebuilt
+  library index instead of re-sorting and re-normalizing every library track
+  for each playlist entry, so previews complete in a fraction of the old
+  time.
+
 ## [2.0.1] - 2026-08-13
 
 ### Added
@@ -22,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The CLAP analyzer image now ships `pgrep` so the Helm chart's default liveness and readiness probes work (#448).
 
-## [2.0.0] - 2026-08-13
+## [2.0.0] - 2026-08-12
 
 ### Added
 

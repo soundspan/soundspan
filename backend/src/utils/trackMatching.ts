@@ -75,9 +75,10 @@ export function normalizeAlbumForMatching(str: string): string {
  * Computes a 0-100 similarity score between two strings.
  */
 export function stringSimilarity(a: string, b: string): number {
-    const s1 = normalizeString(a);
-    const s2 = normalizeString(b);
+    return normalizedStringSimilarity(normalizeString(a), normalizeString(b));
+}
 
+function normalizedStringSimilarity(s1: string, s2: string): number {
     if (s1 === s2) return 100;
 
     if (s1.includes(s2) || s2.includes(s1)) {
@@ -237,84 +238,228 @@ export function matchTrackAgainstLibrary(
     return null;
 }
 
+// ── M3U match index ───────────────────────────────────────────────
+
+/**
+ * A library candidate with its match-tier normalizations precomputed.
+ */
+export interface IndexedM3UCandidate {
+    candidate: LocalTrackCandidate;
+    /** Normalized file path; empty string when the candidate has no path. */
+    normalizedPath: string;
+    /** `normalizeString` of the artist name (exact and fuzzy tiers). */
+    normalizedArtist: string;
+    /** `normalizeTrackTitle` of the track title (exact tier). */
+    normalizedExactTitle: string;
+    /** `normalizeString` of the track title (fuzzy tier). */
+    normalizedFuzzyTitle: string;
+}
+
+/**
+ * Precomputed lookup structures for matching many M3U entries against the
+ * same library snapshot. Build once per playlist with `buildM3UMatchIndex`.
+ */
+export interface M3UMatchIndex {
+    /** All candidates in deterministic (filePath, id) order. */
+    sorted: IndexedM3UCandidate[];
+    /**
+     * Path-tier buckets keyed by the final normalized path segment. Every
+     * path-tier condition (equality or `/`-boundary suffix in either
+     * direction) requires the entry and candidate to share their final path
+     * segment, so a match can only live in the entry's own bucket.
+     */
+    pathBuckets: Map<string, IndexedM3UCandidate[]>;
+    /** First sorted candidate per normalized filename stem. */
+    byFilenameStem: Map<string, LocalTrackCandidate>;
+    /** First sorted candidate per normalized `artist\u0000title` pair. */
+    byArtistTitle: Map<string, LocalTrackCandidate>;
+}
+
+function lastPathSegment(normalizedPath: string): string {
+    const separatorIndex = normalizedPath.lastIndexOf("/");
+    if (separatorIndex === -1) return normalizedPath;
+    return normalizedPath.slice(separatorIndex + 1);
+}
+
+function artistTitleKey(normalizedArtist: string, normalizedTitle: string) {
+    return `${normalizedArtist}\u0000${normalizedTitle}`;
+}
+
+/**
+ * Builds the reusable match index for `matchM3UEntryAgainstLibrary`.
+ * Sorting and normalization happen once here instead of once per entry.
+ */
+export function buildM3UMatchIndex(
+    candidates: LocalTrackCandidate[],
+): M3UMatchIndex {
+    const sorted = [...candidates]
+        .sort((a, b) => {
+            const pathCompare = (a.filePath || "").localeCompare(
+                b.filePath || "",
+            );
+            if (pathCompare !== 0) return pathCompare;
+            return a.id.localeCompare(b.id);
+        })
+        .map((candidate) => ({
+            candidate,
+            normalizedPath: candidate.filePath
+                ? normalizePathForMatching(candidate.filePath)
+                : "",
+            normalizedArtist: normalizeString(candidate.artistName),
+            normalizedExactTitle: normalizeTrackTitle(candidate.title),
+            normalizedFuzzyTitle: normalizeString(candidate.title),
+        }));
+
+    const pathBuckets = new Map<string, IndexedM3UCandidate[]>();
+    const byFilenameStem = new Map<string, LocalTrackCandidate>();
+    const byArtistTitle = new Map<string, LocalTrackCandidate>();
+
+    for (const indexed of sorted) {
+        const { candidate } = indexed;
+        if (candidate.filePath) {
+            const segment = lastPathSegment(indexed.normalizedPath);
+            const bucket = pathBuckets.get(segment);
+            if (bucket) {
+                bucket.push(indexed);
+            } else {
+                pathBuckets.set(segment, [indexed]);
+            }
+
+            const stem = normalizeTrackTitle(
+                getFilenameStem(candidate.filePath),
+            );
+            if (stem.length > 0 && !byFilenameStem.has(stem)) {
+                byFilenameStem.set(stem, candidate);
+            }
+        }
+
+        const key = artistTitleKey(
+            indexed.normalizedArtist,
+            indexed.normalizedExactTitle,
+        );
+        if (!byArtistTitle.has(key)) {
+            byArtistTitle.set(key, candidate);
+        }
+    }
+
+    return { sorted, pathBuckets, byFilenameStem, byArtistTitle };
+}
+
+function matchM3UEntryFuzzy(
+    normalizedArtist: string,
+    normalizedFuzzyTitle: string,
+    index: M3UMatchIndex,
+): TrackMatchResult | null {
+    let bestScore = 0;
+    let bestMatch: LocalTrackCandidate | null = null;
+
+    // Artist names repeat across a library, so score each distinct one once.
+    const artistScoreCache = new Map<string, number>();
+
+    for (const indexed of index.sorted) {
+        let artistScore = artistScoreCache.get(indexed.normalizedArtist);
+        if (artistScore === undefined) {
+            artistScore = normalizedStringSimilarity(
+                normalizedArtist,
+                indexed.normalizedArtist,
+            );
+            artistScoreCache.set(indexed.normalizedArtist, artistScore);
+        }
+
+        // A title score is at most 100, so this bound is exact: candidates
+        // that cannot reach the 70 threshold or beat the current best can
+        // skip the title comparison without changing the outcome.
+        const maxPossibleScore = 100 * 0.6 + artistScore * 0.4;
+        if (maxPossibleScore < 70 || maxPossibleScore <= bestScore) {
+            continue;
+        }
+
+        const titleScore = normalizedStringSimilarity(
+            normalizedFuzzyTitle,
+            indexed.normalizedFuzzyTitle,
+        );
+        // Title weighted 60%, artist 40%
+        const score = titleScore * 0.6 + artistScore * 0.4;
+
+        if (score > bestScore && score >= 70) {
+            bestScore = score;
+            bestMatch = indexed.candidate;
+        }
+    }
+
+    if (!bestMatch) return null;
+    return {
+        trackId: bestMatch.id,
+        matchType: "fuzzy",
+        matchConfidence: Math.round(bestScore),
+    };
+}
+
 /**
  * Match an M3U entry against the local library using the agreed tier order:
  * 1. Normalized file path suffix match
  * 2. Filename stem match
  * 3. Exact metadata match
  * 4. Fuzzy metadata match
+ *
+ * The album-aware strategies of `matchTrackAgainstLibrary` cannot fire on
+ * this path — M3U entries carry no album, and the exact artist+title tier
+ * has already missed by the time the fuzzy tier runs — so the fuzzy tier
+ * replicates only the fuzzy strategy over the precomputed index.
  */
 export function matchM3UEntryAgainstLibrary(
     entry: M3UEntry,
-    candidates: LocalTrackCandidate[],
+    index: M3UMatchIndex,
 ): TrackMatchResult | null {
-    if (!candidates.length) return null;
-
-    const sortedCandidates = [...candidates].sort((a, b) => {
-        const pathCompare = (a.filePath || "").localeCompare(b.filePath || "");
-        if (pathCompare !== 0) return pathCompare;
-        return a.id.localeCompare(b.id);
-    });
+    if (!index.sorted.length) return null;
 
     const entryPath = normalizePathForMatching(entry.filePath);
-
-    for (const candidate of sortedCandidates) {
-        if (!candidate.filePath) continue;
-        const candidatePath = normalizePathForMatching(candidate.filePath);
-        if (
-            candidatePath === entryPath ||
-            entryPath.endsWith(`/${candidatePath}`) ||
-            candidatePath.endsWith(`/${entryPath}`)
-        ) {
-            return {
-                trackId: candidate.id,
-                matchType: "path",
-                matchConfidence: 100,
-            };
+    const bucket = index.pathBuckets.get(lastPathSegment(entryPath));
+    if (bucket) {
+        for (const { candidate, normalizedPath } of bucket) {
+            if (
+                normalizedPath === entryPath ||
+                entryPath.endsWith(`/${normalizedPath}`) ||
+                normalizedPath.endsWith(`/${entryPath}`)
+            ) {
+                return {
+                    trackId: candidate.id,
+                    matchType: "path",
+                    matchConfidence: 100,
+                };
+            }
         }
     }
 
     const entryFilename = normalizeTrackTitle(getFilenameStem(entry.filePath));
     if (entryFilename.length > 0) {
-        for (const candidate of sortedCandidates) {
-            if (!candidate.filePath) continue;
-            const candidateFilename = normalizeTrackTitle(
-                getFilenameStem(candidate.filePath),
-            );
-            if (candidateFilename === entryFilename) {
-                return {
-                    trackId: candidate.id,
-                    matchType: "filename",
-                    matchConfidence: 98,
-                };
-            }
+        const filenameHit = index.byFilenameStem.get(entryFilename);
+        if (filenameHit) {
+            return {
+                trackId: filenameHit.id,
+                matchType: "filename",
+                matchConfidence: 98,
+            };
         }
     }
 
     if (entry.artist && entry.title) {
         const normalizedArtist = normalizeString(entry.artist);
-        const normalizedTitle = normalizeTrackTitle(entry.title);
-
-        for (const candidate of sortedCandidates) {
-            if (
-                normalizeString(candidate.artistName) === normalizedArtist &&
-                normalizeTrackTitle(candidate.title) === normalizedTitle
-            ) {
-                return {
-                    trackId: candidate.id,
-                    matchType: "exact",
-                    matchConfidence: 100,
-                };
-            }
+        const exactHit = index.byArtistTitle.get(
+            artistTitleKey(normalizedArtist, normalizeTrackTitle(entry.title)),
+        );
+        if (exactHit) {
+            return {
+                trackId: exactHit.id,
+                matchType: "exact",
+                matchConfidence: 100,
+            };
         }
 
-        return matchTrackAgainstLibrary(
-            {
-                artist: entry.artist,
-                title: entry.title,
-                duration: entry.durationSeconds ?? undefined,
-            },
-            sortedCandidates,
+        return matchM3UEntryFuzzy(
+            normalizedArtist,
+            normalizeString(entry.title),
+            index,
         );
     }
 

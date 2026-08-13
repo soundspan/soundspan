@@ -32,6 +32,7 @@ export function WithImports<TBase extends ApiClientConstructor>(Base: TBase) {
             return this.request("/import/m3u/preview", {
                 method: "POST",
                 body: JSON.stringify({ content, name }),
+                timeoutMs: IMPORT_PREVIEW_TIMEOUT_MS,
             });
         }
 
