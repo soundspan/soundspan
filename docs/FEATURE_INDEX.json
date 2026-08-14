@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-feature-index",
-    "version": "2026-08-07.01",
+    "version": "2026-08-14.01",
     "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
     "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
   },
@@ -196,6 +196,24 @@
       "tests": {
         "backend_route": ["trackMappingsRuntime.test.ts", "trackMappingsRoutes.integration.test.ts"],
         "backend_contract": []
+      }
+    },
+    {
+      "id": "durable-track-identity",
+      "name": "Durable Track Identity",
+      "description": "Preserves local track identity across moves, retags, replacements, temporary removal, revival, and retention purge, with removed-track visibility in playlists and Library Health",
+      "frontend": {
+        "feature_dirs": ["settings"],
+        "routes": ["/playlist/[id]", "/admin"]
+      },
+      "backend": {
+        "routes": ["admin.ts", "playlists.ts", "library.ts"],
+        "services": ["musicScanner.ts", "trackIdentityMatcher.ts"]
+      },
+      "tests": {
+        "backend_route": ["admin.test.ts", "adminRuntime.test.ts", "playlistsRuntime.test.ts"],
+        "backend_contract": ["musicScannerService.test.ts", "trackIdentityMatcher.test.ts", "trackRemovalPurgeProcessor.test.ts"],
+        "frontend": ["playlistDetailProviderPlayability.component.test.ts", "libraryHealthDetails.component.test.ts"]
       }
     },
     {

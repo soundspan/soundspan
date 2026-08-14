@@ -23,6 +23,8 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/DownloadPreferencesSection.tsx` | components |
 | `components/sections/DownloadServicesSection.tsx` | components |
 | `components/sections/IntegrationsSection.tsx` | components |
+| `components/sections/LibraryHealthSection.tsx` | components |
+| `components/sections/libraryHealthDetails.tsx` | components |
 | `components/sections/LibrarySafetySection.tsx` | components |
 | `components/sections/LidarrSection.tsx` | components |
 | `components/sections/LinkDeviceSection.tsx` | components |

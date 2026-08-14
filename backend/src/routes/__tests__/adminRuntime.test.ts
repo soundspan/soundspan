@@ -24,6 +24,10 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: { workers: { trackRemovalRetentionDays: 90 } },
+}));
+
 import router from "../admin";
 import { prisma } from "../../utils/db";
 
@@ -81,6 +85,7 @@ describe("admin library health routes", () => {
                 track: {
                     id: "track-1",
                     title: "Example Track",
+                    removedAt: new Date("2026-03-10T00:30:00.000Z"),
                     album: {
                         title: "Example Album",
                         artist: { name: "Example Artist" },
@@ -103,6 +108,7 @@ describe("admin library health routes", () => {
                     select: {
                         id: true,
                         title: true,
+                        removedAt: true,
                         album: {
                             select: {
                                 title: true,
@@ -132,6 +138,8 @@ describe("admin library health routes", () => {
                 }),
             ],
             total: 1,
+            removedPendingPurgeCount: 1,
+            trackRemovalRetentionDays: 90,
         });
     });
 

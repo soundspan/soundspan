@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ISRCs for durable identity matching. New and changed files populate these
   keys during scans, while a bounded resumable worker backfills existing
   libraries automatically.
+- Library Health now distinguishes and counts removed tracks that are pending
+  retention purge, shows the configured retention window, and explains that a
+  rescan restores a track when its file returns.
 - The enrichment failures modal now provides confirmed, tab-specific “Retry
   all” actions for Audio Analysis and Vibe Embeddings failures.
 
@@ -28,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing analysis when files move, rename, or are retagged. Replacing audio
   at the same path or matching a moved quality upgrade re-queues audio and
   vibe analysis and invalidates embeddings and transcoded cache files.
+- Removed playlist items now use a muted, greyed treatment with a restore-file
+  tooltip, while other unavailable-provider items keep their existing warning
+  treatment.
 
 ### Fixed
 

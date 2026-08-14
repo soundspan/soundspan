@@ -8,6 +8,7 @@ import {
     type EncryptedModelName,
 } from "../utils/encryptedColumns";
 import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
+import { config } from "../config";
 
 const router = Router();
 
@@ -46,6 +47,55 @@ function isPrismaRecordNotFound(error: unknown): error is { code: string } {
  *     responses:
  *       200:
  *         description: Library health records returned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [records, total, removedPendingPurgeCount, trackRemovalRetentionDays]
+ *               properties:
+ *                 records:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       trackId:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                         enum: [MISSING_FROM_DISK, UNREADABLE_METADATA]
+ *                       filePath:
+ *                         type: string
+ *                       detail:
+ *                         type: string
+ *                         nullable: true
+ *                       detectedAt:
+ *                         type: string
+ *                         format: date-time
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *                       track:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           removedAt:
+ *                             type: string
+ *                             format: date-time
+ *                             nullable: true
+ *                 total:
+ *                   type: integer
+ *                   minimum: 0
+ *                 removedPendingPurgeCount:
+ *                   type: integer
+ *                   minimum: 0
+ *                 trackRemovalRetentionDays:
+ *                   type: integer
+ *                   minimum: 0
  *       401:
  *         description: Not authenticated
  *       403:
@@ -60,6 +110,7 @@ router.get("/library-health", async (_req, res) => {
                         select: {
                             id: true,
                             title: true,
+                            removedAt: true,
                             album: {
                                 select: {
                                     title: true,
@@ -80,7 +131,19 @@ router.get("/library-health", async (_req, res) => {
             prisma.libraryHealthRecord.count(),
         ]);
 
-        res.json({ records, total });
+        const removedPendingPurgeCount = records.filter(
+            (record) =>
+                record.status === "MISSING_FROM_DISK" &&
+                record.track.removedAt !== null,
+        ).length;
+
+        res.json({
+            records,
+            total,
+            removedPendingPurgeCount,
+            trackRemovalRetentionDays:
+                config.workers.trackRemovalRetentionDays,
+        });
     } catch (error) {
         logger.error("Get library health error:", error);
         res.status(500).json({

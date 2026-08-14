@@ -269,20 +269,14 @@ export default function PlaylistsPage() {
         try {
             const playlist = await api.getPlaylist(playlistId);
             if (playlist?.items && playlist.items.length > 0) {
-                const tracks = playlist.items.map(
-                    (item: {
-                        track: {
-                            id: string;
-                            title: string;
-                            duration: number;
-                            album?: {
-                                id?: string;
-                                title?: string;
-                                coverArt?: string;
-                                artist?: { id?: string; name?: string };
-                            };
-                        };
-                    }) => ({
+                const tracks = playlist.items.flatMap((item) => {
+                    if (
+                        !item.track ||
+                        item.playback?.isPlayable === false
+                    ) {
+                        return [];
+                    }
+                    return [{
                         id: item.track.id,
                         title: item.track.title,
                         artist: {
@@ -295,8 +289,8 @@ export default function PlaylistsPage() {
                             id: item.track.album?.id,
                         },
                         duration: item.track.duration,
-                    }),
-                );
+                    }];
+                });
                 playTracks(tracks, 0);
             }
         } catch (error) {

@@ -57,6 +57,10 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
+jest.mock("../../config", () => ({
+    config: { workers: { trackRemovalRetentionDays: 90 } },
+}));
+
 import router from "../admin";
 
 const mockFindMany = mockPrisma.libraryHealthRecord.findMany as jest.Mock;
@@ -90,6 +94,27 @@ describe("admin routes", () => {
                 track: {
                     id: "track-1",
                     title: "Example Track",
+                    removedAt: new Date("2026-03-10T00:30:00.000Z"),
+                    album: {
+                        title: "Example Album",
+                        artist: {
+                            name: "Example Artist",
+                        },
+                    },
+                },
+            },
+            {
+                id: "record-2",
+                trackId: "track-2",
+                status: "MISSING_FROM_DISK",
+                filePath: "/music/transient.mp3",
+                detail: null,
+                detectedAt: new Date("2026-03-10T00:00:00.000Z"),
+                updatedAt: new Date("2026-03-10T01:00:00.000Z"),
+                track: {
+                    id: "track-2",
+                    title: "Transiently Missing Track",
+                    removedAt: null,
                     album: {
                         title: "Example Album",
                         artist: {
@@ -99,7 +124,7 @@ describe("admin routes", () => {
                 },
             },
         ]);
-        mockCount.mockResolvedValue(1);
+        mockCount.mockResolvedValue(2);
         mockDelete.mockResolvedValue({ id: "record-1" });
     });
 
@@ -116,6 +141,7 @@ describe("admin routes", () => {
                     track: {
                         id: "track-1",
                         title: "Example Track",
+                        removedAt: "2026-03-10T00:30:00.000Z",
                         album: {
                             title: "Example Album",
                             artist: {
@@ -124,8 +150,16 @@ describe("admin routes", () => {
                         },
                     },
                 }),
+                expect.objectContaining({
+                    id: "record-2",
+                    track: expect.objectContaining({
+                        removedAt: null,
+                    }),
+                }),
             ],
-            total: 1,
+            total: 2,
+            removedPendingPurgeCount: 1,
+            trackRemovalRetentionDays: 90,
         });
         expect(mockFindMany).toHaveBeenCalledWith({
             include: {
@@ -133,6 +167,7 @@ describe("admin routes", () => {
                     select: {
                         id: true,
                         title: true,
+                        removedAt: true,
                         album: {
                             select: {
                                 title: true,

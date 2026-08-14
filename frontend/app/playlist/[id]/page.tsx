@@ -8,7 +8,11 @@ import {
     createMosaicCandidates,
     selectMosaicCovers,
 } from "@/utils/mosaicCoverSelection";
-import { api } from "@/lib/api";
+import {
+    api,
+    type PlaylistDetailTrackItem,
+    type PlaylistPendingTrackItem,
+} from "@/lib/api";
 import {
     useAudioState,
     usePlaybackStatus,
@@ -69,62 +73,14 @@ import { useCollectionLikeAll } from "@/hooks/useCollectionLikeAll";
 import type { LikeableTrack } from "@/hooks/useCollectionLikeAll";
 import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 
-interface Track {
-    id: string;
-    title: string;
-    duration: number;
-    streamSource?: "tidal" | "youtube";
-    tidalTrackId?: number;
-    youtubeVideoId?: string;
-    album: {
-        id?: string;
-        title: string;
-        coverArt?: string | null;
-        artist: {
-            id?: string;
-            name: string;
-        };
-    };
-}
+type PlaylistItem = PlaylistDetailTrackItem;
+type PendingTrack = PlaylistPendingTrackItem;
 
-interface TrackPlaybackMeta {
-    isPlayable: boolean;
-    reason: string | null;
-    message: string | null;
-}
-
-interface TrackProviderMeta {
-    source: "local" | "tidal" | "youtube" | "unknown";
-    label?: string;
-    tidalTrackId?: number | null;
-    youtubeVideoId?: string | null;
-}
-
-interface PlaylistItem {
-    id: string;
-    type: "track";
-    sort: number;
-    track: Track | null;
-    trackId?: string | null;
-    provider?: TrackProviderMeta;
-    playback?: TrackPlaybackMeta;
-}
-
-interface PendingTrack {
-    id: string;
-    type: "pending";
-    sort: number;
-    pending: {
-        id: string;
-        artist: string;
-        title: string;
-        album: string;
-        previewUrl: string | null;
-    };
-}
+const TRACK_REMOVED_TOOLTIP =
+    "File removed from library — restore the file to bring it back";
 
 interface PlayablePlaylistItem extends PlaylistItem {
-    track: Track;
+    track: NonNullable<PlaylistItem["track"]>;
 }
 
 function isPlayableTrackItem(item: PlaylistItem): item is PlayablePlaylistItem {
@@ -136,6 +92,16 @@ function isLocalPlayableTrackItem(
 ): item is PlayablePlaylistItem {
     if (!isPlayableTrackItem(item)) return false;
     return (item.provider?.source || "local") === "local";
+}
+
+function getUnplayableMessage(item: PlaylistItem): string {
+    if (item.playback?.reason === "track_removed") {
+        return TRACK_REMOVED_TOOLTIP;
+    }
+    return (
+        item.playback?.message ||
+        "Playback is unavailable for this track right now."
+    );
 }
 
 function toAudioTrack(item: PlayablePlaylistItem): AudioTrack {
@@ -665,9 +631,7 @@ export default function PlaylistDetailPage() {
     const handlePlayTrack = (itemId: string) => {
         const item = trackItems.find((entry) => entry.id === itemId);
         if (!item) return;
-        const fallbackMessage =
-            item.playback?.message ||
-            "Playback is unavailable for this track right now";
+        const fallbackMessage = getUnplayableMessage(item);
 
         if (!isPlayableTrackItem(item)) {
             toast.error(fallbackMessage);
@@ -1137,8 +1101,7 @@ export default function PlaylistDetailPage() {
                                     // Cast needed: type guard narrows else branch to `never`
                                     const unplayable = item as PlaylistItem;
                                     toast.error(
-                                        unplayable.playback?.message ||
-                                            "Playback is unavailable for this track right now.",
+                                        getUnplayableMessage(unplayable),
                                     );
                                 }
                             }}
@@ -1149,14 +1112,22 @@ export default function PlaylistDetailPage() {
                                     item.provider?.source ||
                                     track?.streamSource ||
                                     "local";
+                                const isRemoved =
+                                    item.playback?.reason === "track_removed";
                                 const fallbackMessage =
-                                    item.playback?.message ||
-                                    "Playback is unavailable for this track right now.";
+                                    getUnplayableMessage(item);
                                 return {
                                     leadingColumn: isPlayable ? undefined : (
                                         <div className="flex items-center justify-center w-8">
                                             <span title={fallbackMessage}>
-                                                <AlertCircle className="w-4 h-4 text-amber-300" />
+                                                <AlertCircle
+                                                    className={cn(
+                                                        "w-4 h-4",
+                                                        isRemoved
+                                                            ? "text-gray-400"
+                                                            : "text-amber-300",
+                                                    )}
+                                                />
                                             </span>
                                         </div>
                                     ),
@@ -1169,9 +1140,32 @@ export default function PlaylistDetailPage() {
                                     subtitleExtra: !isPlayable ? (
                                         <>
                                             <div className="mt-1 flex items-center gap-1.5">
-                                                <UnplayableBadge />
+                                                <UnplayableBadge
+                                                    label={
+                                                        isRemoved
+                                                            ? "REMOVED"
+                                                            : undefined
+                                                    }
+                                                    title={
+                                                        isRemoved
+                                                            ? TRACK_REMOVED_TOOLTIP
+                                                            : undefined
+                                                    }
+                                                    variant={
+                                                        isRemoved
+                                                            ? "muted"
+                                                            : "warning"
+                                                    }
+                                                />
                                             </div>
-                                            <p className="text-[11px] text-amber-200/90 truncate mt-1">
+                                            <p
+                                                className={cn(
+                                                    "text-[11px] truncate mt-1",
+                                                    isRemoved
+                                                        ? "text-gray-400"
+                                                        : "text-amber-200/90",
+                                                )}
+                                            >
                                                 {fallbackMessage}
                                             </p>
                                         </>
@@ -1488,7 +1482,10 @@ export default function PlaylistDetailPage() {
                                         );
                                     })(),
                                     rowClassName: cn(
+                                        isRemoved &&
+                                            "bg-white/[0.02] hover:bg-white/[0.04] opacity-60 cursor-not-allowed",
                                         !isPlayable &&
+                                            !isRemoved &&
                                             "bg-amber-500/[0.06] hover:bg-amber-500/[0.1] cursor-not-allowed",
                                     ),
                                 };

@@ -36,13 +36,30 @@ export function LoadingBadge() {
     );
 }
 
+interface UnplayableBadgeProps {
+    label?: string;
+    title?: string;
+    variant?: "warning" | "muted";
+}
+
 /**
- * Renders the UnplayableBadge component.
+ * Renders the UnplayableBadge component with optional reason-specific text.
  */
-export function UnplayableBadge() {
+export function UnplayableBadge({
+    label = "UNPLAYABLE",
+    title,
+    variant = "warning",
+}: UnplayableBadgeProps = {}) {
     return (
-        <span className="shrink-0 text-[10px] bg-amber-500/20 text-amber-200 px-1.5 py-0.5 rounded font-medium">
-            UNPLAYABLE
+        <span
+            title={title}
+            className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                variant === "muted"
+                    ? "bg-gray-500/20 text-gray-300"
+                    : "bg-amber-500/20 text-amber-200"
+            }`}
+        >
+            {label}
         </span>
     );
 }

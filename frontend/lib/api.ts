@@ -110,6 +110,89 @@ export interface PlaylistImportExecuteResponse {
     summary: PlaylistImportSummary;
 }
 
+/** Reasons a playlist item can be retained but unavailable for playback. */
+export type PlaylistPlaybackReason =
+    | "provider_unavailable"
+    | "duration_mismatch"
+    | "low_confidence_mapping"
+    | "stale_mapping"
+    | "missing_provider_track"
+    | "track_removed"
+    | "pending_import";
+
+/** Playback availability metadata returned with a playlist item. */
+export interface PlaylistPlaybackMeta {
+    isPlayable: boolean;
+    reason: PlaylistPlaybackReason | null;
+    message: string | null;
+}
+
+/** Provider metadata returned with a resolved playlist item. */
+export interface PlaylistTrackProvider {
+    source: "local" | "tidal" | "youtube" | "unknown";
+    label?: string;
+    tidalTrackId?: number | null;
+    youtubeVideoId?: string | null;
+}
+
+/** Track data rendered by the playlist detail route. */
+export interface PlaylistDetailTrack {
+    id: string;
+    title: string;
+    duration: number;
+    streamSource?: "tidal" | "youtube";
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    album: {
+        id?: string;
+        title: string;
+        coverArt?: string | null;
+        artist: {
+            id?: string;
+            name: string;
+        };
+    };
+}
+
+/** Resolved track item returned by the playlist detail endpoint. */
+export interface PlaylistDetailTrackItem {
+    id: string;
+    type: "track";
+    sort: number;
+    track: PlaylistDetailTrack | null;
+    trackId?: string | null;
+    provider?: PlaylistTrackProvider;
+    playback?: PlaylistPlaybackMeta;
+}
+
+/** Pending import item returned by the playlist detail endpoint. */
+export interface PlaylistPendingTrackItem {
+    id: string;
+    type: "pending";
+    sort: number;
+    pending: {
+        id: string;
+        artist: string;
+        title: string;
+        album: string;
+        previewUrl: string | null;
+    };
+}
+
+/** Typed response from GET /api/playlists/:id. */
+export interface PlaylistDetailResponse {
+    id: string;
+    name: string;
+    isOwner: boolean;
+    isHidden: boolean;
+    isPublic: boolean;
+    user?: { username: string };
+    items: PlaylistDetailTrackItem[];
+    pendingTracks: PlaylistPendingTrackItem[];
+    pendingCount: number;
+    unplayableCount?: number;
+}
+
 /** Lifecycle states returned by generic playlist import jobs. */
 export type ImportJobStatus =
     | "pending"
@@ -149,8 +232,17 @@ export interface LibraryHealthRecord {
     track?: {
         id: string;
         title: string;
+        removedAt: string | null;
         album?: { title: string; artist?: { name: string } };
     };
+}
+
+/** Typed response from GET /api/admin/library-health. */
+export interface LibraryHealthResponse {
+    records: LibraryHealthRecord[];
+    total: number;
+    removedPendingPurgeCount: number;
+    trackRemovalRetentionDays: number;
 }
 
 export interface ShareLinkRecord {

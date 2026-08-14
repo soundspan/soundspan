@@ -490,3 +490,64 @@ test("playlist detail renders provider badges and unplayable fallback messaging"
     assert.match(html, /Cannot play/);
     assert.match(html, /title="Remove from playlist"/);
 });
+
+test("playlist detail distinguishes removed tracks without changing missing-provider treatment", async () => {
+    const playlist = state.playlist;
+    assert.ok(playlist);
+    const items = playlist.items;
+    assert.ok(Array.isArray(items));
+    state.playlist = {
+        ...playlist,
+        items: [
+            ...items,
+            {
+                id: "removed-1",
+                type: "track",
+                sort: 5,
+                trackId: "track-removed-1",
+                provider: { source: "local", label: "LOCAL" },
+                playback: {
+                    isPlayable: false,
+                    reason: "track_removed",
+                    message:
+                        "Playback is unavailable because this track was removed from the library.",
+                },
+                track: {
+                    id: "track-removed-1",
+                    title: "Removed Song",
+                    duration: 200,
+                    album: {
+                        id: "album-removed",
+                        title: "Removed Album",
+                        coverArt: null,
+                        artist: {
+                            id: "artist-removed",
+                            name: "Removed Artist",
+                        },
+                    },
+                },
+            },
+        ],
+    };
+
+    const mod = await import("../../app/playlist/[id]/page");
+    const PlaylistDetailPage = mod.default;
+    const queryClient = new QueryClient();
+    const html = renderToStaticMarkup(
+        React.createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            React.createElement(PlaylistDetailPage),
+        ),
+    );
+
+    assert.match(html, /Removed Song/);
+    assert.match(html, /REMOVED/);
+    assert.match(
+        html,
+        /title="File removed from library — restore the file to bring it back"/,
+    );
+    assert.match(html, /opacity-60/);
+    assert.match(html, /UNPLAYABLE/);
+    assert.match(html, /Track mapping missing for this import\./);
+});

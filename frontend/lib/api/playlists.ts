@@ -1,4 +1,4 @@
-import type { ShareLinkRecord } from "../api";
+import type { PlaylistDetailResponse, ShareLinkRecord } from "../api";
 import type { AddToPlaylistRef } from "../trackRef";
 import { type ApiClientConstructor, type ApiData } from "./core";
 
@@ -11,7 +11,7 @@ export function WithPlaylists<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         async getPlaylist(id: string) {
-            return this.request<ApiData>(`/playlists/${id}`);
+            return this.request<PlaylistDetailResponse>(`/playlists/${id}`);
         }
 
         async createPlaylist(name: string, isPublic = false) {
