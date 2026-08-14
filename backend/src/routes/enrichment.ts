@@ -1203,7 +1203,34 @@ router.post("/retry", requireAdmin, async (req, res) => {
                         where: { id: failure.entityId },
                         data: {
                             analysisStatus: "pending",
+                            analysisError: null,
                             analysisRetryCount: 0,
+                            analysisStartedAt: null,
+                        },
+                    });
+                    queued++;
+                } else if (failure.entityType === "vibe") {
+                    const track = await prisma.track.findUnique({
+                        where: { id: failure.entityId },
+                        select: { id: true },
+                    });
+
+                    if (!track) {
+                        await enrichmentFailureService.resolveFailures([
+                            failure.id,
+                        ]);
+                        skipped++;
+                        continue;
+                    }
+
+                    await prisma.track.update({
+                        where: { id: failure.entityId },
+                        data: {
+                            vibeAnalysisStatus: "pending",
+                            vibeAnalysisError: null,
+                            vibeAnalysisRetryCount: 0,
+                            vibeAnalysisStartedAt: null,
+                            vibeAnalysisStatusUpdatedAt: new Date(),
                         },
                     });
                     queued++;

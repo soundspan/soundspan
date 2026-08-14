@@ -145,6 +145,9 @@ Experimental feature note:
 | --- | --- | --- | --- | --- |
 | `SOUNDSPAN_CALLBACK_URL` | `backend`, `soundspan` (AIO) | Optional | split stack: `http://backend:3006`; AIO: `http://host.docker.internal:3030` | Callback URL used for webhook/integration callbacks (for example Lidarr completion hooks). |
 | `AUDIO_ANALYSIS_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for audio analysis queueing/consumption (Essentia + CLAP vibe embeddings), the mood-bucket worker, and the `/api/analysis` + `/api/vibe` routes. Set `false` to disable; analyzer containers should then also be disabled. |
+| `AUDIO_ANALYSIS_QUEUE_MAX_DEPTH` | `backend-worker` | Optional | `100` | Maximum number of pending MusicCNN jobs admitted to Redis. Additional pending tracks remain in PostgreSQL until capacity is available. |
+| `VIBE_ANALYSIS_QUEUE_MAX_DEPTH` | `backend-worker` | Optional | `100` | Maximum number of pending CLAP jobs admitted to Redis. Additional pending tracks remain in PostgreSQL until capacity is available. |
+| `ANALYSIS_QUEUE_RESERVATION_TTL_SECONDS` | `backend-worker` | Optional | `3600` | TTL for per-track Redis admission reservations that suppress duplicate queue entries. Maximum accepted value is 86400 seconds. |
 | `DISCOVERY_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Discover Weekly (cron + queue processors), the `/api/discover` + `/api/recommendations` routes, and the discovery auto-download lifecycle. |
 | `AUTO_PLAYLISTS_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Made For You mixes (on-demand programmatic playlists) and the `/api/mixes` routes. |
 | `LIDARR_ENABLED` | `backend`, `backend-worker` | Optional | `false` | Enables Lidarr integration logic from env fallback paths. |

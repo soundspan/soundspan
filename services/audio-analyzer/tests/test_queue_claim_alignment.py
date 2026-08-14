@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from types import ModuleType
 
 from conftest import FakeDatabaseConnection, FakeRedis
@@ -21,21 +20,23 @@ def _build_worker(
 
 
 def test_claim_tracks_keeps_only_rows_returned_by_database(loaded_analyzer: ModuleType) -> None:
-    """Keep eligible pending and pre-claimed tracks while filtering stale jobs."""
+    """Keep only tracks atomically claimed from pending state."""
     tracks = [
         ("pending-track", "/music/pending.flac"),
         ("processing-track", "/music/processing.flac"),
         ("stale-track", "/music/stale.flac"),
     ]
-    database = FakeDatabaseConnection([[{"id": "pending-track"}, {"id": "processing-track"}]])
+    database = FakeDatabaseConnection([[{"id": "pending-track"}]])
     worker = _build_worker(loaded_analyzer, database)
 
     claimed = worker._claim_tracks_for_processing(tracks)
 
-    assert claimed == tracks[:2]
+    assert claimed == tracks[:1]
     assert len(database.cursor.executions) == 1
     sql, params = database.cursor.executions[0]
-    assert "\"analysisStatus\" IN ('pending', 'processing')" in sql
+    assert "\"analysisStatus\" = 'pending'" in sql
+    assert '"analysisStartedAt" = NOW()' in sql
+    assert "COALESCE" not in sql
     assert params == ([track_id for track_id, _ in tracks],)
     assert database.commit_calls == 1
     assert database.cursor.closed is True
@@ -54,34 +55,27 @@ def test_claim_tracks_rolls_back_database_errors(loaded_analyzer: ModuleType) ->
     assert database.cursor.closed is True
 
 
-def test_reconciliation_queues_only_tracks_preclaimed_by_database(
+def test_reconciliation_processes_pending_tracks_without_redis_handoff(
     loaded_analyzer: ModuleType,
 ) -> None:
-    """Queue only pending tracks successfully transitioned to processing."""
+    """Process reconciliation rows directly so the consumer owns the claim."""
     tracks = [
         {"id": "track-a", "filePath": "/music/a.flac"},
         {"id": "track-b", "filePath": "/music/b.flac"},
     ]
-    database = FakeDatabaseConnection([tracks, [{"id": "track-b"}]])
+    database = FakeDatabaseConnection([tracks])
     redis_client = FakeRedis()
     worker = _build_worker(loaded_analyzer, database, redis_client)
+    processed: list[list[tuple[str, str]]] = []
+    worker._process_tracks_parallel = lambda batch: processed.append(batch)
 
     found_work = worker._run_db_reconciliation()
 
     assert found_work is True
-    assert len(database.cursor.executions) == 2
-    update_sql, update_params = database.cursor.executions[1]
-    assert "SET \"analysisStatus\" = 'processing'" in update_sql
-    assert "AND \"analysisStatus\" = 'pending'" in update_sql
-    assert update_params == (["track-a", "track-b"],)
+    assert len(database.cursor.executions) == 1
     assert database.commit_calls == 1
-    assert redis_client.queue_pipeline.pushes == [
-        (
-            loaded_analyzer.ANALYSIS_QUEUE,
-            json.dumps({"trackId": "track-b", "filePath": "/music/b.flac"}),
-        )
-    ]
-    assert redis_client.queue_pipeline.execute_calls == 1
+    assert processed == [[("track-a", "/music/a.flac"), ("track-b", "/music/b.flac")]]
+    assert redis_client.pipeline_calls == 0
 
 
 def test_reconciliation_closes_empty_read_transaction(loaded_analyzer: ModuleType) -> None:

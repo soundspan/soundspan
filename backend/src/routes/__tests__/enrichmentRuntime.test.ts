@@ -1109,7 +1109,12 @@ describe("enrichment route runtime behavior", () => {
         expect(mockResolveFailures).toHaveBeenCalledWith(["f-track"]);
         expect(mockTrackUpdate).toHaveBeenCalledWith({
             where: { id: "track-1" },
-            data: { analysisStatus: "pending", analysisRetryCount: 0 },
+            data: {
+                analysisStatus: "pending",
+                analysisError: null,
+                analysisRetryCount: 0,
+                analysisStartedAt: null,
+            },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
@@ -1117,6 +1122,41 @@ describe("enrichment route runtime behavior", () => {
                 "Queued 2 items for retry, 1 skipped (entities no longer exist)",
             queued: 2,
             skipped: 1,
+        });
+    });
+
+    it("resets a selected vibe failure for bounded background admission", async () => {
+        mockGetFailure.mockResolvedValueOnce({
+            id: "f-vibe",
+            entityType: "vibe",
+            entityId: "track-vibe",
+        });
+        mockTrackFindUnique.mockResolvedValueOnce({ id: "track-vibe" });
+        const res = createRes();
+
+        await retryHandler(
+            {
+                body: { ids: ["f-vibe"] },
+                user: { id: "admin-1" },
+            } as any,
+            res,
+        );
+
+        expect(mockTrackUpdate).toHaveBeenCalledWith({
+            where: { id: "track-vibe" },
+            data: {
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisError: null,
+                vibeAnalysisRetryCount: 0,
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: expect.any(Date),
+            },
+        });
+        expect(res.body).toEqual({
+            message:
+                "Queued 1 items for retry, 0 skipped (entities no longer exist)",
+            queued: 1,
+            skipped: 0,
         });
     });
 

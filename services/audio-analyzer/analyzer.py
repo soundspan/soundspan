@@ -1732,8 +1732,8 @@ class AnalysisWorker:
         """
         Check database for pending tracks that may have been missed by Redis queue.
         Handles edge cases: manual DB edits, crash recovery, queue loss.
-        Marks tracks as 'processing' in DB first (prevents backend double-queuing),
-        then pushes them into the Redis queue so BRPOP picks them up.
+        Sends rows directly through the consumer claim path so queue waiting time
+        is never recorded as processing time.
 
         Returns True if pending work was found, False if nothing to do.
         """
@@ -1758,32 +1758,10 @@ class AnalysisWorker:
                 self.db.commit()
                 return False
 
-            logger.info(f"DB reconciliation found {len(tracks)} pending tracks, queuing...")
-            track_ids = [t["id"] for t in tracks]
-            cursor.execute(
-                """
-                UPDATE "Track"
-                SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = NOW(),
-                    "updatedAt" = NOW()
-                WHERE id = ANY(%s)
-                AND "analysisStatus" = 'pending'
-                RETURNING id
-            """,
-                (track_ids,),
-            )
-            marked_ids = {row["id"] for row in cursor.fetchall()}
             self.db.commit()
-            if not marked_ids:
-                return False
-            pipe = self.redis.pipeline()
-            for t in tracks:
-                if t["id"] not in marked_ids:
-                    continue
-                pipe.rpush(
-                    ANALYSIS_QUEUE, json.dumps({"trackId": t["id"], "filePath": t["filePath"]})
-                )
-            pipe.execute()
+            pending_tracks = [(track["id"], track["filePath"]) for track in tracks]
+            logger.info(f"DB reconciliation found {len(pending_tracks)} pending tracks")
+            self._process_tracks_parallel(pending_tracks)
             return True
         except Exception as e:
             logger.error(f"DB reconciliation failed: {e}")
@@ -1955,9 +1933,6 @@ class AnalysisWorker:
         tracks: list[tuple[str, str]],
     ) -> list[tuple[str, str]]:
         """Mark eligible tracks as processing and discard stale queue entries."""
-        # Queue producers may pre-claim tracks as 'processing' before enqueueing
-        # (e.g. DB reconciliation / unified enrichment). Accept both 'pending'
-        # and 'processing' rows here so freshly queued work is not dropped.
         cursor = self.db.get_cursor()
         try:
             track_ids = [t[0] for t in tracks]
@@ -1965,10 +1940,10 @@ class AnalysisWorker:
                 """
                 UPDATE "Track"
                 SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = COALESCE("analysisStartedAt", NOW()),
+                    "analysisStartedAt" = NOW(),
                     "updatedAt" = NOW()
                 WHERE id = ANY(%s)
-                AND "analysisStatus" IN ('pending', 'processing')
+                AND "analysisStatus" = 'pending'
                 RETURNING id
             """,
                 (track_ids,),
@@ -1992,6 +1967,18 @@ class AnalysisWorker:
             return []
         finally:
             cursor.close()
+
+    def _release_queue_reservations(self, tracks: list[tuple[str, str]]) -> None:
+        """Release producer reservations after the database claim completes."""
+        if not tracks:
+            return
+        try:
+            pipe = self.redis.pipeline()
+            for track_id, _ in tracks:
+                pipe.delete(f"{ANALYSIS_QUEUE}:reserved:{track_id}")
+            pipe.execute()
+        except Exception as error:
+            logger.warning(f"Failed to release audio queue reservations: {error}")
 
     def _save_completed_future(self, future) -> tuple[str, int, int, int]:
         """Persist one completed future and return its outcome counters."""
@@ -2092,11 +2079,14 @@ class AnalysisWorker:
         if not tracks:
             return
 
-        self._ensure_pool()
-        logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
+        queued_tracks = tracks
         tracks = self._claim_tracks_for_processing(tracks)
+        self._release_queue_reservations(queued_tracks)
         if not tracks:
             return
+
+        self._ensure_pool()
+        logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
 
         start_time = time.monotonic()
         finalized_track_ids: set[str] = set()

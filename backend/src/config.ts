@@ -366,6 +366,26 @@ export const config = {
         autoPlaylists: parseEnvBool(process.env.AUTO_PLAYLISTS_ENABLED, true),
     },
 
+    // Keep analyzer queues short enough that waiting work is not mistaken for
+    // active processing. Per-track reservations suppress repeated producers.
+    analysisQueues: {
+        audioMaxDepth: boundedPositiveIntEnvOr(
+            process.env.AUDIO_ANALYSIS_QUEUE_MAX_DEPTH,
+            100,
+            10_000,
+        ),
+        vibeMaxDepth: boundedPositiveIntEnvOr(
+            process.env.VIBE_ANALYSIS_QUEUE_MAX_DEPTH,
+            100,
+            10_000,
+        ),
+        reservationTtlSeconds: boundedPositiveIntEnvOr(
+            process.env.ANALYSIS_QUEUE_RESERVATION_TTL_SECONDS,
+            3600,
+            86_400,
+        ),
+    },
+
     listenTogether: {
         reconnectSloMs: positiveIntEnvOr(
             process.env.LISTEN_TOGETHER_RECONNECT_SLO_MS,

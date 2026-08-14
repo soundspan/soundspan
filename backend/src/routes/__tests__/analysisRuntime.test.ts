@@ -37,6 +37,9 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             update: jest.fn(),
         },
+        trackEmbedding: {
+            deleteMany: jest.fn(),
+        },
         systemSettings: {
             update: jest.fn(),
         },
@@ -81,6 +84,8 @@ const mockTrackFindMany = prisma.track.findMany as jest.Mock;
 const mockTrackUpdateMany = prisma.track.updateMany as jest.Mock;
 const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockTrackUpdate = prisma.track.update as jest.Mock;
+const mockTrackEmbeddingDeleteMany = prisma.trackEmbedding
+    .deleteMany as jest.Mock;
 const mockSystemSettingsUpdate = prisma.systemSettings.update as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockExecuteRaw = prisma.$executeRaw as jest.Mock;
@@ -212,6 +217,7 @@ describe("analysis routes runtime", () => {
         mockTrackUpdateMany.mockResolvedValue({ count: 0 });
         mockTrackFindUnique.mockResolvedValue(null);
         mockTrackUpdate.mockResolvedValue({});
+        mockTrackEmbeddingDeleteMany.mockResolvedValue({ count: 0 });
         mockSystemSettingsUpdate.mockResolvedValue({});
         mockQueryRaw.mockResolvedValue([]);
         mockExecuteRaw.mockResolvedValue(0);
@@ -336,6 +342,16 @@ describe("analysis routes runtime", () => {
         const res = createRes();
 
         await postRetryFailed(req, res);
+
+        expect(mockTrackUpdateMany).toHaveBeenCalledWith({
+            where: { analysisStatus: "failed" },
+            data: {
+                analysisStatus: "pending",
+                analysisError: null,
+                analysisRetryCount: 0,
+                analysisStartedAt: null,
+            },
+        });
 
         expect(res.body).toEqual({
             message: "Reset 6 failed tracks to pending",
@@ -635,7 +651,7 @@ describe("analysis routes runtime", () => {
     it("queues vibe embedding jobs in force mode and clears failures", async () => {
         const pipeline = createPipeline();
         mockRedisMulti.mockReturnValue(pipeline);
-        mockQueryRaw.mockResolvedValue([
+        mockTrackFindMany.mockResolvedValue([
             { id: "t1", filePath: "/x.mp3", duration: 111, title: "T1" },
             { id: "t2", filePath: "/y.mp3", duration: 222, title: "T2" },
         ]);
@@ -645,7 +661,8 @@ describe("analysis routes runtime", () => {
 
         await postVibeStart(req, res);
 
-        expect(mockExecuteRaw).toHaveBeenCalled();
+        expect(mockTrackEmbeddingDeleteMany).toHaveBeenCalledWith();
+        expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
@@ -666,7 +683,7 @@ describe("analysis routes runtime", () => {
     });
 
     it("returns no-op vibe start when all tracks already have embeddings", async () => {
-        mockQueryRaw.mockResolvedValue([]);
+        mockTrackFindMany.mockResolvedValue([]);
         const req = { body: {} } as any;
         const res = createRes();
         await postVibeStart(req, res);
@@ -676,43 +693,36 @@ describe("analysis routes runtime", () => {
         });
     });
 
-    it("retries vibe failures or no-ops when none exist", async () => {
-        mockGetFailures.mockResolvedValueOnce({ failures: [] });
+    it("resets all failed vibe rows without bulk queueing", async () => {
+        mockTrackUpdateMany.mockResolvedValueOnce({ count: 0 });
         const noFailuresReq = {} as any;
         const noFailuresRes = createRes();
         await postVibeRetry(noFailuresReq, noFailuresRes);
         expect(noFailuresRes.body).toEqual({
             message: "No vibe failures to retry",
-            queued: 0,
+            reset: 0,
         });
 
-        const pipeline = createPipeline();
-        mockRedisMulti.mockReturnValue(pipeline);
-        mockGetFailures.mockResolvedValueOnce({
-            failures: [{ id: "f1", entityId: "t9" }],
-        });
-        mockTrackFindMany.mockResolvedValueOnce([
-            { id: "t9", filePath: "/t9.mp3", duration: 123, title: "T9" },
-        ]);
+        mockTrackUpdateMany.mockResolvedValueOnce({ count: 1204 });
 
         const req = {} as any;
         const res = createRes();
         await postVibeRetry(req, res);
 
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
-            where: { id: { in: ["t9"] } },
+            where: { vibeAnalysisStatus: "failed" },
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisError: null,
                 vibeAnalysisStartedAt: null,
+                vibeAnalysisRetryCount: 0,
                 vibeAnalysisStatusUpdatedAt: expect.any(Date),
             }),
         });
-        expect(pipeline.rPush).toHaveBeenCalledTimes(1);
-        expect(mockResetRetryCount).toHaveBeenCalledWith(["f1"]);
+        expect(mockRedisMulti).not.toHaveBeenCalled();
         expect(res.body).toEqual({
-            message: "Queued 1 failed tracks for vibe embedding retry",
-            queued: 1,
+            message: "Reset 1204 failed tracks for vibe embedding retry",
+            reset: 1204,
         });
     });
 
@@ -875,7 +885,7 @@ describe("analysis routes runtime", () => {
     });
 
     it("returns 500 when starting vibe embedding catch branch is hit", async () => {
-        mockQueryRaw.mockRejectedValue(new Error("vibe start failed"));
+        mockTrackFindMany.mockRejectedValue(new Error("vibe start failed"));
         const req = { body: {} } as any;
         const res = createRes();
 
@@ -886,7 +896,7 @@ describe("analysis routes runtime", () => {
     });
 
     it("returns 500 when retry vibe failures catch branch is hit", async () => {
-        mockGetFailures.mockRejectedValue(new Error("vibe retry failed"));
+        mockTrackUpdateMany.mockRejectedValue(new Error("vibe retry failed"));
         const req = {} as any;
         const res = createRes();
 

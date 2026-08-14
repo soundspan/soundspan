@@ -28,6 +28,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { featureDetection } from "../services/featureDetection";
 import { moodBucketService } from "../services/moodBucketService";
 import pLimit from "p-limit";
+import { enqueueReservedWork } from "./enrichmentQueue";
 
 const log = logger.child("Enrichment");
 
@@ -1331,7 +1332,7 @@ async function queueAudioAnalysis(): Promise<number> {
             title: true,
             duration: true,
         },
-        take: 10, // Match analyzer batch size to avoid stale "processing" buildup
+        take: config.analysisQueues.audioMaxDepth,
         orderBy: { fileModified: "desc" },
     });
 
@@ -1345,30 +1346,24 @@ async function queueAudioAnalysis(): Promise<number> {
 
     for (const track of tracks) {
         try {
-            // Queue for the Python audio analyzer
-            await withEnrichmentQueueRedisRetry(
-                `queueAudioAnalysis.rpush(${track.id})`,
+            const admission = await withEnrichmentQueueRedisRetry(
+                `queueAudioAnalysis.admit(${track.id})`,
                 () =>
-                    getRedis().rpush(
-                        "audio:analysis:queue",
-                        JSON.stringify({
+                    enqueueReservedWork(getRedis(), {
+                        queueKey: "audio:analysis:queue",
+                        trackId: track.id,
+                        payload: JSON.stringify({
                             trackId: track.id,
                             filePath: track.filePath,
-                            duration: track.duration, // Avoids file read in analyzer
+                            duration: track.duration,
                         }),
-                    ),
+                        maxDepth: config.analysisQueues.audioMaxDepth,
+                        reservationTtlSeconds:
+                            config.analysisQueues.reservationTtlSeconds,
+                    }),
             );
-
-            // Mark as queued (processing) with timestamp for timeout detection
-            await prisma.track.update({
-                where: { id: track.id },
-                data: {
-                    analysisStatus: "processing",
-                    analysisStartedAt: new Date(),
-                },
-            });
-
-            queued++;
+            if (admission === "full") break;
+            if (admission === "queued") queued += 1;
         } catch (error) {
             log.error(`   Failed to queue ${track.title}:`, error);
         }
@@ -1389,21 +1384,18 @@ async function queueVibeEmbeddings(): Promise<number> {
     const tracks = await withEnrichmentPrismaRetry(
         "queueVibeEmbeddings.track.select",
         () =>
-            prisma.$queryRaw<
-                {
-                    id: string;
-                    filePath: string;
-                    vibeAnalysisStatus: string | null;
-                }[]
-            >`
-          SELECT t.id, t."filePath", t."vibeAnalysisStatus"
-          FROM "Track" t
-          LEFT JOIN track_embeddings te ON t.id = te.track_id
-          WHERE te.track_id IS NULL
-            AND t."filePath" IS NOT NULL
-            AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" = 'pending')
-          LIMIT 1000
-      `,
+            prisma.track.findMany({
+                where: {
+                    embedding: null,
+                    OR: [
+                        { vibeAnalysisStatus: null },
+                        { vibeAnalysisStatus: "pending" },
+                    ],
+                },
+                select: { id: true, filePath: true },
+                take: config.analysisQueues.vibeMaxDepth,
+                orderBy: { fileModified: "desc" },
+            }),
     );
 
     if (tracks.length === 0) {
@@ -1414,28 +1406,23 @@ async function queueVibeEmbeddings(): Promise<number> {
 
     for (const track of tracks) {
         try {
-            await withEnrichmentQueueRedisRetry(
-                `queueVibeEmbeddings.rpush(${track.id})`,
+            const admission = await withEnrichmentQueueRedisRetry(
+                `queueVibeEmbeddings.admit(${track.id})`,
                 () =>
-                    getRedis().rpush(
-                        "audio:clap:queue",
-                        JSON.stringify({
+                    enqueueReservedWork(getRedis(), {
+                        queueKey: "audio:clap:queue",
+                        trackId: track.id,
+                        payload: JSON.stringify({
                             trackId: track.id,
                             filePath: track.filePath,
                         }),
-                    ),
+                        maxDepth: config.analysisQueues.vibeMaxDepth,
+                        reservationTtlSeconds:
+                            config.analysisQueues.reservationTtlSeconds,
+                    }),
             );
-
-            await prisma.track.update({
-                where: { id: track.id },
-                data: {
-                    vibeAnalysisStatus: "processing",
-                    vibeAnalysisStartedAt: new Date(),
-                    vibeAnalysisStatusUpdatedAt: new Date(),
-                },
-            });
-
-            queued++;
+            if (admission === "full") break;
+            if (admission === "queued") queued += 1;
         } catch (error) {
             log.error(
                 `   Failed to queue vibe embedding for ${track.id}:`,

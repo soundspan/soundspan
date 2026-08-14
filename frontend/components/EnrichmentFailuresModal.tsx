@@ -10,6 +10,118 @@ interface EnrichmentFailuresModalProps {
     onClose: () => void;
 }
 
+type RetryableFailureType = "audio" | "vibe";
+
+interface RetryAllConfirmationDialogProps {
+    count: number;
+    entityType: RetryableFailureType;
+    onCancel: () => void;
+    onConfirm: () => void;
+}
+
+function RetryAllConfirmationDialog({
+    count,
+    entityType,
+    onCancel,
+    onConfirm,
+}: RetryAllConfirmationDialogProps) {
+    return (
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+            <div
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="retry-all-title"
+                className="bg-surface-hover rounded-lg p-6 max-w-md border border-white/10"
+            >
+                <h3
+                    id="retry-all-title"
+                    className="text-lg font-bold text-white mb-2"
+                >
+                    Retry all failures in this tab?
+                </h3>
+                <p className="text-sm text-white/70 mb-4">
+                    This resets {count} failed{" "}
+                    {entityType === "audio"
+                        ? "audio analyses"
+                        : "vibe embeddings"}
+                    . The bounded background queue will process them gradually.
+                </p>
+                <div className="flex justify-end gap-2">
+                    <button
+                        onClick={onCancel}
+                        className="px-4 py-2 text-sm bg-white/10 text-white/70 rounded-lg hover:bg-white/20 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                        Retry all
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+interface RetryAllFailuresActionProps {
+    count: number;
+    entityType: RetryableFailureType;
+    isError: boolean;
+    isPending: boolean;
+    onRetry: () => void;
+}
+
+function RetryAllFailuresAction({
+    count,
+    entityType,
+    isError,
+    isPending,
+    onRetry,
+}: RetryAllFailuresActionProps) {
+    const [showConfirm, setShowConfirm] = useState(false);
+    if (count <= 0) return null;
+
+    return (
+        <>
+            <div className="flex items-center justify-between gap-3 px-6 py-3 bg-white/5 border-b border-white/10">
+                <div>
+                    <p className="text-sm text-white/60">
+                        Retry every failure in this tab. Work enters the
+                        analyzer queue gradually.
+                    </p>
+                    {isError && (
+                        <p role="alert" className="text-xs text-red-400 mt-1">
+                            Retry failed. Check the server logs and try again.
+                        </p>
+                    )}
+                </div>
+                <button
+                    onClick={() => setShowConfirm(true)}
+                    disabled={isPending}
+                    className="shrink-0 flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg
+                        hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {isPending ? "Retrying..." : `Retry all ${count}`}
+                </button>
+            </div>
+            {showConfirm && (
+                <RetryAllConfirmationDialog
+                    count={count}
+                    entityType={entityType}
+                    onCancel={() => setShowConfirm(false)}
+                    onConfirm={() => {
+                        onRetry();
+                        setShowConfirm(false);
+                    }}
+                />
+            )}
+        </>
+    );
+}
+
 /**
  * Renders the EnrichmentFailuresModal component.
  */
@@ -114,6 +226,25 @@ export function EnrichmentFailuresModal({
         },
     });
 
+    const retryAllMutation = useMutation({
+        mutationFn: (entityType: "audio" | "vibe") =>
+            entityType === "audio"
+                ? enrichmentApi.retryFailedAudioAnalysis()
+                : enrichmentApi.retryVibeEmbeddings(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({
+                queryKey: ["enrichment-failures"],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ["enrichment-failure-counts"],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ["enrichment-progress"],
+            });
+            setSelectedFailures(new Set());
+        },
+    });
+
     const toggleFailureSelection = (id: string) => {
         const newSelected = new Set(selectedFailures);
         if (newSelected.has(id)) {
@@ -180,12 +311,23 @@ export function EnrichmentFailuresModal({
                         )}
                         <button
                             onClick={onClose}
+                            aria-label="Close enrichment failures"
                             className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                         >
                             <X className="w-5 h-5 text-white/70" />
                         </button>
                     </div>
                 </div>
+
+                {(selectedType === "audio" || selectedType === "vibe") && (
+                    <RetryAllFailuresAction
+                        count={counts?.[selectedType] || 0}
+                        entityType={selectedType}
+                        isError={retryAllMutation.isError}
+                        isPending={retryAllMutation.isPending}
+                        onRetry={() => retryAllMutation.mutate(selectedType)}
+                    />
+                )}
 
                 {/* Filter Tabs */}
                 <div className="flex gap-3 px-6 py-4 border-b border-white/10 overflow-x-auto">
@@ -228,6 +370,7 @@ export function EnrichmentFailuresModal({
                                     ? "bg-brand text-black"
                                     : "bg-white/5 text-white/70 hover:bg-white/10"
                             }`}
+                            aria-pressed={selectedType === tab.key}
                         >
                             {tab.label} ({tab.count})
                         </button>
@@ -287,6 +430,7 @@ export function EnrichmentFailuresModal({
                             <div className="flex items-center gap-3 px-3 py-2">
                                 <input
                                     type="checkbox"
+                                    aria-label="Select all failures on this page"
                                     checked={
                                         selectedFailures.size ===
                                         failures?.failures.length
@@ -306,6 +450,7 @@ export function EnrichmentFailuresModal({
                                 >
                                     <input
                                         type="checkbox"
+                                        aria-label={`Select failure for ${failure.entityName || failure.entityId}`}
                                         checked={selectedFailures.has(
                                             failure.id,
                                         )}

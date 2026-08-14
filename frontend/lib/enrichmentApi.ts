@@ -227,12 +227,20 @@ export const enrichmentApi = {
         });
     },
 
+    /** Reset every failed audio-analysis row for bounded background retry. */
+    retryFailedAudioAnalysis: async (): Promise<{
+        message: string;
+        reset: number;
+    }> => {
+        return api.post("/analysis/retry-failed", {});
+    },
+
     /**
      * Retry failed vibe embeddings
      */
     retryVibeEmbeddings: async (): Promise<{
         message: string;
-        queued: number;
+        reset: number;
     }> => {
         return api.post("/analysis/vibe/retry", {});
     },

@@ -60,18 +60,28 @@ describe("unified enrichment runtime behavior", () => {
 
         const queueRedisPrimary = {
             llen: jest.fn(async () => 0),
-            rpush: jest.fn(async () => 1),
+            rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
+            eval: jest.fn(async () => 1),
             keys: jest.fn(async () => []),
             del: jest.fn(async () => 0),
             disconnect: jest.fn(),
         };
         const queueRedisRecovery = {
             llen: jest.fn(async () => 0),
-            rpush: jest.fn(async () => 1),
+            rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
+            eval: jest.fn(async () => 1),
             keys: jest.fn(async () => []),
             del: jest.fn(async () => 0),
             disconnect: jest.fn(),
         };
+        (queueRedisPrimary.eval as jest.Mock).mockImplementation(
+            async (...args: string[]) =>
+                queueRedisPrimary.rpush(args[2], args[6]),
+        );
+        (queueRedisRecovery.eval as jest.Mock).mockImplementation(
+            async (...args: string[]) =>
+                queueRedisRecovery.rpush(args[2], args[6]),
+        );
         const claimRedisPrimary = {
             set: jest.fn(async () => null),
             eval: jest.fn(async () => 1),
@@ -198,6 +208,11 @@ describe("unified enrichment runtime behavior", () => {
                             ? parsed
                             : 900_000;
                     },
+                },
+                analysisQueues: {
+                    audioMaxDepth: 100,
+                    vibeMaxDepth: 100,
+                    reservationTtlSeconds: 3600,
                 },
             },
         }));
@@ -592,25 +607,44 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         const queued = await enrichment.reRunAudioAnalysisOnly();
 
-        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(2);
-        expect(prisma.track.update).toHaveBeenCalledTimes(2);
-        expect(prisma.track.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "track-a" },
-                data: expect.objectContaining({
-                    analysisStatus: "processing",
-                    analysisStartedAt: expect.any(Date),
-                }),
-            }),
-        );
+        expect(queueRedisPrimary.eval).toHaveBeenCalledTimes(2);
+        expect(prisma.track.update).not.toHaveBeenCalled();
         expect(queued).toBe(2);
+    });
+
+    it("stops audio admission when the bounded queue is full", async () => {
+        const { prisma, queueRedisPrimary } = setupUnifiedEnrichmentMocks();
+        (prisma.track.findMany as jest.Mock)
+            .mockResolvedValueOnce([{ id: "track-a" }])
+            .mockResolvedValueOnce([
+                {
+                    id: "track-a",
+                    filePath: "/music/a.flac",
+                    title: "A",
+                    duration: 120,
+                },
+                {
+                    id: "track-b",
+                    filePath: "/music/b.flac",
+                    title: "B",
+                    duration: 140,
+                },
+            ]);
+        (queueRedisPrimary.eval as jest.Mock).mockResolvedValueOnce(-1);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const queued = await enrichment.reRunAudioAnalysisOnly();
+
+        expect(queueRedisPrimary.eval).toHaveBeenCalledTimes(1);
+        expect(queued).toBe(0);
     });
 
     it("re-runs vibe embeddings when available and queues missing embeddings", async () => {
         const { prisma, queueRedisPrimary, getFeatures } =
             setupUnifiedEnrichmentMocks();
         getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
-        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+        (prisma.track.findMany as jest.Mock).mockResolvedValueOnce([
             {
                 id: "track-v1",
                 filePath: "/music/v1.flac",
@@ -627,11 +661,14 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         const queued = await enrichment.reRunVibeEmbeddingsOnly();
 
-        expect(prisma.track.update).toHaveBeenCalledTimes(2);
-        expect(queueRedisPrimary.rpush).toHaveBeenCalledWith(
-            "audio:clap:queue",
-            expect.any(String),
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ embedding: null }),
+                take: 100,
+            }),
         );
+        expect(prisma.track.update).not.toHaveBeenCalled();
+        expect(queueRedisPrimary.eval).toHaveBeenCalledTimes(2);
         expect(queued).toBe(2);
     });
 
@@ -644,8 +681,8 @@ describe("unified enrichment runtime behavior", () => {
         const enrichment = require("../unifiedEnrichment");
         const queued = await enrichment.reRunVibeEmbeddingsOnly();
 
-        expect(prisma.$queryRaw).not.toHaveBeenCalled();
-        expect(queueRedisPrimary.rpush).not.toHaveBeenCalled();
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+        expect(queueRedisPrimary.eval).not.toHaveBeenCalled();
         expect(queued).toBe(0);
     });
 
@@ -746,14 +783,7 @@ describe("unified enrichment runtime behavior", () => {
         expect(queueRedisPrimary.disconnect).toHaveBeenCalledTimes(1);
         expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(1);
         expect(queueRedisRecovery.rpush).toHaveBeenCalledTimes(1);
-        expect(prisma.track.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "track-enrich-1" },
-                data: expect.objectContaining({
-                    analysisStatus: "processing",
-                }),
-            }),
-        );
+        expect(prisma.track.update).not.toHaveBeenCalled();
         expect(result.audioQueued).toBeGreaterThanOrEqual(1);
     });
 
@@ -2033,7 +2063,18 @@ describe("unified enrichment runtime behavior", () => {
         (claimRedisPrimary.set as jest.Mock).mockResolvedValueOnce("OK");
         getFeatures.mockResolvedValue({ vibeEmbeddings: true });
         (prisma.artist.findMany as jest.Mock).mockResolvedValueOnce([]);
-        (prisma.track.findMany as jest.Mock).mockResolvedValue(async () => []);
+        (prisma.track.findMany as jest.Mock).mockImplementation(
+            async (query?: any) =>
+                query?.where?.embedding === null
+                    ? [
+                          {
+                              id: "track-vibe-fail",
+                              filePath: "/music/track-vibe-fail.flac",
+                              vibeAnalysisStatus: null,
+                          },
+                      ]
+                    : [],
+        );
         (prisma.track.count as jest.Mock).mockImplementation(
             async (args?: { where?: any }) => {
                 const where = args?.where;
@@ -2050,23 +2091,16 @@ describe("unified enrichment runtime behavior", () => {
         (prisma.$queryRaw as jest.Mock)
             .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(0) }])
-            .mockResolvedValueOnce([
-                {
-                    id: "track-vibe-fail",
-                    filePath: "/music/track-vibe-fail.flac",
-                    vibeAnalysisStatus: null,
-                },
-            ])
             .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(0) }]);
-        (prisma.track.update as jest.Mock).mockRejectedValueOnce(
-            new Error("update failed"),
+        (queueRedisPrimary.rpush as jest.Mock).mockRejectedValueOnce(
+            new Error("push failed"),
         );
         (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(0);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const enrichment = require("../unifiedEnrichment");
-        await enrichment.runFullEnrichment();
+        await enrichment.reRunVibeEmbeddingsOnly();
 
         expect(logger.error).toHaveBeenCalledWith(
             "   Failed to queue vibe embedding for track-vibe-fail:",
@@ -2078,7 +2112,7 @@ describe("unified enrichment runtime behavior", () => {
         const { prisma, getFeatures, queueRedisPrimary, logger } =
             setupUnifiedEnrichmentMocks();
         getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
-        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+        (prisma.track.findMany as jest.Mock).mockResolvedValueOnce([
             {
                 id: "track-vibe-rpush-fail",
                 filePath: "/music/track-vibe-rpush-fail.flac",
@@ -2105,7 +2139,7 @@ describe("unified enrichment runtime behavior", () => {
         const { prisma, getFeatures, queueRedisPrimary, queueRedisRecovery } =
             setupUnifiedEnrichmentMocks();
         getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
-        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+        (prisma.track.findMany as jest.Mock).mockResolvedValueOnce([
             {
                 id: "track-vibe-rpush-recovery",
                 filePath: "/music/track-vibe-rpush-recovery.flac",
@@ -2124,14 +2158,7 @@ describe("unified enrichment runtime behavior", () => {
         expect(queueRedisPrimary.disconnect).toHaveBeenCalledTimes(1);
         expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(1);
         expect(queueRedisRecovery.rpush).toHaveBeenCalledTimes(1);
-        expect(prisma.track.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "track-vibe-rpush-recovery" },
-                data: expect.objectContaining({
-                    vibeAnalysisStatus: "processing",
-                }),
-            }),
-        );
+        expect(prisma.track.update).not.toHaveBeenCalled();
     });
 
     it("logs vibe cleanup reset counts and queued embeddings", async () => {
@@ -2166,15 +2193,20 @@ describe("unified enrichment runtime behavior", () => {
         (prisma.$queryRaw as jest.Mock)
             .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(0) }])
-            .mockResolvedValueOnce([
-                {
-                    id: "track-vibe-ok",
-                    filePath: "/music/track-vibe-ok.flac",
-                    vibeAnalysisStatus: null,
-                },
-            ])
             .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(1) }]);
+        (prisma.track.findMany as jest.Mock).mockImplementation(
+            async (query?: any) =>
+                query?.where?.embedding === null
+                    ? [
+                          {
+                              id: "track-vibe-ok",
+                              filePath: "/music/track-vibe-ok.flac",
+                              vibeAnalysisStatus: null,
+                          },
+                      ]
+                    : [],
+        );
         (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(0);
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires

@@ -8,9 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The enrichment failures modal now provides confirmed, tab-specific “Retry
+  all” actions for Audio Analysis and Vibe Embeddings failures.
+
 ### Changed
 
 ### Fixed
+
+- Background audio-analysis and vibe-embedding producers now use bounded,
+  deduplicated Redis admission and leave queued tracks pending until an
+  analyzer claims them. Queue wait time no longer consumes the processing
+  timeout or creates false stale-processing failures during large library
+  imports.
+- Retrying all failed analyzer work now resets retry budgets and lets the
+  bounded background producer drain the backlog instead of enqueueing every
+  failed track at once. Selected vibe failures can also be retried correctly.
 
 - Backend track-mapping reconciliation now reuses a normalized local-library
   index, yields between mapping attempts, and enforces configurable per-run

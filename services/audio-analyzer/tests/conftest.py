@@ -94,11 +94,16 @@ class FakePipeline:
 
     def __init__(self) -> None:
         self.pushes: list[tuple[str, str]] = []
+        self.deletes: list[str] = []
         self.execute_calls = 0
 
     def rpush(self, queue: str, payload: str) -> None:
         """Record one queued payload."""
         self.pushes.append((queue, payload))
+
+    def delete(self, key: str) -> None:
+        """Record one reservation deletion."""
+        self.deletes.append(key)
 
     def execute(self) -> None:
         """Record pipeline execution."""

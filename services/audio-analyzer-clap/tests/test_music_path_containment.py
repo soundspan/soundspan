@@ -19,10 +19,15 @@ class SingleJobRedis:
 
     def __init__(self, job: dict[str, Any]) -> None:
         self.job = job
+        self.deleted: list[str] = []
 
     def blpop(self, queue: str, timeout: int) -> tuple[str, str]:
         """Return the configured job without external Redis I/O."""
         return queue, json.dumps(self.job)
+
+    def delete(self, key: str) -> None:
+        """Record released queue reservations."""
+        self.deleted.append(key)
 
 
 class RecordingAnalyzer:
@@ -62,6 +67,7 @@ def _process_queued_path(
     status_updates: list[tuple[str, str]] = []
     stored_track_ids: list[str] = []
     monkeypatch.setattr(module, "MUSIC_PATH", str(music_root))
+    monkeypatch.setattr(worker, "_claim_track", lambda _track_id: True)
     monkeypatch.setattr(
         worker,
         "_update_track_status",
@@ -151,5 +157,35 @@ def test_queued_in_library_path_is_embedded(
     )
 
     assert analyzer.paths == [str(track_path.resolve())]
-    assert status_updates == [("track-1", "processing"), ("track-1", "completed")]
+    assert status_updates == [("track-1", "completed")]
     assert stored_track_ids == ["track-1"]
+
+
+def test_duplicate_queue_job_is_skipped_when_pending_claim_fails(
+    analyzer_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not generate a second embedding when another worker owns the track."""
+    music_root = tmp_path / "music"
+    track_path = music_root / "artist" / "track.flac"
+    track_path.parent.mkdir(parents=True)
+    track_path.touch()
+    analyzer = RecordingAnalyzer()
+    worker = analyzer_module.Worker(1, analyzer, threading.Event())
+    redis_client = SingleJobRedis(
+        {"trackId": "track-1", "filePath": "artist/track.flac", "duration": 30.0}
+    )
+    worker.redis_client = redis_client
+    monkeypatch.setattr(analyzer_module, "MUSIC_PATH", str(music_root))
+    monkeypatch.setattr(worker, "_claim_track", lambda _track_id: False)
+    monkeypatch.setattr(
+        worker,
+        "_store_embedding",
+        lambda _track_id, _embedding: pytest.fail("duplicate was stored"),
+    )
+
+    worker._process_job()
+
+    assert analyzer.paths == []
+    assert redis_client.deleted == ["audio:clap:queue:reserved:track-1"]

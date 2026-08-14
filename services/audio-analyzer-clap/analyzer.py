@@ -477,8 +477,11 @@ class Worker:
             logger.warning("Rejected queued CLAP path outside the configured music library")
             return
 
-        # Update track status to processing
-        self._update_track_status(track_id, "processing")
+        if not self._claim_track(track_id):
+            self._release_queue_reservation(track_id)
+            logger.info(f"Worker {self.worker_id} skipped stale queue job: {track_id}")
+            return
+        self._release_queue_reservation(track_id)
 
         # Generate embedding (pass duration to avoid file probe)
         embedding = self.analyzer.get_audio_embedding(full_path, duration)
@@ -495,6 +498,40 @@ class Worker:
             logger.info(f"Worker {self.worker_id} completed track: {track_id}")
         else:
             self._mark_failed(track_id, "Failed to store embedding")
+
+    def _claim_track(self, track_id: str) -> bool:
+        """Atomically claim one pending track for this worker."""
+        cursor = self.db.get_cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE "Track"
+                SET
+                    "vibeAnalysisStatus" = 'processing',
+                    "vibeAnalysisStartedAt" = NOW(),
+                    "vibeAnalysisStatusUpdatedAt" = NOW()
+                WHERE id = %s
+                AND ("vibeAnalysisStatus" IS NULL OR "vibeAnalysisStatus" = 'pending')
+                RETURNING id
+            """,
+                (track_id,),
+            )
+            claimed = cursor.fetchone() is not None
+            self.db.commit()
+            return claimed
+        except Exception as error:
+            logger.error(f"Failed to claim track for vibe analysis: {error}")
+            self.db.rollback()
+            return False
+        finally:
+            cursor.close()
+
+    def _release_queue_reservation(self, track_id: str) -> None:
+        """Release the producer reservation after the database claim."""
+        try:
+            self.redis_client.delete(f"{ANALYSIS_QUEUE}:reserved:{track_id}")
+        except Exception as error:
+            logger.warning(f"Failed to release vibe queue reservation: {error}")
 
     def _update_track_status(self, track_id: str, status: str):
         """Update the track's vibe analysis status (CLAP embeddings)"""

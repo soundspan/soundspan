@@ -217,6 +217,8 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
             data: {
                 analysisStatus: "pending",
                 analysisError: null,
+                analysisRetryCount: 0,
+                analysisStartedAt: null,
             },
         });
 
@@ -773,11 +775,16 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
  */
 router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { limit = 500, force = false } = req.body;
+        const requestedLimit = Number(req.body.limit ?? 500);
+        const limit =
+            Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+                ? Math.min(requestedLimit, 1000)
+                : 500;
+        const force = req.body.force === true;
 
         // If force mode, delete all existing embeddings first
         if (force) {
-            await prisma.$executeRaw`DELETE FROM track_embeddings`;
+            await prisma.trackEmbedding.deleteMany();
             await prisma.track.updateMany({
                 data: {
                     ...buildVibePendingReset(),
@@ -789,17 +796,19 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         }
 
         // Find tracks without vibe embeddings (all tracks if force was used)
-        const tracks = await prisma.$queryRaw<
-            { id: string; filePath: string; duration: number; title: string }[]
-        >`
-            SELECT t.id, t."filePath", t.duration, t.title
-            FROM "Track" t
-            LEFT JOIN track_embeddings te ON t.id = te.track_id
-            WHERE te.track_id IS NULL
-            AND t."filePath" IS NOT NULL
-            ORDER BY t."fileModified" DESC
-            LIMIT ${limit}
-        `;
+        const tracks = await prisma.track.findMany({
+            where: {
+                embedding: null,
+            },
+            select: {
+                id: true,
+                filePath: true,
+                duration: true,
+                title: true,
+            },
+            orderBy: { fileModified: "desc" },
+            take: limit,
+        });
 
         if (tracks.length === 0) {
             return res.json({
@@ -854,14 +863,14 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
  * @openapi
  * /api/analysis/vibe/retry:
  *   post:
- *     summary: Retry failed vibe embeddings
+ *     summary: Reset all failed vibe embeddings for bounded retry
  *     tags: [Analysis]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Failed tracks queued for vibe embedding retry
+ *         description: Failed tracks reset to pending for bounded background retry
  *       401:
  *         description: Not authenticated
  *       403:
@@ -873,65 +882,26 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
  */
 router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
     try {
-        // Get all vibe failures
-        const { failures } = await enrichmentFailureService.getFailures({
-            entityType: "vibe",
-            includeSkipped: false,
-            includeResolved: false,
+        const result = await prisma.track.updateMany({
+            where: { vibeAnalysisStatus: "failed" },
+            data: {
+                ...buildVibePendingReset(),
+                vibeAnalysisRetryCount: 0,
+            },
         });
 
-        if (failures.length === 0) {
+        if (result.count === 0) {
             return res.json({
                 message: "No vibe failures to retry",
-                queued: 0,
+                reset: 0,
             });
         }
 
-        // Get track details for failed tracks
-        const trackIds = failures.map((f) => f.entityId);
-        const tracks = await prisma.track.findMany({
-            where: { id: { in: trackIds } },
-            select: { id: true, filePath: true, duration: true, title: true },
-        });
-
-        if (tracks.length === 0) {
-            return res.json({
-                message: "No failed tracks found for vibe retry",
-                queued: 0,
-            });
-        }
-
-        // Retry should clear failed state before enqueue so queue loss does not
-        // leave tracks permanently stranded as failed.
-        await prisma.track.updateMany({
-            where: { id: { in: tracks.map((track) => track.id) } },
-            data: buildVibePendingReset(),
-        });
-
-        // Queue for retry
-        const pipeline = redisClient.multi();
-        for (const track of tracks) {
-            pipeline.rPush(
-                VIBE_QUEUE,
-                JSON.stringify({
-                    trackId: track.id,
-                    filePath: track.filePath,
-                    duration: track.duration,
-                }),
-            );
-        }
-        await pipeline.exec();
-
-        // Reset retry counts
-        await enrichmentFailureService.resetRetryCount(
-            failures.map((f) => f.id),
-        );
-
-        logger.info(`Retrying ${tracks.length} failed vibe embeddings`);
+        logger.info(`Reset ${result.count} failed vibe embeddings for retry`);
 
         res.json({
-            message: `Queued ${tracks.length} failed tracks for vibe embedding retry`,
-            queued: tracks.length,
+            message: `Reset ${result.count} failed tracks for vibe embedding retry`,
+            reset: result.count,
         });
     } catch (error: any) {
         logger.error("Retry vibe failures error:", error);
