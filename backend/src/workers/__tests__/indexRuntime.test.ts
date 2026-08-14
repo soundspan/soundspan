@@ -53,6 +53,10 @@ describe("workers runtime behavior", () => {
         const stopDiscoverWeeklyCron = jest.fn();
         const processDiscoverCronTick = jest.fn(async () => ({ ok: true }));
         const processGenericImport = jest.fn(async () => undefined);
+        const processTrackRemovalPurge = jest.fn(async () => ({
+            deleted: 0,
+            continued: false,
+        }));
         const finalizeGenericImportQueueFailure = jest.fn(
             async () => undefined,
         );
@@ -176,6 +180,10 @@ describe("workers runtime behavior", () => {
             finalizeGenericImportQueueFailure,
             GENERIC_IMPORT_WORKER_CONCURRENCY: 2,
         }));
+        jest.doMock("../processors/trackRemovalPurgeProcessor", () => ({
+            TRACK_REMOVAL_PURGE_JOB_NAME: "track-removal-purge",
+            processTrackRemovalPurge,
+        }));
         jest.doMock("../../services/genericImportJobRunner", () => ({
             genericImportJobRunner: {
                 registerRecoveryJobs,
@@ -257,6 +265,7 @@ describe("workers runtime behavior", () => {
             startDiscoverWeeklyCron,
             stopDiscoverWeeklyCron,
             processGenericImport,
+            processTrackRemovalPurge,
             finalizeGenericImportQueueFailure,
             registerRecoveryJobs,
             runDataIntegrityCheck,
@@ -323,6 +332,52 @@ describe("workers runtime behavior", () => {
         expect(mocks.stopDiscoverWeeklyCron).not.toHaveBeenCalled();
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.add).toHaveBeenCalled();
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "track-removal-purge",
+            { mode: "startup" },
+            {
+                jobId: "scheduler:track-removal-purge:startup",
+                delay: 60_000,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "track-removal-purge",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:track-removal-purge:repeat",
+                repeat: { every: 24 * 60 * 60 * 1000 },
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+    });
+
+    it("dispatches track-removal purge jobs through the scheduler", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        const job = {
+            id: "track-removal-purge-1",
+            name: "track-removal-purge",
+            data: { mode: "repeat" },
+        };
+
+        await schedulerHandler(job);
+
+        expect(mocks.processTrackRemovalPurge).toHaveBeenCalledWith(job);
     });
 
     it("removes the persisted Discover Weekly repeatable job and reports backlog when discovery is disabled", async () => {

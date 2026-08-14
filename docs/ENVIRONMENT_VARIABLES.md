@@ -124,6 +124,7 @@ Experimental feature note:
 | `MOOD_BUCKET_CLAIM_TTL_MS` | `backend-worker` | Optional | `120000` | TTL for mood bucket worker cycle claim lock. |
 | `TRACK_RECONCILIATION_MAX_ROWS` | `backend`, `backend-worker` | Optional | `10000` | Hard per-run row cap for remote-to-local track mapping reconciliation. The scheduler persists a shared keyset cursor in Redis so later runs continue across larger backlogs. Valid values are `1..100000`; invalid values use the default. |
 | `TRACK_RECONCILIATION_TIMEOUT_MS` | `backend`, `backend-worker` | Optional | `600000` | Deadline for one remote-to-local track mapping reconciliation run. Valid values are `1..3300000` (55 minutes); invalid values use the default. In-flight Prisma queries finish before cancellation is observed. |
+| `TRACK_REMOVAL_RETENTION_DAYS` | `backend`, `backend-worker` | Optional | `90` | Days to retain soft-removed tracks for automatic revival before the daily purge permanently deletes them. Must be an integer greater than or equal to `0`; `0` purges removed tracks on the next purge cycle. |
 
 ## Frontend Variables
 

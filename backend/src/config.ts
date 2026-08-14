@@ -102,6 +102,14 @@ function addCriticalSecretIssue(
     });
 }
 
+const trackRemovalRetentionDaysSchema = z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/, "must be an integer greater than or equal to 0")
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message: "must be a safe integer",
+    })
+    .optional();
+
 // Validate critical environment variables on startup.
 const envSchema = z
     .object({
@@ -120,6 +128,7 @@ const envSchema = z
         PORT: z.string().optional(),
         NODE_ENV: z.enum(["development", "production", "test"]).optional(),
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
+        TRACK_REMOVAL_RETENTION_DAYS: trackRemovalRetentionDaysSchema,
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -152,6 +161,11 @@ try {
         process.exit(1);
     }
 }
+
+const trackRemovalRetentionDays = Number.parseInt(
+    process.env.TRACK_REMOVAL_RETENTION_DAYS ?? "90",
+    10,
+);
 
 // Music config - will be initialized async
 let musicConfig: MusicConfig = {
@@ -524,6 +538,7 @@ export const config = {
     },
 
     workers: {
+        trackRemovalRetentionDays,
         get moodBucketClaimTtlMs(): number {
             return positiveIntEnvOr(
                 process.env.MOOD_BUCKET_CLAIM_TTL_MS,

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Removed library tracks are now retained for automatic revival when their
+  files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
+  before the daily purge permanently deletes them (default `90`; `0` purges
+  on the next cycle).
 - Tracks now store tag-invariant audio hashes, MusicBrainz recording IDs, and
   ISRCs for durable identity matching. New and changed files populate these
   keys during scans, while a bounded resumable worker backfills existing
@@ -17,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Library scans now soft-remove missing tracks instead of cascading immediate
+  deletion. Same-path returns and cross-scan moves revive the original track
+  row, including its playlists, likes, history, and analysis metadata.
 - Library scans now preserve track IDs, playlists, likes, play history, and
   existing analysis when files move, rename, or are retagged. Replacing audio
   at the same path or matching a moved quality upgrade re-queues audio and

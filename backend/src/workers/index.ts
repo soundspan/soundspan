@@ -55,6 +55,10 @@ import {
     AUDIO_HASH_BACKFILL_JOB_NAME,
     processAudioHashBackfill,
 } from "./processors/audioHashBackfillProcessor";
+import {
+    processTrackRemovalPurge,
+    TRACK_REMOVAL_PURGE_JOB_NAME,
+} from "./processors/trackRemovalPurgeProcessor";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -284,6 +288,7 @@ const SCHEDULER_JOB_TYPES = {
     artistCountsBackfill: "artist-counts-backfill-startup",
     imageBackfill: "image-backfill-startup",
     audioHashBackfill: AUDIO_HASH_BACKFILL_JOB_NAME,
+    trackRemovalPurge: TRACK_REMOVAL_PURGE_JOB_NAME,
     trackMappingReconcile: "track-mapping-reconcile",
     remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
 } as const;
@@ -303,6 +308,8 @@ const SCHEDULER_JOB_IDS = {
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
     audioHashBackfillStartup: "scheduler:audio-hash-backfill:startup",
+    trackRemovalPurgeStartup: "scheduler:track-removal-purge:startup",
+    trackRemovalPurgeRepeat: "scheduler:track-removal-purge:repeat",
     trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
     trackMappingReconcileRepeat: "scheduler:track-mapping-reconcile:repeat",
     remoteTrackMetadataRefreshStartup:
@@ -926,6 +933,30 @@ async function registerSchedulerJobs(): Promise<void> {
             },
         },
         {
+            type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeStartup,
+                delay: ONE_MINUTE_MS,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeRepeat,
+                repeat: { every: 24 * ONE_HOUR_MS },
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
             type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
             data: { mode: "startup" },
             opts: {
@@ -1032,6 +1063,9 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
             break;
         case SCHEDULER_JOB_TYPES.audioHashBackfill:
             await processAudioHashBackfill(job);
+            break;
+        case SCHEDULER_JOB_TYPES.trackRemovalPurge:
+            await processTrackRemovalPurge(job);
             break;
         case SCHEDULER_JOB_TYPES.trackMappingReconcile:
         case "track-mapping-reconcile":

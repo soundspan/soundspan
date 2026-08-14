@@ -360,6 +360,7 @@ model Track {
   audioHashedAt DateTime? // when audioHash was computed (backfill/staleness tracking)
   recordingMbid String?   // MusicBrainz recording id, from file tags
   isrc          String?   // first ISRC from file tags
+  removedAt     DateTime? // soft-delete marker; null means active
 
   // F15: DB-generated uniform sample key for /tracks/shuffle's indexed
   // pivot-sampling query (replaces a full-table ORDER BY RANDOM() scan).
@@ -415,6 +416,7 @@ model Track {
   @@index([audioHash])
   @@index([recordingMbid])
   @@index([isrc])
+  @@index([removedAt])
 }
 
 model Bookmark {

@@ -26,6 +26,7 @@ import {
     removeReplacementCacheFiles,
     resetTrackAfterReplacement,
 } from "./trackReplacement";
+import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
 
 const scanLogger = logger.child("MusicScannerService");
 
@@ -44,12 +45,17 @@ const TRACK_IDENTITY_SELECT = {
     audioHashedAt: true,
     recordingMbid: true,
     isrc: true,
+    removedAt: true,
     album: { select: { rgMbid: true } },
 } satisfies Prisma.TrackSelect;
 
 type IdentityTrackRow = Prisma.TrackGetPayload<{
     select: typeof TRACK_IDENTITY_SELECT;
 }>;
+
+function isTrackRemoved(track: Pick<IdentityTrackRow, "removedAt">): boolean {
+    return track.removedAt instanceof Date;
+}
 
 function hasAudioReplacement(
     storedHash: string | null,
@@ -75,6 +81,7 @@ function buildRebindData(
         isrc: candidate.isrc,
         audioHash: candidate.audioHash,
         audioHashedAt: candidate.audioHashedAt,
+        removedAt: null,
     };
 }
 
@@ -107,6 +114,7 @@ const AUDIO_EXTENSIONS = new Set([
     ".wv",
 ]);
 const MAX_SCAN_DEPTH = 64;
+const REMOVED_TRACK_REVIVAL_POOL_LIMIT = 10_000;
 // Cap health writes at the worker database pool's four connections.
 const HEALTH_WRITE_BATCH_SIZE = 4;
 
@@ -202,15 +210,23 @@ export class MusicScannerService {
             return 0;
         }
 
-        const deleted = await prisma.track.deleteMany({
-            where: { id: { in: tracks.map((track) => track.id) } },
+        await this.markMissingTracks(tracks);
+        const removed = await prisma.track.updateMany({
+            where: {
+                id: { in: tracks.map((track) => track.id) },
+                removedAt: null,
+            },
+            data: { removedAt: new Date() },
         });
-        logger.info(`Removed ${deleted.count} missing tracks from the library`);
-        return deleted.count;
+        logger.info(
+            `Soft-removed ${removed.count} missing tracks from the library`,
+        );
+        return removed.count;
     }
 
     private async rebindMovedTrack(
         match: TrackIdentityMatch<IdentityTrackRow, IdentityTrackRow>,
+        revival: boolean,
     ): Promise<void> {
         const replacement = hasAudioReplacement(
             match.missing.audioHash,
@@ -221,31 +237,46 @@ export class MusicScannerService {
                 where: { id: match.candidate.id },
             });
             const trackData = buildRebindData(match.candidate);
+            let replacementCachePaths: string[] = [];
             if (replacement) {
-                return applyTrackReplacement(
+                replacementCachePaths = await applyTrackReplacement(
                     transaction,
                     match.missing.id,
                     trackData,
                 );
+            } else {
+                await transaction.track.update({
+                    where: { id: match.missing.id },
+                    data: trackData,
+                });
             }
-            await transaction.track.update({
-                where: { id: match.missing.id },
-                data: trackData,
+            await transaction.libraryHealthRecord.deleteMany({
+                where: { trackId: match.missing.id },
             });
-            return [];
+            return replacementCachePaths;
         });
         await removeReplacementCacheFiles(cachePaths);
+        const action = revival ? "Revived" : "Re-bound";
         scanLogger.info(
-            `Re-bound track ${match.missing.filePath} → ${match.candidate.filePath}`,
+            `${action} track ${match.missing.filePath} → ${match.candidate.filePath}`,
         );
     }
 
     private async rebindMovedTracks(
         missing: IdentityTrackRow[],
         candidatePaths: readonly string[],
-    ): Promise<{ unmatched: IdentityTrackRow[]; rebound: number }> {
+        revival = false,
+    ): Promise<{
+        unmatched: IdentityTrackRow[];
+        rebound: number;
+        consumedCandidatePaths: string[];
+    }> {
         if (missing.length === 0 || candidatePaths.length === 0) {
-            return { unmatched: missing, rebound: 0 };
+            return {
+                unmatched: missing,
+                rebound: 0,
+                consumedCandidatePaths: [],
+            };
         }
         const candidates = await prisma.track.findMany({
             where: { filePath: { in: [...candidatePaths] } },
@@ -253,13 +284,34 @@ export class MusicScannerService {
         });
         const matches = matchTrackIdentities(missing, candidates);
         for (const match of matches) {
-            await this.rebindMovedTrack(match);
+            await this.rebindMovedTrack(match, revival);
         }
         const reboundIds = new Set(matches.map((match) => match.missing.id));
         return {
             unmatched: missing.filter((track) => !reboundIds.has(track.id)),
             rebound: matches.length,
+            consumedCandidatePaths: matches.map(
+                (match) => match.candidate.filePath,
+            ),
         };
+    }
+
+    private async reviveRemovedTracks(
+        candidatePaths: readonly string[],
+    ): Promise<number> {
+        if (candidatePaths.length === 0) return 0;
+        const removedTracks = await prisma.track.findMany({
+            where: { removedAt: { not: null } },
+            orderBy: { removedAt: "desc" },
+            take: REMOVED_TRACK_REVIVAL_POOL_LIMIT,
+            select: TRACK_IDENTITY_SELECT,
+        });
+        const result = await this.rebindMovedTracks(
+            removedTracks,
+            candidatePaths,
+            true,
+        );
+        return result.rebound;
     }
 
     /**
@@ -280,9 +332,19 @@ export class MusicScannerService {
         // Step 1: Find all audio files
         const audioFiles = await this.findAudioFiles(musicPath);
         logger.debug(`Found ${audioFiles.length} audio files`);
+        const scannedPaths = new Set(
+            audioFiles.map((file) => path.relative(musicPath, file)),
+        );
 
-        // Step 2: Get existing tracks from database
+        // Step 2: Load active tracks plus removed rows that still own a path
+        // found in this scan. The broader removed pool stays bounded below.
         const existingTracks = await prisma.track.findMany({
+            where: {
+                OR: [
+                    { removedAt: null },
+                    { filePath: { in: [...scannedPaths] } },
+                ],
+            },
             select: TRACK_IDENTITY_SELECT,
         });
 
@@ -325,6 +387,7 @@ export class MusicScannerService {
                     // Check if file needs updating
                     if (existingTrack) {
                         if (
+                            !isTrackRemoved(existingTrack) &&
                             !needsDiscBackfill &&
                             existingTrack.fileModified &&
                             existingTrack.fileModified >= fileModified
@@ -346,6 +409,7 @@ export class MusicScannerService {
                     // disc backfill keep their stored hash untouched.
                     const needsHash =
                         !existingTrack ||
+                        isTrackRemoved(existingTrack) ||
                         !existingTrack.audioHash ||
                         !existingTrack.fileModified ||
                         existingTrack.fileModified < fileModified;
@@ -388,24 +452,33 @@ export class MusicScannerService {
         await this.scanQueue.onIdle();
 
         // Step 4: Handle tracked files that no longer exist
-        const scannedPaths = new Set(
-            audioFiles.map((f) => path.relative(musicPath, f)),
-        );
         const tracksToRemove = existingTracks.filter(
-            (t) => !scannedPaths.has(t.filePath),
+            (track) =>
+                !isTrackRemoved(track) && !scannedPaths.has(track.filePath),
         );
 
         let reboundTracks = 0;
         let unmatchedTracks = tracksToRemove;
+        let revivalCandidatePaths = [...newTrackPaths];
         if (audioFiles.length > 0 && tracksToRemove.length > 0) {
             const rebindResult = await this.rebindMovedTracks(tracksToRemove, [
                 ...newTrackPaths,
             ]);
             unmatchedTracks = rebindResult.unmatched;
             reboundTracks = rebindResult.rebound;
+            const consumedPaths = new Set(rebindResult.consumedCandidatePaths);
+            revivalCandidatePaths = revivalCandidatePaths.filter(
+                (candidatePath) => !consumedPaths.has(candidatePath),
+            );
             result.tracksAdded -= reboundTracks;
             result.tracksUpdated += reboundTracks;
         }
+
+        const revivedTracks = await this.reviveRemovedTracks(
+            revivalCandidatePaths,
+        );
+        result.tracksAdded -= revivedTracks;
+        result.tracksUpdated += revivedTracks;
 
         if (unmatchedTracks.length > 0) {
             result.tracksRemoved = await this.handleMissingTracks(
@@ -417,48 +490,13 @@ export class MusicScannerService {
         const shouldCleanOrphans =
             tracksToRemove.length === 0 ||
             result.tracksRemoved > 0 ||
-            reboundTracks > 0;
+            reboundTracks > 0 ||
+            revivedTracks > 0;
 
-        // Step 5: Clean up orphaned albums (albums with no tracks)
-        const orphanedAlbums = await prisma.album.findMany({
-            where: {
-                tracks: { none: {} },
-            },
-            select: { id: true, title: true },
-        });
-
-        if (shouldCleanOrphans && orphanedAlbums.length > 0) {
-            logger.debug(
-                `Removing ${orphanedAlbums.length} orphaned albums...`,
-            );
-            await prisma.album.deleteMany({
-                where: {
-                    id: { in: orphanedAlbums.map((a) => a.id) },
-                },
-            });
-        }
-
-        // Step 6: Clean up orphaned artists (artists with no albums)
-        const orphanedArtists = await prisma.artist.findMany({
-            where: {
-                albums: { none: {} },
-            },
-            select: { id: true, name: true },
-        });
-
-        if (shouldCleanOrphans && orphanedArtists.length > 0) {
-            logger.debug(
-                `Removing ${
-                    orphanedArtists.length
-                } orphaned artists: ${orphanedArtists
-                    .map((a) => a.name)
-                    .join(", ")}`,
-            );
-            await prisma.artist.deleteMany({
-                where: {
-                    id: { in: orphanedArtists.map((a) => a.id) },
-                },
-            });
+        // Steps 5-6: Delete only parents with no Track rows. Soft-removed
+        // tracks still satisfy the relation and preserve their parents.
+        if (shouldCleanOrphans) {
+            await cleanupOrphanedLibraryEntities();
         }
 
         result.duration = Date.now() - startTime;
@@ -1244,6 +1282,7 @@ export class MusicScannerService {
                 fileSize: stats.size,
                 recordingMbid,
                 isrc,
+                removedAt: null,
                 ...hashFields,
             },
         });
