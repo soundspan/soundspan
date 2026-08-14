@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backend track-mapping reconciliation now reuses a normalized local-library
+  index and yields between mapping attempts, preventing large unmatched
+  backlogs from blocking worker readiness probes and Bull lock renewal.
+
 ## [2.0.2] - 2026-08-13
 
 ### Added

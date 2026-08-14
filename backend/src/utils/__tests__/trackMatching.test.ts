@@ -1,6 +1,8 @@
 import {
     buildM3UMatchIndex,
+    buildTrackMatchIndex,
     matchM3UEntryAgainstLibrary,
+    matchTrackAgainstIndex,
     matchTrackAgainstLibrary,
     normalizeAlbumForMatching,
     normalizeApostrophes,
@@ -75,6 +77,49 @@ describe("trackMatching utilities", () => {
     });
 
     describe("matchTrackAgainstLibrary", () => {
+        it("reuses a prebuilt index across exact and fuzzy matches", () => {
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "exact-index-hit",
+                    artistName: "Beyonce",
+                    title: "Halo",
+                    albumTitle: "I Am... Sasha Fierce",
+                }),
+                makeCandidate({
+                    id: "fuzzy-index-hit",
+                    artistName: "Echoes",
+                    title: "Neon Light",
+                    albumTitle: "Singles",
+                }),
+            ];
+            const index = buildTrackMatchIndex(candidates);
+
+            expect(
+                matchTrackAgainstIndex(
+                    {
+                        artist: "Beyoncé",
+                        title: "Halo",
+                        album: "I Am... Sasha Fierce",
+                    },
+                    index,
+                ),
+            ).toEqual({
+                trackId: "exact-index-hit",
+                matchType: "exact",
+                matchConfidence: 100,
+            });
+            expect(
+                matchTrackAgainstIndex(
+                    { artist: "The Echoes", title: "Neon Lights" },
+                    index,
+                ),
+            ).toEqual({
+                trackId: "fuzzy-index-hit",
+                matchType: "fuzzy",
+                matchConfidence: 79,
+            });
+        });
+
         it("returns null when no candidates are available", () => {
             expect(
                 matchTrackAgainstLibrary(

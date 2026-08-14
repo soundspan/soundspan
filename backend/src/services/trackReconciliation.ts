@@ -13,10 +13,13 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import {
-    matchTrackAgainstLibrary,
+    buildTrackMatchIndex,
+    matchTrackAgainstIndex,
     type TrackMatchInput,
+    type TrackMatchIndex,
     type LocalTrackCandidate,
 } from "../utils/trackMatching";
+import { yieldToEventLoop } from "../utils/async";
 import { trackMappingService } from "./trackMappingService";
 import { tidalStreamingService } from "./tidalStreaming";
 
@@ -58,6 +61,25 @@ interface ReconciliationCursor {
     id: string;
 }
 
+interface ReconciliationMapping {
+    id: string;
+    trackTidalId: string | null;
+    trackYtMusicId: string | null;
+    trackTidal: {
+        title: string;
+        artist: string;
+        album: string;
+        duration: number;
+        isrc: string | null;
+    } | null;
+    trackYtMusic: {
+        title: string;
+        artist: string;
+        album: string;
+        duration: number;
+    } | null;
+}
+
 class TrackReconciliationService {
     private buildCursorWhere(cursor?: ReconciliationCursor) {
         if (!cursor) {
@@ -95,78 +117,70 @@ class TrackReconciliationService {
     }
 
     private async linkMappingsBatch(
-        mappings: Array<{
-            id: string;
-            trackTidalId: string | null;
-            trackYtMusicId: string | null;
-            trackTidal: {
-                title: string;
-                artist: string;
-                album: string;
-                duration: number;
-                isrc: string | null;
-            } | null;
-            trackYtMusic: {
-                title: string;
-                artist: string;
-                album: string;
-                duration: number;
-            } | null;
-        }>,
-        localCandidates: LocalTrackCandidate[],
+        mappings: ReconciliationMapping[],
+        matchIndex: TrackMatchIndex,
     ): Promise<{ linked: number; skipped: number }> {
         let linked = 0;
         let skipped = 0;
 
         for (const mapping of mappings) {
-            const metadata = this.extractMetadata(mapping);
-            if (!metadata) {
-                log.debug(
-                    `Mapping ${mapping.id}: no extractable metadata, skipping`,
-                );
-                skipped++;
-                continue;
-            }
-
-            const match = matchTrackAgainstLibrary(metadata, localCandidates);
-            if (match && match.matchConfidence >= MIN_CONFIDENCE_THRESHOLD) {
-                const conflicting = await prisma.trackMapping.findFirst({
-                    where: {
-                        trackId: match.trackId,
-                        trackTidalId: mapping.trackTidalId ?? null,
-                        trackYtMusicId: mapping.trackYtMusicId ?? null,
-                        stale: false,
-                        id: { not: mapping.id },
-                    },
-                });
-                if (conflicting) {
-                    log.info(
-                        `Mapping ${mapping.id}: conflict with existing mapping ${conflicting.id} for trackId=${match.trackId}, marking stale`,
-                    );
-                    await prisma.trackMapping.update({
-                        where: { id: mapping.id },
-                        data: { stale: true },
-                    });
-                    skipped++;
-                } else {
-                    await prisma.trackMapping.update({
-                        where: { id: mapping.id },
-                        data: {
-                            trackId: match.trackId,
-                            confidence: match.matchConfidence / 100,
-                        },
-                    });
-                    linked++;
-                }
-            } else {
-                log.debug(
-                    `Mapping ${mapping.id}: no match above threshold (best=${match?.matchConfidence ?? 0}%)`,
-                );
-                skipped++;
-            }
+            const outcome = await this.linkMapping(mapping, matchIndex);
+            if (outcome === "linked") linked += 1;
+            else skipped += 1;
+            await yieldToEventLoop();
         }
 
         return { linked, skipped };
+    }
+
+    private async linkMapping(
+        mapping: ReconciliationMapping,
+        matchIndex: TrackMatchIndex,
+    ): Promise<"linked" | "skipped"> {
+        const metadata = this.extractMetadata(mapping);
+        if (!metadata) {
+            log.debug(
+                `Mapping ${mapping.id}: no extractable metadata, skipping`,
+            );
+            return "skipped";
+        }
+
+        const match = matchTrackAgainstIndex(metadata, matchIndex);
+        if (!match || match.matchConfidence < MIN_CONFIDENCE_THRESHOLD) {
+            log.debug(
+                `Mapping ${mapping.id}: no match above threshold (best=${match?.matchConfidence ?? 0}%)`,
+            );
+            return "skipped";
+        }
+
+        const conflicting = await prisma.trackMapping.findFirst({
+            where: {
+                trackId: match.trackId,
+                trackTidalId: mapping.trackTidalId ?? null,
+                trackYtMusicId: mapping.trackYtMusicId ?? null,
+                stale: false,
+                id: { not: mapping.id },
+            },
+        });
+        if (conflicting) {
+            log.info(
+                `Mapping ${mapping.id}: conflict with existing mapping ${conflicting.id} for trackId=${match.trackId}, marking stale`,
+            );
+            await prisma.trackMapping.update({
+                where: { id: mapping.id },
+                data: { stale: true },
+            });
+            return "skipped";
+        }
+
+        await prisma.trackMapping.update({
+            where: { id: mapping.id },
+            data: {
+                trackId: match.trackId,
+                confidence: match.matchConfidence / 100,
+            },
+        });
+        return "linked";
     }
 
     private async getRestoredTidalUserId(): Promise<string | null> {
@@ -275,13 +289,14 @@ class TrackReconciliationService {
                 effectiveMaxRows,
             );
         }
+        const matchIndex = buildTrackMatchIndex(localCandidates);
 
         let currentBatch = firstBatch;
         let currentBatchSize = Math.min(effectiveBatchSize, effectiveMaxRows);
         while (currentBatch.length > 0 && processed < effectiveMaxRows) {
             const batchResult = await this.linkMappingsBatch(
                 currentBatch,
-                localCandidates,
+                matchIndex,
             );
             processed += currentBatch.length;
             linked += batchResult.linked;

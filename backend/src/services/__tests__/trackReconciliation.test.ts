@@ -30,8 +30,13 @@ const mockLogger: Record<string, jest.Mock> = {
 };
 mockLogger.child.mockReturnValue(mockLogger);
 
+const mockYieldToEventLoop = jest.fn(async () => undefined);
+
 jest.mock("../../utils/db", () => ({ prisma: mockPrisma }));
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
+jest.mock("../../utils/async", () => ({
+    yieldToEventLoop: mockYieldToEventLoop,
+}));
 jest.mock("../tidalStreaming", () => ({
     tidalStreamingService: {
         restoreOAuth: jest.fn(),
@@ -371,6 +376,50 @@ describe("TrackReconciliationService", () => {
             expect(result.processed).toBe(2);
             expect(result.linked).toBe(2);
             expect(mockPrisma.trackMapping.update).toHaveBeenCalledTimes(2);
+        });
+
+        it("yields between mapping attempts so health checks can run", async () => {
+            mockPrisma.trackMapping.findMany.mockResolvedValue([
+                {
+                    id: "m-yield-1",
+                    trackId: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        title: "Missing One",
+                        artist: "Unknown Artist",
+                        album: "Unknown Album",
+                        duration: 180,
+                    },
+                },
+                {
+                    id: "m-yield-2",
+                    trackId: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        title: "Missing Two",
+                        artist: "Unknown Artist",
+                        album: "Unknown Album",
+                        duration: 181,
+                    },
+                },
+            ]);
+            mockPrisma.track.findMany.mockResolvedValue([
+                {
+                    id: "local-track",
+                    title: "Different Song",
+                    duration: 120,
+                    filePath: "/music/different.flac",
+                    album: {
+                        title: "Different Album",
+                        artist: { name: "Different Artist" },
+                    },
+                },
+            ]);
+
+            const result = await trackReconciliationService.reconcile();
+
+            expect(result).toEqual({ processed: 2, linked: 0, skipped: 2 });
+            expect(mockYieldToEventLoop).toHaveBeenCalledTimes(2);
         });
 
         it("keeps sweeping forward until the backlog is exhausted so newer rows are not starved", async () => {

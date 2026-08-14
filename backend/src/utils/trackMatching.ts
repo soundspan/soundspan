@@ -120,6 +120,20 @@ export interface TrackMatchResult {
     matchConfidence: number;
 }
 
+interface IndexedTrackCandidate {
+    candidate: LocalTrackCandidate;
+    normalizedArtist: string;
+    normalizedExactTitle: string;
+    normalizedFuzzyTitle: string;
+    normalizedAlbum: string;
+}
+
+/** Reusable normalized candidate index for repeated metadata matching. */
+export interface TrackMatchIndex {
+    candidates: IndexedTrackCandidate[];
+    byArtistTitle: Map<string, IndexedTrackCandidate[]>;
+}
+
 function normalizePathForMatching(filePath: string): string {
     return filePath
         .replace(/\\/g, "/")
@@ -135,107 +149,144 @@ function getFilenameStem(filePath: string): string {
     return filename.replace(/\.[^.]+$/, "");
 }
 
-/**
- * Match a track against a list of local library candidates.
- * Uses the same strategy cascade as the Spotify import:
- * 1. Exact match (artist + album + title)
- * 2. Normalized album match (strip suffixes)
- * 3. Artist + title match (ignore album)
- * 4. Fuzzy match (70% threshold)
- */
-export function matchTrackAgainstLibrary(
-    input: TrackMatchInput,
+/** Builds a reusable normalized index for repeated metadata matching. */
+export function buildTrackMatchIndex(
     candidates: LocalTrackCandidate[],
+): TrackMatchIndex {
+    const indexedCandidates = candidates.map((candidate) => ({
+        candidate,
+        normalizedArtist: normalizeString(candidate.artistName),
+        normalizedExactTitle: normalizeTrackTitle(candidate.title),
+        normalizedFuzzyTitle: normalizeString(candidate.title),
+        normalizedAlbum: normalizeString(
+            normalizeAlbumForMatching(candidate.albumTitle),
+        ),
+    }));
+    const byArtistTitle = new Map<string, IndexedTrackCandidate[]>();
+
+    for (const indexed of indexedCandidates) {
+        const key = artistTitleKey(
+            indexed.normalizedArtist,
+            indexed.normalizedExactTitle,
+        );
+        const matches = byArtistTitle.get(key);
+        if (matches) matches.push(indexed);
+        else byArtistTitle.set(key, [indexed]);
+    }
+
+    return { candidates: indexedCandidates, byArtistTitle };
+}
+
+function matchTrackExact(
+    normalizedArtist: string,
+    normalizedTitle: string,
+    normalizedAlbum: string | undefined,
+    index: TrackMatchIndex,
 ): TrackMatchResult | null {
-    if (!candidates.length) return null;
+    const candidates = index.byArtistTitle.get(
+        artistTitleKey(normalizedArtist, normalizedTitle),
+    );
+    if (!candidates?.length) return null;
 
-    const normArtist = normalizeString(input.artist);
-    const normTitle = normalizeTrackTitle(input.title);
-    const normAlbum = input.album
-        ? normalizeString(normalizeAlbumForMatching(input.album))
-        : undefined;
+    if (normalizedAlbum) {
+        const exact = candidates.find(
+            (entry) => entry.normalizedAlbum === normalizedAlbum,
+        );
+        if (exact) return exactTrackMatch(exact.candidate.id, 100);
 
-    // Strategy 1: Exact match (artist + album + title)
-    for (const c of candidates) {
-        if (
-            normalizeString(c.artistName) === normArtist &&
-            normalizeTrackTitle(c.title) === normTitle &&
-            normAlbum &&
-            normalizeString(normalizeAlbumForMatching(c.albumTitle)) ===
-                normAlbum
-        ) {
-            return {
-                trackId: c.id,
-                matchType: "exact",
-                matchConfidence: 100,
-            };
-        }
+        const variant = candidates.find(
+            (entry) =>
+                entry.normalizedAlbum.length > 0 &&
+                (entry.normalizedAlbum.includes(normalizedAlbum) ||
+                    normalizedAlbum.includes(entry.normalizedAlbum)),
+        );
+        if (variant) return exactTrackMatch(variant.candidate.id, 95);
     }
 
-    // Strategy 2: Normalized album match (handles "Album (Deluxe)" vs "Album")
-    if (normAlbum) {
-        for (const c of candidates) {
-            if (
-                normalizeString(c.artistName) === normArtist &&
-                normalizeTrackTitle(c.title) === normTitle
-            ) {
-                const cAlbum = normalizeString(
-                    normalizeAlbumForMatching(c.albumTitle),
-                );
-                if (
-                    cAlbum.length > 0 &&
-                    normAlbum.length > 0 &&
-                    (cAlbum.includes(normAlbum) || normAlbum.includes(cAlbum))
-                ) {
-                    return {
-                        trackId: c.id,
-                        matchType: "exact",
-                        matchConfidence: 95,
-                    };
-                }
-            }
-        }
-    }
+    return exactTrackMatch(candidates[0].candidate.id, 85);
+}
 
-    // Strategy 3: Artist + title match (ignoring album)
-    for (const c of candidates) {
-        if (
-            normalizeString(c.artistName) === normArtist &&
-            normalizeTrackTitle(c.title) === normTitle
-        ) {
-            return {
-                trackId: c.id,
-                matchType: "exact",
-                matchConfidence: 85,
-            };
-        }
-    }
+function exactTrackMatch(
+    trackId: string,
+    matchConfidence: number,
+): TrackMatchResult {
+    return { trackId, matchType: "exact", matchConfidence };
+}
 
-    // Strategy 4: Fuzzy match (70% threshold)
+function matchTrackFuzzy(
+    normalizedArtist: string,
+    normalizedTitle: string,
+    index: TrackMatchIndex,
+): TrackMatchResult | null {
     let bestScore = 0;
     let bestMatch: LocalTrackCandidate | null = null;
+    const artistScoreCache = new Map<string, number>();
 
-    for (const c of candidates) {
-        const titleScore = stringSimilarity(input.title, c.title);
-        const artistScore = stringSimilarity(input.artist, c.artistName);
-        // Title weighted 60%, artist 40%
+    for (const indexed of index.candidates) {
+        let artistScore = artistScoreCache.get(indexed.normalizedArtist);
+        if (artistScore === undefined) {
+            artistScore = normalizedStringSimilarity(
+                normalizedArtist,
+                indexed.normalizedArtist,
+            );
+            artistScoreCache.set(indexed.normalizedArtist, artistScore);
+        }
+        const titleScore = normalizedStringSimilarity(
+            normalizedTitle,
+            indexed.normalizedFuzzyTitle,
+        );
         const score = titleScore * 0.6 + artistScore * 0.4;
 
         if (score > bestScore && score >= 70) {
             bestScore = score;
-            bestMatch = c;
+            bestMatch = indexed.candidate;
         }
     }
 
-    if (bestMatch) {
-        return {
-            trackId: bestMatch.id,
-            matchType: "fuzzy",
-            matchConfidence: Math.round(bestScore),
-        };
-    }
+    if (!bestMatch) return null;
+    return {
+        trackId: bestMatch.id,
+        matchType: "fuzzy",
+        matchConfidence: Math.round(bestScore),
+    };
+}
 
-    return null;
+/**
+ * Match metadata against a reusable normalized candidate index.
+ * Uses exact artist/album/title, album-variant, artist/title, then fuzzy tiers.
+ */
+export function matchTrackAgainstIndex(
+    input: TrackMatchInput,
+    index: TrackMatchIndex,
+): TrackMatchResult | null {
+    if (!index.candidates.length) return null;
+
+    const normalizedArtist = normalizeString(input.artist);
+    const normalizedExactTitle = normalizeTrackTitle(input.title);
+    const normalizedAlbum = input.album
+        ? normalizeString(normalizeAlbumForMatching(input.album))
+        : undefined;
+    const exact = matchTrackExact(
+        normalizedArtist,
+        normalizedExactTitle,
+        normalizedAlbum,
+        index,
+    );
+    if (exact) return exact;
+
+    return matchTrackFuzzy(
+        normalizedArtist,
+        normalizeString(input.title),
+        index,
+    );
+}
+
+/** Match one track against a local candidate list. */
+export function matchTrackAgainstLibrary(
+    input: TrackMatchInput,
+    candidates: LocalTrackCandidate[],
+): TrackMatchResult | null {
+    return matchTrackAgainstIndex(input, buildTrackMatchIndex(candidates));
 }
 
 // ── M3U match index ───────────────────────────────────────────────
