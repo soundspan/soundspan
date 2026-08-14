@@ -564,6 +564,8 @@ describe("config module", () => {
             PLAYLIST_LOG_DIR: "/tmp/playlist-logs",
             MOOD_BUCKET_CLAIM_TTL_MS: "120001",
             ENRICHMENT_CLAIM_TTL_MS: "900001",
+            TRACK_RECONCILIATION_MAX_ROWS: "10001",
+            TRACK_RECONCILIATION_TIMEOUT_MS: "600001",
         });
 
         expect(config.appVersion).toBe("2.0.0-test");
@@ -580,6 +582,8 @@ describe("config module", () => {
         expect(config.workers).toEqual({
             moodBucketClaimTtlMs: 120_001,
             enrichmentClaimTtlMs: 900_001,
+            trackReconciliationMaxRows: 10_001,
+            trackReconciliationTimeoutMs: 600_001,
         });
     });
 
@@ -596,6 +600,8 @@ describe("config module", () => {
             PLAYLIST_LOG_DIR: "",
             MOOD_BUCKET_CLAIM_TTL_MS: "invalid",
             ENRICHMENT_CLAIM_TTL_MS: "0",
+            TRACK_RECONCILIATION_MAX_ROWS: "100001",
+            TRACK_RECONCILIATION_TIMEOUT_MS: "3600001",
         });
 
         expect(config.appVersion).toBe("unknown");
@@ -609,6 +615,8 @@ describe("config module", () => {
         expect(config.workers).toEqual({
             moodBucketClaimTtlMs: 120_000,
             enrichmentClaimTtlMs: 900_000,
+            trackReconciliationMaxRows: 10_000,
+            trackReconciliationTimeoutMs: 10 * 60 * 1000,
         });
     });
 

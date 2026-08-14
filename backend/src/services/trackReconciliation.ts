@@ -12,6 +12,7 @@
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import {
     buildTrackMatchIndex,
     matchTrackAgainstIndex,
@@ -44,12 +45,23 @@ function tryDecryptOAuthJson(value: string): string {
     }
 }
 
+/** Counts produced by one bounded remote-to-local reconciliation run. */
 export interface ReconciliationResult {
+    /** Remote mappings examined during the run. */
     processed: number;
+    /** Mappings linked to a local library track. */
     linked: number;
+    /** Mappings left unlinked or marked stale. */
     skipped: number;
 }
 
+/** Cancellation controls for one bounded reconciliation run. */
+export interface ReconciliationRunOptions {
+    /** Stops the run between database calls and mapping attempts. */
+    signal?: AbortSignal;
+}
+
+/** Counts produced by one YT Music-to-TIDAL upgrade run. */
 export interface ProviderUpgradeResult {
     processed: number;
     upgraded: number;
@@ -80,6 +92,45 @@ interface ReconciliationMapping {
     } | null;
 }
 
+interface ReconciliationRow extends ReconciliationMapping {
+    createdAt: Date;
+}
+
+interface ReconciliationLimits {
+    batchSize: number;
+    maxRows: number;
+}
+
+function resolveReconciliationLimits(
+    batchSize: number,
+    maxRows: number | undefined,
+): ReconciliationLimits {
+    const configuredMaxRows = config.workers.trackReconciliationMaxRows;
+    const requestedMaxRows =
+        typeof maxRows === "number" && Number.isFinite(maxRows)
+            ? Math.trunc(maxRows)
+            : configuredMaxRows;
+    const effectiveMaxRows =
+        requestedMaxRows > 0
+            ? Math.min(requestedMaxRows, configuredMaxRows)
+            : configuredMaxRows;
+    const requestedBatchSize = Math.max(1, Math.trunc(batchSize));
+
+    return {
+        batchSize: Math.min(requestedBatchSize, effectiveMaxRows),
+        maxRows: effectiveMaxRows,
+    };
+}
+
+function createReconciliationSignal(callerSignal?: AbortSignal): AbortSignal {
+    const timeoutSignal = AbortSignal.timeout(
+        config.workers.trackReconciliationTimeoutMs,
+    );
+    return callerSignal
+        ? AbortSignal.any([callerSignal, timeoutSignal])
+        : timeoutSignal;
+}
+
 class TrackReconciliationService {
     private buildCursorWhere(cursor?: ReconciliationCursor) {
         if (!cursor) {
@@ -99,9 +150,11 @@ class TrackReconciliationService {
 
     private async getUnlinkedMappingsBatch(
         batchSize: number,
+        signal: AbortSignal,
         cursor?: ReconciliationCursor,
-    ) {
-        return prisma.trackMapping.findMany({
+    ): Promise<ReconciliationRow[]> {
+        signal.throwIfAborted();
+        const mappings = await prisma.trackMapping.findMany({
             where: {
                 trackId: null,
                 stale: false,
@@ -114,20 +167,25 @@ class TrackReconciliationService {
             take: batchSize,
             orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         });
+        signal.throwIfAborted();
+        return mappings;
     }
 
     private async linkMappingsBatch(
         mappings: ReconciliationMapping[],
         matchIndex: TrackMatchIndex,
+        signal: AbortSignal,
     ): Promise<{ linked: number; skipped: number }> {
         let linked = 0;
         let skipped = 0;
 
         for (const mapping of mappings) {
-            const outcome = await this.linkMapping(mapping, matchIndex);
+            signal.throwIfAborted();
+            const outcome = await this.linkMapping(mapping, matchIndex, signal);
             if (outcome === "linked") linked += 1;
             else skipped += 1;
             await yieldToEventLoop();
+            signal.throwIfAborted();
         }
 
         return { linked, skipped };
@@ -136,6 +194,7 @@ class TrackReconciliationService {
     private async linkMapping(
         mapping: ReconciliationMapping,
         matchIndex: TrackMatchIndex,
+        signal: AbortSignal,
     ): Promise<"linked" | "skipped"> {
         const metadata = this.extractMetadata(mapping);
         if (!metadata) {
@@ -162,6 +221,7 @@ class TrackReconciliationService {
                 id: { not: mapping.id },
             },
         });
+        signal.throwIfAborted();
         if (conflicting) {
             log.info(
                 `Mapping ${mapping.id}: conflict with existing mapping ${conflicting.id} for trackId=${match.trackId}, marking stale`,
@@ -237,30 +297,30 @@ class TrackReconciliationService {
     }
 
     /**
-     * Run a reconciliation pass: find unlinked TrackMapping rows and attempt
-     * to link them to local library tracks.
+     * Links a bounded set of remote-only mappings to local library tracks.
+     *
+     * The configured row limit is a hard ceiling even when a caller requests
+     * more. Prisma queries cannot be interrupted in flight, so cancellation is
+     * observed immediately before and after each query and mapping attempt.
+     *
+     * @param batchSize Desired rows per database page.
+     * @param maxRows Optional lower per-run row limit.
+     * @param options Caller cancellation propagated into this run.
+     * @throws The abort reason when the caller cancels or the configured
+     * reconciliation deadline expires.
      */
     async reconcile(
         batchSize: number = DEFAULT_BATCH_SIZE,
         maxRows?: number,
+        options: ReconciliationRunOptions = {},
     ): Promise<ReconciliationResult> {
-        const effectiveBatchSize = Math.max(1, Math.trunc(batchSize));
-        const requestedMaxRows =
-            typeof maxRows === "number" && Number.isFinite(maxRows)
-                ? Math.trunc(maxRows)
-                : null;
-        const effectiveMaxRows =
-            requestedMaxRows && requestedMaxRows > 0
-                ? Math.max(effectiveBatchSize, requestedMaxRows)
-                : Number.MAX_SAFE_INTEGER;
-        let processed = 0;
-        let linked = 0;
-        let skipped = 0;
-        let cursor: ReconciliationCursor | undefined;
+        const limits = resolveReconciliationLimits(batchSize, maxRows);
+        const signal = createReconciliationSignal(options.signal);
+        signal.throwIfAborted();
 
         const firstBatch = await this.getUnlinkedMappingsBatch(
-            Math.min(effectiveBatchSize, effectiveMaxRows),
-            cursor,
+            limits.batchSize,
+            signal,
         );
 
         if (firstBatch.length === 0) {
@@ -268,94 +328,104 @@ class TrackReconciliationService {
             return { processed: 0, linked: 0, skipped: 0 };
         }
 
-        if (requestedMaxRows && requestedMaxRows > 0) {
-            log.info(
-                `Reconciling up to ${effectiveMaxRows} unlinked TrackMapping rows in batches of ${effectiveBatchSize}...`,
-            );
-        } else {
-            log.info(
-                `Reconciling unlinked TrackMapping rows in batches of ${effectiveBatchSize} until exhausted...`,
-            );
-        }
+        log.info(
+            `Reconciling up to ${limits.maxRows} unlinked TrackMapping rows in batches of ${limits.batchSize}...`,
+        );
 
         // Load local library candidates once for the whole sweep.
-        const localCandidates = await this.getLocalLibraryCandidates();
+        const localCandidates = await this.getLocalLibraryCandidates(signal);
 
         if (localCandidates.length === 0) {
             log.debug("No local library tracks — nothing to match against");
             return this.exhaustUnlinkedMappingsWithoutMatches(
                 firstBatch,
-                effectiveBatchSize,
-                effectiveMaxRows,
+                limits,
+                signal,
             );
         }
+        signal.throwIfAborted();
         const matchIndex = buildTrackMatchIndex(localCandidates);
+        signal.throwIfAborted();
+        const result = await this.processReconciliationBatches(
+            firstBatch,
+            matchIndex,
+            limits,
+            signal,
+        );
 
+        log.info(
+            `Reconciliation complete: ${result.linked} linked, ${result.skipped} skipped out of ${result.processed}`,
+        );
+        if (result.processed >= limits.maxRows) {
+            log.info(
+                `Reconciliation reached the per-run row limit of ${limits.maxRows}`,
+            );
+        }
+
+        return result;
+    }
+
+    private async processReconciliationBatches(
+        firstBatch: ReconciliationRow[],
+        matchIndex: TrackMatchIndex,
+        limits: ReconciliationLimits,
+        signal: AbortSignal,
+    ): Promise<ReconciliationResult> {
+        const result = { processed: 0, linked: 0, skipped: 0 };
         let currentBatch = firstBatch;
-        let currentBatchSize = Math.min(effectiveBatchSize, effectiveMaxRows);
-        while (currentBatch.length > 0 && processed < effectiveMaxRows) {
+        let currentBatchSize = limits.batchSize;
+
+        while (currentBatch.length > 0 && result.processed < limits.maxRows) {
             const batchResult = await this.linkMappingsBatch(
                 currentBatch,
                 matchIndex,
+                signal,
             );
-            processed += currentBatch.length;
-            linked += batchResult.linked;
-            skipped += batchResult.skipped;
-
+            result.processed += currentBatch.length;
+            result.linked += batchResult.linked;
+            result.skipped += batchResult.skipped;
             if (
-                processed >= effectiveMaxRows ||
+                result.processed >= limits.maxRows ||
                 currentBatch.length < currentBatchSize
             ) {
                 break;
             }
 
             const lastMapping = currentBatch[currentBatch.length - 1];
-            cursor = {
-                createdAt: lastMapping.createdAt,
-                id: lastMapping.id,
-            };
-            const remaining = effectiveMaxRows - processed;
-            currentBatchSize = Math.min(effectiveBatchSize, remaining);
+            const remaining = limits.maxRows - result.processed;
+            currentBatchSize = Math.min(limits.batchSize, remaining);
             currentBatch = await this.getUnlinkedMappingsBatch(
                 currentBatchSize,
-                cursor,
+                signal,
+                { createdAt: lastMapping.createdAt, id: lastMapping.id },
             );
         }
 
-        log.info(
-            `Reconciliation complete: ${linked} linked, ${skipped} skipped out of ${processed}`,
-        );
-
-        return {
-            processed,
-            linked,
-            skipped,
-        };
+        return result;
     }
 
     private async exhaustUnlinkedMappingsWithoutMatches(
-        firstBatch: Array<{
-            id: string;
-            createdAt: Date;
-        }>,
-        batchSize: number,
-        maxRows: number,
+        firstBatch: ReconciliationRow[],
+        limits: ReconciliationLimits,
+        signal: AbortSignal,
     ): Promise<ReconciliationResult> {
         let processed = firstBatch.length;
         let skipped = firstBatch.length;
         let currentBatch = firstBatch;
-        let currentBatchSize = Math.min(batchSize, maxRows);
+        let currentBatchSize = limits.batchSize;
 
-        while (currentBatch.length > 0 && processed < maxRows) {
+        while (currentBatch.length > 0 && processed < limits.maxRows) {
+            signal.throwIfAborted();
             if (currentBatch.length < currentBatchSize) {
                 break;
             }
 
             const lastMapping = currentBatch[currentBatch.length - 1];
-            const remaining = maxRows - processed;
-            currentBatchSize = Math.min(batchSize, remaining);
+            const remaining = limits.maxRows - processed;
+            currentBatchSize = Math.min(limits.batchSize, remaining);
             currentBatch = await this.getUnlinkedMappingsBatch(
                 currentBatchSize,
+                signal,
                 {
                     createdAt: lastMapping.createdAt,
                     id: lastMapping.id,
@@ -618,7 +688,10 @@ class TrackReconciliationService {
     /**
      * Load all local library tracks for matching.
      */
-    private async getLocalLibraryCandidates(): Promise<LocalTrackCandidate[]> {
+    private async getLocalLibraryCandidates(
+        signal: AbortSignal,
+    ): Promise<LocalTrackCandidate[]> {
+        signal.throwIfAborted();
         const tracks = await prisma.track.findMany({
             select: {
                 id: true,
@@ -633,6 +706,7 @@ class TrackReconciliationService {
                 },
             },
         });
+        signal.throwIfAborted();
 
         return tracks.map((t) => ({
             id: t.id,
@@ -645,4 +719,5 @@ class TrackReconciliationService {
     }
 }
 
+/** Shared reconciliation service used by scan and scheduler workers. */
 export const trackReconciliationService = new TrackReconciliationService();

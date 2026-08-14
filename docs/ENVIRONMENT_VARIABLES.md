@@ -122,6 +122,8 @@ Experimental feature note:
 | `DISCOVER_PROCESSOR_LOCK_TTL_MS` | `backend-worker` | Optional | `2700000` | TTL for per-user Discover processor lock claims. |
 | `ENRICHMENT_CLAIM_TTL_MS` | `backend-worker` | Optional | `900000` | TTL for unified enrichment cycle claim lock. |
 | `MOOD_BUCKET_CLAIM_TTL_MS` | `backend-worker` | Optional | `120000` | TTL for mood bucket worker cycle claim lock. |
+| `TRACK_RECONCILIATION_MAX_ROWS` | `backend`, `backend-worker` | Optional | `10000` | Hard per-run row cap for remote-to-local track mapping reconciliation. Valid values are `1..100000`; invalid values use the default. |
+| `TRACK_RECONCILIATION_TIMEOUT_MS` | `backend`, `backend-worker` | Optional | `600000` | Deadline for one remote-to-local track mapping reconciliation run. Valid values are `1..3300000` (55 minutes); invalid values use the default. In-flight Prisma queries finish before cancellation is observed. |
 
 ## Frontend Variables
 

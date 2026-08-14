@@ -516,6 +516,20 @@ export const config = {
                 15 * 60 * 1000,
             );
         },
+        get trackReconciliationMaxRows(): number {
+            return boundedPositiveIntEnvOr(
+                process.env.TRACK_RECONCILIATION_MAX_ROWS,
+                10_000,
+                100_000,
+            );
+        },
+        get trackReconciliationTimeoutMs(): number {
+            return boundedPositiveIntEnvOr(
+                process.env.TRACK_RECONCILIATION_TIMEOUT_MS,
+                10 * 60 * 1000,
+                55 * 60 * 1000,
+            );
+        },
     },
 
     // Because CORS credentials are enabled, production denies cross-origin

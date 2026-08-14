@@ -539,6 +539,8 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 | `DISCOVER_PROCESSOR_LOCK_TTL_MS` | `backendWorker.env.DISCOVER_PROCESSOR_LOCK_TTL_MS` | No | `2700000` |
 | `ENRICHMENT_CLAIM_TTL_MS` | `backendWorker.env.ENRICHMENT_CLAIM_TTL_MS` | No | `900000` |
 | `MOOD_BUCKET_CLAIM_TTL_MS` | `backendWorker.env.MOOD_BUCKET_CLAIM_TTL_MS` | No | `120000` |
+| `TRACK_RECONCILIATION_MAX_ROWS` | `backendWorker.env.TRACK_RECONCILIATION_MAX_ROWS` | No | `10000` |
+| `TRACK_RECONCILIATION_TIMEOUT_MS` | `backendWorker.env.TRACK_RECONCILIATION_TIMEOUT_MS` | No | `600000` |
 
 #### Common Optional Worker Feature Vars
 

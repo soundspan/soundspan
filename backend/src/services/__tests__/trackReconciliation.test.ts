@@ -37,6 +37,14 @@ jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 jest.mock("../../utils/async", () => ({
     yieldToEventLoop: mockYieldToEventLoop,
 }));
+jest.mock("../../config", () => ({
+    config: {
+        workers: {
+            trackReconciliationMaxRows: 2,
+            trackReconciliationTimeoutMs: 60_000,
+        },
+    },
+}));
 jest.mock("../tidalStreaming", () => ({
     tidalStreamingService: {
         restoreOAuth: jest.fn(),
@@ -277,11 +285,159 @@ describe("TrackReconciliationService", () => {
         it("respects batch size parameter", async () => {
             mockPrisma.trackMapping.findMany.mockResolvedValue([]);
 
-            await trackReconciliationService.reconcile(10, 10);
+            await trackReconciliationService.reconcile(1, 2);
 
             expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledWith(
-                expect.objectContaining({ take: 10 }),
+                expect.objectContaining({ take: 1 }),
             );
+        });
+
+        it("uses the configured row cap when the caller omits maxRows", async () => {
+            mockPrisma.trackMapping.findMany
+                .mockResolvedValueOnce([
+                    {
+                        id: "m-limit-1",
+                        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                        trackTidal: null,
+                        trackYtMusic: null,
+                    },
+                    {
+                        id: "m-limit-2",
+                        createdAt: new Date("2026-03-01T00:00:01.000Z"),
+                        trackTidal: null,
+                        trackYtMusic: null,
+                    },
+                ])
+                .mockResolvedValueOnce([
+                    {
+                        id: "m-limit-3",
+                        createdAt: new Date("2026-03-01T00:00:02.000Z"),
+                        trackTidal: null,
+                        trackYtMusic: null,
+                    },
+                ]);
+
+            const result = await trackReconciliationService.reconcile();
+
+            expect(result).toEqual({ processed: 2, linked: 0, skipped: 2 });
+            expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledTimes(1);
+            expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({ take: 2 }),
+            );
+        });
+
+        it("rejects a pre-aborted reconciliation before querying", async () => {
+            const controller = new AbortController();
+            controller.abort(new Error("worker stopping"));
+
+            await expect(
+                trackReconciliationService.reconcile(1, 1, {
+                    signal: controller.signal,
+                }),
+            ).rejects.toThrow("worker stopping");
+            expect(mockPrisma.trackMapping.findMany).not.toHaveBeenCalled();
+        });
+
+        it("applies the configured reconciliation deadline", async () => {
+            const timeoutError = new DOMException(
+                "The operation was aborted due to timeout",
+                "TimeoutError",
+            );
+            const timeoutSpy = jest
+                .spyOn(AbortSignal, "timeout")
+                .mockReturnValueOnce(AbortSignal.abort(timeoutError));
+
+            try {
+                await expect(
+                    trackReconciliationService.reconcile(),
+                ).rejects.toMatchObject({ name: "TimeoutError" });
+                expect(AbortSignal.timeout).toHaveBeenCalledWith(60_000);
+                expect(mockPrisma.trackMapping.findMany).not.toHaveBeenCalled();
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+        });
+
+        it("stops between mapping attempts when cancellation arrives", async () => {
+            const controller = new AbortController();
+            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([
+                {
+                    id: "m-abort-1",
+                    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                    trackTidal: null,
+                    trackYtMusic: null,
+                },
+                {
+                    id: "m-abort-2",
+                    createdAt: new Date("2026-03-01T00:00:01.000Z"),
+                    trackTidal: null,
+                    trackYtMusic: null,
+                },
+            ]);
+            mockPrisma.track.findMany.mockResolvedValueOnce([
+                {
+                    id: "local-track",
+                    title: "Different Song",
+                    duration: 120,
+                    filePath: "/music/different.flac",
+                    album: {
+                        title: "Different Album",
+                        artist: { name: "Different Artist" },
+                    },
+                },
+            ]);
+            mockYieldToEventLoop.mockImplementationOnce(async () => {
+                controller.abort(new Error("worker stopping"));
+            });
+
+            await expect(
+                trackReconciliationService.reconcile(2, 2, {
+                    signal: controller.signal,
+                }),
+            ).rejects.toThrow("worker stopping");
+            expect(mockYieldToEventLoop).toHaveBeenCalledTimes(1);
+        });
+
+        it("does not update a mapping cancelled during its conflict lookup", async () => {
+            const controller = new AbortController();
+            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([
+                {
+                    id: "m-db-abort",
+                    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                    trackTidalId: "tidal-db-abort",
+                    trackYtMusicId: null,
+                    trackTidal: {
+                        title: "Song",
+                        artist: "Artist",
+                        album: "Album",
+                        duration: 200,
+                        isrc: null,
+                    },
+                    trackYtMusic: null,
+                },
+            ]);
+            mockPrisma.track.findMany.mockResolvedValueOnce([
+                {
+                    id: "local-db-abort",
+                    title: "Song",
+                    duration: 200,
+                    filePath: "/music/song.flac",
+                    album: { title: "Album", artist: { name: "Artist" } },
+                },
+            ]);
+            mockPrisma.trackMapping.findFirst.mockImplementationOnce(
+                async () => {
+                    controller.abort(new Error("worker stopping"));
+                    return null;
+                },
+            );
+
+            await expect(
+                trackReconciliationService.reconcile(1, 1, {
+                    signal: controller.signal,
+                }),
+            ).rejects.toThrow("worker stopping");
+            expect(mockPrisma.trackMapping.update).not.toHaveBeenCalled();
         });
 
         it("prefers Tidal metadata over YT Music when both exist", async () => {

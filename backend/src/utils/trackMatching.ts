@@ -121,17 +121,23 @@ export interface TrackMatchResult {
 }
 
 interface IndexedTrackCandidate {
-    candidate: LocalTrackCandidate;
-    normalizedArtist: string;
-    normalizedExactTitle: string;
-    normalizedFuzzyTitle: string;
-    normalizedAlbum: string;
+    readonly candidate: LocalTrackCandidate;
+    readonly normalizedArtist: string;
+    readonly normalizedExactTitle: string;
+    readonly normalizedFuzzyTitle: string;
+    readonly normalizedAlbum: string;
 }
 
-/** Reusable normalized candidate index for repeated metadata matching. */
+/**
+ * Immutable lookup view for matching multiple remote tracks against one local
+ * library snapshot.
+ */
 export interface TrackMatchIndex {
-    candidates: IndexedTrackCandidate[];
-    byArtistTitle: Map<string, IndexedTrackCandidate[]>;
+    readonly candidates: ReadonlyArray<IndexedTrackCandidate>;
+    readonly byArtistTitle: ReadonlyMap<
+        string,
+        ReadonlyArray<IndexedTrackCandidate>
+    >;
 }
 
 function normalizePathForMatching(filePath: string): string {
@@ -149,9 +155,13 @@ function getFilenameStem(filePath: string): string {
     return filename.replace(/\.[^.]+$/, "");
 }
 
-/** Builds a reusable normalized index for repeated metadata matching. */
+/**
+ * Precomputes candidate normalization once for repeated metadata matching.
+ *
+ * @param candidates Local library snapshot; the array is not mutated.
+ */
 export function buildTrackMatchIndex(
-    candidates: LocalTrackCandidate[],
+    candidates: ReadonlyArray<LocalTrackCandidate>,
 ): TrackMatchIndex {
     const indexedCandidates = candidates.map((candidate) => ({
         candidate,
@@ -252,8 +262,11 @@ function matchTrackFuzzy(
 }
 
 /**
- * Match metadata against a reusable normalized candidate index.
+ * Matches metadata against a reusable normalized candidate index.
  * Uses exact artist/album/title, album-variant, artist/title, then fuzzy tiers.
+ *
+ * @param input Remote metadata to match.
+ * @param index Precomputed local library snapshot.
  */
 export function matchTrackAgainstIndex(
     input: TrackMatchInput,
@@ -281,10 +294,15 @@ export function matchTrackAgainstIndex(
     );
 }
 
-/** Match one track against a local candidate list. */
+/**
+ * Matches one remote track against a local candidate list.
+ *
+ * Prefer `buildTrackMatchIndex` and `matchTrackAgainstIndex` when matching
+ * multiple inputs against the same candidates.
+ */
 export function matchTrackAgainstLibrary(
     input: TrackMatchInput,
-    candidates: LocalTrackCandidate[],
+    candidates: ReadonlyArray<LocalTrackCandidate>,
 ): TrackMatchResult | null {
     return matchTrackAgainstIndex(input, buildTrackMatchIndex(candidates));
 }
