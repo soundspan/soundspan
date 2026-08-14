@@ -138,6 +138,7 @@ describe("offline routes runtime", () => {
                 track: {
                     id: "t1",
                     title: "Track 1",
+                    removedAt: null,
                     album: {
                         id: "album-1",
                         title: "Album One",
@@ -157,6 +158,7 @@ describe("offline routes runtime", () => {
                 track: {
                     id: "t2",
                     title: "Track 2",
+                    removedAt: null,
                     album: {
                         id: "album-1",
                         title: "Album One",
@@ -187,6 +189,7 @@ describe("offline routes runtime", () => {
             where: { id: "album-1" },
             include: {
                 tracks: {
+                    where: { removedAt: null },
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                 },
                 artist: {
@@ -514,6 +517,38 @@ describe("offline routes runtime", () => {
                 ]),
             }),
         );
+    });
+
+    it("evicts and omits cached rows for removed tracks", async () => {
+        mockCachedTrackFindMany.mockResolvedValueOnce([
+            {
+                id: "cached-removed",
+                localPath: "/music/removed.flac",
+                quality: "original",
+                fileSizeMb: 20,
+                track: {
+                    id: "removed-track",
+                    title: "Removed",
+                    removedAt: new Date("2026-01-01T00:00:00.000Z"),
+                    album: {
+                        id: "album-1",
+                        title: "Album One",
+                        artist: { id: "artist-1", name: "Artist One" },
+                    },
+                },
+            },
+        ]);
+        const req = {
+            user: { id: "u1", username: "u1", role: "user" },
+        } as any;
+        const res = createRes();
+
+        await getAlbums(req, res);
+
+        expect(mockCachedTrackDeleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["cached-removed"] }, userId: "u1" },
+        });
+        expect(res.body).toEqual([]);
     });
 
     it("returns 500 when cached albums query fails", async () => {

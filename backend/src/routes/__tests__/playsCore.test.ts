@@ -115,7 +115,7 @@ describe("plays routes integration", () => {
             source: "LIBRARY",
         });
         expect(mockTrackFindUnique).toHaveBeenCalledWith({
-            where: { id: "track-1" },
+            where: { id: "track-1", removedAt: null },
         });
         expect(mockPlayCreate).toHaveBeenCalledWith({
             data: {

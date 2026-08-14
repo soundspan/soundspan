@@ -1,6 +1,9 @@
-import { Prisma } from "./db";
+import { Prisma } from "@prisma/client";
 
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
+
+/** SQL predicate for user-facing radio pools backed by the Track alias `t`. */
+export const VISIBLE_TRACK_SQL = Prisma.sql`t."removedAt" IS NULL`;
 
 /** Builds the parameterized SQL predicate for a library-radio mood pool. */
 export const moodPoolCondition = (moodValue: string): Prisma.Sql => {

@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
 
+/** Shared predicate for user-facing reads of tracks that still exist. */
+export const TRACK_VISIBLE_WHERE = {
+    removedAt: null,
+} satisfies Prisma.TrackWhereInput;
+
 /** Supported artist-list sort expressions keyed by the public query value. */
 export const ARTIST_SORT_MAP: Record<
     string,

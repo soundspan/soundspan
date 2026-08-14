@@ -17,6 +17,7 @@ import {
     getUserProviderProfile,
     type UserProviderProfile,
 } from "../services/listenTogetherResolution";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = Router();
 
@@ -199,6 +200,8 @@ const updatePlaylistSchema = z.object({
 
 const playlistItemInclude = {
     track: {
+        // Full Track scalars include removedAt while preserving the existing
+        // response shape for active playlist items.
         include: {
             album: {
                 include: {
@@ -519,13 +522,40 @@ function selectBoundedPlaylistEntries<
 function formatResolvedPlaylistItems(resolvedItems: ResolvedPlaylistItem[]) {
     return resolvedItems.map((resolvedItem) => {
         const formatted = formatUnifiedTrackItem(resolvedItem.effective);
-        if (!resolvedItem.resolution.available) {
+        if (
+            resolvedItem.original.track?.removedAt ||
+            resolvedItem.effective.track?.removedAt
+        ) {
+            formatted.playback = {
+                isPlayable: false,
+                reason: "track_removed",
+                message:
+                    "Playback is unavailable because this track was removed from the library.",
+            };
+        } else if (!resolvedItem.resolution.available) {
             formatted.playback = unavailablePlaybackForReason(
                 resolvedItem.resolution.reason,
             );
         }
         return formatted;
     });
+}
+
+async function getRemovedTrackCounts(
+    playlistIds: string[],
+): Promise<Map<string, number>> {
+    if (playlistIds.length === 0) return new Map();
+    const rows = await prisma.playlistItem.groupBy({
+        by: ["playlistId"],
+        where: {
+            playlistId: { in: playlistIds },
+            track: { removedAt: { not: null } },
+        },
+        _count: { _all: true },
+    });
+    return new Map(
+        rows.map((row) => [row.playlistId, row._count._all] as const),
+    );
 }
 
 function formatPendingPlaylistItems(
@@ -588,6 +618,9 @@ function formatPendingPlaylistItems(
  *                   trackCount:
  *                     type: integer
  *                     description: Authoritative count of all items in the playlist
+ *                   unplayableCount:
+ *                     type: integer
+ *                     description: Count of removed local tracks; omitted when zero
  *                   items:
  *                     type: array
  *                     maxItems: 12
@@ -639,6 +672,12 @@ router.get("/", async (req, res) => {
                     },
                 },
                 items: {
+                    where: {
+                        OR: [
+                            { trackId: null },
+                            { track: TRACK_VISIBLE_WHERE },
+                        ],
+                    },
                     select: {
                         id: true,
                         sort: true,
@@ -657,12 +696,17 @@ router.get("/", async (req, res) => {
                 },
             },
         });
+        const removedTrackCounts = await getRemovedTrackCounts(
+            playlists.map((playlist) => playlist.id),
+        );
 
         const playlistsWithCounts = playlists.map((playlist) => {
             const { _count, ...playlistFields } = playlist;
+            const unplayableCount = removedTrackCounts.get(playlist.id) ?? 0;
             return {
                 ...playlistFields,
                 trackCount: _count.items,
+                ...(unplayableCount > 0 ? { unplayableCount } : {}),
                 isOwner: playlist.userId === userId,
                 isHidden: hiddenPlaylistIds.has(playlist.id),
                 items: playlist.items.map((item) => ({
@@ -789,6 +833,9 @@ router.post("/", async (req, res) => {
  *                 totalItemCount:
  *                   type: integer
  *                   description: Total number of track and pending items in the playlist before response truncation
+ *                 unplayableCount:
+ *                   type: integer
+ *                   description: Count of removed local tracks; omitted when zero
  *                 truncated:
  *                   type: boolean
  *                   description: True when the playlist contains more than 1000 combined items and this response was capped
@@ -830,6 +877,8 @@ router.get("/:id", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
+        const removedTrackCounts = await getRemovedTrackCounts([playlist.id]);
+
         const totalItemCount =
             playlist._count.items + playlist._count.pendingTracks;
         const bounded = selectBoundedPlaylistEntries(
@@ -853,11 +902,13 @@ router.get("/:id", async (req, res) => {
         ].sort((a, b) => a.sort - b.sort);
 
         const { _count, ...playlistFields } = playlist;
+        const unplayableCount = removedTrackCounts.get(playlist.id) ?? 0;
         res.json({
             ...playlistFields,
             isOwner: playlist.userId === userId,
             isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: _count.items,
+            ...(unplayableCount > 0 ? { unplayableCount } : {}),
             pendingCount: _count.pendingTracks,
             totalItemCount,
             truncated: totalItemCount > PLAYLIST_DETAIL_MAX_ITEMS,
@@ -1297,7 +1348,7 @@ router.post("/:id/items", async (req, res) => {
 
         if (addTrackData.trackId) {
             const track = await prisma.track.findUnique({
-                where: { id: addTrackData.trackId },
+                where: { id: addTrackData.trackId, removedAt: null },
             });
 
             if (!track) {

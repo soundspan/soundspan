@@ -7,6 +7,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import analysisInternalRoutes from "./analysisInternal";
 import os from "os";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = Router();
 
@@ -49,6 +50,7 @@ router.get("/status", requireAuth, async (req, res) => {
         // Get counts by status
         const statusCounts = await prisma.track.groupBy({
             by: ["analysisStatus"],
+            where: TRACK_VISIBLE_WHERE,
             _count: true,
         });
 
@@ -71,7 +73,10 @@ router.get("/status", requireAuth, async (req, res) => {
 
         // Get CLAP embedding count
         const embeddingCount = await prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count FROM track_embeddings
+            SELECT COUNT(*) as count
+            FROM track_embeddings te
+            INNER JOIN "Track" t ON t.id = te.track_id
+            WHERE t."removedAt" IS NULL
         `;
         const withEmbeddings = Number(embeddingCount[0]?.count || 0);
 
@@ -140,6 +145,7 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
         const tracks = await prisma.track.findMany({
             where: {
                 analysisStatus: "pending",
+                ...TRACK_VISIBLE_WHERE,
             },
             select: {
                 id: true,
@@ -799,6 +805,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         const tracks = await prisma.track.findMany({
             where: {
                 embedding: null,
+                ...TRACK_VISIBLE_WHERE,
             },
             select: {
                 id: true,

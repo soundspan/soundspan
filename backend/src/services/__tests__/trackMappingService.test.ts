@@ -974,7 +974,7 @@ describe("TrackMappingService", () => {
 
             expect(result).toHaveLength(2);
             expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
-                where: { albumId: "album_1" },
+                where: { albumId: "album_1", removedAt: null },
                 select: { id: true },
             });
             expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledWith({

@@ -8,6 +8,7 @@ import {
     MoodType,
 } from "../services/moodBucketService";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { redisClient } from "../utils/redis";
 
 const router = Router();
@@ -230,6 +231,7 @@ router.post("/mood", async (req, res) => {
         // Load full track details
         const tracks = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { in: mix.trackIds },
             },
             include: {
@@ -575,7 +577,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
 
         // Load full track details
         const tracks = await prisma.track.findMany({
-            where: { id: { in: mix.trackIds } },
+            where: { ...TRACK_VISIBLE_WHERE, id: { in: mix.trackIds } },
             include: {
                 album: {
                     include: {
@@ -656,7 +658,10 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
 
         // Load full track details for immediate playback
         const tracks = await prisma.track.findMany({
-            where: { id: { in: savedMix.trackIds } },
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                id: { in: savedMix.trackIds },
+            },
             include: {
                 album: {
                     include: {
@@ -1014,6 +1019,7 @@ router.get("/:id", async (req, res) => {
         // Load full track details
         const tracks = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: {
                     in: mix.trackIds,
                 },

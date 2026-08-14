@@ -284,6 +284,7 @@ async function doCompute(): Promise<VibeMapResponse> {
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE t."removedAt" IS NULL
         ORDER BY RANDOM()
         LIMIT ${MAX_EMBEDDINGS}
     `;

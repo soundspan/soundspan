@@ -34,6 +34,7 @@ import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
+    TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -192,18 +193,27 @@ export async function handleGetArtists(req: Request, res: Response) {
                 where.OR = [
                     {
                         albums: {
-                            some: { location: "LIBRARY", tracks: { some: {} } },
+                            some: {
+                                location: "LIBRARY",
+                                tracks: { some: TRACK_VISIBLE_WHERE },
+                            },
                         },
                     },
                     { ownedAlbums: { some: {} } },
                 ];
             } else if (filter === "discovery") {
                 where.albums = {
-                    some: { location: "DISCOVER", tracks: { some: {} } },
+                    some: {
+                        location: "DISCOVER",
+                        tracks: { some: TRACK_VISIBLE_WHERE },
+                    },
                 };
                 where.NOT = {
                     albums: {
-                        some: { location: "LIBRARY", tracks: { some: {} } },
+                        some: {
+                            location: "LIBRARY",
+                            tracks: { some: TRACK_VISIBLE_WHERE },
+                        },
                     },
                 };
             } else if (filter === "remote") {
@@ -211,11 +221,19 @@ export async function handleGetArtists(req: Request, res: Response) {
                     { tracksTidal: { some: {} } },
                     { tracksYtMusic: { some: {} } },
                 ];
-                where.NOT = { albums: { some: { tracks: { some: {} } } } };
+                where.NOT = {
+                    albums: {
+                        some: { tracks: { some: TRACK_VISIBLE_WHERE } },
+                    },
+                };
             } else {
                 // "all" — include library, discovery, and remote-only
                 where.OR = [
-                    { albums: { some: { tracks: { some: {} } } } },
+                    {
+                        albums: {
+                            some: { tracks: { some: TRACK_VISIBLE_WHERE } },
+                        },
+                    },
                     { tracksTidal: { some: {} } },
                     { tracksYtMusic: { some: {} } },
                 ];
@@ -386,9 +404,11 @@ export async function handleGetArtist(
 
     const artistInclude = {
         albums: {
+            where: { tracks: { some: TRACK_VISIBLE_WHERE } },
             orderBy: { year: Prisma.SortOrder.desc },
             include: {
                 tracks: {
+                    where: TRACK_VISIBLE_WHERE,
                     orderBy: [
                         { discNo: Prisma.SortOrder.asc },
                         { trackNo: Prisma.SortOrder.asc },
@@ -931,7 +951,7 @@ export async function handleGetArtist(
                             albums: {
                                 where: {
                                     location: "LIBRARY",
-                                    tracks: { some: {} },
+                                    tracks: { some: TRACK_VISIBLE_WHERE },
                                 },
                             },
                         },
@@ -1047,7 +1067,7 @@ export async function handleGetArtist(
                                 albums: {
                                     where: {
                                         location: "LIBRARY",
-                                        tracks: { some: {} },
+                                        tracks: { some: TRACK_VISIBLE_WHERE },
                                     },
                                 },
                             },

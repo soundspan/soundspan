@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAdmin, requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { lastFmService } from "../services/lastfm";
 import { startOfWeek, endOfWeek } from "date-fns";
 import axios from "axios";
@@ -342,7 +343,10 @@ router.get("/current", async (req, res) => {
 
                 if (trackIds.length > 0) {
                     const libraryTracks = await prisma.track.findMany({
-                        where: { id: { in: trackIds } },
+                        where: {
+                            ...TRACK_VISIBLE_WHERE,
+                            id: { in: trackIds },
+                        },
                         include: { album: { include: { artist: true } } },
                     });
 

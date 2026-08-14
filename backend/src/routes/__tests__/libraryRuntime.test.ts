@@ -1372,6 +1372,27 @@ describe("library stream runtime coverage", () => {
         expect(mockPlayCreate).not.toHaveBeenCalled();
     });
 
+    it("returns 404 instead of streaming a removed track", async () => {
+        mockTrackFindUnique.mockImplementationOnce(
+            async ({ where }: { where: { removedAt?: null } }) =>
+                where.removedAt === null ? null : createNativeTrack(),
+        );
+        const res = createRes();
+
+        await streamHandler(
+            {
+                params: { id: "removed-track" },
+                query: {},
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Track not found" });
+        expect(mockPlayCreate).not.toHaveBeenCalled();
+    });
+
     it("returns 404 when track has no native file path", async () => {
         mockTrackFindUnique.mockResolvedValueOnce(
             createNativeTrack({ filePath: null, fileModified: null }),
@@ -2776,10 +2797,13 @@ describe("library catalog list runtime coverage", () => {
                     AND: [
                         {
                             OR: [
-                                { location: "LIBRARY", tracks: { some: {} } },
+                                {
+                                    location: "LIBRARY",
+                                    tracks: { some: { removedAt: null } },
+                                },
                                 {
                                     rgMbid: { in: ["rg-1"] },
-                                    tracks: { some: {} },
+                                    tracks: { some: { removedAt: null } },
                                 },
                             ],
                         },
@@ -2837,7 +2861,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
-                    tracks: { some: {} },
+                    tracks: { some: { removedAt: null } },
                     location: "DISCOVER",
                     artistId: "artist-discovery",
                 },
@@ -3024,7 +3048,7 @@ describe("library catalog list runtime coverage", () => {
 
         expect(mockTrackFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { albumId: "album-10" },
+                where: { albumId: "album-10", removedAt: null },
                 skip: 1,
                 take: 4,
                 orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
@@ -3098,7 +3122,7 @@ describe("library catalog list runtime coverage", () => {
 
         expect(firstRes.statusCode).toBe(200);
         expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(1, {
-            where: { userId: "user-1" },
+            where: { userId: "user-1", track: { removedAt: null } },
             select: { trackId: true, likedAt: true },
             orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
             take: 6,
@@ -3137,6 +3161,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(2, {
             where: {
                 userId: "user-1",
+                track: { removedAt: null },
                 OR: [
                     { likedAt: { lt: tiedLikedAt } },
                     {
@@ -3464,6 +3489,19 @@ describe("library catalog list runtime coverage", () => {
         expect(emptyRes.body).toEqual({ tracks: [], total: 0 });
     });
 
+    it("does not count removed rows when choosing a shuffle strategy", async () => {
+        mockTrackCount.mockImplementationOnce(
+            async ({ where }: { where?: { removedAt?: null } } = {}) =>
+                where?.removedAt === null ? 0 : 1,
+        );
+        const res = createRes();
+
+        await shuffleHandler({ query: { limit: "3" } } as any, res);
+
+        expect(res.body).toEqual({ tracks: [], total: 0 });
+        expect(mockTrackFindMany).not.toHaveBeenCalled();
+    });
+
     it("shuffles small libraries fully in memory", async () => {
         mockTrackCount.mockResolvedValueOnce(2);
         mockTrackFindMany.mockResolvedValueOnce([
@@ -3510,7 +3548,9 @@ describe("library catalog list runtime coverage", () => {
         // Exactly one findMany — the fetch-all call, which carries no pivot
         // filter (the sampling query would pass `where: { random: ... }`).
         expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
-        expect(mockTrackFindMany.mock.calls[0][0]).not.toHaveProperty("where");
+        expect(mockTrackFindMany.mock.calls[0][0].where).toEqual({
+            removedAt: null,
+        });
         expect(mockShuffleArray).toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body.total).toBe(5);
@@ -3545,7 +3585,10 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackFindMany).toHaveBeenNthCalledWith(
             1,
             expect.objectContaining({
-                where: { random: { gte: expect.any(Number) } },
+                where: {
+                    removedAt: null,
+                    random: { gte: expect.any(Number) },
+                },
                 orderBy: { random: "asc" },
                 take: 2,
                 select: { id: true },
@@ -3557,7 +3600,10 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackFindMany).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({
-                where: { id: { in: ["track-9", "track-8"] } },
+                where: {
+                    removedAt: null,
+                    id: { in: ["track-9", "track-8"] },
+                },
             }),
         );
         expect(largeRes.statusCode).toBe(200);
@@ -3603,7 +3649,10 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackFindMany).toHaveBeenNthCalledWith(
             1,
             expect.objectContaining({
-                where: { random: { gte: expect.any(Number) } },
+                where: {
+                    removedAt: null,
+                    random: { gte: expect.any(Number) },
+                },
                 orderBy: { random: "asc" },
                 take: 3,
                 select: { id: true },
@@ -3613,7 +3662,10 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackFindMany).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({
-                where: { random: { lt: expect.any(Number) } },
+                where: {
+                    removedAt: null,
+                    random: { lt: expect.any(Number) },
+                },
                 orderBy: { random: "asc" },
                 take: 2,
                 select: { id: true },
@@ -6627,7 +6679,7 @@ describe("library album cover and media route edge coverage", () => {
 
         expect(mockTrackFindUnique).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { id: "track-stream" },
+                where: { id: "track-stream", removedAt: null },
             }),
         );
         expect(mockPlayFindFirst).toHaveBeenCalledWith({

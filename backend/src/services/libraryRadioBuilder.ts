@@ -9,6 +9,7 @@ import { buildTrackPreferenceScoreMapForUser } from "./libraryTrackPreferences";
 import { getMergedGenres } from "../utils/metadataOverrides";
 import { shuffleArray } from "../utils/shuffle";
 import { escapeLikePattern } from "../utils/likePattern";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 export const getRadioArtistCapForLimit = (limit: number): number => {
     if (!Number.isFinite(limit) || limit <= 0) return 2;
@@ -100,7 +101,7 @@ export const buildMultiTrackRadio = async (
 
     // 1. Load seed tracks with analysis fields
     const seedTracks = await prisma.track.findMany({
-        where: { id: { in: seedTrackIds } },
+        where: { ...TRACK_VISIBLE_WHERE, id: { in: seedTrackIds } },
         select: {
             id: true,
             bpm: true,
@@ -162,6 +163,7 @@ export const buildMultiTrackRadio = async (
     if (seedVector) {
         const candidates = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { notIn: [...excludeSet] },
                 analysisStatus: "completed",
             },
@@ -240,6 +242,7 @@ export const buildMultiTrackRadio = async (
         const currentExclude = new Set([...excludeSet, ...resultIds]);
         const artistTracks = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 album: { artistId: { in: [...seedArtistIds] } },
                 id: { notIn: [...currentExclude] },
             },
@@ -281,7 +284,8 @@ export const buildMultiTrackRadio = async (
                 FROM "Track"
                 JOIN "Album" ON "Track"."albumId" = "Album"."id"
                 JOIN "Artist" ON "Album"."artistId" = "Artist"."id"
-                WHERE "Track"."id" NOT IN (${Prisma.join(currentExclude.length > 0 ? currentExclude : ["__none__"])})
+                WHERE "Track"."removedAt" IS NULL
+                AND "Track"."id" NOT IN (${Prisma.join(currentExclude.length > 0 ? currentExclude : ["__none__"])})
                 AND (${Prisma.join(genreConditions, " OR ")})
                 ORDER BY RANDOM()
                 LIMIT ${limitNum - resultIds.length}
@@ -301,6 +305,7 @@ export const buildMultiTrackRadio = async (
         const currentExclude = [...excludeSet, ...resultIds];
         const randomTracks = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { notIn: currentExclude },
             },
             select: { id: true },

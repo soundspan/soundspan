@@ -145,7 +145,10 @@ describe("subsonic browse compatibility handlers", () => {
 
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { location: "LIBRARY" },
+                where: {
+                    location: "LIBRARY",
+                    tracks: { some: { removedAt: null } },
+                },
                 skip: 0,
                 take: 1,
             }),
@@ -316,6 +319,7 @@ describe("subsonic browse compatibility handlers", () => {
                     location: "LIBRARY",
                     tracks: {
                         some: {
+                            removedAt: null,
                             trackGenres: {
                                 some: {
                                     genre: {
@@ -633,7 +637,11 @@ describe("subsonic browse compatibility handlers", () => {
         expect(mockTrackFindMany).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({
-                where: { id: { in: ["track-1"] } },
+                where: {
+                    removedAt: null,
+                    id: { in: ["track-1"] },
+                    album: { location: "LIBRARY" },
+                },
             }),
         );
         expect(mockSendSuccess).toHaveBeenCalledWith(
@@ -879,6 +887,7 @@ describe("subsonic browse compatibility handlers", () => {
                     albums: {
                         some: {
                             location: "LIBRARY",
+                            tracks: { some: { removedAt: null } },
                         },
                     },
                 }),

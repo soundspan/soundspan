@@ -149,14 +149,16 @@ async function findSimilarHybrid(
                 t.acousticness, t.instrumentalness, t.key, t."keyScale"
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
-            WHERE te.track_id = ${trackId}
+            WHERE t."removedAt" IS NULL AND te.track_id = ${trackId}
         ),
         clap_candidates AS (
             SELECT
                 te.track_id,
                 1 - (te.embedding <=> (SELECT embedding FROM source)) as clap_sim
             FROM track_embeddings te
-            WHERE te.track_id != ${trackId}
+            JOIN "Track" candidate_track ON te.track_id = candidate_track.id
+            WHERE candidate_track."removedAt" IS NULL
+              AND te.track_id != ${trackId}
             ORDER BY te.embedding <=> (SELECT embedding FROM source)
             LIMIT ${candidateLimit}
         )
@@ -189,6 +191,7 @@ async function findSimilarHybrid(
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
         CROSS JOIN source s
+        WHERE t."removedAt" IS NULL
         ORDER BY similarity DESC
         LIMIT ${candidateLimit}
     `);
@@ -203,7 +206,10 @@ async function findSimilarClapOnly(
     const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
     const results = await runAnnQuery<SimilarTrack[]>(Prisma.sql`
         WITH source AS (
-            SELECT embedding FROM track_embeddings WHERE track_id = ${trackId}
+            SELECT te.embedding
+            FROM track_embeddings te
+            JOIN "Track" source_track ON te.track_id = source_track.id
+            WHERE source_track."removedAt" IS NULL AND te.track_id = ${trackId}
         )
         SELECT
             t.id,
@@ -224,7 +230,7 @@ async function findSimilarClapOnly(
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE te.track_id != ${trackId}
+        WHERE t."removedAt" IS NULL AND te.track_id != ${trackId}
         ORDER BY distance
         LIMIT ${candidateLimit}
     `);
@@ -241,7 +247,7 @@ async function findSimilarFeaturesOnly(
         WITH source AS (
             SELECT energy, valence, bpm, danceability, acousticness, instrumentalness, key, "keyScale"
             FROM "Track"
-            WHERE id = ${trackId}
+            WHERE "removedAt" IS NULL AND id = ${trackId}
         )
         SELECT
             t.id,
@@ -270,7 +276,8 @@ async function findSimilarFeaturesOnly(
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
         CROSS JOIN source s
-        WHERE t.id != ${trackId}
+        WHERE t."removedAt" IS NULL
+            AND t.id != ${trackId}
             AND t.energy IS NOT NULL
         ORDER BY similarity DESC
         LIMIT ${candidateLimit}

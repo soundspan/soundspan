@@ -8,6 +8,7 @@
 
 import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { decrypt } from "../utils/encryption";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -668,7 +669,7 @@ class PlaylistImportService {
 
         if (trackIds.length > 0) {
             const found = await prisma.track.findMany({
-                where: { id: { in: trackIds } },
+                where: { ...TRACK_VISIBLE_WHERE, id: { in: trackIds } },
                 select: { id: true },
             });
             const foundSet = new Set(found.map((r) => r.id));
@@ -1017,6 +1018,7 @@ class PlaylistImportService {
 
     private async getLocalLibraryCandidates(): Promise<LocalTrackCandidate[]> {
         const tracks = await prisma.track.findMany({
+            where: TRACK_VISIBLE_WHERE,
             select: {
                 id: true,
                 title: true,

@@ -3,6 +3,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { prisma } from "../../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../../utils/librarySorting";
 import { redisClient } from "../../utils/redis";
 import { config } from "../../config";
 import { logger } from "../../utils/logger";
@@ -245,7 +246,7 @@ class SegmentedSessionService {
         try {
             const trackLookupStartedAtMs = Date.now();
             const track = await prisma.track.findUnique({
-                where: { id: input.trackId },
+                where: { id: input.trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     id: true,
                     filePath: true,
@@ -1352,7 +1353,7 @@ class SegmentedSessionService {
     ): Promise<boolean> {
         try {
             const track = await prisma.track.findUnique({
-                where: { id: session.trackId },
+                where: { id: session.trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     id: true,
                     filePath: true,
@@ -1437,7 +1438,7 @@ class SegmentedSessionService {
             }
 
             const track = await prisma.track.findUnique({
-                where: { id: session.trackId },
+                where: { id: session.trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     id: true,
                     filePath: true,

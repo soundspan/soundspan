@@ -154,6 +154,33 @@ afterEach(() => {
 });
 
 describe("handleStream", () => {
+    it("returns not found instead of streaming a removed library track", async () => {
+        mockTrackFindFirst.mockImplementationOnce(
+            async ({ where }: { where: { removedAt?: null } }) =>
+                where.removedAt === null
+                    ? null
+                    : {
+                          id: "removed-track",
+                          filePath: "Artist/Removed.flac",
+                          fileModified: new Date("2024-01-01T00:00:00Z"),
+                      },
+        );
+
+        await handleStream(
+            buildReq({ id: "tr-removed-track" }),
+            buildRes(),
+        );
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            SubsonicErrorCode.NOT_FOUND,
+            "Song not found",
+            "json",
+            undefined,
+        );
+        expect(mockAudioServiceConstructor).not.toHaveBeenCalled();
+    });
+
     it("returns not found for malformed stream ids", async () => {
         const res = buildRes();
 
@@ -167,6 +194,7 @@ describe("handleStream", () => {
         expect(mockTrackFindFirst).toHaveBeenCalledWith({
             where: {
                 id: "bad-id",
+                removedAt: null,
                 album: {
                     location: "LIBRARY",
                 },

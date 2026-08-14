@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import axios from "axios";
 import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
@@ -957,7 +958,7 @@ export class DiscoverWeeklyService {
             // PRIMARY: Search by rgMbid (most accurate)
             if (criteria.albumMbid) {
                 tracks = await discoverWeeklyPrisma.track.findMany({
-                    where: {
+                    where: { ...TRACK_VISIBLE_WHERE,
                         album: { rgMbid: criteria.albumMbid },
                     },
                     include: {
@@ -974,7 +975,7 @@ export class DiscoverWeeklyService {
             // FALLBACK: Search by artist name + album title (case-insensitive)
             if (tracks.length === 0) {
                 tracks = await discoverWeeklyPrisma.track.findMany({
-                    where: {
+                    where: { ...TRACK_VISIBLE_WHERE,
                         album: {
                             title: {
                                 equals: criteria.albumTitle,
@@ -1144,7 +1145,7 @@ export class DiscoverWeeklyService {
 
         if (seedArtistNames.length > 0 || seedArtistMbids.length > 0) {
             const libraryTracks = await discoverWeeklyPrisma.track.findMany({
-                where: {
+                where: { ...TRACK_VISIBLE_WHERE,
                     album: {
                         artist: {
                             OR: [
@@ -1221,7 +1222,7 @@ export class DiscoverWeeklyService {
             // Exclude albums already used
             const popularLibraryTracks =
                 await discoverWeeklyPrisma.track.findMany({
-                    where: {
+                    where: { ...TRACK_VISIBLE_WHERE,
                         album: {
                             location: "LIBRARY",
                             id: { notIn: Array.from(usedAlbumIds) }, // 1 per album
@@ -1609,7 +1610,7 @@ export class DiscoverWeeklyService {
                 // PRIMARY: Search by rgMbid (most accurate)
                 let tracks: any[] = [];
                 tracks = await discoverWeeklyPrisma.track.findMany({
-                    where: {
+                    where: { ...TRACK_VISIBLE_WHERE,
                         album: { rgMbid: albumMbid },
                     },
                     include: {
@@ -1628,7 +1629,7 @@ export class DiscoverWeeklyService {
                         `       [NAME] Trying name-based search: "${artistName}" - "${albumTitle}"`,
                     );
                     tracks = await discoverWeeklyPrisma.track.findMany({
-                        where: {
+                        where: { ...TRACK_VISIBLE_WHERE,
                             album: {
                                 title: {
                                     equals: albumTitle,

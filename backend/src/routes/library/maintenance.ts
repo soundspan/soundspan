@@ -6,6 +6,7 @@ import {
 } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { prisma, Prisma } from "../../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../../utils/librarySorting";
 import path from "path";
 import { config } from "../../config";
 import { scanQueue } from "../../workers/queues";
@@ -380,6 +381,7 @@ export async function handleGetRecentlyListened(req: Request, res: Response) {
                     source: { in: ["LIBRARY", "DISCOVERY_KEPT"] },
                     // Also filter by album location to exclude discovery albums
                     track: {
+                        ...TRACK_VISIBLE_WHERE,
                         album: {
                             location: "LIBRARY",
                         },
@@ -601,7 +603,7 @@ export async function handleGetRecentlyAdded(req: Request, res: Response) {
     const recentAlbums = await prisma.album.findMany({
         where: {
             location: "LIBRARY",
-            tracks: { some: {} }, // Only albums with actual tracks
+            tracks: { some: TRACK_VISIBLE_WHERE }, // Only albums with visible tracks
         },
         orderBy: { lastSynced: "desc" },
         take: 20, // Hard limit to last 20 albums
@@ -634,7 +636,7 @@ export async function handleGetRecentlyAdded(req: Request, res: Response) {
         where: {
             artistId: { in: artistIds },
             location: "LIBRARY",
-            tracks: { some: {} },
+            tracks: { some: TRACK_VISIBLE_WHERE },
         },
         _count: { id: true },
     });

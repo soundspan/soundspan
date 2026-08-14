@@ -9,6 +9,7 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { trackMappingService } from "./trackMappingService";
 import {
@@ -178,7 +179,11 @@ export async function validateQueueTracks(
             new Set(localInputs.map((entry) => entry.trackId)),
         );
         const localTracks = await prisma.track.findMany({
-            where: { id: { in: uniqueLocalIds }, filePath: { not: "" } },
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                id: { in: uniqueLocalIds },
+                filePath: { not: "" },
+            },
             select: {
                 id: true,
                 title: true,

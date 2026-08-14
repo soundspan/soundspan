@@ -221,7 +221,20 @@ describe("subsonic collections/core compatibility handlers", () => {
         expect(playlistQuery).toMatchObject({
             where: { userId: "user-1" },
             orderBy: { createdAt: "desc" },
-            include: { _count: { select: { items: true } } },
+            include: {
+                _count: {
+                    select: {
+                        items: {
+                            where: {
+                                OR: [
+                                    { trackId: null },
+                                    { track: { removedAt: null } },
+                                ],
+                            },
+                        },
+                    },
+                },
+            },
         });
         expect(playlistQuery.include).not.toHaveProperty("items");
         expect(mockTrackAggregate).not.toHaveBeenCalled();
@@ -230,6 +243,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
+                track: { removedAt: null },
             },
             select: {
                 playlistId: true,
@@ -239,8 +253,9 @@ describe("subsonic collections/core compatibility handlers", () => {
         expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
             where: {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
-                track: {
-                    album: {
+            track: {
+                removedAt: null,
+                album: {
                         AND: [
                             { coverUrl: { not: null } },
                             { coverUrl: { not: "" } },
@@ -322,6 +337,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-a", "playlist-b"] },
                 trackId: { not: null },
+                track: { removedAt: null },
             },
             select: {
                 playlistId: true,
@@ -445,6 +461,11 @@ describe("subsonic collections/core compatibility handlers", () => {
                     id: "playlist-1",
                     userId: "user-1",
                 },
+                include: expect.objectContaining({
+                    items: expect.objectContaining({
+                        where: { track: { removedAt: null } },
+                    }),
+                }),
             }),
         );
         expect(mockSendSuccess).toHaveBeenCalledWith(
@@ -463,6 +484,45 @@ describe("subsonic collections/core compatibility handlers", () => {
                             artistId: "ar-artist-1",
                         }),
                     ]),
+                }),
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("omits removed songs from getPlaylist", async () => {
+        mockPlaylistFindFirst.mockImplementationOnce(
+            async ({ include }: any) =>
+                include.items.where?.track?.removedAt === null
+                    ? {
+                          id: "playlist-1",
+                          name: "Road Trip",
+                          isPublic: false,
+                          createdAt: new Date("2026-01-02T00:00:00.000Z"),
+                          items: [],
+                      }
+                    : {
+                          id: "playlist-1",
+                          name: "Road Trip",
+                          isPublic: false,
+                          createdAt: new Date("2026-01-02T00:00:00.000Z"),
+                          items: [{ track: { id: "removed-track" } }],
+                      },
+        );
+
+        await handleGetPlaylist(
+            buildReq({ id: "pl-playlist-1" }),
+            buildRes(),
+        );
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playlist: expect.objectContaining({
+                    songCount: 0,
+                    duration: 0,
+                    entry: [],
                 }),
             }),
             "json",

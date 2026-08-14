@@ -13,6 +13,7 @@
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
@@ -41,18 +42,19 @@ export async function calculateArtistCounts(
             where: {
                 artistId,
                 location: "LIBRARY",
-                tracks: { some: {} },
+                tracks: { some: TRACK_VISIBLE_WHERE },
             },
         }),
         prisma.album.count({
             where: {
                 artistId,
                 location: "DISCOVER",
-                tracks: { some: {} },
+                tracks: { some: TRACK_VISIBLE_WHERE },
             },
         }),
         prisma.track.count({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 album: { artistId },
             },
         }),

@@ -265,6 +265,52 @@ describe("search service", () => {
         ]);
     });
 
+    it("excludes removed tracks from FTS and ILIKE fallback searches", async () => {
+        prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) =>
+            strings.join(" ").includes('t."removedAt" IS NULL')
+                ? []
+                : [
+                      {
+                          id: "removed-fts",
+                          title: "Removed FTS",
+                          albumId: "album-1",
+                          albumTitle: "Album",
+                          artistId: "artist-1",
+                          artistName: "Artist",
+                          duration: 180,
+                          rank: 1,
+                      },
+                  ],
+        );
+        prisma.track.findMany.mockResolvedValueOnce([]);
+
+        await expect(
+            searchService.searchTracks({ query: "removed" }),
+        ).resolves.toEqual([]);
+
+        prisma.track.findMany.mockImplementationOnce(
+            async ({ where }: { where: { removedAt?: null } }) =>
+                where.removedAt === null
+                    ? []
+                    : [
+                          {
+                              id: "removed-ilike",
+                              title: "Removed ILIKE",
+                              albumId: "album-1",
+                              duration: 180,
+                              album: {
+                                  title: "Album",
+                                  artistId: "artist-1",
+                                  artist: { name: "Artist" },
+                              },
+                          },
+                      ],
+        );
+        await expect(
+            searchService.searchTracks({ query: "***" }),
+        ).resolves.toEqual([]);
+    });
+
     it("searches podcasts, episodes, and audiobooks with fallback behavior", async () => {
         prisma.$queryRaw
             .mockResolvedValueOnce([
@@ -806,7 +852,13 @@ describe("search service", () => {
             expect.objectContaining({
                 where: expect.objectContaining({
                     OR: [
-                        { albums: { some: {} } },
+                        {
+                            albums: {
+                                some: {
+                                    tracks: { some: { removedAt: null } },
+                                },
+                            },
+                        },
                         { remoteTrackCount: { gt: 0 } },
                     ],
                 }),
@@ -831,7 +883,13 @@ describe("search service", () => {
             expect.objectContaining({
                 where: expect.objectContaining({
                     OR: [
-                        { albums: { some: {} } },
+                        {
+                            albums: {
+                                some: {
+                                    tracks: { some: { removedAt: null } },
+                                },
+                            },
+                        },
                         { remoteTrackCount: { gt: 0 } },
                     ],
                 }),

@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { parseBoundedInt } from "../utils/queryParams";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { z } from "zod";
 import { trackMappingService } from "../services/trackMappingService";
 import { resolveRemoteTrackMetadataForRequest } from "../services/remoteTrackMetadataResolver";
@@ -318,7 +319,7 @@ router.post("/", async (req, res) => {
         if (payload.trackId) {
             // Verify local track exists
             const track = await prisma.track.findUnique({
-                where: { id: payload.trackId },
+                where: { id: payload.trackId, ...TRACK_VISIBLE_WHERE },
             });
 
             if (!track) {
@@ -476,7 +477,10 @@ router.get("/", async (req, res) => {
                             id: play.id,
                             playedAt: play.playedAt,
                             source: play.source,
-                            track: toHistoryTrackShape(normalized),
+                            track: toHistoryTrackShape(
+                                normalized,
+                                Boolean(play.track.removedAt),
+                            ),
                         };
                     }
                     if (play.trackTidal) {
@@ -513,7 +517,10 @@ router.get("/", async (req, res) => {
 });
 
 export default router;
-const toHistoryTrackShape = (normalized: UnifiedTrackResponse) => {
+const toHistoryTrackShape = (
+    normalized: UnifiedTrackResponse,
+    isRemoved = false,
+) => {
     const base = {
         id: normalized.id,
         title: normalized.title,
@@ -528,6 +535,16 @@ const toHistoryTrackShape = (normalized: UnifiedTrackResponse) => {
             ...normalized.album,
             artist: normalized.artist,
         },
+        ...(isRemoved
+            ? {
+                  playback: {
+                      isPlayable: false,
+                      reason: "track_removed" as const,
+                      message:
+                          "Playback is unavailable because this track was removed from the library.",
+                  },
+              }
+            : {}),
     };
 
     if (normalized.source === "tidal") {

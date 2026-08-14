@@ -308,6 +308,7 @@ describe("subsonic core compatibility handlers", () => {
         expect(mockTrackFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
+                    removedAt: null,
                     album: {
                         location: "LIBRARY",
                     },
@@ -358,6 +359,7 @@ describe("subsonic core compatibility handlers", () => {
             where: {
                 userId: "user-1",
                 track: {
+                    removedAt: null,
                     album: {
                         location: "LIBRARY",
                     },

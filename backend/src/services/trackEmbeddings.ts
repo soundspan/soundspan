@@ -30,9 +30,11 @@ export async function fetchEmbeddingsByTrackIds(
     const rows = await prisma.$queryRaw<
         { trackId: string; embedding: string }[]
     >`
-        SELECT track_id AS "trackId", embedding::text AS embedding
-        FROM track_embeddings
-        WHERE track_id = ANY(${trackIds as string[]})
+        SELECT te.track_id AS "trackId", te.embedding::text AS embedding
+        FROM track_embeddings te
+        JOIN "Track" t ON t.id = te.track_id
+        WHERE t."removedAt" IS NULL
+          AND te.track_id = ANY(${trackIds as string[]})
     `;
     return rows.map((row) => ({
         trackId: row.trackId,

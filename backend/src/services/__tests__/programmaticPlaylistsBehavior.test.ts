@@ -246,6 +246,16 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
         );
     });
 
+    it("excludes removed tracks from generated candidate pools", async () => {
+        await service.generateKeyJourney("user-1", "2026-02-17");
+
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ removedAt: null }),
+            }),
+        );
+    });
+
     it("generateAllMixes backfills from fallback generators, de-duplicates by type, and appends saved mood mix", async () => {
         jest.useFakeTimers().setSystemTime(new Date("2026-02-17T12:00:00Z"));
 

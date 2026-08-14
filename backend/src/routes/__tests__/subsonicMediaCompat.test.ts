@@ -130,6 +130,27 @@ describe("subsonic media compatibility handlers", () => {
         );
     });
 
+    it("returns not found instead of downloading a removed track", async () => {
+        mockTrackFindFirst.mockImplementationOnce(
+            async ({ where }: { where: { removedAt?: null } }) =>
+                where.removedAt === null
+                    ? null
+                    : { filePath: "Artist/Removed.flac" },
+        );
+        const res = buildRes();
+
+        await handleDownload(buildReq({ id: "tr-removed" }), res);
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            70,
+            "Song not found",
+            "json",
+            undefined,
+        );
+        expect(res.download).not.toHaveBeenCalled();
+    });
+
     it("returns synced lyrics mapped to structuredLyrics line entries", async () => {
         mockTrackFindFirst.mockResolvedValue({
             title: "Song One",

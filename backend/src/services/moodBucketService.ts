@@ -7,6 +7,7 @@
  */
 
 import { logger } from "../utils/logger";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { prisma, Prisma } from "../utils/db";
 import { applyArtistCap } from "./programmaticPlaylistArtistCap";
 import { sampleUniform } from "./artistSlotAllocation";
@@ -555,7 +556,11 @@ export class MoodBucketService {
         // bucket every time (GH #46). A wider score band sampled
         // uniformly keeps quality while varying composition.
         const moodBuckets = await prisma.moodBucket.findMany({
-            where: { mood, score: { gte: MOOD_BUCKET_MIN_SCORE } },
+            where: {
+                mood,
+                score: { gte: MOOD_BUCKET_MIN_SCORE },
+                track: TRACK_VISIBLE_WHERE,
+            },
             select: { trackId: true, score: true },
             orderBy: { score: "desc" },
             take: 500, // Quality band to sample from
@@ -575,7 +580,7 @@ export class MoodBucketService {
 
         // Load the entire candidate pool with artist IDs so diversity caps can be enforced.
         const tracks = await prisma.track.findMany({
-            where: { id: { in: pooledIds } },
+            where: { ...TRACK_VISIBLE_WHERE, id: { in: pooledIds } },
             select: {
                 id: true,
                 album: {

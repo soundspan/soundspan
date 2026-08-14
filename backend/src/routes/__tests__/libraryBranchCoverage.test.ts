@@ -1054,7 +1054,13 @@ describe("library branch coverage focus", () => {
                         { tracksTidal: { some: {} } },
                         { tracksYtMusic: { some: {} } },
                     ],
-                    NOT: { albums: { some: { tracks: { some: {} } } } },
+                    NOT: {
+                        albums: {
+                            some: {
+                                tracks: { some: { removedAt: null } },
+                            },
+                        },
+                    },
                 }),
             }),
         );
@@ -1070,7 +1076,13 @@ describe("library branch coverage focus", () => {
             expect.objectContaining({
                 where: expect.objectContaining({
                     OR: [
-                        { albums: { some: { tracks: { some: {} } } } },
+                        {
+                            albums: {
+                                some: {
+                                    tracks: { some: { removedAt: null } },
+                                },
+                            },
+                        },
                         { tracksTidal: { some: {} } },
                         { tracksYtMusic: { some: {} } },
                     ],
@@ -1168,7 +1180,11 @@ describe("library branch coverage focus", () => {
         await radioHandler(playlistReq, playlistRes);
         expect(playlistRes.statusCode).toBe(200);
         expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
-            where: { playlistId: "playlist-1", trackId: { not: null } },
+            where: {
+                playlistId: "playlist-1",
+                trackId: { not: null },
+                track: { removedAt: null },
+            },
             select: { trackId: true },
         });
     });

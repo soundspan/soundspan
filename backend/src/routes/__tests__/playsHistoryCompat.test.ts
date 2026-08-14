@@ -486,6 +486,47 @@ describe("plays history compatibility", () => {
         expect(errRes.body).toEqual({ error: "Failed to get plays" });
     });
 
+    it("keeps removed tracks in history and marks them unplayable", async () => {
+        mockPlayFindMany.mockResolvedValueOnce([
+            {
+                id: "play-removed",
+                playedAt: new Date("2026-03-01T10:00:00.000Z"),
+                source: "LIBRARY",
+                track: {
+                    id: "track-removed",
+                    title: "Removed Song",
+                    duration: 210,
+                    trackNo: 1,
+                    filePath: "/music/removed.flac",
+                    removedAt: new Date("2026-02-01T00:00:00.000Z"),
+                    album: {
+                        id: "album-1",
+                        title: "Album",
+                        artist: { id: "artist-1", name: "Artist", mbid: null },
+                    },
+                },
+                trackTidal: null,
+                trackYtMusic: null,
+            },
+        ]);
+        const res = createRes();
+
+        await listPlaysHandler(
+            {
+                user: { id: "user-1" },
+                query: {},
+            } as any,
+            res,
+        );
+
+        expect(res.body[0].track.playback).toEqual({
+            isPlayable: false,
+            reason: "track_removed",
+            message:
+                "Playback is unavailable because this track was removed from the library.",
+        });
+    });
+
     it.each([
         ["99999999", 200],
         ["abc", 50],

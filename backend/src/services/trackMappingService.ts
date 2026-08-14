@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { resolveArtistForRemoteTrack } from "./artistResolutionService";
 import { resolveAlbumForRemoteTrack } from "./albumResolutionService";
@@ -734,7 +735,7 @@ class TrackMappingService {
     async getMappingsForAlbum(albumId: string) {
         try {
             const tracks = await prisma.track.findMany({
-                where: { albumId },
+                where: { albumId, ...TRACK_VISIBLE_WHERE },
                 select: { id: true },
             });
 

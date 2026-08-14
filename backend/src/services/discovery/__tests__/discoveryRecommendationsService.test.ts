@@ -422,6 +422,7 @@ describe("DiscoveryRecommendationsService", () => {
                 (mockPrisma.track.findMany as jest.Mock).mock.calls[0][0],
             ).toEqual({
                 where: {
+                    removedAt: null,
                     duration: { gt: 0 },
                     id: { notIn: ["recent-track"] },
                     album: {
@@ -450,6 +451,7 @@ describe("DiscoveryRecommendationsService", () => {
                 (mockPrisma.track.findMany as jest.Mock).mock.calls[1][0],
             ).toEqual({
                 where: {
+                    removedAt: null,
                     duration: { gt: 0 },
                     id: { notIn: ["track-priority"] },
                     album: {
@@ -1062,6 +1064,7 @@ describe("DiscoveryRecommendationsService", () => {
             });
             expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
                 where: {
+                    removedAt: null,
                     id: { in: ["track-1", "track-2", "missing-track"] },
                 },
                 include: {

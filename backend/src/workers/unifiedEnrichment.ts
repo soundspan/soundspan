@@ -1191,6 +1191,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
     // Match both empty array AND null (newly scanned tracks have null, not [])
     const tracks = await prisma.track.findMany({
         where: {
+            removedAt: null,
             OR: [
                 { lastfmTags: { equals: [] } },
                 { lastfmTags: { isEmpty: true } },
@@ -1325,6 +1326,7 @@ async function queueAudioAnalysis(): Promise<number> {
     const tracks = await prisma.track.findMany({
         where: {
             analysisStatus: "pending",
+            removedAt: null,
         },
         select: {
             id: true,
@@ -1387,6 +1389,7 @@ async function queueVibeEmbeddings(): Promise<number> {
             prisma.track.findMany({
                 where: {
                     embedding: null,
+                    removedAt: null,
                     OR: [
                         { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },

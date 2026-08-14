@@ -61,18 +61,19 @@ describe("artistCountsService", () => {
             where: {
                 artistId: "artist-1",
                 location: "LIBRARY",
-                tracks: { some: {} },
+                tracks: { some: { removedAt: null } },
             },
         });
         expect(prisma.album.count).toHaveBeenNthCalledWith(2, {
             where: {
                 artistId: "artist-1",
                 location: "DISCOVER",
-                tracks: { some: {} },
+                tracks: { some: { removedAt: null } },
             },
         });
         expect(prisma.track.count).toHaveBeenCalledWith({
             where: {
+                removedAt: null,
                 album: { artistId: "artist-1" },
             },
         });

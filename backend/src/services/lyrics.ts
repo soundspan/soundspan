@@ -1,5 +1,6 @@
 import axios from "axios";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { BRAND_USER_AGENT } from "../config/brand";
@@ -719,7 +720,7 @@ export async function getLyrics(
 
     // 2. Fetch the track info for the lookup
     const track = await prisma.track.findUnique({
-        where: { id: trackId },
+        where: { id: trackId, ...TRACK_VISIBLE_WHERE },
         include: {
             album: {
                 include: {

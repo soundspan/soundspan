@@ -676,7 +676,7 @@ describe("share links routes integration", () => {
             },
             assertOwnership: () => {
                 expect(mockTrackFindUnique).toHaveBeenCalledWith({
-                    where: { id: "track-1" },
+                    where: { id: "track-1", removedAt: null },
                     select: {
                         id: true,
                         title: true,
@@ -697,7 +697,11 @@ describe("share links routes integration", () => {
             },
             assertOwnership: () => {
                 expect(mockTrackFindFirst).toHaveBeenCalledWith({
-                    where: { id: "track-1", albumId: "album-1" },
+                    where: {
+                        id: "track-1",
+                        albumId: "album-1",
+                        removedAt: null,
+                    },
                     select: {
                         id: true,
                         title: true,
@@ -724,7 +728,11 @@ describe("share links routes integration", () => {
             },
             assertOwnership: () => {
                 expect(mockPlaylistItemFindFirst).toHaveBeenCalledWith({
-                    where: { playlistId: "playlist-1", trackId: "track-1" },
+                    where: {
+                        playlistId: "playlist-1",
+                        trackId: "track-1",
+                        track: { removedAt: null },
+                    },
                 });
             },
         },

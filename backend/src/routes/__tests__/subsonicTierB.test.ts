@@ -980,7 +980,20 @@ describe("subsonic Tier B handlers", () => {
         expect(playlistQuery).toMatchObject({
             where: { userId: "user-1" },
             orderBy: { createdAt: "desc" },
-            include: { _count: { select: { items: true } } },
+            include: {
+                _count: {
+                    select: {
+                        items: {
+                            where: {
+                                OR: [
+                                    { trackId: null },
+                                    { track: { removedAt: null } },
+                                ],
+                            },
+                        },
+                    },
+                },
+            },
         });
         expect(playlistQuery.include).not.toHaveProperty("items");
         expect(mockTrackAggregate).not.toHaveBeenCalled();
@@ -989,6 +1002,7 @@ describe("subsonic Tier B handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
+                track: { removedAt: null },
             },
             select: {
                 playlistId: true,
@@ -1734,6 +1748,7 @@ describe("subsonic Tier B handlers", () => {
                     albums: {
                         some: {
                             location: "LIBRARY",
+                            tracks: { some: { removedAt: null } },
                         },
                     },
                 },

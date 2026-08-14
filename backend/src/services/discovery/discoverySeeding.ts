@@ -8,6 +8,7 @@
  */
 
 import { prisma } from "../../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../../utils/librarySorting";
 import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
 import { subWeeks } from "date-fns";
@@ -63,6 +64,7 @@ export class DiscoverySeeding {
 
         const tracks = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { in: recentTrackIds },
                 album: { location: "LIBRARY" },
             },

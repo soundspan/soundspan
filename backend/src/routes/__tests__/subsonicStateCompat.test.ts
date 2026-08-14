@@ -328,6 +328,10 @@ describe("subsonic state/admin compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     userId: "user-1",
+                    track: {
+                        removedAt: null,
+                        album: { location: "LIBRARY" },
+                    },
                 },
             }),
         );
@@ -367,6 +371,8 @@ describe("subsonic state/admin compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     id: "track-1",
+                    removedAt: null,
+                    album: { location: "LIBRARY" },
                 },
             }),
         );
@@ -707,7 +713,11 @@ describe("subsonic state/admin compatibility handlers", () => {
         expect(artistQuery.select).not.toHaveProperty("albums");
         expect(mockTrackGroupBy).toHaveBeenCalledWith({
             by: ["albumId"],
-            where: { albumId: { in: ["album-2", "album-1"] } },
+            where: {
+                removedAt: null,
+                album: { location: "LIBRARY" },
+                albumId: { in: ["album-2", "album-1"] },
+            },
             _count: { _all: true },
             _sum: { duration: true },
         });

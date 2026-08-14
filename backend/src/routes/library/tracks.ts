@@ -60,6 +60,7 @@ import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
+    TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -178,7 +179,7 @@ export async function handleGetTracks(req: Request, res: Response) {
         };
     }
 
-    const where: any = {};
+    const where: any = { ...TRACK_VISIBLE_WHERE };
     if (albumId) {
         where.albumId = albumId as string;
     }
@@ -331,6 +332,7 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
         cursorLikedAt && cursorTrackIdParam
             ? {
                   userId,
+                  track: TRACK_VISIBLE_WHERE,
                   OR: [
                       { likedAt: { lt: cursorLikedAt } },
                       {
@@ -339,7 +341,7 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
                       },
                   ],
               }
-            : { userId };
+            : { userId, track: TRACK_VISIBLE_WHERE };
     const remoteWhere: Prisma.LikedRemoteTrackWhereInput =
         cursorLikedAt && remoteCursorIdParam
             ? {
@@ -361,7 +363,9 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
 
     const [total, remoteTotal, userSettings, localEntries, remoteEntries] =
         await Promise.all([
-            prisma.likedTrack.count({ where: { userId } }),
+            prisma.likedTrack.count({
+                where: { userId, track: TRACK_VISIBLE_WHERE },
+            }),
             prisma.likedRemoteTrack.count({ where: { userId } }),
             prisma.userSettings.findUnique({
                 where: { userId },
@@ -487,7 +491,10 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
     const localTrackRows =
         localTrackIds.length > 0
             ? await prisma.track.findMany({
-                  where: { id: { in: localTrackIds } },
+                  where: {
+                      ...TRACK_VISIBLE_WHERE,
+                      id: { in: localTrackIds },
+                  },
                   include: {
                       album: {
                           include: {
@@ -738,7 +745,9 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
     );
 
     // Get total count of tracks
-    const totalTracks = await prisma.track.count();
+    const totalTracks = await prisma.track.count({
+        where: TRACK_VISIBLE_WHERE,
+    });
 
     if (totalTracks === 0) {
         return res.json({ tracks: [], total: 0 });
@@ -750,6 +759,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
     if (totalTracks <= limit) {
         // Fetch all tracks and shuffle
         tracksData = await prisma.track.findMany({
+            where: TRACK_VISIBLE_WHERE,
             include: {
                 album: {
                     include: {
@@ -774,7 +784,10 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         // start of the range (random < pivot) for the remainder.
         const pivot = Math.random();
         const randomIds = await prisma.track.findMany({
-            where: { random: { gte: pivot } },
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                random: { gte: pivot },
+            },
             orderBy: { random: "asc" },
             take: limit,
             select: { id: true },
@@ -783,7 +796,10 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         if (randomIds.length < limit) {
             const remaining = limit - randomIds.length;
             const topUpIds = await prisma.track.findMany({
-                where: { random: { lt: pivot } },
+                where: {
+                    ...TRACK_VISIBLE_WHERE,
+                    random: { lt: pivot },
+                },
                 orderBy: { random: "asc" },
                 take: remaining,
                 select: { id: true },
@@ -794,6 +810,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         // Then fetch full track data for selected IDs
         tracksData = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { in: randomIds.map((r) => r.id) },
             },
             include: {
@@ -894,7 +911,7 @@ export async function handleStreamTrack(
         }
 
         const track = await prisma.track.findUnique({
-            where: { id: req.params.id },
+            where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
         });
 
         if (!track) {
@@ -1106,7 +1123,7 @@ export async function handleGetTrackPreference(
 
     const trackId = req.params.id;
     const track = await prisma.track.findUnique({
-        where: { id: trackId },
+        where: { id: trackId, ...TRACK_VISIBLE_WHERE },
         select: { id: true },
     });
     if (!track) {
@@ -1213,7 +1230,7 @@ export async function handleSetTrackPreference(
     }
 
     const track = await prisma.track.findUnique({
-        where: { id: trackId },
+        where: { id: trackId, ...TRACK_VISIBLE_WHERE },
         select: { id: true },
     });
     if (!track) {
@@ -1333,7 +1350,7 @@ export async function handleGetTrack(
     res: Response,
 ) {
     const track = await prisma.track.findUnique({
-        where: { id: req.params.id },
+        where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
         include: {
             album: {
                 include: {
@@ -1447,7 +1464,7 @@ export async function handleGetTrackAudioInfo(
         const trackId = req.params.id;
         const playback = parseBooleanQueryParam(req.query.playback, false);
         const track = await prisma.track.findUnique({
-            where: { id: trackId },
+            where: { id: trackId, ...TRACK_VISIBLE_WHERE },
             select: {
                 filePath: true,
                 fileModified: true,
@@ -1593,7 +1610,7 @@ export async function handleDeleteTrack(
     }
 
     const track = await prisma.track.findUnique({
-        where: { id: req.params.id },
+        where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
         include: {
             album: {
                 include: {

@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { runAnnQuery } from "../utils/annQuery";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { blockingBlPop, redisClient } from "../utils/redis";
 import { parseEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
@@ -179,7 +180,11 @@ router.get(
  */
 async function fetchTrackEmbedding(trackId: string): Promise<number[] | null> {
     const rows = await prisma.$queryRaw<{ embedding: string }[]>`
-        SELECT embedding::text FROM track_embeddings WHERE track_id = ${trackId} LIMIT 1
+        SELECT te.embedding::text
+        FROM track_embeddings te
+        JOIN "Track" t ON te.track_id = t.id
+        WHERE t."removedAt" IS NULL AND te.track_id = ${trackId}
+        LIMIT 1
     `;
     if (!rows.length) return null;
     return parseEmbedding(rows[0].embedding);
@@ -240,7 +245,8 @@ async function findNearestToEmbedding(
             JOIN "Track" t ON te.track_id = t.id
             JOIN "Album" a ON t."albumId" = a.id
             JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE te.track_id != ALL(${excludeIds}::text[])
+            WHERE t."removedAt" IS NULL
+              AND te.track_id != ALL(${excludeIds}::text[])
             ORDER BY te.embedding <=> ${embedding}::vector
             LIMIT ${limit}
         `);
@@ -256,6 +262,7 @@ async function findNearestToEmbedding(
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE t."removedAt" IS NULL
         ORDER BY te.embedding <=> ${embedding}::vector
         LIMIT ${limit}
     `);
@@ -455,7 +462,7 @@ async function resolveTrackDestination(
     }
 
     const destinationTrack = await prisma.track.findUnique({
-        where: { id: toTrackId },
+        where: { id: toTrackId, ...TRACK_VISIBLE_WHERE },
         include: { album: { include: { artist: true } } },
     });
     if (!destinationTrack) {
@@ -511,7 +518,7 @@ async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
         where: {
             mood,
             score: { gte: MOOD_BUCKET_MIN_SCORE },
-            track: { embedding: { isNot: null } },
+            track: { ...TRACK_VISIBLE_WHERE, embedding: { isNot: null } },
         },
         orderBy: { score: "desc" },
         take: MOOD_BUCKET_POOL_LIMIT,
@@ -748,7 +755,10 @@ router.get(
                 by: ["mood"],
                 where: {
                     score: { gte: MOOD_BUCKET_MIN_SCORE },
-                    track: { embedding: { isNot: null } },
+                    track: {
+                        ...TRACK_VISIBLE_WHERE,
+                        embedding: { isNot: null },
+                    },
                 },
                 _count: { _all: true },
             });
@@ -1044,7 +1054,7 @@ router.get<{ trackId: string }>(
 
             // Fetch source track audio features for vibe match comparison
             const sourceTrack = await prisma.track.findUnique({
-                where: { id: trackId },
+                where: { id: trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     energy: true,
                     valence: true,
@@ -1297,7 +1307,8 @@ router.post(
                 JOIN "Track" t ON te.track_id = t.id
                 JOIN "Album" a ON t."albumId" = a.id
                 JOIN "Artist" ar ON a."artistId" = ar.id
-                WHERE te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
+                WHERE t."removedAt" IS NULL
+                  AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
                 ORDER BY te.embedding <=> ${searchEmbedding}::vector
                 LIMIT ${limit * 3}
             `);
@@ -1430,10 +1441,15 @@ router.get(
     requireAuth,
     asyncHandler(async (req, res) => {
         try {
-            const totalTracks = await prisma.track.count();
+            const totalTracks = await prisma.track.count({
+                where: TRACK_VISIBLE_WHERE,
+            });
 
             const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count FROM track_embeddings
+            SELECT COUNT(*) as count
+            FROM track_embeddings te
+            JOIN "Track" t ON te.track_id = t.id
+            WHERE t."removedAt" IS NULL
         `;
 
             const embeddedCount = Number(embeddedTracks[0]?.count || 0);

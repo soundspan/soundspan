@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Soft-removed library tracks are now excluded from library, search, radio,
+  recommendation, streaming, Subsonic, sharing, import-matching, and offline
+  read surfaces. Playlists and play history retain removed entries as
+  unplayable records, while Subsonic playlists omit them.
+
 - Background audio-analysis and vibe-embedding producers now use bounded,
   deduplicated Redis admission and leave queued tracks pending until an
   analyzer claims them. Queue wait time no longer consumes the processing

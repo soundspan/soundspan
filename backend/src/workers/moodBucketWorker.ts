@@ -185,7 +185,8 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
             SELECT t.id, t.title
             FROM "Track" t
             LEFT JOIN "MoodBucket" mb ON mb."trackId" = t.id
-            WHERE t."analysisStatus" = 'completed'
+            WHERE t."removedAt" IS NULL
+              AND t."analysisStatus" = 'completed'
             GROUP BY t.id, t.title, t."analyzedAt"
             HAVING COUNT(mb.*) = 0
                 OR (

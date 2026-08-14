@@ -184,6 +184,7 @@ describe("ProgrammaticPlaylistService data-driven curated vibe mixes", () => {
             const mostRecentCall = calls[calls.length - 1];
             expect(mostRecentCall[0]).toEqual({
                 where: {
+                    removedAt: null,
                     analysisStatus: "completed",
                     ...definition.where,
                 },

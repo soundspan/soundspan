@@ -25,6 +25,7 @@ export interface UnifiedLocalTrackRecord {
     trackNumber?: number | null;
     filePath?: string | null;
     displayTitle?: string | null;
+    removedAt?: Date | null;
     album: {
         id?: string | null;
         title: string;

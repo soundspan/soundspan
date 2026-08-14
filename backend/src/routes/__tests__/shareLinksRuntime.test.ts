@@ -283,6 +283,8 @@ describe("shareLinks routes runtime", () => {
         mockPlaylistFindUnique.mockResolvedValue({
             id: "playlist-1",
             userId: "u1",
+            items: [],
+            pendingTracks: [],
         });
         mockAlbumFindUnique.mockResolvedValue({ id: "album-1" });
         mockTrackFindUnique.mockResolvedValue({
@@ -445,6 +447,41 @@ describe("shareLinks routes runtime", () => {
                 name: "Shared Playlist",
             }),
         });
+    });
+
+    it("flags removed tracks in a shared playlist as unplayable", async () => {
+        mockPlaylistFindUnique.mockResolvedValueOnce({
+            id: "playlist-1",
+            name: "Shared Playlist",
+            user: { username: "alice" },
+            items: [
+                {
+                    id: "item-removed",
+                    track: {
+                        id: "track-removed",
+                        removedAt: new Date("2026-08-01T00:00:00.000Z"),
+                    },
+                },
+            ],
+            pendingTracks: [],
+        });
+        const res = createRes();
+
+        await getSharedResource(
+            createReq({ params: { token: "a".repeat(64) } }),
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body as {
+            resource: { items: Array<{ playback: unknown }> };
+        };
+        expect(body.resource.items[0].playback).toEqual(
+            expect.objectContaining({
+                isPlayable: false,
+                reason: "track_removed",
+            }),
+        );
     });
 
     it("access endpoint returns 404 for expired token", async () => {
@@ -625,6 +662,48 @@ describe("shareLinks routes runtime", () => {
             expect(mockDestroy).toHaveBeenCalled();
         });
 
+        it("returns not found instead of streaming a removed shared track", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce({
+                id: "share-removed",
+                token: "removed-token",
+                resourceType: "track",
+                resourceId: "track-removed",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: null,
+                playCount: 0,
+                lastStreamedAt: null,
+            });
+            mockTrackFindUnique.mockImplementationOnce(
+                async ({ where }: { where: { removedAt?: null } }) =>
+                    where.removedAt === null
+                        ? null
+                        : {
+                              id: "track-removed",
+                              title: "Removed",
+                              filePath: "removed.flac",
+                              fileModified: new Date(),
+                          },
+            );
+            const res = createRes();
+
+            await getSharedStream(
+                createReq({
+                    params: {
+                        token: "removed-token",
+                        trackId: "track-removed",
+                    },
+                    query: {},
+                    headers: {},
+                }),
+                res,
+            );
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({ error: "Track not found" });
+            expect(mockStreamFileWithRangeSupport).not.toHaveBeenCalled();
+        });
+
         it("allows only one of two concurrent new sessions when one play remains", async () => {
             const shareLink = {
                 id: "share-1",
@@ -748,7 +827,11 @@ describe("shareLinks routes runtime", () => {
             await getSharedStream(req, res);
 
             expect(mockTrackFindFirst).toHaveBeenCalledWith({
-                where: { id: "track-1", albumId: "album-1" },
+                where: {
+                    id: "track-1",
+                    albumId: "album-1",
+                    removedAt: null,
+                },
                 select: expect.any(Object),
             });
             expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();
@@ -775,7 +858,11 @@ describe("shareLinks routes runtime", () => {
             await getSharedStream(req, res);
 
             expect(mockPlaylistItemFindFirst).toHaveBeenCalledWith({
-                where: { playlistId: "playlist-1", trackId: "track-1" },
+                where: {
+                    playlistId: "playlist-1",
+                    trackId: "track-1",
+                    track: { removedAt: null },
+                },
             });
             expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();
         });
@@ -1099,6 +1186,45 @@ describe("shareLinks routes runtime", () => {
             expect(mockArchivePipe).toHaveBeenCalledWith(res);
             expect(mockArchiveAppend).toHaveBeenCalledTimes(2);
             expect(mockArchiveFinalize).toHaveBeenCalledTimes(1);
+        });
+
+        it("excludes removed tracks from a shared album zip", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce({
+                id: "share-zip",
+                token: "zip-token",
+                resourceType: "album",
+                resourceId: "album-1",
+                revoked: false,
+                expiresAt: null,
+                maxPlays: null,
+                playCount: 0,
+                lastStreamedAt: null,
+            });
+            mockAlbumFindUnique.mockImplementationOnce(async ({ select }) =>
+                select.tracks.where?.removedAt === null
+                    ? { artist: { name: "Artist One" }, tracks: [] }
+                    : {
+                          artist: { name: "Artist One" },
+                          tracks: [
+                              {
+                                  id: "removed-track",
+                                  title: "Removed",
+                                  filePath: "artist/album/removed.flac",
+                                  fileModified: new Date(),
+                              },
+                          ],
+                      },
+            );
+            const req = {
+                params: { token: "zip-token" },
+            } as unknown as Request;
+            const res = createRes();
+
+            await getSharedZip(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({ error: "No streamable tracks found" });
+            expect(mockArchiveAppend).not.toHaveBeenCalled();
         });
 
         it("aborts once and destroys the active file stream when the client disconnects", async () => {

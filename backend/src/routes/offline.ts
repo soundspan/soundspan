@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = Router();
 
@@ -82,6 +83,7 @@ router.post("/albums/:id/download", async (req, res) => {
             where: { id: albumId },
             include: {
                 tracks: {
+                    where: TRACK_VISIBLE_WHERE,
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                 },
                 artist: {
@@ -290,10 +292,25 @@ router.get("/albums", async (req, res) => {
             },
         });
 
+        const removedCachedTracks = cachedTracks.filter(
+            (cached) => cached.track.removedAt !== null,
+        );
+        if (removedCachedTracks.length > 0) {
+            await prisma.cachedTrack.deleteMany({
+                where: {
+                    id: { in: removedCachedTracks.map((cached) => cached.id) },
+                    userId,
+                },
+            });
+        }
+        const visibleCachedTracks = cachedTracks.filter(
+            (cached) => cached.track.removedAt === null,
+        );
+
         // Group by album
         const albumsMap = new Map();
 
-        for (const cached of cachedTracks) {
+        for (const cached of visibleCachedTracks) {
             const albumId = cached.track.album.id;
 
             if (!albumsMap.has(albumId)) {

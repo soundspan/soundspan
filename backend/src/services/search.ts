@@ -1,6 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 /**
  * Executes normalizeCacheQuery.
@@ -129,7 +130,16 @@ export class SearchService {
                     contains: query,
                     mode: "insensitive",
                 },
-                OR: [{ albums: { some: {} } }, { remoteTrackCount: { gt: 0 } }],
+                OR: [
+                    {
+                        albums: {
+                            some: {
+                                tracks: { some: TRACK_VISIBLE_WHERE },
+                            },
+                        },
+                    },
+                    { remoteTrackCount: { gt: 0 } },
+                ],
             },
             select: {
                 id: true,
@@ -173,7 +183,11 @@ export class SearchService {
         FROM "Artist" a
         WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
           AND (
-            EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+            EXISTS (
+              SELECT 1 FROM "Album" alb
+              JOIN "Track" t ON t."albumId" = alb.id
+              WHERE alb."artistId" = a.id AND t."removedAt" IS NULL
+            )
             OR a."remoteTrackCount" > 0
           )
         ORDER BY rank DESC, a.name ASC
@@ -202,6 +216,7 @@ export class SearchService {
     }: SearchOptions): Promise<AlbumSearchResult[]> {
         const results = await prisma.album.findMany({
             where: {
+                tracks: { some: TRACK_VISIBLE_WHERE },
                 OR: [
                     {
                         title: {
@@ -279,6 +294,10 @@ export class SearchService {
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND EXISTS (
+                SELECT 1 FROM "Track" t
+                WHERE t."albumId" = a.id AND t."removedAt" IS NULL
+              )
 
             UNION ALL
 
@@ -293,6 +312,10 @@ export class SearchService {
             FROM "Album" a
             INNER JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND EXISTS (
+                SELECT 1 FROM "Track" t
+                WHERE t."albumId" = a.id AND t."removedAt" IS NULL
+              )
           ) combined
           ORDER BY id, rank DESC
         ) deduped
@@ -322,6 +345,7 @@ export class SearchService {
     }: SearchOptions): Promise<TrackSearchResult[]> {
         const results = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 title: {
                     contains: query,
                     mode: "insensitive",
@@ -391,7 +415,8 @@ export class SearchService {
         FROM "Track" t
         LEFT JOIN "Album" a ON t."albumId" = a.id
         LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
+        WHERE t."removedAt" IS NULL
+          AND t."searchVector" @@ to_tsquery('english', ${tsquery})
         ORDER BY rank DESC, t.title ASC
         LIMIT ${limit}
         OFFSET ${offset}
@@ -823,6 +848,7 @@ export class SearchService {
         const trackIds = tracks.map((t) => t.id);
         const tracksWithGenre = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 id: { in: trackIds },
                 trackGenres: {
                     some: {

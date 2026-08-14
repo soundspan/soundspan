@@ -389,6 +389,7 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
         expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
+                    removedAt: null,
                     id: { notIn: ["overplayed-1", "overplayed-2"] },
                 },
                 orderBy: { id: "asc" },
@@ -420,7 +421,7 @@ describe("ProgrammaticPlaylistService priority diversity generators", () => {
 
         expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: undefined,
+                where: { removedAt: null },
                 orderBy: { id: "asc" },
                 take: 1000,
             }),

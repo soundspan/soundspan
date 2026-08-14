@@ -692,6 +692,12 @@ describe("library vibe radio reliability compatibility", () => {
                 }),
             ],
         });
+        expect(mockQueryRaw.mock.calls[0][1].strings.join(" ")).toContain(
+            't."removedAt" IS NULL',
+        );
+        expect(mockTrackFindMany.mock.calls[1][0].where).toEqual(
+            expect.objectContaining({ removedAt: null }),
+        );
         // Diversify artist lookup + full track fetch; the pool is sampled in SQL.
         expect(mockTrackFindMany).toHaveBeenCalledTimes(2);
     });

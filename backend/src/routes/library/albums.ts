@@ -40,6 +40,7 @@ import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
+    TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -148,7 +149,7 @@ export async function handleGetAlbums(req: Request, res: Response) {
         };
 
         let where: any = {
-            tracks: { some: {} }, // Only albums with tracks
+            tracks: { some: TRACK_VISIBLE_WHERE }, // Only albums with visible tracks
         };
 
         // Apply location filter
@@ -161,8 +162,14 @@ export async function handleGetAlbums(req: Request, res: Response) {
 
             // Albums with LIBRARY location OR rgMbid in OwnedAlbum
             where.OR = [
-                { location: "LIBRARY", tracks: { some: {} } },
-                { rgMbid: { in: ownedMbids }, tracks: { some: {} } },
+                {
+                    location: "LIBRARY",
+                    tracks: { some: TRACK_VISIBLE_WHERE },
+                },
+                {
+                    rgMbid: { in: ownedMbids },
+                    tracks: { some: TRACK_VISIBLE_WHERE },
+                },
             ];
         } else if (filter === "discovery") {
             where.location = "DISCOVER";
@@ -270,6 +277,7 @@ export async function handleGetAlbum(
         ? await prisma.album.findFirst({
               where: {
                   OR: [{ id: idParam }, { rgMbid: idParam }],
+                  tracks: { some: TRACK_VISIBLE_WHERE },
               },
               include: {
                   artist: {
@@ -280,6 +288,7 @@ export async function handleGetAlbum(
                       },
                   },
                   tracks: {
+                      where: TRACK_VISIBLE_WHERE,
                       orderBy: [
                           { discNo: Prisma.SortOrder.asc },
                           { trackNo: Prisma.SortOrder.asc },
@@ -290,6 +299,7 @@ export async function handleGetAlbum(
         : await prisma.album.findFirst({
               where: {
                   OR: [{ id: idParam }, { rgMbid: idParam }],
+                  tracks: { some: TRACK_VISIBLE_WHERE },
               },
               include: {
                   artist: {
@@ -404,7 +414,7 @@ export async function handleSetAlbumPreference(
     }
 
     const albumTracks = await prisma.track.findMany({
-        where: { albumId: album.id },
+        where: { albumId: album.id, ...TRACK_VISIBLE_WHERE },
         select: { id: true },
     });
     const trackIds = Array.from(

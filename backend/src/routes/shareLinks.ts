@@ -14,6 +14,7 @@ import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = Router();
 const zipLogger = logger.child("ShareLinks.ZipArchive");
@@ -382,23 +383,31 @@ async function resolveTrackOwnership(
     if (shareLink.resourceType === "track") {
         if (shareLink.resourceId !== trackId) return null;
         return prisma.track.findUnique({
-            where: { id: trackId },
+            where: { id: trackId, ...TRACK_VISIBLE_WHERE },
             select: trackStreamSelect,
         });
     }
     if (shareLink.resourceType === "album") {
         return prisma.track.findFirst({
-            where: { id: trackId, albumId: shareLink.resourceId },
+            where: {
+                id: trackId,
+                albumId: shareLink.resourceId,
+                ...TRACK_VISIBLE_WHERE,
+            },
             select: trackStreamSelect,
         });
     }
     if (shareLink.resourceType === "playlist") {
         const item = await prisma.playlistItem.findFirst({
-            where: { playlistId: shareLink.resourceId, trackId },
+            where: {
+                playlistId: shareLink.resourceId,
+                trackId,
+                track: TRACK_VISIBLE_WHERE,
+            },
         });
         if (!item) return null;
         return prisma.track.findUnique({
-            where: { id: trackId },
+            where: { id: trackId, ...TRACK_VISIBLE_WHERE },
             select: trackStreamSelect,
         });
     }
@@ -407,7 +416,7 @@ async function resolveTrackOwnership(
 
 async function resolveSharedResource(resourceType: string, resourceId: string) {
     if (resourceType === "playlist") {
-        return prisma.playlist.findUnique({
+        const playlist = await prisma.playlist.findUnique({
             where: { id: resourceId },
             include: {
                 user: {
@@ -424,6 +433,23 @@ async function resolveSharedResource(resourceType: string, resourceId: string) {
                 },
             },
         });
+        if (!playlist) return null;
+        return {
+            ...playlist,
+            items: playlist.items.map((item) =>
+                item.track?.removedAt
+                    ? {
+                          ...item,
+                          playback: {
+                              isPlayable: false,
+                              reason: "track_removed" as const,
+                              message:
+                                  "Playback is unavailable because this track was removed from the library.",
+                          },
+                      }
+                    : item,
+            ),
+        };
     }
 
     if (resourceType === "album") {
@@ -438,6 +464,7 @@ async function resolveSharedResource(resourceType: string, resourceId: string) {
                     },
                 },
                 tracks: {
+                    where: TRACK_VISIBLE_WHERE,
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                     include: {
                         album: {
@@ -457,7 +484,7 @@ async function resolveSharedResource(resourceType: string, resourceId: string) {
     }
 
     return prisma.track.findUnique({
-        where: { id: resourceId },
+        where: { id: resourceId, ...TRACK_VISIBLE_WHERE },
         include: {
             album: {
                 include: {
@@ -544,7 +571,7 @@ router.post("/", requireAuth, async (req, res) => {
             }
         } else {
             const track = await prisma.track.findUnique({
-                where: { id: data.resourceId },
+                where: { id: data.resourceId, ...TRACK_VISIBLE_WHERE },
                 select: { id: true },
             });
             if (!track) {
@@ -883,7 +910,10 @@ router.get("/access/:token/zip", async (req, res) => {
 
         if (shareLink.resourceType === "track") {
             const track = await prisma.track.findUnique({
-                where: { id: shareLink.resourceId },
+                where: {
+                    id: shareLink.resourceId,
+                    ...TRACK_VISIBLE_WHERE,
+                },
                 select: {
                     id: true,
                     title: true,
@@ -909,6 +939,7 @@ router.get("/access/:token/zip", async (req, res) => {
                 select: {
                     artist: { select: { name: true } },
                     tracks: {
+                        where: TRACK_VISIBLE_WHERE,
                         orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                         select: {
                             id: true,
@@ -927,7 +958,10 @@ router.get("/access/:token/zip", async (req, res) => {
             }
         } else if (shareLink.resourceType === "playlist") {
             const items = await prisma.playlistItem.findMany({
-                where: { playlistId: shareLink.resourceId },
+                where: {
+                    playlistId: shareLink.resourceId,
+                    track: TRACK_VISIBLE_WHERE,
+                },
                 orderBy: { sort: "asc" },
                 select: {
                     track: {

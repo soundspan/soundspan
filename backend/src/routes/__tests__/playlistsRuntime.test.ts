@@ -45,6 +45,7 @@ const prisma = {
         create: jest.fn(),
         delete: jest.fn(),
         update: jest.fn(),
+        groupBy: jest.fn(),
     },
     userSettings: {
         findUnique: jest.fn(),
@@ -281,6 +282,7 @@ describe("playlists route runtime", () => {
         });
         prisma.playlistItem.delete.mockResolvedValue({});
         prisma.playlistItem.update.mockResolvedValue({});
+        prisma.playlistItem.groupBy.mockResolvedValue([]);
 
         prisma.userSettings.findUnique.mockResolvedValue({
             tidalOAuthJson: "tidal-token",
@@ -453,6 +455,9 @@ describe("playlists route runtime", () => {
                 items: [],
             },
         ]);
+        prisma.playlistItem.groupBy.mockResolvedValueOnce([
+            { playlistId: "pl-1", _count: { _all: 2 } },
+        ]);
 
         const req = { user: { id: "u1" }, query: {} } as any;
         const res = createRes();
@@ -465,6 +470,7 @@ describe("playlists route runtime", () => {
                 isOwner: true,
                 isHidden: false,
                 trackCount: 7,
+                unplayableCount: 2,
                 items: [
                     {
                         id: "i-1",
@@ -499,6 +505,12 @@ describe("playlists route runtime", () => {
                     user: { select: { username: true } },
                     _count: { select: { items: true } },
                     items: {
+                        where: {
+                            OR: [
+                                { trackId: null },
+                                { track: { removedAt: null } },
+                            ],
+                        },
                         select: {
                             id: true,
                             sort: true,
@@ -606,6 +618,9 @@ describe("playlists route runtime", () => {
             pendingTracks: [],
             user: { username: "owner2" },
         });
+        prisma.playlistItem.groupBy.mockResolvedValueOnce([
+            { playlistId: "pl-removed", _count: { _all: 1 } },
+        ]);
         const deniedReq = {
             user: { id: "u1" },
             params: { id: "pl-private" },
@@ -630,6 +645,87 @@ describe("playlists route runtime", () => {
         await getPlaylist(errReq, errRes);
         expect(errRes.statusCode).toBe(500);
         expect(errRes.body).toEqual({ error: "Failed to get playlist" });
+    });
+
+    it("keeps removed playlist tracks visible but flags them unplayable", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-removed",
+            userId: "u1",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            _count: { items: 1, pendingTracks: 0 },
+            items: [
+                {
+                    id: "pli-removed",
+                    playlistId: "pl-removed",
+                    trackId: "track-removed",
+                    trackTidalId: null,
+                    trackYtMusicId: null,
+                    sort: 0,
+                    track: {
+                        id: "track-removed",
+                        title: "Removed Song",
+                        duration: 180,
+                        trackNo: 1,
+                        filePath: "Artist/Removed.flac",
+                        displayTitle: null,
+                        removedAt: new Date("2026-08-01T00:00:00Z"),
+                        album: {
+                            id: "album-1",
+                            title: "Album",
+                            coverUrl: null,
+                            artist: { id: "artist-1", name: "Artist" },
+                        },
+                    },
+                    trackTidal: null,
+                    trackYtMusic: null,
+                },
+            ],
+            pendingTracks: [],
+        });
+
+        const res = createRes();
+        await getPlaylist(
+            { user: { id: "u1" }, params: { id: "pl-removed" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items).toHaveLength(1);
+        expect(res.body.unplayableCount).toBe(1);
+        expect(res.body.items[0].playback).toEqual(
+            expect.objectContaining({
+                isPlayable: false,
+                reason: "track_removed",
+            }),
+        );
+    });
+
+    it("blocks adding a removed local track to a playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            items: [],
+        });
+        prisma.track.findUnique.mockImplementationOnce(
+            async ({ where }: { where: { removedAt?: null } }) =>
+                where.removedAt === null ? null : { id: "track-removed" },
+        );
+        const res = createRes();
+
+        await addItem(
+            {
+                user: { id: "u1" },
+                params: { id: "pl-1" },
+                body: { trackId: "track-removed" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Track not found" });
+        expect(prisma.playlistItem.create).not.toHaveBeenCalled();
     });
 
     it("truncates oversized playlist detail with bounded bulk resolution", async () => {

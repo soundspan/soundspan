@@ -44,6 +44,15 @@ const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 
 const LIBRARY_LOCATION = "LIBRARY";
+const LIBRARY_TRACK_WHERE = {
+    removedAt: null,
+    album: { location: LIBRARY_LOCATION },
+} satisfies Prisma.TrackWhereInput;
+
+const LIBRARY_ALBUM_WHERE = {
+    location: LIBRARY_LOCATION,
+    tracks: { some: { removedAt: null } },
+} satisfies Prisma.AlbumWhereInput;
 const SUBSONIC_COVER_CACHE_CONTROL = "public, max-age=86400";
 const DEFAULT_SUBSONIC_AVATAR_PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6fQAAAAASUVORK5CYII=",
@@ -248,6 +257,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
         },
     },
     tracks: {
+        where: { removedAt: null },
         select: {
             duration: true,
         },
@@ -320,6 +330,7 @@ async function buildAlbumPlayStats(
         where: {
             userId,
             track: {
+                removedAt: null,
                 album: {
                     location: LIBRARY_LOCATION,
                 },
@@ -345,6 +356,7 @@ async function buildAlbumPlayStats(
     }
     const tracks = await prisma.track.findMany({
         where: {
+                ...LIBRARY_TRACK_WHERE,
             id: {
                 in: trackIds,
             },
@@ -923,9 +935,7 @@ export async function handleGetIndexes(
         const artists = await prisma.artist.findMany({
             where: {
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -935,7 +945,7 @@ export async function handleGetIndexes(
                 lastSynced: true,
                 _count: {
                     select: {
-                        albums: true,
+                        albums: { where: LIBRARY_ALBUM_WHERE },
                     },
                 },
             },
@@ -1020,9 +1030,7 @@ export async function handleGetArtists(
         const artists = await prisma.artist.findMany({
             where: {
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -1031,7 +1039,7 @@ export async function handleGetArtists(
                 heroUrl: true,
                 _count: {
                     select: {
-                        albums: true,
+                        albums: { where: LIBRARY_ALBUM_WHERE },
                     },
                 },
             },
@@ -1102,9 +1110,7 @@ export async function handleGetArtist(
             where: {
                 id: artistId,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -1112,9 +1118,7 @@ export async function handleGetArtist(
                 name: true,
                 heroUrl: true,
                 albums: {
-                    where: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    where: LIBRARY_ALBUM_WHERE,
                     select: {
                         id: true,
                         title: true,
@@ -1123,13 +1127,14 @@ export async function handleGetArtist(
                         genres: true,
                         userGenres: true,
                         tracks: {
+                            where: { removedAt: null },
                             select: {
                                 duration: true,
                             },
                         },
                         _count: {
                             select: {
-                                tracks: true,
+                                tracks: { where: { removedAt: null } },
                             },
                         },
                     },
@@ -1226,7 +1231,7 @@ export async function handleGetAlbum(
         const album = await prisma.album.findFirst({
             where: {
                 id: albumId,
-                location: LIBRARY_LOCATION,
+                ...LIBRARY_ALBUM_WHERE,
             },
             select: {
                 id: true,
@@ -1242,6 +1247,7 @@ export async function handleGetAlbum(
                     },
                 },
                 tracks: {
+                    where: { removedAt: null },
                     select: {
                         id: true,
                         title: true,
@@ -1347,6 +1353,7 @@ export async function handleGetSong(
     try {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -1466,9 +1473,7 @@ export async function handleSearch3(
             prisma.artist.findMany({
                 where: {
                     albums: {
-                        some: {
-                            location: LIBRARY_LOCATION,
-                        },
+                        some: LIBRARY_ALBUM_WHERE,
                     },
                     ...(query
                         ? {
@@ -1485,7 +1490,7 @@ export async function handleSearch3(
                     heroUrl: true,
                     _count: {
                         select: {
-                            albums: true,
+                            albums: { where: LIBRARY_ALBUM_WHERE },
                         },
                     },
                 },
@@ -1497,7 +1502,7 @@ export async function handleSearch3(
             }),
             prisma.album.findMany({
                 where: {
-                    location: LIBRARY_LOCATION,
+                    ...LIBRARY_ALBUM_WHERE,
                     ...(query
                         ? {
                               OR: [
@@ -1533,13 +1538,14 @@ export async function handleSearch3(
                         },
                     },
                     tracks: {
+                        where: { removedAt: null },
                         select: {
                             duration: true,
                         },
                     },
                     _count: {
                         select: {
-                            tracks: true,
+                            tracks: { where: { removedAt: null } },
                         },
                     },
                 },
@@ -1551,6 +1557,7 @@ export async function handleSearch3(
             }),
             prisma.track.findMany({
                 where: {
+                ...LIBRARY_TRACK_WHERE,
                     album: {
                         location: LIBRARY_LOCATION,
                     },
@@ -1693,9 +1700,7 @@ export async function handleGetArtistInfo2(
             where: {
                 id: artistId,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -1713,9 +1718,7 @@ export async function handleGetArtistInfo2(
                                 name: true,
                                 heroUrl: true,
                                 albums: {
-                                    where: {
-                                        location: LIBRARY_LOCATION,
-                                    },
+                                    where: LIBRARY_ALBUM_WHERE,
                                     select: {
                                         id: true,
                                     },
@@ -1810,7 +1813,7 @@ export async function handleGetAlbumInfo2(
         const album = await prisma.album.findFirst({
             where: {
                 id: albumId,
-                location: LIBRARY_LOCATION,
+                ...LIBRARY_ALBUM_WHERE,
             },
             select: {
                 rgMbid: true,
@@ -1862,9 +1865,7 @@ async function findSimilarArtistIds(artistId: string): Promise<string[]> {
         where: {
             id: artistId,
             albums: {
-                some: {
-                    location: LIBRARY_LOCATION,
-                },
+                some: LIBRARY_ALBUM_WHERE,
             },
         },
         select: {
@@ -1874,9 +1875,7 @@ async function findSimilarArtistIds(artistId: string): Promise<string[]> {
                         select: {
                             id: true,
                             albums: {
-                                where: {
-                                    location: LIBRARY_LOCATION,
-                                },
+                                where: LIBRARY_ALBUM_WHERE,
                                 select: {
                                     id: true,
                                 },
@@ -2081,9 +2080,7 @@ export async function handleGetSimilarSongs(
             where: {
                 id: artistId,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -2119,6 +2116,7 @@ export async function handleGetSimilarSongs(
 
         const tracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 album: {
                     location: LIBRARY_LOCATION,
                     artistId: {
@@ -2240,6 +2238,7 @@ export async function handleGetSimilarSongs2(
     try {
         const sourceTrack = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -2290,6 +2289,7 @@ export async function handleGetSimilarSongs2(
             similarArtistIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
+                ...LIBRARY_TRACK_WHERE,
                           id: {
                               not: trackId,
                           },
@@ -2316,6 +2316,7 @@ export async function handleGetSimilarSongs2(
             genreFilter !== null
                 ? await prisma.track.findMany({
                       where: {
+                ...LIBRARY_TRACK_WHERE,
                           id: {
                               not: trackId,
                           },
@@ -2332,6 +2333,7 @@ export async function handleGetSimilarSongs2(
 
         const sameArtistTracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: {
                     not: trackId,
                 },
@@ -2393,9 +2395,7 @@ async function resolveArtistIdForTopSongs(
             where: {
                 id: parsed.id,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -2417,9 +2417,7 @@ async function resolveArtistIdForTopSongs(
                 mode: "insensitive",
             },
             albums: {
-                some: {
-                    location: LIBRARY_LOCATION,
-                },
+                some: LIBRARY_ALBUM_WHERE,
             },
         },
         select: {
@@ -2467,6 +2465,7 @@ export async function handleGetTopSongs(
             by: ["trackId"],
             where: {
                 track: {
+                    removedAt: null,
                     album: {
                         artistId: artist.id,
                         location: LIBRARY_LOCATION,
@@ -2484,6 +2483,7 @@ export async function handleGetTopSongs(
 
         const tracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 album: {
                     artistId: artist.id,
                     location: LIBRARY_LOCATION,
@@ -2606,9 +2606,7 @@ async function handleSearchLike(
             prisma.artist.findMany({
                 where: {
                     albums: {
-                        some: {
-                            location: LIBRARY_LOCATION,
-                        },
+                        some: LIBRARY_ALBUM_WHERE,
                     },
                     ...(query
                         ? {
@@ -2625,7 +2623,7 @@ async function handleSearchLike(
                     heroUrl: true,
                     _count: {
                         select: {
-                            albums: true,
+                            albums: { where: LIBRARY_ALBUM_WHERE },
                         },
                     },
                 },
@@ -2637,7 +2635,7 @@ async function handleSearchLike(
             }),
             prisma.album.findMany({
                 where: {
-                    location: LIBRARY_LOCATION,
+                    ...LIBRARY_ALBUM_WHERE,
                     ...(query
                         ? {
                               OR: [
@@ -2673,13 +2671,14 @@ async function handleSearchLike(
                         },
                     },
                     tracks: {
+                        where: { removedAt: null },
                         select: {
                             duration: true,
                         },
                     },
                     _count: {
                         select: {
-                            tracks: true,
+                            tracks: { where: { removedAt: null } },
                         },
                     },
                 },
@@ -2691,6 +2690,7 @@ async function handleSearchLike(
             }),
             prisma.track.findMany({
                 where: {
+                ...LIBRARY_TRACK_WHERE,
                     album: {
                         location: LIBRARY_LOCATION,
                     },
@@ -2861,9 +2861,7 @@ async function handleGetAlbumListLike(
             albums = [];
         } else if (type === "random") {
             const candidates = await prisma.album.findMany({
-                where: {
-                    location: LIBRARY_LOCATION,
-                },
+                where: LIBRARY_ALBUM_WHERE,
                 select: albumListSelect,
                 orderBy: {
                     id: "asc",
@@ -2914,7 +2912,7 @@ async function handleGetAlbumListLike(
                         id: {
                             in: pagedAlbumIds,
                         },
-                        location: LIBRARY_LOCATION,
+                        ...LIBRARY_ALBUM_WHERE,
                     },
                     select: albumListSelect,
                 });
@@ -2930,7 +2928,7 @@ async function handleGetAlbumListLike(
             }
         } else {
             const where: Prisma.AlbumWhereInput = {
-                location: LIBRARY_LOCATION,
+                ...LIBRARY_ALBUM_WHERE,
             };
             let orderBy: Prisma.AlbumOrderByWithRelationInput[] = [
                 { title: "asc" },
@@ -2990,6 +2988,7 @@ async function handleGetAlbumListLike(
 
                 where.tracks = {
                     some: {
+                        removedAt: null,
                         trackGenres: {
                             some: {
                                 genre: {
@@ -3056,9 +3055,7 @@ async function getRootMusicDirectoryChildren(): Promise<
     const artists = await prisma.artist.findMany({
         where: {
             albums: {
-                some: {
-                    location: LIBRARY_LOCATION,
-                },
+                some: LIBRARY_ALBUM_WHERE,
             },
         },
         select: {
@@ -3068,9 +3065,7 @@ async function getRootMusicDirectoryChildren(): Promise<
             _count: {
                 select: {
                     albums: {
-                        where: {
-                            location: LIBRARY_LOCATION,
-                        },
+                        where: LIBRARY_ALBUM_WHERE,
                     },
                 },
             },
@@ -3101,18 +3096,14 @@ async function getArtistMusicDirectory(
         where: {
             id: artistId,
             albums: {
-                some: {
-                    location: LIBRARY_LOCATION,
-                },
+                some: LIBRARY_ALBUM_WHERE,
             },
         },
         select: {
             id: true,
             name: true,
             albums: {
-                where: {
-                    location: LIBRARY_LOCATION,
-                },
+                where: LIBRARY_ALBUM_WHERE,
                 select: {
                     id: true,
                     title: true,
@@ -3121,6 +3112,7 @@ async function getArtistMusicDirectory(
                     genres: true,
                     userGenres: true,
                     tracks: {
+                        where: { removedAt: null },
                         select: {
                             duration: true,
                         },
@@ -3167,7 +3159,7 @@ async function getAlbumMusicDirectory(
     const album = await prisma.album.findFirst({
         where: {
             id: albumId,
-            location: LIBRARY_LOCATION,
+            ...LIBRARY_ALBUM_WHERE,
         },
         select: {
             id: true,
@@ -3183,6 +3175,7 @@ async function getAlbumMusicDirectory(
                 },
             },
             tracks: {
+                where: { removedAt: null },
                 select: {
                     id: true,
                     title: true,
@@ -3333,6 +3326,7 @@ export async function handleGetGenres(
                 trackGenres: {
                     some: {
                         track: {
+                            removedAt: null,
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -3345,6 +3339,7 @@ export async function handleGetGenres(
                 trackGenres: {
                     where: {
                         track: {
+                            removedAt: null,
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -3443,6 +3438,7 @@ export async function handleGetSongsByGenre(
         // while composition varies across days.
         const matchingTracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 album: {
                     location: LIBRARY_LOCATION,
                 },
@@ -3472,7 +3468,8 @@ export async function handleGetSongsByGenre(
         const trackRows =
             pageIds.length > 0
                 ? await prisma.track.findMany({
-                      where: { id: { in: pageIds } },
+                      where: {
+                ...LIBRARY_TRACK_WHERE, id: { in: pageIds } },
                       select: {
                           id: true,
                           title: true,
@@ -3566,6 +3563,7 @@ export async function handleGetRandomSongs(
 
     try {
         const where: Prisma.TrackWhereInput = {
+            ...LIBRARY_TRACK_WHERE,
             album: {
                 location: LIBRARY_LOCATION,
             },
@@ -3787,6 +3785,7 @@ export async function handleGetPlayQueue(
             uniqueTrackIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
+                ...LIBRARY_TRACK_WHERE,
                           id: {
                               in: uniqueTrackIds,
                           },
@@ -3911,6 +3910,7 @@ export async function handleSavePlayQueue(
             uniqueTrackIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
+                ...LIBRARY_TRACK_WHERE,
                           id: {
                               in: uniqueTrackIds,
                           },
@@ -4044,6 +4044,7 @@ export async function handleGetBookmarks(
         const bookmarks = await prisma.bookmark.findMany({
             where: {
                 userId: req.user!.id,
+                track: LIBRARY_TRACK_WHERE,
             },
             select: {
                 positionSeconds: true,
@@ -4119,6 +4120,7 @@ export async function handleCreateBookmark(
     try {
         const track = await prisma.track.findUnique({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
             },
             select: {
@@ -4322,7 +4324,7 @@ async function resolveCoverArtUrl(
         const album = await prisma.album.findFirst({
             where: {
                 id: entityId,
-                location: LIBRARY_LOCATION,
+                ...LIBRARY_ALBUM_WHERE,
             },
             select: {
                 coverUrl: true,
@@ -4338,9 +4340,7 @@ async function resolveCoverArtUrl(
             where: {
                 id: entityId,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -4353,6 +4353,7 @@ async function resolveCoverArtUrl(
     if (type === "track") {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: entityId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -4381,6 +4382,7 @@ async function resolveCoverArtUrl(
                 items: {
                     where: {
                         track: {
+                            removedAt: null,
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -4415,7 +4417,7 @@ async function resolveCoverArtUrl(
         prisma.album.findFirst({
             where: {
                 id: entityId,
-                location: LIBRARY_LOCATION,
+                ...LIBRARY_ALBUM_WHERE,
             },
             select: {
                 coverUrl: true,
@@ -4427,9 +4429,7 @@ async function resolveCoverArtUrl(
             where: {
                 id: entityId,
                 albums: {
-                    some: {
-                        location: LIBRARY_LOCATION,
-                    },
+                    some: LIBRARY_ALBUM_WHERE,
                 },
             },
             select: {
@@ -4438,6 +4438,7 @@ async function resolveCoverArtUrl(
         }),
         prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: entityId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -4462,6 +4463,7 @@ async function resolveCoverArtUrl(
                 items: {
                     where: {
                         track: {
+                            removedAt: null,
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -4533,6 +4535,7 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
     try {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -4658,6 +4661,7 @@ export async function handleDownload(
     try {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -4734,6 +4738,7 @@ export async function handleGetLyrics(
     try {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 title: rawTitle
                     ? {
                           contains: rawTitle,
@@ -4845,6 +4850,7 @@ export async function handleGetLyricsBySongId(
     try {
         const track = await prisma.track.findFirst({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
                     location: LIBRARY_LOCATION,
@@ -5080,6 +5086,7 @@ async function ensureLibraryTracksExist(trackIds: string[]): Promise<boolean> {
 
     const tracks = await prisma.track.findMany({
         where: {
+                ...LIBRARY_TRACK_WHERE,
             id: {
                 in: trackIds,
             },
@@ -5105,7 +5112,7 @@ async function ensureLibraryAlbumsExist(albumIds: string[]): Promise<boolean> {
             id: {
                 in: albumIds,
             },
-            location: LIBRARY_LOCATION,
+            ...LIBRARY_ALBUM_WHERE,
         },
         select: {
             id: true,
@@ -5128,9 +5135,7 @@ async function ensureLibraryArtistsExist(
                 in: artistIds,
             },
             albums: {
-                some: {
-                    location: LIBRARY_LOCATION,
-                },
+                some: LIBRARY_ALBUM_WHERE,
             },
         },
         select: {
@@ -5152,6 +5157,7 @@ async function resolveStarMutationTrackIds(input: {
     if (albumIds.length > 0) {
         const albumTracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 albumId: {
                     in: albumIds,
                 },
@@ -5172,6 +5178,7 @@ async function resolveStarMutationTrackIds(input: {
     if (artistIds.length > 0) {
         const artistTracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 album: {
                     location: LIBRARY_LOCATION,
                     artistId: {
@@ -5205,6 +5212,7 @@ async function getPlaylistDurations(
         where: {
             playlistId: { in: nonEmptyIds },
             trackId: { not: null },
+            track: { removedAt: null },
         },
         select: {
             playlistId: true,
@@ -5231,6 +5239,7 @@ async function getPlaylistCoverFlags(
         where: {
             playlistId: { in: playlistIds },
             track: {
+                removedAt: null,
                 album: {
                     AND: [
                         { coverUrl: { not: null } },
@@ -5265,7 +5274,14 @@ export async function handleGetPlaylists(
             include: {
                 _count: {
                     select: {
-                        items: true,
+                        items: {
+                            where: {
+                                OR: [
+                                    { trackId: null },
+                                    { track: { removedAt: null } },
+                                ],
+                            },
+                        },
                     },
                 },
             },
@@ -5344,6 +5360,7 @@ export async function handleGetPlaylist(
             },
             include: {
                 items: {
+                    where: { track: { removedAt: null } },
                     orderBy: { sort: "asc" },
                     select: {
                         track: {
@@ -6012,6 +6029,7 @@ export async function handleGetNowPlaying(
 
         const tracks = await prisma.track.findMany({
             where: {
+                ...LIBRARY_TRACK_WHERE,
                 id: {
                     in: trackIds,
                 },
@@ -6349,6 +6367,7 @@ async function buildStarredPayload(userId: string): Promise<{
         where: {
             userId,
             track: {
+                removedAt: null,
                 album: {
                     location: LIBRARY_LOCATION,
                 },
@@ -6421,7 +6440,7 @@ async function buildStarredPayload(userId: string): Promise<{
                       id: {
                           in: albumIds,
                       },
-                      location: LIBRARY_LOCATION,
+                      ...LIBRARY_ALBUM_WHERE,
                   },
                   select: {
                       id: true,
@@ -6446,9 +6465,7 @@ async function buildStarredPayload(userId: string): Promise<{
                           in: Array.from(artistStarredAt.keys()),
                       },
                       albums: {
-                          some: {
-                              location: LIBRARY_LOCATION,
-                          },
+                          some: LIBRARY_ALBUM_WHERE,
                       },
                   },
                   select: {
@@ -6458,9 +6475,7 @@ async function buildStarredPayload(userId: string): Promise<{
                       _count: {
                           select: {
                               albums: {
-                                  where: {
-                                      location: LIBRARY_LOCATION,
-                                  },
+                                  where: LIBRARY_ALBUM_WHERE,
                               },
                           },
                       },
@@ -6470,7 +6485,8 @@ async function buildStarredPayload(userId: string): Promise<{
         albumIds.length > 0
             ? prisma.track.groupBy({
                   by: ["albumId"],
-                  where: { albumId: { in: albumIds } },
+                  where: {
+                ...LIBRARY_TRACK_WHERE, albumId: { in: albumIds } },
                   _count: { _all: true },
                   _sum: { duration: true },
               })
