@@ -51,6 +51,10 @@ import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
 import { genericImportJobRunner } from "../services/genericImportJobRunner";
 import type { ReconciliationCursor } from "../services/trackReconciliation";
+import {
+    AUDIO_HASH_BACKFILL_JOB_NAME,
+    processAudioHashBackfill,
+} from "./processors/audioHashBackfillProcessor";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -279,6 +283,7 @@ const SCHEDULER_JOB_TYPES = {
     downloadQueueReconcile: "download-queue-reconcile-startup",
     artistCountsBackfill: "artist-counts-backfill-startup",
     imageBackfill: "image-backfill-startup",
+    audioHashBackfill: AUDIO_HASH_BACKFILL_JOB_NAME,
     trackMappingReconcile: "track-mapping-reconcile",
     remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
 } as const;
@@ -297,6 +302,7 @@ const SCHEDULER_JOB_IDS = {
     downloadQueueReconcileStartup: "scheduler:download-queue-reconcile:startup",
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
+    audioHashBackfillStartup: "scheduler:audio-hash-backfill:startup",
     trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
     trackMappingReconcileRepeat: "scheduler:track-mapping-reconcile:repeat",
     remoteTrackMetadataRefreshStartup:
@@ -908,6 +914,18 @@ async function registerSchedulerJobs(): Promise<void> {
             },
         },
         {
+            type: SCHEDULER_JOB_TYPES.audioHashBackfill,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.audioHashBackfillStartup,
+                delay: 50_000,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
             type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
             data: { mode: "startup" },
             opts: {
@@ -1011,6 +1029,9 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
         case SCHEDULER_JOB_TYPES.imageBackfill:
         case "image-backfill":
             await processImageBackfillJob();
+            break;
+        case SCHEDULER_JOB_TYPES.audioHashBackfill:
+            await processAudioHashBackfill(job);
             break;
         case SCHEDULER_JOB_TYPES.trackMappingReconcile:
         case "track-mapping-reconcile":

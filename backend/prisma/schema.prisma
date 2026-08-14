@@ -352,6 +352,15 @@ model Track {
   hasUserOverrides   Boolean                  @default(false)
   analysisStartedAt  DateTime?
 
+  // Durable track identity (#457): content/tag match keys used to preserve
+  // Track.id across file moves, renames, retags, and in-place quality
+  // upgrades. Deliberately NOT unique — the same audio can legitimately
+  // exist at two paths, and the same recording on album + compilation.
+  audioHash     String?   // "sha256:<hex>" of the primary encoded audio stream (tag-invariant)
+  audioHashedAt DateTime? // when audioHash was computed (backfill/staleness tracking)
+  recordingMbid String?   // MusicBrainz recording id, from file tags
+  isrc          String?   // first ISRC from file tags
+
   // F15: DB-generated uniform sample key for /tracks/shuffle's indexed
   // pivot-sampling query (replaces a full-table ORDER BY RANDOM() scan).
   // The volatile DB-side default means every writer (Prisma upserts in the
@@ -403,6 +412,9 @@ model Track {
   @@index([instrumentalness])
   @@index([hasUserOverrides])
   @@index([random])
+  @@index([audioHash])
+  @@index([recordingMbid])
+  @@index([isrc])
 }
 
 model Bookmark {

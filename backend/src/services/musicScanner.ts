@@ -16,6 +16,7 @@ import {
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { processBatched } from "../utils/async";
+import { computeAudioStreamHash } from "./audioHash";
 
 type LibraryHealthRecordDelegate = {
     upsert(args: Prisma.LibraryHealthRecordUpsertArgs): Promise<unknown>;
@@ -173,6 +174,7 @@ export class MusicScannerService {
                 id: true,
                 filePath: true,
                 fileModified: true,
+                audioHash: true,
             },
         });
 
@@ -230,11 +232,21 @@ export class MusicScannerService {
                         result.tracksAdded++;
                     }
 
+                    // Hash only new or content-changed files (durable track
+                    // identity, #457). Unchanged files reprocessed for the
+                    // disc backfill keep their stored hash untouched.
+                    const needsHash =
+                        !existingTrack ||
+                        !existingTrack.audioHash ||
+                        !existingTrack.fileModified ||
+                        existingTrack.fileModified < fileModified;
+
                     // Extract metadata and update database
                     await this.processAudioFile(
                         audioFile,
                         relativePath,
                         musicPath,
+                        needsHash,
                     );
                 } catch (err: any) {
                     const relativePath = path.relative(musicPath, audioFile);
@@ -613,6 +625,7 @@ export class MusicScannerService {
         absolutePath: string,
         relativePath: string,
         musicPath: string,
+        computeHash = true,
     ): Promise<void> {
         // Extract metadata in two stages. The cheap header-only parse yields
         // a duration for most formats (FLAC STREAMINFO, MP3 Xing, MP4 atoms).
@@ -637,6 +650,11 @@ export class MusicScannerService {
         const discNo = metadata.common.disk?.no || 1;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
+        const recordingMbid =
+            metadata.common.musicbrainz_recordingid?.trim() || null;
+        const rawIsrc = metadata.common.isrc as string[] | string | undefined;
+        const firstIsrc = typeof rawIsrc === "string" ? rawIsrc : rawIsrc?.[0];
+        const isrc = firstIsrc?.trim() || null;
 
         // Artist and album info
         // IMPORTANT: Prefer albumartist over artist to keep albums grouped under the primary artist
@@ -1061,6 +1079,16 @@ export class MusicScannerService {
             });
         }
 
+        const hashFields: {
+            audioHash?: string | null;
+            audioHashedAt?: Date | null;
+        } = {};
+        if (computeHash) {
+            const audioHash = await computeAudioStreamHash(absolutePath);
+            hashFields.audioHash = audioHash;
+            hashFields.audioHashedAt = audioHash ? new Date() : null;
+        }
+
         // Upsert track
         const track = await prisma.track.upsert({
             where: { filePath: relativePath },
@@ -1074,6 +1102,9 @@ export class MusicScannerService {
                 filePath: relativePath,
                 fileModified: stats.mtime,
                 fileSize: stats.size,
+                recordingMbid,
+                isrc,
+                ...hashFields,
             },
             update: {
                 albumId: album.id,
@@ -1084,6 +1115,9 @@ export class MusicScannerService {
                 mime,
                 fileModified: stats.mtime,
                 fileSize: stats.size,
+                recordingMbid,
+                isrc,
+                ...hashFields,
             },
         });
 

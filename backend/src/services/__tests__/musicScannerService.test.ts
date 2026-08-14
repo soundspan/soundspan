@@ -54,6 +54,7 @@ const mockLogger = {
 };
 
 const mockBackfillAllArtistCounts = jest.fn();
+const mockComputeAudioStreamHash = jest.fn();
 const mockGetAlbumCover = jest.fn();
 const mockNormalizeArtistName = jest.fn((name: string) =>
     name.trim().toLowerCase(),
@@ -125,6 +126,10 @@ jest.mock("../../utils/artistNormalization", () => ({
 
 jest.mock("../artistCountsService", () => ({
     backfillAllArtistCounts: mockBackfillAllArtistCounts,
+}));
+
+jest.mock("../audioHash", () => ({
+    computeAudioStreamHash: mockComputeAudioStreamHash,
 }));
 
 const { MusicScannerService } =
@@ -214,6 +219,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         mockBackfillAllArtistCounts.mockResolvedValue(undefined);
         mockGetAlbumCover.mockResolvedValue(null);
+        mockComputeAudioStreamHash.mockResolvedValue("sha256:" + "ab".repeat(32));
     });
 
     afterEach(() => {
@@ -338,6 +344,164 @@ describe("MusicScannerService.scanLibrary", () => {
             }),
         );
         expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("populates identity keys (audioHash, recordingMbid, isrc) for new files", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Test Track.flac";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Test Track",
+                track: { no: 3 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Test Album",
+                year: 2024,
+                musicbrainz_recordingid: "b1a9c0e5-d987-4042-ae91-78d6a3267d69",
+                isrc: ["USRC17607839", "GBUM71029601"],
+            },
+            format: { duration: 218.7, codec: "audio/flac" },
+        } as any);
+        const expectedHash = "sha256:" + "cd".repeat(32);
+        mockComputeAudioStreamHash.mockResolvedValue(expectedHash);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
+        const identityFields = {
+            audioHash: expectedHash,
+            audioHashedAt: expect.any(Date),
+            recordingMbid: "b1a9c0e5-d987-4042-ae91-78d6a3267d69",
+            isrc: "USRC17607839",
+        };
+        expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining(identityFields),
+                update: expect.objectContaining(identityFields),
+            }),
+        );
+    });
+
+    it("stores null identity keys when tags carry none", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Test Track.flac";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    recordingMbid: null,
+                    isrc: null,
+                }),
+            }),
+        );
+    });
+
+    it("does not re-hash a backfill-reprocessed file that already has a hash", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.systemSettings.findFirst.mockResolvedValue({
+            discNoBackfillDone: false,
+        });
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-1",
+                filePath: "Artist/Track.mp3",
+                fileModified: new Date("2026-02-10T00:00:00.000Z"),
+                audioHash: "sha256:" + "ee".repeat(32),
+            },
+        ]);
+        mockStat.mockResolvedValue({
+            mtime: new Date("2026-02-01T00:00:00.000Z"),
+            size: 777,
+        });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockComputeAudioStreamHash).not.toHaveBeenCalled();
+        const [upsertArg] = mockPrisma.track.upsert.mock.calls[0];
+        expect(upsertArg.update).not.toHaveProperty("audioHash");
+        expect(upsertArg.update).not.toHaveProperty("audioHashedAt");
+    });
+
+    it("hashes a backfill-reprocessed file that lacks a hash", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.systemSettings.findFirst.mockResolvedValue({
+            discNoBackfillDone: false,
+        });
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-1",
+                filePath: "Artist/Track.mp3",
+                fileModified: new Date("2026-02-10T00:00:00.000Z"),
+                audioHash: null,
+            },
+        ]);
+        mockStat.mockResolvedValue({
+            mtime: new Date("2026-02-01T00:00:00.000Z"),
+            size: 777,
+        });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
+    });
+
+    it("clears a stale hash when a changed file fails to hash", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-1",
+                filePath: "Artist/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+                audioHash: "sha256:" + "ee".repeat(32),
+            },
+        ]);
+        mockStat.mockResolvedValue({
+            mtime: new Date("2026-02-01T00:00:00.000Z"),
+            size: 777,
+        });
+        mockComputeAudioStreamHash.mockResolvedValue(null);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
+        expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    audioHash: null,
+                    audioHashedAt: null,
+                }),
+            }),
+        );
     });
 
     it("re-parses with duration:true only when the cheap parse lacks a duration (opus/ogg)", async () => {

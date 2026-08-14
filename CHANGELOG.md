@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tracks now store tag-invariant audio hashes, MusicBrainz recording IDs, and
+  ISRCs for durable identity matching. New and changed files populate these
+  keys during scans, while a bounded resumable worker backfills existing
+  libraries automatically.
 - The enrichment failures modal now provides confirmed, tab-specific “Retry
   all” actions for Audio Analysis and Vibe Embeddings failures.
 
