@@ -326,6 +326,47 @@ describe("TrackReconciliationService", () => {
             );
         });
 
+        it("returns a continuation cursor for a bounded reconciliation window", async () => {
+            const startAfter = {
+                id: "m-before-window",
+                createdAt: new Date("2026-02-28T23:59:59.000Z"),
+            };
+            const lastRow = {
+                id: "m-window-1",
+                createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                trackTidal: null,
+                trackYtMusic: null,
+            };
+            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([lastRow]);
+
+            const window = await trackReconciliationService.reconcileWindow({
+                batchSize: 1,
+                maxRows: 1,
+                startAfter,
+            });
+
+            expect(window).toEqual({
+                result: { processed: 1, linked: 0, skipped: 1 },
+                nextCursor: {
+                    id: lastRow.id,
+                    createdAt: lastRow.createdAt,
+                },
+            });
+            expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        OR: [
+                            { createdAt: { gt: startAfter.createdAt } },
+                            {
+                                createdAt: startAfter.createdAt,
+                                id: { gt: startAfter.id },
+                            },
+                        ],
+                    }),
+                }),
+            );
+        });
+
         it("rejects a pre-aborted reconciliation before querying", async () => {
             const controller = new AbortController();
             controller.abort(new Error("worker stopping"));

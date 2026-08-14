@@ -61,16 +61,30 @@ export interface ReconciliationRunOptions {
     signal?: AbortSignal;
 }
 
+/** Stable keyset position used to continue a later reconciliation window. */
+export interface ReconciliationCursor {
+    createdAt: Date;
+    id: string;
+}
+
+/** Inputs for one bounded, resumable reconciliation window. */
+export interface ReconciliationWindowOptions extends ReconciliationRunOptions {
+    batchSize?: number;
+    maxRows?: number;
+    startAfter?: ReconciliationCursor;
+}
+
+/** Result and optional continuation position for a reconciliation window. */
+export interface ReconciliationWindowResult {
+    result: ReconciliationResult;
+    nextCursor: ReconciliationCursor | null;
+}
+
 /** Counts produced by one YT Music-to-TIDAL upgrade run. */
 export interface ProviderUpgradeResult {
     processed: number;
     upgraded: number;
     skipped: number;
-}
-
-interface ReconciliationCursor {
-    createdAt: Date;
-    id: string;
 }
 
 interface ReconciliationMapping {
@@ -314,18 +328,42 @@ class TrackReconciliationService {
         maxRows?: number,
         options: ReconciliationRunOptions = {},
     ): Promise<ReconciliationResult> {
-        const limits = resolveReconciliationLimits(batchSize, maxRows);
+        const window = await this.reconcileWindow({
+            batchSize,
+            maxRows,
+            signal: options.signal,
+        });
+        return window.result;
+    }
+
+    /**
+     * Reconciles one bounded keyset window and returns where the next run starts.
+     *
+     * @param options Batch, row-limit, cancellation, and continuation inputs.
+     * @throws The abort reason when cancelled or the configured deadline expires.
+     */
+    async reconcileWindow(
+        options: ReconciliationWindowOptions = {},
+    ): Promise<ReconciliationWindowResult> {
+        const limits = resolveReconciliationLimits(
+            options.batchSize ?? DEFAULT_BATCH_SIZE,
+            options.maxRows,
+        );
         const signal = createReconciliationSignal(options.signal);
         signal.throwIfAborted();
 
         const firstBatch = await this.getUnlinkedMappingsBatch(
             limits.batchSize,
             signal,
+            options.startAfter,
         );
 
         if (firstBatch.length === 0) {
             log.debug("No unlinked mappings to reconcile — early exit");
-            return { processed: 0, linked: 0, skipped: 0 };
+            return {
+                result: { processed: 0, linked: 0, skipped: 0 },
+                nextCursor: null,
+            };
         }
 
         log.info(
@@ -346,12 +384,13 @@ class TrackReconciliationService {
         signal.throwIfAborted();
         const matchIndex = buildTrackMatchIndex(localCandidates);
         signal.throwIfAborted();
-        const result = await this.processReconciliationBatches(
+        const window = await this.processReconciliationBatches(
             firstBatch,
             matchIndex,
             limits,
             signal,
         );
+        const { result } = window;
 
         log.info(
             `Reconciliation complete: ${result.linked} linked, ${result.skipped} skipped out of ${result.processed}`,
@@ -362,7 +401,7 @@ class TrackReconciliationService {
             );
         }
 
-        return result;
+        return window;
     }
 
     private async processReconciliationBatches(
@@ -370,7 +409,7 @@ class TrackReconciliationService {
         matchIndex: TrackMatchIndex,
         limits: ReconciliationLimits,
         signal: AbortSignal,
-    ): Promise<ReconciliationResult> {
+    ): Promise<ReconciliationWindowResult> {
         const result = { processed: 0, linked: 0, skipped: 0 };
         let currentBatch = firstBatch;
         let currentBatchSize = limits.batchSize;
@@ -401,14 +440,32 @@ class TrackReconciliationService {
             );
         }
 
-        return result;
+        return {
+            result,
+            nextCursor: this.getContinuationCursor(
+                currentBatch,
+                result.processed,
+                limits.maxRows,
+            ),
+        };
+    }
+
+    private getContinuationCursor(
+        lastBatch: ReconciliationRow[],
+        processed: number,
+        maxRows: number,
+    ): ReconciliationCursor | null {
+        if (processed < maxRows) return null;
+        const lastMapping = lastBatch[lastBatch.length - 1];
+        if (!lastMapping) return null;
+        return { createdAt: lastMapping.createdAt, id: lastMapping.id };
     }
 
     private async exhaustUnlinkedMappingsWithoutMatches(
         firstBatch: ReconciliationRow[],
         limits: ReconciliationLimits,
         signal: AbortSignal,
-    ): Promise<ReconciliationResult> {
+    ): Promise<ReconciliationWindowResult> {
         let processed = firstBatch.length;
         let skipped = firstBatch.length;
         let currentBatch = firstBatch;
@@ -435,7 +492,14 @@ class TrackReconciliationService {
             skipped += currentBatch.length;
         }
 
-        return { processed, linked: 0, skipped };
+        return {
+            result: { processed, linked: 0, skipped },
+            nextCursor: this.getContinuationCursor(
+                currentBatch,
+                processed,
+                limits.maxRows,
+            ),
+        };
     }
 
     /**

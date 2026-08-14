@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Backend track-mapping reconciliation now reuses a normalized local-library
   index, yields between mapping attempts, and enforces configurable per-run
-  row and time limits. Large unmatched backlogs no longer block worker
-  readiness probes or Bull lock renewal indefinitely.
+  row and time limits. The scheduler persists its continuation cursor in Redis
+  so bounded runs advance across larger backlogs. Large unmatched backlogs no
+  longer block worker readiness probes or Bull lock renewal indefinitely.
 
 ## [2.0.2] - 2026-08-13
 

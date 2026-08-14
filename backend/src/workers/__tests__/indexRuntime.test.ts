@@ -105,7 +105,9 @@ describe("workers runtime behavior", () => {
         };
 
         const schedulerLockRedis = {
+            get: jest.fn(async () => null as string | null),
             set: jest.fn(async () => "OK"),
+            del: jest.fn(async () => 1),
             eval: jest.fn(async () => 1),
             quit: jest.fn(async () => "OK"),
             disconnect: jest.fn(),
@@ -116,10 +118,12 @@ describe("workers runtime behavior", () => {
         };
         const trackReconciliationService = {
             reconcileOrphans: jest.fn(async () => ({ created: 0 })),
-            reconcile: jest.fn(async () => ({
-                processed: 0,
-                linked: 0,
-                skipped: 0,
+            reconcileWindow: jest.fn(async () => ({
+                result: { processed: 0, linked: 0, skipped: 0 },
+                nextCursor: null as {
+                    id: string;
+                    createdAt: Date;
+                } | null,
             })),
             reconcileYoutubeToTidal: jest.fn(async () => ({
                 processed: 0,
@@ -696,10 +700,13 @@ describe("workers runtime behavior", () => {
                 created: 1,
             },
         );
-        mocks.trackReconciliationService.reconcile.mockResolvedValueOnce({
-            processed: 2,
-            linked: 1,
-            skipped: 1,
+        const nextCursor = {
+            id: "mapping-cursor-2",
+            createdAt: new Date("2026-08-14T12:00:00.000Z"),
+        };
+        mocks.trackReconciliationService.reconcileWindow.mockResolvedValueOnce({
+            result: { processed: 2, linked: 1, skipped: 1 },
+            nextCursor,
         });
         mocks.trackReconciliationService.reconcileYoutubeToTidal.mockResolvedValueOnce(
             {
@@ -728,13 +735,86 @@ describe("workers runtime behavior", () => {
             mocks.trackReconciliationService.reconcileOrphans,
         ).toHaveBeenCalledTimes(1);
         expect(
-            mocks.trackReconciliationService.reconcile,
+            mocks.trackReconciliationService.reconcileWindow,
         ).toHaveBeenCalledTimes(1);
+        expect(mocks.schedulerLockRedis.set).toHaveBeenCalledWith(
+            "scheduler:cursor:track-mapping-reconcile",
+            JSON.stringify({
+                id: nextCursor.id,
+                createdAt: nextCursor.createdAt.toISOString(),
+            }),
+        );
         expect(
             mocks.trackReconciliationService.reconcileYoutubeToTidal,
         ).toHaveBeenCalledTimes(1);
         expect(mocks.logger.info).toHaveBeenCalledWith(
             expect.stringContaining("Upgraded 2 YT mappings to TIDAL"),
+        );
+    });
+
+    it("resumes track reconciliation after the shared cursor", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        const storedCursor = {
+            id: "mapping-cursor-1",
+            createdAt: "2026-08-14T11:00:00.000Z",
+        };
+        mocks.schedulerLockRedis.get.mockResolvedValueOnce(
+            JSON.stringify(storedCursor),
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        await schedulerHandler({
+            id: "track-reconcile-resume",
+            name: "track-mapping-reconcile",
+            data: { mode: "repeat" },
+        });
+
+        expect(
+            mocks.trackReconciliationService.reconcileWindow,
+        ).toHaveBeenCalledWith({
+            startAfter: {
+                id: storedCursor.id,
+                createdAt: new Date(storedCursor.createdAt),
+            },
+        });
+        expect(mocks.schedulerLockRedis.del).toHaveBeenCalledWith(
+            "scheduler:cursor:track-mapping-reconcile",
+        );
+    });
+
+    it("discards an invalid shared reconciliation cursor", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        mocks.schedulerLockRedis.get.mockResolvedValueOnce("not-json");
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        await schedulerHandler({
+            id: "track-reconcile-invalid-cursor",
+            name: "track-mapping-reconcile",
+            data: { mode: "repeat" },
+        });
+
+        expect(
+            mocks.trackReconciliationService.reconcileWindow,
+        ).toHaveBeenCalledWith({});
+        expect(mocks.schedulerLockRedis.del).toHaveBeenCalledWith(
+            "scheduler:cursor:track-mapping-reconcile",
+        );
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            "Discarding invalid persisted track reconciliation cursor",
         );
     });
 

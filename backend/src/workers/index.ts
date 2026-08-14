@@ -50,6 +50,7 @@ import { enrichmentStateService } from "../services/enrichmentState";
 import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
 import { genericImportJobRunner } from "../services/genericImportJobRunner";
+import type { ReconciliationCursor } from "../services/trackReconciliation";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -67,6 +68,9 @@ let schedulerLockRedis: Redis = createIORedisClient(
 const schedulerLockOwnerId = `${WORKER_PROCESSOR_ID}:scheduler-claims`;
 const ONE_MINUTE_MS = 60_000;
 const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+const TRACK_RECONCILIATION_CURSOR_KEY =
+    "scheduler:cursor:track-mapping-reconcile";
+const MAX_RECONCILIATION_CURSOR_BYTES = 512;
 const SCHEDULER_CLAIM_RETRY_ATTEMPTS = 3;
 const OBSERVABILITY_LOG_EVERY = 25;
 const DEFAULT_SCHEDULER_SKIP_WARN_THRESHOLD = 3;
@@ -197,6 +201,72 @@ async function withSchedulerClaimRedisRetry<T>(
             await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
         }
     }
+}
+
+function parseReconciliationCursor(value: string): ReconciliationCursor | null {
+    if (value.length > MAX_RECONCILIATION_CURSOR_BYTES) return null;
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+
+    const candidate = parsed as Record<string, unknown>;
+    if (
+        typeof candidate.id !== "string" ||
+        candidate.id.length === 0 ||
+        candidate.id.length > 128 ||
+        typeof candidate.createdAt !== "string"
+    ) {
+        return null;
+    }
+
+    const createdAt = new Date(candidate.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    return { id: candidate.id, createdAt };
+}
+
+async function loadReconciliationCursor(): Promise<
+    ReconciliationCursor | undefined
+> {
+    const stored = await withSchedulerClaimRedisRetry(
+        "track reconciliation cursor load",
+        () => schedulerLockRedis.get(TRACK_RECONCILIATION_CURSOR_KEY),
+    );
+    if (!stored) return undefined;
+
+    const cursor = parseReconciliationCursor(stored);
+    if (cursor) return cursor;
+
+    log.warn("Discarding invalid persisted track reconciliation cursor");
+    await withSchedulerClaimRedisRetry(
+        "invalid track reconciliation cursor removal",
+        () => schedulerLockRedis.del(TRACK_RECONCILIATION_CURSOR_KEY),
+    );
+    return undefined;
+}
+
+async function saveReconciliationCursor(
+    cursor: ReconciliationCursor | null,
+): Promise<void> {
+    if (!cursor) {
+        await withSchedulerClaimRedisRetry(
+            "track reconciliation cursor clear",
+            () => schedulerLockRedis.del(TRACK_RECONCILIATION_CURSOR_KEY),
+        );
+        return;
+    }
+
+    const stored = JSON.stringify({
+        id: cursor.id,
+        createdAt: cursor.createdAt.toISOString(),
+    });
+    await withSchedulerClaimRedisRetry("track reconciliation cursor save", () =>
+        schedulerLockRedis.set(TRACK_RECONCILIATION_CURSOR_KEY, stored),
+    );
 }
 
 const SCHEDULER_JOB_TYPES = {
@@ -651,7 +721,12 @@ async function processTrackMappingReconcileJob(): Promise<void> {
                 );
             }
 
-            const result = await trackReconciliationService.reconcile();
+            const startAfter = await loadReconciliationCursor();
+            const window = await trackReconciliationService.reconcileWindow(
+                startAfter ? { startAfter } : {},
+            );
+            await saveReconciliationCursor(window.nextCursor);
+            const { result } = window;
             if (result.linked > 0) {
                 log.info(
                     `Linked ${result.linked} mappings to local tracks (${result.skipped} skipped)`,
