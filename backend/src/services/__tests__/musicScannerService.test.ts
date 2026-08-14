@@ -1,5 +1,6 @@
 const mockReaddir = jest.fn();
 const mockStat = jest.fn();
+const mockUnlink = jest.fn();
 const mockExistsSync = jest.fn();
 const mockParseFile = jest.fn();
 const queueInstances: Array<{ add: jest.Mock; onIdle: jest.Mock }> = [];
@@ -8,6 +9,15 @@ const mockPrisma = {
     track: {
         findMany: jest.fn(),
         upsert: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
+    },
+    trackEmbedding: {
+        deleteMany: jest.fn(),
+    },
+    transcodedFile: {
+        findMany: jest.fn(),
         deleteMany: jest.fn(),
     },
     album: {
@@ -44,6 +54,7 @@ const mockPrisma = {
         upsert: jest.fn(),
         deleteMany: jest.fn(),
     },
+    $transaction: jest.fn(),
 };
 
 const mockLogger = {
@@ -51,7 +62,9 @@ const mockLogger = {
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+mockLogger.child.mockReturnValue(mockLogger);
 
 const mockBackfillAllArtistCounts = jest.fn();
 const mockComputeAudioStreamHash = jest.fn();
@@ -69,6 +82,7 @@ jest.mock("fs", () => ({
     promises: {
         readdir: mockReaddir,
         stat: mockStat,
+        unlink: mockUnlink,
     },
     existsSync: mockExistsSync,
 }));
@@ -132,8 +146,57 @@ jest.mock("../audioHash", () => ({
     computeAudioStreamHash: mockComputeAudioStreamHash,
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        music: { transcodeCachePath: "/cache/transcodes" },
+    },
+}));
+
 const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
+
+interface TestIdentityTrack {
+    id: string;
+    filePath: string;
+    fileModified: Date;
+    fileSize: number;
+    duration: number;
+    title: string;
+    discNo: number;
+    trackNo: number;
+    mime: string;
+    albumId: string;
+    audioHash: string | null;
+    audioHashedAt: Date | null;
+    recordingMbid: string | null;
+    isrc: string | null;
+    album: { rgMbid: string | null };
+}
+
+function identityTrack(
+    id: string,
+    filePath: string,
+    overrides: Partial<TestIdentityTrack> = {},
+): TestIdentityTrack {
+    return {
+        id,
+        filePath,
+        fileModified: new Date("2026-01-01T00:00:00.000Z"),
+        fileSize: 1_024,
+        duration: 218,
+        title: "Test Track",
+        discNo: 1,
+        trackNo: 3,
+        mime: "audio/flac",
+        albumId: "album-1",
+        audioHash: null,
+        audioHashedAt: null,
+        recordingMbid: null,
+        isrc: null,
+        album: { rgMbid: "rg-album-1" },
+        ...overrides,
+    };
+}
 
 describe("MusicScannerService.scanLibrary", () => {
     beforeEach(() => {
@@ -163,7 +226,17 @@ describe("MusicScannerService.scanLibrary", () => {
 
         mockPrisma.track.findMany.mockResolvedValue([]);
         mockPrisma.track.upsert.mockResolvedValue({});
+        mockPrisma.track.update.mockResolvedValue({});
+        mockPrisma.track.delete.mockResolvedValue({});
         mockPrisma.track.deleteMany.mockResolvedValue({ count: 0 });
+        mockPrisma.trackEmbedding.deleteMany.mockResolvedValue({ count: 0 });
+        mockPrisma.transcodedFile.findMany.mockResolvedValue([]);
+        mockPrisma.transcodedFile.deleteMany.mockResolvedValue({ count: 0 });
+        mockPrisma.$transaction.mockImplementation(
+            async (operation: (tx: typeof mockPrisma) => Promise<unknown>) =>
+                operation(mockPrisma),
+        );
+        mockUnlink.mockResolvedValue(undefined);
         mockPrisma.libraryHealthRecord.upsert.mockResolvedValue({});
         mockPrisma.libraryHealthRecord.deleteMany.mockResolvedValue({
             count: 0,
@@ -219,7 +292,9 @@ describe("MusicScannerService.scanLibrary", () => {
 
         mockBackfillAllArtistCounts.mockResolvedValue(undefined);
         mockGetAlbumCover.mockResolvedValue(null);
-        mockComputeAudioStreamHash.mockResolvedValue("sha256:" + "ab".repeat(32));
+        mockComputeAudioStreamHash.mockResolvedValue(
+            "sha256:" + "ab".repeat(32),
+        );
     });
 
     afterEach(() => {
@@ -490,6 +565,7 @@ describe("MusicScannerService.scanLibrary", () => {
             size: 777,
         });
         mockComputeAudioStreamHash.mockResolvedValue(null);
+        mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-1" });
 
         await scanner.scanLibrary("/music");
 
@@ -502,6 +578,24 @@ describe("MusicScannerService.scanLibrary", () => {
                 }),
             }),
         );
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "track-1" },
+            data: expect.objectContaining({
+                analysisStatus: "pending",
+                analyzedAt: null,
+                analysisError: null,
+                analysisRetryCount: 0,
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisError: null,
+                vibeAnalysisRetryCount: 0,
+            }),
+        });
+        expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-1" },
+        });
+        expect(mockPrisma.transcodedFile.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-1" },
+        });
     });
 
     it("re-parses with duration:true only when the cheap parse lacks a duration (opus/ogg)", async () => {
@@ -626,6 +720,250 @@ describe("MusicScannerService.scanLibrary", () => {
                 title: "Test Album",
             },
         });
+    });
+
+    it("re-binds a retagged and renamed file by audio hash without resetting analysis", async () => {
+        const scanner = new MusicScannerService();
+        const oldHash = "sha256:" + "11".repeat(32);
+        const oldTrack = identityTrack(
+            "track-old",
+            "Artist/Album/01 Old Name.flac",
+            { audioHash: oldHash },
+        );
+        const candidate = identityTrack(
+            "track-new",
+            "Artist/Album/01 Retagged Name.flac",
+            {
+                audioHash: oldHash,
+                title: "Retagged Title",
+                fileModified: new Date("2026-02-01T00:00:00.000Z"),
+            },
+        );
+
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/Artist/Album/01 Retagged Name.flac"]);
+        mockPrisma.track.findMany
+            .mockResolvedValueOnce([oldTrack])
+            .mockResolvedValueOnce([candidate]);
+        mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 1,
+                tracksRemoved: 0,
+            }),
+        );
+        expect(mockPrisma.track.delete).toHaveBeenCalledWith({
+            where: { id: "track-new" },
+        });
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "track-old" },
+            data: expect.objectContaining({
+                filePath: "Artist/Album/01 Retagged Name.flac",
+                title: "Retagged Title",
+                audioHash: oldHash,
+            }),
+        });
+        const oldUpdate = mockPrisma.track.update.mock.calls.find(
+            ([args]) => args.where.id === "track-old",
+        )?.[0];
+        expect(oldUpdate?.data).not.toHaveProperty("analysisStatus");
+        expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.transcodedFile.deleteMany).not.toHaveBeenCalled();
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "Artist/Album/01 Old Name.flac → Artist/Album/01 Retagged Name.flac",
+            ),
+        );
+    });
+
+    it("re-binds an extension upgrade by recording id and resets derived audio data", async () => {
+        const scanner = new MusicScannerService();
+        const oldTrack = identityTrack(
+            "track-old",
+            "Artist/Album/01 Song.mp3",
+            {
+                audioHash: "sha256:" + "22".repeat(32),
+                recordingMbid: "recording-1",
+                mime: "audio/mpeg",
+            },
+        );
+        const candidate = identityTrack(
+            "track-new",
+            "Artist/Album/01 Song.flac",
+            {
+                audioHash: "sha256:" + "33".repeat(32),
+                audioHashedAt: new Date("2026-02-01T00:01:00.000Z"),
+                recordingMbid: "recording-1",
+                fileModified: new Date("2026-02-01T00:00:00.000Z"),
+                fileSize: 8_192,
+            },
+        );
+
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/Artist/Album/01 Song.flac"]);
+        mockPrisma.track.findMany
+            .mockResolvedValueOnce([oldTrack])
+            .mockResolvedValueOnce([candidate]);
+        mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
+        mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
+            { cachePath: "track-old-high.mp3" },
+        ]);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 1,
+                tracksRemoved: 0,
+            }),
+        );
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "track-old" },
+            data: expect.objectContaining({
+                filePath: "Artist/Album/01 Song.flac",
+                audioHash: candidate.audioHash,
+                analysisStatus: "pending",
+                analyzedAt: null,
+                analysisError: null,
+                analysisRetryCount: 0,
+                analysisStartedAt: null,
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisError: null,
+                vibeAnalysisRetryCount: 0,
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: expect.any(Date),
+            }),
+        });
+        expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-old" },
+        });
+        expect(mockPrisma.transcodedFile.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-old" },
+        });
+        expect(mockUnlink).toHaveBeenCalledWith(
+            "/cache/transcodes/track-old-high.mp3",
+        );
+    });
+
+    it("keeps a same-path replacement id and invalidates derived audio data", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Album/01 Song.flac";
+        const oldTrack = identityTrack(
+            "track-old",
+            "Artist/Album/01 Song.flac",
+            { audioHash: "sha256:" + "44".repeat(32) },
+        );
+        const newHash = "sha256:" + "55".repeat(32);
+
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValueOnce([oldTrack]);
+        mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-old" });
+        mockComputeAudioStreamHash.mockResolvedValueOnce(newHash);
+        mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
+            { cachePath: "track-old-medium.mp3" },
+        ]);
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 1,
+                tracksRemoved: 0,
+            }),
+        );
+        expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { filePath: "Artist/Album/01 Song.flac" },
+                update: expect.objectContaining({ audioHash: newHash }),
+            }),
+        );
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "track-old" },
+            data: expect.objectContaining({
+                analysisStatus: "pending",
+                analyzedAt: null,
+                analysisRetryCount: 0,
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisRetryCount: 0,
+            }),
+        });
+        expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-old" },
+        });
+        expect(mockPrisma.transcodedFile.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-old" },
+        });
+        expect(mockUnlink).toHaveBeenCalledWith(
+            "/cache/transcodes/track-old-medium.mp3",
+        );
+        expect(mockPrisma.track.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes ambiguous identical moves when lower tiers cannot disambiguate them", async () => {
+        const scanner = new MusicScannerService();
+        const shared = {
+            audioHash: "sha256:" + "66".repeat(32),
+            recordingMbid: "recording-shared",
+            isrc: "USRC10000001",
+            title: "Duplicate",
+            fileSize: 4_096,
+            duration: 200,
+        };
+        const missing = [
+            identityTrack("track-old-1", "Old/01.flac", shared),
+            identityTrack("track-old-2", "Old/02.flac", shared),
+        ];
+        const candidates = [
+            identityTrack("track-new-1", "New/01.flac", shared),
+            identityTrack("track-new-2", "New/02.flac", shared),
+        ];
+
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/New/01.flac", "/music/New/02.flac"]);
+        mockPrisma.track.findMany
+            .mockResolvedValueOnce(missing)
+            .mockResolvedValueOnce(candidates);
+        mockPrisma.track.upsert
+            .mockResolvedValueOnce(candidates[0])
+            .mockResolvedValueOnce(candidates[1]);
+        mockPrisma.track.deleteMany.mockResolvedValueOnce({ count: 2 });
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockPrisma.track.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["track-old-1", "track-old-2"] } },
+        });
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 2,
+                tracksUpdated: 0,
+                tracksRemoved: 2,
+            }),
+        );
     });
 
     it("marks missing tracks as unhealthy without deleting library context", async () => {

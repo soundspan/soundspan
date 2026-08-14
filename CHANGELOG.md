@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Library scans now preserve track IDs, playlists, likes, play history, and
+  existing analysis when files move, rename, or are retagged. Replacing audio
+  at the same path or matching a moved quality upgrade re-queues audio and
+  vibe analysis and invalidates embeddings and transcoded cache files.
+
 ### Fixed
 
 - Background audio-analysis and vibe-embedding producers now use bounded,
