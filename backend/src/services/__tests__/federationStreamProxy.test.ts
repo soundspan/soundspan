@@ -7,6 +7,8 @@ const getCachedFederatedStreamFilePath = jest.fn();
 const cacheFederatedStream = jest.fn();
 const streamFileWithRangeSupport = jest.fn();
 const destroyStreamingService = jest.fn();
+const logDebug = jest.fn();
+const logInfo = jest.fn();
 const prisma = {
     federationPeer: { updateMany: jest.fn() },
 };
@@ -24,12 +26,25 @@ jest.mock("../federationClient", () => ({
     },
 }));
 jest.mock("../audioStreaming", () => ({
+    FederatedCacheCapacityError: class FederatedCacheCapacityError extends Error {
+        constructor() {
+            super("Federated cache fill exceeded remaining capacity");
+        }
+    },
     AudioStreamingService: jest.fn(() => ({
         getCachedFederatedStreamFilePath,
         cacheFederatedStream,
         streamFileWithRangeSupport,
         destroy: destroyStreamingService,
     })),
+}));
+jest.mock("../../utils/logger", () => ({
+    logger: {
+        child: jest.fn(() => ({
+            debug: logDebug,
+            info: logInfo,
+        })),
+    },
 }));
 jest.mock("../../config", () => ({
     config: {
@@ -267,6 +282,57 @@ describe("federated stream proxy", () => {
         });
         expect(body).toBe("audio");
         expect(streamFileWithRangeSupport).not.toHaveBeenCalled();
+    });
+
+    it("retries an unknown-length capacity overflow as uncached passthrough", async () => {
+        const { FederatedCacheCapacityError } =
+            jest.requireMock("../audioStreaming");
+        const overflowStream = Readable.from(["discarded"]);
+        getStream
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: { "content-type": "audio/flac" },
+                data: overflowStream,
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: { "content-type": "audio/flac" },
+                data: Readable.from(["fresh-audio"]),
+            });
+        cacheFederatedStream.mockImplementationOnce(
+            async (_trackId, _quality, _modified, _mime, loadStream) => {
+                const source = await loadStream();
+                source.stream.destroy();
+                throw new FederatedCacheCapacityError();
+            },
+        );
+        const req = createRequest();
+        const res = createResponse();
+        let body = "";
+        res.on("data", (chunk) => {
+            body += chunk.toString();
+        });
+
+        await proxyFederatedTrackStream({
+            req: req as never,
+            res: res as never,
+            peer,
+            remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/flac",
+            quality: "original",
+        });
+
+        expect(getStream).toHaveBeenCalledTimes(2);
+        expect(body).toBe("fresh-audio");
+        expect(streamFileWithRangeSupport).not.toHaveBeenCalled();
+        expect(prisma.federationPeer.updateMany).not.toHaveBeenCalled();
+        expect(logDebug).toHaveBeenCalledTimes(1);
+        expect(logDebug).toHaveBeenCalledWith(
+            "Federated stream cache capacity exceeded; retrying uncached",
+            { peerId: "peer-1", trackId: "fed-track-1" },
+        );
     });
 
     it.each([206, 416])(

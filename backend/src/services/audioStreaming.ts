@@ -58,7 +58,8 @@ export interface FederatedStreamSource {
     headers?: Record<string, unknown>;
 }
 
-class FederatedCacheCapacityError extends Error {
+/** Signals that an unknown-length federated cache fill crossed its byte ceiling. */
+export class FederatedCacheCapacityError extends Error {
     constructor() {
         super("Federated cache fill exceeded remaining capacity");
         this.name = "FederatedCacheCapacityError";

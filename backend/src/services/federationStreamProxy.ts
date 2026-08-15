@@ -8,7 +8,12 @@ import {
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { AudioStreamingService, type Quality } from "./audioStreaming";
+import {
+    AudioStreamingService,
+    FederatedCacheCapacityError,
+    type FederatedStreamSource,
+    type Quality,
+} from "./audioStreaming";
 
 const log = logger.child("FederationStreamProxy");
 const PASSTHROUGH_HEADERS = [
@@ -128,6 +133,49 @@ async function passthroughPeerStream(
     await pipeline(source.stream, input.res);
 }
 
+async function loadPeerStreamSource(
+    input: FederationStreamInput,
+    signal: AbortSignal,
+    state: ProxyStreamState,
+    fallbackMime: string,
+): Promise<FederatedStreamSource> {
+    const response = await loadPeerStream(input, undefined, signal);
+    state.upstream = response.data;
+    const contentType = response.headers["content-type"];
+    return {
+        stream: response.data,
+        mimeType: typeof contentType === "string" ? contentType : fallbackMime,
+        status: response.status,
+        contentLength: parseContentLength(response.headers),
+        headers: response.headers,
+    };
+}
+
+async function cacheOrReloadPeerStream(
+    input: FederationStreamInput,
+    service: AudioStreamingService,
+    signal: AbortSignal,
+    state: ProxyStreamState,
+    fallbackMime: string,
+) {
+    try {
+        return await service.cacheFederatedStream(
+            input.trackId,
+            input.quality,
+            input.sourceModified,
+            fallbackMime,
+            () => loadPeerStreamSource(input, signal, state, fallbackMime),
+        );
+    } catch (error) {
+        if (!(error instanceof FederatedCacheCapacityError)) throw error;
+        log.debug(
+            "Federated stream cache capacity exceeded; retrying uncached",
+            { peerId: input.peer.id, trackId: input.trackId },
+        );
+        return loadPeerStreamSource(input, signal, state, fallbackMime);
+    }
+}
+
 async function serveFederatedStream(
     input: FederationStreamInput,
     service: AudioStreamingService,
@@ -156,26 +204,12 @@ async function serveFederatedStream(
         await proxyRangeMiss(input, signal, state);
         return;
     }
-    const complete = await service.cacheFederatedStream(
-        input.trackId,
-        input.quality,
-        input.sourceModified,
+    const complete = await cacheOrReloadPeerStream(
+        input,
+        service,
+        signal,
+        state,
         fallbackMime,
-        async () => {
-            const response = await loadPeerStream(input, undefined, signal);
-            state.upstream = response.data;
-            const contentType = response.headers["content-type"];
-            return {
-                stream: response.data,
-                mimeType:
-                    typeof contentType === "string"
-                        ? contentType
-                        : fallbackMime,
-                status: response.status,
-                contentLength: parseContentLength(response.headers),
-                headers: response.headers,
-            };
-        },
     );
     if ("stream" in complete) {
         await passthroughPeerStream(input, complete);

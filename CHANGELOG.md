@@ -90,8 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrator explicitly selects bidirectional sharing.
 - Federated stream cache fills now accept only complete status-200 responses,
   bypass known oversized responses, enforce a remaining-capacity byte ceiling
-  for unknown lengths, and remove partial files after overflow or write
-  failure.
+  for unknown lengths, remove partial files after overflow or write failure,
+  and retry capacity overflows as uncached streams.
 - Subsonic playlist listing and item reads again include visible playlist
   tracks from discovery albums while retaining federated local-wins dedup
   suppression.
