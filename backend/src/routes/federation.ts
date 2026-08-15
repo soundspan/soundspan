@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { pipeline } from "node:stream/promises";
+import type { Transform } from "node:stream";
 import { z } from "zod";
 import { config } from "../config";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -31,6 +32,7 @@ import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
 import { sendRouteError } from "./routeErrorResponse";
 import { handleAudiobookCover } from "./audiobooks";
+import { withFederationStreamControls } from "../services/federationStreamControls";
 
 const router = Router();
 const albumParamsSchema = z.strictObject({
@@ -330,6 +332,7 @@ async function streamExportedTrack(
     res: Response,
     trackId: string,
     quality: Quality,
+    pacing: Transform | null,
 ) {
     const track = await findExportedFederationTrack(trackId);
     if (!track?.filePath) return sendRouteError(res, 404, "Track not found");
@@ -355,11 +358,22 @@ async function streamExportedTrack(
             res,
             streamFile.filePath,
             streamFile.mimeType,
+            pacing ?? undefined,
         );
         return undefined;
     } finally {
         service.destroy();
     }
+}
+
+function authenticatedStreamLimits(req: Request) {
+    const peer = req.federationPeer;
+    if (!peer) throw new Error("Federation stream peer is unavailable");
+    return {
+        peerId: peer.id,
+        maxConcurrentStreams: peer.maxConcurrentStreams,
+        maxStreamKbps: peer.maxStreamKbps,
+    };
 }
 
 /** @openapi
@@ -382,11 +396,18 @@ router.get(
         const params = trackParamsSchema.safeParse(req.params);
         const query = streamQuerySchema.safeParse(req.query);
         if (!params.success || !query.success) return validationError(res);
-        return streamExportedTrack(
+        return withFederationStreamControls(
             req,
             res,
-            params.data.trackId,
-            query.data.quality,
+            authenticatedStreamLimits(req),
+            (pacing) =>
+                streamExportedTrack(
+                    req,
+                    res,
+                    params.data.trackId,
+                    query.data.quality,
+                    pacing,
+                ),
         );
     }),
 );
@@ -433,25 +454,33 @@ router.get(
         const params = audiobookParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
         if (!params.success || !query.success) return validationError(res);
-        const exported = await findExportedFederationAudiobook(
-            params.data.audiobookId,
+        return withFederationStreamControls(
+            req,
+            res,
+            authenticatedStreamLimits(req),
+            async (pacing) => {
+                const exported = await findExportedFederationAudiobook(
+                    params.data.audiobookId,
+                );
+                if (!exported) {
+                    return sendRouteError(res, 404, "Audiobook not found");
+                }
+                const range =
+                    typeof req.headers.range === "string"
+                        ? req.headers.range
+                        : undefined;
+                const result = await audiobookshelfService.streamAudiobook(
+                    exported.id,
+                    range,
+                    { request: req, response: res },
+                );
+                res.status(result.status || (range ? 206 : 200));
+                copyAudiobookStreamHeaders(res, result.headers);
+                if (pacing) await pipeline(result.stream, pacing, res);
+                else await pipeline(result.stream, res);
+                return undefined;
+            },
         );
-        if (!exported) {
-            return sendRouteError(res, 404, "Audiobook not found");
-        }
-        const range =
-            typeof req.headers.range === "string"
-                ? req.headers.range
-                : undefined;
-        const result = await audiobookshelfService.streamAudiobook(
-            exported.id,
-            range,
-            { request: req, response: res },
-        );
-        res.status(result.status || (range ? 206 : 200));
-        copyAudiobookStreamHeaders(res, result.headers);
-        await pipeline(result.stream, res);
-        return undefined;
     }),
 );
 

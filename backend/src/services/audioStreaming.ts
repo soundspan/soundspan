@@ -700,7 +700,7 @@ export class AudioStreamingService {
     }
 
     /**
-     * Stream file with proper HTTP Range support (fixes Firefox FLAC issue #42/#17)
+     * Stream a file with Range support and an optional response pacing transform.
      * Manually handles Range requests to ensure compatibility with Firefox's strict
      * Content-Range header validation for large FLAC files.
      */
@@ -709,6 +709,7 @@ export class AudioStreamingService {
         res: Response,
         filePath: string,
         mimeType: string,
+        pacing?: Transform,
     ): Promise<void> {
         try {
             // Get file stats for size
@@ -776,7 +777,8 @@ export class AudioStreamingService {
             // stream.on("error") handler and res.on("close") teardown that raw
             // pipe() required (and which leaked backpressure/abort handling).
             try {
-                await pipeline(stream, res);
+                if (pacing) await pipeline(stream, pacing, res);
+                else await pipeline(stream, res);
             } catch (err) {
                 // A client closing the connection mid-stream (seek, skip,
                 // navigate away) surfaces as ERR_STREAM_PREMATURE_CLOSE; that's

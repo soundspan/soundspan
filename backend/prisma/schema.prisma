@@ -332,6 +332,7 @@ model Track {
   peerId             String?
   remoteId           String?
   dedupOfTrackId     String?
+  dedupPinned        Boolean                  @default(false)
   bpm                Float?
   beatsCount         Int?
   key                String?
@@ -458,6 +459,9 @@ model FederationPeer {
   lastSeenAt     DateTime?
   lastSyncCursor String?
   catalogEpoch   String?
+  showDedupedCopies Boolean @default(false)
+  maxConcurrentStreams Int?
+  maxStreamKbps Int?
   createdById    String
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt

@@ -82,6 +82,7 @@ import {
     pairAndLinkConsumerFederationPeer,
     revokeFederationPeer,
     rotateFederationPeerCredential,
+    updateFederationPeerSettings,
 } from "../federationPeers";
 
 const manifest = {
@@ -209,6 +210,37 @@ describe("federation peer credentials", () => {
                 credentialHash: null,
                 outboundToken: null,
             },
+        });
+    });
+
+    it("updates settings through the public peer projection", async () => {
+        prisma.federationPeer.updateMany.mockResolvedValueOnce({ count: 1 });
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            id: "peer-1",
+            showDedupedCopies: true,
+            maxConcurrentStreams: 4,
+            maxStreamKbps: 320,
+        });
+
+        await expect(
+            updateFederationPeerSettings("peer-1", {
+                showDedupedCopies: true,
+                maxConcurrentStreams: 4,
+                maxStreamKbps: 320,
+            }),
+        ).resolves.toEqual(
+            expect.objectContaining({
+                id: "peer-1",
+                showDedupedCopies: true,
+            }),
+        );
+        expect(prisma.federationPeer.findUnique).toHaveBeenCalledWith({
+            where: { id: "peer-1" },
+            select: expect.objectContaining({
+                showDedupedCopies: true,
+                maxConcurrentStreams: true,
+                maxStreamKbps: true,
+            }),
         });
     });
 

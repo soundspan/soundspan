@@ -49,6 +49,8 @@ function peer(overrides: Record<string, unknown> = {}) {
         scopes: ["library:read", "stream:read"],
         inboundStatus: "ACTIVE",
         lastSeenAt: new Date("2026-08-15T10:00:00.000Z"),
+        maxConcurrentStreams: null,
+        maxStreamKbps: null,
         ...overrides,
     };
 }
@@ -198,6 +200,8 @@ describe("requireFederationPeer", () => {
             id: "peer-1",
             name: "Peer One",
             scopes: ["library:read", "stream:read"],
+            maxConcurrentStreams: null,
+            maxStreamKbps: null,
         });
         expect(req.user).toBeUndefined();
         expect(next).toHaveBeenCalledTimes(1);

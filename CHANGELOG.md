@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     streaming, and local progress without requiring Audiobookshelf on the
     consumer. The double proxy inherits the existing Audiobookshelf
     `media.tracks[0]` single-track limitation. Closes #477.
+  - Federation peers now have per-peer duplicate visibility and nullable host
+    stream caps. Distributed concurrent-stream admission returns typed `429`
+    responses with retry guidance, bandwidth caps pace track and audiobook
+    streams, and administrators can keyset-page and pin link/unlink dedup
+    decisions or reset them to automatic matching. Closes #476.
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges
@@ -67,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all” actions for Audio Analysis and Vibe Embeddings failures.
 
 ### Changed
+
+- Federated audiobook mirror IDs now use the Node.js `randomUUID()` standard
+  library API; the direct `@paralleldrive/cuid2` dependency was removed.
 
 - Federation sync now batches per-page identity and local dedup reads, limits
   incremental artist-count recomputation to touched artists, and persists a

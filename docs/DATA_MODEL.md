@@ -73,7 +73,7 @@ erDiagram
 
 | Entity | Purpose | Key Fields |
 |--------|---------|------------|
-| `Track` | Local file-backed or peer-mirrored music row | `origin`, nullable unique `filePath`, `peerId`/`remoteId`, `dedupOfTrackId`, durable identity keys, soft-removal and analysis fields |
+| `Track` | Local file-backed or peer-mirrored music row | `origin`, nullable unique `filePath`, `peerId`/`remoteId`, `dedupOfTrackId`, `dedupPinned`, durable identity keys, soft-removal and analysis fields |
 | `TranscodedFile` | Cached transcoded variant for locally served content | `trackId`, `quality`, `cachePath` |
 | `TrackEmbedding` | CLAP 512-dim vector; peer embeddings can be imported when scoped | `trackId`, `embedding` (pgvector) |
 | `TrackLyrics` | Synced/plain lyrics for local tracks | `trackId`, `source` (lrclib, embedded, none) |
@@ -116,7 +116,7 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 
 | Entity | Purpose | Key Fields |
 | --- | --- | --- |
-| `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `lastSeenAt`, `lastSyncCursor`, `catalogEpoch`, `createdById` |
+| `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `showDedupedCopies`, nullable `maxConcurrentStreams`/`maxStreamKbps`, sync cursors, `createdById` |
 | `FederationPairingCode` | Short-lived, single-use admin pairing grant | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById` |
 | `FederationTombstone` | Deleted host catalog identity retained for incremental peer deltas | `entityType`, `entityId`, indexed `deletedAt` |
 | `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl` |
@@ -131,7 +131,9 @@ with their creating user.
 `HOST` and `BOTH`. `outboundStatus` controls sync, health, playback, and online
 provenance for `CONSUMER` and `BOTH`. Revocation sets both fields to `REVOKED`.
 This separation ensures an outbound health failure cannot disable valid inbound
-authentication on a bidirectional row. During full sync, `lastSyncCursor` may
+authentication on a bidirectional row. `maxConcurrentStreams` and
+`maxStreamKbps` are nullable host-side limits; null preserves unlimited
+streaming. During full sync, `lastSyncCursor` may
 contain a JSON full-phase page cursor; completed syncs store the delta
 high-water timestamp.
 
@@ -141,7 +143,7 @@ leave both fields null. `Track.filePath` remains unique but is nullable because
 federated tracks have no consumer-side file.
 
 Mirrored `Audiobook` rows use the same nullable `peerId`/`remoteId` provenance
-and unique pair. Their primary IDs are consumer-minted `fed:<cuid>` strings, so
+and unique pair. Their primary IDs are consumer-minted `fed:<uuid>` strings, so
 they cannot collide with Audiobookshelf IDs. `AudiobookProgress` already stores
 the audiobook ID as a string without a foreign key, so federated progress uses
 the existing table and is never written back to Audiobookshelf. Podcast peers
@@ -261,10 +263,16 @@ The sync worker compares each federated track with active local tracks by audio
 hash, recording MBID, ISRC, then release-group/disc/track position. When a local
 match exists, the federated row remains as the peer-owned alternate and sets
 `dedupOfTrackId` to the winning local `Track.id`. Browse and search suppress
-federated rows with a dedup target, so the local copy is the visible result.
+federated rows with a dedup target by default; `showDedupedCopies` exposes only
+the configured peer's alternates.
 Deleting the local winner sets `dedupOfTrackId` to null, allowing the peer copy
 to become visible again. Peer-to-peer row identity remains the unique
 `(peerId, remoteId)` pair.
+
+Administrator link and unlink actions set `dedupPinned=true`. Federation sync
+and scanner reconciliation skip pinned rows. Reset clears the pin and
+immediately applies the same strongest-first identity matcher, so automatic
+arbitration resumes without waiting for another catalog sync or scan.
 
 Federated rows are available to the web library, search, playlists, normal
 stream resolution, intelligence surfaces, metadata-based lyrics lookup, and

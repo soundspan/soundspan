@@ -1,5 +1,5 @@
 import type { Job } from "bull";
-import { createId } from "@paralleldrive/cuid2";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
     createFederationClient,
@@ -533,11 +533,11 @@ async function applyTrackDedup(
     trackId: string,
     match: DedupMatch | null,
 ): Promise<void> {
-    await prisma.track.update({
-        where: { id: trackId },
+    const updated = await prisma.track.updateMany({
+        where: { id: trackId, dedupPinned: false },
         data: { dedupOfTrackId: match?.id ?? null },
     });
-    if (!match) return;
+    if (!match || updated.count !== 1) return;
     await trackMappingService.createMapping({
         trackId: match.id,
         confidence: match.confidence,
@@ -640,7 +640,7 @@ async function upsertTrack(
             ...values,
         },
         update: values,
-        select: { id: true },
+        select: { id: true, dedupPinned: true },
     });
     if (hashChanged) await clearTrackTranscodeCache(row.id);
     await applyTrackDedup(row.id, match);
@@ -1048,7 +1048,7 @@ async function applyAudiobooks(
                 },
             },
             create: {
-                id: `fed:${createId()}`,
+                id: `fed:${randomUUID()}`,
                 peerId: context.peerId,
                 remoteId: item.id,
                 ...values,

@@ -21,6 +21,7 @@ const handleAudiobookCover = jest.fn((_req, res) =>
     res.status(200).send("book-cover"),
 );
 const streamAudiobook = jest.fn();
+const redisEval = jest.fn();
 
 jest.mock("../../services/federationCatalog", () => catalog);
 jest.mock("../../services/federationPeers", () => ({
@@ -48,6 +49,12 @@ jest.mock("../../middleware/federationAuth", () => ({
                 id: "peer-1",
                 name: "Peer",
                 scopes: granted,
+                maxConcurrentStreams: req.headers["x-test-max-concurrent"]
+                    ? Number(req.headers["x-test-max-concurrent"])
+                    : null,
+                maxStreamKbps: req.headers["x-test-max-kbps"]
+                    ? Number(req.headers["x-test-max-kbps"])
+                    : null,
             };
             next();
         },
@@ -90,6 +97,9 @@ jest.mock("../audiobooks", () => ({ handleAudiobookCover }));
 jest.mock("../../services/audiobookshelf", () => ({
     audiobookshelfService: { streamAudiobook },
 }));
+jest.mock("../../utils/redis", () => ({
+    redisClient: { eval: redisEval },
+}));
 
 import router from "../federation";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
@@ -119,6 +129,7 @@ describe("federation host routes", () => {
             filePath: "/music/file.flac",
             mimeType: "audio/flac",
         });
+        redisEval.mockResolvedValue(1);
     });
 
     it.each([
@@ -364,6 +375,8 @@ describe("federation host routes", () => {
         expect(streamFileWithRangeSupport.mock.calls[0][0].headers.range).toBe(
             "bytes=0-9",
         );
+        expect(streamFileWithRangeSupport.mock.calls[0][4]).toBeUndefined();
+        expect(redisEval).not.toHaveBeenCalled();
         expect(destroy).toHaveBeenCalledTimes(1);
 
         const hidden = await request(app)
@@ -402,6 +415,7 @@ describe("federation host routes", () => {
             "bytes=0-4",
             expect.objectContaining({ request: expect.any(Object) }),
         );
+        expect(redisEval).not.toHaveBeenCalled();
 
         catalog.findExportedFederationAudiobook.mockResolvedValueOnce(null);
         const hidden = await request(app)
@@ -410,5 +424,51 @@ describe("federation host routes", () => {
             .set("x-test-scopes", "stream:read");
         expect(hidden.status).toBe(404);
         expect(streamAudiobook).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        "/api/federation/v1/stream/track-1",
+        "/api/federation/v1/stream/audiobook/audiobook-1",
+    ])(
+        "enforces the authenticated peer concurrency cap on %s",
+        async (path) => {
+            redisEval.mockResolvedValueOnce(0);
+
+            const response = await request(app)
+                .get(path)
+                .set("Authorization", "Bearer valid")
+                .set("x-test-scopes", "stream:read")
+                .set("x-test-max-concurrent", "1");
+
+            expect(response.status).toBe(429);
+            expect(response.headers["retry-after"]).toBe("1");
+            expect(response.body).toEqual({
+                error: "Federation peer stream limit exceeded",
+                code: "FEDERATION_STREAM_LIMIT",
+                retryAfterSeconds: 1,
+            });
+        },
+    );
+
+    it("passes a pacing transform to a capped track stream", async () => {
+        catalog.findExportedFederationTrack.mockResolvedValueOnce({
+            id: "track-1",
+            filePath: "Artist/Album/file.flac",
+            fileModified: new Date("2026-08-15T12:00:00.000Z"),
+        });
+        streamFileWithRangeSupport.mockImplementationOnce(async (_req, res) => {
+            res.status(200).send("audio");
+        });
+
+        const response = await request(app)
+            .get("/api/federation/v1/stream/track-1")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "stream:read")
+            .set("x-test-max-kbps", "64");
+
+        expect(response.status).toBe(200);
+        expect(streamFileWithRangeSupport.mock.calls[0][4]).toEqual(
+            expect.objectContaining({ _readableState: expect.any(Object) }),
+        );
     });
 });

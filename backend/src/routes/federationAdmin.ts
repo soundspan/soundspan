@@ -15,7 +15,12 @@ import {
     pairAndLinkConsumerFederationPeer,
     revokeFederationPeer,
     rotateFederationPeerCredential,
+    updateFederationPeerSettings,
 } from "../services/federationPeers";
+import {
+    arbitrateFederationTrackDedup,
+    listFederationPeerDedup,
+} from "../services/federationDedupArbitration";
 import { enqueueFederationSyncNow } from "../workers/federationJobs";
 import { sendRouteError } from "./routeErrorResponse";
 
@@ -79,6 +84,23 @@ const consumerPairSchema = z.strictObject({
     name: z.string().trim().min(1).max(120),
     scopes: scopesSchema.default(["library:read", "stream:read"]),
 });
+const peerSettingsSchema = z.strictObject({
+    showDedupedCopies: z.boolean().optional(),
+    maxConcurrentStreams: z.number().int().min(1).max(64).nullable().optional(),
+    maxStreamKbps: z.number().int().min(64).max(100_000).nullable().optional(),
+});
+const dedupListQuerySchema = z.strictObject({
+    cursor: z.string().trim().min(1).max(128).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const dedupActionSchema = z.discriminatedUnion("action", [
+    z.strictObject({
+        action: z.literal("link"),
+        localTrackId: z.string().trim().min(1).max(128),
+    }),
+    z.strictObject({ action: z.literal("unlink") }),
+    z.strictObject({ action: z.literal("reset") }),
+]);
 
 function invalidRequest(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation peer request");
@@ -101,6 +123,117 @@ router.get(
     "/peers",
     asyncHandler(async (_req, res) => {
         return res.json({ peers: await listFederationPeers() });
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/peers/{id}/settings:
+ *   patch:
+ *     summary: Update per-peer duplicate visibility and host stream caps
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             properties:
+ *               showDedupedCopies: { type: boolean }
+ *               maxConcurrentStreams: { type: integer, minimum: 1, maximum: 64, nullable: true }
+ *               maxStreamKbps: { type: integer, minimum: 64, maximum: 100000, nullable: true }
+ *     responses:
+ *       200: { description: Updated public federation peer }
+ *       400: { description: Invalid settings }
+ *       404: { description: Federation peer not found }
+ */
+router.patch(
+    "/peers/:id/settings",
+    asyncHandler(async (req, res) => {
+        const params = peerParamsSchema.safeParse(req.params);
+        const body = peerSettingsSchema.safeParse(req.body);
+        if (!params.success || !body.success) return invalidRequest(res);
+        const peer = await updateFederationPeerSettings(
+            params.data.id,
+            body.data,
+        );
+        if (!peer) {
+            return sendRouteError(res, 404, "Federation peer not found");
+        }
+        return res.json(peer);
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/peers/{id}/dedup:
+ *   get:
+ *     summary: List linked or pinned federated tracks for one peer
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: cursor, schema: { type: string } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+ *     responses:
+ *       200: { description: Keyset page of dedup arbitration rows }
+ *       400: { description: Invalid pagination }
+ *       404: { description: Federation peer not found }
+ */
+router.get(
+    "/peers/:id/dedup",
+    asyncHandler(async (req, res) => {
+        const params = peerParamsSchema.safeParse(req.params);
+        const query = dedupListQuerySchema.safeParse(req.query);
+        if (!params.success || !query.success) return invalidRequest(res);
+        const page = await listFederationPeerDedup({
+            peerId: params.data.id,
+            cursor: query.data.cursor,
+            limit: query.data.limit,
+        });
+        if (!page) {
+            return sendRouteError(res, 404, "Federation peer not found");
+        }
+        return res.json(page);
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/tracks/{id}/dedup:
+ *   post:
+ *     summary: Pin, unlink, or reset one federated track dedup decision
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - { type: object, required: [action, localTrackId], properties: { action: { type: string, enum: [link] }, localTrackId: { type: string } } }
+ *               - { type: object, required: [action], properties: { action: { type: string, enum: [unlink, reset] } } }
+ *     responses:
+ *       200: { description: Updated dedup arbitration row }
+ *       400: { description: Invalid action }
+ *       404: { description: Federated track or local link target not found }
+ */
+router.post(
+    "/tracks/:id/dedup",
+    asyncHandler(async (req, res) => {
+        const params = peerParamsSchema.safeParse(req.params);
+        const body = dedupActionSchema.safeParse(req.body);
+        if (!params.success || !body.success) return invalidRequest(res);
+        const result = await arbitrateFederationTrackDedup(
+            params.data.id,
+            body.data,
+        );
+        if (!result) {
+            return sendRouteError(
+                res,
+                404,
+                "Federation dedup resource not found",
+            );
+        }
+        return res.json(result);
     }),
 );
 

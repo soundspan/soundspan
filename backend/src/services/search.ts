@@ -7,6 +7,7 @@ import {
     trackBrowseWhere,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
+import { trackBrowseSql } from "../utils/libraryRadioPredicates";
 
 /**
  * Executes normalizeCacheQuery.
@@ -112,23 +113,7 @@ function visibleBrowseTracks(source: LibraryOriginFilter) {
 }
 
 function trackSourceSql(source: LibraryOriginFilter): Prisma.Sql {
-    const federatedVisible = Prisma.sql`
-        t.origin = ${"FEDERATED"}::"TrackOrigin"
-        AND (
-            t."dedupOfTrackId" IS NULL
-            OR EXISTS (
-                SELECT 1 FROM "Track" dedup_winner
-                WHERE dedup_winner.id = t."dedupOfTrackId"
-                  AND dedup_winner."removedAt" IS NOT NULL
-            )
-        )`;
-    if (source === "local") {
-        return Prisma.sql`t.origin = ${"LOCAL"}::"TrackOrigin"`;
-    }
-    if (source === "peers") {
-        return federatedVisible;
-    }
-    return Prisma.sql`(t.origin = ${"LOCAL"}::"TrackOrigin" OR (${federatedVisible}))`;
+    return trackBrowseSql("t", source);
 }
 
 function peerProjectionSql(alias: "a" | "t"): Prisma.Sql {

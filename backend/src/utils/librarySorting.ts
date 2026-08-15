@@ -35,6 +35,7 @@ export function trackBrowseWhere(
         origin: "FEDERATED" as const,
         OR: [
             { dedupOfTrackId: null },
+            { federationPeer: { showDedupedCopies: true } },
             { dedupOfTrack: { removedAt: { not: null } } },
         ],
     } satisfies Prisma.TrackWhereInput;

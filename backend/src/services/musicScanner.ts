@@ -665,10 +665,11 @@ export class MusicScannerService {
                 this.dedupIdentity(candidates[index]),
             );
             if (candidateConfidence === null) continue;
-            await prisma.track.update({
-                where: { id: candidates[index].id },
+            const updated = await prisma.track.updateMany({
+                where: { id: candidates[index].id, dedupPinned: false },
                 data: { dedupOfTrackId: local.id },
             });
+            if (updated.count !== 1) continue;
             confidence = Math.max(confidence ?? 0, candidateConfidence);
         }
         if (confidence === null) return;
@@ -687,6 +688,7 @@ export class MusicScannerService {
                 ...identityWhere,
                 origin: "FEDERATED",
                 removedAt: null,
+                dedupPinned: false,
                 AND: {
                     OR: [
                         { dedupOfTrackId: null },

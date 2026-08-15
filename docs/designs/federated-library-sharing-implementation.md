@@ -1,6 +1,6 @@
 # Federated Library Sharing — Implementation Plan
 
-Companion to [federated-library-sharing.md](federated-library-sharing.md) (the spec, issue #451). Drafted 2026-08-15 at the start of implementation on `feature/federated-library-sharing`. Status: **F1–F13 complete; implementation is pending its F10 release review**. The spec's Resolved Decisions are implemented; this document records the build order, per-chunk contracts, and reviewed implementation decisions marked **[D]**.
+Companion to [federated-library-sharing.md](federated-library-sharing.md) (the spec, issue #451). Drafted 2026-08-15 at the start of implementation on `feature/federated-library-sharing`. Status: **F1–F14 complete; implementation is pending its F10 release review**. The spec's Resolved Decisions are implemented; this document records the build order, per-chunk contracts, and reviewed implementation decisions marked **[D]**.
 
 ## Context updates since the spec
 
@@ -26,9 +26,12 @@ Companion to [federated-library-sharing.md](federated-library-sharing.md) (the s
 15. **Private-network federation is intentional.** Admin-configured HTTPS peer URLs may resolve to LAN, private, or VPN addresses. Federation requests disable redirects and bound time, retries, concurrency, and JSON response size. The public-address-only SSRF rule is not applied because private networking is a primary self-hosted use case; administrators must treat linked peers as trusted.
 16. **Removed tracks never seed intelligence.** `TRACK_VISIBLE_WHERE` applies to play and like history used by mixes, radio, and recommendations, so retained soft-removed rows cannot influence generated results.
 17. **Podcasts federate as listings, not `Podcast` mirrors.** Hosts disclose the complete subscribed-feed catalog to trusted peers with `library:read`. Consumers use `FederationPodcastListing`; native subscription by feed URL remains authoritative and episodes are excluded.
-18. **Audiobooks federate as full mirrors with double-proxied playback.** Hosts export only `Audiobook.peerId = null`; consumers mint `fed:<cuid>` IDs and use `(peerId, remoteId)` for idempotency. Cover and Range stream requests recheck export eligibility. The peer calls the existing Audiobookshelf stream proxy, which inherits its single-track `media.tracks[0]` limitation.
+18. **Audiobooks federate as full mirrors with double-proxied playback.** Hosts export only `Audiobook.peerId = null`; consumers mint `fed:<uuid>` IDs with `node:crypto` `randomUUID()` and use `(peerId, remoteId)` for idempotency. Cover and Range stream requests recheck export eligibility. The peer calls the existing Audiobookshelf stream proxy, which inherits its single-track `media.tracks[0]` limitation.
 19. **Wire additions do not break older consumers.** Manifest media types are bounded strings filtered to known types, count objects accept unknown keys, and additive manifest fields are tolerated. Tombstone fields remain strict, but unknown bounded entity types are skipped, counted, and logged once per sync. Malformed known tombstones still reject the page.
 20. **Audiobook identifier deduplication is deferred.** v1 does not merge by ASIN or ISBN. A future local-wins policy may use those fields after collision and edition semantics are specified.
+21. **Duplicate visibility is consumer-side and peer-specific.** The shared Prisma predicate admits a linked federated row when its owning peer has `showDedupedCopies=true`; the shared SQL predicate uses the equivalent bounded peer `EXISTS`. The default false value preserves prior suppression, including deployments with no federated rows.
+22. **Host caps are nullable and enforced after peer authentication.** `maxConcurrentStreams` uses an atomic Redis `INCR`, a refreshed 60-second crash-recovery TTL, and an idempotent TTL-guarded decrement on response finish, close, request abort, and handler completion. Exhaustion returns typed `429` plus `Retry-After`. `maxStreamKbps` inserts a 100-millisecond byte-window pacing Transform in both track and audiobook pipelines. Null values bypass coordination and pacing.
+23. **Manual dedup arbitration is pinned.** Link and unlink set `dedupPinned=true`; federation sync and scanner reconciliation use atomic `dedupPinned=false` update guards. Reset clears the pin and immediately runs the standard strongest-first matcher, recording a federation mapping when a local winner exists.
 
 ## Review disposition appendix
 
@@ -65,6 +68,7 @@ restart.
 | F11 | First-class federation | Complete | Audio features sync additively; intelligence and Subsonic use visible, dedup-suppressed federated rows; LRCLIB metadata lookup supports federated tracks; complete peer streams are cached with single-flight fills and hash-change/peer-delete invalidation. |
 | F12 | Sync throughput + bidirectional peers | Complete | Page-batched existence/dedup reads, touched-artist incremental counts, resumable full sync with convergent cleanup, split inbound/outbound status, manual and reciprocal `BOTH` linking. |
 | F13 | Podcast and audiobook media types | Complete | Additive manifest compatibility; podcast catalog listings and native subscription state; full audiobook mirrors, cleanup/tombstones/resume, provenance, local progress, and Range/cover double proxies. Closes #477. |
+| F14 | Per-peer settings and dedup arbitration | Complete | Peer-specific duplicate visibility, nullable distributed host stream concurrency and bandwidth caps, admin settings and keyset arbitration APIs, durable manual pins honored by sync/scanner dedup, and UUID-backed federated audiobook IDs. Closes #476. |
 | F9 | Docs + contracts | Complete | Architecture, data model, environment, security, feature index, route/service indexes, OpenSubsonic contract, changelog, and design status synchronized to F1–F8 |
 | F10 | Release review + sweep + PR | Pending | Adversarial review, chunked regression sweep, all enforcement gates, and PR publication |
 

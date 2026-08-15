@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import type { LibraryOriginFilter } from "./librarySorting";
 
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 
@@ -10,22 +11,37 @@ export const LOCAL_TRACK_SQL = Prisma.sql`t.origin = ${"LOCAL"}::"TrackOrigin"`;
 
 type TrackSqlAlias = "t" | "candidate_track" | "source_track";
 
+function federatedBrowseSql(trackAlias: Prisma.Sql): Prisma.Sql {
+    return Prisma.sql`${trackAlias}.origin = ${"FEDERATED"}::"TrackOrigin"
+        AND (
+            ${trackAlias}."dedupOfTrackId" IS NULL
+            OR EXISTS (
+                SELECT 1 FROM "FederationPeer" dedup_peer
+                WHERE dedup_peer.id = ${trackAlias}."peerId"
+                  AND dedup_peer."showDedupedCopies" = true
+            )
+            OR EXISTS (
+                SELECT 1 FROM "Track" dedup_winner
+                WHERE dedup_winner.id = ${trackAlias}."dedupOfTrackId"
+                  AND dedup_winner."removedAt" IS NOT NULL
+            )
+        )`;
+}
+
 /** Builds the browse origin/dedup predicate for a code-owned Track alias. */
-export function trackBrowseSql(alias: TrackSqlAlias = "t"): Prisma.Sql {
+export function trackBrowseSql(
+    alias: TrackSqlAlias = "t",
+    origin: LibraryOriginFilter = "all",
+): Prisma.Sql {
     const trackAlias = Prisma.raw(alias);
+    const federatedVisible = federatedBrowseSql(trackAlias);
+    if (origin === "local") {
+        return Prisma.sql`${trackAlias}.origin = ${"LOCAL"}::"TrackOrigin"`;
+    }
+    if (origin === "peers") return federatedVisible;
     return Prisma.sql`(
         ${trackAlias}.origin = ${"LOCAL"}::"TrackOrigin"
-        OR (
-            ${trackAlias}.origin = ${"FEDERATED"}::"TrackOrigin"
-            AND (
-                ${trackAlias}."dedupOfTrackId" IS NULL
-                OR EXISTS (
-                    SELECT 1 FROM "Track" dedup_winner
-                    WHERE dedup_winner.id = ${trackAlias}."dedupOfTrackId"
-                      AND dedup_winner."removedAt" IS NOT NULL
-                )
-            )
-        )
+        OR (${federatedVisible})
     )`;
 }
 

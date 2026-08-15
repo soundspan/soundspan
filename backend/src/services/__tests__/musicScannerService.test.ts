@@ -350,12 +350,13 @@ describe("MusicScannerService.scanLibrary", () => {
             return [];
         });
         mockPrisma.track.upsert.mockResolvedValue(local);
+        mockPrisma.track.updateMany.mockResolvedValueOnce({ count: 1 });
         mockComputeAudioStreamHash.mockResolvedValue(audioHash);
 
         await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.track.update).toHaveBeenCalledWith({
-            where: { id: "federated-1" },
+        expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
+            where: { id: "federated-1", dedupPinned: false },
             data: { dedupOfTrackId: "local-new" },
         });
         expect(mockCreateMapping).toHaveBeenCalledWith({
@@ -363,6 +364,53 @@ describe("MusicScannerService.scanLibrary", () => {
             confidence: 1,
             source: "federation",
         });
+    });
+
+    it("does not rewrite a pinned federated duplicate during reconciliation", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
+        const audioHash = "sha256:" + "ad".repeat(32);
+        const local = identityTrack("local-new", "Artist/Track.flac", {
+            audioHash,
+        });
+        const pinned = {
+            ...identityTrack("federated-pinned", "unused", { audioHash }),
+            filePath: null,
+            origin: "FEDERATED",
+            dedupPinned: true,
+        };
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Artist/Track.flac",
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (
+                args.where?.filePath?.in &&
+                args.where?.origin === "LOCAL" &&
+                args.where?.removedAt === null
+            ) {
+                return [local];
+            }
+            if (args.where?.filePath?.in) return [];
+            if (args.where?.origin === "FEDERATED") return [pinned];
+            return [];
+        });
+        mockPrisma.track.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ dedupPinned: false }),
+            }),
+        );
+        expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
+            where: { id: "federated-pinned", dedupPinned: false },
+            data: { dedupOfTrackId: "local-new" },
+        });
+        expect(mockCreateMapping).not.toHaveBeenCalled();
     });
 
     it("does not query federated candidates when federation is disabled", async () => {

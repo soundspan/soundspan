@@ -11,6 +11,11 @@ const service = {
     createFederationPairingCode: jest.fn(),
     linkConsumerFederationPeer: jest.fn(),
     pairAndLinkConsumerFederationPeer: jest.fn(),
+    updateFederationPeerSettings: jest.fn(),
+};
+const dedupService = {
+    listFederationPeerDedup: jest.fn(),
+    arbitrateFederationTrackDedup: jest.fn(),
 };
 
 const enqueueFederationSyncNow = jest.fn();
@@ -26,6 +31,7 @@ jest.mock("../../services/federationPeers", () => ({
 jest.mock("../../workers/federationJobs", () => ({
     enqueueFederationSyncNow,
 }));
+jest.mock("../../services/federationDedupArbitration", () => dedupService);
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: Request, res: Response, next: NextFunction) => {
         if (req.headers.authorization !== "Bearer admin") {
@@ -74,6 +80,23 @@ describe("federation admin routes", () => {
         });
         service.pairAndLinkConsumerFederationPeer.mockResolvedValue({
             peer: { id: "paired-peer-1", name: "Paired Library" },
+        });
+        service.updateFederationPeerSettings.mockResolvedValue({
+            id: "peer-1",
+            showDedupedCopies: true,
+            maxConcurrentStreams: 4,
+            maxStreamKbps: 320,
+        });
+        dedupService.listFederationPeerDedup.mockResolvedValue({
+            items: [],
+            nextCursor: null,
+        });
+        dedupService.arbitrateFederationTrackDedup.mockResolvedValue({
+            federatedTrack: { id: "fed-track-1" },
+            localTrack: { id: "local-track-1" },
+            tier: "audioHash",
+            confidence: 1,
+            pinned: true,
         });
         enqueueFederationSyncNow.mockResolvedValue(undefined);
     });
@@ -371,5 +394,106 @@ describe("federation admin routes", () => {
         expect(response.status).toBe(202);
         expect(response.body).toEqual({ queued: true });
         expect(enqueueFederationSyncNow).toHaveBeenCalledWith("peer-1");
+    });
+
+    it("patches bounded peer settings and accepts explicit null caps", async () => {
+        const response = await request(app)
+            .patch("/api/federation/admin/peers/peer-1/settings")
+            .set("Authorization", "Bearer admin")
+            .send({
+                showDedupedCopies: true,
+                maxConcurrentStreams: null,
+                maxStreamKbps: 320,
+            });
+
+        expect(response.status).toBe(200);
+        expect(service.updateFederationPeerSettings).toHaveBeenCalledWith(
+            "peer-1",
+            {
+                showDedupedCopies: true,
+                maxConcurrentStreams: null,
+                maxStreamKbps: 320,
+            },
+        );
+        expect(response.body).toEqual(
+            expect.objectContaining({ id: "peer-1", showDedupedCopies: true }),
+        );
+    });
+
+    it.each([
+        { maxConcurrentStreams: 0 },
+        { maxConcurrentStreams: 65 },
+        { maxStreamKbps: 63 },
+        { maxStreamKbps: 100_001 },
+        { showDedupedCopies: "yes" },
+        { maxConcurrentStreams: 2, unexpected: true },
+    ])("rejects invalid peer settings %#", async (body) => {
+        const response = await request(app)
+            .patch("/api/federation/admin/peers/peer-1/settings")
+            .set("Authorization", "Bearer admin")
+            .send(body);
+
+        expect(response.status).toBe(400);
+    });
+
+    it("keyset-pages dedup arbitration rows for one peer", async () => {
+        dedupService.listFederationPeerDedup.mockResolvedValueOnce({
+            items: [{ federatedTrack: { id: "fed-track-2" }, pinned: false }],
+            nextCursor: "fed-track-2",
+        });
+        const response = await request(app)
+            .get(
+                "/api/federation/admin/peers/peer-1/dedup?cursor=fed-track-1&limit=25",
+            )
+            .set("Authorization", "Bearer admin");
+
+        expect(response.status).toBe(200);
+        expect(dedupService.listFederationPeerDedup).toHaveBeenCalledWith({
+            peerId: "peer-1",
+            cursor: "fed-track-1",
+            limit: 25,
+        });
+        expect(response.body.nextCursor).toBe("fed-track-2");
+    });
+
+    it.each([
+        [{ action: "link", localTrackId: "local-track-1" }],
+        [{ action: "unlink" }],
+        [{ action: "reset" }],
+    ])("applies a validated dedup arbitration action %#", async (body) => {
+        const response = await request(app)
+            .post("/api/federation/admin/tracks/fed-track-1/dedup")
+            .set("Authorization", "Bearer admin")
+            .send(body);
+
+        expect(response.status).toBe(200);
+        expect(dedupService.arbitrateFederationTrackDedup).toHaveBeenCalledWith(
+            "fed-track-1",
+            body,
+        );
+    });
+
+    it("uses uniform not-found responses for hidden dedup resources", async () => {
+        service.updateFederationPeerSettings.mockResolvedValueOnce(null);
+        dedupService.listFederationPeerDedup.mockResolvedValueOnce(null);
+        dedupService.arbitrateFederationTrackDedup.mockResolvedValueOnce(null);
+
+        const settings = await request(app)
+            .patch("/api/federation/admin/peers/missing/settings")
+            .set("Authorization", "Bearer admin")
+            .send({ showDedupedCopies: true });
+        const list = await request(app)
+            .get("/api/federation/admin/peers/missing/dedup")
+            .set("Authorization", "Bearer admin");
+        const action = await request(app)
+            .post("/api/federation/admin/tracks/missing/dedup")
+            .set("Authorization", "Bearer admin")
+            .send({ action: "link", localTrackId: "also-missing" });
+
+        expect(settings.body).toEqual({ error: "Federation peer not found" });
+        expect(list.body).toEqual({ error: "Federation peer not found" });
+        expect(action.body).toEqual({
+            error: "Federation dedup resource not found",
+        });
     });
 });

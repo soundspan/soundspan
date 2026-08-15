@@ -66,6 +66,7 @@ const prisma = {
         findFirst: jest.fn(),
         upsert: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findMany: jest.fn(),
         deleteMany: jest.fn(),
     },
@@ -298,8 +299,12 @@ describe("federation sync processor", () => {
         prisma.album.deleteMany.mockResolvedValue({ count: 0 });
         prisma.track.findUnique.mockResolvedValue({ id: "fed-track-row" });
         prisma.track.findFirst.mockResolvedValue(null);
-        prisma.track.upsert.mockResolvedValue({ id: "fed-track-row" });
+        prisma.track.upsert.mockResolvedValue({
+            id: "fed-track-row",
+            dedupPinned: false,
+        });
         prisma.track.update.mockResolvedValue({});
+        prisma.track.updateMany.mockResolvedValue({ count: 1 });
         prisma.track.findMany.mockImplementation(async ({ where }) =>
             where?.peerId === "peer-1" && where?.remoteId
                 ? [
@@ -390,7 +395,9 @@ describe("federation sync processor", () => {
                     },
                 },
                 create: expect.objectContaining({
-                    id: expect.stringMatching(/^fed:[a-z0-9]+$/),
+                    id: expect.stringMatching(
+                        /^fed:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+                    ),
                     peerId: "peer-1",
                     remoteId: "remote-audiobook-1",
                     title: "Peer Audiobook",
@@ -1050,8 +1057,8 @@ describe("federation sync processor", () => {
 
             await processFederationSync(job());
 
-            expect(prisma.track.update).toHaveBeenCalledWith({
-                where: { id: "fed-track-row" },
+            expect(prisma.track.updateMany).toHaveBeenCalledWith({
+                where: { id: "fed-track-row", dedupPinned: false },
                 data: { dedupOfTrackId: "local-track-1" },
             });
             expect(createMapping).toHaveBeenCalledWith({
@@ -1061,6 +1068,31 @@ describe("federation sync processor", () => {
             });
         },
     );
+
+    it("preserves a pinned arbitration decision through a full resync", async () => {
+        prisma.track.upsert.mockResolvedValueOnce({
+            id: "fed-track-row",
+            dedupPinned: true,
+        });
+        prisma.track.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        await processFederationSync(job());
+
+        expect(prisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.not.objectContaining({
+                    dedupPinned: expect.anything(),
+                    dedupOfTrackId: expect.anything(),
+                }),
+                select: { id: true, dedupPinned: true },
+            }),
+        );
+        expect(prisma.track.updateMany).toHaveBeenCalledWith({
+            where: { id: "fed-track-row", dedupPinned: false },
+            data: { dedupOfTrackId: null },
+        });
+        expect(createMapping).not.toHaveBeenCalled();
+    });
 
     it("batches one mixed page and preserves the lowest-id dedup tie winner", async () => {
         const secondTrack = {
@@ -1131,7 +1163,7 @@ describe("federation sync processor", () => {
             ),
         ).toHaveLength(1);
         expect(
-            prisma.track.update.mock.calls.filter(
+            prisma.track.updateMany.mock.calls.filter(
                 ([args]) => args.data.dedupOfTrackId === "local-a",
             ),
         ).toHaveLength(2);

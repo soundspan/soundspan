@@ -40,6 +40,9 @@ const publicPeerSelect = {
     lastSeenAt: true,
     lastSyncCursor: true,
     catalogEpoch: true,
+    showDedupedCopies: true,
+    maxConcurrentStreams: true,
+    maxStreamKbps: true,
     createdAt: true,
     updatedAt: true,
 } satisfies Prisma.FederationPeerSelect;
@@ -55,6 +58,13 @@ export interface CreateHostPeerInput {
     createdById: string;
     scopes: FederationScope[];
     baseUrl?: string;
+}
+
+/** Validated administrator-controlled peer behavior settings. */
+export interface FederationPeerSettingsInput {
+    showDedupedCopies?: boolean;
+    maxConcurrentStreams?: number | null;
+    maxStreamKbps?: number | null;
 }
 
 /** Validated public pairing request values. */
@@ -187,6 +197,22 @@ export async function listFederationPeers(): Promise<PublicFederationPeer[]> {
         select: publicPeerSelect,
         orderBy: { createdAt: "desc" },
         take: PEER_LIST_LIMIT,
+    });
+}
+
+/** Updates one peer's visibility and host stream limits without exposing credentials. */
+export async function updateFederationPeerSettings(
+    peerId: string,
+    settings: FederationPeerSettingsInput,
+): Promise<PublicFederationPeer | null> {
+    const updated = await prisma.federationPeer.updateMany({
+        where: { id: peerId },
+        data: settings,
+    });
+    if (updated.count !== 1) return null;
+    return prisma.federationPeer.findUnique({
+        where: { id: peerId },
+        select: publicPeerSelect,
     });
 }
 

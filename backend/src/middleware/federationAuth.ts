@@ -19,6 +19,8 @@ declare global {
                 id: string;
                 name: string;
                 scopes: string[];
+                maxConcurrentStreams: number | null;
+                maxStreamKbps: number | null;
             };
         }
     }
@@ -31,6 +33,8 @@ type AuthPeer = {
     scopes: FederationScope[];
     inboundStatus: string | null;
     lastSeenAt: Date | null;
+    maxConcurrentStreams: number | null;
+    maxStreamKbps: number | null;
 };
 
 function bearerToken(req: Request): string | null {
@@ -50,6 +54,8 @@ async function resolvePeer(token: string): Promise<AuthPeer | null> {
             scopes: true,
             inboundStatus: true,
             lastSeenAt: true,
+            maxConcurrentStreams: true,
+            maxStreamKbps: true,
         },
     });
     if (!peer) return null;
@@ -102,6 +108,8 @@ export function requireFederationPeer(
             id: peer.id,
             name: peer.name,
             scopes: peer.scopes,
+            maxConcurrentStreams: peer.maxConcurrentStreams,
+            maxStreamKbps: peer.maxStreamKbps,
         };
         await updateLastSeen(peer, new Date());
         return next();

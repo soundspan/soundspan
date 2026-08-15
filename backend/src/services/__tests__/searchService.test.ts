@@ -281,6 +281,11 @@ describe("search service", () => {
                                         OR: [
                                             { dedupOfTrackId: null },
                                             {
+                                                federationPeer: {
+                                                    showDedupedCopies: true,
+                                                },
+                                            },
+                                            {
                                                 dedupOfTrack: {
                                                     removedAt: { not: null },
                                                 },
@@ -951,6 +956,11 @@ describe("search service", () => {
                                                                 null,
                                                         },
                                                         {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
+                                                        },
+                                                        {
                                                             dedupOfTrack: {
                                                                 removedAt: {
                                                                     not: null,
@@ -1003,6 +1013,11 @@ describe("search service", () => {
                                                         {
                                                             dedupOfTrackId:
                                                                 null,
+                                                        },
+                                                        {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
                                                         },
                                                         {
                                                             dedupOfTrack: {
