@@ -151,7 +151,7 @@ describe("MoodBucketService", () => {
             where: {
                 mood: VALID_MOODS[0],
                 score: { gte: 0.5 },
-                track: { removedAt: null },
+                track: { removedAt: null, origin: "LOCAL" },
             },
         });
     });

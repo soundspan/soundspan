@@ -58,6 +58,7 @@ export function WithSettings<TBase extends ApiClientConstructor>(Base: TBase) {
             audioAnalysis: boolean;
             discovery: boolean;
             autoPlaylists: boolean;
+            federation: boolean;
         }> {
             return this.request<{
                 musicCNN: boolean;
@@ -65,6 +66,7 @@ export function WithSettings<TBase extends ApiClientConstructor>(Base: TBase) {
                 audioAnalysis: boolean;
                 discovery: boolean;
                 autoPlaylists: boolean;
+                federation: boolean;
             }>("/system/features");
         }
 

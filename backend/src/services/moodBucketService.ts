@@ -7,7 +7,10 @@
  */
 
 import { logger } from "../utils/logger";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 import { prisma, Prisma } from "../utils/db";
 import { applyArtistCap } from "./programmaticPlaylistArtistCap";
 import { sampleUniform } from "./artistSlotAllocation";
@@ -248,7 +251,7 @@ export class MoodBucketService {
             "assignTrackToMoods.track.findUnique",
             () =>
                 prisma.track.findUnique({
-                    where: { id: trackId },
+                    where: { id: trackId, ...LOCAL_TRACK_WHERE },
                     select: {
                         id: true,
                         analysisStatus: true,
@@ -515,7 +518,7 @@ export class MoodBucketService {
                 where: {
                     mood,
                     score: { gte: MOOD_BUCKET_MIN_SCORE },
-                    track: { removedAt: null },
+                    track: { removedAt: null, ...LOCAL_TRACK_WHERE },
                 },
             });
             const config = MOOD_CONFIG[mood];
@@ -563,7 +566,7 @@ export class MoodBucketService {
             where: {
                 mood,
                 score: { gte: MOOD_BUCKET_MIN_SCORE },
-                track: TRACK_VISIBLE_WHERE,
+                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
             },
             select: { trackId: true, score: true },
             orderBy: { score: "desc" },
@@ -584,7 +587,11 @@ export class MoodBucketService {
 
         // Load the entire candidate pool with artist IDs so diversity caps can be enforced.
         const tracks = await prisma.track.findMany({
-            where: { ...TRACK_VISIBLE_WHERE, id: { in: pooledIds } },
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
+                id: { in: pooledIds },
+            },
             select: {
                 id: true,
                 album: {
@@ -750,7 +757,10 @@ export class MoodBucketService {
 
         while (true) {
             const tracks = await prisma.track.findMany({
-                where: { analysisStatus: "completed" },
+                where: {
+                    analysisStatus: "completed",
+                    ...LOCAL_TRACK_WHERE,
+                },
                 select: {
                     id: true,
                     analysisMode: true,

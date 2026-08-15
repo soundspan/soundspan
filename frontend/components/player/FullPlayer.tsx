@@ -41,6 +41,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { APP_VERSION } from "@/lib/version";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 /**
  * FullPlayer - UI-only component for desktop bottom player
@@ -445,6 +446,13 @@ export function FullPlayer() {
                             )}
                             {/* Status badges */}
                             <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                {currentTrack?.source === "federated" &&
+                                    currentTrack.peer && (
+                                        <PeerBadge
+                                            peerName={currentTrack.peer.name}
+                                            online={currentTrack.peer.online}
+                                        />
+                                    )}
                                 {/* Vibe match score when in vibe mode */}
                                 {vibeMode && vibeMatchScore !== null && (
                                     <span

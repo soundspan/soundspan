@@ -269,6 +269,37 @@ describe("search route runtime behavior", () => {
         expect(res.statusCode).toBe(200);
     });
 
+    it("passes a validated peers source filter to the search service", async () => {
+        const req = {
+            query: { q: "shared", type: "tracks", source: "peers" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchByType).toHaveBeenCalledWith({
+            query: "shared",
+            type: "tracks",
+            limit: 20,
+            genre: undefined,
+            source: "peers",
+        });
+        expect(res.statusCode).toBe(200);
+    });
+
+    it("rejects an unknown search source before querying", async () => {
+        const req = {
+            query: { q: "shared", type: "tracks", source: "internet" },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(mockSearchByType).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid search query" });
+    });
+
     it("returns 500 when search service throws", async () => {
         mockSearchByType.mockRejectedValueOnce(new Error("search down"));
         const req = {

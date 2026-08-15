@@ -8,6 +8,7 @@ import { formatTime } from "@/utils/formatTime";
 import { formatNumber } from "@/utils/formatNumber";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { TidalBadge } from "@/components/ui/TidalBadge";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 import {
     TrackList as SharedTrackList,
     PreviewBadge,
@@ -59,6 +60,12 @@ export const TrackList = memo(function TrackList({
             artistName: track.artist?.name ?? album.artist?.name ?? "",
             duration: track.duration,
             coverArtUrl: null, // Album page doesn't show per-row cover art
+            isPlayable:
+                track.source !== "federated" || track.peer?.online === true,
+            unplayableReason:
+                track.source === "federated" && track.peer?.online === false
+                    ? "peer_offline"
+                    : undefined,
         }),
         [album.artist?.name],
     );
@@ -68,6 +75,7 @@ export const TrackList = memo(function TrackList({
             const isYouTubeTrack = track.streamSource === "youtube";
             const isTidalTrack =
                 track.streamSource === "tidal" && !!track.tidalTrackId;
+            const isFederated = track.source === "federated";
             const hasLocalFile =
                 typeof track.filePath === "string" &&
                 track.filePath.trim().length > 0;
@@ -76,7 +84,9 @@ export const TrackList = memo(function TrackList({
                 !hasLocalFile &&
                 !isTidalTrack &&
                 !isYouTubeTrack;
-            const isPlayable = isOwned || isTidalTrack || isYouTubeTrack;
+            const isPlayable = isFederated
+                ? track.peer?.online === true
+                : isOwned || isTidalTrack || isYouTubeTrack;
             const isPreviewOnly = !isPlayable && !isAwaitingProviderMatch;
 
             if (isAwaitingProviderMatch) return;
@@ -96,6 +106,7 @@ export const TrackList = memo(function TrackList({
             const isYouTubeTrack = track.streamSource === "youtube";
             const isTidalTrack =
                 track.streamSource === "tidal" && !!track.tidalTrackId;
+            const isFederated = track.source === "federated";
             const hasLocalFile =
                 typeof track.filePath === "string" &&
                 track.filePath.trim().length > 0;
@@ -104,7 +115,9 @@ export const TrackList = memo(function TrackList({
                 !hasLocalFile &&
                 !isTidalTrack &&
                 !isYouTubeTrack;
-            const isPlayable = isOwned || isTidalTrack || isYouTubeTrack;
+            const isPlayable = isFederated
+                ? track.peer?.online === true
+                : isOwned || isTidalTrack || isYouTubeTrack;
             const isPreviewOnly = !isPlayable && !isAwaitingProviderMatch;
             const isPreviewPlaying =
                 previewTrack === track.id && previewPlaying;
@@ -135,6 +148,12 @@ export const TrackList = memo(function TrackList({
                     <>
                         {isTidalTrack && <TidalBadge />}
                         {isYouTubeTrack && <YouTubeBadge />}
+                        {isFederated && track.peer && (
+                            <PeerBadge
+                                peerName={track.peer.name}
+                                online={track.peer.online}
+                            />
+                        )}
                         {isAwaitingProviderMatch && <LoadingBadge />}
                         {isPreviewOnly && <PreviewBadge />}
                     </>
@@ -223,6 +242,7 @@ export const TrackList = memo(function TrackList({
                 rowClassName: cn(
                     state.isPlaying && "bg-surface-hover border-l-2",
                     isPreviewOnly && "opacity-70 hover:opacity-90",
+                    isFederated && !track.peer?.online && "opacity-50",
                 ),
             };
         },

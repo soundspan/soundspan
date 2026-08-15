@@ -43,6 +43,7 @@ import { formatTime } from "@/utils/formatTime";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 /**
  * Renders the QueuePage component.
@@ -98,6 +99,15 @@ export default function QueuePage() {
     };
 
     const handlePlayFromQueue = (index: number) => {
+        const queueTrack = queue[index];
+        if (
+            !isEpisodeQueueItem(queueTrack) &&
+            queueTrack.source === "federated" &&
+            queueTrack.peer?.online === false
+        ) {
+            toast.info("This peer is offline");
+            return;
+        }
         const availability = isInGroup
             ? trackAvailability.get(index)
             : undefined;
@@ -363,6 +373,17 @@ export default function QueuePage() {
                                             currentTrack.streamSource,
                                         ) === "youtube" ? (
                                             <YouTubeBadge />
+                                        ) : null}
+                                        {currentTrack.source === "federated" &&
+                                        currentTrack.peer ? (
+                                            <PeerBadge
+                                                peerName={
+                                                    currentTrack.peer.name
+                                                }
+                                                online={
+                                                    currentTrack.peer.online
+                                                }
+                                            />
                                         ) : null}
                                     </div>
                                     <p className="text-xs text-gray-400 truncate">
@@ -759,7 +780,9 @@ function NextTrackRow({
     const availability = isInGroup
         ? trackAvailability.get(queueIndex)
         : undefined;
-    const isUnavailable = availability?.available === false;
+    const isUnavailable =
+        availability?.available === false ||
+        (track.source === "federated" && track.peer?.online === false);
     const resolvedSource = resolveQueueSource(queueIndex, track.streamSource);
 
     return (
@@ -810,6 +833,12 @@ function NextTrackRow({
                     ) : null}
                     {isInGroup && resolvedSource === "youtube" ? (
                         <YouTubeBadge />
+                    ) : null}
+                    {track.source === "federated" && track.peer ? (
+                        <PeerBadge
+                            peerName={track.peer.name}
+                            online={track.peer.online}
+                        />
                     ) : null}
                 </div>
                 {track.album?.title && (
@@ -901,7 +930,9 @@ function PreviousTrackRow({
     trackAvailability: Map<number, AvailabilityItem>;
 }) {
     const availability = isInGroup ? trackAvailability.get(idx) : undefined;
-    const isUnavailable = availability?.available === false;
+    const isUnavailable =
+        availability?.available === false ||
+        (track.source === "federated" && track.peer?.online === false);
     const resolvedSource = resolveQueueSource(idx, track.streamSource);
 
     return (
@@ -942,6 +973,12 @@ function PreviousTrackRow({
                     ) : null}
                     {isInGroup && resolvedSource === "youtube" ? (
                         <YouTubeBadge />
+                    ) : null}
+                    {track.source === "federated" && track.peer ? (
+                        <PeerBadge
+                            peerName={track.peer.name}
+                            online={track.peer.online}
+                        />
                     ) : null}
                 </div>
                 {track.album?.title && (

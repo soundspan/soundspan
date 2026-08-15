@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
@@ -10,8 +10,9 @@ import { useSystemSettings } from "@/features/settings/hooks/useSystemSettings";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { InlineStatus, useInlineStatus } from "@/components/ui/InlineStatus";
 import { SettingsLayout, SidebarItem } from "@/features/settings/components/ui";
+import { useFeatures } from "@/lib/features-context";
 
-const sidebarItems: SidebarItem[] = [
+const baseSidebarItems: SidebarItem[] = [
     { id: "download-preferences", label: "Download Preferences" },
     { id: "download-services", label: "Download Services" },
     { id: "audiobookshelf", label: "Media Servers" },
@@ -112,12 +113,21 @@ const UserManagementSection = dynamic(
     { loading: renderSectionFallback },
 );
 
+const FederationSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/FederationSection").then(
+            (mod) => mod.FederationSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
 const logger = createFrontendLogger("Admin.Page");
 
 /**
  * Renders the AdminPage component.
  */
 export default function AdminPage() {
+    const { federation } = useFeatures();
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     const router = useRouter();
     const [isSaving, setIsSaving] = useState(false);
@@ -126,6 +136,16 @@ export default function AdminPage() {
         Record<string, boolean>
     >({});
     const saveStatus = useInlineStatus();
+    const sidebarItems = useMemo(
+        () =>
+            federation
+                ? [
+                      ...baseSidebarItems,
+                      { id: "federation", label: "Federation" },
+                  ]
+                : baseSidebarItems,
+        [federation],
+    );
 
     const isAdmin = user?.role === "admin";
 
@@ -299,6 +319,8 @@ export default function AdminPage() {
                 />
 
                 <UserManagementSection />
+
+                {federation && <FederationSection />}
 
                 {/* Save Button - Fixed at bottom */}
                 <div className="sticky bottom-0 pt-8 pb-8">

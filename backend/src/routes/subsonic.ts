@@ -46,12 +46,13 @@ const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 const LIBRARY_LOCATION = "LIBRARY";
 const LIBRARY_TRACK_WHERE = {
     removedAt: null,
+    origin: "LOCAL",
     album: { location: LIBRARY_LOCATION },
 } satisfies Prisma.TrackWhereInput;
 
 const LIBRARY_ALBUM_WHERE = {
     location: LIBRARY_LOCATION,
-    tracks: { some: { removedAt: null } },
+    tracks: { some: { removedAt: null, origin: "LOCAL" } },
 } satisfies Prisma.AlbumWhereInput;
 const SUBSONIC_COVER_CACHE_CONTROL = "public, max-age=86400";
 const DEFAULT_SUBSONIC_AVATAR_PNG = Buffer.from(
@@ -257,7 +258,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
         },
     },
     tracks: {
-        where: { removedAt: null },
+        where: { removedAt: null, origin: "LOCAL" },
         select: {
             duration: true,
         },
@@ -331,6 +332,7 @@ async function buildAlbumPlayStats(
             userId,
             track: {
                 removedAt: null,
+                origin: "LOCAL",
                 album: {
                     location: LIBRARY_LOCATION,
                 },
@@ -1128,14 +1130,16 @@ export async function handleGetArtist(
                         genres: true,
                         userGenres: true,
                         tracks: {
-                            where: { removedAt: null },
+                            where: { removedAt: null, origin: "LOCAL" },
                             select: {
                                 duration: true,
                             },
                         },
                         _count: {
                             select: {
-                                tracks: { where: { removedAt: null } },
+                                tracks: {
+                                    where: { removedAt: null, origin: "LOCAL" },
+                                },
                             },
                         },
                     },
@@ -1248,7 +1252,7 @@ export async function handleGetAlbum(
                     },
                 },
                 tracks: {
-                    where: { removedAt: null },
+                    where: { removedAt: null, origin: "LOCAL" },
                     select: {
                         id: true,
                         title: true,
@@ -1539,14 +1543,16 @@ export async function handleSearch3(
                         },
                     },
                     tracks: {
-                        where: { removedAt: null },
+                        where: { removedAt: null, origin: "LOCAL" },
                         select: {
                             duration: true,
                         },
                     },
                     _count: {
                         select: {
-                            tracks: { where: { removedAt: null } },
+                            tracks: {
+                                where: { removedAt: null, origin: "LOCAL" },
+                            },
                         },
                     },
                 },
@@ -2467,6 +2473,7 @@ export async function handleGetTopSongs(
             where: {
                 track: {
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         artistId: artist.id,
                         location: LIBRARY_LOCATION,
@@ -2672,14 +2679,16 @@ async function handleSearchLike(
                         },
                     },
                     tracks: {
-                        where: { removedAt: null },
+                        where: { removedAt: null, origin: "LOCAL" },
                         select: {
                             duration: true,
                         },
                     },
                     _count: {
                         select: {
-                            tracks: { where: { removedAt: null } },
+                            tracks: {
+                                where: { removedAt: null, origin: "LOCAL" },
+                            },
                         },
                     },
                 },
@@ -2990,6 +2999,7 @@ async function handleGetAlbumListLike(
                 where.tracks = {
                     some: {
                         removedAt: null,
+                        origin: "LOCAL",
                         trackGenres: {
                             some: {
                                 genre: {
@@ -3113,7 +3123,7 @@ async function getArtistMusicDirectory(
                     genres: true,
                     userGenres: true,
                     tracks: {
-                        where: { removedAt: null },
+                        where: { removedAt: null, origin: "LOCAL" },
                         select: {
                             duration: true,
                         },
@@ -3176,7 +3186,7 @@ async function getAlbumMusicDirectory(
                 },
             },
             tracks: {
-                where: { removedAt: null },
+                where: { removedAt: null, origin: "LOCAL" },
                 select: {
                     id: true,
                     title: true,
@@ -3328,6 +3338,7 @@ export async function handleGetGenres(
                     some: {
                         track: {
                             removedAt: null,
+                            origin: "LOCAL",
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -3341,6 +3352,7 @@ export async function handleGetGenres(
                     where: {
                         track: {
                             removedAt: null,
+                            origin: "LOCAL",
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -4386,6 +4398,7 @@ async function resolveCoverArtUrl(
                     where: {
                         track: {
                             removedAt: null,
+                            origin: "LOCAL",
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -4467,6 +4480,7 @@ async function resolveCoverArtUrl(
                     where: {
                         track: {
                             removedAt: null,
+                            origin: "LOCAL",
                             album: {
                                 location: LIBRARY_LOCATION,
                             },
@@ -5215,7 +5229,7 @@ async function getPlaylistDurations(
         where: {
             playlistId: { in: nonEmptyIds },
             trackId: { not: null },
-            track: { removedAt: null },
+            track: { removedAt: null, origin: "LOCAL" },
         },
         select: {
             playlistId: true,
@@ -5243,6 +5257,7 @@ async function getPlaylistCoverFlags(
             playlistId: { in: playlistIds },
             track: {
                 removedAt: null,
+                origin: "LOCAL",
                 album: {
                     AND: [
                         { coverUrl: { not: null } },
@@ -5281,7 +5296,12 @@ export async function handleGetPlaylists(
                             where: {
                                 OR: [
                                     { trackId: null },
-                                    { track: { removedAt: null } },
+                                    {
+                                        track: {
+                                            removedAt: null,
+                                            origin: "LOCAL",
+                                        },
+                                    },
                                 ],
                             },
                         },
@@ -5363,7 +5383,7 @@ export async function handleGetPlaylist(
             },
             include: {
                 items: {
-                    where: { track: { removedAt: null } },
+                    where: { track: { removedAt: null, origin: "LOCAL" } },
                     orderBy: { sort: "asc" },
                     select: {
                         track: {
@@ -6371,6 +6391,7 @@ async function buildStarredPayload(userId: string): Promise<{
             userId,
             track: {
                 removedAt: null,
+                origin: "LOCAL",
                 album: {
                     location: LIBRARY_LOCATION,
                 },

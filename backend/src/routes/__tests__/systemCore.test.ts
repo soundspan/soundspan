@@ -50,6 +50,7 @@ jest.mock("../../config", () => ({
             audioAnalysis: true,
             discovery: false,
             autoPlaylists: true,
+            federation: true,
         },
     },
 }));
@@ -98,6 +99,7 @@ describe("system routes integration", () => {
             audioAnalysis: true,
             discovery: false,
             autoPlaylists: true,
+            federation: true,
         });
         expect(mockGetFeatures).toHaveBeenCalledTimes(1);
     });
@@ -117,6 +119,7 @@ describe("system routes integration", () => {
             audioAnalysis: true,
             discovery: false,
             autoPlaylists: true,
+            federation: true,
         });
     });
 

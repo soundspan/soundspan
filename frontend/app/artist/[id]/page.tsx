@@ -212,6 +212,8 @@ export default function ArtistPage() {
         },
         duration: t.duration,
         filePath: t.filePath,
+        source: t.source,
+        peer: t.peer,
         ...(t.streamSource === "tidal" && {
             streamSource: "tidal" as const,
             tidalTrackId: t.tidalTrackId,

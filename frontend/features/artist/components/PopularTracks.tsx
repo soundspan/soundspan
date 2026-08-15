@@ -8,6 +8,7 @@ import { formatTime } from "@/utils/formatTime";
 import { formatNumber } from "@/utils/formatNumber";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 import { TrackList, LoadingBadge } from "@/components/track";
 import type { TrackRowItem, TrackRowSlots, RowState } from "@/components/track";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
@@ -38,6 +39,11 @@ function toRowItem(track: Track): TrackRowItem {
         coverArtUrl: track.album?.coverArt
             ? api.getCoverArtUrl(track.album.coverArt, 80)
             : null,
+        isPlayable: track.source !== "federated" || track.peer?.online === true,
+        unplayableReason:
+            track.source === "federated" && track.peer?.online === false
+                ? "peer_offline"
+                : undefined,
     };
 }
 
@@ -66,7 +72,11 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
             const hasLocalFile =
                 typeof track.filePath === "string" &&
                 track.filePath.trim().length > 0;
-            const isPlayable = hasLocalFile || isTidalTrack || isYtMusic;
+            const isPlayable =
+                (track.source === "federated" && track.peer?.online === true) ||
+                hasLocalFile ||
+                isTidalTrack ||
+                isYtMusic;
 
             if (!isPlayable) return;
             onPlayTrack(track);
@@ -83,7 +93,11 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
             const hasLocalFile =
                 typeof track.filePath === "string" &&
                 track.filePath.trim().length > 0;
-            const isPlayable = hasLocalFile || isTidalTrack || isYtMusic;
+            const isPlayable =
+                (track.source === "federated" && track.peer?.online === true) ||
+                hasLocalFile ||
+                isTidalTrack ||
+                isYtMusic;
             const isUnowned =
                 !track.album?.id ||
                 !track.album?.title ||
@@ -100,6 +114,12 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                     <>
                         {isTidalTrack && <TidalBadge />}
                         {isYtMusic && <YouTubeBadge />}
+                        {track.source === "federated" && track.peer && (
+                            <PeerBadge
+                                peerName={track.peer.name}
+                                online={track.peer.online}
+                            />
+                        )}
                         {isAwaitingProviderMatch && <LoadingBadge />}
                     </>
                 ),
@@ -153,6 +173,8 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         track.streamSource === "youtube"
                                             ? track.streamSource
                                             : undefined,
+                                    source: track.source,
+                                    peer: track.peer,
                                 }}
                             />
                         )}

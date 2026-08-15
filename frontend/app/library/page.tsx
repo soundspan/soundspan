@@ -10,6 +10,7 @@ import {
     useLibraryAlbumsQuery,
     useLibraryTracksQuery,
     LibraryFilter,
+    LibraryOrigin,
     SortOption,
 } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import { Shuffle, ListFilter } from "lucide-react";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { useAuth } from "@/lib/auth-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { useFeatures } from "@/lib/features-context";
 
 /**
  * Renders the LibraryPage component.
@@ -34,6 +36,7 @@ export default function LibraryPage() {
     const { playTracks, playNow } = useAudioControls();
     const { isInGroup } = useListenTogether();
     const { user } = useAuth();
+    const { federation } = useFeatures();
     const isAdmin = user?.role === "admin";
     const [canDeleteFromLibrary, setCanDeleteFromLibrary] = useState(false);
 
@@ -49,6 +52,7 @@ export default function LibraryPage() {
 
     // Filter state (owned = your library, discovery = discovery weekly artists)
     const [filter, setFilter] = useState<LibraryFilter>("owned");
+    const [origin, setOrigin] = useState<LibraryOrigin>("all");
 
     // Sort and pagination state
     const [sortBy, setSortBy] = useState<SortOption>("name");
@@ -105,6 +109,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "artists",
+        origin,
     });
 
     const albumsQuery = useLibraryAlbumsQuery({
@@ -113,6 +118,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "albums",
+        origin,
     });
 
     const tracksQuery = useLibraryTracksQuery({
@@ -120,6 +126,7 @@ export default function LibraryPage() {
         limit: itemsPerPage,
         page: currentPage,
         enabled: activeTab === "tracks",
+        origin,
     });
 
     // Get data based on active tab
@@ -215,7 +222,7 @@ export default function LibraryPage() {
     // Reset page when filter or sort changes
     useEffect(() => {
         setCurrentPage(1);
-    }, [filter, sortBy, itemsPerPage]);
+    }, [filter, origin, sortBy, itemsPerPage]);
 
     // Get total items and pages from pagination
     const totalItems = pagination.total;
@@ -263,6 +270,8 @@ export default function LibraryPage() {
                 title: track.album?.title || "Unknown Album",
                 coverArt: track.album?.coverArt,
             },
+            source: track.source,
+            peer: track.peer,
         }));
     }, []);
 
@@ -404,6 +413,34 @@ export default function LibraryPage() {
                         activeTab={activeTab}
                         onTabChange={changeTab}
                     />
+
+                    {federation && (
+                        <div
+                            className="flex items-center gap-1"
+                            aria-label="Library source"
+                        >
+                            {(["all", "local", "peers"] as const).map(
+                                (value) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        onClick={() => setOrigin(value)}
+                                        className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition-all ${
+                                            origin === value
+                                                ? "bg-brand text-black"
+                                                : "bg-white/10 text-white hover:bg-white/15"
+                                        }`}
+                                    >
+                                        {value === "all"
+                                            ? "All"
+                                            : value === "local"
+                                              ? "Local"
+                                              : "Peers"}
+                                    </button>
+                                ),
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-2">
                         {/* Shuffle Button */}

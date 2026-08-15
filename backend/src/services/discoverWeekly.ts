@@ -15,7 +15,10 @@ import { logger } from "../utils/logger";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 import axios from "axios";
 import { lastFmService } from "./lastfm";
 import { musicBrainzService } from "./musicbrainz";
@@ -960,6 +963,7 @@ export class DiscoverWeeklyService {
                 tracks = await discoverWeeklyPrisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
                         album: { rgMbid: criteria.albumMbid },
                     },
                     include: {
@@ -978,6 +982,7 @@ export class DiscoverWeeklyService {
                 tracks = await discoverWeeklyPrisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
                         album: {
                             title: {
                                 equals: criteria.albumTitle,
@@ -1149,6 +1154,7 @@ export class DiscoverWeeklyService {
             const libraryTracks = await discoverWeeklyPrisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
+                    ...LOCAL_TRACK_WHERE,
                     album: {
                         artist: {
                             OR: [
@@ -1227,6 +1233,7 @@ export class DiscoverWeeklyService {
                 await discoverWeeklyPrisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
                         album: {
                             location: "LIBRARY",
                             id: { notIn: Array.from(usedAlbumIds) }, // 1 per album
@@ -1616,6 +1623,7 @@ export class DiscoverWeeklyService {
                 tracks = await discoverWeeklyPrisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
                         album: { rgMbid: albumMbid },
                     },
                     include: {
@@ -1636,6 +1644,7 @@ export class DiscoverWeeklyService {
                     tracks = await discoverWeeklyPrisma.track.findMany({
                         where: {
                             ...TRACK_VISIBLE_WHERE,
+                            ...LOCAL_TRACK_WHERE,
                             album: {
                                 title: {
                                     equals: albumTitle,
@@ -2896,6 +2905,10 @@ export class DiscoverWeeklyService {
                 where: {
                     userId,
                     playedAt: { gte: subWeeks(new Date(), 12) }, // Last 3 months
+                    track: {
+                        ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
+                    },
                 },
                 include: {
                     track: {

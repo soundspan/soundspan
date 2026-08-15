@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/TrackOverflowMenu";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 import {
     TrackList as SharedTrackList,
     TrackListHeader,
@@ -91,12 +92,18 @@ function isLocalPlayableTrackItem(
     item: PlaylistItem,
 ): item is PlayablePlaylistItem {
     if (!isPlayableTrackItem(item)) return false;
-    return (item.provider?.source || "local") === "local";
+    return (
+        item.track.source !== "federated" &&
+        (item.provider?.source || "local") === "local"
+    );
 }
 
 function getUnplayableMessage(item: PlaylistItem): string {
     if (item.playback?.reason === "track_removed") {
         return TRACK_REMOVED_TOOLTIP;
+    }
+    if (item.playback?.reason === "peer_offline") {
+        return "This peer is offline.";
     }
     return (
         item.playback?.message ||
@@ -119,6 +126,8 @@ function toAudioTrack(item: PlayablePlaylistItem): AudioTrack {
             id: track.album.id,
         },
         duration: track.duration,
+        source: track.source,
+        peer: track.peer,
         ...(track.streamSource === "tidal"
             ? {
                   streamSource: "tidal" as const,
@@ -1132,7 +1141,13 @@ export default function PlaylistDetailPage() {
                                         </div>
                                     ),
                                     titleBadges:
-                                        providerSource === "tidal" ? (
+                                        track?.source === "federated" &&
+                                        track.peer ? (
+                                            <PeerBadge
+                                                peerName={track.peer.name}
+                                                online={track.peer.online}
+                                            />
+                                        ) : providerSource === "tidal" ? (
                                             <TidalBadge />
                                         ) : providerSource === "youtube" ? (
                                             <YouTubeBadge />
@@ -1144,7 +1159,11 @@ export default function PlaylistDetailPage() {
                                                     label={
                                                         isRemoved
                                                             ? "REMOVED"
-                                                            : undefined
+                                                            : item.playback
+                                                                    ?.reason ===
+                                                                "peer_offline"
+                                                              ? "OFFLINE"
+                                                              : undefined
                                                     }
                                                     title={
                                                         isRemoved

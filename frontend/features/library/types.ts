@@ -1,3 +1,8 @@
+import type {
+    FederatedTrackPeer,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
+
 export type Tab = "artists" | "albums" | "tracks";
 
 export interface Artist {
@@ -7,6 +12,8 @@ export interface Artist {
     coverArt?: string | null;
     albumCount?: number;
     trackCount?: number;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Album {
@@ -19,6 +26,8 @@ export interface Album {
         mbid?: string;
         name: string;
     };
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Track {
@@ -39,6 +48,8 @@ export interface Track {
     displayTitle?: string | null;
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface DeleteDialogState {

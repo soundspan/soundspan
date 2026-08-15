@@ -3,6 +3,7 @@ import { WithAuth } from "./api/auth";
 import { WithAudiobooks } from "./api/audiobooks";
 import { WithConnectors } from "./api/connectors";
 import { WithEnrichment } from "./api/enrichment";
+import { WithFederation } from "./api/federation";
 import { WithDiscover } from "./api/discover";
 import { WithDownloads } from "./api/downloads";
 import { WithImports } from "./api/imports";
@@ -118,6 +119,7 @@ export type PlaylistPlaybackReason =
     | "stale_mapping"
     | "missing_provider_track"
     | "track_removed"
+    | "peer_offline"
     | "pending_import";
 
 /** Playback availability metadata returned with a playlist item. */
@@ -129,7 +131,7 @@ export interface PlaylistPlaybackMeta {
 
 /** Provider metadata returned with a resolved playlist item. */
 export interface PlaylistTrackProvider {
-    source: "local" | "tidal" | "youtube" | "unknown";
+    source: "local" | "tidal" | "youtube" | "federated" | "unknown";
     label?: string;
     tidalTrackId?: number | null;
     youtubeVideoId?: string | null;
@@ -143,6 +145,8 @@ export interface PlaylistDetailTrack {
     streamSource?: "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    source?: "local" | "tidal" | "youtube" | "federated";
+    peer?: { id: string; name: string; online: boolean };
     album: {
         id?: string;
         title: string;
@@ -457,28 +461,30 @@ export interface PlaybackClientMetricInput {
 }
 
 class ApiClient extends WithListenGroups(
-    WithTidal(
-        WithYouTube(
-            WithYtMusic(
-                WithVibe(
-                    WithAudiobooks(
-                        WithPodcasts(
-                            WithSoulseek(
-                                WithEnrichment(
-                                    WithMetadata(
-                                        WithNotifications(
-                                            WithDiscover(
-                                                WithImports(
-                                                    WithDownloads(
-                                                        WithAuth(
-                                                            WithConnectors(
-                                                                WithSettings(
-                                                                    WithPlays(
-                                                                        WithRecommendations(
-                                                                            WithMedia(
-                                                                                WithPlaylists(
-                                                                                    WithLibrary(
-                                                                                        ApiClientCore,
+    WithFederation(
+        WithTidal(
+            WithYouTube(
+                WithYtMusic(
+                    WithVibe(
+                        WithAudiobooks(
+                            WithPodcasts(
+                                WithSoulseek(
+                                    WithEnrichment(
+                                        WithMetadata(
+                                            WithNotifications(
+                                                WithDiscover(
+                                                    WithImports(
+                                                        WithDownloads(
+                                                            WithAuth(
+                                                                WithConnectors(
+                                                                    WithSettings(
+                                                                        WithPlays(
+                                                                            WithRecommendations(
+                                                                                WithMedia(
+                                                                                    WithPlaylists(
+                                                                                        WithLibrary(
+                                                                                            ApiClientCore,
+                                                                                        ),
                                                                                     ),
                                                                                 ),
                                                                             ),

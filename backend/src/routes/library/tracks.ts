@@ -60,8 +60,11 @@ import {
 import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
+    LOCAL_TRACK_WHERE,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
+    parseLibraryOrigin,
+    trackBrowseWhere,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -127,6 +130,13 @@ export const tracksDeletionRouter = Router();
  *           default: 0
  *         description: Offset for pagination
  *       - in: query
+ *         name: origin
+ *         schema:
+ *           type: string
+ *           enum: [all, local, peers]
+ *           default: all
+ *         description: Filter tracks by local or federated origin
+ *       - in: query
  *         name: sortBy
  *         schema:
  *           type: string
@@ -164,14 +174,21 @@ export async function handleGetTracks(req: Request, res: Response) {
         limit: limitParam = "100",
         offset: offsetParam = "0",
         sortBy = "name",
+        origin: originParam,
     } = req.query;
+    const origin = parseLibraryOrigin(originParam);
+    if (!origin) {
+        return sendRouteError(res, 400, "Invalid library origin filter");
+    }
     const limit = Math.min(
         parseInt(limitParam as string, 10) || 100,
         MAX_LIMIT,
     );
     const offset = parseInt(offsetParam as string, 10) || 0;
 
-    let orderBy: any;
+    let orderBy:
+        | Prisma.TrackOrderByWithRelationInput
+        | Prisma.TrackOrderByWithRelationInput[];
     if (albumId) {
         orderBy = [{ discNo: "asc" as const }, { trackNo: "asc" as const }];
     } else {
@@ -180,7 +197,10 @@ export async function handleGetTracks(req: Request, res: Response) {
         };
     }
 
-    const where: any = { ...TRACK_VISIBLE_WHERE };
+    const where: Prisma.TrackWhereInput = {
+        ...TRACK_VISIBLE_WHERE,
+        ...trackBrowseWhere(origin),
+    };
     if (albumId) {
         where.albumId = albumId as string;
     }
@@ -202,14 +222,25 @@ export async function handleGetTracks(req: Request, res: Response) {
                         },
                     },
                 },
+                federationPeer: {
+                    select: { id: true, name: true, status: true },
+                },
             },
         }),
         prisma.track.count({ where }),
     ]);
 
     // Add coverArt field to albums
-    const tracks = tracksData.map((track) => ({
+    const tracks = tracksData.map(({ federationPeer, ...track }) => ({
         ...track,
+        source: track.origin === "FEDERATED" ? "federated" : "local",
+        peer: federationPeer
+            ? {
+                  id: federationPeer.id,
+                  name: federationPeer.name,
+                  online: federationPeer.status === "ACTIVE",
+              }
+            : undefined,
         album: {
             ...track.album,
             coverArt: track.album.coverUrl,
@@ -750,7 +781,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
 
     // Get total count of tracks
     const totalTracks = await prisma.track.count({
-        where: TRACK_VISIBLE_WHERE,
+        where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
     });
 
     if (totalTracks === 0) {
@@ -763,7 +794,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
     if (totalTracks <= limit) {
         // Fetch all tracks and shuffle
         tracksData = await prisma.track.findMany({
-            where: TRACK_VISIBLE_WHERE,
+            where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
             include: {
                 album: {
                     include: {
@@ -790,6 +821,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         const randomIds = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 random: { gte: pivot },
             },
             orderBy: { random: "asc" },
@@ -802,6 +834,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
             const topUpIds = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
+                    ...LOCAL_TRACK_WHERE,
                     random: { lt: pivot },
                 },
                 orderBy: { random: "asc" },
@@ -815,6 +848,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         tracksData = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 id: { in: randomIds.map((r) => r.id) },
             },
             include: {

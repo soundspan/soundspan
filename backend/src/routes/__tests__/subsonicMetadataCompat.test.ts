@@ -616,6 +616,7 @@ describe("subsonic metadata compatibility handlers", () => {
                     where: {
                         track: {
                             removedAt: null,
+                            origin: "LOCAL",
                             album: {
                                 location: "LIBRARY",
                             },

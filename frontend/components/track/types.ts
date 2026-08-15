@@ -13,6 +13,9 @@ export interface TrackRowItem {
     duration: number;
     /** Fully-resolved cover art URL. Null = placeholder. */
     coverArtUrl: string | null;
+    /** False retains the row while disabling playback (for example, an offline peer). */
+    isPlayable?: boolean;
+    unplayableReason?: "peer_offline";
 }
 
 /**

@@ -3,7 +3,10 @@ import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 
 const router = Router();
 
@@ -83,7 +86,7 @@ router.post("/albums/:id/download", async (req, res) => {
             where: { id: albumId },
             include: {
                 tracks: {
-                    where: TRACK_VISIBLE_WHERE,
+                    where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                 },
                 artist: {
@@ -217,7 +220,11 @@ router.post("/tracks/:id/complete", async (req, res) => {
             req.body,
         );
         const track = await prisma.track.findFirst({
-            where: { id: trackId, ...TRACK_VISIBLE_WHERE },
+            where: {
+                id: trackId,
+                ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
+            },
             select: { id: true },
         });
         if (!track) {

@@ -2259,6 +2259,7 @@ describe("library catalog list runtime coverage", () => {
                         { libraryAlbumCount: { gt: 0 } },
                         { discoveryAlbumCount: { gt: 0 } },
                         { remoteTrackCount: { gt: 0 } },
+                        { peerId: { not: null } },
                     ],
                     name: { contains: "art", mode: "insensitive" },
                 }),
@@ -2904,11 +2905,48 @@ describe("library catalog list runtime coverage", () => {
                             OR: [
                                 {
                                     location: "LIBRARY",
-                                    tracks: { some: { removedAt: null } },
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    dedupOfTrackId: null,
+                                                },
+                                            ],
+                                        },
+                                    },
                                 },
                                 {
                                     rgMbid: { in: ["rg-1"] },
-                                    tracks: { some: { removedAt: null } },
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    dedupOfTrackId: null,
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                                {
+                                    location: "FEDERATED",
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    dedupOfTrackId: null,
+                                                },
+                                            ],
+                                        },
+                                    },
                                 },
                             ],
                         },
@@ -2966,7 +3004,18 @@ describe("library catalog list runtime coverage", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
-                    tracks: { some: { removedAt: null } },
+                    tracks: {
+                        some: {
+                            removedAt: null,
+                            OR: [
+                                { origin: "LOCAL" },
+                                {
+                                    origin: "FEDERATED",
+                                    dedupOfTrackId: null,
+                                },
+                            ],
+                        },
+                    },
                     location: "DISCOVER",
                     artistId: "artist-discovery",
                 },
@@ -3153,7 +3202,14 @@ describe("library catalog list runtime coverage", () => {
 
         expect(mockTrackFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { albumId: "album-10", removedAt: null },
+                where: {
+                    albumId: "album-10",
+                    removedAt: null,
+                    OR: [
+                        { origin: "LOCAL" },
+                        { origin: "FEDERATED", dedupOfTrackId: null },
+                    ],
+                },
                 skip: 1,
                 take: 4,
                 orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
@@ -3655,6 +3711,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
         expect(mockTrackFindMany.mock.calls[0][0].where).toEqual({
             removedAt: null,
+            origin: "LOCAL",
         });
         expect(mockShuffleArray).toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
@@ -3692,6 +3749,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     random: { gte: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -3707,6 +3765,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     id: { in: ["track-9", "track-8"] },
                 },
             }),
@@ -3756,6 +3815,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     random: { gte: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -3769,6 +3829,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     random: { lt: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -6429,7 +6490,10 @@ describe("library catalog list runtime coverage", () => {
 
         expect(res.statusCode).toBe(200);
         expect(mockLikedTrackFindMany).toHaveBeenCalledWith({
-            where: { userId: "user-1" },
+            where: {
+                userId: "user-1",
+                track: { removedAt: null, origin: "LOCAL" },
+            },
             select: { trackId: true },
             orderBy: { likedAt: "desc" },
             take: 5000,

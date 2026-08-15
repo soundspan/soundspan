@@ -20,6 +20,7 @@ interface FeaturesState {
     audioAnalysis: boolean;
     discovery: boolean;
     autoPlaylists: boolean;
+    federation: boolean;
     showVersion: boolean;
     loading: boolean;
 }
@@ -33,6 +34,7 @@ const defaultState: FeaturesState = {
     audioAnalysis: true,
     discovery: true,
     autoPlaylists: true,
+    federation: false,
     showVersion: false,
     loading: true,
 };
@@ -58,6 +60,7 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                 audioAnalysis: features.audioAnalysis ?? true,
                 discovery: features.discovery ?? true,
                 autoPlaylists: features.autoPlaylists ?? true,
+                federation: features.federation ?? false,
                 showVersion: uiSettings.showVersion,
                 loading: false,
             });
@@ -71,6 +74,7 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                           audioAnalysis: true,
                           discovery: true,
                           autoPlaylists: true,
+                          federation: false,
                           showVersion: false,
                           loading: false,
                       }

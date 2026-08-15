@@ -12,6 +12,7 @@ import { getArtistHref } from "@/utils/artistRoute";
 import { TrackList } from "@/components/track";
 import type { TrackRowItem, TrackRowSlots, RowState } from "@/components/track";
 import type { LibraryTrack } from "../types";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface LibraryTracksListProps {
     tracks: LibraryTrack[];
@@ -28,6 +29,11 @@ function toRowItem(track: LibraryTrack): TrackRowItem {
         coverArtUrl: track.album.coverUrl
             ? api.getCoverArtUrl(track.album.coverUrl, 48)
             : null,
+        isPlayable: track.source !== "federated" || track.peer?.online === true,
+        unplayableReason:
+            track.source === "federated" && track.peer?.online === false
+                ? "peer_offline"
+                : undefined,
     };
 }
 
@@ -68,6 +74,8 @@ export function LibraryTracksList({
                         title: t.album.title,
                         coverArt: t.album.coverUrl,
                     },
+                    source: t.source,
+                    peer: t.peer,
                 }));
                 playTracks(formattedTracks, index);
             }
@@ -91,6 +99,13 @@ export function LibraryTracksList({
                 }) || "/artist";
 
             return {
+                titleBadges:
+                    track.source === "federated" && track.peer ? (
+                        <PeerBadge
+                            peerName={track.peer.name}
+                            online={track.peer.online}
+                        />
+                    ) : undefined,
                 leadingColumn: (
                     <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
                         {isPlayingThis ? (

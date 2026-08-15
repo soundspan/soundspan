@@ -1,7 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 import { normalizeArtistName } from "../utils/artistNormalization";
 import { lastFmService } from "./lastfm";
 import { moodBucketService } from "./moodBucketService";
@@ -239,6 +242,7 @@ async function findTracksByGenrePatterns(
     const tracks = await prisma.track.findMany({
         where: {
             ...TRACK_VISIBLE_WHERE,
+            ...LOCAL_TRACK_WHERE,
             OR: [
                 { lastfmTags: { hasSome: tagPatterns } },
                 { essentiaGenres: { hasSome: tagPatterns } },
@@ -275,6 +279,7 @@ async function findTracksByGenrePatterns(
         const albumTracks = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 album: {
                     OR: [
                         { genres: { not: { equals: null } } },
@@ -365,7 +370,11 @@ export class ProgrammaticPlaylistService {
     private trackWhere(
         where: Prisma.TrackWhereInput | undefined = {},
     ): Prisma.TrackWhereInput {
-        return { ...(where ?? {}), ...TRACK_VISIBLE_WHERE };
+        return {
+            ...(where ?? {}),
+            ...TRACK_VISIBLE_WHERE,
+            ...LOCAL_TRACK_WHERE,
+        };
     }
 
     // Track count thresholds for mix generation
@@ -853,7 +862,11 @@ export class ProgrammaticPlaylistService {
     ): Promise<ProgrammaticMix | null> {
         // Get all decades
         const albums = await prisma.album.findMany({
-            where: { tracks: { some: TRACK_VISIBLE_WHERE } },
+            where: {
+                tracks: {
+                    some: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                },
+            },
             select: { year: true, originalYear: true, displayYear: true },
         });
 
@@ -953,7 +966,7 @@ export class ProgrammaticPlaylistService {
         const trackGenres = await prisma.trackGenre.findMany({
             where: {
                 genreId: selectedGenre.id,
-                track: { removedAt: null },
+                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
             },
             include: {
                 track: {
@@ -1023,7 +1036,10 @@ export class ProgrammaticPlaylistService {
         const seedKey = `top-tracks-${userId}`;
         const playStats = await prisma.play.groupBy({
             by: ["trackId"],
-            where: { userId },
+            where: {
+                userId,
+                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+            },
             _count: { trackId: true },
             orderBy: { _count: { trackId: "desc" } },
             take: this.TRACK_LIMIT * 10,
@@ -1144,7 +1160,11 @@ export class ProgrammaticPlaylistService {
     ): Promise<ProgrammaticMix | null> {
         const overplayed = await prisma.play.groupBy({
             by: ["trackId"],
-            where: { userId, trackId: { not: null } },
+            where: {
+                userId,
+                trackId: { not: null },
+                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+            },
             _count: { trackId: true },
             having: { trackId: { _count: { gt: 2 } } },
         });
@@ -1218,6 +1238,7 @@ export class ProgrammaticPlaylistService {
                 playedAt: {
                     gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
                 },
+                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
             },
             include: {
                 track: {
@@ -1290,7 +1311,10 @@ export class ProgrammaticPlaylistService {
                     albums: {
                         include: {
                             tracks: {
-                                where: TRACK_VISIBLE_WHERE,
+                                where: {
+                                    ...TRACK_VISIBLE_WHERE,
+                                    ...LOCAL_TRACK_WHERE,
+                                },
                                 include: {
                                     album: {
                                         select: {
@@ -1358,7 +1382,11 @@ export class ProgrammaticPlaylistService {
         today: string,
     ): Promise<ProgrammaticMix | null> {
         const totalAlbums = await prisma.album.count({
-            where: { tracks: { some: TRACK_VISIBLE_WHERE } },
+            where: {
+                tracks: {
+                    some: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                },
+            },
         });
 
         if (totalAlbums < 10) return null;
@@ -1367,10 +1395,17 @@ export class ProgrammaticPlaylistService {
         const seed = getSeededRandom(`random-${today}`) % totalAlbums;
 
         const randomAlbums = await prisma.album.findMany({
-            where: { tracks: { some: TRACK_VISIBLE_WHERE } },
+            where: {
+                tracks: {
+                    some: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                },
+            },
             include: {
                 tracks: {
-                    where: TRACK_VISIBLE_WHERE,
+                    where: {
+                        ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
+                    },
                     include: {
                         album: {
                             select: {

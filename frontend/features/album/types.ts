@@ -1,3 +1,8 @@
+import type {
+    FederatedTrackPeer,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
+
 export type AlbumSource = "library" | "discovery";
 
 export interface Album {
@@ -21,6 +26,8 @@ export interface Album {
     owned?: boolean;
     tracks?: Track[];
     similarAlbums?: SimilarAlbum[];
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Track {
@@ -52,6 +59,8 @@ export interface Track {
     youtubeVideoId?: string;
     // Local file path (present for owned/library tracks)
     filePath?: string;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface SimilarAlbum {

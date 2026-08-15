@@ -30,6 +30,7 @@ router.get("/features", requireAuth, async (req, res) => {
             audioAnalysis: config.features.audioAnalysis,
             discovery: config.features.discovery,
             autoPlaylists: config.features.autoPlaylists,
+            federation: config.features.federation,
         });
     } catch (error: any) {
         logger.error("Feature detection error:", error);

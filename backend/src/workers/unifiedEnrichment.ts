@@ -29,6 +29,7 @@ import { featureDetection } from "../services/featureDetection";
 import { moodBucketService } from "../services/moodBucketService";
 import pLimit from "p-limit";
 import { enqueueReservedWork } from "./enrichmentQueue";
+import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 
 const log = logger.child("Enrichment");
 
@@ -564,6 +565,7 @@ export async function runFullEnrichment(options?: {
     });
 
     await prisma.track.updateMany({
+        where: LOCAL_TRACK_WHERE,
         data: {
             lastfmTags: [],
             analysisStatus: "pending",
@@ -571,9 +573,15 @@ export async function runFullEnrichment(options?: {
     });
 
     if (forceVibeRebuild) {
-        await prisma.$executeRaw`DELETE FROM track_embeddings`;
+        await prisma.$executeRaw`
+            DELETE FROM track_embeddings te
+            USING "Track" t
+            WHERE t.id = te.track_id
+              AND t.origin = ${"LOCAL"}::"TrackOrigin"
+        `;
 
         await prisma.track.updateMany({
+            where: LOCAL_TRACK_WHERE,
             data: {
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisStartedAt: null,
@@ -630,6 +638,7 @@ export async function resetMoodTagsOnly(): Promise<{ count: number }> {
     log.debug("Resetting ONLY mood tags...");
 
     const result = await prisma.track.updateMany({
+        where: LOCAL_TRACK_WHERE,
         data: { lastfmTags: [] },
     });
 
@@ -1192,6 +1201,7 @@ async function enrichTrackTagsBatch(): Promise<number> {
     const tracks = await prisma.track.findMany({
         where: {
             removedAt: null,
+            ...LOCAL_TRACK_WHERE,
             OR: [
                 { lastfmTags: { equals: [] } },
                 { lastfmTags: { isEmpty: true } },
@@ -1327,6 +1337,7 @@ async function queueAudioAnalysis(): Promise<number> {
         where: {
             analysisStatus: "pending",
             removedAt: null,
+            ...LOCAL_TRACK_WHERE,
         },
         select: {
             id: true,
@@ -1390,6 +1401,7 @@ async function queueVibeEmbeddings(): Promise<number> {
                 where: {
                     embedding: null,
                     removedAt: null,
+                    ...LOCAL_TRACK_WHERE,
                     OR: [
                         { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },
@@ -1648,14 +1660,16 @@ export async function getEnrichmentProgress() {
                 by: ["enrichmentStatus"],
                 _count: true,
             }),
-            prisma.track.count(),
+            prisma.track.count({ where: LOCAL_TRACK_WHERE }),
             prisma.$queryRaw<{ count: bigint }[]>`
                 SELECT COUNT(*) as count
                 FROM "Track"
                 WHERE "filePath" IS NOT NULL
+                  AND origin = ${"LOCAL"}::"TrackOrigin"
             `,
             prisma.track.count({
                 where: {
+                    ...LOCAL_TRACK_WHERE,
                     AND: [
                         { NOT: { lastfmTags: { equals: [] } } },
                         { NOT: { lastfmTags: { equals: null } } },
@@ -1663,25 +1677,43 @@ export async function getEnrichmentProgress() {
                 },
             }),
             prisma.track.count({
-                where: { analysisStatus: "completed" },
+                where: {
+                    analysisStatus: "completed",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
             prisma.track.count({
-                where: { analysisStatus: "pending" },
+                where: {
+                    analysisStatus: "pending",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
             prisma.track.count({
-                where: { analysisStatus: "processing" },
+                where: {
+                    analysisStatus: "processing",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
             prisma.track.count({
-                where: { analysisStatus: "failed" },
+                where: {
+                    analysisStatus: "failed",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
             prisma.$queryRaw<{ count: bigint }[]>`
                 SELECT COUNT(*) as count FROM track_embeddings
             `,
             prisma.track.count({
-                where: { vibeAnalysisStatus: "processing" },
+                where: {
+                    vibeAnalysisStatus: "processing",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
             prisma.track.count({
-                where: { vibeAnalysisStatus: "failed" },
+                where: {
+                    vibeAnalysisStatus: "failed",
+                    ...LOCAL_TRACK_WHERE,
+                },
             }),
         ]),
     );
@@ -1870,7 +1902,7 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
     await audioAnalysisCleanupService.cleanupStaleProcessing();
 
     const tracks = await prisma.track.findMany({
-        where: { analysisStatus: "pending" },
+        where: { analysisStatus: "pending", ...LOCAL_TRACK_WHERE },
         select: { id: true },
     });
 

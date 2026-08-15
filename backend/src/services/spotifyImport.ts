@@ -32,6 +32,7 @@ const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 const SPOTIFY_IMPORT_PRISMA_RETRY_ATTEMPTS = 3;
 const MATCHABLE_TRACK_WHERE = {
     removedAt: null,
+    origin: "LOCAL",
 } satisfies Prisma.TrackWhereInput;
 const spotifyImportBasePrisma = prisma;
 let spotifyImportRedis: typeof redisClient = redisClient;

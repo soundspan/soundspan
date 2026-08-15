@@ -1,3 +1,8 @@
+import type {
+    FederatedTrackPeer,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
+
 export type ArtistSource = "library" | "discovery";
 
 export interface Artist {
@@ -22,6 +27,8 @@ export interface Artist {
     userHeroUrl?: string | null;
     userGenres?: string[];
     hasUserOverrides?: boolean;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Album {
@@ -45,6 +52,9 @@ export interface Album {
     userCoverUrl?: string | null;
     userGenres?: string[];
     hasUserOverrides?: boolean;
+    source?: UnifiedTrackSource;
+    provenanceSource?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Track {
@@ -74,6 +84,8 @@ export interface Track {
     streamSource?: "local" | "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface SimilarArtist {

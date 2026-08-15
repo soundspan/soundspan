@@ -21,6 +21,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             offset?: number;
             filter?: "owned" | "discovery" | "all";
             sortBy?: string;
+            origin?: "all" | "local" | "peers";
         }) {
             return this.request<{
                 artists: ApiData[];
@@ -89,6 +90,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             offset?: number;
             filter?: "owned" | "discovery" | "all";
             sortBy?: string;
+            origin?: "all" | "local" | "peers";
         }) {
             return this.request<{
                 albums: ApiData[];
@@ -118,6 +120,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             limit?: number;
             offset?: number;
             sortBy?: string;
+            origin?: "all" | "local" | "peers";
         }) {
             return this.request<{
                 tracks: ApiData[];

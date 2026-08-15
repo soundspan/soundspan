@@ -7,7 +7,7 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
-import { InQueueBadge } from "./badges";
+import { InQueueBadge, UnplayableBadge } from "./badges";
 import type { TrackRowProps } from "./types";
 
 const DEFAULT_ACCENT = "#3b82f6";
@@ -52,6 +52,7 @@ export function TrackRow({
             data-tv-card-index={index}
             onClick={onPlay}
             role="button"
+            aria-disabled={item.isPlayable === false ? true : undefined}
             aria-label={`Play ${item.displayTitle ?? item.title} by ${item.artistName}`}
             tabIndex={0}
             onKeyDown={(e) => {
@@ -66,6 +67,7 @@ export function TrackRow({
                 isPlaying && "bg-white/5",
                 isInQueue && !isPlaying && "bg-brand/[0.06]",
                 rowClassName,
+                item.isPlayable === false && "cursor-not-allowed opacity-50",
             )}
         >
             {/* Leading column: track number or custom */}
@@ -122,6 +124,13 @@ export function TrackRow({
                             {item.displayTitle ?? item.title}
                         </span>
                         {titleBadges}
+                        {item.unplayableReason === "peer_offline" && (
+                            <UnplayableBadge
+                                label="OFFLINE"
+                                title="This federation peer is offline"
+                                variant="muted"
+                            />
+                        )}
                         {isInQueue && <InQueueBadge />}
                     </h3>
                     {artistContent !== undefined ? (

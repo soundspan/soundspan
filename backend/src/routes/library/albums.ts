@@ -41,6 +41,8 @@ import {
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
+    parseLibraryOrigin,
+    trackBrowseWhere,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -98,6 +100,13 @@ export const albumsDeletionRouter = Router();
  *           default: owned
  *         description: Filter by ownership type
  *       - in: query
+ *         name: origin
+ *         schema:
+ *           type: string
+ *           enum: [all, local, peers]
+ *           default: all
+ *         description: Filter albums by local or federated track origin
+ *       - in: query
  *         name: sortBy
  *         schema:
  *           type: string
@@ -137,7 +146,16 @@ export async function handleGetAlbums(req: Request, res: Response) {
             offset: offsetParam = "0",
             filter = "owned", // owned (default), discovery, all
             sortBy = "name",
+            origin: originParam,
         } = req.query;
+        const origin = parseLibraryOrigin(originParam);
+        if (!origin) {
+            return sendRouteError(res, 400, "Invalid library origin filter");
+        }
+        const browseTrackWhere = {
+            ...TRACK_VISIBLE_WHERE,
+            ...trackBrowseWhere(origin),
+        };
         const limit = Math.min(
             parseInt(limitParam as string, 10) || 500,
             MAX_LIMIT,
@@ -148,8 +166,8 @@ export async function handleGetAlbums(req: Request, res: Response) {
             title: "asc" as const,
         };
 
-        let where: any = {
-            tracks: { some: TRACK_VISIBLE_WHERE }, // Only albums with visible tracks
+        let where: Prisma.AlbumWhereInput = {
+            tracks: { some: browseTrackWhere }, // Only albums with visible tracks
         };
 
         // Apply location filter
@@ -164,13 +182,19 @@ export async function handleGetAlbums(req: Request, res: Response) {
             where.OR = [
                 {
                     location: "LIBRARY",
-                    tracks: { some: TRACK_VISIBLE_WHERE },
+                    tracks: { some: browseTrackWhere },
                 },
                 {
                     rgMbid: { in: ownedMbids },
-                    tracks: { some: TRACK_VISIBLE_WHERE },
+                    tracks: { some: browseTrackWhere },
                 },
             ];
+            if (origin !== "local") {
+                where.OR.push({
+                    location: "FEDERATED",
+                    tracks: { some: browseTrackWhere },
+                });
+            }
         } else if (filter === "discovery") {
             where.location = "DISCOVER";
         }
@@ -202,14 +226,25 @@ export async function handleGetAlbums(req: Request, res: Response) {
                             name: true,
                         },
                     },
+                    federationPeer: {
+                        select: { id: true, name: true, status: true },
+                    },
                 },
             }),
             prisma.album.count({ where }),
         ]);
 
         // Normalize coverArt field for frontend
-        const albums = albumsData.map((album) => ({
+        const albums = albumsData.map(({ federationPeer, ...album }) => ({
             ...album,
+            source: album.location === "FEDERATED" ? "federated" : "local",
+            peer: federationPeer
+                ? {
+                      id: federationPeer.id,
+                      name: federationPeer.name,
+                      online: federationPeer.status === "ACTIVE",
+                  }
+                : undefined,
             coverArt: album.coverUrl,
         }));
 
@@ -270,25 +305,33 @@ export async function handleGetAlbum(
 ) {
     const idParam = req.params.id;
     const includeTracks = parseBooleanQueryParam(req.query.includeTracks, true);
+    const browseTrackWhere = {
+        ...TRACK_VISIBLE_WHERE,
+        ...trackBrowseWhere("all"),
+    };
 
     // Find album by ID or rgMbid (for discovery albums) in single query.
     // Tracks can be excluded for lightweight progressive hydration.
-    const album = includeTracks
+    const albumWithTracks = includeTracks
         ? await prisma.album.findFirst({
               where: {
                   OR: [{ id: idParam }, { rgMbid: idParam }],
-                  tracks: { some: TRACK_VISIBLE_WHERE },
+                  tracks: { some: browseTrackWhere },
               },
               include: {
                   artist: {
-                      select: {
-                          id: true,
-                          mbid: true,
-                          name: true,
-                      },
+                      select: { id: true, mbid: true, name: true },
+                  },
+                  federationPeer: {
+                      select: { id: true, name: true, status: true },
                   },
                   tracks: {
-                      where: TRACK_VISIBLE_WHERE,
+                      where: browseTrackWhere,
+                      include: {
+                          federationPeer: {
+                              select: { id: true, name: true, status: true },
+                          },
+                      },
                       orderBy: [
                           { discNo: Prisma.SortOrder.asc },
                           { trackNo: Prisma.SortOrder.asc },
@@ -296,21 +339,24 @@ export async function handleGetAlbum(
                   },
               },
           })
+        : null;
+    const albumWithoutTracks = includeTracks
+        ? null
         : await prisma.album.findFirst({
               where: {
                   OR: [{ id: idParam }, { rgMbid: idParam }],
-                  tracks: { some: TRACK_VISIBLE_WHERE },
+                  tracks: { some: browseTrackWhere },
               },
               include: {
                   artist: {
-                      select: {
-                          id: true,
-                          mbid: true,
-                          name: true,
-                      },
+                      select: { id: true, mbid: true, name: true },
+                  },
+                  federationPeer: {
+                      select: { id: true, name: true, status: true },
                   },
               },
           });
+    const album = albumWithTracks ?? albumWithoutTracks;
 
     if (!album) {
         return sendRouteError(res, 404, "Album not found");
@@ -328,10 +374,32 @@ export async function handleGetAlbum(
     const isOwned = !!owned;
 
     const artistData = album.artist;
-    const tracks = includeTracks && "tracks" in album ? album.tracks : [];
+    const persistedTracks = albumWithTracks?.tracks ?? [];
+    const tracks = persistedTracks.map(({ federationPeer, ...track }) => ({
+        ...track,
+        ...(track.origin === "FEDERATED" && federationPeer
+            ? {
+                  source: "federated" as const,
+                  peer: {
+                      id: federationPeer.id,
+                      name: federationPeer.name,
+                      online: federationPeer.status === "ACTIVE",
+                  },
+              }
+            : {}),
+    }));
+    const { federationPeer, ...albumFields } = album;
 
     res.json({
-        ...album,
+        ...albumFields,
+        source: album.location === "FEDERATED" ? "federated" : "local",
+        peer: federationPeer
+            ? {
+                  id: federationPeer.id,
+                  name: federationPeer.name,
+                  online: federationPeer.status === "ACTIVE",
+              }
+            : undefined,
         artist: artistData,
         tracks,
         owned: isOwned,

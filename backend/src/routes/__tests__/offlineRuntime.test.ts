@@ -144,6 +144,7 @@ describe("offline routes runtime", () => {
                     id: "t1",
                     title: "Track 1",
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         id: "album-1",
                         title: "Album One",
@@ -164,6 +165,7 @@ describe("offline routes runtime", () => {
                     id: "t2",
                     title: "Track 2",
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         id: "album-1",
                         title: "Album One",
@@ -194,7 +196,7 @@ describe("offline routes runtime", () => {
             where: { id: "album-1" },
             include: {
                 tracks: {
-                    where: { removedAt: null },
+                    where: { removedAt: null, origin: "LOCAL" },
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                 },
                 artist: {
@@ -432,7 +434,7 @@ describe("offline routes runtime", () => {
         await postTrackComplete(req, res);
 
         expect(mockTrackFindFirst).toHaveBeenCalledWith({
-            where: { id: "t1", removedAt: null },
+            where: { id: "t1", removedAt: null, origin: "LOCAL" },
             select: { id: true },
         });
 

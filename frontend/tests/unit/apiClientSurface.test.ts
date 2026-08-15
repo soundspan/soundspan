@@ -29,6 +29,8 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "clearToken",
     "clearYtMusicAuth",
     "createApiKey",
+    "createFederationPairingCode",
+    "createFederationPeer",
     "createInviteCode",
     "createListenGroup",
     "createPlaylist",
@@ -39,6 +41,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "deleteArtist",
     "deleteAudiobookProgress",
     "deleteDownload",
+    "deleteFederationPeer",
     "deletePlaylist",
     "deletePodcastEpisodeProgress",
     "deleteProfilePicture",
@@ -88,6 +91,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getEnrichmentProgress",
     "getEnrichmentSettings",
     "getFeatures",
+    "getFederationPeers",
     "getFreshPreviewUrl",
     "getHomepageGenres",
     "getHomepageTopPodcasts",
@@ -189,6 +193,8 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "isTokenInitialized",
     "joinListenGroup",
     "leaveListenGroup",
+    "linkFederationPeer",
+    "pairFederationPeer",
     "likeDiscoverAlbum",
     "listApiKeys",
     "listImportJobs",
@@ -232,6 +238,8 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "retryFailedAnalysis",
     "retryFailedDownload",
     "retryPendingTrack",
+    "revokeFederationPeer",
+    "rotateFederationPeerCredential",
     "revokeApiKey",
     "revokeInviteCode",
     "revokeShareLink",
@@ -254,6 +262,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "startLibraryEnrichment",
     "submitImportJob",
     "subscribePodcast",
+    "syncFederationPeer",
     "syncLibraryEnrichment",
     "testAudiobookshelf",
     "testFanart",
@@ -293,5 +302,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 273);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 282);
 });

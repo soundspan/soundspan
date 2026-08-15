@@ -19,6 +19,7 @@ interface UseSearchDataProps {
     libraryLimit?: number;
     discoverLimit?: number;
     similarArtistsLimit?: number;
+    source?: "all" | "local" | "peers";
 }
 
 interface UseSearchDataReturn {
@@ -41,12 +42,13 @@ export function useSearchData({
     libraryLimit = 20,
     discoverLimit = 20,
     similarArtistsLimit = 6,
+    source = "all",
 }: UseSearchDataProps): UseSearchDataReturn {
     const {
         data: libraryResults,
         isLoading: isLibrarySearching,
         isFetching: isLibraryFetching,
-    } = useSearchQuery(query, libraryType, libraryLimit);
+    } = useSearchQuery(query, libraryType, libraryLimit, source);
 
     const {
         data: discoverData,

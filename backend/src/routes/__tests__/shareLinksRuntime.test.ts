@@ -831,6 +831,7 @@ describe("shareLinks routes runtime", () => {
                     id: "track-1",
                     albumId: "album-1",
                     removedAt: null,
+                    origin: "LOCAL",
                 },
                 select: expect.any(Object),
             });
@@ -861,7 +862,7 @@ describe("shareLinks routes runtime", () => {
                 where: {
                     playlistId: "playlist-1",
                     trackId: "track-1",
-                    track: { removedAt: null },
+                    track: { removedAt: null, origin: "LOCAL" },
                 },
             });
             expect(mockStreamFileWithRangeSupport).toHaveBeenCalled();

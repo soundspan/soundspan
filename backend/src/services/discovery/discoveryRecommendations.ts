@@ -1,6 +1,9 @@
 import { addMonths, endOfWeek, startOfWeek, subDays } from "date-fns";
 import { prisma } from "../../utils/db";
-import { TRACK_VISIBLE_WHERE } from "../../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../../utils/librarySorting";
 import { logger } from "../../utils/logger";
 import { discoverySeeding } from "./discoverySeeding";
 import {
@@ -187,6 +190,10 @@ export class DiscoveryRecommendationsService {
                 where: {
                     userId,
                     playedAt: { gte: subDays(new Date(), 120) },
+                    track: {
+                        ...TRACK_VISIBLE_WHERE,
+                        ...LOCAL_TRACK_WHERE,
+                    },
                 },
                 select: {
                     track: {
@@ -332,6 +339,7 @@ export class DiscoveryRecommendationsService {
         const candidateTracks = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 duration: { gt: 0 },
                 filePath: { not: null },
                 origin: "LOCAL",
@@ -484,6 +492,7 @@ export class DiscoveryRecommendationsService {
             const fallbackTracks = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
+                    ...LOCAL_TRACK_WHERE,
                     duration: { gt: 0 },
                     filePath: { not: null },
                     origin: "LOCAL",
@@ -751,7 +760,11 @@ export class DiscoveryRecommendationsService {
 
         const libraryTracks = trackIds.length
             ? await prisma.track.findMany({
-                  where: { ...TRACK_VISIBLE_WHERE, id: { in: trackIds } },
+                  where: {
+                      ...TRACK_VISIBLE_WHERE,
+                      ...LOCAL_TRACK_WHERE,
+                      id: { in: trackIds },
+                  },
                   include: {
                       album: {
                           include: {

@@ -309,6 +309,7 @@ describe("subsonic core compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         location: "LIBRARY",
                     },
@@ -360,6 +361,7 @@ describe("subsonic core compatibility handlers", () => {
                 userId: "user-1",
                 track: {
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         location: "LIBRARY",
                     },

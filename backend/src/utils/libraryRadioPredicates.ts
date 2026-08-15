@@ -5,6 +5,9 @@ const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 /** SQL predicate for user-facing radio pools backed by the Track alias `t`. */
 export const VISIBLE_TRACK_SQL = Prisma.sql`t."removedAt" IS NULL`;
 
+/** SQL predicate for tracks physically owned by this instance (Track alias `t`). */
+export const LOCAL_TRACK_SQL = Prisma.sql`t.origin = ${"LOCAL"}::"TrackOrigin"`;
+
 /** Builds the parameterized SQL predicate for a library-radio mood pool. */
 export const moodPoolCondition = (moodValue: string): Prisma.Sql => {
     switch (moodValue) {

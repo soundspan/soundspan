@@ -82,7 +82,7 @@ describe("search service", () => {
 
         await searchService.searchArtists({ query });
 
-        expect(prisma.$queryRaw.mock.calls[0][1]).toBe(expectedTsquery);
+        expect(prisma.$queryRaw.mock.calls[0]).toContain(expectedTsquery);
     });
 
     it("normalizes long whitespace-only separators without excessive backtracking", async () => {
@@ -100,7 +100,7 @@ describe("search service", () => {
 
         await searchService.searchArtists({ query });
 
-        expect(prisma.$queryRaw.mock.calls[0][1]).toBe("alpha:* & beta:*");
+        expect(prisma.$queryRaw.mock.calls[0]).toContain("alpha:* & beta:*");
         expect(performance.now() - startedAt).toBeLessThan(500);
     });
 
@@ -270,7 +270,20 @@ describe("search service", () => {
             expect(args.where.AND[0]).toEqual({
                 OR: [
                     { tracks: { none: {} } },
-                    { tracks: { some: { removedAt: null } } },
+                    {
+                        tracks: {
+                            some: {
+                                removedAt: null,
+                                OR: [
+                                    { origin: "LOCAL" },
+                                    {
+                                        origin: "FEDERATED",
+                                        dedupOfTrackId: null,
+                                    },
+                                ],
+                            },
+                        },
+                    },
                 ],
             });
             return [
@@ -918,7 +931,18 @@ describe("search service", () => {
                         {
                             albums: {
                                 some: {
-                                    tracks: { some: { removedAt: null } },
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    dedupOfTrackId: null,
+                                                },
+                                            ],
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -949,7 +973,18 @@ describe("search service", () => {
                         {
                             albums: {
                                 some: {
-                                    tracks: { some: { removedAt: null } },
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    dedupOfTrackId: null,
+                                                },
+                                            ],
+                                        },
+                                    },
                                 },
                             },
                         },

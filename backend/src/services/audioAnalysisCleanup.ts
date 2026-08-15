@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { enrichmentFailureService } from "./enrichmentFailureService";
 
@@ -88,6 +89,7 @@ class AudioAnalysisCleanupService {
         const staleTracks = await prisma.track.findMany({
             where: {
                 analysisStatus: "processing",
+                ...LOCAL_TRACK_WHERE,
                 OR: [
                     { analysisStartedAt: { lt: cutoff } },
                     {
@@ -219,10 +221,18 @@ class AudioAnalysisCleanupService {
         failureCount: number;
     }> {
         const [pending, processing, completed, failed] = await Promise.all([
-            prisma.track.count({ where: { analysisStatus: "pending" } }),
-            prisma.track.count({ where: { analysisStatus: "processing" } }),
-            prisma.track.count({ where: { analysisStatus: "completed" } }),
-            prisma.track.count({ where: { analysisStatus: "failed" } }),
+            prisma.track.count({
+                where: { analysisStatus: "pending", ...LOCAL_TRACK_WHERE },
+            }),
+            prisma.track.count({
+                where: { analysisStatus: "processing", ...LOCAL_TRACK_WHERE },
+            }),
+            prisma.track.count({
+                where: { analysisStatus: "completed", ...LOCAL_TRACK_WHERE },
+            }),
+            prisma.track.count({
+                where: { analysisStatus: "failed", ...LOCAL_TRACK_WHERE },
+            }),
         ]);
 
         return {

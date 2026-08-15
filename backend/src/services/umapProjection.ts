@@ -285,6 +285,7 @@ async function doCompute(): Promise<VibeMapResponse> {
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
+          AND t.origin = ${"LOCAL"}::"TrackOrigin"
         ORDER BY RANDOM()
         LIMIT ${MAX_EMBEDDINGS}
     `;

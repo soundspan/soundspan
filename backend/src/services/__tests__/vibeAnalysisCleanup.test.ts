@@ -33,6 +33,7 @@ describe("vibeAnalysisCleanupService", () => {
         expect(mockTrackFindMany).toHaveBeenCalledWith({
             where: {
                 vibeAnalysisStatus: "processing",
+                origin: "LOCAL",
                 OR: [
                     { vibeAnalysisStatusUpdatedAt: { lt: expect.any(Date) } },
                     {

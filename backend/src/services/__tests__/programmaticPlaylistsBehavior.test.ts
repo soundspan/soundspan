@@ -649,7 +649,7 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
             expect.objectContaining({
                 where: {
                     genreId: "genre-2",
-                    track: { removedAt: null },
+                    track: { removedAt: null, origin: "LOCAL" },
                 },
             }),
         );

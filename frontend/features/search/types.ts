@@ -1,8 +1,14 @@
+import type {
+    FederatedTrackPeer,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
+
 export type FilterTab =
     | "all"
     | "library"
     | "discover"
     | "podcasts"
+    | "peers"
     | "soulseek";
 
 export interface Artist {
@@ -11,6 +17,8 @@ export interface Artist {
     heroUrl?: string;
     mbid?: string;
     image?: string;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Album {
@@ -21,6 +29,8 @@ export interface Album {
     artist?: {
         name: string;
     };
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface Podcast {
@@ -71,6 +81,8 @@ export interface LibraryTrack {
     displayTitle?: string | null;
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
 }
 
 export interface SearchResult {

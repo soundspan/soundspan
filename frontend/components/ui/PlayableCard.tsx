@@ -24,7 +24,7 @@ export interface PlayableCardProps extends Omit<CardProps, "onPlay"> {
     onSearch?: (e: React.MouseEvent) => void;
     showPlayButton?: boolean;
     circular?: boolean;
-    badge?: "owned" | "download" | null;
+    badge?: "owned" | "download" | ReactNode | null;
     isDownloading?: boolean;
     colors?: ColorPalette | null;
     tvCardIndex?: number;
@@ -193,6 +193,7 @@ const PlayableCard = memo(function PlayableCard({
                             )}
                         </span>
                     )}
+                    {typeof badge !== "string" && badge}
                 </div>
             )}
 

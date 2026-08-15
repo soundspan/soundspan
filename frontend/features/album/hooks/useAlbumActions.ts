@@ -40,6 +40,8 @@ export function useAlbumActions() {
             coverArt: album.coverArt || album.coverUrl,
         },
         filePath: track.filePath,
+        source: track.source,
+        peer: track.peer,
         ...(track.streamSource === "tidal" && {
             streamSource: "tidal" as const,
             tidalTrackId: track.tidalTrackId,
@@ -58,7 +60,12 @@ export function useAlbumActions() {
 
         const formattedTracks =
             album.tracks &&
-            album.tracks.map((track) => toPlaybackTrack(track, album));
+            album.tracks
+                .filter(
+                    (track) =>
+                        track.source !== "federated" || track.peer?.online,
+                )
+                .map((track) => toPlaybackTrack(track, album));
 
         if (formattedTracks) {
             playTracks(formattedTracks, startIndex);
@@ -73,7 +80,12 @@ export function useAlbumActions() {
 
         const formattedTracks =
             album.tracks &&
-            album.tracks.map((track) => toPlaybackTrack(track, album));
+            album.tracks
+                .filter(
+                    (track) =>
+                        track.source !== "federated" || track.peer?.online,
+                )
+                .map((track) => toPlaybackTrack(track, album));
 
         if (formattedTracks) {
             // Shuffle the tracks array

@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db";
+import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { enrichmentFailureService } from "./enrichmentFailureService";
 
@@ -18,6 +19,7 @@ class VibeAnalysisCleanupService {
         const staleTracks = await prisma.track.findMany({
             where: {
                 vibeAnalysisStatus: "processing",
+                ...LOCAL_TRACK_WHERE,
                 OR: [
                     { vibeAnalysisStatusUpdatedAt: { lt: cutoff } },
                     {

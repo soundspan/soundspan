@@ -100,7 +100,9 @@ function validateEmbeddings(embeddings: number[][]): void {
 
 /** Number of tracks with a CLAP embedding row (pure Prisma count). */
 export async function countEmbeddedTracks(): Promise<number> {
-    return prisma.trackEmbedding.count();
+    return prisma.trackEmbedding.count({
+        where: { track: { origin: "LOCAL" } },
+    });
 }
 
 /**
@@ -155,6 +157,7 @@ function pickRandom<T>(items: T[], count: number): T[] {
  */
 export async function computeCalibration(): Promise<CalibrationPayload> {
     const idRows = await prisma.trackEmbedding.findMany({
+        where: { track: { origin: "LOCAL" } },
         select: { trackId: true },
         orderBy: { trackId: "asc" },
         take: CALIBRATION_ID_SCAN_CAP,
@@ -166,8 +169,10 @@ export async function computeCalibration(): Promise<CalibrationPayload> {
 
     const rows = await prisma.$queryRaw<{ embedding: string }[]>`
         SELECT embedding::text AS embedding
-        FROM track_embeddings
-        WHERE track_id = ANY(${sampledIds})
+        FROM track_embeddings te
+        JOIN "Track" t ON t.id = te.track_id
+        WHERE t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND te.track_id = ANY(${sampledIds})
     `;
 
     const embeddings = rows.map((row) => parseEmbedding(row.embedding));

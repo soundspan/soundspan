@@ -13,7 +13,9 @@ import { api } from "@/lib/api";
 import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
+    FederatedTrackPeer,
     RemoteMediaSource,
+    UnifiedTrackSource,
 } from "@soundspan/media-metadata-contract";
 import type { Episode } from "@/features/podcast/types";
 import {
@@ -109,6 +111,8 @@ export interface Track {
     // Streaming source fields
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
+    source?: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
     streamSource?: RemoteMediaSource;
     tidalTrackId?: number;
     youtubeVideoId?: string;

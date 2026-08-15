@@ -6,6 +6,7 @@ import type { ColorPalette } from "@/hooks/useImageColor";
 import { PlayableCard } from "@/components/ui/PlayableCard";
 import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface AvailableAlbumsProps {
     albums: Album[];
@@ -148,11 +149,24 @@ function LazyAlbumCard({
                 subtitle={subtitle}
                 placeholderIcon={<Disc3 className="w-12 h-12 text-gray-400" />}
                 circular={false}
-                badge={downloadsEnabled ? "download" : null}
+                badge={
+                    album.provenanceSource === "federated" && album.peer ? (
+                        <PeerBadge
+                            peerName={album.peer.name}
+                            online={album.peer.online}
+                        />
+                    ) : downloadsEnabled ? (
+                        "download"
+                    ) : null
+                }
                 showPlayButton={false}
                 colors={colors}
                 isDownloading={isPendingDownload(albumMbid)}
-                onDownload={(e) => onDownloadAlbum(album, e)}
+                onDownload={
+                    album.provenanceSource === "federated"
+                        ? undefined
+                        : (e) => onDownloadAlbum(album, e)
+                }
                 onSearch={
                     onSearchAlbum ? (e) => onSearchAlbum(album, e) : undefined
                 }

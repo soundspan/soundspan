@@ -10,8 +10,31 @@ import {
 } from "../services/search";
 import axios from "axios";
 import { redisClient } from "../utils/redis";
+import { z } from "zod";
+import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
 
 const router = Router();
+
+const searchQuerySchema = z.strictObject({
+    q: z.string().max(500).default(""),
+    type: z
+        .enum([
+            "all",
+            "artists",
+            "albums",
+            "tracks",
+            "audiobooks",
+            "podcasts",
+            "episodes",
+        ])
+        .default("all"),
+    genre: z.string().trim().min(1).max(120).optional(),
+    limit: z.preprocess((value) => {
+        const parsed = Number.parseInt(String(value ?? "20"), 10);
+        return Number.isNaN(parsed) ? 20 : Math.min(Math.max(parsed, 1), 100);
+    }, z.number().int()),
+    source: z.enum(LIBRARY_ORIGIN_VALUES).default("all"),
+});
 
 function normalizeDiscoverArtistName(value: unknown): string {
     return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -158,6 +181,8 @@ function transformSearchResults(serviceResults: SearchResults) {
             artistId: album.artistId,
             year: album.year,
             coverUrl: album.coverUrl,
+            source: album.source,
+            peer: album.peer,
             artist: {
                 id: album.artistId,
                 name: album.artistName,
@@ -170,6 +195,8 @@ function transformSearchResults(serviceResults: SearchResults) {
             albumId: track.albumId,
             duration: track.duration,
             trackNo: 0,
+            source: track.source,
+            peer: track.peer,
             album: {
                 id: track.albumId,
                 title: track.albumTitle,
@@ -221,6 +248,13 @@ router.use(requireAuth);
  *           type: string
  *         description: Filter tracks by genre
  *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [all, local, peers]
+ *           default: all
+ *         description: Limit music results by owning source
+ *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
@@ -265,13 +299,14 @@ router.use(requireAuth);
  */
 router.get("/", async (req, res) => {
     try {
-        const { q = "", type = "all", genre, limit = "20" } = req.query;
-
-        const query = (q as string).trim();
-        const parsed = parseInt(limit as string, 10);
-        const searchLimit = Number.isNaN(parsed)
-            ? 20
-            : Math.min(Math.max(parsed, 1), 100);
+        const parsed = searchQuerySchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: "Invalid search query" });
+        }
+        const { type, genre, source } = parsed.data;
+        const query = parsed.data.q.trim();
+        const searchLimit = parsed.data.limit;
+        const sourceOption = req.query.source === undefined ? {} : { source };
 
         if (!query) {
             return res.json({
@@ -290,6 +325,7 @@ router.get("/", async (req, res) => {
                 query,
                 limit: searchLimit,
                 genre: genre as string | undefined,
+                ...sourceOption,
             });
 
             return res.json(transformSearchResults(serviceResults));
@@ -301,6 +337,7 @@ router.get("/", async (req, res) => {
             type: type as string,
             limit: searchLimit,
             genre: genre as string | undefined,
+            ...sourceOption,
         });
 
         res.json(transformSearchResults(serviceResults));

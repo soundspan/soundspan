@@ -330,6 +330,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                     userId: "user-1",
                     track: {
                         removedAt: null,
+                        origin: "LOCAL",
                         album: { location: "LIBRARY" },
                     },
                 },
@@ -372,6 +373,7 @@ describe("subsonic state/admin compatibility handlers", () => {
                 where: {
                     id: "track-1",
                     removedAt: null,
+                    origin: "LOCAL",
                     album: { location: "LIBRARY" },
                 },
             }),
@@ -715,6 +717,7 @@ describe("subsonic state/admin compatibility handlers", () => {
             by: ["albumId"],
             where: {
                 removedAt: null,
+                origin: "LOCAL",
                 album: { location: "LIBRARY" },
                 albumId: { in: ["album-2", "album-1"] },
             },

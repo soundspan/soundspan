@@ -147,7 +147,7 @@ describe("subsonic browse compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     location: "LIBRARY",
-                    tracks: { some: { removedAt: null } },
+                    tracks: { some: { removedAt: null, origin: "LOCAL" } },
                 },
                 skip: 0,
                 take: 1,
@@ -320,6 +320,7 @@ describe("subsonic browse compatibility handlers", () => {
                     tracks: {
                         some: {
                             removedAt: null,
+                            origin: "LOCAL",
                             trackGenres: {
                                 some: {
                                     genre: {
@@ -639,6 +640,7 @@ describe("subsonic browse compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
+                    origin: "LOCAL",
                     id: { in: ["track-1"] },
                     album: { location: "LIBRARY" },
                 },
@@ -887,7 +889,9 @@ describe("subsonic browse compatibility handlers", () => {
                     albums: {
                         some: {
                             location: "LIBRARY",
-                            tracks: { some: { removedAt: null } },
+                            tracks: {
+                                some: { removedAt: null, origin: "LOCAL" },
+                            },
                         },
                     },
                 }),

@@ -5,6 +5,7 @@ import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Album } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface DiscographyProps {
     albums: Album[];
@@ -70,11 +71,29 @@ export function Discography({
                             placeholderIcon={
                                 <Disc3 className="w-12 h-12 text-gray-400" />
                             }
-                            badge="owned"
+                            badge={
+                                album.provenanceSource === "federated" &&
+                                album.peer ? (
+                                    <PeerBadge
+                                        peerName={album.peer.name}
+                                        online={album.peer.online}
+                                    />
+                                ) : (
+                                    "owned"
+                                )
+                            }
                             circular={false}
                             colors={colors}
-                            onPlay={() => onPlayAlbum(album.id, album.title)}
-                            showPlayButton
+                            onPlay={
+                                album.provenanceSource === "federated" &&
+                                album.peer?.online === false
+                                    ? undefined
+                                    : () => onPlayAlbum(album.id, album.title)
+                            }
+                            showPlayButton={
+                                album.provenanceSource !== "federated" ||
+                                album.peer?.online === true
+                            }
                             tvCardIndex={index}
                         />
                     );

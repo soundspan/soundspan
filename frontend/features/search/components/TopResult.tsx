@@ -4,6 +4,7 @@ import { Music } from "lucide-react";
 import { api } from "@/lib/api";
 import { Artist, DiscoverResult } from "../types";
 import { getArtistRouteParam } from "@/utils/artistRoute";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 interface TopResultProps {
     libraryArtist?: Artist;
     discoveryArtist?: DiscoverResult;
@@ -73,6 +74,14 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                         {name}
                     </h3>
                     <p className="text-sm text-white font-bold">Artist</p>
+                    {libraryArtist?.source === "federated" &&
+                        libraryArtist.peer && (
+                            <PeerBadge
+                                className="mt-2"
+                                peerName={libraryArtist.peer.name}
+                                online={libraryArtist.peer.online}
+                            />
+                        )}
                 </div>
             </Link>
         </section>

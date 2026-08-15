@@ -228,7 +228,12 @@ describe("subsonic collections/core compatibility handlers", () => {
                             where: {
                                 OR: [
                                     { trackId: null },
-                                    { track: { removedAt: null } },
+                                    {
+                                        track: {
+                                            removedAt: null,
+                                            origin: "LOCAL",
+                                        },
+                                    },
                                 ],
                             },
                         },
@@ -243,7 +248,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
-                track: { removedAt: null },
+                track: { removedAt: null, origin: "LOCAL" },
             },
             select: {
                 playlistId: true,
@@ -255,6 +260,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
                 track: {
                     removedAt: null,
+                    origin: "LOCAL",
                     album: {
                         AND: [
                             { coverUrl: { not: null } },
@@ -337,7 +343,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-a", "playlist-b"] },
                 trackId: { not: null },
-                track: { removedAt: null },
+                track: { removedAt: null, origin: "LOCAL" },
             },
             select: {
                 playlistId: true,
@@ -463,7 +469,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                 },
                 include: expect.objectContaining({
                     items: expect.objectContaining({
-                        where: { track: { removedAt: null } },
+                        where: { track: { removedAt: null, origin: "LOCAL" } },
                     }),
                 }),
             }),

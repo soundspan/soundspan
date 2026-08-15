@@ -7,6 +7,7 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { Disc3, Play, Trash2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface AlbumsGridProps {
     albums: Album[];
@@ -93,20 +94,22 @@ const AlbumCardItem = memo(
                             )}
                         </div>
                         {/* Play button */}
-                        {!hidePlayButtons && (
-                            <button
-                                onClick={handlePlay}
-                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl opacity-0 pointer-events-none sm:pointer-events-auto group-hover:opacity-100 transition-opacity"
-                            >
-                                {showPlaySpinner ? (
-                                    <Loader2 className="w-4 h-4 animate-spin text-black" />
-                                ) : (
-                                    <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
-                                )}
-                            </button>
-                        )}
+                        {!hidePlayButtons &&
+                            (album.source !== "federated" ||
+                                album.peer?.online === true) && (
+                                <button
+                                    onClick={handlePlay}
+                                    className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl opacity-0 pointer-events-none sm:pointer-events-auto group-hover:opacity-100 transition-opacity"
+                                >
+                                    {showPlaySpinner ? (
+                                        <Loader2 className="w-4 h-4 animate-spin text-black" />
+                                    ) : (
+                                        <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
+                                    )}
+                                </button>
+                            )}
                         {/* Delete button */}
-                        {canDelete && (
+                        {canDelete && album.source !== "federated" && (
                             <button
                                 onClick={handleDelete}
                                 className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
@@ -119,9 +122,17 @@ const AlbumCardItem = memo(
                     <h3 className="text-sm font-semibold text-white truncate">
                         {album.title}
                     </h3>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">
-                        {album.artist?.name}
-                    </p>
+                    <div className="mt-0.5 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs text-gray-400">
+                            {album.artist?.name}
+                        </p>
+                        {album.source === "federated" && album.peer && (
+                            <PeerBadge
+                                peerName={album.peer.name}
+                                online={album.peer.online}
+                            />
+                        )}
+                    </div>
                 </div>
             </Link>
         );

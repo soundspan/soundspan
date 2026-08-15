@@ -23,6 +23,7 @@ const apiExports = {
                 audioAnalysis: true,
                 discovery: true,
                 autoPlaylists: true,
+                federation: true,
             };
         },
         getUiSettings: async () => {

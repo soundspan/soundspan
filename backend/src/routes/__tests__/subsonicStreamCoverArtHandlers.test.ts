@@ -192,6 +192,7 @@ describe("handleStream", () => {
             where: {
                 id: "bad-id",
                 removedAt: null,
+                origin: "LOCAL",
                 album: {
                     location: "LIBRARY",
                 },

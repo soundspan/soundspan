@@ -987,7 +987,12 @@ describe("subsonic Tier B handlers", () => {
                             where: {
                                 OR: [
                                     { trackId: null },
-                                    { track: { removedAt: null } },
+                                    {
+                                        track: {
+                                            removedAt: null,
+                                            origin: "LOCAL",
+                                        },
+                                    },
                                 ],
                             },
                         },
@@ -1002,7 +1007,7 @@ describe("subsonic Tier B handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
-                track: { removedAt: null },
+                track: { removedAt: null, origin: "LOCAL" },
             },
             select: {
                 playlistId: true,
@@ -1748,7 +1753,9 @@ describe("subsonic Tier B handlers", () => {
                     albums: {
                         some: {
                             location: "LIBRARY",
-                            tracks: { some: { removedAt: null } },
+                            tracks: {
+                                some: { removedAt: null, origin: "LOCAL" },
+                            },
                         },
                     },
                 },

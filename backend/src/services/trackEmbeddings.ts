@@ -58,6 +58,7 @@ export async function fetchEmbeddingsByTrackIds(
         FROM track_embeddings te
         JOIN "Track" t ON t.id = te.track_id
         WHERE t."removedAt" IS NULL
+          AND t.origin = ${"LOCAL"}::"TrackOrigin"
           AND te.track_id = ANY(${trackIds as string[]})
     `;
     return rows.map((row) => ({

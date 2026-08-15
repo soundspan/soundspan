@@ -35,6 +35,8 @@ import {
     ARTIST_SORT_MAP,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
+    parseLibraryOrigin,
+    trackBrowseWhere,
 } from "../../utils/librarySorting";
 import {
     PersistedTrackDeletionPath,
@@ -92,6 +94,13 @@ export const artistsDeletionRouter = Router();
  *           default: owned
  *         description: Filter by ownership type (remote = streaming-only artists)
  *       - in: query
+ *         name: origin
+ *         schema:
+ *           type: string
+ *           enum: [all, local, peers]
+ *           default: all
+ *         description: Filter artists by local or federated track origin
+ *       - in: query
  *         name: cursor
  *         schema:
  *           type: string
@@ -141,7 +150,16 @@ export async function handleGetArtists(req: Request, res: Response) {
             filter = "owned", // owned (default), discovery, remote, all
             cursor, // Optional cursor for cursor-based pagination
             sortBy = "name",
+            origin: originParam,
         } = req.query;
+        const origin = parseLibraryOrigin(originParam);
+        if (!origin) {
+            return sendRouteError(res, 400, "Invalid library origin filter");
+        }
+        const browseTrackWhere = {
+            ...TRACK_VISIBLE_WHERE,
+            ...trackBrowseWhere(origin),
+        };
 
         const limit = Math.min(
             parseInt(limitParam as string, 10) || 50,
@@ -158,19 +176,25 @@ export async function handleGetArtists(req: Request, res: Response) {
         // (e.g. fresh DB after first scan before backfill finishes) and we
         // must fall back to JOIN-based filtering to avoid returning 0 results.
         const countsReady =
+            origin !== "peers" &&
             (await prisma.artist.count({
                 where: { countsLastUpdated: { not: null } },
             })) > 0;
 
         // Build WHERE clause
-        let where: any = {};
+        const where: Prisma.ArtistWhereInput = {};
 
-        if (countsReady) {
+        if (origin === "peers") {
+            where.albums = {
+                some: { tracks: { some: browseTrackWhere } },
+            };
+        } else if (countsReady) {
             // Fast path: use denormalized counts (indexed lookup)
             if (filter === "owned") {
                 where.OR = [
                     { libraryAlbumCount: { gt: 0 } },
                     { ownedAlbums: { some: {} } },
+                    ...(origin === "all" ? [{ peerId: { not: null } }] : []),
                 ];
             } else if (filter === "discovery") {
                 where.discoveryAlbumCount = { gt: 0 };
@@ -185,6 +209,7 @@ export async function handleGetArtists(req: Request, res: Response) {
                     { libraryAlbumCount: { gt: 0 } },
                     { discoveryAlbumCount: { gt: 0 } },
                     { remoteTrackCount: { gt: 0 } },
+                    ...(origin === "all" ? [{ peerId: { not: null } }] : []),
                 ];
             }
         } else {
@@ -195,24 +220,34 @@ export async function handleGetArtists(req: Request, res: Response) {
                         albums: {
                             some: {
                                 location: "LIBRARY",
-                                tracks: { some: TRACK_VISIBLE_WHERE },
+                                tracks: { some: browseTrackWhere },
                             },
                         },
                     },
                     { ownedAlbums: { some: {} } },
                 ];
+                if (origin === "all") {
+                    where.OR.push({
+                        albums: {
+                            some: {
+                                location: "FEDERATED",
+                                tracks: { some: browseTrackWhere },
+                            },
+                        },
+                    });
+                }
             } else if (filter === "discovery") {
                 where.albums = {
                     some: {
                         location: "DISCOVER",
-                        tracks: { some: TRACK_VISIBLE_WHERE },
+                        tracks: { some: browseTrackWhere },
                     },
                 };
                 where.NOT = {
                     albums: {
                         some: {
                             location: "LIBRARY",
-                            tracks: { some: TRACK_VISIBLE_WHERE },
+                            tracks: { some: browseTrackWhere },
                         },
                     },
                 };
@@ -223,7 +258,7 @@ export async function handleGetArtists(req: Request, res: Response) {
                 ];
                 where.NOT = {
                     albums: {
-                        some: { tracks: { some: TRACK_VISIBLE_WHERE } },
+                        some: { tracks: { some: browseTrackWhere } },
                     },
                 };
             } else {
@@ -231,7 +266,7 @@ export async function handleGetArtists(req: Request, res: Response) {
                 where.OR = [
                     {
                         albums: {
-                            some: { tracks: { some: TRACK_VISIBLE_WHERE } },
+                            some: { tracks: { some: browseTrackWhere } },
                         },
                     },
                     { tracksTidal: { some: {} } },
@@ -249,7 +284,7 @@ export async function handleGetArtists(req: Request, res: Response) {
         const [artists, total] = await prisma.$transaction(
             async (tx) => {
                 // Build findMany args - cursor or offset pagination
-                const findManyArgs: Parameters<typeof tx.artist.findMany>[0] = {
+                const findManyArgs = {
                     where,
                     take: limit,
                     orderBy,
@@ -263,16 +298,14 @@ export async function handleGetArtists(req: Request, res: Response) {
                         discoveryAlbumCount: true,
                         totalTrackCount: true,
                         remoteTrackCount: true,
+                        peerId: true,
+                        federationPeer: {
+                            select: { id: true, name: true, status: true },
+                        },
                     },
-                };
-
-                // Use cursor-based pagination if cursor provided, otherwise offset
-                if (cursor) {
-                    findManyArgs.cursor = { id: cursor as string };
-                    findManyArgs.skip = 1;
-                } else {
-                    findManyArgs.skip = offset;
-                }
+                    cursor: cursor ? { id: cursor as string } : undefined,
+                    skip: cursor ? 1 : offset,
+                } satisfies Prisma.ArtistFindManyArgs;
 
                 return Promise.all([
                     tx.artist.findMany(findManyArgs),
@@ -311,6 +344,16 @@ export async function handleGetArtists(req: Request, res: Response) {
                 coverArt, // Alias for frontend consistency
                 albumCount,
                 trackCount: artist.totalTrackCount,
+                ...(artist.peerId && artist.federationPeer
+                    ? {
+                          source: "federated" as const,
+                          peer: {
+                              id: artist.federationPeer.id,
+                              name: artist.federationPeer.name,
+                              online: artist.federationPeer.status === "ACTIVE",
+                          },
+                      }
+                    : {}),
             };
         });
 
@@ -401,20 +444,30 @@ export async function handleGetArtist(
     );
     const shouldResolveMbid =
         includeDiscography || includeTopTracks || includeSimilarArtists;
+    const browseTrackWhere = {
+        ...TRACK_VISIBLE_WHERE,
+        ...trackBrowseWhere("all"),
+    };
 
     const artistInclude = {
         albums: {
-            where: { tracks: { some: TRACK_VISIBLE_WHERE } },
+            where: { tracks: { some: browseTrackWhere } },
             orderBy: { year: Prisma.SortOrder.desc },
             include: {
+                federationPeer: {
+                    select: { id: true, name: true, status: true },
+                },
                 tracks: {
-                    where: TRACK_VISIBLE_WHERE,
+                    where: browseTrackWhere,
                     orderBy: [
                         { discNo: Prisma.SortOrder.asc },
                         { trackNo: Prisma.SortOrder.asc },
                     ],
                     take: 10, // Top tracks
                     include: {
+                        federationPeer: {
+                            select: { id: true, name: true, status: true },
+                        },
                         album: {
                             select: {
                                 id: true,
@@ -427,6 +480,9 @@ export async function handleGetArtist(
             },
         },
         ownedAlbums: true,
+        federationPeer: {
+            select: { id: true, name: true, status: true },
+        },
         // Note: similarFrom (FK-based) is no longer used for display
         // We now use similarArtistsJson which is fetched by default
     };
@@ -521,10 +577,32 @@ export async function handleGetArtist(
         .filter((album) => album.location !== "REMOTE")
         .map((album) => ({
             ...album,
+            tracks: album.tracks.map(({ federationPeer, ...track }) => ({
+                ...track,
+                ...(track.origin === "FEDERATED" && federationPeer
+                    ? {
+                          source: "federated" as const,
+                          peer: {
+                              id: federationPeer.id,
+                              name: federationPeer.name,
+                              online: federationPeer.status === "ACTIVE",
+                          },
+                      }
+                    : {}),
+            })),
             owned:
                 album.location === "LIBRARY" || ownedRgMbids.has(album.rgMbid),
             coverArt: album.coverUrl,
             source: "database" as const,
+            provenanceSource:
+                album.location === "FEDERATED" ? "federated" : "local",
+            peer: album.federationPeer
+                ? {
+                      id: album.federationPeer.id,
+                      name: album.federationPeer.name,
+                      online: album.federationPeer.status === "ACTIVE",
+                  }
+                : undefined,
         }));
 
     logger.debug(
@@ -729,7 +807,21 @@ export async function handleGetArtist(
 
     if (includeTopTracks) {
         // Extract top tracks from library first
-        const allTracks = artist.albums.flatMap((a) => a.tracks);
+        const allTracks = artist.albums.flatMap((album) =>
+            album.tracks.map(({ federationPeer, ...track }) => ({
+                ...track,
+                ...(track.origin === "FEDERATED" && federationPeer
+                    ? {
+                          source: "federated" as const,
+                          peer: {
+                              id: federationPeer.id,
+                              name: federationPeer.name,
+                              online: federationPeer.status === "ACTIVE",
+                          },
+                      }
+                    : {}),
+            })),
+        );
         topTracks = allTracks.slice(0, 10);
 
         // Get user play counts for all tracks
@@ -1140,8 +1232,17 @@ export async function handleGetArtist(
         }
     }
 
+    const { federationPeer, ...artistFields } = artist;
     res.json({
-        ...artist,
+        ...artistFields,
+        source: artist.peerId ? "federated" : "local",
+        peer: federationPeer
+            ? {
+                  id: federationPeer.id,
+                  name: federationPeer.name,
+                  online: federationPeer.status === "ACTIVE",
+              }
+            : undefined,
         coverArt: heroUrl, // Use fetched hero image (falls back to artist.heroUrl)
         bio: getArtistDisplaySummary(artist),
         genres: getMergedGenres(artist),

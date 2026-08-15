@@ -86,6 +86,7 @@ describe("audioAnalysisCleanupService", () => {
         expect(prisma.track.findMany).toHaveBeenCalledWith({
             where: {
                 analysisStatus: "processing",
+                origin: "LOCAL",
                 OR: [
                     { analysisStartedAt: { lt: expect.any(Date) } },
                     {

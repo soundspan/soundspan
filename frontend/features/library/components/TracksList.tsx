@@ -15,6 +15,7 @@ import type {
     OverflowConfig,
     TrackRowSlots,
 } from "@/components/track";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface TracksListProps {
     tracks: Track[];
@@ -34,6 +35,11 @@ function toRowItem(track: Track): TrackRowItem {
         coverArtUrl: track.album?.coverArt
             ? api.getCoverArtUrl(track.album.coverArt, 80)
             : null,
+        isPlayable: track.source !== "federated" || track.peer?.online === true,
+        unplayableReason:
+            track.source === "federated" && track.peer?.online === false
+                ? "peer_offline"
+                : undefined,
     };
 }
 
@@ -54,6 +60,13 @@ export function TracksList({
 
     const rowSlots = useCallback(
         (track: Track): TrackRowSlots => ({
+            titleBadges:
+                track.source === "federated" && track.peer ? (
+                    <PeerBadge
+                        peerName={track.peer.name}
+                        online={track.peer.online}
+                    />
+                ) : undefined,
             artistContent: track.album?.artist
                 ? (() => {
                       const href = getArtistHref({
@@ -106,17 +119,18 @@ export function TracksList({
                 },
                 duration: track.duration,
             },
-            extraItemsAfter: canDelete ? (
-                <TrackMenuButton
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(track.id, track.title);
-                    }}
-                    icon={<Trash2 className="h-4 w-4" />}
-                    label="Delete track"
-                    className="text-red-400 hover:text-red-300"
-                />
-            ) : undefined,
+            extraItemsAfter:
+                canDelete && track.source !== "federated" ? (
+                    <TrackMenuButton
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(track.id, track.title);
+                        }}
+                        icon={<Trash2 className="h-4 w-4" />}
+                        label="Delete track"
+                        className="text-red-400 hover:text-red-300"
+                    />
+                ) : undefined,
         }),
         [canDelete, onDelete],
     );

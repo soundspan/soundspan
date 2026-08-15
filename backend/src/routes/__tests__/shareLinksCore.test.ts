@@ -676,7 +676,7 @@ describe("share links routes integration", () => {
             },
             assertOwnership: () => {
                 expect(mockTrackFindUnique).toHaveBeenCalledWith({
-                    where: { id: "track-1", removedAt: null },
+                    where: { id: "track-1", removedAt: null, origin: "LOCAL" },
                     select: {
                         id: true,
                         title: true,
@@ -701,6 +701,7 @@ describe("share links routes integration", () => {
                         id: "track-1",
                         albumId: "album-1",
                         removedAt: null,
+                        origin: "LOCAL",
                     },
                     select: {
                         id: true,
@@ -731,7 +732,7 @@ describe("share links routes integration", () => {
                     where: {
                         playlistId: "playlist-1",
                         trackId: "track-1",
-                        track: { removedAt: null },
+                        track: { removedAt: null, origin: "LOCAL" },
                     },
                 });
             },

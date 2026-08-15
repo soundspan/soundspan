@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rescan restores a track when its file returns.
 - The enrichment failures modal now provides confirmed, tab-specific “Retry
   all” actions for Audio Analysis and Vibe Embeddings failures.
+- Added a feature-gated federation admin surface for linking, pairing,
+  credential rotation, revocation, deletion, and immediate synchronization.
+- Federated library results now show peer provenance in browse, search,
+  playlists, queue, and now-playing surfaces. Offline peer tracks remain
+  visible but are greyed and unplayable.
+- Search and Library now provide peer-source filters when federation is
+  enabled.
 
 ### Changed
 
@@ -51,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed playlist items now use a muted, greyed treatment with a restore-file
   tooltip, while other unavailable-provider items keep their existing warning
   treatment.
+- Radio, mixes, recommendations, discovery, vibe analysis, Subsonic, sharing,
+  offline downloads, imports, Listen Together resolution, lyrics enrichment,
+  and analysis queues now operate only on local tracks. Browse and search keep
+  federated tracks while suppressing remote duplicates when a local copy wins.
 
 ### Fixed
 

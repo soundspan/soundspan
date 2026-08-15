@@ -24,6 +24,7 @@ import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsLis
 import { TVSearchInput } from "@/features/search/components/TVSearchInput";
 import { useAuth } from "@/lib/auth-context";
 import type { FilterTab } from "@/features/search/types";
+import { useFeatures } from "@/lib/features-context";
 
 type SearchSectionView = "tracks" | "albums" | "artists" | null;
 
@@ -36,6 +37,7 @@ export default function SearchPage() {
     // Downloads are admin-only app-wide (mirrors lib/download-context.tsx and
     // the backend's requireAdmin gate on /api/youtube download endpoints).
     const { user } = useAuth();
+    const { federation } = useFeatures();
     const canDownloadYouTube = user?.role === "admin";
     const [filterTab, setFilterTab] = useState<FilterTab>("all");
     const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
@@ -75,6 +77,7 @@ export default function SearchPage() {
         libraryLimit: isTracksView || isAlbumsView ? 100 : 20,
         discoverLimit: 20,
         similarArtistsLimit: isArtistsView ? 50 : 6,
+        source: filterTab === "peers" ? "peers" : "all",
     });
     const {
         soulseekResults,
@@ -118,7 +121,8 @@ export default function SearchPage() {
         isDiscoverSearching ||
         isSoulseekSearching ||
         isSoulseekPolling;
-    const showLibrary = filterTab === "all" || filterTab === "library";
+    const showLibrary =
+        filterTab === "all" || filterTab === "library" || filterTab === "peers";
     const showDiscover = filterTab === "all" || filterTab === "discover";
     const showSoulseek = filterTab === "all" || filterTab === "soulseek";
     const showPodcastResults = filterTab === "all" || isPodcastTab;
@@ -157,6 +161,7 @@ export default function SearchPage() {
                 filterTab={filterTab}
                 onFilterChange={setFilterTab}
                 soulseekEnabled={soulseekEnabled}
+                federationEnabled={federation}
                 hasSearched={hasSearched}
             />
 

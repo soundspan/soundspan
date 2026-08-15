@@ -3,6 +3,7 @@ import { Disc3 } from "lucide-react";
 import Image from "next/image";
 import { api } from "@/lib/api";
 import { Album } from "../types";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface LibraryAlbumsGridProps {
     albums: Album[];
@@ -55,9 +56,17 @@ export function LibraryAlbumsGrid({
                             <h3 className="text-base font-bold text-white line-clamp-1 mb-1">
                                 {album.title}
                             </h3>
-                            <p className="text-sm text-[#b3b3b3] line-clamp-1">
-                                {album.artist?.name}
-                            </p>
+                            <div className="flex items-center gap-2">
+                                <p className="min-w-0 flex-1 text-sm text-gray-400 line-clamp-1">
+                                    {album.artist?.name}
+                                </p>
+                                {album.source === "federated" && album.peer && (
+                                    <PeerBadge
+                                        peerName={album.peer.name}
+                                        online={album.peer.online}
+                                    />
+                                )}
+                            </div>
                         </div>
                     </Link>
                 );

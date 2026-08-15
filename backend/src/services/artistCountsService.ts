@@ -13,7 +13,10 @@
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
@@ -42,19 +45,24 @@ export async function calculateArtistCounts(
             where: {
                 artistId,
                 location: "LIBRARY",
-                tracks: { some: TRACK_VISIBLE_WHERE },
+                tracks: {
+                    some: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                },
             },
         }),
         prisma.album.count({
             where: {
                 artistId,
                 location: "DISCOVER",
-                tracks: { some: TRACK_VISIBLE_WHERE },
+                tracks: {
+                    some: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                },
             },
         }),
         prisma.track.count({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 album: { artistId },
             },
         }),
@@ -141,7 +149,7 @@ export async function updateArtistCountsByTrackId(
     trackId: string,
 ): Promise<void> {
     const track = await prisma.track.findUnique({
-        where: { id: trackId },
+        where: { id: trackId, ...LOCAL_TRACK_WHERE },
         select: {
             album: {
                 select: { artistId: true },

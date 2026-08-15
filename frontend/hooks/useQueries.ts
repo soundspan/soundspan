@@ -53,17 +53,20 @@ export const queryKeys = {
         sortBy?: string;
         limit?: number;
         offset?: number;
+        origin?: string;
     }) => ["library", "artists", params] as const,
     libraryAlbums: (params: {
         filter?: string;
         sortBy?: string;
         limit?: number;
         offset?: number;
+        origin?: string;
     }) => ["library", "albums", params] as const,
     libraryTracks: (params: {
         sortBy?: string;
         limit?: number;
         offset?: number;
+        origin?: string;
     }) => ["library", "tracks", params] as const,
     likedPlaylist: (limit: number = 10_000) =>
         ["library", "liked-playlist", limit] as const,
@@ -80,8 +83,8 @@ export const queryKeys = {
         ["recommendations", "albums", seedAlbumId, limit] as const,
 
     // Search
-    search: (query: string, type?: string, limit?: number) =>
-        ["search", query, type, limit] as const,
+    search: (query: string, type?: string, limit?: number, source?: string) =>
+        ["search", query, type, limit, source] as const,
     discoverSearch: (query: string, type?: string, limit?: number) =>
         ["search", "discover", query, type, limit] as const,
     discoverSimilar: (artist: string, mbid: string, limit: number) =>
@@ -325,6 +328,7 @@ export function useRecentlyAddedQuery(limit: number = 10) {
 }
 
 export type LibraryFilter = "owned" | "discovery" | "all";
+export type LibraryOrigin = "all" | "local" | "peers";
 export type SortOption = "name" | "name-desc" | "recent" | "tracks";
 
 interface LibraryArtistsParams {
@@ -333,6 +337,7 @@ interface LibraryArtistsParams {
     limit?: number;
     page?: number;
     enabled?: boolean;
+    origin?: LibraryOrigin;
 }
 
 interface LibraryAlbumsParams {
@@ -341,6 +346,7 @@ interface LibraryAlbumsParams {
     limit?: number;
     page?: number;
     enabled?: boolean;
+    origin?: LibraryOrigin;
 }
 
 interface LibraryTracksParams {
@@ -348,6 +354,7 @@ interface LibraryTracksParams {
     limit?: number;
     page?: number;
     enabled?: boolean;
+    origin?: LibraryOrigin;
 }
 
 // Page response types for infinite queries
@@ -383,11 +390,19 @@ export function useLibraryArtistsQuery({
     limit = 40,
     page = 1,
     enabled = true,
+    origin = "all",
 }: LibraryArtistsParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
-        queryKey: queryKeys.libraryArtists({ filter, sortBy, limit, offset }),
-        queryFn: () => api.getArtists({ limit, offset, filter, sortBy }),
+        queryKey: queryKeys.libraryArtists({
+            filter,
+            sortBy,
+            limit,
+            offset,
+            origin,
+        }),
+        queryFn: () =>
+            api.getArtists({ limit, offset, filter, sortBy, origin }),
         select: (response) => ({
             artists: response.artists,
             total: response.total,
@@ -413,6 +428,7 @@ export function useLibraryAlbumsInfiniteQuery({
     sortBy = "name",
     limit = 40,
     enabled = true,
+    origin = "all",
 }: Omit<LibraryAlbumsParams, "page"> & { enabled?: boolean } = {}) {
     return useInfiniteQuery<
         AlbumsPageResponse,
@@ -421,7 +437,7 @@ export function useLibraryAlbumsInfiniteQuery({
         readonly unknown[],
         number
     >({
-        queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit }),
+        queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit, origin }),
         queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
             const response = await api.getAlbums({
@@ -429,6 +445,7 @@ export function useLibraryAlbumsInfiniteQuery({
                 offset,
                 filter,
                 sortBy,
+                origin,
             });
             return {
                 albums: response.albums,
@@ -460,6 +477,7 @@ export function useLibraryArtistsInfiniteQuery({
     sortBy = "name",
     limit = 40,
     enabled = true,
+    origin = "all",
 }: Omit<LibraryArtistsParams, "page"> & { enabled?: boolean } = {}) {
     return useInfiniteQuery<
         ArtistsPageResponse,
@@ -468,7 +486,7 @@ export function useLibraryArtistsInfiniteQuery({
         readonly unknown[],
         number
     >({
-        queryKey: queryKeys.libraryArtists({ filter, sortBy, limit }),
+        queryKey: queryKeys.libraryArtists({ filter, sortBy, limit, origin }),
         queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
             const response = await api.getArtists({
@@ -476,6 +494,7 @@ export function useLibraryArtistsInfiniteQuery({
                 offset,
                 filter,
                 sortBy,
+                origin,
             });
             return {
                 artists: response.artists,
@@ -510,11 +529,18 @@ export function useLibraryAlbumsQuery({
     limit = 40,
     page = 1,
     enabled = true,
+    origin = "all",
 }: LibraryAlbumsParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
-        queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit, offset }),
-        queryFn: () => api.getAlbums({ limit, offset, filter, sortBy }),
+        queryKey: queryKeys.libraryAlbums({
+            filter,
+            sortBy,
+            limit,
+            offset,
+            origin,
+        }),
+        queryFn: () => api.getAlbums({ limit, offset, filter, sortBy, origin }),
         select: (response) => ({
             albums: response.albums,
             total: response.total,
@@ -535,6 +561,7 @@ export function useLibraryTracksInfiniteQuery({
     sortBy = "name",
     limit = 40,
     enabled = true,
+    origin = "all",
 }: Omit<LibraryTracksParams, "page"> & { enabled?: boolean } = {}) {
     return useInfiniteQuery<
         TracksPageResponse,
@@ -543,10 +570,15 @@ export function useLibraryTracksInfiniteQuery({
         readonly unknown[],
         number
     >({
-        queryKey: queryKeys.libraryTracks({ sortBy, limit }),
+        queryKey: queryKeys.libraryTracks({ sortBy, limit, origin }),
         queryFn: async ({ pageParam }) => {
             const offset = (pageParam - 1) * limit;
-            const response = await api.getTracks({ limit, offset, sortBy });
+            const response = await api.getTracks({
+                limit,
+                offset,
+                sortBy,
+                origin,
+            });
             return {
                 tracks: response.tracks,
                 total: response.total,
@@ -577,11 +609,12 @@ export function useLibraryTracksQuery({
     limit = 40,
     page = 1,
     enabled = true,
+    origin = "all",
 }: LibraryTracksParams = {}) {
     const offset = (page - 1) * limit;
     return useQuery({
-        queryKey: queryKeys.libraryTracks({ sortBy, limit, offset }),
-        queryFn: () => api.getTracks({ limit, offset, sortBy }),
+        queryKey: queryKeys.libraryTracks({ sortBy, limit, offset, origin }),
+        queryFn: () => api.getTracks({ limit, offset, sortBy, origin }),
         select: (response) => ({
             tracks: response.tracks,
             total: response.total,
@@ -687,10 +720,11 @@ export function useSearchQuery(
         | "audiobooks"
         | "podcasts" = "all",
     limit: number = 20,
+    source: "all" | "local" | "peers" = "all",
 ) {
     return useQuery({
-        queryKey: queryKeys.search(query, type, limit),
-        queryFn: ({ signal }) => api.search(query, type, limit, signal),
+        queryKey: queryKeys.search(query, type, limit, source),
+        queryFn: ({ signal }) => api.search(query, type, limit, signal, source),
         enabled: query.length >= 2, // Only search if query is at least 2 characters
         staleTime: 5 * 60 * 1000, // 5 minutes
     });

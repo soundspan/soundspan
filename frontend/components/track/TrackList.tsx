@@ -104,7 +104,11 @@ export function TrackList<T>({
                 index={index}
                 isPlaying={isPlaying}
                 isInQueue={isInQueue}
-                onPlay={handlePlay(item, index)}
+                onPlay={
+                    rowItem.isPlayable === false
+                        ? undefined
+                        : handlePlay(item, index)
+                }
                 className={rowClassName}
                 accentColor={accentColor}
                 showCoverArt={showCoverArt}

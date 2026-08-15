@@ -1,4 +1,4 @@
-import { Download } from "lucide-react";
+import { Download, Network } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { FilterTab } from "../types";
 
@@ -6,6 +6,7 @@ interface SearchFiltersProps {
     filterTab: FilterTab;
     onFilterChange: (tab: FilterTab) => void;
     soulseekEnabled: boolean;
+    federationEnabled: boolean;
     hasSearched: boolean;
 }
 
@@ -16,6 +17,7 @@ export function SearchFilters({
     filterTab,
     onFilterChange,
     soulseekEnabled,
+    federationEnabled,
     hasSearched,
 }: SearchFiltersProps) {
     if (!hasSearched) {
@@ -80,10 +82,27 @@ export function SearchFilters({
             >
                 Podcasts
             </button>
-            {soulseekEnabled && (
+            {federationEnabled && (
                 <button
                     data-tv-card
                     data-tv-card-index={4}
+                    tabIndex={0}
+                    onClick={() => onFilterChange("peers")}
+                    className={cn(
+                        "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition-all",
+                        filterTab === "peers"
+                            ? "bg-brand text-black"
+                            : "bg-surface-hover text-white hover:bg-surface-highlight",
+                    )}
+                >
+                    <Network className="h-4 w-4" />
+                    Peers
+                </button>
+            )}
+            {soulseekEnabled && (
+                <button
+                    data-tv-card
+                    data-tv-card-index={federationEnabled ? 5 : 4}
                     tabIndex={0}
                     onClick={() => onFilterChange("soulseek")}
                     className={cn(

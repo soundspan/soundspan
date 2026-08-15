@@ -346,7 +346,7 @@ describe("analysis routes runtime", () => {
         await postRetryFailed(req, res);
 
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
-            where: { analysisStatus: "failed" },
+            where: { analysisStatus: "failed", origin: "LOCAL" },
             data: {
                 analysisStatus: "pending",
                 analysisError: null,
@@ -369,7 +369,11 @@ describe("analysis routes runtime", () => {
         expect(notFoundRes.statusCode).toBe(404);
         expect(mockTrackFindFirst).toHaveBeenLastCalledWith(
             expect.objectContaining({
-                where: { id: "missing", removedAt: null },
+                where: {
+                    id: "missing",
+                    removedAt: null,
+                    origin: "LOCAL",
+                },
             }),
         );
 
@@ -674,9 +678,12 @@ describe("analysis routes runtime", () => {
 
         await postVibeStart(req, res);
 
-        expect(mockTrackEmbeddingDeleteMany).toHaveBeenCalledWith();
+        expect(mockTrackEmbeddingDeleteMany).toHaveBeenCalledWith({
+            where: { track: { origin: "LOCAL" } },
+        });
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
+            where: { origin: "LOCAL" },
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisRetryCount: 0,
@@ -723,7 +730,10 @@ describe("analysis routes runtime", () => {
         await postVibeRetry(req, res);
 
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
-            where: { vibeAnalysisStatus: "failed" },
+            where: {
+                vibeAnalysisStatus: "failed",
+                origin: "LOCAL",
+            },
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisError: null,

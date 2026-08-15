@@ -8,6 +8,7 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { api } from "@/lib/api";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { getArtistHref } from "@/utils/artistRoute";
+import { PeerBadge } from "@/components/ui/PeerBadge";
 
 interface ArtistsGridProps {
     artists: Artist[];
@@ -104,20 +105,22 @@ const ArtistCardItem = memo(
                             )}
                         </div>
                         {/* Play button */}
-                        {!hidePlayButtons && (
-                            <button
-                                onClick={handlePlay}
-                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                                {showPlaySpinner ? (
-                                    <Loader2 className="w-4 h-4 animate-spin text-black" />
-                                ) : (
-                                    <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
-                                )}
-                            </button>
-                        )}
+                        {!hidePlayButtons &&
+                            (artist.source !== "federated" ||
+                                artist.peer?.online === true) && (
+                                <button
+                                    onClick={handlePlay}
+                                    className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                    {showPlaySpinner ? (
+                                        <Loader2 className="w-4 h-4 animate-spin text-black" />
+                                    ) : (
+                                        <Play className="w-4 h-4 fill-current ml-0.5 text-black" />
+                                    )}
+                                </button>
+                            )}
                         {/* Delete button */}
-                        {canDelete && (
+                        {canDelete && artist.source !== "federated" && (
                             <button
                                 onClick={handleDelete}
                                 className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
@@ -130,9 +133,17 @@ const ArtistCardItem = memo(
                     <h3 className="text-sm font-semibold text-white truncate">
                         {artist.name}
                     </h3>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">
-                        {artist.albumCount || 0} albums
-                    </p>
+                    <div className="mt-0.5 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs text-gray-400">
+                            {artist.albumCount || 0} albums
+                        </p>
+                        {artist.source === "federated" && artist.peer && (
+                            <PeerBadge
+                                peerName={artist.peer.name}
+                                online={artist.peer.online}
+                            />
+                        )}
+                    </div>
                 </div>
             </Link>
         );

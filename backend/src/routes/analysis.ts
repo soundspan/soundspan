@@ -7,7 +7,10 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import analysisInternalRoutes from "./analysisInternal";
 import os from "os";
-import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import {
+    LOCAL_TRACK_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
 
 const router = Router();
 
@@ -50,7 +53,7 @@ router.get("/status", requireAuth, async (req, res) => {
         // Get counts by status
         const statusCounts = await prisma.track.groupBy({
             by: ["analysisStatus"],
-            where: TRACK_VISIBLE_WHERE,
+            where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
             _count: true,
         });
 
@@ -77,6 +80,7 @@ router.get("/status", requireAuth, async (req, res) => {
             FROM track_embeddings te
             INNER JOIN "Track" t ON t.id = te.track_id
             WHERE t."removedAt" IS NULL
+              AND t.origin = ${"LOCAL"}::"TrackOrigin"
         `;
         const withEmbeddings = Number(embeddingCount[0]?.count || 0);
 
@@ -146,6 +150,7 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
             where: {
                 analysisStatus: "pending",
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
             },
             select: {
                 id: true,
@@ -219,6 +224,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
         const result = await prisma.track.updateMany({
             where: {
                 analysisStatus: "failed",
+                ...LOCAL_TRACK_WHERE,
             },
             data: {
                 analysisStatus: "pending",
@@ -277,7 +283,11 @@ router.post<{ trackId: string }>(
             const { trackId } = req.params;
 
             const track = await prisma.track.findFirst({
-                where: { id: trackId, ...TRACK_VISIBLE_WHERE },
+                where: {
+                    id: trackId,
+                    ...TRACK_VISIBLE_WHERE,
+                    ...LOCAL_TRACK_WHERE,
+                },
                 select: {
                     id: true,
                     filePath: true,
@@ -359,7 +369,11 @@ router.get<{ trackId: string }>(
             const { trackId } = req.params;
 
             const track = await prisma.track.findFirst({
-                where: { id: trackId, ...TRACK_VISIBLE_WHERE },
+                where: {
+                    id: trackId,
+                    ...TRACK_VISIBLE_WHERE,
+                    ...LOCAL_TRACK_WHERE,
+                },
                 select: {
                     id: true,
                     title: true,
@@ -434,6 +448,7 @@ router.get("/features", requireAuth, async (req, res) => {
         const analyzed = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
                 analysisStatus: "completed",
                 bpm: { not: null },
             },
@@ -791,8 +806,11 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
 
         // If force mode, delete all existing embeddings first
         if (force) {
-            await prisma.trackEmbedding.deleteMany();
+            await prisma.trackEmbedding.deleteMany({
+                where: { track: LOCAL_TRACK_WHERE },
+            });
             await prisma.track.updateMany({
+                where: LOCAL_TRACK_WHERE,
                 data: {
                     ...buildVibePendingReset(),
                     vibeAnalysisRetryCount: 0,
@@ -807,6 +825,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             where: {
                 embedding: null,
                 ...TRACK_VISIBLE_WHERE,
+                ...LOCAL_TRACK_WHERE,
             },
             select: {
                 id: true,
@@ -891,7 +910,10 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
 router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
     try {
         const result = await prisma.track.updateMany({
-            where: { vibeAnalysisStatus: "failed" },
+            where: {
+                vibeAnalysisStatus: "failed",
+                ...LOCAL_TRACK_WHERE,
+            },
             data: {
                 ...buildVibePendingReset(),
                 vibeAnalysisRetryCount: 0,
