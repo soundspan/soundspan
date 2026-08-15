@@ -26,6 +26,7 @@ import type {
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsSection } from "../ui";
+import { PeerDedupList, PeerSettingsPanel } from "./federationPeerSettings";
 
 type AddMode = "host" | "link" | "pair";
 
@@ -140,6 +141,7 @@ interface FederationPeersListProps {
     onRotate: (peer: FederationPeer) => void;
     onRevoke: (peer: FederationPeer) => void;
     onDelete: (peer: FederationPeer) => void;
+    onRefresh?: () => Promise<void>;
 }
 
 /** Render the federation peer collection and its administrative actions. */
@@ -150,6 +152,7 @@ export function FederationPeersList({
     onRotate,
     onRevoke,
     onDelete,
+    onRefresh,
 }: FederationPeersListProps) {
     if (peers.length === 0) {
         return (
@@ -169,6 +172,7 @@ export function FederationPeersList({
                     onRotate={onRotate}
                     onRevoke={onRevoke}
                     onDelete={onDelete}
+                    onRefresh={onRefresh}
                 />
             ))}
         </div>
@@ -182,6 +186,7 @@ function PeerCard({
     onRotate,
     onRevoke,
     onDelete,
+    onRefresh,
 }: {
     peer: FederationPeer;
     busy: boolean;
@@ -189,7 +194,14 @@ function PeerCard({
     onRotate: (peer: FederationPeer) => void;
     onRevoke: (peer: FederationPeer) => void;
     onDelete: (peer: FederationPeer) => void;
+    onRefresh?: () => Promise<void>;
 }) {
+    const [panel, setPanel] = useState<"none" | "settings" | "dedup">("none");
+    const [panelError, setPanelError] = useState<string | null>(null);
+    const togglePanel = (target: "settings" | "dedup") => {
+        setPanelError(null);
+        setPanel((current) => (current === target ? "none" : target));
+    };
     return (
         <div className="rounded-lg border border-white/[0.06] bg-surface-hover p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -261,6 +273,42 @@ function PeerCard({
                     onDelete={onDelete}
                 />
             </div>
+            <div className="mt-2 flex gap-3 text-[10px] text-gray-400">
+                <button
+                    type="button"
+                    onClick={() => togglePanel("settings")}
+                    className="underline-offset-2 hover:underline"
+                >
+                    {panel === "settings" ? "Hide settings" : "Settings"}
+                </button>
+                {hasOutbound(peer) && (
+                    <button
+                        type="button"
+                        onClick={() => togglePanel("dedup")}
+                        className="underline-offset-2 hover:underline"
+                    >
+                        {panel === "dedup"
+                            ? "Hide dedup matches"
+                            : "Dedup matches"}
+                    </button>
+                )}
+            </div>
+            {panelError && (
+                <p className="mt-2 text-xs text-red-300">{panelError}</p>
+            )}
+            {panel === "settings" && (
+                <PeerSettingsPanel
+                    peer={peer}
+                    onSaved={async () => {
+                        setPanel("none");
+                        await onRefresh?.();
+                    }}
+                    onError={setPanelError}
+                />
+            )}
+            {panel === "dedup" && (
+                <PeerDedupList peer={peer} onError={setPanelError} />
+            )}
         </div>
     );
 }
@@ -630,6 +678,7 @@ function PeerManagementPanel(props: {
     runPeerAction: RunPeerAction;
     setCredential: (value: { peerName: string; token: string }) => void;
     setDeletePeer: (peer: FederationPeer) => void;
+    loadPeers: () => Promise<void>;
 }) {
     if (props.loading) {
         return (
@@ -642,6 +691,7 @@ function PeerManagementPanel(props: {
         <FederationPeersList
             peers={props.peers}
             busyPeerId={props.busyPeerId}
+            onRefresh={props.loadPeers}
             onSync={(peer) =>
                 void props.runPeerAction(peer, () =>
                     api.syncFederationPeer(peer.id).then(() => undefined),
@@ -871,6 +921,7 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
                 runPeerAction={props.runPeerAction}
                 setCredential={props.setCredential}
                 setDeletePeer={props.setDeletePeer}
+                loadPeers={props.loadPeers}
             />
             <FederationAddControls
                 busy={props.addBusy}

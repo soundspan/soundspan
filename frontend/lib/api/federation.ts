@@ -19,12 +19,41 @@ export interface FederationPeer {
     scopes: FederationScope[];
     inboundStatus: FederationPeerStatus | null;
     outboundStatus: FederationPeerStatus | null;
+    showDedupedCopies: boolean;
+    maxConcurrentStreams: number | null;
+    maxStreamKbps: number | null;
     lastSeenAt: string | null;
     lastSyncCursor: string | null;
     catalogEpoch: string | null;
     createdAt: string;
     updatedAt: string;
 }
+
+export interface FederationPeerSettingsInput {
+    showDedupedCopies?: boolean;
+    maxConcurrentStreams?: number | null;
+    maxStreamKbps?: number | null;
+}
+
+export interface FederationDedupTrack {
+    id: string;
+    title: string;
+    album: { title: string };
+    artist: { name: string };
+}
+
+export interface FederationDedupEntry {
+    federatedTrack: FederationDedupTrack;
+    localTrack: FederationDedupTrack | null;
+    tier: string | null;
+    confidence: number | null;
+    pinned: boolean;
+}
+
+export type FederationDedupActionInput =
+    | { action: "link"; localTrackId: string }
+    | { action: "unlink" }
+    | { action: "reset" };
 
 export interface CreateFederationPeerInput {
     name: string;
@@ -131,6 +160,42 @@ export function WithFederation<TBase extends ApiClientConstructor>(
             return this.request<{ code: string; expiresAt: string }>(
                 "/federation/admin/pairing-codes",
                 { method: "POST", body: JSON.stringify({ scopes }) },
+            );
+        }
+
+        async updateFederationPeerSettings(
+            peerId: string,
+            settings: FederationPeerSettingsInput,
+        ): Promise<FederationPeer> {
+            return this.request<FederationPeer>(
+                `/federation/admin/peers/${encodeURIComponent(peerId)}/settings`,
+                { method: "PATCH", body: JSON.stringify(settings) },
+            );
+        }
+
+        async getFederationPeerDedup(
+            peerId: string,
+            cursor?: string,
+        ): Promise<{
+            items: FederationDedupEntry[];
+            nextCursor: string | null;
+        }> {
+            const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+            return this.request<{
+                items: FederationDedupEntry[];
+                nextCursor: string | null;
+            }>(
+                `/federation/admin/peers/${encodeURIComponent(peerId)}/dedup${query}`,
+            );
+        }
+
+        async arbitrateFederationTrackDedup(
+            trackId: string,
+            input: FederationDedupActionInput,
+        ): Promise<FederationDedupEntry> {
+            return this.request<FederationDedupEntry>(
+                `/federation/admin/tracks/${encodeURIComponent(trackId)}/dedup`,
+                { method: "POST", body: JSON.stringify(input) },
             );
         }
     }
