@@ -143,6 +143,9 @@ describe("workers runtime behavior", () => {
         };
 
         jest.doMock("../../utils/logger", () => ({ logger }));
+        jest.doMock("music-metadata", () => ({ parseFile: jest.fn() }), {
+            virtual: true,
+        });
         jest.doMock("../queues", () => ({
             scanQueue,
             discoverQueue,
