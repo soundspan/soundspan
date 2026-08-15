@@ -2954,6 +2954,11 @@ describe("library catalog list runtime coverage", () => {
                                                                 null,
                                                         },
                                                         {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
+                                                        },
+                                                        {
                                                             dedupOfTrack: {
                                                                 removedAt: {
                                                                     not: null,
@@ -2981,6 +2986,11 @@ describe("library catalog list runtime coverage", () => {
                                                                 null,
                                                         },
                                                         {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
+                                                        },
+                                                        {
                                                             dedupOfTrack: {
                                                                 removedAt: {
                                                                     not: null,
@@ -3006,6 +3016,11 @@ describe("library catalog list runtime coverage", () => {
                                                         {
                                                             dedupOfTrackId:
                                                                 null,
+                                                        },
+                                                        {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
                                                         },
                                                         {
                                                             dedupOfTrack: {
@@ -3085,6 +3100,11 @@ describe("library catalog list runtime coverage", () => {
                                     origin: "FEDERATED",
                                     OR: [
                                         { dedupOfTrackId: null },
+                                        {
+                                            federationPeer: {
+                                                showDedupedCopies: true,
+                                            },
+                                        },
                                         {
                                             dedupOfTrack: {
                                                 removedAt: { not: null },
@@ -3290,6 +3310,11 @@ describe("library catalog list runtime coverage", () => {
                             origin: "FEDERATED",
                             OR: [
                                 { dedupOfTrackId: null },
+                                {
+                                    federationPeer: {
+                                        showDedupedCopies: true,
+                                    },
+                                },
                                 {
                                     dedupOfTrack: {
                                         removedAt: { not: null },

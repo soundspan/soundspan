@@ -301,7 +301,6 @@ describe("federation sync processor", () => {
         prisma.track.findFirst.mockResolvedValue(null);
         prisma.track.upsert.mockResolvedValue({
             id: "fed-track-row",
-            dedupPinned: false,
         });
         prisma.track.update.mockResolvedValue({});
         prisma.track.updateMany.mockResolvedValue({ count: 1 });
@@ -1072,7 +1071,6 @@ describe("federation sync processor", () => {
     it("preserves a pinned arbitration decision through a full resync", async () => {
         prisma.track.upsert.mockResolvedValueOnce({
             id: "fed-track-row",
-            dedupPinned: true,
         });
         prisma.track.updateMany.mockResolvedValueOnce({ count: 0 });
 
@@ -1084,7 +1082,7 @@ describe("federation sync processor", () => {
                     dedupPinned: expect.anything(),
                     dedupOfTrackId: expect.anything(),
                 }),
-                select: { id: true, dedupPinned: true },
+                select: { id: true },
             }),
         );
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
@@ -1430,6 +1428,38 @@ describe("federation sync processor", () => {
         );
         expect(prisma.federationPodcastListing.upsert).toHaveBeenCalled();
         expect(prisma.audiobook.upsert).toHaveBeenCalled();
+    });
+
+    it("skips full-sync types omitted from the parsed host manifest", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: JSON.stringify({
+                phase: "full",
+                mediaType: "artist",
+                cursor: null,
+                serverTime: "2026-08-15T11:59:59.000Z",
+                epoch: "epoch-1",
+            }),
+        });
+        client.getManifest.mockResolvedValue({
+            ...manifest,
+            mediaTypes: ["artist", "album", "track"],
+        });
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+            podcasts: 0,
+            audiobooks: 0,
+        });
+
+        expect(
+            client.getCatalogItems.mock.calls.map((call) => call[0]),
+        ).toEqual(["artist", "album", "track", "artist", "album", "track"]);
+        expect(prisma.federationPodcastListing.upsert).not.toHaveBeenCalled();
+        expect(prisma.audiobook.upsert).not.toHaveBeenCalled();
+        expect(mockLog.info).toHaveBeenCalledWith(
+            "peerId=peer-1 skipping unadvertised media types: podcast,audiobook",
+        );
     });
 
     it("imports embeddings only when the persisted peer scope permits it", async () => {

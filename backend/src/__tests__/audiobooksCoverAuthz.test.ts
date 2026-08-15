@@ -31,14 +31,17 @@ jest.mock("../middleware/rateLimiter", () => ({
     imageLimiter: (_req: any, _res: any, next: any) => next(),
 }));
 
-jest.mock("../utils/logger", () => ({
-    logger: {
+jest.mock("../utils/logger", () => {
+    const logger = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+        child: jest.fn(),
+    };
+    logger.child.mockReturnValue(logger);
+    return { logger };
+});
 
 const mockAudiobookshelfService = {
     getAllAudiobooks: jest.fn(),
@@ -91,6 +94,9 @@ jest.mock("../utils/db", () => ({
 
 jest.mock("../config", () => ({
     config: {
+        features: {
+            federation: false,
+        },
         music: {
             musicPath: mockMusicPath,
         },

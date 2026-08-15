@@ -1069,6 +1069,11 @@ describe("library branch coverage focus", () => {
                                                         dedupOfTrackId: null,
                                                     },
                                                     {
+                                                        federationPeer: {
+                                                            showDedupedCopies: true,
+                                                        },
+                                                    },
+                                                    {
                                                         dedupOfTrack: {
                                                             removedAt: {
                                                                 not: null,
@@ -1112,6 +1117,11 @@ describe("library branch coverage focus", () => {
                                                         {
                                                             dedupOfTrackId:
                                                                 null,
+                                                        },
+                                                        {
+                                                            federationPeer: {
+                                                                showDedupedCopies: true,
+                                                            },
                                                         },
                                                         {
                                                             dedupOfTrack: {
@@ -1238,6 +1248,11 @@ describe("library branch coverage focus", () => {
                                     origin: "FEDERATED",
                                     OR: [
                                         { dedupOfTrackId: null },
+                                        {
+                                            federationPeer: {
+                                                showDedupedCopies: true,
+                                            },
+                                        },
                                         {
                                             dedupOfTrack: {
                                                 removedAt: { not: null },

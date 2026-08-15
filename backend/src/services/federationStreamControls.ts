@@ -1,55 +1,63 @@
 import type { Request, Response } from "express";
+import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 
 const log = logger.child("FederationStreamControls");
-const STREAM_COUNTER_KEY_PREFIX = "federation:stream-count:v1";
+const STREAM_LEASE_KEY_PREFIX = "federation:stream-leases:v2";
 const STREAM_RETRY_AFTER_SECONDS = 1;
 const PACING_WINDOW_MS = 100;
 const MAX_PACING_SLICES_PER_CHUNK = 8_000_000;
 
 /** Crash-recovery lease duration for distributed peer stream counters. */
 export const FEDERATION_STREAM_COUNTER_TTL_SECONDS = 60;
-const STREAM_COUNTER_REFRESH_MS =
+const STREAM_LEASE_REFRESH_MS =
     (FEDERATION_STREAM_COUNTER_TTL_SECONDS * 1_000) / 3;
+const STREAM_LEASE_TTL_MS = FEDERATION_STREAM_COUNTER_TTL_SECONDS * 1_000;
 
 const ACQUIRE_STREAM_SCRIPT = `
-local current = redis.call('INCR', KEYS[1])
-local ttl = redis.call('TTL', KEYS[1])
-if current == 1 or ttl < 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[2])
-end
-if current > tonumber(ARGV[1]) then
-  local remaining = redis.call('DECR', KEYS[1])
-  if remaining <= 0 then redis.call('DEL', KEYS[1]) end
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
+local active = redis.call('ZCOUNT', KEYS[1], '(' .. now_ms, '+inf')
+if active >= tonumber(ARGV[2]) then
   return 0
 end
-return current
+redis.call('ZADD', KEYS[1], now_ms + tonumber(ARGV[3]), ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return 1
 `;
 
 const REFRESH_STREAM_SCRIPT = `
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-if current > 0 then
-  redis.call('EXPIRE', KEYS[1], ARGV[1])
-  return 1
+local score = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]) or '0')
+if score <= 0 then return 0 end
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+if score <= now_ms then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return 0
 end
-return 0
+redis.call('ZADD', KEYS[1], now_ms + tonumber(ARGV[2]), ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 1
 `;
 
 const RELEASE_STREAM_SCRIPT = `
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-if current <= 0 then return 0 end
-if current == 1 then
+redis.call('ZREM', KEYS[1], ARGV[1])
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
+local remaining = redis.call('ZCARD', KEYS[1])
+if remaining <= 0 then
   redis.call('DEL', KEYS[1])
   return 0
 end
-local remaining = redis.call('DECR', KEYS[1])
-redis.call('EXPIRE', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
 return remaining
 `;
 
-/** Minimal Redis command surface used by the distributed stream counter. */
+/** Minimal Redis command surface used by the distributed stream lease set. */
 export interface FederationStreamRedis {
     eval(
         script: string,
@@ -71,19 +79,24 @@ class FederationStreamLease {
     constructor(
         private readonly redis: FederationStreamRedis,
         private readonly key: string,
+        private readonly member: string,
     ) {
         this.refreshTimer = setInterval(() => {
             this.refresh().catch((error: unknown) => {
                 log.warn("Failed to refresh federation stream lease", error);
             });
-        }, STREAM_COUNTER_REFRESH_MS);
+        }, STREAM_LEASE_REFRESH_MS);
         this.refreshTimer.unref?.();
     }
 
     private async refresh(): Promise<void> {
         await this.redis.eval(REFRESH_STREAM_SCRIPT, {
             keys: [this.key],
-            arguments: [String(FEDERATION_STREAM_COUNTER_TTL_SECONDS)],
+            arguments: [
+                this.member,
+                String(STREAM_LEASE_TTL_MS),
+                String(FEDERATION_STREAM_COUNTER_TTL_SECONDS),
+            ],
         });
     }
 
@@ -94,15 +107,18 @@ class FederationStreamLease {
         this.releasePromise = this.redis
             .eval(RELEASE_STREAM_SCRIPT, {
                 keys: [this.key],
-                arguments: [String(FEDERATION_STREAM_COUNTER_TTL_SECONDS)],
+                arguments: [
+                    this.member,
+                    String(FEDERATION_STREAM_COUNTER_TTL_SECONDS),
+                ],
             })
             .then(() => undefined);
         return this.releasePromise;
     }
 }
 
-function streamCounterKey(peerId: string): string {
-    return `${STREAM_COUNTER_KEY_PREFIX}:${peerId}`;
+function streamLeaseKey(peerId: string): string {
+    return `${STREAM_LEASE_KEY_PREFIX}:${peerId}`;
 }
 
 async function acquireStreamLease(
@@ -110,16 +126,19 @@ async function acquireStreamLease(
     peerId: string,
     limit: number,
 ): Promise<FederationStreamLease | null> {
-    const key = streamCounterKey(peerId);
+    const key = streamLeaseKey(peerId);
+    const member = randomUUID();
     const result = await redis.eval(ACQUIRE_STREAM_SCRIPT, {
         keys: [key],
         arguments: [
+            member,
             String(limit),
+            String(STREAM_LEASE_TTL_MS),
             String(FEDERATION_STREAM_COUNTER_TTL_SECONDS),
         ],
     });
     if (Number(result) < 1) return null;
-    return new FederationStreamLease(redis, key);
+    return new FederationStreamLease(redis, key, member);
 }
 
 function waitForWindow(delayMs: number): Promise<void> {

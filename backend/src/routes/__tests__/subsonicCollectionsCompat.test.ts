@@ -115,6 +115,9 @@ const PLAYLIST_TRACK_WHERE = {
                     origin: "FEDERATED",
                     OR: [
                         { dedupOfTrackId: null },
+                        {
+                            federationPeer: { showDedupedCopies: true },
+                        },
                         { dedupOfTrack: { removedAt: { not: null } } },
                     ],
                 },

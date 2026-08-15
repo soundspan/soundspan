@@ -640,7 +640,7 @@ async function upsertTrack(
             ...values,
         },
         update: values,
-        select: { id: true, dedupPinned: true },
+        select: { id: true },
     });
     if (hashChanged) await clearTrackTranscodeCache(row.id);
     await applyTrackDedup(row.id, match);
@@ -1242,8 +1242,10 @@ async function cleanupFullSync(context: SyncContext): Promise<void> {
 async function collectFreshHostIds(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
+    advertisedTypes: ReadonlySet<MediaType>,
 ): Promise<void> {
     for (const mediaType of FULL_TYPES) {
+        if (!advertisedTypes.has(mediaType)) continue;
         context.seen[mediaType].clear();
         let cursor: string | undefined;
         for (let page = 0; page < MAX_REMOTE_PAGES; page += 1) {
@@ -1364,25 +1366,46 @@ function fullSyncCursor(manifest: FederationManifest, fallback: Date): string {
     return fallback.toISOString();
 }
 
+function advertisedFullTypeSet(
+    context: SyncContext,
+    manifestMediaTypes: FederationManifest["mediaTypes"],
+): ReadonlySet<MediaType> {
+    const advertisedTypes = new Set<MediaType>(manifestMediaTypes);
+    const skippedTypes = FULL_TYPES.filter(
+        (mediaType) => !advertisedTypes.has(mediaType),
+    );
+    if (skippedTypes.length > 0) {
+        log.info(
+            `peerId=${context.peerId} skipping unadvertised media types: ${skippedTypes.join(",")}`,
+        );
+    }
+    return advertisedTypes;
+}
+
 async function runFullSync(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
     progress: FullProgress,
     resumed: boolean,
+    manifestMediaTypes: FederationManifest["mediaTypes"],
 ): Promise<FederationSyncResult> {
+    const advertisedTypes = advertisedFullTypeSet(context, manifestMediaTypes);
     const startIndex =
         progress.mediaType === "cleanup"
             ? FULL_TYPES.length
             : FULL_TYPES.indexOf(progress.mediaType);
     for (let index = 0; index < FULL_TYPES.length; index += 1) {
         if (index < startIndex) continue;
+        if (!advertisedTypes.has(FULL_TYPES[index])) continue;
         await syncFullType(context, client, {
             ...progress,
             mediaType: FULL_TYPES[index],
             cursor: index === startIndex ? progress.cursor : null,
         });
     }
-    if (resumed) await collectFreshHostIds(context, client);
+    if (resumed) {
+        await collectFreshHostIds(context, client, advertisedTypes);
+    }
     await cleanupFullSync(context);
     return finishSync(context, "full", progress.serverTime, progress.epoch);
 }
@@ -1470,7 +1493,13 @@ export async function processFederationSync(
         fullProgress.epoch === manifest.catalogEpoch &&
         peer.catalogEpoch === fullProgress.epoch
     ) {
-        return runFullSync(context, client, fullProgress, true);
+        return runFullSync(
+            context,
+            client,
+            fullProgress,
+            true,
+            manifest.mediaTypes,
+        );
     }
     if (
         !peer.lastSyncCursor ||
@@ -1483,6 +1512,7 @@ export async function processFederationSync(
             client,
             newFullProgress(manifest, startedAt),
             false,
+            manifest.mediaTypes,
         );
     }
     try {
@@ -1509,6 +1539,7 @@ export async function processFederationSync(
             client,
             newFullProgress(refreshedManifest, startedAt),
             false,
+            refreshedManifest.mediaTypes,
         );
     }
 }
