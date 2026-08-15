@@ -124,6 +124,20 @@ model FederationPeer {
 - `Artist`/`Album`/`Track` gain nullable `peerId → FederationPeer` + `remoteId` (the peer's cuid for the entity).
 - Federated track IDs remain ordinary local `Track.id` cuids. The wire envelope carries the host ID, which is stored as the unique `(peerId, remoteId)` pair. `Play` and `PlaylistItem` use the existing `trackId` column, while API responses discriminate the row with `source: "federated"` and peer provenance. No new polymorphic FK columns are required.
 
+**Federated vs provider-remote tracks.** Federated tracks deliberately do NOT follow the existing TIDAL/YT Music "remote track" pattern. The two models coexist and serve different purposes:
+
+| | Provider-remote (`TrackTidal`/`TrackYtMusic`) | Federated (`Track` with `origin: FEDERATED`) |
+| --- | --- | --- |
+| Storage | Side tables outside the library | First-class library rows |
+| Browse/search | Never appear (playlists/likes only) | Full browse, search, artist/album pages |
+| References | Dedicated polymorphic columns on `PlaylistItem`/`LikedRemoteTrack`/`Play` per provider | Ordinary `trackId` — zero new columns |
+| Likes | Provider-specific route + `LikedRemoteTrack` | Standard track preference route + `LikedTrack` |
+| Playback | Extracted/proxied from the provider at play time | Proxied from the owning peer's federation stream endpoint |
+| Dedup vs local | `TrackMapping` gap-fill arbitration | Identity-tier matching (`audioHash`/`recordingMbid`/`isrc`/position), local wins via `dedupOfTrackId` |
+| Lifecycle | Ephemeral provider IDs, refreshed lazily | Synced catalog with deltas, tombstones, and peer-cascade cleanup |
+
+Rationale: a peer's library is *library* — a durable catalog a friend curates — so it should feel native (searchable, browsable, deduplicated, badged). Provider streaming is ephemeral gap-fill for individual tracks. The side-table pattern also scales poorly (every new source historically meant new nullable FK columns on every polymorphic table); first-class rows avoid that entirely, which is why federation adds no schema burden to playlists, likes, or plays.
+
 **Sync worker.** The Bull `federation-sync` queue performs an initial full catalog pull, then scheduled delta pulls (default 15 min, configurable). It upserts rows, populates `searchVector` through database behavior, and imports embeddings into `TrackEmbedding` when scoped. Bounded pages, `lastSyncCursor`, catalog epochs, and deterministic per-peer Bull job IDs make work resumable, idempotent, and coalesced. Existing denormalized artist counts remain local-only in v1.
 
 **Dedup.** Track arbitration uses the durable identity keys from the prerequisite feature (`docs/designs/durable-track-identity.md`) in this order: `audioHash`, `recordingMbid`, `isrc`, then `(rgMbid, discNo, trackNo)`. The catalog envelope carries these keys. Federated artist and album rows remain peer-owned; global MBID collisions receive deterministic placeholder identities. Within one peer, track identity keys can rebind a changed host `remoteId` to the existing federated row instead of dropping and recreating it.
