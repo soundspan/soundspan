@@ -128,13 +128,15 @@ function buildArtistIdentityClauses(
                 .filter((mbid): mbid is string => Boolean(mbid)),
         ),
     );
-    const names = Array.from(
-        new Set(
-            identities
-                .map((identity) => identity.name)
-                .filter((name): name is string => Boolean(name)),
-        ),
-    );
+    const namesByLowercase = new Map<string, string>();
+    for (const identity of identities) {
+        if (!identity.name) continue;
+        const lowercaseName = identity.name.toLowerCase();
+        if (!namesByLowercase.has(lowercaseName)) {
+            namesByLowercase.set(lowercaseName, identity.name);
+        }
+    }
+    const names = Array.from(namesByLowercase.values());
     const clauses: Array<Record<string, unknown>> = [];
     if (mbids.length > 0) clauses.push({ mbid: { in: mbids } });
     for (const name of names) {
@@ -150,7 +152,9 @@ function featureMatchesArtist(
     feature: RecentFeaturedArtist,
     artist: ResolvedArtistIdentity,
 ): boolean {
-    if (feature.artistMbid && feature.artistMbid === artist.mbid) return true;
+    if (feature.artistMbid && artist.mbid) {
+        return feature.artistMbid === artist.mbid;
+    }
     return (
         feature.artistName.localeCompare(artist.name, undefined, {
             sensitivity: "accent",
@@ -353,6 +357,8 @@ export class DiscoveryRecommendationsService {
                 artistName: true,
                 weekStartDate: true,
             },
+            // Bounds six weeks x 50 tracks x both discovery pipelines.
+            take: 600,
         });
         if (recentFeatures.length === 0) return;
 
@@ -641,6 +647,7 @@ export class DiscoveryRecommendationsService {
         excludedAlbumMbids: string[],
     ): Promise<SelectedTrack[]> {
         const selectedTrackIds = primaryTracks.map((track) => track.id);
+        const selectedTrackIdSet = new Set(selectedTrackIds);
         const selectedAlbumIds = new Set(
             primaryTracks.map((track) => track.albumId),
         );
@@ -655,7 +662,7 @@ export class DiscoveryRecommendationsService {
         );
         const eligibleTracks = fallbackTracks.filter(
             (track) =>
-                !selectedTrackIds.includes(track.id) &&
+                !selectedTrackIdSet.has(track.id) &&
                 !selectedAlbumIds.has(track.albumId),
         );
         const selections = capRankedDiscoveryTracks(

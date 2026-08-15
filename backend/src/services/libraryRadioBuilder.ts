@@ -38,6 +38,13 @@ export const selectTracksWithArtistDiversity = <
     strictCap: number,
     relaxedCap: number,
 ): T[] => {
+    if (
+        !Array.isArray(tracks) ||
+        !Number.isFinite(targetCount) ||
+        targetCount <= 0
+    ) {
+        return [];
+    }
     return applyArtistCap(tracks, {
         preserveInputOrder: true,
         targetCount,

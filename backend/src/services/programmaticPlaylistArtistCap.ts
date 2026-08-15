@@ -185,6 +185,8 @@ export function applyArtistCap<T extends ArtistCapTrack>(
     tracks: T[],
     options: ApplyArtistCapOptions<T> = {},
 ): T[] {
+    if (!Array.isArray(tracks)) return [];
+
     const maxPerArtist = options.maxPerArtist ?? DEFAULT_MAX_PER_ARTIST;
     if (
         !Number.isFinite(maxPerArtist) ||

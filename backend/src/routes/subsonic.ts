@@ -3663,6 +3663,21 @@ export async function handleGetRandomSongs(
             (track) => track.album.artist.id,
             { targetCount: size },
         );
+        if (selectedCandidates.length < size) {
+            const selectedTrackIds = new Set(
+                selectedCandidates.map((track) => track.id),
+            );
+            const remainingCandidates = candidates.filter(
+                (track) => !selectedTrackIds.has(track.id),
+            );
+            shuffleInPlace(remainingCandidates);
+            selectedCandidates.push(
+                ...remainingCandidates.slice(
+                    0,
+                    size - selectedCandidates.length,
+                ),
+            );
+        }
         shuffleInPlace(selectedCandidates);
         const songs = selectedCandidates.map((track) =>
             formatSongForSubsonic({

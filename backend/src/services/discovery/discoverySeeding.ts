@@ -87,7 +87,13 @@ function sampleSeedArtists(
     limit: number,
     rng: () => number,
 ): SeedArtist[] {
-    return artists
+    return [...artists]
+        .sort(
+            (left, right) =>
+                (left.artist.mbid ?? "").localeCompare(
+                    right.artist.mbid ?? "",
+                ) || left.artist.name.localeCompare(right.artist.name),
+        )
         .map((entry) => ({
             ...entry,
             key: Math.pow(
@@ -131,7 +137,7 @@ export class DiscoverySeeding {
                 source: { in: ["LIBRARY", "DISCOVERY_KEPT"] },
             },
             _count: { id: true },
-            orderBy: { _count: { id: "desc" } },
+            orderBy: [{ _count: { id: "desc" } }, { trackId: "asc" }],
             take: this.RECENT_PLAYS_LIMIT,
         });
 

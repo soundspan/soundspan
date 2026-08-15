@@ -462,6 +462,39 @@ describe("DiscoverySeeding", () => {
             ]);
         });
 
+        it("samples tied play counts deterministically across database row orders", async () => {
+            const recentPlays = Array.from({ length: 8 }, (_, index) => ({
+                trackId: `track-${index + 1}`,
+                _count: { id: 5 },
+            }));
+            const tracks = recentPlays.map((play, index) => ({
+                id: play.trackId,
+                album: {
+                    artistId: `artist-${index + 1}`,
+                    artist: {
+                        id: `artist-${index + 1}`,
+                        name: `Artist ${index + 1}`,
+                        mbid: `mbid-${index + 1}`,
+                    },
+                },
+            }));
+
+            (mockPrisma.play.groupBy as jest.Mock)
+                .mockResolvedValueOnce(recentPlays)
+                .mockResolvedValueOnce([...recentPlays].reverse());
+            (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
+
+            const first = await seeding.getSeedArtists(userId, 3);
+            const reordered = await seeding.getSeedArtists(userId, 3);
+
+            expect(reordered).toEqual(first);
+            expect(mockPrisma.play.groupBy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    orderBy: [{ _count: { id: "desc" } }, { trackId: "asc" }],
+                }),
+            );
+        });
+
         it("should deduplicate artists from multiple tracks", async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [

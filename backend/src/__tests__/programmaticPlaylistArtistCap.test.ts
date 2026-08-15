@@ -38,6 +38,14 @@ function countByArtist(tracks: TestTrack[]): Map<string, number> {
 }
 
 describe("applyArtistCap", () => {
+    it("returns an empty selection for a non-array track input", () => {
+        expect(
+            applyArtistCap(null as unknown as TestTrack[], {
+                maxPerArtist: 1,
+            }),
+        ).toEqual([]);
+    });
+
     it("uses a custom artist identity before the album artist path", () => {
         const input = [
             { ...makeTrack("a-1", "album-a"), artistId: "artist-a" },
@@ -77,6 +85,33 @@ describe("applyArtistCap", () => {
         expect(selected.map((track) => track.id)).toEqual([
             "a-new-1",
             "b-new-1",
+        ]);
+    });
+
+    it("counts already-selected artists against relaxed fallback caps", () => {
+        const selected = applyArtistCap(
+            [
+                makeTrack("a-new-1", "artist-a"),
+                makeTrack("a-new-2", "artist-a"),
+                makeTrack("b-new-1", "artist-b"),
+                makeTrack("b-new-2", "artist-b"),
+            ],
+            {
+                maxPerArtist: 1,
+                targetCount: 4,
+                preserveInputOrder: true,
+                alreadySelected: [makeTrack("a-existing", "artist-a")],
+                fallback: {
+                    enabled: true,
+                    maxRelaxedPerArtist: 2,
+                },
+            },
+        );
+
+        expect(selected.map((track) => track.id)).toEqual([
+            "b-new-1",
+            "a-new-1",
+            "b-new-2",
         ]);
     });
 

@@ -240,6 +240,34 @@ describe("DiscoveryRecommendationsService", () => {
             expect(result).toEqual([]);
             expect(mockPrisma.artist.findMany).not.toHaveBeenCalled();
         });
+
+        it("deduplicates seed names case-insensitively while preserving first casing", async () => {
+            (
+                mockDiscoverySeeding.getSeedArtists as jest.Mock
+            ).mockResolvedValue([
+                { name: "Shared Artist" },
+                { name: "shared artist" },
+                { name: "SHARED ARTIST" },
+            ]);
+            (mockPrisma.artist.findMany as jest.Mock).mockResolvedValue([]);
+
+            await (service as any).resolveSeedArtistIds("user-1");
+
+            expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
+                where: {
+                    OR: [
+                        {
+                            name: {
+                                equals: "Shared Artist",
+                                mode: "insensitive",
+                            },
+                        },
+                    ],
+                },
+                select: { id: true },
+                take: 30,
+            });
+        });
     });
 
     describe("buildArtistScoreMap", () => {
@@ -411,6 +439,7 @@ describe("DiscoveryRecommendationsService", () => {
                     artistName: true,
                     weekStartDate: true,
                 },
+                take: 600,
             });
             expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
                 where: {
@@ -423,12 +452,6 @@ describe("DiscoveryRecommendationsService", () => {
                         {
                             name: {
                                 equals: "Repeat Artist",
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            name: {
-                                equals: "repeat artist",
                                 mode: "insensitive",
                             },
                         },
@@ -447,6 +470,39 @@ describe("DiscoveryRecommendationsService", () => {
             );
             expect(result.get("fresh-artist")).toBe(0.8);
             expect(result.has("not-in-score-map")).toBe(false);
+        });
+
+        it("does not decay a same-named artist with a different MBID", async () => {
+            (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue(
+                [
+                    {
+                        artistMbid: "featured-mbid",
+                        artistName: "Shared Artist",
+                        weekStartDate: new Date("2025-03-10T00:00:00.000Z"),
+                    },
+                ],
+            );
+            (mockPrisma.artist.findMany as jest.Mock).mockResolvedValue([
+                {
+                    id: "featured-artist",
+                    mbid: "featured-mbid",
+                    name: "Shared Artist",
+                },
+                {
+                    id: "different-artist",
+                    mbid: "different-mbid",
+                    name: "Shared Artist",
+                },
+            ]);
+            const scores = new Map([
+                ["featured-artist", 1],
+                ["different-artist", 1],
+            ]);
+
+            await (service as any).applyRecentArtistDecay("user-1", scores);
+
+            expect(scores.get("featured-artist")).toBeCloseTo(0.6);
+            expect(scores.get("different-artist")).toBe(1);
         });
     });
 

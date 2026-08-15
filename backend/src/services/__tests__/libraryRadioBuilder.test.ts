@@ -109,6 +109,22 @@ const createSeedTrack = (genre: string) => ({
 });
 
 describe("selectTracksWithArtistDiversity", () => {
+    it("returns an empty selection for invalid tracks or target counts", () => {
+        const tracks = [{ id: "a-1", artistId: "artist-a" }];
+
+        expect(
+            selectTracksWithArtistDiversity(tracks, Number.NaN, 1, 2),
+        ).toEqual([]);
+        expect(
+            selectTracksWithArtistDiversity(
+                null as unknown as typeof tracks,
+                1,
+                1,
+                2,
+            ),
+        ).toEqual([]);
+    });
+
     it("returns a shorter result instead of unbounded narrow-pool refill", () => {
         const tracks = [
             { id: "a-1", artistId: "artist-a" },
