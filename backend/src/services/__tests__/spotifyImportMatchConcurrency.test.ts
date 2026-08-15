@@ -338,7 +338,8 @@ describe("spotify import matchTrack concurrency", () => {
         ]);
         expect(preview.summary.inLibrary).toBe(3);
         expect(prisma.track.findFirst).toHaveBeenCalled();
-        for (const [query] of (prisma.track.findFirst as jest.Mock).mock.calls) {
+        for (const [query] of (prisma.track.findFirst as jest.Mock).mock
+            .calls) {
             expect(query.where).toEqual(
                 expect.objectContaining({ removedAt: null }),
             );

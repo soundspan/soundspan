@@ -315,9 +315,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         async getLibraryHealth() {
-            return this.request<LibraryHealthResponse>(
-                "/admin/library-health",
-            );
+            return this.request<LibraryHealthResponse>("/admin/library-health");
         }
 
         async dismissLibraryHealthRecord(recordId: string) {

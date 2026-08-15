@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { Job } from "bull";
+import { z } from "zod";
 import { config } from "../../config";
 import { computeAudioStreamHash } from "../../services/audioHash";
 import { prisma } from "../../utils/db";
@@ -22,7 +23,9 @@ export const AUDIO_HASH_BACKFILL_JOB_NAME = "track-audio-hash-backfill";
 
 /** Cursor payload persisted with each audio-hash backfill page. */
 export interface AudioHashBackfillJobData {
+    mode?: "startup";
     startAfterId?: string;
+    sweepStartedAt: string;
 }
 
 /** Summary returned by one bounded audio-hash backfill page. */
@@ -35,17 +38,11 @@ export interface AudioHashBackfillResult {
 
 type BackfillTrack = { id: string; filePath: string };
 
-function parseStartAfterId(value: unknown): string | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value !== "string") {
-        throw new TypeError("Audio hash backfill cursor must be a string");
-    }
-    const cursor = value.trim();
-    if (cursor.length === 0 || cursor.length > 128) {
-        throw new RangeError("Audio hash backfill cursor is invalid");
-    }
-    return cursor;
-}
+const backfillJobDataSchema = z.strictObject({
+    mode: z.literal("startup").optional(),
+    startAfterId: z.string().trim().min(1).max(128).optional(),
+    sweepStartedAt: z.iso.datetime({ offset: true }),
+});
 
 async function loadBackfillPage(
     startAfterId: string | undefined,
@@ -53,6 +50,7 @@ async function loadBackfillPage(
     return prisma.track.findMany({
         where: {
             audioHash: null,
+            removedAt: null,
             ...(startAfterId ? { id: { gt: startAfterId } } : {}),
         },
         orderBy: { id: "asc" },
@@ -89,20 +87,23 @@ async function hashTrack(track: BackfillTrack): Promise<"hashed" | "skipped"> {
     const audioHash = await computeAudioStreamHash(absolutePath);
     if (!audioHash) return "skipped";
 
-    await prisma.track.update({
-        where: { id: track.id },
+    const updated = await prisma.track.updateMany({
+        where: { id: track.id, audioHash: null },
         data: { audioHash, audioHashedAt: new Date() },
     });
-    return "hashed";
+    return updated.count === 1 ? "hashed" : "skipped";
 }
 
-async function enqueueContinuation(startAfterId: string): Promise<void> {
+async function enqueueContinuation(
+    startAfterId: string,
+    sweepStartedAt: string,
+): Promise<void> {
     await schedulerQueue.add(
         AUDIO_HASH_BACKFILL_JOB_NAME,
-        { startAfterId },
+        { startAfterId, sweepStartedAt },
         {
             ...CONTINUATION_OPTIONS,
-            jobId: `scheduler:audio-hash-backfill:${startAfterId}`,
+            jobId: `scheduler:audio-hash-backfill:${sweepStartedAt}:${startAfterId}`,
         },
     );
 }
@@ -111,7 +112,8 @@ async function enqueueContinuation(startAfterId: string): Promise<void> {
 export async function processAudioHashBackfill(
     job: Job<AudioHashBackfillJobData>,
 ): Promise<AudioHashBackfillResult> {
-    const startAfterId = parseStartAfterId(job.data?.startAfterId);
+    const data = backfillJobDataSchema.parse(job.data);
+    const startAfterId = data.startAfterId;
     const candidates = await loadBackfillPage(startAfterId);
     const batch = candidates.slice(0, BATCH_SIZE);
     let hashed = 0;
@@ -126,7 +128,12 @@ export async function processAudioHashBackfill(
     }
 
     const continued = candidates.length > BATCH_SIZE;
-    if (continued) await enqueueContinuation(batch[BATCH_SIZE - 1].id);
+    if (continued) {
+        await enqueueContinuation(
+            batch[BATCH_SIZE - 1].id,
+            data.sweepStartedAt,
+        );
+    }
     log.info(
         `Processed ${batch.length} track audio hashes (${hashed} hashed, ${skipped} skipped)`,
     );

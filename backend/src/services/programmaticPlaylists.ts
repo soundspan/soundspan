@@ -951,7 +951,10 @@ export class ProgrammaticPlaylistService {
 
         // Get ALL tracks from this genre
         const trackGenres = await prisma.trackGenre.findMany({
-            where: { genreId: selectedGenre.id },
+            where: {
+                genreId: selectedGenre.id,
+                track: { removedAt: null },
+            },
             include: {
                 track: {
                     include: {
@@ -1084,7 +1087,9 @@ export class ProgrammaticPlaylistService {
                 selectedTracks.map((track) => track.id),
             );
             const fallbackTracks = await prisma.track.findMany({
-                where: this.trackWhere({ id: { notIn: Array.from(selectedIds) } }),
+                where: this.trackWhere({
+                    id: { notIn: Array.from(selectedIds) },
+                }),
                 include: {
                     album: {
                         select: {
@@ -1150,10 +1155,11 @@ export class ProgrammaticPlaylistService {
             );
 
         const candidateTracks = await prisma.track.findMany({
-            where:
-                this.trackWhere(overplayedIds.length > 0
+            where: this.trackWhere(
+                overplayedIds.length > 0
                     ? { id: { notIn: overplayedIds } }
-                    : undefined),
+                    : undefined,
+            ),
             include: {
                 _count: {
                     select: {
@@ -3008,7 +3014,10 @@ export class ProgrammaticPlaylistService {
         }
 
         const tracks = await prisma.track.findMany({
-            where: this.trackWhere({ analysisStatus: "completed", ...definition.where }),
+            where: this.trackWhere({
+                analysisStatus: "completed",
+                ...definition.where,
+            }),
             include: { album: { select: { coverUrl: true } } },
             take: definition.take,
         });

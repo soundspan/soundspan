@@ -645,6 +645,14 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
         const mix = await service.generateGenreMix("user-1", "2026-02-17");
 
         expect(mix).toBeNull();
+        expect(mockPrisma.trackGenre.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    genreId: "genre-2",
+                    track: { removedAt: null },
+                },
+            }),
+        );
         expect(mockPrisma.track.findMany).toHaveBeenCalledTimes(2);
     });
 

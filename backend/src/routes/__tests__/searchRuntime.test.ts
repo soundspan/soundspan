@@ -299,10 +299,19 @@ describe("search route runtime behavior", () => {
         await genresHandler(req, res);
 
         expect(mockGenreFindMany).toHaveBeenCalledWith({
+            where: {
+                trackGenres: {
+                    some: { track: { removedAt: null } },
+                },
+            },
             orderBy: { name: "asc" },
             include: {
                 _count: {
-                    select: { trackGenres: true },
+                    select: {
+                        trackGenres: {
+                            where: { track: { removedAt: null } },
+                        },
+                    },
                 },
             },
         });

@@ -13,7 +13,7 @@ export interface LibraryOrphanCleanupResult {
 export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCleanupResult> {
     const orphanedAlbums = await prisma.album.findMany({
         where: { tracks: { none: {} } },
-        select: { id: true, title: true },
+        select: { id: true },
     });
     const albumsDeleted =
         orphanedAlbums.length > 0
@@ -21,6 +21,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
                   await prisma.album.deleteMany({
                       where: {
                           id: { in: orphanedAlbums.map((album) => album.id) },
+                          tracks: { none: {} },
                       },
                   })
               ).count
@@ -28,7 +29,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
 
     const orphanedArtists = await prisma.artist.findMany({
         where: { albums: { none: {} } },
-        select: { id: true, name: true },
+        select: { id: true },
     });
     const artistsDeleted =
         orphanedArtists.length > 0
@@ -38,6 +39,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
                           id: {
                               in: orphanedArtists.map((artist) => artist.id),
                           },
+                          albums: { none: {} },
                       },
                   })
               ).count

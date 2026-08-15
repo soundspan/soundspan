@@ -104,6 +104,7 @@ const prisma = {
         findFirst: jest.fn(),
     },
     track: {
+        findFirst: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
     },
@@ -200,6 +201,7 @@ const mockAlbumUpdate = dbPrisma.album.update as jest.Mock;
 const mockOwnedAlbumDeleteMany = dbPrisma.ownedAlbum.deleteMany as jest.Mock;
 const mockOwnedAlbumUpsert = dbPrisma.ownedAlbum.upsert as jest.Mock;
 const mockTrackFindUnique = dbPrisma.track.findUnique as jest.Mock;
+const mockTrackFindFirst = dbPrisma.track.findFirst as jest.Mock;
 const mockTrackUpdate = dbPrisma.track.update as jest.Mock;
 const mockSystemSettingsFindUnique = dbPrisma.systemSettings
     .findUnique as jest.Mock;
@@ -362,6 +364,7 @@ describe("enrichment route runtime behavior", () => {
         mockOwnedAlbumDeleteMany.mockResolvedValue({ count: 0 });
         mockOwnedAlbumUpsert.mockResolvedValue({});
         mockTrackFindUnique.mockResolvedValue({ id: "track-1" });
+        mockTrackFindFirst.mockResolvedValue({ id: "track-1" });
         mockTrackUpdate.mockResolvedValue(undefined);
         mockGetSystemSettings.mockResolvedValue({ enrichmentConcurrency: 2 });
         mockSystemSettingsUpsert.mockResolvedValue({});
@@ -1456,7 +1459,7 @@ describe("enrichment route runtime behavior", () => {
                 },
             },
         };
-        mockTrackFindUnique.mockResolvedValueOnce({ id: "track-1" });
+        mockTrackFindFirst.mockResolvedValueOnce({ id: "track-1" });
         mockTrackUpdate.mockResolvedValueOnce(track);
 
         const res = createRes();
@@ -1465,8 +1468,8 @@ describe("enrichment route runtime behavior", () => {
             res,
         );
 
-        expect(mockTrackFindUnique).toHaveBeenCalledWith({
-            where: { id: "track-1" },
+        expect(mockTrackFindFirst).toHaveBeenCalledWith({
+            where: { id: "track-1", removedAt: null },
             select: { id: true },
         });
         expect(mockTrackUpdate).toHaveBeenCalledWith({
@@ -1493,6 +1496,19 @@ describe("enrichment route runtime behavior", () => {
             message: "Track metadata reset to original values",
             track,
         });
+    });
+
+    it("returns 404 when resetting metadata for a removed track", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce(null);
+        const res = createRes();
+
+        await resetTrackMetadataHandler(
+            { params: { id: "track-removed" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(404);
+        expect(mockTrackUpdate).not.toHaveBeenCalled();
     });
 
     it("returns 500 when album metadata reset fails", async () => {
@@ -1546,7 +1562,7 @@ describe("enrichment route runtime behavior", () => {
     });
 
     it("returns 404 on track metadata reset race condition", async () => {
-        mockTrackFindUnique.mockResolvedValueOnce({ id: "track-race" });
+        mockTrackFindFirst.mockResolvedValueOnce({ id: "track-race" });
         mockTrackUpdate.mockRejectedValueOnce(
             Object.assign(new Error("track deleted"), { code: "P2025" }),
         );

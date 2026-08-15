@@ -216,6 +216,13 @@ router.post("/tracks/:id/complete", async (req, res) => {
         const { localPath, quality, fileSizeMb } = completeTrackSchema.parse(
             req.body,
         );
+        const track = await prisma.track.findFirst({
+            where: { id: trackId, ...TRACK_VISIBLE_WHERE },
+            select: { id: true },
+        });
+        if (!track) {
+            return res.status(404).json({ error: "Track not found" });
+        }
 
         const cachedTrack = await prisma.cachedTrack.upsert({
             where: {

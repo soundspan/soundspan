@@ -342,10 +342,19 @@ router.get("/", async (req, res) => {
 router.get("/genres", async (req, res) => {
     try {
         const genres = await prisma.genre.findMany({
+            where: {
+                trackGenres: {
+                    some: { track: { removedAt: null } },
+                },
+            },
             orderBy: { name: "asc" },
             include: {
                 _count: {
-                    select: { trackGenres: true },
+                    select: {
+                        trackGenres: {
+                            where: { track: { removedAt: null } },
+                        },
+                    },
                 },
             },
         });

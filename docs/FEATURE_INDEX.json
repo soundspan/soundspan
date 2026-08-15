@@ -207,7 +207,7 @@
         "routes": ["/playlist/[id]", "/admin"]
       },
       "backend": {
-        "routes": ["admin.ts", "playlists.ts", "library.ts"],
+        "routes": ["admin.ts", "playlists.ts", "library.ts", "subsonic.ts"],
         "services": ["musicScanner.ts", "trackIdentityMatcher.ts"]
       },
       "tests": {

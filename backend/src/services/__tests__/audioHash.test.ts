@@ -146,8 +146,9 @@ describeIntegration("computeAudioStreamHash (real ffmpeg)", () => {
     beforeAll(() => {
         // Real subprocesses in this suite: restore the actual execFile.
         mockExecFile.mockImplementation((...args: unknown[]) => {
-            const real = jest.requireActual("child_process")
-                .execFile as (...a: unknown[]) => unknown;
+            const real = jest.requireActual("child_process").execFile as (
+                ...a: unknown[]
+            ) => unknown;
             return real(...args);
         });
 
@@ -155,19 +156,30 @@ describeIntegration("computeAudioStreamHash (real ffmpeg)", () => {
         original = path.join(tmpDir, "original.flac");
         retagged = path.join(tmpDir, "retagged.flac");
         execFileSync(FFMPEG, [
-            "-v", "error",
-            "-f", "lavfi",
-            "-i", "anoisesrc=d=2:c=pink",
-            "-c:a", "flac",
-            "-y", original,
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "anoisesrc=d=2:c=pink",
+            "-c:a",
+            "flac",
+            "-y",
+            original,
         ]);
         execFileSync(FFMPEG, [
-            "-v", "error",
-            "-i", original,
-            "-c", "copy",
-            "-metadata", "title=Retagged",
-            "-metadata", "artist=Someone Else",
-            "-y", retagged,
+            "-v",
+            "error",
+            "-i",
+            original,
+            "-c",
+            "copy",
+            "-metadata",
+            "title=Retagged",
+            "-metadata",
+            "artist=Someone Else",
+            "-y",
+            retagged,
         ]);
     });
 

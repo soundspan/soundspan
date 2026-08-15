@@ -24,9 +24,9 @@ import {
 import {
     applyTrackReplacement,
     removeReplacementCacheFiles,
-    resetTrackAfterReplacement,
 } from "./trackReplacement";
 import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
+import { config } from "../config";
 
 const scanLogger = logger.child("MusicScannerService");
 
@@ -61,7 +61,7 @@ function hasAudioReplacement(
     storedHash: string | null,
     nextHash: string | null,
 ): boolean {
-    return storedHash !== null && storedHash !== nextHash;
+    return storedHash !== null && nextHash !== null && storedHash !== nextHash;
 }
 
 function buildRebindData(
@@ -100,6 +100,24 @@ function getLibraryHealthRecordDelegate(): LibraryHealthRecordDelegate {
     ).libraryHealthRecord;
 }
 
+function isPrismaRecordNotFound(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "P2025",
+    );
+}
+
+function mergeTracksById(
+    first: readonly IdentityTrackRow[],
+    second: readonly IdentityTrackRow[],
+): IdentityTrackRow[] {
+    const tracksById = new Map(first.map((track) => [track.id, track]));
+    for (const track of second) tracksById.set(track.id, track);
+    return [...tracksById.values()];
+}
+
 // Supported audio formats
 const AUDIO_EXTENSIONS = new Set([
     ".mp3",
@@ -114,6 +132,8 @@ const AUDIO_EXTENSIONS = new Set([
     ".wv",
 ]);
 const MAX_SCAN_DEPTH = 64;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TRACK_PATH_QUERY_BATCH_SIZE = 10_000;
 const REMOVED_TRACK_REVIVAL_POOL_LIMIT = 10_000;
 // Cap health writes at the worker database pool's four connections.
 const HEALTH_WRITE_BATCH_SIZE = 4;
@@ -278,30 +298,68 @@ export class MusicScannerService {
                 consumedCandidatePaths: [],
             };
         }
-        const candidates = await prisma.track.findMany({
-            where: { filePath: { in: [...candidatePaths] } },
-            select: TRACK_IDENTITY_SELECT,
-        });
+        const candidates = await this.loadTracksByPaths(candidatePaths);
         const matches = matchTrackIdentities(missing, candidates);
+        const reboundMatches: typeof matches = [];
         for (const match of matches) {
-            await this.rebindMovedTrack(match, revival);
+            try {
+                await this.rebindMovedTrack(match, revival);
+                reboundMatches.push(match);
+            } catch (error: unknown) {
+                if (!isPrismaRecordNotFound(error)) throw error;
+                scanLogger.warn(
+                    `Skipped re-binding ${match.missing.id}; a matched track changed concurrently`,
+                );
+            }
         }
-        const reboundIds = new Set(matches.map((match) => match.missing.id));
+        const reboundIds = new Set(
+            reboundMatches.map((match) => match.missing.id),
+        );
         return {
             unmatched: missing.filter((track) => !reboundIds.has(track.id)),
-            rebound: matches.length,
-            consumedCandidatePaths: matches.map(
+            rebound: reboundMatches.length,
+            consumedCandidatePaths: reboundMatches.map(
                 (match) => match.candidate.filePath,
             ),
         };
+    }
+
+    private async loadTracksByPaths(
+        filePaths: readonly string[],
+    ): Promise<IdentityTrackRow[]> {
+        return processBatched(
+            [...filePaths],
+            TRACK_PATH_QUERY_BATCH_SIZE,
+            (batch) =>
+                prisma.track.findMany({
+                    where: { filePath: { in: batch } },
+                    select: TRACK_IDENTITY_SELECT,
+                }),
+        );
+    }
+
+    private async loadTracksForScan(
+        scannedPaths: ReadonlySet<string>,
+    ): Promise<IdentityTrackRow[]> {
+        const activeTracks = await prisma.track.findMany({
+            where: { removedAt: null },
+            select: TRACK_IDENTITY_SELECT,
+        });
+        const tracksAtScannedPaths = await this.loadTracksByPaths([
+            ...scannedPaths,
+        ]);
+        return mergeTracksById(activeTracks, tracksAtScannedPaths);
     }
 
     private async reviveRemovedTracks(
         candidatePaths: readonly string[],
     ): Promise<number> {
         if (candidatePaths.length === 0) return 0;
+        const retentionDays = config.workers.trackRemovalRetentionDays;
+        if (retentionDays === 0) return 0;
+        const purgeCutoff = new Date(Date.now() - retentionDays * DAY_MS);
         const removedTracks = await prisma.track.findMany({
-            where: { removedAt: { not: null } },
+            where: { removedAt: { not: null, gte: purgeCutoff } },
             orderBy: { removedAt: "desc" },
             take: REMOVED_TRACK_REVIVAL_POOL_LIMIT,
             select: TRACK_IDENTITY_SELECT,
@@ -338,15 +396,7 @@ export class MusicScannerService {
 
         // Step 2: Load active tracks plus removed rows that still own a path
         // found in this scan. The broader removed pool stays bounded below.
-        const existingTracks = await prisma.track.findMany({
-            where: {
-                OR: [
-                    { removedAt: null },
-                    { filePath: { in: [...scannedPaths] } },
-                ],
-            },
-            select: TRACK_IDENTITY_SELECT,
-        });
+        const existingTracks = await this.loadTracksForScan(scannedPaths);
 
         const tracksByPath = new Map(
             existingTracks.map((t) => [t.filePath, t]),
@@ -374,6 +424,7 @@ export class MusicScannerService {
 
         for (const audioFile of audioFiles) {
             await this.scanQueue.add(async () => {
+                let countedAsExisting: boolean | undefined;
                 try {
                     const relativePath = path.relative(musicPath, audioFile);
                     progress.currentFile = relativePath;
@@ -399,9 +450,11 @@ export class MusicScannerService {
                         }
                         // File changed or needs disc metadata update
                         result.tracksUpdated++;
+                        countedAsExisting = true;
                     } else {
                         // New file
                         result.tracksAdded++;
+                        countedAsExisting = false;
                     }
 
                     // Hash only new or content-changed files (durable track
@@ -426,6 +479,8 @@ export class MusicScannerService {
                 } catch (err: any) {
                     const relativePath = path.relative(musicPath, audioFile);
                     const existingTrack = tracksByPath.get(relativePath);
+                    if (countedAsExisting === true) result.tracksUpdated -= 1;
+                    if (countedAsExisting === false) result.tracksAdded -= 1;
                     if (existingTrack) {
                         await this.markTrackHealthIssue(
                             existingTrack.id,
@@ -1254,8 +1309,7 @@ export class MusicScannerService {
             hashFields.audioHashedAt = computedAudioHash ? new Date() : null;
         }
 
-        // Upsert track
-        const track = await prisma.track.upsert({
+        const trackUpsert = {
             where: { filePath: relativePath },
             create: {
                 albumId: album.id,
@@ -1285,16 +1339,28 @@ export class MusicScannerService {
                 removedAt: null,
                 ...hashFields,
             },
-        });
+        } satisfies Prisma.TrackUpsertArgs;
 
-        if (
+        const replacement =
             computeHash &&
-            existingAudioHash !== null &&
-            computedAudioHash !== existingAudioHash
-        ) {
-            await resetTrackAfterReplacement(track.id);
+            hasAudioReplacement(existingAudioHash, computedAudioHash ?? null);
+        if (replacement) {
+            const committed = await prisma.$transaction(async (transaction) => {
+                const track = await transaction.track.upsert(trackUpsert);
+                const cachePaths = await applyTrackReplacement(
+                    transaction,
+                    track.id,
+                );
+                await transaction.libraryHealthRecord.deleteMany({
+                    where: { trackId: track.id },
+                });
+                return { track, cachePaths };
+            });
+            await removeReplacementCacheFiles(committed.cachePaths);
+            return;
         }
 
+        const track = await prisma.track.upsert(trackUpsert);
         await this.clearTrackHealthIssue(track.id);
     }
 }

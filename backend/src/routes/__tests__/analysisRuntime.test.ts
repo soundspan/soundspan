@@ -34,6 +34,7 @@ jest.mock("../../utils/db", () => ({
             groupBy: jest.fn(),
             findMany: jest.fn(),
             updateMany: jest.fn(),
+            findFirst: jest.fn(),
             findUnique: jest.fn(),
             update: jest.fn(),
         },
@@ -82,6 +83,7 @@ import { enrichmentFailureService } from "../../services/enrichmentFailureServic
 const mockGroupBy = prisma.track.groupBy as jest.Mock;
 const mockTrackFindMany = prisma.track.findMany as jest.Mock;
 const mockTrackUpdateMany = prisma.track.updateMany as jest.Mock;
+const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
 const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockTrackUpdate = prisma.track.update as jest.Mock;
 const mockTrackEmbeddingDeleteMany = prisma.trackEmbedding
@@ -362,11 +364,16 @@ describe("analysis routes runtime", () => {
     it("handles analyze/:trackId not found and queue flow", async () => {
         const notFoundReq = { params: { trackId: "missing" } } as any;
         const notFoundRes = createRes();
-        mockTrackFindUnique.mockResolvedValueOnce(null);
+        mockTrackFindFirst.mockResolvedValueOnce(null);
         await postAnalyzeTrack(notFoundReq, notFoundRes);
         expect(notFoundRes.statusCode).toBe(404);
+        expect(mockTrackFindFirst).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                where: { id: "missing", removedAt: null },
+            }),
+        );
 
-        mockTrackFindUnique.mockResolvedValueOnce({
+        mockTrackFindFirst.mockResolvedValueOnce({
             id: "t100",
             filePath: "/music/t100.mp3",
             duration: 222,
@@ -429,7 +436,7 @@ describe("analysis routes runtime", () => {
     );
 
     it("returns track analysis payload or 404", async () => {
-        mockTrackFindUnique.mockResolvedValueOnce(null);
+        mockTrackFindFirst.mockResolvedValueOnce(null);
         const missingReq = { params: { trackId: "x" } } as any;
         const missingRes = createRes();
         await getTrack(missingReq, missingRes);
@@ -442,7 +449,7 @@ describe("analysis routes runtime", () => {
             analysisError:
                 "ffmpeg failed at /srv/soundspan/music/private/track.flac",
         };
-        mockTrackFindUnique.mockImplementationOnce(async ({ select }) =>
+        mockTrackFindFirst.mockImplementationOnce(async ({ select }) =>
             Object.fromEntries(
                 Object.entries(storedTrack).filter(
                     ([field]) => select[field] === true,
@@ -467,6 +474,12 @@ describe("analysis routes runtime", () => {
         const res = createRes();
 
         await getFeatures(req, res);
+
+        expect(mockTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ removedAt: null }),
+            }),
+        );
 
         expect(res.body).toEqual({
             count: 0,
@@ -776,7 +789,7 @@ describe("analysis routes runtime", () => {
     });
 
     it("returns 500 when analyze/:trackId catch branch is hit", async () => {
-        mockTrackFindUnique.mockRejectedValue(new Error("analyze failed"));
+        mockTrackFindFirst.mockRejectedValue(new Error("analyze failed"));
         const req = { params: { trackId: "t100" } } as any;
         const res = createRes();
 
@@ -789,7 +802,7 @@ describe("analysis routes runtime", () => {
     });
 
     it("returns 500 when get track analysis catch branch is hit", async () => {
-        mockTrackFindUnique.mockRejectedValue(new Error("track lookup failed"));
+        mockTrackFindFirst.mockRejectedValue(new Error("track lookup failed"));
         const req = { params: { trackId: "x" } } as any;
         const res = createRes();
 

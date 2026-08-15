@@ -78,6 +78,10 @@ const mockCanonicalizeVariousArtists = jest.fn((name: string) => name);
 const mockExtractPrimaryArtist = jest.fn((name: string) => name);
 const mockParseArtistFromPath = jest.fn((name: string) => name);
 const mockExtractCoverArt = jest.fn();
+const mockConfig = {
+    music: { transcodeCachePath: "/cache/transcodes" },
+    workers: { trackRemovalRetentionDays: 90 },
+};
 
 jest.mock("fs", () => ({
     promises: {
@@ -148,9 +152,7 @@ jest.mock("../audioHash", () => ({
 }));
 
 jest.mock("../../config", () => ({
-    config: {
-        music: { transcodeCachePath: "/cache/transcodes" },
-    },
+    config: mockConfig,
 }));
 
 const { MusicScannerService } =
@@ -205,6 +207,7 @@ describe("MusicScannerService.scanLibrary", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         queueInstances.length = 0;
+        mockConfig.workers.trackRemovalRetentionDays = 90;
 
         mockReaddir.mockResolvedValue([]);
         mockExistsSync.mockReturnValue(true);
@@ -302,7 +305,158 @@ describe("MusicScannerService.scanLibrary", () => {
     });
 
     afterEach(() => {
+        jest.useRealTimers();
         jest.restoreAllMocks();
+    });
+
+    it("chunks active-scan path lookups beyond the bind-parameter batch size", async () => {
+        const scanner = new MusicScannerService();
+        const audioFiles = Array.from(
+            { length: 10_001 },
+            (_, index) => `/music/Artist/Track-${index}.flac`,
+        );
+        const activeTracks = audioFiles.map((audioFile, index) =>
+            identityTrack(`track-${index}`, audioFile.slice("/music/".length), {
+                fileModified: new Date("2026-03-01T00:00:00.000Z"),
+            }),
+        );
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue(audioFiles);
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (args.where?.removedAt === null) return activeTracks;
+            if (args.where?.filePath?.in) return [];
+            throw new Error("scan track lookup was not chunked");
+        });
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 0,
+                tracksRemoved: 0,
+            }),
+        );
+
+        const pathQueries = mockPrisma.track.findMany.mock.calls.filter(
+            ([args]) => args.where?.filePath?.in,
+        );
+        expect(pathQueries).toHaveLength(2);
+        expect(pathQueries[0][0].where.filePath.in).toHaveLength(10_000);
+        expect(pathQueries[1][0].where.filePath.in).toHaveLength(1);
+    });
+
+    it("chunks moved-track candidate path lookups beyond the bind-parameter batch size", async () => {
+        const scanner = new MusicScannerService();
+        const missing = identityTrack("track-old", "Old/Track.flac");
+        const candidatePaths = Array.from(
+            { length: 10_001 },
+            (_, index) => `New/Track-${index}.flac`,
+        );
+        mockPrisma.track.findMany.mockResolvedValue([]);
+
+        await expect(
+            (
+                scanner as unknown as {
+                    rebindMovedTracks(
+                        missingTracks: TestIdentityTrack[],
+                        paths: readonly string[],
+                    ): Promise<unknown>;
+                }
+            ).rebindMovedTracks([missing], candidatePaths),
+        ).resolves.toEqual({
+            unmatched: [missing],
+            rebound: 0,
+            consumedCandidatePaths: [],
+        });
+
+        expect(mockPrisma.track.findMany).toHaveBeenCalledTimes(2);
+        expect(
+            mockPrisma.track.findMany.mock.calls[0][0].where.filePath.in,
+        ).toHaveLength(10_000);
+        expect(
+            mockPrisma.track.findMany.mock.calls[1][0].where.filePath.in,
+        ).toHaveLength(1);
+    });
+
+    it("contains P2025 races while re-binding a moved track", async () => {
+        const scanner = new MusicScannerService();
+        const audioHash = "sha256:" + "0f".repeat(32);
+        const missing = identityTrack("track-old", "Old/Track.flac", {
+            audioHash,
+        });
+        const candidate = identityTrack("track-new", "New/Track.flac", {
+            audioHash,
+        });
+        mockPrisma.track.findMany.mockResolvedValue([candidate]);
+        mockPrisma.track.delete.mockRejectedValueOnce(
+            Object.assign(new Error("record disappeared"), { code: "P2025" }),
+        );
+
+        await expect(
+            (
+                scanner as unknown as {
+                    rebindMovedTracks(
+                        missingTracks: TestIdentityTrack[],
+                        paths: readonly string[],
+                    ): Promise<unknown>;
+                }
+            ).rebindMovedTracks([missing], [candidate.filePath]),
+        ).resolves.toEqual({
+            unmatched: [missing],
+            rebound: 0,
+            consumedCandidatePaths: [],
+        });
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("Skipped re-binding track-old"),
+        );
+    });
+
+    it("does not reset derived data when a moved candidate hash is unknown", async () => {
+        const scanner = new MusicScannerService();
+        const missing = identityTrack("track-old", "Old/Track.flac", {
+            audioHash: "sha256:" + "1f".repeat(32),
+            recordingMbid: "recording-1",
+        });
+        const candidate = identityTrack("track-new", "New/Track.flac", {
+            audioHash: null,
+            recordingMbid: "recording-1",
+        });
+        mockPrisma.track.findMany.mockResolvedValue([candidate]);
+
+        await (
+            scanner as unknown as {
+                rebindMovedTracks(
+                    missingTracks: TestIdentityTrack[],
+                    paths: readonly string[],
+                ): Promise<unknown>;
+            }
+        ).rebindMovedTracks([missing], [candidate.filePath]);
+
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "track-old" },
+            data: expect.objectContaining({ audioHash: null }),
+        });
+        expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.transcodedFile.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("skips the removed-track revival pool when retention is zero", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.workers.trackRemovalRetentionDays = 0;
+
+        await expect(
+            (
+                scanner as unknown as {
+                    reviveRemovedTracks(
+                        paths: readonly string[],
+                    ): Promise<number>;
+                }
+            ).reviveRemovedTracks(["New/Track.flac"]),
+        ).resolves.toBe(0);
+        expect(mockPrisma.track.findMany).not.toHaveBeenCalled();
     });
 
     it("skips unchanged files without parsing metadata again", async () => {
@@ -582,24 +736,9 @@ describe("MusicScannerService.scanLibrary", () => {
                 }),
             }),
         );
-        expect(mockPrisma.track.update).toHaveBeenCalledWith({
-            where: { id: "track-1" },
-            data: expect.objectContaining({
-                analysisStatus: "pending",
-                analyzedAt: null,
-                analysisError: null,
-                analysisRetryCount: 0,
-                vibeAnalysisStatus: "pending",
-                vibeAnalysisError: null,
-                vibeAnalysisRetryCount: 0,
-            }),
-        });
-        expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
-            where: { trackId: "track-1" },
-        });
-        expect(mockPrisma.transcodedFile.deleteMany).toHaveBeenCalledWith({
-            where: { trackId: "track-1" },
-        });
+        expect(mockPrisma.track.update).not.toHaveBeenCalled();
+        expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.transcodedFile.deleteMany).not.toHaveBeenCalled();
     });
 
     it("re-parses with duration:true only when the cheap parse lacks a duration (opus/ogg)", async () => {
@@ -752,6 +891,7 @@ describe("MusicScannerService.scanLibrary", () => {
         ).mockResolvedValue(["/music/Artist/Album/01 Retagged Name.flac"]);
         mockPrisma.track.findMany
             .mockResolvedValueOnce([oldTrack])
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([candidate]);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
 
@@ -819,6 +959,7 @@ describe("MusicScannerService.scanLibrary", () => {
         ).mockResolvedValue(["/music/Artist/Album/01 Song.flac"]);
         mockPrisma.track.findMany
             .mockResolvedValueOnce([oldTrack])
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([candidate]);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
         mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
@@ -920,6 +1061,9 @@ describe("MusicScannerService.scanLibrary", () => {
             "/cache/transcodes/track-old-medium.mp3",
         );
         expect(mockPrisma.track.delete).not.toHaveBeenCalled();
+        expect(
+            mockPrisma.$transaction.mock.invocationCallOrder[0],
+        ).toBeLessThan(mockPrisma.track.upsert.mock.invocationCallOrder[0]);
     });
 
     it("revives a same-path track and forces hash and metadata processing", async () => {
@@ -946,7 +1090,9 @@ describe("MusicScannerService.scanLibrary", () => {
             mtime: new Date("2026-02-15T00:00:00.000Z"),
             size: 2_048,
         });
-        mockPrisma.track.findMany.mockResolvedValueOnce([removedTrack]);
+        mockPrisma.track.findMany
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([removedTrack]);
         mockPrisma.track.upsert.mockResolvedValueOnce({
             ...removedTrack,
             removedAt: null,
@@ -977,6 +1123,9 @@ describe("MusicScannerService.scanLibrary", () => {
     });
 
     it("revives a removed track at a new path from the bounded removed pool", async () => {
+        jest.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-03-01T00:00:00.000Z").getTime(),
+        );
         const scanner = new MusicScannerService();
         const audioFile = "/music/New/01 Song.flac";
         const audioHash = "sha256:" + "58".repeat(32);
@@ -1002,23 +1151,28 @@ describe("MusicScannerService.scanLibrary", () => {
         mockComputeAudioStreamHash.mockResolvedValueOnce(audioHash);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
         mockPrisma.track.findMany
-            .mockResolvedValueOnce([removedTrack])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([removedTrack])
             .mockResolvedValueOnce([candidate]);
 
         const result = await scanner.scanLibrary("/music");
 
         expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(1, {
-            where: {
-                OR: [
-                    { removedAt: null },
-                    { filePath: { in: ["New/01 Song.flac"] } },
-                ],
-            },
+            where: { removedAt: null },
             select: expect.objectContaining({ removedAt: true }),
         });
         expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(2, {
-            where: { removedAt: { not: null } },
+            where: { filePath: { in: ["New/01 Song.flac"] } },
+            select: expect.objectContaining({ removedAt: true }),
+        });
+        expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(3, {
+            where: {
+                removedAt: {
+                    not: null,
+                    gte: new Date("2025-12-01T00:00:00.000Z"),
+                },
+            },
             orderBy: { removedAt: "desc" },
             take: 10_000,
             select: expect.objectContaining({ removedAt: true }),
@@ -1050,6 +1204,9 @@ describe("MusicScannerService.scanLibrary", () => {
     });
 
     it("applies replacement semantics when revived content has a different hash", async () => {
+        jest.spyOn(Date, "now").mockReturnValue(
+            new Date("2026-03-01T00:00:00.000Z").getTime(),
+        );
         const scanner = new MusicScannerService();
         const audioFile = "/music/New/01 Song.flac";
         const oldHash = "sha256:" + "59".repeat(32);
@@ -1073,7 +1230,8 @@ describe("MusicScannerService.scanLibrary", () => {
         mockComputeAudioStreamHash.mockResolvedValueOnce(newHash);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
         mockPrisma.track.findMany
-            .mockResolvedValueOnce([removedTrack])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([removedTrack])
             .mockResolvedValueOnce([candidate]);
         mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
@@ -1131,6 +1289,7 @@ describe("MusicScannerService.scanLibrary", () => {
         ).mockResolvedValue(["/music/New/01.flac", "/music/New/02.flac"]);
         mockPrisma.track.findMany
             .mockResolvedValueOnce(missing)
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce(candidates);
         mockPrisma.track.upsert
             .mockResolvedValueOnce(candidates[0])
@@ -1250,14 +1409,39 @@ describe("MusicScannerService.scanLibrary", () => {
         });
         expect(mockPrisma.album.findMany).toHaveBeenCalledWith({
             where: { tracks: { none: {} } },
-            select: { id: true, title: true },
+            select: { id: true },
         });
         expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
             where: { albums: { none: {} } },
-            select: { id: true, name: true },
+            select: { id: true },
         });
         expect(mockPrisma.album.deleteMany).not.toHaveBeenCalled();
         expect(mockPrisma.artist.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("re-checks orphan relations in guarded catalog deletes", async () => {
+        const scanner = new MusicScannerService();
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([]);
+        mockPrisma.album.findMany.mockResolvedValueOnce([{ id: "album-1" }]);
+        mockPrisma.artist.findMany.mockResolvedValueOnce([{ id: "artist-1" }]);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["album-1"] },
+                tracks: { none: {} },
+            },
+        });
+        expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["artist-1"] },
+                albums: { none: {} },
+            },
+        });
     });
 
     it("does not re-mark tracks that were already soft-removed", async () => {
@@ -1401,7 +1585,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(result.tracksAdded).toBe(1);
+        expect(result.tracksAdded).toBe(0);
         expect(result.tracksUpdated).toBe(0);
         expect(result.tracksRemoved).toBe(0);
         expect(result.errors).toEqual([
@@ -1433,7 +1617,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(result).toEqual(
             expect.objectContaining({
                 tracksAdded: 0,
-                tracksUpdated: 1,
+                tracksUpdated: 0,
                 tracksRemoved: 0,
                 errors: [{ file: audioFile, error: "metadata read failed" }],
             }),
@@ -1531,7 +1715,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         expect(result).toEqual(
             expect.objectContaining({
-                tracksAdded: 2,
+                tracksAdded: 1,
                 tracksUpdated: 0,
                 tracksRemoved: 0,
                 errors: [

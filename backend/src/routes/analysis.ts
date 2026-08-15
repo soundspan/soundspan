@@ -276,8 +276,8 @@ router.post<{ trackId: string }>(
         try {
             const { trackId } = req.params;
 
-            const track = await prisma.track.findUnique({
-                where: { id: trackId },
+            const track = await prisma.track.findFirst({
+                where: { id: trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     id: true,
                     filePath: true,
@@ -358,8 +358,8 @@ router.get<{ trackId: string }>(
         try {
             const { trackId } = req.params;
 
-            const track = await prisma.track.findUnique({
-                where: { id: trackId },
+            const track = await prisma.track.findFirst({
+                where: { id: trackId, ...TRACK_VISIBLE_WHERE },
                 select: {
                     id: true,
                     title: true,
@@ -433,6 +433,7 @@ router.get("/features", requireAuth, async (req, res) => {
         // Get analyzed tracks
         const analyzed = await prisma.track.findMany({
             where: {
+                ...TRACK_VISIBLE_WHERE,
                 analysisStatus: "completed",
                 bpm: { not: null },
             },

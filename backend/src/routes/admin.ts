@@ -141,8 +141,7 @@ router.get("/library-health", async (_req, res) => {
             records,
             total,
             removedPendingPurgeCount,
-            trackRemovalRetentionDays:
-                config.workers.trackRemovalRetentionDays,
+            trackRemovalRetentionDays: config.workers.trackRemovalRetentionDays,
         });
     } catch (error) {
         logger.error("Get library health error:", error);

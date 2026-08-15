@@ -421,7 +421,7 @@ class SpotifyImportService {
         // Strategy 1: Exact match by primary artist + album + title
         let exactMatch = await spotifyImportPrisma.track.findFirst({
             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                ...MATCHABLE_TRACK_WHERE,
                 album: {
                     artist: {
                         normalizedName: normalizedPrimaryArtist,
@@ -495,7 +495,7 @@ class SpotifyImportService {
             let normalizedAlbumMatch =
                 await spotifyImportPrisma.track.findFirst({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         album: {
                             artist: {
                                 normalizedName: normalizedPrimaryArtist,
@@ -595,7 +595,7 @@ class SpotifyImportService {
         // This catches tracks where the album metadata is missing from Spotify/Deezer
         const artistTitleMatches = await spotifyImportPrisma.track.findMany({
             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                ...MATCHABLE_TRACK_WHERE,
                 album: {
                     artist: {
                         normalizedName: normalizedPrimaryArtist,
@@ -777,7 +777,7 @@ class SpotifyImportService {
             if (fullArtistFirstWord.length >= 3) {
                 fuzzyMatches = await spotifyImportPrisma.track.findMany({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         album: {
                             artist: {
                                 normalizedName: {
@@ -1123,8 +1123,7 @@ class SpotifyImportService {
                 : null;
 
             logger?.debug(
-                `
-${logPrefix} ========================================`,
+                `\n${logPrefix} ========================================`,
             );
             logger?.debug(
                 `${logPrefix} Looking up: "${artistName}" - "${albumName}"`,
@@ -1254,8 +1253,7 @@ ${logPrefix} ========================================`,
                 );
             }
             logger?.debug(
-                `${logPrefix} ========================================
-`,
+                `${logPrefix} ========================================\n`,
             );
 
             albumsToDownload.push(albumToDownload);
@@ -1789,8 +1787,7 @@ ${logPrefix} ========================================`,
      */
     async checkImportCompletion(importJobId: string): Promise<void> {
         logger?.debug(
-            `
-[Spotify Import] Checking completion for job ${importJobId}...`,
+            `\n[Spotify Import] Checking completion for job ${importJobId}...`,
         );
 
         const job = await getImportJob(importJobId);
@@ -1929,8 +1926,7 @@ ${logPrefix} ========================================`,
      */
     async buildPlaylistAfterScan(importJobId: string): Promise<void> {
         logger?.debug(
-            `
-[Spotify Import] Building playlist for job ${importJobId}...`,
+            `\n[Spotify Import] Building playlist for job ${importJobId}...`,
         );
 
         const job = await getImportJob(importJobId);
@@ -1971,7 +1967,9 @@ ${logPrefix} ========================================`,
                 const existingTrack =
                     await spotifyImportPrisma.track.findUnique({
                         where: {
-                    ...MATCHABLE_TRACK_WHERE, id: pendingTrack.preMatchedTrackId },
+                            ...MATCHABLE_TRACK_WHERE,
+                            id: pendingTrack.preMatchedTrackId,
+                        },
                         select: { id: true, title: true },
                     });
                 if (existingTrack) {
@@ -2038,7 +2036,7 @@ ${logPrefix} ========================================`,
                 );
                 localTrack = await spotifyImportPrisma.track.findFirst({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         title: {
                             equals: strippedTitle,
                             mode: "insensitive",
@@ -2068,7 +2066,7 @@ ${logPrefix} ========================================`,
                 );
                 const candidates = await spotifyImportPrisma.track.findMany({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         title: {
                             contains: searchTerm,
                             mode: "insensitive",
@@ -2129,7 +2127,7 @@ ${logPrefix} ========================================`,
                 logger?.log(`   Strategy 3.5: Fuzzy artist+title matching`);
                 const candidates = await spotifyImportPrisma.track.findMany({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         album: {
                             artist: {
                                 normalizedName: {
@@ -2170,7 +2168,7 @@ ${logPrefix} ========================================`,
                 logger?.log(`   Strategy 4: StartsWith search`);
                 localTrack = await spotifyImportPrisma.track.findFirst({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         title: {
                             startsWith: strippedTitle.substring(
                                 0,
@@ -2216,7 +2214,7 @@ ${logPrefix} ========================================`,
                     const candidates = await spotifyImportPrisma.track.findMany(
                         {
                             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                                ...MATCHABLE_TRACK_WHERE,
                                 title: {
                                     contains: searchWords.split(" ")[0], // Just first word
                                     mode: "insensitive",
@@ -2284,7 +2282,7 @@ ${logPrefix} ========================================`,
                     .join(" ");
                 const candidates = await spotifyImportPrisma.track.findMany({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         title: {
                             contains: titleSearchTerm,
                             mode: "insensitive",
@@ -2755,8 +2753,7 @@ ${logPrefix} ========================================`,
         tracksAdded: number;
     }> {
         logger?.debug(
-            `
-[Spotify Import] Reconciling pending tracks across all playlists...`,
+            `\n[Spotify Import] Reconciling pending tracks across all playlists...`,
         );
 
         // Get all pending tracks grouped by playlist
@@ -2834,7 +2831,7 @@ ${logPrefix} ========================================`,
                 // Debug: Check what tracks exist for this artist
                 const artistTracks = await spotifyImportPrisma.track.findMany({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         album: {
                             artist: {
                                 normalizedName: {
@@ -2880,7 +2877,7 @@ ${logPrefix} ========================================`,
                 // Strategy 1: Stripped title + fuzzy artist (contains first word)
                 let localTrack = await spotifyImportPrisma.track.findFirst({
                     where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                        ...MATCHABLE_TRACK_WHERE,
                         title: { equals: strippedTitle, mode: "insensitive" },
                         album: {
                             artist: {
@@ -2912,7 +2909,7 @@ ${logPrefix} ========================================`,
                     const candidates = await spotifyImportPrisma.track.findMany(
                         {
                             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                                ...MATCHABLE_TRACK_WHERE,
                                 title: {
                                     contains: searchTerm,
                                     mode: "insensitive",
@@ -2988,7 +2985,7 @@ ${logPrefix} ========================================`,
                     const candidates = await spotifyImportPrisma.track.findMany(
                         {
                             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                                ...MATCHABLE_TRACK_WHERE,
                                 title: {
                                     contains: firstWord,
                                     mode: "insensitive",
@@ -3049,7 +3046,7 @@ ${logPrefix} ========================================`,
                     const candidates = await spotifyImportPrisma.track.findMany(
                         {
                             where: {
-                    ...MATCHABLE_TRACK_WHERE,
+                                ...MATCHABLE_TRACK_WHERE,
                                 title: {
                                     equals: strippedTitle,
                                     mode: "insensitive",

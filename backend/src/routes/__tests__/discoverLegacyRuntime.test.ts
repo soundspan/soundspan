@@ -495,6 +495,18 @@ describe("discover legacy-mode runtime behavior", () => {
         const res = createRes();
         await currentHandler(req, res);
 
+        expect(prisma.album.findFirst).toHaveBeenCalledWith(
+            expect.objectContaining({
+                include: expect.objectContaining({
+                    tracks: {
+                        where: { removedAt: null },
+                        take: 1,
+                        orderBy: { trackNo: "asc" },
+                    },
+                }),
+            }),
+        );
+
         expect(res.statusCode).toBe(200);
         expect(res.body.totalCount).toBe(2);
         expect(res.body.unavailableCount).toBe(1);

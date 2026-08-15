@@ -392,7 +392,11 @@ router.get("/current", async (req, res) => {
                     },
                     include: {
                         artist: true,
-                        tracks: { take: 1, orderBy: { trackNo: "asc" } },
+                        tracks: {
+                            where: TRACK_VISIBLE_WHERE,
+                            take: 1,
+                            orderBy: { trackNo: "asc" },
+                        },
                     },
                 });
 

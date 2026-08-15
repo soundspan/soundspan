@@ -78,7 +78,7 @@ The tension in any durable-identity scheme: identity by **location** (path) vers
 
 1. **A file present at a known `filePath` IS that track.** The existing upsert keyed on `filePath` stays authoritative; no content check may override a path match.
    - Same path, same `audioHash` → unchanged (or pure retag: refresh tag-derived metadata only).
-   - Same path, **different `audioHash`** → **replacement**: keep `Track.id`, update file fields + hash, re-queue audio analysis, CLAP embedding, and transcode-cache invalidation for that row. This is the "upgraded file at the exact path" rule: identity survives, derived data refreshes. (Consequence, accepted: overwriting a path with a genuinely different recording keeps the old row's id. Path wins by design.)
+   - Same path, **different non-null `audioHash`** → **replacement**: keep `Track.id`, update file fields + hash, re-queue audio analysis, CLAP embedding, and transcode-cache invalidation for that row. A hash failure records `audioHash = null` and leaves derived data intact because content identity is unknown; the backfill retries it later. This is the "upgraded file at the exact path" rule: identity survives, derived data refreshes. (Consequence, accepted: overwriting a path with a genuinely different recording keeps the old row's id. Path wins by design.)
 2. **Content tiers arbitrate the leftovers.** Paths that disappeared this scan are matched against (a) paths that appeared this scan and (b) — thanks to soft delete — files that appear in *any future* scan, via the removed pool (below). First match wins:
    1. `audioHash` equal — exact, works for untagged files, immune to retags;
    2. `recordingMbid` equal (duration ignored — upgrades may change master);
@@ -86,7 +86,7 @@ The tension in any durable-identity scheme: identity by **location** (path) vers
    4. same album `rgMbid` + `discNo` + `trackNo` + normalized title, duration ±10s (wide — covers format upgrades of the same release, where the hash intentionally differs);
    5. same `fileSize` + duration ±2s + normalized title (tight — last resort for pure renames of untagged, unhashed files).
 
-   On match: update `filePath`/`fileModified`/`fileSize`/`audioHash` in place, preserving `Track.id`. If the matched file's hash differs from the stored one (moved *and* upgraded), apply the replacement rule's re-analysis as well.
+   On match: update `filePath`/`fileModified`/`fileSize`/`audioHash` in place, preserving `Track.id`. If both hashes are known and differ (moved *and* upgraded), apply the replacement rule's re-analysis as well. A null next hash is unknown and never triggers destructive reset behavior.
 
    Ambiguity rule: if a tier yields more than one candidate for a row, that tier abstains and the next runs; if all abstain, the row is treated as unmatched. Never guess between two candidates.
 3. **Soft-remove what nothing claims.** Unmatched disappeared rows are marked `removedAt = now()` — never hard-deleted by the scanner (next section).

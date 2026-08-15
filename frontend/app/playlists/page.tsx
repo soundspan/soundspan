@@ -270,26 +270,26 @@ export default function PlaylistsPage() {
             const playlist = await api.getPlaylist(playlistId);
             if (playlist?.items && playlist.items.length > 0) {
                 const tracks = playlist.items.flatMap((item) => {
-                    if (
-                        !item.track ||
-                        item.playback?.isPlayable === false
-                    ) {
+                    if (!item.track || item.playback?.isPlayable === false) {
                         return [];
                     }
-                    return [{
-                        id: item.track.id,
-                        title: item.track.title,
-                        artist: {
-                            name: item.track.album?.artist?.name || "Unknown",
-                            id: item.track.album?.artist?.id,
+                    return [
+                        {
+                            id: item.track.id,
+                            title: item.track.title,
+                            artist: {
+                                name:
+                                    item.track.album?.artist?.name || "Unknown",
+                                id: item.track.album?.artist?.id,
+                            },
+                            album: {
+                                title: item.track.album?.title || "Unknown",
+                                coverArt: item.track.album?.coverArt,
+                                id: item.track.album?.id,
+                            },
+                            duration: item.track.duration,
                         },
-                        album: {
-                            title: item.track.album?.title || "Unknown",
-                            coverArt: item.track.album?.coverArt,
-                            id: item.track.album?.id,
-                        },
-                        duration: item.track.duration,
-                    }];
+                    ];
                 });
                 playTracks(tracks, 0);
             }

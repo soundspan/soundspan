@@ -356,7 +356,7 @@ async function buildAlbumPlayStats(
     }
     const tracks = await prisma.track.findMany({
         where: {
-                ...LIBRARY_TRACK_WHERE,
+            ...LIBRARY_TRACK_WHERE,
             id: {
                 in: trackIds,
             },
@@ -1557,7 +1557,7 @@ export async function handleSearch3(
             }),
             prisma.track.findMany({
                 where: {
-                ...LIBRARY_TRACK_WHERE,
+                    ...LIBRARY_TRACK_WHERE,
                     album: {
                         location: LIBRARY_LOCATION,
                     },
@@ -2289,7 +2289,7 @@ export async function handleGetSimilarSongs2(
             similarArtistIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
-                ...LIBRARY_TRACK_WHERE,
+                          ...LIBRARY_TRACK_WHERE,
                           id: {
                               not: trackId,
                           },
@@ -2316,7 +2316,7 @@ export async function handleGetSimilarSongs2(
             genreFilter !== null
                 ? await prisma.track.findMany({
                       where: {
-                ...LIBRARY_TRACK_WHERE,
+                          ...LIBRARY_TRACK_WHERE,
                           id: {
                               not: trackId,
                           },
@@ -2690,7 +2690,7 @@ async function handleSearchLike(
             }),
             prisma.track.findMany({
                 where: {
-                ...LIBRARY_TRACK_WHERE,
+                    ...LIBRARY_TRACK_WHERE,
                     album: {
                         location: LIBRARY_LOCATION,
                     },
@@ -3469,7 +3469,9 @@ export async function handleGetSongsByGenre(
             pageIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
-                ...LIBRARY_TRACK_WHERE, id: { in: pageIds } },
+                          ...LIBRARY_TRACK_WHERE,
+                          id: { in: pageIds },
+                      },
                       select: {
                           id: true,
                           title: true,
@@ -3785,7 +3787,7 @@ export async function handleGetPlayQueue(
             uniqueTrackIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
-                ...LIBRARY_TRACK_WHERE,
+                          ...LIBRARY_TRACK_WHERE,
                           id: {
                               in: uniqueTrackIds,
                           },
@@ -3910,7 +3912,7 @@ export async function handleSavePlayQueue(
             uniqueTrackIds.length > 0
                 ? await prisma.track.findMany({
                       where: {
-                ...LIBRARY_TRACK_WHERE,
+                          ...LIBRARY_TRACK_WHERE,
                           id: {
                               in: uniqueTrackIds,
                           },
@@ -5086,7 +5088,7 @@ async function ensureLibraryTracksExist(trackIds: string[]): Promise<boolean> {
 
     const tracks = await prisma.track.findMany({
         where: {
-                ...LIBRARY_TRACK_WHERE,
+            ...LIBRARY_TRACK_WHERE,
             id: {
                 in: trackIds,
             },
@@ -6486,7 +6488,9 @@ async function buildStarredPayload(userId: string): Promise<{
             ? prisma.track.groupBy({
                   by: ["albumId"],
                   where: {
-                ...LIBRARY_TRACK_WHERE, albumId: { in: albumIds } },
+                      ...LIBRARY_TRACK_WHERE,
+                      albumId: { in: albumIds },
+                  },
                   _count: { _all: true },
                   _sum: { duration: true },
               })

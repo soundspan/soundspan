@@ -253,9 +253,9 @@ describe("subsonic collections/core compatibility handlers", () => {
         expect(mockPlaylistItemFindMany).toHaveBeenCalledWith({
             where: {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
-            track: {
-                removedAt: null,
-                album: {
+                track: {
+                    removedAt: null,
+                    album: {
                         AND: [
                             { coverUrl: { not: null } },
                             { coverUrl: { not: "" } },
@@ -511,10 +511,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                       },
         );
 
-        await handleGetPlaylist(
-            buildReq({ id: "pl-playlist-1" }),
-            buildRes(),
-        );
+        await handleGetPlaylist(buildReq({ id: "pl-playlist-1" }), buildRes());
 
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),

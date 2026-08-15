@@ -44,6 +44,10 @@ Tier B mutation/readiness:
 - `scrobble`, `getNowPlaying`
 - `getStarred`, `getStarred2`, `star`, `unstar`, `setRating`
 
+Soft-removed local tracks are omitted from browse, search, album, playlist,
+similar-song, and random-song responses. `stream` and `download` return
+not-found responses for soft-removed track IDs.
+
 Alias support:
 
 - Both bare and `.view` forms are mounted (for example `/rest/ping` and `/rest/ping.view`)

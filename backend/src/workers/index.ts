@@ -787,7 +787,7 @@ async function registerSchedulerJobs(): Promise<void> {
 
     const schedulerJobs: Array<{
         type: (typeof SCHEDULER_JOB_TYPES)[keyof typeof SCHEDULER_JOB_TYPES];
-        data: { mode: "startup" | "repeat" };
+        data: { mode: "startup" | "repeat"; sweepStartedAt?: string };
         opts: Bull.JobOptions;
     }> = [
         {
@@ -922,7 +922,10 @@ async function registerSchedulerJobs(): Promise<void> {
         },
         {
             type: SCHEDULER_JOB_TYPES.audioHashBackfill,
-            data: { mode: "startup" },
+            data: {
+                mode: "startup",
+                sweepStartedAt: new Date().toISOString(),
+            },
             opts: {
                 jobId: SCHEDULER_JOB_IDS.audioHashBackfillStartup,
                 delay: 50_000,

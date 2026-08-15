@@ -166,10 +166,7 @@ describe("handleStream", () => {
                       },
         );
 
-        await handleStream(
-            buildReq({ id: "tr-removed-track" }),
-            buildRes(),
-        );
+        await handleStream(buildReq({ id: "tr-removed-track" }), buildRes());
 
         expect(mockSendError).toHaveBeenCalledWith(
             expect.anything(),

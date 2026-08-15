@@ -265,6 +265,69 @@ describe("search service", () => {
         ]);
     });
 
+    it("keeps remote-only albums, hides removed-only albums, and keeps mixed albums", async () => {
+        prisma.album.findMany.mockImplementationOnce(async (args) => {
+            expect(args.where.AND[0]).toEqual({
+                OR: [
+                    { tracks: { none: {} } },
+                    { tracks: { some: { removedAt: null } } },
+                ],
+            });
+            return [
+                {
+                    id: "album-remote",
+                    title: "Remote Album",
+                    artistId: "artist-1",
+                    year: 2026,
+                    coverUrl: null,
+                    artist: { name: "Remote Artist" },
+                },
+                {
+                    id: "album-mixed",
+                    title: "Mixed Album",
+                    artistId: "artist-2",
+                    year: 2025,
+                    coverUrl: null,
+                    artist: { name: "Mixed Artist" },
+                },
+            ];
+        });
+
+        const results = await searchService.searchAlbums({ query: "***" });
+
+        expect(results.map((album) => album.id)).toEqual([
+            "album-remote",
+            "album-mixed",
+        ]);
+        expect(results).not.toContainEqual(
+            expect.objectContaining({ id: "album-removed-only" }),
+        );
+    });
+
+    it("uses the remote-only escape in both album FTS branches", async () => {
+        prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) => {
+            const sql = strings.join(" ");
+            expect(
+                sql.match(/NOT EXISTS \(SELECT 1 FROM "Track"/g),
+            ).toHaveLength(2);
+            return [
+                {
+                    id: "album-remote",
+                    title: "Remote Album",
+                    artistId: "artist-1",
+                    artistName: "Remote Artist",
+                    year: 2026,
+                    coverUrl: null,
+                    rank: 1,
+                },
+            ];
+        });
+
+        await expect(
+            searchService.searchAlbums({ query: "remote" }),
+        ).resolves.toEqual([expect.objectContaining({ id: "album-remote" })]);
+    });
+
     it("excludes removed tracks from FTS and ILIKE fallback searches", async () => {
         prisma.$queryRaw.mockImplementationOnce(async (strings: string[]) =>
             strings.join(" ").includes('t."removedAt" IS NULL')

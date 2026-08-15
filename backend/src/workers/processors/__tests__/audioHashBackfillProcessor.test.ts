@@ -20,7 +20,7 @@ describe("audioHashBackfillProcessor", () => {
         const prisma = {
             track: {
                 findMany: jest.fn(async () => tracks),
-                update: jest.fn(async () => ({})),
+                updateMany: jest.fn(async () => ({ count: 1 })),
             },
         };
         const schedulerQueue = {
@@ -66,7 +66,10 @@ describe("audioHashBackfillProcessor", () => {
     function buildJob(startAfterId?: string) {
         return {
             id: "audio-hash-backfill-1",
-            data: startAfterId ? { startAfterId } : {},
+            data: {
+                ...(startAfterId ? { startAfterId } : { mode: "startup" }),
+                sweepStartedAt: "2026-08-14T12:00:00.000Z",
+            },
         } as any;
     }
 
@@ -95,16 +98,16 @@ describe("audioHashBackfillProcessor", () => {
 
         expect(logger.child).toHaveBeenCalledWith("AudioHashBackfillProcessor");
         expect(prisma.track.findMany).toHaveBeenCalledWith({
-            where: { audioHash: null },
+            where: { audioHash: null, removedAt: null },
             orderBy: { id: "asc" },
             take: 51,
             select: { id: true, filePath: true },
         });
         expect(computeAudioStreamHash).toHaveBeenCalledTimes(49);
         expect(computeAudioStreamHash).not.toHaveBeenCalledWith(missingPath);
-        expect(prisma.track.update).toHaveBeenCalledTimes(49);
-        expect(prisma.track.update).toHaveBeenCalledWith({
-            where: { id: "track-000" },
+        expect(prisma.track.updateMany).toHaveBeenCalledTimes(49);
+        expect(prisma.track.updateMany).toHaveBeenCalledWith({
+            where: { id: "track-000", audioHash: null },
             data: {
                 audioHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
                 audioHashedAt: expect.any(Date),
@@ -112,11 +115,14 @@ describe("audioHashBackfillProcessor", () => {
         });
         expect(schedulerQueue.add).toHaveBeenCalledWith(
             "track-audio-hash-backfill",
-            { startAfterId: "track-049" },
+            {
+                startAfterId: "track-049",
+                sweepStartedAt: "2026-08-14T12:00:00.000Z",
+            },
             {
                 attempts: 3,
                 backoff: { type: "exponential", delay: 5_000 },
-                jobId: "scheduler:audio-hash-backfill:track-049",
+                jobId: "scheduler:audio-hash-backfill:2026-08-14T12:00:00.000Z:track-049",
                 removeOnComplete: true,
                 removeOnFail: 10,
             },
@@ -140,11 +146,48 @@ describe("audioHashBackfillProcessor", () => {
         });
 
         expect(prisma.track.findMany).toHaveBeenCalledWith({
-            where: { audioHash: null, id: { gt: "track-050" } },
+            where: {
+                audioHash: null,
+                removedAt: null,
+                id: { gt: "track-050" },
+            },
             orderBy: { id: "asc" },
             take: 51,
             select: { id: true, filePath: true },
         });
         expect(schedulerQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("skips a hash write when a concurrent scan already populated it", async () => {
+        const { module, prisma } = loadProcessor([
+            { id: "track-raced", filePath: "Artist/Raced.flac" },
+        ]);
+        prisma.track.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        await expect(
+            module.processAudioHashBackfill(buildJob()),
+        ).resolves.toEqual({
+            processed: 1,
+            hashed: 0,
+            skipped: 1,
+            continued: false,
+        });
+        expect(prisma.track.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "track-raced", audioHash: null },
+            }),
+        );
+    });
+
+    it("rejects a continuation without a validated sweep token", async () => {
+        const { module, prisma } = loadProcessor([]);
+
+        await expect(
+            module.processAudioHashBackfill({
+                id: "invalid",
+                data: { startAfterId: "track-050" },
+            } as any),
+        ).rejects.toBeDefined();
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
     });
 });

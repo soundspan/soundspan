@@ -216,21 +216,30 @@ export class SearchService {
     }: SearchOptions): Promise<AlbumSearchResult[]> {
         const results = await prisma.album.findMany({
             where: {
-                tracks: { some: TRACK_VISIBLE_WHERE },
-                OR: [
+                AND: [
                     {
-                        title: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
+                        OR: [
+                            { tracks: { none: {} } },
+                            { tracks: { some: TRACK_VISIBLE_WHERE } },
+                        ],
                     },
                     {
-                        artist: {
-                            name: {
-                                contains: query,
-                                mode: "insensitive",
+                        OR: [
+                            {
+                                title: {
+                                    contains: query,
+                                    mode: "insensitive",
+                                },
                             },
-                        },
+                            {
+                                artist: {
+                                    name: {
+                                        contains: query,
+                                        mode: "insensitive",
+                                    },
+                                },
+                            },
+                        ],
                     },
                 ],
             },
@@ -294,9 +303,9 @@ export class SearchService {
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-              AND EXISTS (
-                SELECT 1 FROM "Track" t
-                WHERE t."albumId" = a.id AND t."removedAt" IS NULL
+              AND (
+                NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
+                OR EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."removedAt" IS NULL)
               )
 
             UNION ALL
@@ -312,9 +321,9 @@ export class SearchService {
             FROM "Album" a
             INNER JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
-              AND EXISTS (
-                SELECT 1 FROM "Track" t
-                WHERE t."albumId" = a.id AND t."removedAt" IS NULL
+              AND (
+                NOT EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id)
+                OR EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."removedAt" IS NULL)
               )
           ) combined
           ORDER BY id, rank DESC

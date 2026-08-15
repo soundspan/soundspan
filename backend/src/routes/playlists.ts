@@ -673,10 +673,7 @@ router.get("/", async (req, res) => {
                 },
                 items: {
                     where: {
-                        OR: [
-                            { trackId: null },
-                            { track: TRACK_VISIBLE_WHERE },
-                        ],
+                        OR: [{ trackId: null }, { track: TRACK_VISIBLE_WHERE }],
                     },
                     select: {
                         id: true,

@@ -512,7 +512,11 @@ export class MoodBucketService {
         // Count tracks per mood in parallel
         const countPromises = VALID_MOODS.map(async (mood) => {
             const count = await prisma.moodBucket.count({
-                where: { mood, score: { gte: MOOD_BUCKET_MIN_SCORE } },
+                where: {
+                    mood,
+                    score: { gte: MOOD_BUCKET_MIN_SCORE },
+                    track: { removedAt: null },
+                },
             });
             const config = MOOD_CONFIG[mood];
             return {

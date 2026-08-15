@@ -669,7 +669,8 @@ router.get("/tracks", async (req, res) => {
             let sameArtistTracks: any[] = [];
             if (seedTrack) {
                 sameArtistTracks = await prisma.track.findMany({
-                    where: { ...TRACK_VISIBLE_WHERE,
+                    where: {
+                        ...TRACK_VISIBLE_WHERE,
                         id: { not: seedTrack.id },
                         album: {
                             artistId: seedTrack.album.artist.id,
@@ -682,7 +683,8 @@ router.get("/tracks", async (req, res) => {
                 });
             } else if (seedArtistName) {
                 sameArtistTracks = await prisma.track.findMany({
-                    where: { ...TRACK_VISIBLE_WHERE,
+                    where: {
+                        ...TRACK_VISIBLE_WHERE,
                         album: {
                             artist: {
                                 OR: [
@@ -760,7 +762,8 @@ router.get("/tracks", async (req, res) => {
 
         if (artistOrClauses.length > 0) {
             candidateTracks = await prisma.track.findMany({
-                where: { ...TRACK_VISIBLE_WHERE,
+                where: {
+                    ...TRACK_VISIBLE_WHERE,
                     album: {
                         artist: {
                             OR: artistOrClauses,
@@ -777,7 +780,8 @@ router.get("/tracks", async (req, res) => {
         // Fallback for sparse metadata libraries.
         if (candidateTracks.length === 0 && lfmTracks.length > 0) {
             candidateTracks = await prisma.track.findMany({
-                where: { ...TRACK_VISIBLE_WHERE,
+                where: {
+                    ...TRACK_VISIBLE_WHERE,
                     title: {
                         in: lfmTracks.map((track) => track.title),
                         mode: "insensitive",

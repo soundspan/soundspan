@@ -333,6 +333,16 @@ describe("workers runtime behavior", () => {
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.add).toHaveBeenCalled();
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "track-audio-hash-backfill",
+            {
+                mode: "startup",
+                sweepStartedAt: expect.any(String),
+            },
+            expect.objectContaining({
+                jobId: "scheduler:audio-hash-backfill:startup",
+            }),
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
             { mode: "startup" },
             {

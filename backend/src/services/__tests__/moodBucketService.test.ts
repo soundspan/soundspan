@@ -141,6 +141,21 @@ describe("MoodBucketService", () => {
         mockPrisma.moodBucket.upsert.mockResolvedValue({});
     });
 
+    it("counts only visible tracks in mood presets", async () => {
+        mockPrisma.moodBucket.count.mockResolvedValue(3);
+
+        const presets = await service.getMoodPresets();
+
+        expect(presets).toHaveLength(VALID_MOODS.length);
+        expect(mockPrisma.moodBucket.count).toHaveBeenCalledWith({
+            where: {
+                mood: VALID_MOODS[0],
+                score: { gte: 0.5 },
+                track: { removedAt: null },
+            },
+        });
+    });
+
     describe("isRetryablePrismaError", () => {
         it("handles all supported Prisma error types and messages", () => {
             const privateService = asPrivate(service);

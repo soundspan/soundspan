@@ -153,7 +153,7 @@ describe("trackRemovalPurgeProcessor", () => {
             {
                 attempts: 3,
                 backoff: { type: "exponential", delay: 5_000 },
-                jobId: "scheduler:track-removal-purge:track-099",
+                jobId: "scheduler:track-removal-purge:2026-05-16T12:00:00.000Z:track-099",
                 removeOnComplete: true,
                 removeOnFail: 10,
             },

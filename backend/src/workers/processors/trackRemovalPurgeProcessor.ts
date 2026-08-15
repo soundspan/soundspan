@@ -125,7 +125,7 @@ async function enqueueContinuation(
         { startAfterId, cutoffAt: cutoff.toISOString(), deletedSoFar },
         {
             ...CONTINUATION_OPTIONS,
-            jobId: `scheduler:track-removal-purge:${startAfterId}`,
+            jobId: `scheduler:track-removal-purge:${cutoff.toISOString()}:${startAfterId}`,
         },
     );
 }

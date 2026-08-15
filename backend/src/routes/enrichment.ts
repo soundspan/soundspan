@@ -28,6 +28,7 @@ import {
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
@@ -2112,8 +2113,8 @@ router.post("/tracks/:id/reset", async (req, res) => {
         const { prisma } = await import("../utils/db");
 
         // Check if track exists first
-        const existingTrack = await prisma.track.findUnique({
-            where: { id: req.params.id },
+        const existingTrack = await prisma.track.findFirst({
+            where: { id: req.params.id, ...TRACK_VISIBLE_WHERE },
             select: { id: true },
         });
 
