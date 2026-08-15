@@ -1,4 +1,5 @@
 import type { Job } from "bull";
+import { createId } from "@paralleldrive/cuid2";
 import { z } from "zod";
 import {
     createFederationClient,
@@ -35,12 +36,19 @@ type MediaType = FederationEnvelope["mediaType"];
 type ArtistEnvelope = Extract<FederationEnvelope, { mediaType: "artist" }>;
 type AlbumEnvelope = Extract<FederationEnvelope, { mediaType: "album" }>;
 type TrackEnvelope = Extract<FederationEnvelope, { mediaType: "track" }>;
+type PodcastEnvelope = Extract<FederationEnvelope, { mediaType: "podcast" }>;
+type AudiobookEnvelope = Extract<
+    FederationEnvelope,
+    { mediaType: "audiobook" }
+>;
 type ParentMediaType = "artist" | "album";
 
 interface SyncCounts {
     artists: number;
     albums: number;
     tracks: number;
+    podcasts: number;
+    audiobooks: number;
     tombstones: number;
 }
 
@@ -54,6 +62,7 @@ interface SyncContext {
     warnedParents: Set<string>;
     touchedArtistIds: Set<string>;
     skippedInvalid: number;
+    skippedUnknownTombstones: number;
 }
 
 /** Bounded summary of one completed peer sync. */
@@ -61,26 +70,43 @@ export interface FederationSyncResult extends SyncCounts {
     mode: "full" | "incremental";
     cursor: string;
     skippedInvalid: number;
+    skippedUnknownTombstones: number;
 }
 
 function newSyncContext(peerId: string, scopes: string[]): SyncContext {
     return {
         peerId,
         scopes,
-        counts: { artists: 0, albums: 0, tracks: 0, tombstones: 0 },
-        seen: { artist: new Set(), album: new Set(), track: new Set() },
+        counts: {
+            artists: 0,
+            albums: 0,
+            tracks: 0,
+            podcasts: 0,
+            audiobooks: 0,
+            tombstones: 0,
+        },
+        seen: {
+            artist: new Set(),
+            album: new Set(),
+            track: new Set(),
+            podcast: new Set(),
+            audiobook: new Set(),
+        },
         albumRgMbids: new Map(),
         unavailableParents: { artist: new Set(), album: new Set() },
         warnedParents: new Set(),
         touchedArtistIds: new Set(),
         skippedInvalid: 0,
+        skippedUnknownTombstones: 0,
     };
 }
 
 function incrementCount(context: SyncContext, mediaType: MediaType): void {
     if (mediaType === "artist") context.counts.artists += 1;
     else if (mediaType === "album") context.counts.albums += 1;
-    else context.counts.tracks += 1;
+    else if (mediaType === "track") context.counts.tracks += 1;
+    else if (mediaType === "podcast") context.counts.podcasts += 1;
+    else context.counts.audiobooks += 1;
 }
 
 function rememberSeen(context: SyncContext, item: FederationEnvelope): void {
@@ -629,19 +655,29 @@ interface GroupedPage {
     artists: ArtistEnvelope[];
     albums: AlbumEnvelope[];
     tracks: TrackEnvelope[];
+    podcasts: PodcastEnvelope[];
+    audiobooks: AudiobookEnvelope[];
 }
 
 function groupPage(items: readonly FederationEnvelope[]): GroupedPage {
     if (items.length > MAX_PAGE_ITEMS) {
         throw new RangeError("Federation page exceeded the item bound");
     }
-    const grouped: GroupedPage = { artists: [], albums: [], tracks: [] };
+    const grouped: GroupedPage = {
+        artists: [],
+        albums: [],
+        tracks: [],
+        podcasts: [],
+        audiobooks: [],
+    };
     for (let index = 0; index < MAX_PAGE_ITEMS; index += 1) {
         const item = items[index];
         if (!item) break;
         if (item.mediaType === "artist") grouped.artists.push(item);
         else if (item.mediaType === "album") grouped.albums.push(item);
-        else grouped.tracks.push(item);
+        else if (item.mediaType === "track") grouped.tracks.push(item);
+        else if (item.mediaType === "podcast") grouped.podcasts.push(item);
+        else grouped.audiobooks.push(item);
     }
     return grouped;
 }
@@ -947,6 +983,82 @@ async function applyTracks(
     }
 }
 
+async function applyPodcasts(
+    context: SyncContext,
+    items: readonly PodcastEnvelope[],
+    remember: boolean,
+): Promise<void> {
+    for (const item of items) {
+        const values = {
+            feedUrl: item.attributes.feedUrl,
+            title: item.attributes.title,
+            author: item.attributes.author,
+            imageUrl: item.attributes.imageUrl,
+            updatedAt: new Date(item.updatedAt),
+        };
+        await prisma.federationPodcastListing.upsert({
+            where: {
+                peerId_remoteId: {
+                    peerId: context.peerId,
+                    remoteId: item.id,
+                },
+            },
+            create: {
+                peerId: context.peerId,
+                remoteId: item.id,
+                ...values,
+            },
+            update: values,
+        });
+        recordApplied(context, item, remember);
+    }
+}
+
+function syncedAudiobookValues(item: AudiobookEnvelope) {
+    return {
+        title: item.attributes.title,
+        author: item.attributes.author,
+        narrator: item.attributes.narrator,
+        duration: item.attributes.duration,
+        description: item.attributes.description,
+        asin: item.attributes.asin,
+        isbn: item.attributes.isbn,
+        coverUrl: item.attributes.coverUrl ? "federation" : null,
+        localCoverPath: null,
+        audioUrl: item.id,
+        genres: [],
+        tags: [],
+        updatedAt: new Date(item.updatedAt),
+        lastSyncedAt: new Date(item.updatedAt),
+    };
+}
+
+async function applyAudiobooks(
+    context: SyncContext,
+    items: readonly AudiobookEnvelope[],
+    remember: boolean,
+): Promise<void> {
+    for (const item of items) {
+        const values = syncedAudiobookValues(item);
+        await prisma.audiobook.upsert({
+            where: {
+                peerId_remoteId: {
+                    peerId: context.peerId,
+                    remoteId: item.id,
+                },
+            },
+            create: {
+                id: `fed:${createId()}`,
+                peerId: context.peerId,
+                remoteId: item.id,
+                ...values,
+            },
+            update: values,
+        });
+        recordApplied(context, item, remember);
+    }
+}
+
 async function applyOrderedChanges(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
@@ -968,18 +1080,33 @@ async function applyOrderedChanges(
         resolvedAlbums.has(item.id),
     );
     await applyTracks(context, state, validTracks, resolvedAlbums, remember);
+    await applyPodcasts(context, grouped.podcasts, remember);
+    await applyAudiobooks(context, grouped.audiobooks, remember);
 }
 
 const fullProgressSchema = z.strictObject({
     phase: z.literal("full"),
-    mediaType: z.enum(["artist", "album", "track", "cleanup"]),
+    mediaType: z.enum([
+        "artist",
+        "album",
+        "track",
+        "podcast",
+        "audiobook",
+        "cleanup",
+    ]),
     cursor: z.string().min(1).max(512).nullable(),
     serverTime: z.iso.datetime({ offset: true }),
     epoch: z.string().min(1).max(128),
 });
 type FullProgress = z.infer<typeof fullProgressSchema>;
 type FullMediaType = FullProgress["mediaType"];
-const FULL_TYPES: readonly MediaType[] = ["artist", "album", "track"];
+const FULL_TYPES: readonly MediaType[] = [
+    "artist",
+    "album",
+    "track",
+    "podcast",
+    "audiobook",
+];
 
 function parseFullProgress(value: string | null): FullProgress | null {
     if (!value?.startsWith("{")) return null;
@@ -1008,6 +1135,8 @@ async function saveFullProgress(
 function nextFullType(mediaType: MediaType): FullMediaType {
     if (mediaType === "artist") return "album";
     if (mediaType === "album") return "track";
+    if (mediaType === "track") return "podcast";
+    if (mediaType === "podcast") return "audiobook";
     return "cleanup";
 }
 
@@ -1069,6 +1198,22 @@ async function cleanupFullSync(context: SyncContext): Promise<void> {
         select: { id: true, remoteId: true },
     });
     await cleanupUnseen(
+        context.seen.audiobook,
+        (cursor) => prisma.audiobook.findMany(query(cursor)),
+        (ids) =>
+            prisma.audiobook.deleteMany({
+                where: { id: { in: ids }, peerId: context.peerId },
+            }),
+    );
+    await cleanupUnseen(
+        context.seen.podcast,
+        (cursor) => prisma.federationPodcastListing.findMany(query(cursor)),
+        (ids) =>
+            prisma.federationPodcastListing.deleteMany({
+                where: { id: { in: ids }, peerId: context.peerId },
+            }),
+    );
+    await cleanupUnseen(
         context.seen.track,
         (cursor) => prisma.track.findMany(query(cursor)),
         (ids) =>
@@ -1126,6 +1271,21 @@ async function applyTombstones(
     const trackIds = idsFor("track");
     const albumIds = idsFor("album");
     const artistIds = idsFor("artist");
+    const podcastIds = idsFor("podcast");
+    const audiobookIds = idsFor("audiobook");
+    if (audiobookIds.length > 0) {
+        await prisma.audiobook.deleteMany({
+            where: {
+                peerId: context.peerId,
+                remoteId: { in: audiobookIds },
+            },
+        });
+    }
+    if (podcastIds.length > 0) {
+        await prisma.federationPodcastListing.deleteMany({
+            where: { peerId: context.peerId, remoteId: { in: podcastIds } },
+        });
+    }
     if (trackIds.length > 0) {
         const rows = await prisma.track.findMany({
             where: { peerId: context.peerId, remoteId: { in: trackIds } },
@@ -1166,6 +1326,8 @@ async function finishSync(
         context.counts.artists +
         context.counts.albums +
         context.counts.tracks +
+        context.counts.podcasts +
+        context.counts.audiobooks +
         context.counts.tombstones;
     if (changed > 0 && mode === "full") await backfillAllArtistCounts();
     if (changed > 0 && mode === "incremental") {
@@ -1181,13 +1343,14 @@ async function finishSync(
         },
     });
     log.info(
-        `peerId=${context.peerId} mode=${mode} cursor=${cursor} artists=${context.counts.artists} albums=${context.counts.albums} tracks=${context.counts.tracks} tombstones=${context.counts.tombstones} skippedInvalid=${context.skippedInvalid}`,
+        `peerId=${context.peerId} mode=${mode} cursor=${cursor} artists=${context.counts.artists} albums=${context.counts.albums} tracks=${context.counts.tracks} podcasts=${context.counts.podcasts} audiobooks=${context.counts.audiobooks} tombstones=${context.counts.tombstones} skippedInvalid=${context.skippedInvalid} skippedUnknownTombstones=${context.skippedUnknownTombstones}`,
     );
     return {
         mode,
         cursor,
         ...context.counts,
         skippedInvalid: context.skippedInvalid,
+        skippedUnknownTombstones: context.skippedUnknownTombstones,
     };
 }
 
@@ -1257,6 +1420,8 @@ async function runIncrementalSync(
             cursor: pageCursor,
         });
         context.skippedInvalid += result.skippedInvalid ?? 0;
+        context.skippedUnknownTombstones +=
+            result.skippedUnknownTombstones ?? 0;
         await applyOrderedChanges(context, client, result.changes, false);
         await applyTombstones(context, result.tombstones);
         nextSince = new Date(result.nextSince);

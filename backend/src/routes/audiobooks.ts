@@ -1,4 +1,10 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
+import type {
+    Audiobook,
+    AudiobookProgress,
+    FederationPeer,
+} from "@prisma/client";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { audiobookCacheService } from "../services/audiobookCache";
@@ -13,8 +19,99 @@ import {
 } from "../services/imageProxy";
 import { sendRouteError } from "./routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
+import { config } from "../config";
+import {
+    proxyFederatedAudiobookCover,
+    proxyFederatedAudiobookStream,
+} from "../services/federationAudiobookProxy";
 
 const router = Router();
+
+const federationPeerInclude = {
+    federationPeer: {
+        select: {
+            id: true,
+            name: true,
+            outboundStatus: true,
+            baseUrl: true,
+            outboundToken: true,
+        },
+    },
+} as const;
+const audiobookSearchSchema = z.strictObject({
+    q: z.string().trim().min(1).max(200),
+});
+const audiobookProgressMetadataSelect = {
+    title: true,
+    author: true,
+    coverUrl: true,
+    duration: true,
+    libraryId: true,
+    localCoverPath: true,
+    peerId: true,
+} as const;
+
+type AudiobookRow = Audiobook & {
+    federationPeer?: Pick<
+        FederationPeer,
+        "id" | "name" | "outboundStatus" | "baseUrl" | "outboundToken"
+    > | null;
+};
+
+type ProgressRow = Pick<
+    AudiobookProgress,
+    "currentTime" | "duration" | "isFinished" | "lastPlayedAt"
+>;
+
+function federatedSource(book: AudiobookRow) {
+    if (!book.peerId || !book.federationPeer) return {};
+    return {
+        source: "federated" as const,
+        peer: {
+            id: book.federationPeer.id,
+            name: book.federationPeer.name,
+            online: book.federationPeer.outboundStatus === "ACTIVE",
+        },
+    };
+}
+
+function progressResponse(progress: ProgressRow | null | undefined) {
+    if (!progress) return null;
+    return {
+        currentTime: progress.currentTime,
+        progress:
+            progress.duration > 0
+                ? (progress.currentTime / progress.duration) * 100
+                : 0,
+        isFinished: progress.isFinished,
+        lastPlayedAt: progress.lastPlayedAt,
+    };
+}
+
+function audiobookListResponse(
+    book: AudiobookRow,
+    progress: ProgressRow | null | undefined,
+) {
+    return {
+        id: book.id,
+        title: book.title,
+        author: book.author || "Unknown Author",
+        narrator: book.narrator,
+        description: book.description,
+        coverUrl:
+            book.localCoverPath || book.coverUrl
+                ? `/audiobooks/${book.id}/cover`
+                : null,
+        duration: book.duration || 0,
+        libraryId: book.libraryId,
+        series: book.series
+            ? { name: book.series, sequence: book.seriesSequence || "1" }
+            : null,
+        genres: book.genres || [],
+        progress: progressResponse(progress),
+        ...federatedSource(book),
+    };
+}
 
 /**
  * @openapi
@@ -270,22 +367,41 @@ router.get("/debug-series", requireAuthOrToken, async (req, res) => {
  */
 router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
     try {
-        // Check if Audiobookshelf is enabled
         const { getSystemSettings } = await import("../utils/systemSettings");
         const settings = await getSystemSettings();
 
-        if (!settings?.audiobookshelfEnabled) {
+        if (!settings?.audiobookshelfEnabled && !config.features.federation) {
             return res.status(200).json([]);
         }
 
-        const { q } = req.query;
-
-        if (!q || typeof q !== "string") {
+        const query = audiobookSearchSchema.safeParse(req.query);
+        if (!query.success) {
             return res.status(400).json({ error: "Query parameter required" });
         }
+        const { q } = query.data;
 
-        const results = await audiobookshelfService.searchAudiobooks(q);
-        res.json(results);
+        const federated = config.features.federation
+            ? await prisma.audiobook.findMany({
+                  where: {
+                      peerId: { not: null },
+                      OR: [
+                          { title: { contains: q, mode: "insensitive" } },
+                          { author: { contains: q, mode: "insensitive" } },
+                          { narrator: { contains: q, mode: "insensitive" } },
+                      ],
+                  },
+                  orderBy: { title: "asc" },
+                  take: 100,
+                  include: federationPeerInclude,
+              })
+            : [];
+        const remote = settings?.audiobookshelfEnabled
+            ? await audiobookshelfService.searchAudiobooks(q)
+            : [];
+        res.json([
+            ...remote,
+            ...federated.map((book) => audiobookListResponse(book, null)),
+        ]);
     } catch (error: any) {
         logger.error("Error searching audiobooks:", error);
         res.status(500).json({
@@ -333,7 +449,7 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
         const { getSystemSettings } = await import("../utils/systemSettings");
         const settings = await getSystemSettings();
 
-        if (!settings?.audiobookshelfEnabled) {
+        if (!settings?.audiobookshelfEnabled && !config.features.federation) {
             return res.status(200).json({
                 configured: false,
                 enabled: false,
@@ -349,11 +465,31 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
         const skip = hasOffset ? parsedOffset : undefined;
 
         // Read from cached database instead of hitting Audiobookshelf API
-        const audiobooks = await prisma.audiobook.findMany({
-            orderBy: { title: "asc" },
+        const pagination = {
             ...(take !== undefined ? { take } : {}),
             ...(skip !== undefined ? { skip } : {}),
-        });
+        };
+        const audiobooks = config.features.federation
+            ? await prisma.audiobook.findMany({
+                  where: settings?.audiobookshelfEnabled
+                      ? undefined
+                      : { peerId: { not: null } },
+                  orderBy: { title: "asc" },
+                  include: federationPeerInclude,
+                  ...pagination,
+              })
+            : await prisma.audiobook.findMany({
+                  orderBy: { title: "asc" },
+                  ...pagination,
+              });
+
+        if (!settings?.audiobookshelfEnabled && audiobooks.length === 0) {
+            return res.status(200).json({
+                configured: false,
+                enabled: false,
+                audiobooks: [],
+            });
+        }
 
         const audiobookIds = audiobooks.map((book) => book.id);
         const progressEntries =
@@ -370,45 +506,9 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
         );
 
         // Get user's progress for each audiobook
-        const audiobooksWithProgress = audiobooks.map((book) => {
-            const progress = progressMap.get(book.id);
-
-            // Cover URL: if we have localCoverPath or coverUrl from Audiobookshelf, serve from our endpoint
-            // The /audiobooks/:id/cover endpoint will find the file on disk even if localCoverPath isn't set
-            const hasCover = book.localCoverPath || book.coverUrl;
-
-            return {
-                id: book.id,
-                title: book.title,
-                author: book.author || "Unknown Author",
-                narrator: book.narrator,
-                description: book.description,
-                coverUrl: hasCover
-                    ? `/audiobooks/${book.id}/cover` // Serve from local disk
-                    : null,
-                duration: book.duration || 0,
-                libraryId: book.libraryId,
-                series: book.series
-                    ? {
-                          name: book.series,
-                          sequence: book.seriesSequence || "1",
-                      }
-                    : null,
-                genres: book.genres || [],
-                progress: progress
-                    ? {
-                          currentTime: progress.currentTime,
-                          progress:
-                              progress.duration > 0
-                                  ? (progress.currentTime / progress.duration) *
-                                    100
-                                  : 0,
-                          isFinished: progress.isFinished,
-                          lastPlayedAt: progress.lastPlayedAt,
-                      }
-                    : null,
-            };
-        });
+        const audiobooksWithProgress = audiobooks.map((book) =>
+            audiobookListResponse(book, progressMap.get(book.id)),
+        );
 
         res.json(audiobooksWithProgress);
     } catch (error: any) {
@@ -574,142 +674,196 @@ router.get<{ seriesName: string }>(
  * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
  * Uses the high-volume imageLimiter (matches library/browse image routes)
  */
+type AudiobookCoverRow = Awaited<ReturnType<typeof loadAudiobookCover>>;
+
+async function loadAudiobookCover(id: string) {
+    return prisma.audiobook.findUnique({
+        where: { id },
+        select: {
+            localCoverPath: true,
+            coverUrl: true,
+            peerId: true,
+            remoteId: true,
+            federationPeer: {
+                select: {
+                    id: true,
+                    baseUrl: true,
+                    outboundToken: true,
+                    outboundStatus: true,
+                },
+            },
+        },
+    });
+}
+
+async function serveFederatedAudiobookCover(
+    req: Request,
+    res: Response,
+    audiobook: AudiobookCoverRow,
+): Promise<boolean> {
+    if (!config.features.federation || !audiobook?.peerId) return false;
+    const peer = audiobook.federationPeer;
+    if (
+        !peer ||
+        peer.outboundStatus !== "ACTIVE" ||
+        !peer.baseUrl ||
+        !peer.outboundToken ||
+        !audiobook.remoteId
+    ) {
+        sendRouteError(res, 503, "Federation peer is offline", {
+            code: "PEER_OFFLINE",
+        });
+        return true;
+    }
+    const served = await proxyFederatedAudiobookCover({
+        req,
+        res,
+        peer,
+        remoteId: audiobook.remoteId,
+    });
+    if (!served) sendRouteError(res, 404, "Cover not found");
+    return true;
+}
+
+async function resolveAudiobookCoverPath(
+    id: string,
+    coverDir: string,
+    storedPath: string | null | undefined,
+): Promise<string | null | undefined> {
+    if (storedPath) return storedPath;
+    const fs = await import("fs");
+    const fallbackPath = safeResolvePath(coverDir, `${id}.jpg`);
+    if (!fallbackPath || !fs.existsSync(fallbackPath)) return null;
+    try {
+        await prisma.audiobook.update({
+            where: { id },
+            data: { localCoverPath: fallbackPath },
+        });
+    } catch (error: unknown) {
+        logger.debug("Could not persist audiobook cover fallback", { error });
+    }
+    return fallbackPath;
+}
+
+async function serveAudiobookCoverFile(
+    res: Response,
+    coverPath: string | null | undefined,
+    coverDir: string,
+): Promise<boolean> {
+    if (!coverPath) return false;
+    const fs = await import("fs");
+    if (!fs.existsSync(coverPath)) return false;
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    sendFileFromRoot(res, coverPath, coverDir);
+    return true;
+}
+
+async function fetchAudiobookshelfCover(
+    id: string,
+    coverUrl: string,
+): Promise<globalThis.Response | null> {
+    const { getSystemSettings } = await import("../utils/systemSettings");
+    const settings = await getSystemSettings();
+    if (!settings?.audiobookshelfUrl || !settings.audiobookshelfApiKey) {
+        return null;
+    }
+    const baseUrl = settings.audiobookshelfUrl.replace(/\/$/, "");
+    const coverApiUrl = buildSafeAudiobookCoverUrl(coverUrl, baseUrl);
+    if (!coverApiUrl) {
+        logger.warn(
+            `[Audiobook Cover] Blocked unsafe cover path for ${id}: ${coverUrl}`,
+        );
+        return null;
+    }
+    try {
+        return await fetch(coverApiUrl, {
+            headers: {
+                Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
+            },
+            signal: AbortSignal.timeout(15000),
+        });
+    } catch (error: unknown) {
+        logger.error(`[Audiobook Cover] Proxy error for ${id}:`, error);
+        return null;
+    }
+}
+
+async function sendAudiobookshelfCover(
+    res: Response,
+    response: globalThis.Response,
+): Promise<boolean> {
+    if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return false;
+    }
+    const bodyResult = await readResponseBodyWithByteCap(
+        response,
+        MAX_EXTERNAL_IMAGE_BYTES,
+    );
+    if (!bodyResult.ok) return false;
+    res.setHeader(
+        "Content-Type",
+        response.headers.get("content-type") || "image/jpeg",
+    );
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.send(bodyResult.buffer);
+    return true;
+}
+
+export async function handleAudiobookCover(
+    req: Request<{ id: string }>,
+    res: Response,
+) {
+    try {
+        const { id } = req.params;
+        if (!/^[A-Za-z0-9_:-]+$/.test(id)) {
+            return res.status(400).json({ error: "Invalid audiobook ID" });
+        }
+
+        const path = await import("path");
+        const audiobook = await loadAudiobookCover(id);
+        if (await serveFederatedAudiobookCover(req, res, audiobook)) {
+            return undefined;
+        }
+
+        const coverDir = path.join(
+            config.music.musicPath,
+            "cover-cache",
+            "audiobooks",
+        );
+        const coverPath = await resolveAudiobookCoverPath(
+            id,
+            coverDir,
+            audiobook?.localCoverPath,
+        );
+        if (await serveAudiobookCoverFile(res, coverPath, coverDir)) return;
+
+        if (audiobook?.coverUrl) {
+            const response = await fetchAudiobookshelfCover(
+                id,
+                audiobook.coverUrl,
+            );
+            if (response && (await sendAudiobookshelfCover(res, response))) {
+                return undefined;
+            }
+        }
+
+        return res.status(404).json({ error: "Cover not found" });
+    } catch (error: unknown) {
+        logger.error("Error serving cover:", error);
+        return res.status(500).json({
+            error: "Failed to serve cover",
+        });
+    }
+}
+
 router.get<{ id: string }>(
     "/:id/cover",
     requireAuthOrToken,
     imageLimiter,
-    async (req, res) => {
-        try {
-            const { id } = req.params;
-            if (!/^[A-Za-z0-9_-]+$/.test(id)) {
-                return res.status(400).json({ error: "Invalid audiobook ID" });
-            }
-
-            const fs = await import("fs");
-            const path = await import("path");
-            const { config } = await import("../config");
-
-            const audiobook = await prisma.audiobook.findUnique({
-                where: { id },
-                select: { localCoverPath: true, coverUrl: true },
-            });
-
-            const coverDir = path.join(
-                config.music.musicPath,
-                "cover-cache",
-                "audiobooks",
-            );
-            let coverPath = audiobook?.localCoverPath;
-
-            // Fallback: check if cover exists on disk even if DB path is empty
-            if (!coverPath) {
-                const fallbackPath = safeResolvePath(coverDir, `${id}.jpg`);
-                if (fallbackPath && fs.existsSync(fallbackPath)) {
-                    coverPath = fallbackPath;
-                    // Update database with the correct path
-                    await prisma.audiobook
-                        .update({
-                            where: { id },
-                            data: { localCoverPath: fallbackPath },
-                        })
-                        .catch(() => {}); // Ignore errors if audiobook doesn't exist
-                }
-            }
-
-            // If local cover exists, serve it. CORS headers come from the
-            // app-level cors() middleware, which enforces the origin
-            // allowlist; do not reflect the request origin here.
-            if (coverPath && fs.existsSync(coverPath)) {
-                res.setHeader(
-                    "Cache-Control",
-                    "public, max-age=31536000, immutable",
-                );
-                res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-                return sendFileFromRoot(res, coverPath, coverDir);
-            }
-
-            // Fallback: proxy from Audiobookshelf if coverUrl is available
-            if (audiobook?.coverUrl) {
-                const { getSystemSettings } =
-                    await import("../utils/systemSettings");
-                const settings = await getSystemSettings();
-
-                if (
-                    settings?.audiobookshelfUrl &&
-                    settings?.audiobookshelfApiKey
-                ) {
-                    const baseUrl = settings.audiobookshelfUrl.replace(
-                        /\/$/,
-                        "",
-                    );
-                    const coverApiUrl = buildSafeAudiobookCoverUrl(
-                        audiobook.coverUrl,
-                        baseUrl,
-                    );
-                    if (!coverApiUrl) {
-                        logger.warn(
-                            `[Audiobook Cover] Blocked unsafe cover path for ${id}: ${audiobook.coverUrl}`,
-                        );
-                        return res
-                            .status(404)
-                            .json({ error: "Cover not found" });
-                    }
-
-                    try {
-                        const response = await fetch(coverApiUrl, {
-                            headers: {
-                                Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
-                            },
-                            signal: AbortSignal.timeout(15000),
-                        });
-
-                        if (response.ok) {
-                            const bodyResult =
-                                await readResponseBodyWithByteCap(
-                                    response,
-                                    MAX_EXTERNAL_IMAGE_BYTES,
-                                );
-                            if (!bodyResult.ok) {
-                                return sendRouteError(
-                                    res,
-                                    404,
-                                    "Cover not found",
-                                );
-                            }
-                            res.setHeader(
-                                "Content-Type",
-                                response.headers.get("content-type") ||
-                                    "image/jpeg",
-                            );
-                            res.setHeader(
-                                "Cache-Control",
-                                "public, max-age=86400",
-                            ); // 24 hours for proxied
-                            res.setHeader(
-                                "Cross-Origin-Resource-Policy",
-                                "cross-origin",
-                            );
-                            return res.send(bodyResult.buffer);
-                        }
-                        await response.body?.cancel().catch(() => {});
-                    } catch (proxyError: any) {
-                        logger.error(
-                            `[Audiobook Cover] Proxy error for ${id}:`,
-                            proxyError.message,
-                        );
-                    }
-                }
-            }
-
-            // No cover available
-            return res.status(404).json({ error: "Cover not found" });
-        } catch (error: any) {
-            logger.error("Error serving cover:", error);
-            res.status(500).json({
-                error: "Failed to serve cover",
-            });
-        }
-    },
+    handleAudiobookCover,
 );
 
 /**
@@ -746,30 +900,35 @@ router.get<{ id: string }>(
     apiLimiter,
     async (req, res) => {
         try {
-            // Check if Audiobookshelf is enabled
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
             const settings = await getSystemSettings();
+            const { id } = req.params;
+            let audiobook: AudiobookRow | null = config.features.federation
+                ? await prisma.audiobook.findUnique({
+                      where: { id },
+                      include: federationPeerInclude,
+                  })
+                : null;
+            const isFederated = Boolean(audiobook?.peerId);
 
-            if (!settings?.audiobookshelfEnabled) {
+            if (!settings?.audiobookshelfEnabled && !isFederated) {
                 return res
                     .status(200)
                     .json({ configured: false, enabled: false });
             }
 
-            const { id } = req.params;
+            if (!config.features.federation) {
+                audiobook = await prisma.audiobook.findUnique({
+                    where: { id },
+                });
+            }
 
-            // Try to get from cache first
-            let audiobook = await prisma.audiobook.findUnique({
-                where: { id },
-            });
-
-            // If not cached or stale, fetch from API and cache it
-            if (
-                !audiobook ||
-                audiobook.lastSyncedAt <
-                    new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-            ) {
+            const staleBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const cacheStale =
+                !isFederated &&
+                (!audiobook || audiobook.lastSyncedAt < staleBefore);
+            if (cacheStale) {
                 logger.debug(
                     `[AUDIOBOOK] Audiobook ${id} not cached or stale, fetching...`,
                 );
@@ -781,16 +940,16 @@ router.get<{ id: string }>(
             }
 
             // Get chapters and audio files from API (these change less frequently)
-            let absBook;
-            try {
-                absBook = await audiobookshelfService.getAudiobook(id);
-            } catch (apiError: any) {
-                logger.warn(
-                    `  Failed to fetch live data from Audiobookshelf for ${id}, using cached data only:`,
-                    apiError.message,
-                );
-                // Continue with cached data only if API call fails
-                absBook = { media: { chapters: [], audioFiles: [] } };
+            let absBook = { media: { chapters: [], audioFiles: [] } };
+            if (!isFederated) {
+                try {
+                    absBook = await audiobookshelfService.getAudiobook(id);
+                } catch (apiError: any) {
+                    logger.warn(
+                        `  Failed to fetch live data from Audiobookshelf for ${id}, using cached data only:`,
+                        apiError.message,
+                    );
+                }
             }
 
             // Get user's progress
@@ -829,6 +988,7 @@ router.get<{ id: string }>(
                           lastPlayedAt: progress.lastPlayedAt,
                       }
                     : null,
+                ...federatedSource(audiobook),
             };
 
             res.json(response);
@@ -882,6 +1042,59 @@ router.get<{ id: string }>(
  * GET /audiobooks/:id/stream
  * Proxy the audiobook stream with authentication
  */
+async function tryFederatedAudiobookStream(
+    req: Request<{ id: string }>,
+    res: Response,
+): Promise<boolean> {
+    if (!config.features.federation) return false;
+    const audiobook = await prisma.audiobook.findUnique({
+        where: { id: req.params.id },
+        select: {
+            peerId: true,
+            remoteId: true,
+            federationPeer: {
+                select: {
+                    id: true,
+                    name: true,
+                    baseUrl: true,
+                    outboundToken: true,
+                    outboundStatus: true,
+                },
+            },
+        },
+    });
+    if (!audiobook?.peerId) return false;
+    const peer = audiobook.federationPeer;
+    if (
+        !peer ||
+        peer.outboundStatus !== "ACTIVE" ||
+        !peer.baseUrl ||
+        !peer.outboundToken ||
+        !audiobook.remoteId
+    ) {
+        sendRouteError(res, 503, "Federation peer is offline", {
+            code: "PEER_OFFLINE",
+        });
+        return true;
+    }
+    try {
+        await proxyFederatedAudiobookStream({
+            req,
+            res,
+            peer,
+            remoteId: audiobook.remoteId,
+        });
+    } catch (error: unknown) {
+        logger.warn("Federated audiobook stream proxy failed", { error });
+        if (!res.headersSent) {
+            sendRouteError(res, 503, "Federation peer is offline", {
+                code: "PEER_OFFLINE",
+            });
+        }
+    }
+    return true;
+}
+
 router.get<{ id: string }>(
     "/:id/stream",
     requireAuthOrToken,
@@ -894,7 +1107,8 @@ router.get<{ id: string }>(
                 `[Audiobook Stream] User: ${req.user?.id || "unknown"}`,
             );
 
-            // Check if Audiobookshelf is enabled
+            if (await tryFederatedAudiobookStream(req, res)) return;
+
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
             const settings = await getSystemSettings();
@@ -1027,19 +1241,33 @@ router.post<{ id: string }>(
     apiLimiter,
     async (req, res) => {
         try {
-            // Check if Audiobookshelf is enabled
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
             const settings = await getSystemSettings();
+            const { id } = req.params;
+            let cachedAudiobook = config.features.federation
+                ? await prisma.audiobook.findUnique({
+                      where: { id },
+                      select: audiobookProgressMetadataSelect,
+                  })
+                : null;
 
-            if (!settings?.audiobookshelfEnabled) {
+            if (
+                !settings?.audiobookshelfEnabled &&
+                !(config.features.federation && cachedAudiobook?.peerId)
+            ) {
                 return res.status(200).json({
                     success: false,
                     message: "Audiobookshelf is not configured",
                 });
             }
+            if (!config.features.federation) {
+                cachedAudiobook = await prisma.audiobook.findUnique({
+                    where: { id },
+                    select: audiobookProgressMetadataSelect,
+                });
+            }
 
-            const { id } = req.params;
             const {
                 currentTime: rawCurrentTime,
                 duration: rawDuration,
@@ -1082,27 +1310,14 @@ router.post<{ id: string }>(
             logger.debug(`   Finished: ${!!isFinished}`);
 
             // Pull cached metadata to avoid hitting Audiobookshelf for every update
-            const [cachedAudiobook, existingProgress] = await Promise.all([
-                prisma.audiobook.findUnique({
-                    where: { id },
-                    select: {
-                        title: true,
-                        author: true,
-                        coverUrl: true,
-                        duration: true,
-                        libraryId: true,
-                        localCoverPath: true,
+            const existingProgress = await prisma.audiobookProgress.findUnique({
+                where: {
+                    userId_audiobookshelfId: {
+                        userId: req.user!.id,
+                        audiobookshelfId: id,
                     },
-                }),
-                prisma.audiobookProgress.findUnique({
-                    where: {
-                        userId_audiobookshelfId: {
-                            userId: req.user!.id,
-                            audiobookshelfId: id,
-                        },
-                    },
-                }),
-            ]);
+                },
+            });
 
             const fallbackDuration =
                 durationValue ||
@@ -1153,21 +1368,21 @@ router.post<{ id: string }>(
 
             logger.debug(`   Progress saved to database`);
 
-            // Also update progress in Audiobookshelf
-            try {
-                await audiobookshelfService.updateProgress(
-                    id,
-                    currentTime,
-                    fallbackDuration,
-                    isFinished,
-                );
-                logger.debug(`   Progress synced to Audiobookshelf`);
-            } catch (error) {
-                logger.error(
-                    "Failed to sync progress to Audiobookshelf:",
-                    error,
-                );
-                // Continue anyway - local progress is saved
+            if (!cachedAudiobook?.peerId) {
+                try {
+                    await audiobookshelfService.updateProgress(
+                        id,
+                        currentTime,
+                        fallbackDuration,
+                        isFinished,
+                    );
+                    logger.debug(`   Progress synced to Audiobookshelf`);
+                } catch (error) {
+                    logger.error(
+                        "Failed to sync progress to Audiobookshelf:",
+                        error,
+                    );
+                }
             }
 
             res.json({
@@ -1222,19 +1437,23 @@ router.delete<{ id: string }>(
     apiLimiter,
     async (req, res) => {
         try {
-            // Check if Audiobookshelf is enabled
             const { getSystemSettings } =
                 await import("../utils/systemSettings");
             const settings = await getSystemSettings();
+            const { id } = req.params;
+            const audiobook = config.features.federation
+                ? await prisma.audiobook.findUnique({
+                      where: { id },
+                      select: { peerId: true },
+                  })
+                : null;
 
-            if (!settings?.audiobookshelfEnabled) {
+            if (!settings?.audiobookshelfEnabled && !audiobook?.peerId) {
                 return res.status(200).json({
                     success: false,
                     message: "Audiobookshelf is not configured",
                 });
             }
-
-            const { id } = req.params;
 
             logger.debug(`\n[AUDIOBOOK PROGRESS] Removing progress:`);
             logger.debug(`   User: ${req.user!.username}`);
@@ -1250,16 +1469,16 @@ router.delete<{ id: string }>(
 
             logger.debug(`   Progress removed from database`);
 
-            // Also remove progress from Audiobookshelf
-            try {
-                await audiobookshelfService.updateProgress(id, 0, 0, false);
-                logger.debug(`   Progress reset in Audiobookshelf`);
-            } catch (error) {
-                logger.error(
-                    "Failed to reset progress in Audiobookshelf:",
-                    error,
-                );
-                // Continue anyway - local progress is deleted
+            if (!audiobook?.peerId) {
+                try {
+                    await audiobookshelfService.updateProgress(id, 0, 0, false);
+                    logger.debug(`   Progress reset in Audiobookshelf`);
+                } catch (error) {
+                    logger.error(
+                        "Failed to reset progress in Audiobookshelf:",
+                        error,
+                    );
+                }
             }
 
             res.json({

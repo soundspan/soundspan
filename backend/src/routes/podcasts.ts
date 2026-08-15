@@ -20,6 +20,8 @@ import pLimit from "p-limit";
 import { sendRouteError } from "./routeErrorResponse";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import { config } from "../config";
+import { asyncHandler } from "../middleware/asyncHandler";
+import { sendFeatureDisabled } from "../utils/featureGate";
 
 const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
@@ -29,6 +31,7 @@ const MAX_PODCAST_DISCOVERY_GENRES = 7;
 const MAX_PODCAST_GENRES_QUERY_LENGTH = 64;
 const PODCAST_GENRE_FETCH_CONCURRENCY = 3;
 const podcastGenreDiscoveryLogger = logger.child("PodcastGenreDiscovery");
+const MAX_PEER_PODCAST_LISTINGS = 5_000;
 
 const PODCAST_GENRE_SEARCH_TERMS = {
     "1303": "comedy podcast",
@@ -139,6 +142,65 @@ const subscribeSchema = z
     .refine((body) => Boolean(body.feedUrl) || Boolean(body.itunesId), {
         message: "feedUrl or itunesId is required",
     });
+
+/** @openapi
+ * /api/podcasts/peers:
+ *   get:
+ *     summary: List podcast catalogs shared by federation peers
+ *     tags: [Podcasts]
+ *     security: [{ sessionAuth: [] }]
+ *     responses:
+ *       200: { description: Peer podcast listings with subscription state }
+ *       401: { description: Not authenticated }
+ *       404: { description: Federation feature disabled }
+ */
+router.get(
+    "/peers",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+        if (!config.features.federation) {
+            sendFeatureDisabled(res);
+            return;
+        }
+        const query = z.strictObject({}).safeParse(req.query ?? {});
+        if (!query.success) {
+            return sendRouteError(res, 400, "Invalid podcast peer request");
+        }
+        const listings = await prisma.federationPodcastListing.findMany({
+            orderBy: [{ title: "asc" }, { id: "asc" }],
+            take: MAX_PEER_PODCAST_LISTINGS,
+            include: {
+                federationPeer: {
+                    select: { id: true, name: true, outboundStatus: true },
+                },
+            },
+        });
+        const feedUrls = listings.map((listing) => listing.feedUrl);
+        const subscribed =
+            feedUrls.length === 0
+                ? []
+                : await prisma.podcast.findMany({
+                      where: {
+                          feedUrl: { in: feedUrls },
+                          subscriptions: { some: { userId: req.user!.id } },
+                      },
+                      select: { feedUrl: true },
+                  });
+        const subscribedFeeds = new Set(subscribed.map((item) => item.feedUrl));
+        return res.json(
+            listings.map(({ federationPeer, ...listing }) => ({
+                ...listing,
+                source: "federated" as const,
+                peer: {
+                    id: federationPeer.id,
+                    name: federationPeer.name,
+                    online: federationPeer.outboundStatus === "ACTIVE",
+                },
+                subscribed: subscribedFeeds.has(listing.feedUrl),
+            })),
+        );
+    }),
+);
 
 function areSubscribeIdentifiersAbsent(body: unknown): boolean {
     if (!body || typeof body !== "object") return true;

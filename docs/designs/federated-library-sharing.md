@@ -1,6 +1,6 @@
 # Federated Library Sharing ("Swarming")
 
-Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: **implemented, pending release**. The v1 implementation shipped through chunks F1–F8; contract documentation is synchronized in F9.
+Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: **implemented, pending release**. The implementation includes podcast and audiobook federation through chunk F13; contract documentation is synchronized in F9 and F13.
 
 ## Summary
 
@@ -25,7 +25,6 @@ Two layers ship independently, matching the issue:
 - Write federation (remote playlist edits, scrobble forwarding to peers, remote likes).
 - Transitive federation (peer-of-a-peer discovery). Links are explicit and pairwise.
 - Federated user identity / SSO. Local users see remote *media*, not remote *users*.
-- Podcasts and audiobooks in v1 — music ships first, but all media types are intended to federate eventually, so the catalog API is designed around a generic media-item envelope from day one (see Layer 1).
 - Public/anonymous federation. Every link is an admin-approved pairing.
 
 ## Why native federation (vs a Jellyswarrm-style proxy)
@@ -77,17 +76,19 @@ Endpoints (all read-only, all peer-credential-authenticated):
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /manifest` | UUID instance identity and catalog epoch, `HOSTNAME`-based name, version, supported `mediaTypes`, local-only counts, embedding availability |
-| `GET /catalog/items?type=&cursor=` | Paged media items in a generic envelope (see below); `type` ∈ `artist \| album \| track` in v1 |
+| `GET /catalog/items?type=&cursor=` | Paged media items in a generic envelope (see below); `type` ∈ `artist \| album \| track \| podcast \| audiobook` |
 | `GET /catalog/delta?since=` | Changed/removed items since cursor, same envelope (drives incremental sync) |
 | `GET /cover/:itemId` | Cover art bytes (ETag) |
 | `GET /stream/:itemId` | Audio with Range support, quality param; reuses `AudioStreamingService` |
+| `GET /stream/audiobook/:itemId` | Audiobook audio with Range support; reuses the Audiobookshelf proxy |
+| `GET /cover/audiobook/:itemId` | Exported audiobook cover bytes |
 
-**Generic media-item envelope.** Every catalog row is `{ id, mediaType, updatedAt, parentRef?, attributes }`. Track attributes include structural metadata plus optional nullable `bpm`, `beatsCount`, `key`, `keyScale`, `keyStrength`, `energy`, `loudness`, `dynamicRange`, `danceability`, `valence`, `arousal`, `instrumentalness`, `acousticness`, `speechiness`, `moodHappy`, `moodSad`, `moodRelaxed`, `moodAggressive`, `moodParty`, `moodAcoustic`, `moodElectronic`, `danceabilityMl`, `moodTags`, `essentiaGenres`, `lastfmTags`, and the scoped optional embedding. Consumers bound finite numbers and tag-array/string sizes at the wire boundary and tolerate fields omitted by older hosts. The manifest advertises which `mediaTypes` the host exports. New media types and attributes remain additive without a `/v2` split.
+**Generic media-item envelope.** Every catalog row is `{ id, mediaType, updatedAt, parentRef?, attributes }`. Track attributes include structural metadata plus optional analyzer fields and the scoped optional embedding. Podcast attributes are `feedUrl`, `title`, `author`, `description`, `imageUrl`, and `itunesId`. Audiobook attributes are `title`, `author`, `narrator`, `duration`, `description`, `asin`, `isbn`, and a Boolean cover-presence flag. Consumers bound finite numbers and string/array sizes at the wire boundary. Manifest media types are bounded strings that consumers filter to the types they understand; unknown count keys and future manifest fields are tolerated. New media types and attributes remain additive without a `/v2` split.
 
 Notes:
 
 - Only `location=LIBRARY` content is exported. `DISCOVER` and already-`REMOTE`/`FEDERATED` items are excluded — this also prevents transitive re-export (peer-of-a-peer laundering).
-- Delta feed uses row update timestamps plus `FederationTombstone(entityType, entityId, deletedAt)` records written by retention purge and orphan cleanup while federation is enabled.
+- Delta feed uses row update timestamps plus `FederationTombstone(entityType, entityId, deletedAt)` records written by retention purge and orphan cleanup while federation is enabled. Tombstone fields remain strict. A consumer skips and counts a well-formed tombstone whose bounded `entityType` it does not understand, while a malformed tombstone for a known type fails the page so deletion integrity is preserved.
 - Embedding export (512-dim CLAP vector from `TrackEmbedding`) is included behind scope `embeddings:read`. The consumer stores scoped embeddings and uses them in federated vibe and similarity queries. ~2KB/track; optional per link.
 
 **Peer credentials** — new Prisma model, deliberately *not* `ApiKey` (ApiKeys hard-expire at 90 days, map 1:1 to a human user, and grant write surface):
@@ -124,6 +125,10 @@ model FederationPeer {
 - `Track` gains `origin` (`LOCAL | FEDERATED`), nullable `filePath` (federated rows have none; unique constraint keeps ignoring NULLs in Postgres), and `@@unique([peerId, remoteId])`.
 - `Artist`/`Album`/`Track` gain nullable `peerId → FederationPeer` + `remoteId` (the peer's cuid for the entity).
 - Federated track IDs remain ordinary local `Track.id` cuids. The wire envelope carries the host ID, which is stored as the unique `(peerId, remoteId)` pair. `Play` and `PlaylistItem` use the existing `trackId` column, while API responses discriminate the row with `source: "federated"` and peer provenance. No new polymorphic FK columns are required.
+
+**Podcasts are catalog listings, not mirrors.** A host exports every subscribed `Podcast` feed as `mediaType: "podcast"`. The consumer stores only `FederationPodcastListing` rows keyed by `(peerId, remoteId)` and exposes them through `GET /api/podcasts/peers` with peer and per-user subscription state. It never inserts peer data into `Podcast`, because `Podcast.feedUrl` is globally unique and a mirror could collide with the native feed row. Subscribing follows the existing native feed flow. Episodes do not federate.
+
+**Audiobooks are full mirrors.** `Audiobook` gains nullable `peerId`/`remoteId`; local rows leave both null and hosts export only `peerId: null` rows to prevent transitive re-export. Consumers mint `fed:<cuid>` primary IDs and mirror metadata without v1 ASIN/ISBN deduplication. List, detail, search, cover, stream, and progress remain available for federated rows when Audiobookshelf is disabled. Progress stays local on the consumer. Streaming is a double proxy: browser → consumer → owning peer → Audiobookshelf. The inherited Audiobookshelf implementation streams only `media.tracks[0]`; multi-track audiobook concatenation or track selection remains future work.
 
 **Federated vs provider-remote tracks.** Federated tracks deliberately do NOT follow the existing TIDAL/YT Music "remote track" pattern. The two models coexist and serve different purposes:
 
@@ -221,4 +226,4 @@ Confirmed with the project owner and implemented in the pending-release v1:
 4. **Owner-reversed 2026-08-15: Subsonic includes federated media.** Metadata and playlists expose visible, dedup-suppressed peer items. Streams/downloads proxy through the owning peer, and an offline peer returns a Subsonic generic protocol error.
 
 Owner reversals recorded 2026-08-15: the earlier local-only intelligence decision, local-only Subsonic decision, no-consumer-cache decision, and local-only lyrics decision are superseded by F11. Share links remain the deliberate egress exclusion: a consumer cannot re-share peer media to third parties.
-5. **All media types federate eventually.** Music ships first, but the catalog API uses the generic media-item envelope from day one so podcasts and audiobooks become additive `mediaType` values, not a v2 API.
+5. **Podcasts and audiobooks use the additive media envelope.** Podcasts are catalog listings only; audiobooks are full mirrors with proxied cover and streaming paths. Both are additive `mediaType` values, not a v2 API.

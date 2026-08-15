@@ -123,6 +123,25 @@ describe("federation HTTP client", () => {
         );
     });
 
+    it("accepts additive manifest media types and count keys", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                ...manifest,
+                mediaTypes: [...manifest.mediaTypes, "video"],
+                counts: { ...manifest.counts, videos: 7 },
+                futureCapability: true,
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).resolves.toMatchObject({
+            mediaTypes: ["artist", "album", "track"],
+            counts: { artists: 1, albums: 2, tracks: 3 },
+        });
+    });
+
     it("fetches one catalog item by type and encoded id", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 200,
@@ -155,6 +174,47 @@ describe("federation HTTP client", () => {
             nextCursor: null,
             skippedInvalid: 1,
         });
+    });
+
+    it("validates podcast and audiobook envelopes", async () => {
+        const items = [
+            {
+                id: "podcast-1",
+                mediaType: "podcast",
+                updatedAt: "2026-08-15T12:00:00.000Z",
+                attributes: {
+                    feedUrl: "https://feeds.example/show.xml",
+                    title: "Peer Podcast",
+                    author: null,
+                    description: null,
+                    imageUrl: null,
+                    itunesId: null,
+                },
+            },
+            {
+                id: "audiobook-1",
+                mediaType: "audiobook",
+                updatedAt: "2026-08-15T12:00:00.000Z",
+                attributes: {
+                    title: "Peer Audiobook",
+                    author: null,
+                    narrator: null,
+                    duration: 600,
+                    description: null,
+                    asin: null,
+                    isbn: null,
+                    coverUrl: true,
+                },
+            },
+        ];
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: { items, nextCursor: null },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("podcast"),
+        ).resolves.toMatchObject({ items, skippedInvalid: 0 });
     });
 
     it("accepts bounded audio features and tolerates their absence", async () => {
@@ -271,6 +331,35 @@ describe("federation HTTP client", () => {
         ).rejects.toBeInstanceOf(FederationResponseError);
     });
 
+    it("skips bounded unknown tombstone types without weakening known tombstones", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                kind: "ok",
+                changes: [],
+                tombstones: [
+                    {
+                        entityType: "video",
+                        entityId: "video-1",
+                        deletedAt: "2026-08-15T12:01:00.000Z",
+                    },
+                ],
+                nextCursor: null,
+                nextSince: "2026-08-15T12:02:00.000Z",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-08-15T12:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).resolves.toMatchObject({
+            tombstones: [],
+            skippedUnknownTombstones: 1,
+        });
+    });
+
     it("treats a stale cursor response as a full-resync signal", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 409,
@@ -320,6 +409,28 @@ describe("federation HTTP client", () => {
             createFederationClient(peer, { attempts: 1 }).getCover("album-1"),
         ).rejects.toBeInstanceOf(FederationHttpError);
         expect(coverBody.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("requests audiobook streams through the typed endpoint with Range", async () => {
+        const body = { destroy: jest.fn() };
+        axiosRequest.mockResolvedValueOnce({
+            status: 206,
+            data: body,
+            headers: { "content-range": "bytes 0-9/100" },
+        });
+
+        await createFederationClient(peer).getAudiobookStream({
+            remoteId: "book/id",
+            range: "bytes=0-9",
+        });
+
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://peer.example/api/federation/v1/stream/audiobook/book%2Fid",
+                headers: expect.objectContaining({ Range: "bytes=0-9" }),
+                responseType: "stream",
+            }),
+        );
     });
 
     it("rejects an oversized JSON response at the transport boundary", async () => {

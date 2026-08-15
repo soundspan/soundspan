@@ -69,6 +69,16 @@ const prisma = {
         findMany: jest.fn(),
         deleteMany: jest.fn(),
     },
+    federationPodcastListing: {
+        upsert: jest.fn(),
+        findMany: jest.fn(),
+        deleteMany: jest.fn(),
+    },
+    audiobook: {
+        upsert: jest.fn(),
+        findMany: jest.fn(),
+        deleteMany: jest.fn(),
+    },
 };
 
 jest.mock("../../../utils/db", () => ({ prisma }));
@@ -115,8 +125,8 @@ const manifest = {
     name: "Peer One",
     version: "2.0.2",
     catalogEpoch: "epoch-1",
-    mediaTypes: ["artist", "album", "track"],
-    counts: { artists: 1, albums: 1, tracks: 1 },
+    mediaTypes: ["artist", "album", "track", "podcast", "audiobook"],
+    counts: { artists: 1, albums: 1, tracks: 1, podcasts: 1, audiobooks: 1 },
     embeddingsAvailable: true,
     serverTime: "2026-08-15T11:59:59.000Z",
 };
@@ -186,6 +196,34 @@ const track = {
         embedding: Array.from({ length: 512 }, () => 0.25),
     },
 };
+const podcast = {
+    id: "remote-podcast-1",
+    mediaType: "podcast",
+    updatedAt: "2026-08-15T12:00:03.000Z",
+    attributes: {
+        feedUrl: "https://feeds.example/show.xml",
+        title: "Peer Podcast",
+        author: "Podcast Author",
+        description: "Listing-only metadata",
+        imageUrl: "https://images.example/show.jpg",
+        itunesId: "12345",
+    },
+};
+const audiobook = {
+    id: "remote-audiobook-1",
+    mediaType: "audiobook",
+    updatedAt: "2026-08-15T12:00:04.000Z",
+    attributes: {
+        title: "Peer Audiobook",
+        author: "Book Author",
+        narrator: "Book Narrator",
+        duration: 3_600,
+        description: "Mirrored metadata",
+        asin: "ASIN-1",
+        isbn: "ISBN-1",
+        coverUrl: true,
+    },
+};
 
 function job() {
     return { data: { peerId: "peer-1" } } as never;
@@ -196,7 +234,11 @@ function catalogPageFor(type: string) {
         return { items: [artist], nextCursor: null, skippedInvalid: 0 };
     if (type === "album")
         return { items: [album], nextCursor: null, skippedInvalid: 0 };
-    return { items: [track], nextCursor: null, skippedInvalid: 0 };
+    if (type === "track")
+        return { items: [track], nextCursor: null, skippedInvalid: 0 };
+    if (type === "podcast")
+        return { items: [podcast], nextCursor: null, skippedInvalid: 0 };
+    return { items: [audiobook], nextCursor: null, skippedInvalid: 0 };
 }
 
 describe("federation sync processor", () => {
@@ -271,6 +313,16 @@ describe("federation sync processor", () => {
                 : [],
         );
         prisma.track.deleteMany.mockResolvedValue({ count: 0 });
+        prisma.federationPodcastListing.upsert.mockResolvedValue({
+            id: "podcast-listing-row",
+        });
+        prisma.federationPodcastListing.findMany.mockResolvedValue([]);
+        prisma.federationPodcastListing.deleteMany.mockResolvedValue({
+            count: 0,
+        });
+        prisma.audiobook.upsert.mockResolvedValue({ id: "fed:audiobook-row" });
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        prisma.audiobook.deleteMany.mockResolvedValue({ count: 0 });
         createMapping.mockResolvedValue({ id: "mapping-1" });
         upsertTrackEmbedding.mockResolvedValue(undefined);
         backfillAllArtistCounts.mockResolvedValue({ processed: 1, errors: 0 });
@@ -286,7 +338,7 @@ describe("federation sync processor", () => {
 
         expect(
             client.getCatalogItems.mock.calls.map((call) => call[0]),
-        ).toEqual(["artist", "album", "track"]);
+        ).toEqual(["artist", "album", "track", "podcast", "audiobook"]);
         expect(prisma.artist.upsert.mock.invocationCallOrder[0]).toBeLessThan(
             prisma.album.upsert.mock.invocationCallOrder[0],
         );
@@ -310,6 +362,44 @@ describe("federation sync processor", () => {
                     moodTags: ["focused"],
                     essentiaGenres: ["electronic"],
                     lastfmTags: ["synthwave"],
+                }),
+            }),
+        );
+        expect(prisma.federationPodcastListing.upsert).toHaveBeenCalledWith({
+            where: {
+                peerId_remoteId: {
+                    peerId: "peer-1",
+                    remoteId: "remote-podcast-1",
+                },
+            },
+            create: expect.objectContaining({
+                peerId: "peer-1",
+                remoteId: "remote-podcast-1",
+                feedUrl: "https://feeds.example/show.xml",
+            }),
+            update: expect.objectContaining({
+                title: "Peer Podcast",
+            }),
+        });
+        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    peerId_remoteId: {
+                        peerId: "peer-1",
+                        remoteId: "remote-audiobook-1",
+                    },
+                },
+                create: expect.objectContaining({
+                    id: expect.stringMatching(/^fed:[a-z0-9]+$/),
+                    peerId: "peer-1",
+                    remoteId: "remote-audiobook-1",
+                    title: "Peer Audiobook",
+                    asin: "ASIN-1",
+                    audioUrl: "remote-audiobook-1",
+                }),
+                update: expect.objectContaining({
+                    title: "Peer Audiobook",
+                    isbn: "ISBN-1",
                 }),
             }),
         );
@@ -349,6 +439,8 @@ describe("federation sync processor", () => {
             artists: 1,
             albums: 1,
             tracks: 1,
+            podcasts: 1,
+            audiobooks: 1,
             skippedInvalid: 0,
         });
     });
@@ -658,6 +750,17 @@ describe("federation sync processor", () => {
     });
 
     it("deletes unseen full-sync rows in bounded child-first batches", async () => {
+        prisma.audiobook.findMany.mockImplementation(async ({ where }) =>
+            where?.id
+                ? []
+                : [{ id: "stale-audiobook", remoteId: "old-audiobook" }],
+        );
+        prisma.federationPodcastListing.findMany.mockImplementation(
+            async ({ where }) =>
+                where?.id
+                    ? []
+                    : [{ id: "stale-podcast", remoteId: "old-podcast" }],
+        );
         prisma.track.findMany.mockImplementation(async ({ where }) =>
             where?.peerId === "peer-1" && !where?.remoteId && !where?.id
                 ? [{ id: "stale-track", remoteId: "old-track" }]
@@ -695,6 +798,14 @@ describe("federation sync processor", () => {
 
         await processFederationSync(job());
 
+        expect(prisma.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: { id: { in: ["stale-audiobook"] }, peerId: "peer-1" },
+        });
+        expect(prisma.federationPodcastListing.deleteMany).toHaveBeenCalledWith(
+            {
+                where: { id: { in: ["stale-podcast"] }, peerId: "peer-1" },
+            },
+        );
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: { id: { in: ["stale-track"] }, peerId: "peer-1" },
         });
@@ -720,10 +831,21 @@ describe("federation sync processor", () => {
                     entityId: "removed-track",
                     deletedAt: "2026-08-15T12:11:00.000Z",
                 },
+                {
+                    entityType: "podcast",
+                    entityId: "removed-podcast",
+                    deletedAt: "2026-08-15T12:11:00.000Z",
+                },
+                {
+                    entityType: "audiobook",
+                    entityId: "removed-audiobook",
+                    deletedAt: "2026-08-15T12:11:00.000Z",
+                },
             ],
             nextCursor: null,
             nextSince: "2026-08-15T12:12:00.000Z",
             skippedInvalid: 0,
+            skippedUnknownTombstones: 1,
         });
 
         const result = await processFederationSync(job());
@@ -740,7 +862,28 @@ describe("federation sync processor", () => {
                 remoteId: { in: ["removed-track"] },
             },
         });
-        expect(result.mode).toBe("incremental");
+        expect(prisma.federationPodcastListing.deleteMany).toHaveBeenCalledWith(
+            {
+                where: {
+                    peerId: "peer-1",
+                    remoteId: { in: ["removed-podcast"] },
+                },
+            },
+        );
+        expect(prisma.audiobook.deleteMany).toHaveBeenCalledWith({
+            where: {
+                peerId: "peer-1",
+                remoteId: { in: ["removed-audiobook"] },
+            },
+        });
+        expect(result).toMatchObject({
+            mode: "incremental",
+            tombstones: 3,
+            skippedUnknownTombstones: 1,
+        });
+        expect(mockLog.info).toHaveBeenCalledWith(
+            expect.stringContaining("skippedUnknownTombstones=1"),
+        );
     });
 
     it("falls back to full sync after a typed epoch 409", async () => {
@@ -1227,6 +1370,34 @@ describe("federation sync processor", () => {
             ["stale-album"],
             ["stale-artist"],
         ]);
+    });
+
+    it("resumes through podcast and audiobook full-sync phases", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: JSON.stringify({
+                phase: "full",
+                mediaType: "podcast",
+                cursor: "resume-podcast-page",
+                serverTime: "2026-08-15T11:59:59.000Z",
+                epoch: "epoch-1",
+            }),
+        });
+
+        await processFederationSync(job());
+
+        expect(client.getCatalogItems).toHaveBeenNthCalledWith(
+            1,
+            "podcast",
+            "resume-podcast-page",
+        );
+        expect(client.getCatalogItems).toHaveBeenNthCalledWith(
+            2,
+            "audiobook",
+            undefined,
+        );
+        expect(prisma.federationPodcastListing.upsert).toHaveBeenCalled();
+        expect(prisma.audiobook.upsert).toHaveBeenCalled();
     });
 
     it("imports embeddings only when the persisted peer scope permits it", async () => {

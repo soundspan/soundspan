@@ -22,13 +22,11 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
-jest.mock("../../config", () => ({
-    config: {
-        music: {
-            musicPath: "/music",
-        },
-    },
-}));
+const mockConfig = {
+    features: { federation: false },
+    music: { musicPath: "/music" },
+};
+jest.mock("../../config", () => ({ config: mockConfig }));
 
 const fsExistsSync = jest.fn();
 jest.mock("fs", () => ({
@@ -52,6 +50,13 @@ const audiobookCacheService = {
 };
 jest.mock("../../services/audiobookCache", () => ({
     audiobookCacheService,
+}));
+
+const proxyFederatedAudiobookStream = jest.fn();
+const proxyFederatedAudiobookCover = jest.fn();
+jest.mock("../../services/federationAudiobookProxy", () => ({
+    proxyFederatedAudiobookStream,
+    proxyFederatedAudiobookCover,
 }));
 
 const getSystemSettings = jest.fn();
@@ -197,6 +202,7 @@ describe("audiobooks advanced runtime", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockConfig.features.federation = false;
 
         getSystemSettings.mockResolvedValue({
             audiobookshelfEnabled: true,
@@ -223,9 +229,278 @@ describe("audiobooks advanced runtime", () => {
         audiobookshelfService.searchAudiobooks.mockResolvedValue([]);
         audiobookshelfService.updateProgress.mockResolvedValue(undefined);
         audiobookCacheService.getAudiobook.mockResolvedValue(null);
+        proxyFederatedAudiobookStream.mockResolvedValue(undefined);
+        proxyFederatedAudiobookCover.mockResolvedValue(true);
 
         fsExistsSync.mockReturnValue(false);
         mockFetch.mockReset();
+    });
+
+    it("serves federated audiobook reads without Audiobookshelf", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        const peer = {
+            id: "peer-1",
+            name: "Peer One",
+            outboundStatus: "ACTIVE",
+            baseUrl: "https://peer.example",
+            outboundToken: "encrypted-token",
+        };
+        const book = {
+            id: "fed:book-1",
+            peerId: "peer-1",
+            remoteId: "remote-book-1",
+            title: "Peer Book",
+            author: "Peer Author",
+            narrator: "Peer Narrator",
+            description: "Peer description",
+            localCoverPath: null,
+            coverUrl: "federation",
+            duration: 600,
+            libraryId: null,
+            series: null,
+            seriesSequence: null,
+            genres: [],
+            lastSyncedAt: new Date(),
+            federationPeer: peer,
+        };
+        prisma.audiobook.findMany.mockResolvedValueOnce([book]);
+        prisma.audiobook.findUnique.mockResolvedValue(book);
+
+        const listRes = createRes();
+        await listHandler({ user: { id: "u1" }, query: {} } as any, listRes);
+        expect(listRes.body).toEqual([
+            expect.objectContaining({
+                id: "fed:book-1",
+                source: "federated",
+                peer: { id: "peer-1", name: "Peer One", online: true },
+            }),
+        ]);
+
+        const detailRes = createRes();
+        await detailsHandler(
+            { params: { id: "fed:book-1" }, user: { id: "u1" } } as any,
+            detailRes,
+        );
+        expect(detailRes.body).toEqual(
+            expect.objectContaining({
+                id: "fed:book-1",
+                chapters: [],
+                audioFiles: [],
+                source: "federated",
+                peer: { id: "peer-1", name: "Peer One", online: true },
+            }),
+        );
+        expect(audiobookshelfService.getAudiobook).not.toHaveBeenCalled();
+        expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
+    });
+
+    it("searches federated audiobooks without Audiobookshelf", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        prisma.audiobook.findMany.mockResolvedValueOnce([
+            {
+                id: "fed:book-1",
+                peerId: "peer-1",
+                remoteId: "remote-book-1",
+                title: "Peer Book",
+                author: "Peer Author",
+                narrator: null,
+                description: null,
+                localCoverPath: null,
+                coverUrl: "federation",
+                duration: 600,
+                libraryId: null,
+                series: null,
+                seriesSequence: null,
+                genres: [],
+                federationPeer: {
+                    id: "peer-1",
+                    name: "Peer One",
+                    outboundStatus: "ACTIVE",
+                },
+            },
+        ]);
+
+        const res = createRes();
+        await searchHandler({ query: { q: "Peer" } } as any, res);
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ peerId: { not: null } }),
+                take: 100,
+            }),
+        );
+        expect(audiobookshelfService.searchAudiobooks).not.toHaveBeenCalled();
+        expect(res.body).toEqual([
+            expect.objectContaining({
+                id: "fed:book-1",
+                source: "federated",
+                peer: { id: "peer-1", name: "Peer One", online: true },
+            }),
+        ]);
+    });
+
+    it("proxies active federated streams and rejects offline peers", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        const row = {
+            id: "fed:book-1",
+            peerId: "peer-1",
+            remoteId: "remote-book-1",
+            federationPeer: {
+                id: "peer-1",
+                name: "Peer One",
+                outboundStatus: "ACTIVE",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+            },
+        };
+        prisma.audiobook.findUnique.mockResolvedValueOnce(row);
+
+        const successRes = createRes();
+        await streamHandler(
+            {
+                params: { id: "fed:book-1" },
+                headers: { range: "bytes=10-19" },
+                user: { id: "u1" },
+            } as any,
+            successRes,
+        );
+        expect(proxyFederatedAudiobookStream).toHaveBeenCalledWith(
+            expect.objectContaining({
+                remoteId: "remote-book-1",
+                peer: row.federationPeer,
+            }),
+        );
+
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            ...row,
+            federationPeer: {
+                ...row.federationPeer,
+                outboundStatus: "OFFLINE",
+            },
+        });
+        const offlineRes = createRes();
+        await streamHandler(
+            {
+                params: { id: "fed:book-1" },
+                headers: {},
+                user: { id: "u1" },
+            } as any,
+            offlineRes,
+        );
+        expect(offlineRes.statusCode).toBe(503);
+        expect(offlineRes.body).toEqual({
+            error: "Federation peer is offline",
+            code: "PEER_OFFLINE",
+        });
+    });
+
+    it("proxies federated covers without Audiobookshelf", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        const row = {
+            peerId: "peer-1",
+            remoteId: "remote-book-1",
+            localCoverPath: null,
+            coverUrl: "federation",
+            federationPeer: {
+                id: "peer-1",
+                outboundStatus: "ACTIVE",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+            },
+        };
+        prisma.audiobook.findUnique.mockResolvedValueOnce(row);
+
+        const successRes = createRes();
+        await coverHandler(
+            { params: { id: "fed:book-1" }, headers: {} } as any,
+            successRes,
+        );
+        expect(proxyFederatedAudiobookCover).toHaveBeenCalledWith(
+            expect.objectContaining({
+                peer: row.federationPeer,
+                remoteId: "remote-book-1",
+            }),
+        );
+
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            ...row,
+            federationPeer: {
+                ...row.federationPeer,
+                outboundStatus: "OFFLINE",
+            },
+        });
+        const offlineRes = createRes();
+        await coverHandler(
+            { params: { id: "fed:book-1" }, headers: {} } as any,
+            offlineRes,
+        );
+        expect(offlineRes.statusCode).toBe(503);
+        expect(offlineRes.body).toEqual({
+            error: "Federation peer is offline",
+            code: "PEER_OFFLINE",
+        });
+    });
+
+    it("stores federated progress locally without Audiobookshelf write-back", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            peerId: "peer-1",
+            title: "Peer Book",
+            author: "Peer Author",
+            coverUrl: "federation",
+            duration: 600,
+            libraryId: null,
+            localCoverPath: null,
+        });
+        prisma.audiobookProgress.upsert.mockResolvedValueOnce({
+            currentTime: 30,
+            duration: 600,
+            isFinished: false,
+        });
+
+        const res = createRes();
+        await progressHandler(
+            {
+                params: { id: "fed:book-1" },
+                body: { currentTime: 30, duration: 600, isFinished: false },
+                user: { id: "u1", username: "user1" },
+            } as any,
+            res,
+        );
+
+        expect(res.body).toEqual(expect.objectContaining({ success: true }));
+        expect(audiobookshelfService.updateProgress).not.toHaveBeenCalled();
+    });
+
+    it("deletes federated progress locally without Audiobookshelf", async () => {
+        mockConfig.features.federation = true;
+        getSystemSettings.mockResolvedValue({ audiobookshelfEnabled: false });
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            peerId: "peer-1",
+        });
+
+        const res = createRes();
+        await deleteProgressHandler(
+            {
+                params: { id: "fed:book-1" },
+                user: { id: "u1", username: "user1" },
+            } as any,
+            res,
+        );
+
+        expect(prisma.audiobookProgress.deleteMany).toHaveBeenCalledWith({
+            where: { userId: "u1", audiobookshelfId: "fed:book-1" },
+        });
+        expect(audiobookshelfService.updateProgress).not.toHaveBeenCalled();
+        expect(res.body).toEqual({
+            success: true,
+            message: "Progress removed",
+        });
     });
 
     it("handles debug-series disabled, success, and failure branches", async () => {
@@ -716,6 +991,7 @@ describe("audiobooks advanced runtime", () => {
             success: false,
             message: "Audiobookshelf is not configured",
         });
+        expect(prisma.audiobook.findUnique).not.toHaveBeenCalled();
 
         prisma.audiobook.findUnique.mockResolvedValueOnce({
             title: "Cached Title",

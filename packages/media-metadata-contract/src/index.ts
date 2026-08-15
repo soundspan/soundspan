@@ -63,8 +63,13 @@ export interface CanonicalMediaSearchResult {
     raw: Record<string, unknown>;
 }
 
-/** Music media types currently exported by federation v1. */
-export type FederationMediaType = "artist" | "album" | "track";
+/** Media types currently understood by federation v1 consumers. */
+export type FederationMediaType =
+    | "artist"
+    | "album"
+    | "track"
+    | "podcast"
+    | "audiobook";
 
 /** Source discriminator emitted by unified track response serializers. */
 export type UnifiedTrackSource = "local" | "tidal" | "youtube" | "federated";
@@ -117,6 +122,28 @@ export interface FederationTrackAttributes extends FederationTrackAudioFeatures 
     isrc: string | null;
     audioHash: string | null;
     embedding?: number[];
+}
+
+/** Podcast catalog-listing attributes published by federation hosts. */
+export interface FederationPodcastAttributes {
+    feedUrl: string;
+    title: string;
+    author: string | null;
+    description: string | null;
+    imageUrl: string | null;
+    itunesId: string | null;
+}
+
+/** Audiobook mirror attributes published by federation hosts. */
+export interface FederationAudiobookAttributes {
+    title: string;
+    author: string | null;
+    narrator: string | null;
+    duration: number | null;
+    description: string | null;
+    asin: string | null;
+    isbn: string | null;
+    coverUrl: boolean;
 }
 
 /** Generic additive federation catalog envelope shared by hosts and consumers. */

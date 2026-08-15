@@ -1,7 +1,9 @@
 import type {
     FederationCatalogTombstone,
+    FederationAudiobookAttributes,
     FederationMediaItemEnvelope,
     FederationMediaType,
+    FederationPodcastAttributes,
     FederationTrackAttributes,
 } from "@soundspan/media-metadata-contract";
 import type { Prisma } from "@prisma/client";
@@ -31,6 +33,12 @@ const EXPORTED_TRACK_WHERE = {
     removedAt: null,
     album: EXPORTED_ALBUM_WHERE,
 } satisfies Prisma.TrackWhereInput;
+
+const EXPORTED_PODCAST_WHERE = {} satisfies Prisma.PodcastWhereInput;
+
+const EXPORTED_AUDIOBOOK_WHERE = {
+    peerId: null,
+} satisfies Prisma.AudiobookWhereInput;
 
 const artistSelect = {
     id: true,
@@ -90,9 +98,38 @@ const trackSelect = {
     updatedAt: true,
 } satisfies Prisma.TrackSelect;
 
+const podcastSelect = {
+    id: true,
+    feedUrl: true,
+    title: true,
+    author: true,
+    description: true,
+    imageUrl: true,
+    itunesId: true,
+    updatedAt: true,
+} satisfies Prisma.PodcastSelect;
+
+const audiobookSelect = {
+    id: true,
+    title: true,
+    author: true,
+    narrator: true,
+    duration: true,
+    description: true,
+    asin: true,
+    isbn: true,
+    coverUrl: true,
+    localCoverPath: true,
+    updatedAt: true,
+} satisfies Prisma.AudiobookSelect;
+
 type ArtistRow = Prisma.ArtistGetPayload<{ select: typeof artistSelect }>;
 type AlbumRow = Prisma.AlbumGetPayload<{ select: typeof albumSelect }>;
 type TrackRow = Prisma.TrackGetPayload<{ select: typeof trackSelect }>;
+type PodcastRow = Prisma.PodcastGetPayload<{ select: typeof podcastSelect }>;
+type AudiobookRow = Prisma.AudiobookGetPayload<{
+    select: typeof audiobookSelect;
+}>;
 
 /** Decoded high-water key for deterministic federation delta pagination. */
 export interface FederationDeltaCursor {
@@ -240,6 +277,40 @@ function trackEnvelope(
     };
 }
 
+function podcastEnvelope(row: PodcastRow): FederationMediaItemEnvelope {
+    return {
+        id: row.id,
+        mediaType: "podcast",
+        updatedAt: row.updatedAt,
+        attributes: {
+            feedUrl: row.feedUrl,
+            title: row.title,
+            author: row.author,
+            description: row.description,
+            imageUrl: row.imageUrl,
+            itunesId: row.itunesId,
+        } satisfies FederationPodcastAttributes,
+    };
+}
+
+function audiobookEnvelope(row: AudiobookRow): FederationMediaItemEnvelope {
+    return {
+        id: row.id,
+        mediaType: "audiobook",
+        updatedAt: row.updatedAt,
+        attributes: {
+            title: row.title,
+            author: row.author,
+            narrator: row.narrator,
+            duration: row.duration,
+            description: row.description,
+            asin: row.asin,
+            isbn: row.isbn,
+            coverUrl: Boolean(row.coverUrl || row.localCoverPath),
+        } satisfies FederationAudiobookAttributes,
+    };
+}
+
 async function embeddingMap(rows: readonly TrackRow[], include: boolean) {
     if (!include || rows.length === 0) return new Map<string, number[]>();
     const embeddings = await fetchEmbeddingsByTrackIds(
@@ -284,6 +355,30 @@ async function loadTrackItems(cursor: string | undefined, limit: number) {
     });
 }
 
+async function loadPodcastItems(cursor: string | undefined, limit: number) {
+    return prisma.podcast.findMany({
+        where: {
+            ...EXPORTED_PODCAST_WHERE,
+            ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: "asc" },
+        take: limit + 1,
+        select: podcastSelect,
+    });
+}
+
+async function loadAudiobookItems(cursor: string | undefined, limit: number) {
+    return prisma.audiobook.findMany({
+        where: {
+            ...EXPORTED_AUDIOBOOK_WHERE,
+            ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: "asc" },
+        take: limit + 1,
+        select: audiobookSelect,
+    });
+}
+
 function itemPage(items: FederationMediaItemEnvelope[], limit: number) {
     const page = items.slice(0, limit);
     return {
@@ -307,6 +402,14 @@ export async function getFederationCatalogItems(input: {
     if (input.mediaType === "album") {
         const rows = await loadAlbumItems(input.cursor, input.limit);
         return itemPage(rows.map(albumEnvelope), input.limit);
+    }
+    if (input.mediaType === "podcast") {
+        const rows = await loadPodcastItems(input.cursor, input.limit);
+        return itemPage(rows.map(podcastEnvelope), input.limit);
+    }
+    if (input.mediaType === "audiobook") {
+        const rows = await loadAudiobookItems(input.cursor, input.limit);
+        return itemPage(rows.map(audiobookEnvelope), input.limit);
     }
     const rows = await loadTrackItems(input.cursor, input.limit);
     const embeddings = await embeddingMap(rows, input.includeEmbeddings);
@@ -336,6 +439,20 @@ export async function getFederationCatalogItem(input: {
         });
         return row ? albumEnvelope(row) : null;
     }
+    if (input.mediaType === "podcast") {
+        const row = await prisma.podcast.findFirst({
+            where: { id: input.id, ...EXPORTED_PODCAST_WHERE },
+            select: podcastSelect,
+        });
+        return row ? podcastEnvelope(row) : null;
+    }
+    if (input.mediaType === "audiobook") {
+        const row = await prisma.audiobook.findFirst({
+            where: { id: input.id, ...EXPORTED_AUDIOBOOK_WHERE },
+            select: audiobookSelect,
+        });
+        return row ? audiobookEnvelope(row) : null;
+    }
     const row = await prisma.track.findFirst({
         where: { id: input.id, ...EXPORTED_TRACK_WHERE },
         select: trackSelect,
@@ -351,18 +468,26 @@ export async function getFederationManifest(
     now: Date = new Date(),
 ) {
     const identity = await ensureFederationIdentity();
-    const [artists, albums, tracks] = await Promise.all([
+    const [artists, albums, tracks, podcasts, audiobooks] = await Promise.all([
         prisma.artist.count({ where: EXPORTED_ARTIST_WHERE }),
         prisma.album.count({ where: EXPORTED_ALBUM_WHERE }),
         prisma.track.count({ where: EXPORTED_TRACK_WHERE }),
+        prisma.podcast.count({ where: EXPORTED_PODCAST_WHERE }),
+        prisma.audiobook.count({ where: EXPORTED_AUDIOBOOK_WHERE }),
     ]);
     return {
         instanceId: identity.federationInstanceId,
         name: config.federation.instanceName,
         version: config.appVersion,
         catalogEpoch: identity.catalogEpoch,
-        mediaTypes: ["artist", "album", "track"] as FederationMediaType[],
-        counts: { artists, albums, tracks },
+        mediaTypes: [
+            "artist",
+            "album",
+            "track",
+            "podcast",
+            "audiobook",
+        ] as FederationMediaType[],
+        counts: { artists, albums, tracks, podcasts, audiobooks },
         embeddingsAvailable,
         serverTime: now,
     };
@@ -441,6 +566,46 @@ async function loadTrackDelta(
     });
 }
 
+async function loadPodcastDelta(
+    since: Date,
+    until: Date,
+    cursor: FederationDeltaCursor | undefined,
+    take: number,
+) {
+    return prisma.podcast.findMany({
+        where: {
+            ...EXPORTED_PODCAST_WHERE,
+            AND: [
+                { updatedAt: { gt: since, lte: until } },
+                cursorPredicate("updatedAt", cursor),
+            ],
+        },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+        take,
+        select: podcastSelect,
+    });
+}
+
+async function loadAudiobookDelta(
+    since: Date,
+    until: Date,
+    cursor: FederationDeltaCursor | undefined,
+    take: number,
+) {
+    return prisma.audiobook.findMany({
+        where: {
+            ...EXPORTED_AUDIOBOOK_WHERE,
+            AND: [
+                { updatedAt: { gt: since, lte: until } },
+                cursorPredicate("updatedAt", cursor),
+            ],
+        },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+        take,
+        select: audiobookSelect,
+    });
+}
+
 async function loadTombstoneDelta(
     since: Date,
     until: Date,
@@ -449,7 +614,9 @@ async function loadTombstoneDelta(
 ) {
     return prisma.federationTombstone.findMany({
         where: {
-            entityType: { in: ["artist", "album", "track"] },
+            entityType: {
+                in: ["artist", "album", "track", "podcast", "audiobook"],
+            },
             AND: [
                 { deletedAt: { gt: since, lte: until } },
                 cursorPredicate("deletedAt", cursor),
@@ -477,12 +644,15 @@ async function buildDeltaEvents(input: {
     includeEmbeddings: boolean;
 }): Promise<DeltaEvent[]> {
     const take = input.limit + 1;
-    const [artists, albums, tracks, tombstones] = await Promise.all([
-        loadArtistDelta(input.since, input.until, input.cursor, take),
-        loadAlbumDelta(input.since, input.until, input.cursor, take),
-        loadTrackDelta(input.since, input.until, input.cursor, take),
-        loadTombstoneDelta(input.since, input.until, input.cursor, take),
-    ]);
+    const [artists, albums, tracks, podcasts, audiobooks, tombstones] =
+        await Promise.all([
+            loadArtistDelta(input.since, input.until, input.cursor, take),
+            loadAlbumDelta(input.since, input.until, input.cursor, take),
+            loadTrackDelta(input.since, input.until, input.cursor, take),
+            loadPodcastDelta(input.since, input.until, input.cursor, take),
+            loadAudiobookDelta(input.since, input.until, input.cursor, take),
+            loadTombstoneDelta(input.since, input.until, input.cursor, take),
+        ]);
     const embeddings = await embeddingMap(tracks, input.includeEmbeddings);
     return [
         ...artists.map((row) => ({
@@ -499,6 +669,16 @@ async function buildDeltaEvents(input: {
             id: row.id,
             updatedAt: row.updatedAt,
             envelope: trackEnvelope(row, embeddings.get(row.id)),
+        })),
+        ...podcasts.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: podcastEnvelope(row),
+        })),
+        ...audiobooks.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: audiobookEnvelope(row),
         })),
         ...tombstones.map((row) => ({
             id: row.id,
@@ -577,5 +757,17 @@ export async function findExportedFederationTrack(trackId: string) {
     return prisma.track.findFirst({
         where: { id: trackId, ...EXPORTED_TRACK_WHERE },
         select: { id: true, filePath: true, fileModified: true, mime: true },
+    });
+}
+
+/** Finds an audiobook only when it is eligible for direct host export. */
+export async function findExportedFederationAudiobook(audiobookId: string) {
+    return prisma.audiobook.findFirst({
+        where: { id: audiobookId, ...EXPORTED_AUDIOBOOK_WHERE },
+        select: {
+            id: true,
+            localCoverPath: true,
+            coverUrl: true,
+        },
     });
 }

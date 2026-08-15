@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import { config } from "../config";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -13,6 +14,7 @@ import {
 } from "../services/audioStreaming";
 import {
     decodeFederationDeltaCursor,
+    findExportedFederationAudiobook,
     findExportedFederationAlbum,
     findExportedFederationTrack,
     getFederationCatalogDelta,
@@ -20,6 +22,7 @@ import {
     getFederationCatalogItems,
     getFederationManifest,
 } from "../services/federationCatalog";
+import { audiobookshelfService } from "../services/audiobookshelf";
 import {
     consumeFederationPairingRequest,
     FEDERATION_SCOPE_VALUES,
@@ -27,6 +30,7 @@ import {
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
 import { sendRouteError } from "./routeErrorResponse";
+import { handleAudiobookCover } from "./audiobooks";
 
 const router = Router();
 const albumParamsSchema = z.strictObject({
@@ -35,14 +39,17 @@ const albumParamsSchema = z.strictObject({
 const trackParamsSchema = z.strictObject({
     trackId: z.string().trim().min(1).max(128),
 });
+const audiobookParamsSchema = z.strictObject({
+    audiobookId: z.string().trim().min(1).max(128),
+});
 const pageLimitSchema = z.coerce.number().int().min(1).max(500).default(200);
 const catalogItemsSchema = z.strictObject({
-    type: z.enum(["artist", "album", "track"]),
+    type: z.enum(["artist", "album", "track", "podcast", "audiobook"]),
     cursor: z.string().trim().min(1).max(128).optional(),
     limit: pageLimitSchema,
 });
 const catalogItemParamsSchema = z.strictObject({
-    type: z.enum(["artist", "album", "track"]),
+    type: z.enum(["artist", "album", "track", "podcast", "audiobook"]),
     id: z.string().trim().min(1).max(128),
 });
 const deltaQuerySchema = z.strictObject({
@@ -288,6 +295,36 @@ router.get(
     }),
 );
 
+/** @openapi
+ * /api/federation/v1/cover/audiobook/{audiobookId}:
+ *   get:
+ *     summary: Get cover art for an exported audiobook
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     responses:
+ *       200: { description: Cover image bytes }
+ *       404: { description: Exported audiobook or cover not found }
+ *       429: { description: Federation peer rate limit exceeded }
+ */
+router.get(
+    "/cover/audiobook/:audiobookId",
+    requireFederationPeer("library:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const params = audiobookParamsSchema.safeParse(req.params);
+        const query = emptyQuerySchema.safeParse(req.query);
+        if (!params.success || !query.success) return validationError(res);
+        const exported = await findExportedFederationAudiobook(
+            params.data.audiobookId,
+        );
+        if (!exported) {
+            return sendRouteError(res, 404, "Audiobook cover not found");
+        }
+        req.params.id = exported.id;
+        return handleAudiobookCover(req as Request<{ id: string }>, res);
+    }),
+);
+
 async function streamExportedTrack(
     req: Request,
     res: Response,
@@ -351,6 +388,70 @@ router.get(
             params.data.trackId,
             query.data.quality,
         );
+    }),
+);
+
+const AUDIOBOOK_STREAM_HEADERS = [
+    "content-type",
+    "content-length",
+    "accept-ranges",
+    "content-range",
+] as const;
+
+function copyAudiobookStreamHeaders(
+    res: Response,
+    headers: Record<string, unknown>,
+): void {
+    for (const name of AUDIOBOOK_STREAM_HEADERS) {
+        const value = headers[name];
+        if (typeof value === "string" || typeof value === "number") {
+            res.setHeader(name, String(value));
+        }
+    }
+    if (!res.hasHeader("accept-ranges")) {
+        res.setHeader("accept-ranges", "bytes");
+    }
+}
+
+/** @openapi
+ * /api/federation/v1/stream/audiobook/{audiobookId}:
+ *   get:
+ *     summary: Stream an exported audiobook through its Audiobookshelf proxy
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     responses:
+ *       200: { description: Full audiobook response }
+ *       206: { description: Partial audiobook response }
+ *       404: { description: Exported audiobook not found }
+ *       429: { description: Federation peer rate limit exceeded }
+ */
+router.get(
+    "/stream/audiobook/:audiobookId",
+    requireFederationPeer("stream:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const params = audiobookParamsSchema.safeParse(req.params);
+        const query = emptyQuerySchema.safeParse(req.query);
+        if (!params.success || !query.success) return validationError(res);
+        const exported = await findExportedFederationAudiobook(
+            params.data.audiobookId,
+        );
+        if (!exported) {
+            return sendRouteError(res, 404, "Audiobook not found");
+        }
+        const range =
+            typeof req.headers.range === "string"
+                ? req.headers.range
+                : undefined;
+        const result = await audiobookshelfService.streamAudiobook(
+            exported.id,
+            range,
+            { request: req, response: res },
+        );
+        res.status(result.status || (range ? 206 : 200));
+        copyAudiobookStreamHeaders(res, result.headers);
+        await pipeline(result.stream, res);
+        return undefined;
     }),
 );
 

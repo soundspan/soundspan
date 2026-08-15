@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { Readable } from "node:stream";
 import request from "supertest";
 
 const catalog = {
@@ -8,6 +9,7 @@ const catalog = {
     getFederationCatalogDelta: jest.fn(),
     findExportedFederationAlbum: jest.fn(),
     findExportedFederationTrack: jest.fn(),
+    findExportedFederationAudiobook: jest.fn(),
     decodeFederationDeltaCursor: jest.fn(),
 };
 const peers = { consumeFederationPairingRequest: jest.fn() };
@@ -15,6 +17,10 @@ const streamFileWithRangeSupport = jest.fn();
 const getStreamFilePath = jest.fn();
 const destroy = jest.fn();
 const handleGetCoverArt = jest.fn((_req, res) => res.status(200).send("cover"));
+const handleAudiobookCover = jest.fn((_req, res) =>
+    res.status(200).send("book-cover"),
+);
+const streamAudiobook = jest.fn();
 
 jest.mock("../../services/federationCatalog", () => catalog);
 jest.mock("../../services/federationPeers", () => ({
@@ -79,6 +85,10 @@ jest.mock("../../utils/safeResolvePath", () => ({
 }));
 jest.mock("../library/coverArt", () => ({
     handleGetCoverArt,
+}));
+jest.mock("../audiobooks", () => ({ handleAudiobookCover }));
+jest.mock("../../services/audiobookshelf", () => ({
+    audiobookshelfService: { streamAudiobook },
 }));
 
 import router from "../federation";
@@ -163,7 +173,7 @@ describe("federation host routes", () => {
         });
 
         const invalid = await request(app)
-            .get("/api/federation/v1/catalog/items?type=podcast&limit=501")
+            .get("/api/federation/v1/catalog/items?type=video&limit=501")
             .set("Authorization", "Bearer valid")
             .set("x-test-scopes", "library:read");
         expect(invalid.status).toBe(400);
@@ -307,6 +317,29 @@ describe("federation host routes", () => {
         expect(handleGetCoverArt).toHaveBeenCalledTimes(1);
     });
 
+    it("re-checks audiobook export eligibility before serving a cover", async () => {
+        catalog.findExportedFederationAudiobook.mockResolvedValueOnce({
+            id: "audiobook-1",
+        });
+        const response = await request(app)
+            .get("/api/federation/v1/cover/audiobook/audiobook-1")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read");
+
+        expect(response.status).toBe(200);
+        expect(handleAudiobookCover.mock.calls[0][0].params.id).toBe(
+            "audiobook-1",
+        );
+
+        catalog.findExportedFederationAudiobook.mockResolvedValueOnce(null);
+        const hidden = await request(app)
+            .get("/api/federation/v1/cover/audiobook/hidden")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read");
+        expect(hidden.status).toBe(404);
+        expect(handleAudiobookCover).toHaveBeenCalledTimes(1);
+    });
+
     it("streams an exported local track with Range support and no Play write", async () => {
         catalog.findExportedFederationTrack.mockResolvedValueOnce({
             id: "track-1",
@@ -339,5 +372,43 @@ describe("federation host routes", () => {
             .set("x-test-scopes", "stream:read");
         expect(hidden.status).toBe(404);
         expect(getStreamFilePath).toHaveBeenCalledTimes(1);
+    });
+
+    it("double-proxies only exported audiobooks with Range passthrough", async () => {
+        catalog.findExportedFederationAudiobook.mockResolvedValueOnce({
+            id: "audiobook-1",
+        });
+        streamAudiobook.mockResolvedValueOnce({
+            stream: Readable.from(Buffer.from("audio")),
+            headers: {
+                "content-type": "audio/mpeg",
+                "content-range": "bytes 0-4/5",
+                "content-length": "5",
+                "accept-ranges": "bytes",
+            },
+            status: 206,
+        });
+
+        const response = await request(app)
+            .get("/api/federation/v1/stream/audiobook/audiobook-1")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "stream:read")
+            .set("Range", "bytes=0-4");
+
+        expect(response.status).toBe(206);
+        expect(response.headers["content-range"]).toBe("bytes 0-4/5");
+        expect(streamAudiobook).toHaveBeenCalledWith(
+            "audiobook-1",
+            "bytes=0-4",
+            expect.objectContaining({ request: expect.any(Object) }),
+        );
+
+        catalog.findExportedFederationAudiobook.mockResolvedValueOnce(null);
+        const hidden = await request(app)
+            .get("/api/federation/v1/stream/audiobook/hidden")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "stream:read");
+        expect(hidden.status).toBe(404);
+        expect(streamAudiobook).toHaveBeenCalledTimes(1);
     });
 });

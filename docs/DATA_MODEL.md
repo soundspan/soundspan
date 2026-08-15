@@ -119,10 +119,12 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 | `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `lastSeenAt`, `lastSyncCursor`, `catalogEpoch`, `createdById` |
 | `FederationPairingCode` | Short-lived, single-use admin pairing grant | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById` |
 | `FederationTombstone` | Deleted host catalog identity retained for incremental peer deltas | `entityType`, `entityId`, indexed `deletedAt` |
+| `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl` |
 
 `FederationPeer.createdById` uses a restricted user relation, so an owning
 administrator cannot be deleted while the peer remains. Deleting a peer
-cascades to its mirrored artists, albums, and tracks. Pairing codes cascade
+cascades to its mirrored artists, albums, tracks, audiobooks, and podcast
+listings. Pairing codes cascade
 with their creating user.
 
 `inboundStatus` controls credentials presented by the peer and is populated for
@@ -137,6 +139,15 @@ Mirrored `Artist`, `Album`, and `Track` rows store a nullable `peerId` and the
 host's `remoteId`; each model has a unique `(peerId, remoteId)` pair. Local rows
 leave both fields null. `Track.filePath` remains unique but is nullable because
 federated tracks have no consumer-side file.
+
+Mirrored `Audiobook` rows use the same nullable `peerId`/`remoteId` provenance
+and unique pair. Their primary IDs are consumer-minted `fed:<cuid>` strings, so
+they cannot collide with Audiobookshelf IDs. `AudiobookProgress` already stores
+the audiobook ID as a string without a foreign key, so federated progress uses
+the existing table and is never written back to Audiobookshelf. Podcast peers
+use `FederationPodcastListing` instead of `Podcast`; matching `feedUrl` values
+drive native per-user subscription state without violating the global
+`Podcast.feedUrl` uniqueness contract.
 
 ### User & Auth
 
@@ -189,7 +200,7 @@ federated tracks have no consumer-side file.
 | `Podcast` / `PodcastEpisode` | Podcast catalog (RSS-backed) |
 | `PodcastSubscription` / `PodcastProgress` / `PodcastDownload` | Per-user podcast state |
 | `PodcastRecommendation` | Cached podcast recommendations |
-| `Audiobook` / `AudiobookProgress` | Audiobookshelf-synced audiobooks |
+| `Audiobook` / `AudiobookProgress` | Local Audiobookshelf rows and peer-mirrored audiobooks with local per-user progress |
 | `Genre` / `TrackGenre` | Genre tagging |
 | `MoodBucket` | ML-derived mood classifications |
 

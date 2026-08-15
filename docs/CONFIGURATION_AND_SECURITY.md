@@ -106,6 +106,7 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - Instance links use dedicated `Authorization: Bearer` credentials. They do not reuse user JWTs or API keys and never establish a user identity on the host.
 - Host-issued credentials are random 32-byte tokens. The raw value is returned only when issued or rotated; the database stores an HMAC hash for constant-time verification.
 - Each credential grants an explicit subset of `library:read`, `stream:read`, and `embeddings:read`. Embedding access also requires library access.
+- `library:read` includes the instance's complete subscribed podcast-feed catalog. Treat linked peers as trusted recipients of feed URLs and podcast metadata.
 - Revocation clears credential material and changes the peer to `REVOKED`. Deleting a peer also cascades its consumer-side mirrored catalog rows.
 - Consumer outbound tokens are encrypted and decrypted through the settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. API and admin responses exclude both outbound tokens and credential hashes.
 - Peer base URLs must use HTTPS. The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it.

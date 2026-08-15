@@ -7,6 +7,12 @@ const prisma = {
     artist: { count: jest.fn(), findMany: jest.fn() },
     album: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
     track: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
+    podcast: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
+    audiobook: {
+        count: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+    },
     federationTombstone: { findMany: jest.fn() },
 };
 
@@ -99,6 +105,35 @@ function track(id: string) {
     };
 }
 
+function podcast(id: string) {
+    return {
+        id,
+        feedUrl: `https://feeds.example/${id}.xml`,
+        title: `Podcast ${id}`,
+        author: "Host Author",
+        description: "Host description",
+        imageUrl: `https://images.example/${id}.jpg`,
+        itunesId: `itunes-${id}`,
+        updatedAt: at,
+    };
+}
+
+function audiobook(id: string) {
+    return {
+        id,
+        title: `Audiobook ${id}`,
+        author: "Book Author",
+        narrator: "Book Narrator",
+        duration: 3_600,
+        description: "Book description",
+        asin: `ASIN-${id}`,
+        isbn: `ISBN-${id}`,
+        coverUrl: "items/book/cover",
+        localCoverPath: null,
+        updatedAt: at,
+    };
+}
+
 describe("federation catalog exports", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -115,14 +150,22 @@ describe("federation catalog exports", () => {
         prisma.artist.count.mockResolvedValue(2);
         prisma.album.count.mockResolvedValue(3);
         prisma.track.count.mockResolvedValue(4);
+        prisma.podcast.count.mockResolvedValue(5);
+        prisma.audiobook.count.mockResolvedValue(6);
 
         await expect(getFederationManifest(true, at)).resolves.toEqual({
             instanceId: "instance-1",
             name: "soundspan-host",
             version: "2.0.2-test",
             catalogEpoch: "epoch-1",
-            mediaTypes: ["artist", "album", "track"],
-            counts: { artists: 2, albums: 3, tracks: 4 },
+            mediaTypes: ["artist", "album", "track", "podcast", "audiobook"],
+            counts: {
+                artists: 2,
+                albums: 3,
+                tracks: 4,
+                podcasts: 5,
+                audiobooks: 6,
+            },
             embeddingsAvailable: true,
             serverTime: at,
         });
@@ -137,6 +180,47 @@ describe("federation catalog exports", () => {
                 }),
             }),
         });
+    });
+
+    it("exports podcast listings and local-only audiobook mirrors", async () => {
+        prisma.podcast.findMany.mockResolvedValue([podcast("podcast-1")]);
+        prisma.audiobook.findMany.mockResolvedValue([audiobook("audiobook-1")]);
+
+        const podcasts = await getFederationCatalogItems({
+            mediaType: "podcast",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        const audiobooks = await getFederationCatalogItems({
+            mediaType: "audiobook",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+
+        expect(podcasts.items[0]).toEqual({
+            id: "podcast-1",
+            mediaType: "podcast",
+            updatedAt: at,
+            attributes: expect.objectContaining({
+                feedUrl: "https://feeds.example/podcast-1.xml",
+                description: "Host description",
+            }),
+        });
+        expect(audiobooks.items[0]).toEqual({
+            id: "audiobook-1",
+            mediaType: "audiobook",
+            updatedAt: at,
+            attributes: expect.objectContaining({
+                title: "Audiobook audiobook-1",
+                coverUrl: true,
+            }),
+        });
+        expect(prisma.podcast.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: {} }),
+        );
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { peerId: null } }),
+        );
     });
 
     it("returns one exported item by type and id", async () => {
@@ -285,6 +369,8 @@ describe("federation catalog exports", () => {
         prisma.artist.findMany.mockResolvedValue([]);
         prisma.album.findMany.mockResolvedValue([]);
         prisma.track.findMany.mockResolvedValue([]);
+        prisma.podcast.findMany.mockResolvedValue([]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
 
         await getFederationCatalogItems({
             mediaType: "artist",
@@ -298,6 +384,16 @@ describe("federation catalog exports", () => {
         });
         await getFederationCatalogItems({
             mediaType: "track",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        await getFederationCatalogItems({
+            mediaType: "podcast",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        await getFederationCatalogItems({
+            mediaType: "audiobook",
             limit: 10,
             includeEmbeddings: false,
         });
@@ -332,6 +428,12 @@ describe("federation catalog exports", () => {
                     },
                 },
             }),
+        );
+        expect(prisma.podcast.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: {} }),
+        );
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { peerId: null } }),
         );
     });
 
@@ -371,6 +473,8 @@ describe("federation catalog exports", () => {
         prisma.artist.findMany.mockResolvedValue([artist("a1")]);
         prisma.album.findMany.mockResolvedValue([album("b1")]);
         prisma.track.findMany.mockResolvedValue([track("c1")]);
+        prisma.podcast.findMany.mockResolvedValue([podcast("e1")]);
+        prisma.audiobook.findMany.mockResolvedValue([audiobook("f1")]);
         prisma.federationTombstone.findMany.mockResolvedValue([
             {
                 id: "d1",

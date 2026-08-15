@@ -465,6 +465,23 @@ model FederationPeer {
   artists        Artist[]
   albums         Album[]
   tracks         Track[]
+  audiobooks     Audiobook[]
+  podcastListings FederationPodcastListing[]
+}
+
+model FederationPodcastListing {
+  id             String         @id @default(cuid())
+  peerId         String
+  remoteId       String
+  feedUrl        String
+  title          String
+  author         String?
+  imageUrl       String?
+  updatedAt      DateTime       @updatedAt
+  federationPeer FederationPeer @relation(fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@unique([peerId, remoteId])
+  @@index([feedUrl])
 }
 
 model FederationTombstone {
@@ -929,7 +946,11 @@ model Audiobook {
   updatedAt      DateTime                 @updatedAt
   lastSyncedAt   DateTime                 @default(now())
   searchVector   Unsupported("tsvector")?
+  peerId         String?
+  remoteId       String?
+  federationPeer FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
 
+  @@unique([peerId, remoteId])
   @@index([title])
   @@index([author])
   @@index([series])

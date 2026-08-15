@@ -29,11 +29,15 @@ const prisma = {
     },
     podcast: {
         findUnique: jest.fn(async () => null),
+        findMany: jest.fn(async (): Promise<any[]> => []),
         create: jest.fn(async () => ({
             id: "podcast-new",
             title: "Podcast New",
         })),
         update: jest.fn(async () => ({})),
+    },
+    federationPodcastListing: {
+        findMany: jest.fn(async (): Promise<any[]> => []),
     },
     podcastEpisode: {
         createMany: jest.fn(async () => ({ count: 0 })),
@@ -111,12 +115,14 @@ jest.mock("axios", () => ({
     },
 }));
 
-jest.mock("../../config", () => ({
-    config: {
-        get podcastDebug() {
-            return process.env.PODCAST_DEBUG === "1";
-        },
+const mockConfig = {
+    features: { federation: false },
+    get podcastDebug() {
+        return process.env.PODCAST_DEBUG === "1";
     },
+};
+jest.mock("../../config", () => ({
+    config: mockConfig,
 }));
 
 import router, {
@@ -152,6 +158,7 @@ function createRes() {
 
 describe("podcasts core runtime behavior", () => {
     const syncCoversHandler = getHandler("/sync-covers", "post");
+    const peerListingsHandler = getHandler("/peers", "get");
     const listHandler = getHandler("/", "get");
     const byIdHandler = getHandler("/:id", "get");
     const subscribeHandler = getHandler("/subscribe", "post");
@@ -160,6 +167,7 @@ describe("podcasts core runtime behavior", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockConfig.features.federation = false;
         mockAxiosIsAxiosError.mockReturnValue(false);
         (prisma.$connect as jest.Mock).mockResolvedValue(undefined);
         rssParserService.parseFeed.mockResolvedValue({
@@ -175,6 +183,83 @@ describe("podcasts core runtime behavior", () => {
             episodes: [],
             feedMetadata: {},
         });
+    });
+
+    it("feature-gates peer podcast listings", async () => {
+        const res = createRes();
+        await peerListingsHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "feature disabled",
+            code: "FEATURE_DISABLED",
+        });
+        expect(prisma.federationPodcastListing.findMany).not.toHaveBeenCalled();
+    });
+
+    it("lists peer podcast catalogs with user subscription state", async () => {
+        mockConfig.features.federation = true;
+        prisma.federationPodcastListing.findMany.mockResolvedValueOnce([
+            {
+                id: "listing-1",
+                remoteId: "remote-1",
+                feedUrl: "https://feeds.example/one.xml",
+                title: "One",
+                author: "Author One",
+                imageUrl: null,
+                updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+                federationPeer: {
+                    id: "peer-1",
+                    name: "Peer One",
+                    outboundStatus: "ACTIVE",
+                },
+            },
+            {
+                id: "listing-2",
+                remoteId: "remote-2",
+                feedUrl: "https://feeds.example/two.xml",
+                title: "Two",
+                author: null,
+                imageUrl: null,
+                updatedAt: new Date("2026-08-15T12:01:00.000Z"),
+                federationPeer: {
+                    id: "peer-2",
+                    name: "Peer Two",
+                    outboundStatus: "OFFLINE",
+                },
+            },
+        ]);
+        prisma.podcast.findMany.mockResolvedValueOnce([
+            { feedUrl: "https://feeds.example/one.xml" },
+        ]);
+
+        const res = createRes();
+        await peerListingsHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(prisma.podcast.findMany).toHaveBeenCalledWith({
+            where: {
+                feedUrl: {
+                    in: [
+                        "https://feeds.example/one.xml",
+                        "https://feeds.example/two.xml",
+                    ],
+                },
+                subscriptions: { some: { userId: "user-1" } },
+            },
+            select: { feedUrl: true },
+        });
+        expect(res.body).toEqual([
+            expect.objectContaining({
+                id: "listing-1",
+                subscribed: true,
+                peer: { id: "peer-1", name: "Peer One", online: true },
+            }),
+            expect.objectContaining({
+                id: "listing-2",
+                subscribed: false,
+                peer: { id: "peer-2", name: "Peer Two", online: false },
+            }),
+        ]);
     });
 
     function mockImmediateTimers() {

@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     pairing uses bounded callbacks and degrades to a working one-directional
     link with a warning when the callback fails. Inbound authentication and
     outbound health now have independent statuses. (#479)
+  - Federation now includes podcast catalog listings and full audiobook
+    mirrors. Podcast feeds remain native subscriptions and episodes are not
+    mirrored. Federated audiobooks support list, detail, search, cover, Range
+    streaming, and local progress without requiring Audiobookshelf on the
+    consumer. The double proxy inherits the existing Audiobookshelf
+    `media.tracks[0]` single-track limitation. Closes #477.
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges

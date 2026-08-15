@@ -17,7 +17,15 @@ const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
 
-const mediaTypeSchema = z.enum(["artist", "album", "track"]);
+const KNOWN_MEDIA_TYPES = [
+    "artist",
+    "album",
+    "track",
+    "podcast",
+    "audiobook",
+] as const;
+const mediaTypeSchema = z.enum(KNOWN_MEDIA_TYPES);
+const boundedMediaTypeSchema = z.string().min(1).max(64);
 const dateTimeSchema = z.union([z.iso.datetime({ offset: true }), z.date()]);
 const artistAttributesSchema = z.strictObject({
     name: z.string().min(1).max(1_000),
@@ -98,22 +106,57 @@ const trackEnvelopeSchema = z.strictObject({
     parentRef: z.string().min(1).max(128),
     attributes: trackAttributesSchema,
 });
+const podcastEnvelopeSchema = z.strictObject({
+    id: z.string().min(1).max(128),
+    mediaType: z.literal("podcast"),
+    updatedAt: dateTimeSchema,
+    attributes: z.strictObject({
+        feedUrl: z.url().max(4_096),
+        title: z.string().min(1).max(2_000),
+        author: z.string().max(1_000).nullable(),
+        description: z.string().max(100_000).nullable(),
+        imageUrl: z.url().max(4_096).nullable(),
+        itunesId: z.string().max(256).nullable(),
+    }),
+});
+const audiobookEnvelopeSchema = z.strictObject({
+    id: z.string().min(1).max(128),
+    mediaType: z.literal("audiobook"),
+    updatedAt: dateTimeSchema,
+    attributes: z.strictObject({
+        title: z.string().min(1).max(2_000),
+        author: z.string().max(1_000).nullable(),
+        narrator: z.string().max(1_000).nullable(),
+        duration: z.number().finite().nonnegative().nullable(),
+        description: z.string().max(100_000).nullable(),
+        asin: z.string().max(128).nullable(),
+        isbn: z.string().max(128).nullable(),
+        coverUrl: z.boolean(),
+    }),
+});
 export const federationEnvelopeSchema = z.discriminatedUnion("mediaType", [
     artistEnvelopeSchema,
     albumEnvelopeSchema,
     trackEnvelopeSchema,
+    podcastEnvelopeSchema,
+    audiobookEnvelopeSchema,
 ]);
 
-export const federationManifestSchema = z.strictObject({
+export const federationManifestSchema = z.looseObject({
     instanceId: z.string().min(1).max(128),
     name: z.string().min(1).max(200),
     version: z.string().min(1).max(100),
     catalogEpoch: z.string().min(1).max(128),
-    mediaTypes: z.array(mediaTypeSchema).max(32),
-    counts: z.strictObject({
+    mediaTypes: z
+        .array(boundedMediaTypeSchema)
+        .max(32)
+        .transform((values) => values.filter(isKnownMediaType)),
+    counts: z.looseObject({
         artists: z.number().int().nonnegative(),
         albums: z.number().int().nonnegative(),
         tracks: z.number().int().nonnegative(),
+        podcasts: z.number().int().nonnegative().optional(),
+        audiobooks: z.number().int().nonnegative().optional(),
     }),
     embeddingsAvailable: z.boolean(),
     serverTime: dateTimeSchema.optional(),
@@ -123,7 +166,7 @@ const catalogPageShapeSchema = z.strictObject({
     nextCursor: z.string().min(1).max(512).nullable(),
 });
 const tombstoneSchema = z.strictObject({
-    entityType: mediaTypeSchema,
+    entityType: boundedMediaTypeSchema,
     entityId: z.string().min(1).max(128),
     deletedAt: dateTimeSchema,
 });
@@ -183,10 +226,21 @@ export interface FederationCatalogPage {
 export interface FederationDelta {
     kind: "ok";
     changes: FederationEnvelope[];
-    tombstones: Array<z.infer<typeof tombstoneSchema>>;
+    tombstones: Array<
+        z.infer<typeof tombstoneSchema> & {
+            entityType: z.infer<typeof mediaTypeSchema>;
+        }
+    >;
     nextCursor: string | null;
     nextSince: z.infer<typeof dateTimeSchema>;
     skippedInvalid: number;
+    skippedUnknownTombstones: number;
+}
+
+function isKnownMediaType(
+    value: string,
+): value is z.infer<typeof mediaTypeSchema> {
+    return KNOWN_MEDIA_TYPES.some((known) => known === value);
 }
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
@@ -305,7 +359,14 @@ function parseCatalogPage(value: unknown): FederationCatalogPage {
 function parseDeltaPage(value: unknown): FederationDelta {
     const page = parseResponse(deltaPageShapeSchema, value);
     const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
-    const tombstones = parseResponse(tombstonesSchema, page.tombstones);
+    const parsedTombstones = parseResponse(tombstonesSchema, page.tombstones);
+    const tombstones = parsedTombstones.filter(
+        (
+            item,
+        ): item is typeof item & {
+            entityType: z.infer<typeof mediaTypeSchema>;
+        } => isKnownMediaType(item.entityType),
+    );
     return {
         kind: "ok",
         changes: changes.items,
@@ -313,6 +374,7 @@ function parseDeltaPage(value: unknown): FederationDelta {
         nextCursor: page.nextCursor,
         nextSince: page.nextSince,
         skippedInvalid: changes.skippedInvalid,
+        skippedUnknownTombstones: parsedTombstones.length - tombstones.length,
     };
 }
 
@@ -499,6 +561,31 @@ class FederationClient {
         return response as AxiosResponse<NodeJS.ReadableStream>;
     }
 
+    async getAudiobookStream(input: {
+        remoteId: string;
+        range?: string;
+        signal?: AbortSignal;
+    }): Promise<AxiosResponse<NodeJS.ReadableStream>> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(
+                this.baseUrl,
+                `/api/federation/v1/stream/audiobook/${encodeURIComponent(input.remoteId)}`,
+            ),
+            headers: input.range ? { Range: input.range } : {},
+            responseType: "stream",
+            signal: input.signal,
+        });
+        if (![200, 206, 416].includes(response.status)) {
+            destroyStreamBody(response);
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return response as AxiosResponse<NodeJS.ReadableStream>;
+    }
+
     async getCover(
         remoteId: string,
         signal?: AbortSignal,
@@ -508,6 +595,29 @@ class FederationClient {
             url: peerUrl(
                 this.baseUrl,
                 `/api/federation/v1/cover/${encodeURIComponent(remoteId)}`,
+            ),
+            responseType: "stream",
+            signal,
+        });
+        if (![200, 304, 404].includes(response.status)) {
+            destroyStreamBody(response);
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return response as AxiosResponse<NodeJS.ReadableStream>;
+    }
+
+    async getAudiobookCover(
+        remoteId: string,
+        signal?: AbortSignal,
+    ): Promise<AxiosResponse<NodeJS.ReadableStream>> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(
+                this.baseUrl,
+                `/api/federation/v1/cover/audiobook/${encodeURIComponent(remoteId)}`,
             ),
             responseType: "stream",
             signal,

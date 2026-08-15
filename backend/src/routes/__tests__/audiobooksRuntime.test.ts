@@ -44,6 +44,11 @@ jest.mock("../../services/audiobookCache", () => ({
     audiobookCacheService,
 }));
 
+jest.mock("../../services/federationAudiobookProxy", () => ({
+    proxyFederatedAudiobookStream: jest.fn(),
+    proxyFederatedAudiobookCover: jest.fn(),
+}));
+
 const notificationService = {
     notifySystem: jest.fn(),
 };
@@ -58,6 +63,7 @@ jest.mock("../../utils/systemSettings", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        features: { federation: false },
         music: {
             musicPath: "/music",
         },
