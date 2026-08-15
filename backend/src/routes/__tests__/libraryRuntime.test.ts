@@ -1,5 +1,6 @@
-import type { Request, Response } from "express";
+import express, { type Request, type Response } from "express";
 import fs from "fs";
+import request from "supertest";
 
 const mockStreamGetStreamFilePath = jest.fn();
 const mockStreamWithRangeSupport = jest.fn();
@@ -4118,6 +4119,64 @@ describe("library catalog list runtime coverage", () => {
                 entityId: "track-1",
             },
         });
+    });
+
+    it("likes and reads a FEDERATED track through the standard preference route", async () => {
+        const federatedTrack = {
+            id: "federated-track-1",
+            origin: "FEDERATED",
+        };
+        let likedEntry: { likedAt: Date } | null = null;
+        mockTrackFindUnique.mockImplementation(async ({ where }) =>
+            where.id === federatedTrack.id ? federatedTrack : null,
+        );
+        mockLikedTrackUpsert.mockImplementation(async ({ create }) => {
+            likedEntry = { likedAt: create.likedAt };
+            return { ...create, origin: federatedTrack.origin };
+        });
+        mockLikedTrackFindUnique.mockImplementation(async () => likedEntry);
+        mockDislikedEntityFindUnique.mockResolvedValue(null);
+        mockDislikedEntityDeleteMany.mockResolvedValue({ count: 0 });
+
+        const routeApp = express();
+        routeApp.use(express.json());
+        routeApp.use((req, _res, next) => {
+            req.user = { id: "user-1" } as never;
+            next();
+        });
+        routeApp.use("/api/library", router);
+
+        const postResponse = await request(routeApp)
+            .post("/api/library/tracks/federated-track-1/preference")
+            .send({ signal: "thumbs_up" });
+        expect(postResponse.status).toBe(200);
+        expect(postResponse.body).toEqual(
+            expect.objectContaining({
+                trackId: "federated-track-1",
+                signal: "thumbs_up",
+                state: "liked",
+            }),
+        );
+        expect(mockLikedTrackUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    userId: "user-1",
+                    trackId: "federated-track-1",
+                }),
+            }),
+        );
+
+        const getResponse = await request(routeApp).get(
+            "/api/library/tracks/federated-track-1/preference",
+        );
+        expect(getResponse.status).toBe(200);
+        expect(getResponse.body).toEqual(
+            expect.objectContaining({
+                trackId: "federated-track-1",
+                signal: "thumbs_up",
+                state: "liked",
+            }),
+        );
     });
 
     it("updates album-wide track preferences in one batch request", async () => {

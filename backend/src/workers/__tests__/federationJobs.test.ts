@@ -104,12 +104,61 @@ describe("federation queue registration", () => {
     });
 
     it("dedupes one follow-up job while the primary sync is active", async () => {
+        const remove = jest.fn();
         federationQueue.getJob.mockResolvedValueOnce({
             getState: jest.fn().mockResolvedValue("active"),
+            remove,
         });
 
         await enqueueFederationSyncNow("peer-1");
 
+        expect(remove).not.toHaveBeenCalled();
+        expect(federationQueue.add).toHaveBeenCalledWith(
+            FEDERATION_SYNC_JOB_NAME,
+            { peerId: "peer-1" },
+            expect.objectContaining({
+                jobId: "federation-sync:peer-1:followup",
+            }),
+        );
+    });
+
+    it("removes a failed primary job before reusing its deterministic id", async () => {
+        const remove = jest.fn().mockResolvedValue(undefined);
+        federationQueue.getJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("failed"),
+            remove,
+        });
+
+        await enqueueFederationSyncNow("peer-1");
+
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+            federationQueue.add.mock.invocationCallOrder[0],
+        );
+        expect(federationQueue.add).toHaveBeenCalledWith(
+            FEDERATION_SYNC_JOB_NAME,
+            { peerId: "peer-1" },
+            expect.objectContaining({ jobId: "federation-sync:peer-1" }),
+        );
+    });
+
+    it("removes a failed follow-up before queueing behind an active primary", async () => {
+        const removePrimary = jest.fn();
+        const removeFollowup = jest.fn().mockResolvedValue(undefined);
+        federationQueue.getJob
+            .mockResolvedValueOnce({
+                getState: jest.fn().mockResolvedValue("active"),
+                remove: removePrimary,
+            })
+            .mockResolvedValueOnce({
+                getState: jest.fn().mockResolvedValue("failed"),
+                remove: removeFollowup,
+            });
+
+        await enqueueFederationSyncNow("peer-1");
+
+        expect(removePrimary).not.toHaveBeenCalled();
+        expect(removeFollowup).toHaveBeenCalledTimes(1);
         expect(federationQueue.add).toHaveBeenCalledWith(
             FEDERATION_SYNC_JOB_NAME,
             { peerId: "peer-1" },

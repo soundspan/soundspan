@@ -16,6 +16,8 @@ test("PeerBadge identifies an online federation peer", async () => {
         React.createElement(PeerBadge, { peerName: "Josh", online: true }),
     );
     assert.match(html, /title="From Josh"/);
+    assert.match(html, /<svg/);
+    assert.match(html, /aria-hidden="true"/);
     assert.match(html, />Josh</);
     assert.doesNotMatch(html, /opacity-50/);
 });
@@ -26,5 +28,7 @@ test("PeerBadge uses the muted treatment when the peer is offline", async () => 
         React.createElement(PeerBadge, { peerName: "Sam", online: false }),
     );
     assert.match(html, /title="From Sam"/);
+    assert.match(html, /<svg/);
+    assert.match(html, /aria-hidden="true"/);
     assert.match(html, /opacity-50/);
 });

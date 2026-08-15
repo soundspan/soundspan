@@ -117,6 +117,16 @@ const positiveIntegerEnvSchema = z
         message: "must be a safe integer",
     })
     .optional();
+const federationTombstoneRetentionEnvSchema = z
+    .string()
+    .regex(/^[1-9]\d*$/, "must be an integer greater than or equal to 3")
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message: "must be a safe integer",
+    })
+    .refine((value) => Number(value) >= 3, {
+        message: "must be an integer greater than or equal to 3",
+    })
+    .optional();
 
 // Validate critical environment variables on startup.
 const envSchema = z
@@ -137,7 +147,8 @@ const envSchema = z
         NODE_ENV: z.enum(["development", "production", "test"]).optional(),
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
         TRACK_REMOVAL_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
-        FEDERATION_TOMBSTONE_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
+        FEDERATION_TOMBSTONE_RETENTION_DAYS:
+            federationTombstoneRetentionEnvSchema,
         FEDERATION_SYNC_INTERVAL_MINUTES: positiveIntegerEnvSchema,
     })
     .superRefine((env, context) => {
@@ -169,8 +180,10 @@ try {
         logger.error(
             "\n Please check your .env file and ensure all required variables are set.",
         );
-        process.exit(1);
+    } else {
+        logger.error(" Environment validation failed:", error);
     }
+    process.exit(1);
 }
 
 const trackRemovalRetentionDays = Number.parseInt(

@@ -125,6 +125,27 @@ describe("federation host routes", () => {
         expect(response.status).toBe(status);
     });
 
+    it.each([
+        [undefined, 401],
+        ["wrong", 403],
+        ["library:read", 200],
+    ])("enforces single-item scope matrix for %s", async (scopes, status) => {
+        catalog.getFederationCatalogItem.mockResolvedValueOnce({
+            id: "artist-1",
+            mediaType: "artist",
+        });
+        let call = request(app).get(
+            "/api/federation/v1/catalog/items/artist/artist-1",
+        );
+        if (scopes !== undefined) {
+            call = call
+                .set("Authorization", "Bearer valid")
+                .set("x-test-scopes", scopes);
+        }
+        const response = await call;
+        expect(response.status).toBe(status);
+    });
+
     it("validates bounded keyset catalog input", async () => {
         const response = await request(app)
             .get(

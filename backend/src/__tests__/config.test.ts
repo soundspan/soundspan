@@ -5,6 +5,7 @@ const mockValidateMusicConfig = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
 const mockLoggerWarn = jest.fn();
+const mockValidateEncryptionKey = jest.fn();
 
 jest.mock("dotenv", () => ({
     __esModule: true,
@@ -24,6 +25,11 @@ jest.mock("../utils/logger", () => ({
         error: (...args: unknown[]) => mockLoggerError(...args),
         warn: (...args: unknown[]) => mockLoggerWarn(...args),
     },
+}));
+
+jest.mock("../utils/encryption", () => ({
+    validateEncryptionKey: (...args: unknown[]) =>
+        mockValidateEncryptionKey(...args),
 }));
 
 describe("config module", () => {
@@ -799,11 +805,11 @@ describe("config module", () => {
         expect(keyOnly.config.audiobookshelf).toBeUndefined();
     });
 
-    it("accepts zero and rejects malformed federation tombstone retention", async () => {
-        const zero = await loadConfigModule({
-            FEDERATION_TOMBSTONE_RETENTION_DAYS: "0",
+    it("accepts the three-day federation tombstone floor and rejects lower values", async () => {
+        const minimum = await loadConfigModule({
+            FEDERATION_TOMBSTONE_RETENTION_DAYS: "3",
         });
-        expect(zero.config.workers.federationTombstoneRetentionDays).toBe(0);
+        expect(minimum.config.workers.federationTombstoneRetentionDays).toBe(3);
 
         const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
             code?: number,
@@ -811,8 +817,27 @@ describe("config module", () => {
             throw new Error(`process.exit:${code}`);
         }) as never);
         await expect(
-            loadConfigModule({ FEDERATION_TOMBSTONE_RETENTION_DAYS: "-1" }),
+            loadConfigModule({ FEDERATION_TOMBSTONE_RETENTION_DAYS: "2" }),
         ).rejects.toThrow("process.exit:1");
+        exitSpy.mockRestore();
+    });
+
+    it("logs and exits when post-schema encryption validation throws", async () => {
+        mockValidateEncryptionKey.mockImplementationOnce(() => {
+            throw new Error("encryption validation failed");
+        });
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        await expect(loadConfigModule()).rejects.toThrow("process.exit:1");
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            " Environment validation failed:",
+            expect.any(Error),
+        );
+
         exitSpy.mockRestore();
     });
 

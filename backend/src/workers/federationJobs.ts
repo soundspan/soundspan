@@ -11,13 +11,21 @@ export const FEDERATION_HEALTH_JOB_NAME = "peer-health";
 const ONE_HOUR_MS = 60 * 60 * 1_000;
 const MAX_CONSUMER_PEERS = 500;
 
+async function removeTerminalJob(jobId: string): Promise<string | null> {
+    const job = await federationQueue.getJob(jobId);
+    if (!job) return null;
+    const state = await job.getState();
+    if (state === "failed" || state === "completed") await job.remove();
+    return state;
+}
+
 /** Enqueues or coalesces one peer's sync through a deterministic Bull job id. */
 export async function enqueueFederationSyncNow(peerId: string): Promise<void> {
     const primaryJobId = `federation-sync:${peerId}`;
-    const primary = await federationQueue.getJob(primaryJobId);
-    const state = primary ? await primary.getState() : null;
+    const state = await removeTerminalJob(primaryJobId);
     const jobId =
         state === "active" ? `${primaryJobId}:followup` : primaryJobId;
+    if (jobId !== primaryJobId) await removeTerminalJob(jobId);
     await federationQueue.add(
         FEDERATION_SYNC_JOB_NAME,
         { peerId },

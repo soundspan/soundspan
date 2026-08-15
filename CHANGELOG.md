@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Federation-aware deletion cleanup writes track, album, and artist
     tombstones transactionally.
     `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;
-    minimum `0`).
+    minimum `3`).
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges
@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Search queries are now limited to 500 characters. Undeclared query
+  parameters remain ignored for compatibility with existing callers.
+- Library orphan cleanup deletes at most 10,000 albums and 10,000 artists per
+  pass to bound each purge cycle.
 - Soft-removed tracks retained for recovery no longer seed mixes, radio, or
   recommendations through play or like history.
 - Library scans now soft-remove missing tracks instead of cascading immediate

@@ -181,7 +181,7 @@ interface TestIdentityTrack {
     recordingMbid: string | null;
     isrc: string | null;
     removedAt: Date | null;
-    album: { rgMbid: string | null };
+    album: { rgMbid: string | null; location: string };
 }
 
 function identityTrack(
@@ -206,7 +206,7 @@ function identityTrack(
         recordingMbid: null,
         isrc: null,
         removedAt: null,
-        album: { rgMbid: "rg-album-1" },
+        album: { rgMbid: "rg-album-1", location: "LIBRARY" },
         ...overrides,
     };
 }
@@ -216,6 +216,7 @@ describe("MusicScannerService.scanLibrary", () => {
         jest.clearAllMocks();
         queueInstances.length = 0;
         mockConfig.workers.trackRemovalRetentionDays = 90;
+        mockConfig.features.federation = false;
 
         mockReaddir.mockResolvedValue([]);
         mockExistsSync.mockReturnValue(true);
@@ -320,6 +321,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
     it("hides a federated duplicate when a matching local rip arrives", async () => {
         const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
         const audioHash = "sha256:" + "ad".repeat(32);
         const local = identityTrack("local-new", "Artist/Track.flac", {
             audioHash,
@@ -361,6 +363,183 @@ describe("MusicScannerService.scanLibrary", () => {
             confidence: 1,
             source: "federation",
         });
+    });
+
+    it("does not query federated candidates when federation is disabled", async () => {
+        const scanner = new MusicScannerService();
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Artist/Track.flac",
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+
+        await scanner.scanLibrary("/music");
+
+        const federatedQueries = mockPrisma.track.findMany.mock.calls.filter(
+            ([args]) => args.where?.origin === "FEDERATED",
+        );
+        expect(federatedQueries).toHaveLength(0);
+    });
+
+    it("reconciles successful new paths after counters are rebound to zero", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
+        const local = identityTrack("local-rebound", "Artist/Track.flac");
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Artist/Track.flac",
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+        jest.spyOn(scanner as any, "reviveRemovedTracks").mockResolvedValue(1);
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (
+                args.where?.origin === "LOCAL" &&
+                args.where?.removedAt === null &&
+                args.where?.filePath?.in
+            ) {
+                return [local];
+            }
+            return [];
+        });
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result.tracksAdded).toBe(0);
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ origin: "FEDERATED" }),
+            }),
+        );
+    });
+
+    it("chunks newly added paths for federation reconciliation", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
+        const audioFiles = Array.from(
+            { length: 10_001 },
+            (_, index) => `/music/Artist/Track-${index}.flac`,
+        );
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue(
+            audioFiles,
+        );
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+        jest.spyOn(scanner as any, "reviveRemovedTracks").mockResolvedValue(0);
+
+        await scanner.scanLibrary("/music");
+
+        const reconciliationQueries =
+            mockPrisma.track.findMany.mock.calls.filter(
+                ([args]) =>
+                    args.where?.origin === "LOCAL" &&
+                    args.where?.removedAt === null &&
+                    args.where?.filePath?.in,
+            );
+        expect(reconciliationQueries).toHaveLength(2);
+        expect(reconciliationQueries[0][0].where.filePath.in).toHaveLength(
+            10_000,
+        );
+        expect(reconciliationQueries[1][0].where.filePath.in).toHaveLength(1);
+    });
+
+    it("constrains positional federation candidates to the release group", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
+        const local = identityTrack("local-new", "Artist/Track.flac");
+        const otherAlbum = {
+            ...identityTrack("federated-other", "unused", {
+                album: { rgMbid: "rg-other", location: "FEDERATED" },
+            }),
+            filePath: null,
+            origin: "FEDERATED",
+        };
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Artist/Track.flac",
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+        jest.spyOn(scanner as any, "reviveRemovedTracks").mockResolvedValue(0);
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (
+                args.where?.origin === "LOCAL" &&
+                args.where?.removedAt === null &&
+                args.where?.filePath?.in
+            ) {
+                return [local];
+            }
+            if (args.where?.origin === "FEDERATED") return [otherAlbum];
+            return [];
+        });
+
+        await scanner.scanLibrary("/music");
+
+        const positionalQuery = mockPrisma.track.findMany.mock.calls.find(
+            ([args]) =>
+                args.where?.origin === "FEDERATED" &&
+                args.where?.discNo === 1 &&
+                args.where?.trackNo === 3,
+        );
+        expect(positionalQuery?.[0].where.album).toEqual(
+            expect.objectContaining({
+                location: "FEDERATED",
+                OR: expect.arrayContaining([{ rgMbid: "rg-album-1" }]),
+            }),
+        );
+        expect(mockPrisma.track.update).not.toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: "federated-other" } }),
+        );
+    });
+
+    it("does not position-dedup a DISCOVER download against a peer track", async () => {
+        const scanner = new MusicScannerService();
+        mockConfig.features.federation = true;
+        const local = identityTrack("discover-new", "Discover/Track.flac", {
+            album: { rgMbid: "rg-album-1", location: "DISCOVER" },
+        });
+        jest.spyOn(scanner as any, "findAudioFiles").mockResolvedValue([
+            "/music/Discover/Track.flac",
+        ]);
+        jest.spyOn(scanner as any, "processAudioFile").mockResolvedValue(
+            undefined,
+        );
+        jest.spyOn(scanner as any, "reviveRemovedTracks").mockResolvedValue(0);
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (
+                args.where?.origin === "LOCAL" &&
+                args.where?.removedAt === null &&
+                args.where?.filePath?.in
+            ) {
+                return [local];
+            }
+            if (args.where?.origin === "FEDERATED") {
+                return [
+                    {
+                        ...local,
+                        id: "federated-1",
+                        filePath: null,
+                        origin: "FEDERATED",
+                        album: {
+                            rgMbid: "rg-album-1",
+                            location: "FEDERATED",
+                        },
+                    },
+                ];
+            }
+            return [];
+        });
+
+        await scanner.scanLibrary("/music");
+
+        expect(
+            mockPrisma.track.findMany.mock.calls.some(
+                ([args]) => args.where?.origin === "FEDERATED",
+            ),
+        ).toBe(false);
+        expect(mockPrisma.track.update).not.toHaveBeenCalled();
     });
 
     it("chunks active-scan path lookups beyond the bind-parameter batch size", async () => {

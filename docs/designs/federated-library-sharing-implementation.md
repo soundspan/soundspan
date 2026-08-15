@@ -43,7 +43,7 @@ Known follow-up: batch catalog writes and reduce repeated
 `backfillAllArtistCounts` work for higher sync throughput. This review does not
 change those operations.
 
-## Build chunks (each = one Codex dispatch + review gate + commit)
+## Build chunks (each = one implementation increment + review gate + commit)
 
 | # | Chunk | Status | Contents |
 | --- | --- | --- | --- |

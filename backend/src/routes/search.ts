@@ -15,7 +15,7 @@ import { LIBRARY_ORIGIN_VALUES } from "../utils/librarySorting";
 
 const router = Router();
 
-const searchQuerySchema = z.strictObject({
+const searchQuerySchema = z.object({
     q: z.string().max(500).default(""),
     type: z
         .enum([

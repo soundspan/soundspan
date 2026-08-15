@@ -90,6 +90,7 @@ const tombstoneSchema = z.strictObject({
     entityId: z.string().min(1).max(128),
     deletedAt: dateTimeSchema,
 });
+const tombstonesSchema = z.array(tombstoneSchema).max(MAX_PAGE_ITEMS);
 const deltaPageShapeSchema = z.strictObject({
     kind: z.literal("ok"),
     changes: z.array(z.unknown()).max(MAX_PAGE_ITEMS),
@@ -250,14 +251,14 @@ function parseCatalogPage(value: unknown): FederationCatalogPage {
 function parseDeltaPage(value: unknown): FederationDelta {
     const page = parseResponse(deltaPageShapeSchema, value);
     const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
-    const tombstones = parseLenientItems(page.tombstones, tombstoneSchema);
+    const tombstones = parseResponse(tombstonesSchema, page.tombstones);
     return {
         kind: "ok",
         changes: changes.items,
-        tombstones: tombstones.items,
+        tombstones,
         nextCursor: page.nextCursor,
         nextSince: page.nextSince,
-        skippedInvalid: changes.skippedInvalid + tombstones.skippedInvalid,
+        skippedInvalid: changes.skippedInvalid,
     };
 }
 

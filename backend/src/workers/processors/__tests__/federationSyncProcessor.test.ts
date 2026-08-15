@@ -11,6 +11,14 @@ class MockStaleCursorError extends Error {
         super("stale cursor");
     }
 }
+class MockFederationHttpError extends Error {
+    constructor(
+        public readonly status: number | null,
+        public readonly transient = false,
+    ) {
+        super(`http ${status}`);
+    }
+}
 
 const client = {
     getManifest: jest.fn(),
@@ -69,6 +77,7 @@ jest.mock("../../../services/federationClient", () => ({
     createFederationClient,
     FederationEpochMismatchError: MockEpochMismatchError,
     FederationStaleCursorError: MockStaleCursorError,
+    FederationHttpError: MockFederationHttpError,
 }));
 jest.mock("../../../services/trackMappingService", () => ({
     trackMappingService: { createMapping },
@@ -319,6 +328,121 @@ describe("federation sync processor", () => {
         );
         expect(prisma.album.upsert).toHaveBeenCalled();
         expect(prisma.track.upsert).toHaveBeenCalled();
+    });
+
+    it("retains a full-sync hierarchy recovered from a track parent", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve({
+                items: type === "track" ? [track] : [],
+                nextCursor: null,
+                skippedInvalid: 0,
+            }),
+        );
+        client.getCatalogItem.mockImplementation((type: string) =>
+            Promise.resolve(type === "album" ? album : artist),
+        );
+        prisma.artist.findUnique
+            .mockReset()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: "artist-local-row" });
+        prisma.album.findUnique
+            .mockReset()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "album-local-row",
+                rgMbid: "release-group-1",
+            });
+        prisma.track.findMany
+            .mockResolvedValueOnce([
+                { id: "fed-track-row", remoteId: "remote-track-1" },
+            ])
+            .mockResolvedValueOnce([]);
+        prisma.album.findMany
+            .mockResolvedValueOnce([
+                { id: "album-local-row", remoteId: "remote-album-1" },
+            ])
+            .mockResolvedValueOnce([]);
+        prisma.artist.findMany
+            .mockResolvedValueOnce([
+                { id: "artist-local-row", remoteId: "remote-artist-1" },
+            ])
+            .mockResolvedValueOnce([]);
+
+        await processFederationSync(job());
+
+        expect(client.getCatalogItem.mock.calls).toEqual([
+            ["album", "remote-album-1"],
+            ["artist", "remote-artist-1"],
+        ]);
+        expect(prisma.track.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.album.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("skips descendants when a recovered artist is not exported", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve({
+                items:
+                    type === "album"
+                        ? [album]
+                        : type === "track"
+                          ? [track]
+                          : [],
+                nextCursor: null,
+                skippedInvalid: 0,
+            }),
+        );
+        client.getCatalogItem.mockImplementation((type: string) => {
+            if (type === "artist") {
+                return Promise.reject(new MockFederationHttpError(404));
+            }
+            return Promise.resolve(album);
+        });
+        prisma.artist.findUnique.mockResolvedValue(null);
+        prisma.album.findUnique.mockResolvedValue(null);
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+            artists: 0,
+            albums: 0,
+            tracks: 0,
+            skippedInvalid: 2,
+        });
+        expect(prisma.album.upsert).not.toHaveBeenCalled();
+        expect(prisma.track.upsert).not.toHaveBeenCalled();
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            expect.stringContaining("missing parent artist=remote-artist-1"),
+        );
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            expect.stringContaining("missing parent album=remote-album-1"),
+        );
+    });
+
+    it("skips a track when its recovered album is not exported", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve({
+                items: type === "track" ? [track] : [],
+                nextCursor: null,
+                skippedInvalid: 0,
+            }),
+        );
+        client.getCatalogItem.mockRejectedValueOnce(
+            new MockFederationHttpError(404),
+        );
+        prisma.album.findUnique.mockResolvedValue(null);
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+            tracks: 0,
+            skippedInvalid: 1,
+        });
+        expect(prisma.track.upsert).not.toHaveBeenCalled();
+        expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            expect.stringContaining("missing parent album=remote-album-1"),
+        );
     });
 
     it("does not mutate catalog rows when a validated page request fails", async () => {

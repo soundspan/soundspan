@@ -721,8 +721,8 @@ config:
   deezerApiKey: ""
   # -- Set to true to expose API docs publicly
   docsPublic: false
-  # -- Federation tombstone retention in days. Zero removes tombstones on the
-  #    terminal purge page immediately after they become older than that page.
+  # -- Federation tombstone retention in days. Minimum 3 preserves the stale
+  #    cursor safety margin before a consumer must perform a full resync.
   federationTombstoneRetentionDays: 90
   # -- Consumer federation catalog sync interval in minutes. Minimum 1.
   federationSyncIntervalMinutes: 15

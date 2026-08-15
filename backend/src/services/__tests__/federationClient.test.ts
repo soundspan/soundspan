@@ -114,6 +114,53 @@ describe("federation HTTP client", () => {
         });
     });
 
+    it("skips invalid delta changes but rejects malformed tombstones", async () => {
+        const validTombstone = {
+            entityType: "artist",
+            entityId: "artist-removed",
+            deletedAt: "2026-08-15T12:01:00.000Z",
+        };
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                kind: "ok",
+                changes: [artistEnvelope, { invalid: true }],
+                tombstones: [validTombstone],
+                nextCursor: null,
+                nextSince: "2026-08-15T12:02:00.000Z",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-08-15T12:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).resolves.toMatchObject({
+            changes: [artistEnvelope],
+            tombstones: [validTombstone],
+            skippedInvalid: 1,
+        });
+
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                kind: "ok",
+                changes: [],
+                tombstones: [{ entityType: "artist" }],
+                nextCursor: null,
+                nextSince: "2026-08-15T12:02:00.000Z",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-08-15T12:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).rejects.toBeInstanceOf(FederationResponseError);
+    });
+
     it("treats a stale cursor response as a full-resync signal", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 409,

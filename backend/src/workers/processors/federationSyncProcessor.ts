@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
     createFederationClient,
     FederationEpochMismatchError,
+    FederationHttpError,
     FederationStaleCursorError,
     type FederationEnvelope,
     type FederationManifest,
@@ -29,6 +30,7 @@ type MediaType = FederationEnvelope["mediaType"];
 type ArtistEnvelope = Extract<FederationEnvelope, { mediaType: "artist" }>;
 type AlbumEnvelope = Extract<FederationEnvelope, { mediaType: "album" }>;
 type TrackEnvelope = Extract<FederationEnvelope, { mediaType: "track" }>;
+type ParentMediaType = "artist" | "album";
 
 interface SyncCounts {
     artists: number;
@@ -43,6 +45,8 @@ interface SyncContext {
     counts: SyncCounts;
     seen: Record<MediaType, Set<string>>;
     albumRgMbids: Map<string, string>;
+    unavailableParents: Record<ParentMediaType, Set<string>>;
+    warnedParents: Set<string>;
     skippedInvalid: number;
 }
 
@@ -60,6 +64,8 @@ function newSyncContext(peerId: string, scopes: string[]): SyncContext {
         counts: { artists: 0, albums: 0, tracks: 0, tombstones: 0 },
         seen: { artist: new Set(), album: new Set(), track: new Set() },
         albumRgMbids: new Map(),
+        unavailableParents: { artist: new Set(), album: new Set() },
+        warnedParents: new Set(),
         skippedInvalid: 0,
     };
 }
@@ -81,6 +87,24 @@ function rememberSeen(context: SyncContext, item: FederationEnvelope): void {
 function placeholderIdentity(peerId: string, value: string): string {
     const encoded = Buffer.from(value, "utf8").toString("base64url");
     return `federation:${peerId}:${encoded}`;
+}
+
+function warnParentRecovery(
+    context: SyncContext,
+    mediaType: ParentMediaType,
+    remoteId: string,
+    action: string,
+): void {
+    const key = `${mediaType}:${remoteId}`;
+    if (context.warnedParents.has(key)) return;
+    context.warnedParents.add(key);
+    log.warn(
+        `peerId=${context.peerId} missing parent ${mediaType}=${remoteId}; ${action}`,
+    );
+}
+
+function isMissingExportedParent(error: unknown): boolean {
+    return error instanceof FederationHttpError && error.status === 404;
 }
 
 async function upsertArtist(
@@ -142,19 +166,30 @@ async function ensureRemoteArtistId(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
     remoteId: string,
-): Promise<string> {
+    remember: boolean,
+): Promise<string | null> {
     const existingId = await loadRemoteArtistId(context, remoteId);
     if (existingId) return existingId;
-    log.warn(
-        `peerId=${context.peerId} missing parent artist=${remoteId}; fetching directly`,
-    );
-    const parent = await client.getCatalogItem("artist", remoteId);
+    if (context.unavailableParents.artist.has(remoteId)) {
+        warnParentRecovery(context, "artist", remoteId, "skipping child");
+        return null;
+    }
+    warnParentRecovery(context, "artist", remoteId, "fetching directly");
+    let parent: FederationEnvelope;
+    try {
+        parent = await client.getCatalogItem("artist", remoteId);
+    } catch (error) {
+        if (!isMissingExportedParent(error)) throw error;
+        context.unavailableParents.artist.add(remoteId);
+        return null;
+    }
     if (parent.mediaType !== "artist") {
         throw new Error("Federation host returned the wrong parent type");
     }
     await upsertArtist(context, parent);
     const importedId = await loadRemoteArtistId(context, remoteId);
     if (!importedId) throw new Error("Federation artist parent import failed");
+    if (remember) rememberSeen(context, parent);
     return importedId;
 }
 
@@ -162,12 +197,18 @@ async function upsertAlbum(
     context: SyncContext,
     item: AlbumEnvelope,
     client: ReturnType<typeof createFederationClient>,
-): Promise<void> {
+    remember: boolean,
+): Promise<boolean> {
     const artistId = await ensureRemoteArtistId(
         context,
         client,
         item.parentRef,
+        remember,
     );
+    if (!artistId) {
+        context.unavailableParents.album.add(item.id);
+        return false;
+    }
     const existing = await prisma.album.findUnique({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
@@ -210,6 +251,7 @@ async function upsertAlbum(
         },
     });
     context.albumRgMbids.set(item.id, item.attributes.rgMbid);
+    return true;
 }
 
 async function loadRemoteAlbum(
@@ -235,19 +277,31 @@ async function ensureRemoteAlbum(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
     remoteId: string,
-): Promise<{ id: string; rgMbid: string }> {
+    remember: boolean,
+): Promise<{ id: string; rgMbid: string } | null> {
     const existing = await loadRemoteAlbum(context, remoteId);
     if (existing) return existing;
-    log.warn(
-        `peerId=${context.peerId} missing parent album=${remoteId}; fetching directly`,
-    );
-    const parent = await client.getCatalogItem("album", remoteId);
+    if (context.unavailableParents.album.has(remoteId)) {
+        warnParentRecovery(context, "album", remoteId, "skipping child");
+        return null;
+    }
+    warnParentRecovery(context, "album", remoteId, "fetching directly");
+    let parent: FederationEnvelope;
+    try {
+        parent = await client.getCatalogItem("album", remoteId);
+    } catch (error) {
+        if (!isMissingExportedParent(error)) throw error;
+        context.unavailableParents.album.add(remoteId);
+        return null;
+    }
     if (parent.mediaType !== "album") {
         throw new Error("Federation host returned the wrong parent type");
     }
-    await upsertAlbum(context, parent, client);
+    const applied = await upsertAlbum(context, parent, client, remember);
+    if (!applied) return null;
     const imported = await loadRemoteAlbum(context, remoteId);
     if (!imported) throw new Error("Federation album parent import failed");
+    if (remember) rememberSeen(context, parent);
     return imported;
 }
 
@@ -348,8 +402,15 @@ async function upsertTrack(
     context: SyncContext,
     item: TrackEnvelope,
     client: ReturnType<typeof createFederationClient>,
-): Promise<void> {
-    const album = await ensureRemoteAlbum(context, client, item.parentRef);
+    remember: boolean,
+): Promise<boolean> {
+    const album = await ensureRemoteAlbum(
+        context,
+        client,
+        item.parentRef,
+        remember,
+    );
+    if (!album) return false;
     const attributes = item.attributes;
     await rebindFederatedTrack(context, item, album.id);
     const row = await prisma.track.upsert({
@@ -396,6 +457,7 @@ async function upsertTrack(
     if (attributes.embedding && context.scopes.includes("embeddings:read")) {
         await upsertTrackEmbedding(row.id, attributes.embedding);
     }
+    return true;
 }
 
 async function applyEnvelope(
@@ -405,9 +467,15 @@ async function applyEnvelope(
     remember: boolean,
 ): Promise<void> {
     if (item.mediaType === "artist") await upsertArtist(context, item);
-    else if (item.mediaType === "album")
-        await upsertAlbum(context, item, client);
-    else await upsertTrack(context, item, client);
+    else if (item.mediaType === "album") {
+        if (!(await upsertAlbum(context, item, client, remember))) {
+            context.skippedInvalid += 1;
+            return;
+        }
+    } else if (!(await upsertTrack(context, item, client, remember))) {
+        context.skippedInvalid += 1;
+        return;
+    }
     if (remember) rememberSeen(context, item);
     incrementCount(context, item.mediaType);
 }

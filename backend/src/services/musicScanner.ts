@@ -55,8 +55,17 @@ const TRACK_IDENTITY_SELECT = {
     album: { select: { rgMbid: true } },
 } satisfies Prisma.TrackSelect;
 
+const FEDERATION_RECONCILIATION_TRACK_SELECT = {
+    ...TRACK_IDENTITY_SELECT,
+    album: { select: { rgMbid: true, location: true } },
+} satisfies Prisma.TrackSelect;
+
 type IdentityTrackRow = Prisma.TrackGetPayload<{
     select: typeof TRACK_IDENTITY_SELECT;
+}>;
+
+type FederationLocalIdentityTrackRow = Prisma.TrackGetPayload<{
+    select: typeof FEDERATION_RECONCILIATION_TRACK_SELECT;
 }>;
 
 type LocalIdentityTrackRow = Omit<IdentityTrackRow, "filePath"> & {
@@ -165,6 +174,9 @@ const REMOVED_TRACK_REVIVAL_POOL_LIMIT = 10_000;
 // Cap health writes at the worker database pool's four connections.
 const HEALTH_WRITE_BATCH_SIZE = 4;
 const MAX_FEDERATED_DEDUP_CANDIDATES = 10_000;
+const MAX_FEDERATED_DEDUP_TIERS = 4;
+const MAX_FEDERATED_DEDUP_TOTAL_CANDIDATES =
+    MAX_FEDERATED_DEDUP_TIERS * MAX_FEDERATED_DEDUP_CANDIDATES;
 
 interface ScanProgress {
     filesScanned: number;
@@ -578,7 +590,7 @@ export class MusicScannerService {
         result.tracksAdded -= revivedTracks;
         result.tracksUpdated += revivedTracks;
 
-        if (result.tracksAdded > 0) {
+        if (config.features.federation && newTrackPaths.size > 0) {
             await this.reconcileFederatedDuplicates([...newTrackPaths]);
         }
 
@@ -638,35 +650,16 @@ export class MusicScannerService {
     }
 
     private async reconcileFederatedTrack(
-        local: IdentityTrackRow,
+        local: FederationLocalIdentityTrackRow,
     ): Promise<void> {
-        const candidates = await prisma.track.findMany({
-            where: {
-                origin: "FEDERATED",
-                removedAt: null,
-                OR: [
-                    ...(local.audioHash
-                        ? [{ audioHash: local.audioHash }]
-                        : []),
-                    ...(local.recordingMbid
-                        ? [{ recordingMbid: local.recordingMbid }]
-                        : []),
-                    ...(local.isrc ? [{ isrc: local.isrc }] : []),
-                    { discNo: local.discNo, trackNo: local.trackNo },
-                ],
-                AND: {
-                    OR: [
-                        { dedupOfTrackId: null },
-                        { dedupOfTrack: { removedAt: { not: null } } },
-                    ],
-                },
-            },
-            orderBy: { id: "asc" },
-            take: MAX_FEDERATED_DEDUP_CANDIDATES,
-            select: TRACK_IDENTITY_SELECT,
-        });
+        const candidates = await this.loadFederatedDedupCandidates(local);
         let confidence: number | null = null;
-        for (let index = 0; index < candidates.length; index += 1) {
+        for (
+            let index = 0;
+            index < MAX_FEDERATED_DEDUP_TOTAL_CANDIDATES &&
+            index < candidates.length;
+            index += 1
+        ) {
             const candidateConfidence = federationDedupConfidence(
                 this.dedupIdentity(local),
                 this.dedupIdentity(candidates[index]),
@@ -686,18 +679,105 @@ export class MusicScannerService {
         });
     }
 
+    private async loadFederatedCandidates(
+        identityWhere: Prisma.TrackWhereInput,
+    ): Promise<IdentityTrackRow[]> {
+        return prisma.track.findMany({
+            where: {
+                ...identityWhere,
+                origin: "FEDERATED",
+                removedAt: null,
+                AND: {
+                    OR: [
+                        { dedupOfTrackId: null },
+                        { dedupOfTrack: { removedAt: { not: null } } },
+                    ],
+                },
+            },
+            orderBy: { id: "asc" },
+            take: MAX_FEDERATED_DEDUP_CANDIDATES,
+            select: TRACK_IDENTITY_SELECT,
+        });
+    }
+
+    private federatedDedupQueries(
+        local: FederationLocalIdentityTrackRow,
+    ): Prisma.TrackWhereInput[] {
+        const queries: Prisma.TrackWhereInput[] = [];
+        if (local.audioHash) queries.push({ audioHash: local.audioHash });
+        if (local.recordingMbid) {
+            queries.push({ recordingMbid: local.recordingMbid });
+        }
+        if (local.isrc) queries.push({ isrc: local.isrc });
+        const positional = this.positionalFederatedQuery(local);
+        if (positional) queries.push(positional);
+        return queries;
+    }
+
+    private positionalFederatedQuery(
+        local: FederationLocalIdentityTrackRow,
+    ): Prisma.TrackWhereInput | null {
+        if (local.album.location !== "LIBRARY") return null;
+        const encodedRgMbid = Buffer.from(local.album.rgMbid).toString(
+            "base64url",
+        );
+        return {
+            discNo: local.discNo,
+            trackNo: local.trackNo,
+            album: {
+                location: "FEDERATED",
+                OR: [
+                    { rgMbid: local.album.rgMbid },
+                    {
+                        AND: [
+                            { rgMbid: { startsWith: "federation:" } },
+                            { rgMbid: { endsWith: `:${encodedRgMbid}` } },
+                        ],
+                    },
+                ],
+            },
+        };
+    }
+
+    private async loadFederatedDedupCandidates(
+        local: FederationLocalIdentityTrackRow,
+    ): Promise<IdentityTrackRow[]> {
+        const queries = this.federatedDedupQueries(local);
+        const candidatesById = new Map<string, IdentityTrackRow>();
+        for (let index = 0; index < MAX_FEDERATED_DEDUP_TIERS; index += 1) {
+            const query = queries[index];
+            if (!query) break;
+            const candidates = await this.loadFederatedCandidates(query);
+            for (
+                let candidateIndex = 0;
+                candidateIndex < MAX_FEDERATED_DEDUP_CANDIDATES &&
+                candidateIndex < candidates.length;
+                candidateIndex += 1
+            ) {
+                const candidate = candidates[candidateIndex];
+                candidatesById.set(candidate.id, candidate);
+            }
+        }
+        return [...candidatesById.values()];
+    }
+
     private async reconcileFederatedDuplicates(
         newTrackPaths: string[],
     ): Promise<void> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                filePath: { in: newTrackPaths },
-                origin: "LOCAL",
-                removedAt: null,
-            },
-            orderBy: { id: "asc" },
-            select: TRACK_IDENTITY_SELECT,
-        });
+        const tracks = await processBatched(
+            newTrackPaths,
+            TRACK_PATH_QUERY_BATCH_SIZE,
+            (batch) =>
+                prisma.track.findMany({
+                    where: {
+                        filePath: { in: batch },
+                        origin: "LOCAL",
+                        removedAt: null,
+                    },
+                    orderBy: { id: "asc" },
+                    select: FEDERATION_RECONCILIATION_TRACK_SELECT,
+                }),
+        );
         for (let index = 0; index < tracks.length; index += 1) {
             await this.reconcileFederatedTrack(tracks[index]);
         }

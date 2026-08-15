@@ -300,6 +300,39 @@ describe("search route runtime behavior", () => {
         expect(res.body).toEqual({ error: "Invalid search query" });
     });
 
+    it("ignores undeclared search parameters for caller compatibility", async () => {
+        const req = {
+            query: {
+                q: "shared",
+                type: "tracks",
+                thirdPartyHint: "preserve-compatibility",
+            },
+        } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSearchByType).toHaveBeenCalledWith({
+            query: "shared",
+            type: "tracks",
+            limit: 20,
+            genre: undefined,
+        });
+    });
+
+    it("rejects search queries longer than 500 characters", async () => {
+        const req = { query: { q: "x".repeat(501) } } as any;
+        const res = createRes();
+
+        await rootHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid search query" });
+        expect(mockSearchAll).not.toHaveBeenCalled();
+        expect(mockSearchByType).not.toHaveBeenCalled();
+    });
+
     it("returns 500 when search service throws", async () => {
         mockSearchByType.mockRejectedValueOnce(new Error("search down"));
         const req = {
