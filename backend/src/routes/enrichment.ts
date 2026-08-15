@@ -2085,6 +2085,14 @@ router.post("/albums/:id/reset", async (req, res) => {
  * /api/enrichment/tracks/{id}/reset:
  *   post:
  *     summary: Reset track metadata to canonical values
+ *     description: >-
+ *       Deliberately user-level (no admin gate), like the sibling
+ *       metadata-override routes (the metadata PUTs and entity resets):
+ *       it clears only the display-override columns (displayTitle,
+ *       displayTrackNo, hasUserOverrides) behind the metadata editor
+ *       available to every authenticated user. It cannot touch enrichment
+ *       pipeline state, which is controlled by the admin-gated job routes
+ *       in this router.
  *     tags: [Enrichment]
  *     security:
  *       - sessionAuth: []
