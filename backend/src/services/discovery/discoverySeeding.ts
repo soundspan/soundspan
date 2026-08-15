@@ -14,11 +14,94 @@ import {
 } from "../../utils/librarySorting";
 import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
-import { subWeeks } from "date-fns";
+import {
+    createSeededRng,
+    DEFAULT_ARTIST_WEIGHT_ALPHA,
+    getSeededRandom,
+} from "../artistSlotAllocation";
+import { format, startOfWeek, subWeeks } from "date-fns";
 
+/** Artist identity returned for Discover Weekly metadata seeding. */
 export interface SeedArtist {
     name: string;
     mbid?: string;
+}
+
+type RecentPlayCount = {
+    trackId: string | null;
+    _count: { id: number };
+};
+
+type SeedTrack = {
+    id: string;
+    album: {
+        artistId: string;
+        artist: {
+            name: string;
+            mbid: string | null;
+        };
+    };
+};
+
+type WeightedSeedArtist = {
+    artist: SeedArtist;
+    playCount: number;
+    firstSeenIndex: number;
+};
+
+/** Aggregate track play counts into valid artist-level seed weights. */
+function aggregateArtistPlayCounts(
+    recentPlays: RecentPlayCount[],
+    tracks: SeedTrack[],
+    isValidMbid: (mbid: string | null | undefined) => mbid is string,
+): WeightedSeedArtist[] {
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+    const artistWeights = new Map<string, WeightedSeedArtist>();
+    for (let index = 0; index < recentPlays.length; index += 1) {
+        const play = recentPlays[index];
+        const track = play.trackId ? trackById.get(play.trackId) : undefined;
+        if (!track || !isValidMbid(track.album.artist.mbid)) continue;
+
+        const existing = artistWeights.get(track.album.artistId);
+        if (existing) {
+            existing.playCount += play._count.id;
+            continue;
+        }
+        artistWeights.set(track.album.artistId, {
+            artist: {
+                name: track.album.artist.name,
+                mbid: track.album.artist.mbid,
+            },
+            playCount: play._count.id,
+            firstSeenIndex: index,
+        });
+    }
+    return Array.from(artistWeights.values());
+}
+
+/**
+ * Weighted-sample artists without replacement using Efraimidis-Spirakis keys.
+ */
+function sampleSeedArtists(
+    artists: WeightedSeedArtist[],
+    limit: number,
+    rng: () => number,
+): SeedArtist[] {
+    return artists
+        .map((entry) => ({
+            ...entry,
+            key: Math.pow(
+                rng(),
+                1 / Math.pow(entry.playCount, DEFAULT_ARTIST_WEIGHT_ALPHA),
+            ),
+        }))
+        .sort(
+            (left, right) =>
+                right.key - left.key ||
+                left.firstSeenIndex - right.firstSeenIndex,
+        )
+        .slice(0, limit)
+        .map((entry) => entry.artist);
 }
 
 /**
@@ -75,20 +158,17 @@ export class DiscoverySeeding {
             include: { album: { include: { artist: true } } },
         });
 
-        const artistMap = new Map<string, SeedArtist>();
-        for (const track of tracks) {
-            const artist = track.album.artist;
-            if (!artistMap.has(track.album.artistId)) {
-                if (this.isValidMbid(artist.mbid)) {
-                    artistMap.set(track.album.artistId, {
-                        name: artist.name,
-                        mbid: artist.mbid,
-                    });
-                }
-            }
-        }
-
-        const artists = Array.from(artistMap.values()).slice(0, limit);
+        const weightedArtists = aggregateArtistPlayCounts(
+            recentPlays,
+            tracks,
+            (mbid): mbid is string => this.isValidMbid(mbid),
+        );
+        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const weekKey = format(weekStart, "yyyy-MM-dd");
+        const rng = createSeededRng(
+            getSeededRandom(`discover-seeds-${userId}-${weekKey}`),
+        );
+        const artists = sampleSeedArtists(weightedArtists, limit, rng);
         logger.debug(
             `[DiscoverySeeding] Found ${artists.length} seed artists from play history`,
         );

@@ -1,21 +1,16 @@
 /**
- * Shared artist-diversity selection for generated queues (GH #46).
+ * Shared primitives for the two artist-diversity selection problems (GH #46).
  *
- * Every queue/mix generation surface (library radio, programmatic
- * mixes, mood buckets, Subsonic samplers) selects tracks through this
- * module instead of carrying its own shuffle/cap logic — four
- * independent selection implementations is how artist-dominance bugs
- * replicated per surface.
+ * `allocateTracksWithArtistWeighting` handles unranked sampled pools: generated
+ * library-radio modes routed through `routes/library/radio.ts`, programmatic
+ * playlists, and Subsonic `getRandomSongs`. It allocates damped proportional
+ * artist slots under a hard share ceiling, then samples within each artist.
  *
- * Model: damped proportional slot allocation. Each artist's weight is
- * `n^alpha` (n = matching tracks). `alpha = 0` degenerates to
- * one-share-each (the flat cap), `alpha = 1` is fully proportional and
- * reproduces the dominance bug; the useful range is between. Slots are
- * distributed by largest-remainder rounding under a hard per-artist
- * ceiling (a share of the target size), so no artist can be a majority
- * regardless of discography size. Tracks within an artist are sampled
- * without replacement using the caller's RNG, so seeded generators stay
- * deterministic per seed.
+ * Score-ranked pools instead preserve ranking through
+ * `programmaticPlaylistArtistCap.applyArtistCap`: mood buckets, Discover Weekly,
+ * and artist-radio similar tracks selected by `libraryRadioBuilder`. Ordered
+ * vibe, liked, playlist, and tracks-radio queues intentionally skip artist
+ * diversification so their source order remains intact.
  */
 
 export interface ArtistAllocationOptions {

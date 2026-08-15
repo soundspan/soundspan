@@ -7,7 +7,10 @@ import {
     subsonicRateLimiter,
 } from "../middleware/subsonicAuth";
 import { prisma } from "../utils/db";
-import { seededShuffle } from "../services/artistSlotAllocation";
+import {
+    allocateTracksWithArtistWeighting,
+    seededShuffle,
+} from "../services/artistSlotAllocation";
 import {
     getResponseFormat,
     sendSubsonicError,
@@ -3557,7 +3560,7 @@ export async function handleGetSongsByGenre(
 }
 
 /**
- * Executes handleGetRandomSongs.
+ * Return a flat shuffled Subsonic song sample with weighted artist diversity.
  */
 export async function handleGetRandomSongs(
     req: Request,
@@ -3655,8 +3658,13 @@ export async function handleGetRandomSongs(
             take: 5000,
         });
 
-        shuffleInPlace(candidates);
-        const songs = candidates.slice(0, size).map((track) =>
+        const selectedCandidates = allocateTracksWithArtistWeighting(
+            candidates,
+            (track) => track.album.artist.id,
+            { targetCount: size },
+        );
+        shuffleInPlace(selectedCandidates);
+        const songs = selectedCandidates.map((track) =>
             formatSongForSubsonic({
                 ...track,
                 genre: genre || undefined,

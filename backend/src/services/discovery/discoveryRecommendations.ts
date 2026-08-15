@@ -1,4 +1,4 @@
-import { addMonths, endOfWeek, startOfWeek, subDays } from "date-fns";
+import { addMonths, endOfWeek, startOfWeek, subDays, subWeeks } from "date-fns";
 import { prisma } from "../../utils/db";
 import {
     TRACK_BROWSE_WHERE,
@@ -12,6 +12,19 @@ import {
     TRACK_DISLIKE_ENTITY_TYPE,
 } from "../trackPreference";
 import { separateArtists } from "../../utils/separateArtists";
+import { applyArtistCap } from "../programmaticPlaylistArtistCap";
+
+/**
+ * Weekly score multiplier for recently featured artists so fresh candidates
+ * outrank repeats without removing repeat artists from the candidate pool.
+ */
+const RECENT_FEATURE_DECAY = 0.6;
+
+/**
+ * Cap the six-week repeat penalty at three featured weeks; 3+ appearances
+ * receive about 0.22x, below the generic candidate score of 0.35.
+ */
+const RECENT_FEATURE_DECAY_MAX_WEEKS = 3;
 
 type RecommendationTier = "high" | "medium" | "explore" | "wildcard";
 
@@ -61,6 +74,195 @@ interface CurrentPlaylistResponse {
     unavailable: never[];
     totalCount: number;
     unavailableCount: number;
+}
+
+type ArtistIdentity = {
+    mbid?: string | null;
+    name?: string | null;
+};
+
+type ResolvedArtistIdentity = {
+    id: string;
+    mbid: string;
+    name: string;
+};
+
+type RecentFeaturedArtist = {
+    artistMbid: string | null;
+    artistName: string;
+    weekStartDate: Date;
+};
+
+type SelectableDiscoveryTrack = {
+    id: string;
+    title: string;
+    duration: number;
+    filePath: string | null;
+    albumId: string;
+    album: {
+        artistId: string;
+        title: string;
+        rgMbid: string;
+        coverUrl: string | null;
+        artist: {
+            id: string;
+            name: string;
+            mbid: string;
+        };
+    };
+};
+
+type ScoredDiscoveryTrack = SelectableDiscoveryTrack & {
+    score: number;
+    tier: RecommendationTier;
+};
+
+/** Build the MBID/name OR clauses used to resolve library artists. */
+function buildArtistIdentityClauses(
+    identities: ArtistIdentity[],
+): Array<Record<string, unknown>> {
+    const mbids = Array.from(
+        new Set(
+            identities
+                .map((identity) => identity.mbid)
+                .filter((mbid): mbid is string => Boolean(mbid)),
+        ),
+    );
+    const names = Array.from(
+        new Set(
+            identities
+                .map((identity) => identity.name)
+                .filter((name): name is string => Boolean(name)),
+        ),
+    );
+    const clauses: Array<Record<string, unknown>> = [];
+    if (mbids.length > 0) clauses.push({ mbid: { in: mbids } });
+    for (const name of names) {
+        clauses.push({
+            name: { equals: name, mode: "insensitive" as const },
+        });
+    }
+    return clauses;
+}
+
+/** Return whether a stored feature row identifies a resolved artist. */
+function featureMatchesArtist(
+    feature: RecentFeaturedArtist,
+    artist: ResolvedArtistIdentity,
+): boolean {
+    if (feature.artistMbid && feature.artistMbid === artist.mbid) return true;
+    return (
+        feature.artistName.localeCompare(artist.name, undefined, {
+            sensitivity: "accent",
+        }) === 0
+    );
+}
+
+/** Count distinct featured weeks for a resolved artist. */
+function countFeaturedWeeks(
+    features: RecentFeaturedArtist[],
+    artist: ResolvedArtistIdentity,
+): number {
+    const weeks = new Set<number>();
+    for (const feature of features) {
+        if (featureMatchesArtist(feature, artist)) {
+            weeks.add(feature.weekStartDate.getTime());
+        }
+    }
+    return weeks.size;
+}
+
+/** Keep the first, highest-ranked track for each album. */
+function dedupeTracksByAlbum<T extends { albumId: string }>(tracks: T[]): T[] {
+    const seenAlbumIds = new Set<string>();
+    const deduped: T[] = [];
+    for (const track of tracks) {
+        if (seenAlbumIds.has(track.albumId)) continue;
+        seenAlbumIds.add(track.albumId);
+        deduped.push(track);
+    }
+    return deduped;
+}
+
+/** Map a selected library track into the persisted Discover Weekly shape. */
+function toSelectedTrack(
+    track: SelectableDiscoveryTrack,
+    similarity: number,
+    tier: RecommendationTier,
+): SelectedTrack {
+    return {
+        trackId: track.id,
+        title: track.title,
+        duration: track.duration,
+        filePath: track.filePath ?? "",
+        albumId: track.albumId,
+        albumTitle: track.album.title,
+        albumMbid: track.album.rgMbid,
+        artistId: track.album.artist.id,
+        artistName: track.album.artist.name,
+        artistMbid: track.album.artist.mbid,
+        coverUrl: track.album.coverUrl,
+        similarity,
+        tier,
+    };
+}
+
+/** Score candidate tracks while preserving all fields needed for selection. */
+function scoreDiscoveryCandidates(
+    tracks: SelectableDiscoveryTrack[],
+    artistScores: Map<string, number>,
+    preferenceScores: Map<string, number>,
+): ScoredDiscoveryTrack[] {
+    return tracks
+        .map((track) => {
+            const artistScore = artistScores.get(track.album.artistId) ?? 0.35;
+            const baseScore = clampSimilarity(artistScore + randomJitter(0.14));
+            const score = clampSimilarity(
+                applyTrackPreferenceSimilarityBias(
+                    baseScore,
+                    preferenceScores.get(track.id) ?? 0,
+                ),
+            );
+            return { ...track, score, tier: similarityToTier(score) };
+        })
+        .sort((left, right) => right.score - left.score);
+}
+
+/** Apply the shared strict/relaxed cap to a ranked discovery pass. */
+function capRankedDiscoveryTracks<T extends SelectableDiscoveryTrack>(
+    tracks: T[],
+    targetCount: number,
+    strictArtistCap: number,
+    relaxedArtistCap: number,
+    alreadySelected?: T[],
+): T[] {
+    return applyArtistCap(dedupeTracksByAlbum(tracks), {
+        preserveInputOrder: true,
+        targetCount,
+        maxPerArtist: strictArtistCap,
+        ...(alreadySelected ? { alreadySelected } : {}),
+        fallback: {
+            enabled: true,
+            relaxationStep: Math.max(1, relaxedArtistCap - strictArtistCap),
+            maxRelaxedPerArtist: relaxedArtistCap,
+        },
+    });
+}
+
+/** Score and map fallback tracks after rank-preserving artist selection. */
+function mapFallbackSelections(
+    tracks: SelectableDiscoveryTrack[],
+    preferenceScores: Map<string, number>,
+): SelectedTrack[] {
+    return tracks.map((track) => {
+        const similarity = clampSimilarity(
+            applyTrackPreferenceSimilarityBias(
+                0.34 + randomJitter(0.15),
+                preferenceScores.get(track.id) ?? 0,
+            ),
+        );
+        return toSelectedTrack(track, similarity, similarityToTier(similarity));
+    });
 }
 
 function clampSimilarity(value: number): number {
@@ -116,26 +318,7 @@ export class DiscoveryRecommendationsService {
 
     private async resolveSeedArtistIds(userId: string): Promise<string[]> {
         const seeds = await discoverySeeding.getSeedArtists(userId);
-
-        const mbids = seeds
-            .map((seed) => seed.mbid)
-            .filter(Boolean) as string[];
-        const names = seeds.map((seed) => seed.name).filter(Boolean);
-
-        const whereClauses: Array<Record<string, unknown>> = [];
-        if (mbids.length > 0) {
-            whereClauses.push({ mbid: { in: mbids } });
-        }
-        if (names.length > 0) {
-            whereClauses.push(
-                ...names.map((name) => ({
-                    name: {
-                        equals: name,
-                        mode: "insensitive" as const,
-                    },
-                })),
-            );
-        }
+        const whereClauses = buildArtistIdentityClauses(seeds);
 
         if (whereClauses.length === 0) {
             return [];
@@ -152,95 +335,143 @@ export class DiscoveryRecommendationsService {
         return artists.map((artist) => artist.id);
     }
 
-    private async buildArtistScoreMap(
+    private async applyRecentArtistDecay(
         userId: string,
-    ): Promise<Map<string, number>> {
-        const scoreMap = new Map<string, number>();
+        scoreMap: Map<string, number>,
+    ): Promise<void> {
+        const currentWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const recentFeatures = await prisma.discoveryAlbum.findMany({
+            where: {
+                userId,
+                weekStartDate: {
+                    lt: currentWeekStart,
+                    gte: subWeeks(currentWeekStart, 6),
+                },
+            },
+            select: {
+                artistMbid: true,
+                artistName: true,
+                weekStartDate: true,
+            },
+        });
+        if (recentFeatures.length === 0) return;
 
+        const whereClauses = buildArtistIdentityClauses(
+            recentFeatures.map((feature) => ({
+                mbid: feature.artistMbid,
+                name: feature.artistName,
+            })),
+        );
+        if (whereClauses.length === 0) return;
+
+        const artists = await prisma.artist.findMany({
+            where: { OR: whereClauses },
+            select: { id: true, mbid: true, name: true },
+        });
+        for (const artist of artists) {
+            const score = scoreMap.get(artist.id);
+            if (score === undefined) continue;
+            const weeks = Math.min(
+                countFeaturedWeeks(recentFeatures, artist),
+                RECENT_FEATURE_DECAY_MAX_WEEKS,
+            );
+            if (weeks === 0) continue;
+            scoreMap.set(
+                artist.id,
+                score * Math.pow(RECENT_FEATURE_DECAY, weeks),
+            );
+        }
+    }
+
+    private async addSeedArtistScores(
+        userId: string,
+        scoreMap: Map<string, number>,
+    ): Promise<void> {
         const seedArtistIds = await this.resolveSeedArtistIds(userId);
         for (const artistId of seedArtistIds) {
             scoreMap.set(artistId, 0.62 + randomJitter(0.08));
         }
+        if (seedArtistIds.length === 0) return;
 
-        if (seedArtistIds.length > 0) {
-            const similarEdges = await prisma.similarArtist.findMany({
-                where: {
-                    fromArtistId: { in: seedArtistIds },
-                },
-                orderBy: { weight: "desc" },
-                select: {
-                    toArtistId: true,
-                    weight: true,
-                },
-                take: 800,
-            });
-
-            for (const edge of similarEdges) {
-                const weighted = clampSimilarity(edge.weight || 0.35);
-                const existing = scoreMap.get(edge.toArtistId) || 0;
-                if (weighted > existing) {
-                    scoreMap.set(edge.toArtistId, weighted);
-                }
+        const similarEdges = await prisma.similarArtist.findMany({
+            where: { fromArtistId: { in: seedArtistIds } },
+            orderBy: { weight: "desc" },
+            select: { toArtistId: true, weight: true },
+            take: 800,
+        });
+        for (const edge of similarEdges) {
+            const weighted = clampSimilarity(edge.weight || 0.35);
+            const existing = scoreMap.get(edge.toArtistId) || 0;
+            if (weighted > existing) {
+                scoreMap.set(edge.toArtistId, weighted);
             }
         }
+    }
 
-        if (scoreMap.size === 0) {
-            // Fallback: derive seeds from recent plays when metadata seeding is unavailable.
-            const recentPlays = await prisma.play.findMany({
-                where: {
-                    userId,
-                    playedAt: { gte: subDays(new Date(), 120) },
-                    track: {
-                        ...TRACK_VISIBLE_WHERE,
-                        ...TRACK_BROWSE_WHERE,
+    private async addRecentPlayArtistScores(
+        userId: string,
+        scoreMap: Map<string, number>,
+    ): Promise<void> {
+        if (scoreMap.size > 0) return;
+
+        const recentPlays = await prisma.play.findMany({
+            where: {
+                userId,
+                playedAt: { gte: subDays(new Date(), 120) },
+                track: {
+                    ...TRACK_VISIBLE_WHERE,
+                    ...TRACK_BROWSE_WHERE,
+                },
+            },
+            select: {
+                track: {
+                    select: {
+                        album: { select: { artistId: true } },
                     },
                 },
-                select: {
-                    track: {
-                        select: {
-                            album: {
-                                select: {
-                                    artistId: true,
-                                },
-                            },
-                        },
-                    },
-                },
-                take: 600,
-                orderBy: { playedAt: "desc" },
-            });
-
-            for (const play of recentPlays) {
-                const artistId = play.track?.album?.artistId;
-                if (!artistId) continue;
-                if (!scoreMap.has(artistId)) {
-                    scoreMap.set(artistId, 0.5 + randomJitter(0.08));
-                }
+            },
+            take: 600,
+            orderBy: { playedAt: "desc" },
+        });
+        for (const play of recentPlays) {
+            const artistId = play.track?.album?.artistId;
+            if (artistId && !scoreMap.has(artistId)) {
+                scoreMap.set(artistId, 0.5 + randomJitter(0.08));
             }
         }
+    }
 
-        if (scoreMap.size === 0) {
-            // Last resort fallback for very fresh libraries.
-            const fallbackArtists = await prisma.artist.findMany({
-                where: {
-                    albums: {
-                        some: {
-                            tracks: {
-                                some: {},
-                            },
-                        },
+    private async addCatalogArtistScores(
+        scoreMap: Map<string, number>,
+    ): Promise<void> {
+        if (scoreMap.size > 0) return;
+
+        const fallbackArtists = await prisma.artist.findMany({
+            where: {
+                albums: {
+                    some: {
+                        tracks: { some: {} },
                     },
                 },
-                select: { id: true },
-                take: 100,
-                orderBy: { countsLastUpdated: "desc" },
-            });
-
-            for (const artist of fallbackArtists) {
-                scoreMap.set(artist.id, 0.4 + randomJitter(0.08));
-            }
+            },
+            select: { id: true },
+            take: 100,
+            orderBy: { countsLastUpdated: "desc" },
+        });
+        for (const artist of fallbackArtists) {
+            scoreMap.set(artist.id, 0.4 + randomJitter(0.08));
         }
+    }
 
+    private async buildArtistScoreMap(
+        userId: string,
+    ): Promise<Map<string, number>> {
+        const scoreMap = new Map<string, number>();
+        await this.addSeedArtistScores(userId, scoreMap);
+        await this.addRecentPlayArtistScores(userId, scoreMap);
+        await this.addCatalogArtistScores(scoreMap);
+
+        await this.applyRecentArtistDecay(userId, scoreMap);
         return scoreMap;
     }
 
@@ -302,15 +533,10 @@ export class DiscoveryRecommendationsService {
         return scoreMap;
     }
 
-    private async selectTracks(
-        userId: string,
-        targetCount: number,
-    ): Promise<SelectedTrack[]> {
-        const strictArtistCap = getArtistCapForTarget(targetCount);
-        const relaxedArtistCap = getRelaxedArtistCapForTarget(targetCount);
-        const artistScores = await this.buildArtistScoreMap(userId);
-        const prioritizedArtistIds = Array.from(artistScores.keys());
-
+    private async getSelectionFilters(userId: string): Promise<{
+        recentTrackIds: string[];
+        excludedAlbumMbids: string[];
+    }> {
         const recentPlays = await prisma.play.findMany({
             where: {
                 userId,
@@ -324,19 +550,25 @@ export class DiscoveryRecommendationsService {
             .filter(
                 (trackId): trackId is string => typeof trackId === "string",
             );
-
         const activeExclusions = await prisma.discoverExclusion.findMany({
-            where: {
-                userId,
-                expiresAt: { gt: new Date() },
-            },
+            where: { userId, expiresAt: { gt: new Date() } },
             select: { albumMbid: true },
         });
-        const excludedAlbumMbids = activeExclusions.map(
-            (entry) => entry.albumMbid,
-        );
+        return {
+            recentTrackIds,
+            excludedAlbumMbids: activeExclusions.map(
+                (entry) => entry.albumMbid,
+            ),
+        };
+    }
 
-        const candidateTracks = await prisma.track.findMany({
+    private async findPrimaryCandidateTracks(
+        targetCount: number,
+        prioritizedArtistIds: string[],
+        recentTrackIds: string[],
+        excludedAlbumMbids: string[],
+    ): Promise<SelectableDiscoveryTrack[]> {
+        return prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
                 ...TRACK_BROWSE_WHERE,
@@ -358,11 +590,7 @@ export class DiscoveryRecommendationsService {
                 album: {
                     include: {
                         artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                                mbid: true,
-                            },
+                            select: { id: true, name: true, mbid: true },
                         },
                     },
                 },
@@ -370,235 +598,121 @@ export class DiscoveryRecommendationsService {
             take: Math.max(targetCount * 20, 220),
             orderBy: [{ updatedAt: "desc" }],
         });
-        const candidatePreferenceScores = await this.getTrackPreferenceScoreMap(
-            userId,
-            candidateTracks.map((track) => track.id),
-        );
+    }
 
-        const scoredCandidates = candidateTracks
-            .map((track) => {
-                const artistScore =
-                    artistScores.get(track.album.artistId) ?? 0.35;
-                const baseScore = clampSimilarity(
-                    artistScore + randomJitter(0.14),
-                );
-                const score = clampSimilarity(
-                    applyTrackPreferenceSimilarityBias(
-                        baseScore,
-                        candidatePreferenceScores.get(track.id) ?? 0,
-                    ),
-                );
-                return {
-                    track,
-                    score,
-                    tier: similarityToTier(score),
-                };
-            })
-            .sort((left, right) => right.score - left.score);
-
-        const selected: SelectedTrack[] = [];
-        const selectedAlbumIds = new Set<string>();
-        const selectedTrackIds = new Set<string>();
-        const selectedArtistCounts = new Map<string, number>();
-
-        const canSelectArtist = (artistId: string, cap: number): boolean =>
-            (selectedArtistCounts.get(artistId) ?? 0) < cap;
-
-        const recordSelectedArtist = (artistId: string): void => {
-            selectedArtistCounts.set(
-                artistId,
-                (selectedArtistCounts.get(artistId) ?? 0) + 1,
-            );
-        };
-
-        const deferredPrimaryCandidates: typeof scoredCandidates = [];
-
-        for (const candidate of scoredCandidates) {
-            if (selected.length >= targetCount) break;
-            if (selectedTrackIds.has(candidate.track.id)) continue;
-            if (selectedAlbumIds.has(candidate.track.albumId)) continue;
-            if (
-                !canSelectArtist(
-                    candidate.track.album.artist.id,
-                    strictArtistCap,
-                )
-            ) {
-                deferredPrimaryCandidates.push(candidate);
-                continue;
-            }
-
-            selectedTrackIds.add(candidate.track.id);
-            selectedAlbumIds.add(candidate.track.albumId);
-            recordSelectedArtist(candidate.track.album.artist.id);
-
-            selected.push({
-                trackId: candidate.track.id,
-                title: candidate.track.title,
-                duration: candidate.track.duration,
-                filePath: candidate.track.filePath ?? "",
-                albumId: candidate.track.albumId,
-                albumTitle: candidate.track.album.title,
-                albumMbid: candidate.track.album.rgMbid,
-                artistId: candidate.track.album.artist.id,
-                artistName: candidate.track.album.artist.name,
-                artistMbid: candidate.track.album.artist.mbid,
-                coverUrl: candidate.track.album.coverUrl,
-                similarity: candidate.score,
-                tier: candidate.tier,
-            });
-        }
-
-        if (selected.length < targetCount) {
-            for (const candidate of deferredPrimaryCandidates) {
-                if (selected.length >= targetCount) break;
-                if (selectedTrackIds.has(candidate.track.id)) continue;
-                if (selectedAlbumIds.has(candidate.track.albumId)) continue;
-                if (
-                    !canSelectArtist(
-                        candidate.track.album.artist.id,
-                        relaxedArtistCap,
-                    )
-                ) {
-                    continue;
-                }
-
-                selectedTrackIds.add(candidate.track.id);
-                selectedAlbumIds.add(candidate.track.albumId);
-                recordSelectedArtist(candidate.track.album.artist.id);
-
-                selected.push({
-                    trackId: candidate.track.id,
-                    title: candidate.track.title,
-                    duration: candidate.track.duration,
-                    filePath: candidate.track.filePath ?? "",
-                    albumId: candidate.track.albumId,
-                    albumTitle: candidate.track.album.title,
-                    albumMbid: candidate.track.album.rgMbid,
-                    artistId: candidate.track.album.artist.id,
-                    artistName: candidate.track.album.artist.name,
-                    artistMbid: candidate.track.album.artist.mbid,
-                    coverUrl: candidate.track.album.coverUrl,
-                    similarity: candidate.score,
-                    tier: candidate.tier,
-                });
-            }
-        }
-
-        if (selected.length < targetCount) {
-            const fallbackTracks = await prisma.track.findMany({
-                where: {
-                    ...TRACK_VISIBLE_WHERE,
-                    ...TRACK_BROWSE_WHERE,
-                    duration: { gt: 0 },
-                    id: { notIn: Array.from(selectedTrackIds) },
-                    album: {
-                        location: { in: ["LIBRARY", "FEDERATED"] },
-                        ...(excludedAlbumMbids.length > 0
-                            ? { rgMbid: { notIn: excludedAlbumMbids } }
-                            : {}),
-                    },
+    private async findFallbackCandidateTracks(
+        targetCount: number,
+        selectedTrackIds: string[],
+        excludedAlbumMbids: string[],
+    ): Promise<SelectableDiscoveryTrack[]> {
+        return prisma.track.findMany({
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                ...TRACK_BROWSE_WHERE,
+                duration: { gt: 0 },
+                id: { notIn: selectedTrackIds },
+                album: {
+                    location: { in: ["LIBRARY", "FEDERATED"] },
+                    ...(excludedAlbumMbids.length > 0
+                        ? { rgMbid: { notIn: excludedAlbumMbids } }
+                        : {}),
                 },
-                include: {
-                    album: {
-                        include: {
-                            artist: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    mbid: true,
-                                },
-                            },
+            },
+            include: {
+                album: {
+                    include: {
+                        artist: {
+                            select: { id: true, name: true, mbid: true },
                         },
                     },
                 },
-                take: Math.max(targetCount * 10, 180),
-                orderBy: [{ updatedAt: "desc" }],
-            });
-            const fallbackPreferenceScores =
-                await this.getTrackPreferenceScoreMap(
-                    userId,
-                    fallbackTracks.map((track) => track.id),
-                );
+            },
+            take: Math.max(targetCount * 10, 180),
+            orderBy: [{ updatedAt: "desc" }],
+        });
+    }
 
-            const deferredFallbackTracks: typeof fallbackTracks = [];
+    private async selectFallbackTracks(
+        userId: string,
+        targetCount: number,
+        strictArtistCap: number,
+        relaxedArtistCap: number,
+        primaryTracks: ScoredDiscoveryTrack[],
+        excludedAlbumMbids: string[],
+    ): Promise<SelectedTrack[]> {
+        const selectedTrackIds = primaryTracks.map((track) => track.id);
+        const selectedAlbumIds = new Set(
+            primaryTracks.map((track) => track.albumId),
+        );
+        const fallbackTracks = await this.findFallbackCandidateTracks(
+            targetCount,
+            selectedTrackIds,
+            excludedAlbumMbids,
+        );
+        const preferenceScores = await this.getTrackPreferenceScoreMap(
+            userId,
+            fallbackTracks.map((track) => track.id),
+        );
+        const eligibleTracks = fallbackTracks.filter(
+            (track) =>
+                !selectedTrackIds.includes(track.id) &&
+                !selectedAlbumIds.has(track.albumId),
+        );
+        const selections = capRankedDiscoveryTracks(
+            eligibleTracks,
+            targetCount - primaryTracks.length,
+            strictArtistCap,
+            relaxedArtistCap,
+            primaryTracks,
+        );
+        return mapFallbackSelections(selections, preferenceScores);
+    }
 
-            for (const track of fallbackTracks) {
-                if (selected.length >= targetCount) break;
-                if (selectedTrackIds.has(track.id)) continue;
-                if (selectedAlbumIds.has(track.albumId)) continue;
-                if (!canSelectArtist(track.album.artist.id, strictArtistCap)) {
-                    deferredFallbackTracks.push(track);
-                    continue;
-                }
+    private async selectTracks(
+        userId: string,
+        targetCount: number,
+    ): Promise<SelectedTrack[]> {
+        const strictArtistCap = getArtistCapForTarget(targetCount);
+        const relaxedArtistCap = getRelaxedArtistCapForTarget(targetCount);
+        const artistScores = await this.buildArtistScoreMap(userId);
+        const prioritizedArtistIds = Array.from(artistScores.keys());
+        const { recentTrackIds, excludedAlbumMbids } =
+            await this.getSelectionFilters(userId);
+        const candidateTracks = await this.findPrimaryCandidateTracks(
+            targetCount,
+            prioritizedArtistIds,
+            recentTrackIds,
+            excludedAlbumMbids,
+        );
+        const preferenceScores = await this.getTrackPreferenceScoreMap(
+            userId,
+            candidateTracks.map((track) => track.id),
+        );
+        const scoredCandidates = scoreDiscoveryCandidates(
+            candidateTracks,
+            artistScores,
+            preferenceScores,
+        );
+        const primaryTracks = capRankedDiscoveryTracks(
+            scoredCandidates,
+            targetCount,
+            strictArtistCap,
+            relaxedArtistCap,
+        );
+        const selected = primaryTracks.map((track) =>
+            toSelectedTrack(track, track.score, track.tier),
+        );
 
-                selectedTrackIds.add(track.id);
-                selectedAlbumIds.add(track.albumId);
-                recordSelectedArtist(track.album.artist.id);
-
-                const fallbackSimilarity = clampSimilarity(
-                    applyTrackPreferenceSimilarityBias(
-                        0.34 + randomJitter(0.15),
-                        fallbackPreferenceScores.get(track.id) ?? 0,
-                    ),
-                );
-                selected.push({
-                    trackId: track.id,
-                    title: track.title,
-                    duration: track.duration,
-                    filePath: track.filePath ?? "",
-                    albumId: track.albumId,
-                    albumTitle: track.album.title,
-                    albumMbid: track.album.rgMbid,
-                    artistId: track.album.artist.id,
-                    artistName: track.album.artist.name,
-                    artistMbid: track.album.artist.mbid,
-                    coverUrl: track.album.coverUrl,
-                    similarity: fallbackSimilarity,
-                    tier: similarityToTier(fallbackSimilarity),
-                });
-            }
-
-            if (selected.length < targetCount) {
-                for (const track of deferredFallbackTracks) {
-                    if (selected.length >= targetCount) break;
-                    if (selectedTrackIds.has(track.id)) continue;
-                    if (selectedAlbumIds.has(track.albumId)) continue;
-                    if (
-                        !canSelectArtist(
-                            track.album.artist.id,
-                            relaxedArtistCap,
-                        )
-                    ) {
-                        continue;
-                    }
-
-                    selectedTrackIds.add(track.id);
-                    selectedAlbumIds.add(track.albumId);
-                    recordSelectedArtist(track.album.artist.id);
-
-                    const fallbackSimilarity = clampSimilarity(
-                        applyTrackPreferenceSimilarityBias(
-                            0.34 + randomJitter(0.15),
-                            fallbackPreferenceScores.get(track.id) ?? 0,
-                        ),
-                    );
-                    selected.push({
-                        trackId: track.id,
-                        title: track.title,
-                        duration: track.duration,
-                        filePath: track.filePath ?? "",
-                        albumId: track.albumId,
-                        albumTitle: track.album.title,
-                        albumMbid: track.album.rgMbid,
-                        artistId: track.album.artist.id,
-                        artistName: track.album.artist.name,
-                        artistMbid: track.album.artist.mbid,
-                        coverUrl: track.album.coverUrl,
-                        similarity: fallbackSimilarity,
-                        tier: similarityToTier(fallbackSimilarity),
-                    });
-                }
-            }
+        if (selected.length < targetCount) {
+            const fallbackSelections = await this.selectFallbackTracks(
+                userId,
+                targetCount,
+                strictArtistCap,
+                relaxedArtistCap,
+                primaryTracks,
+                excludedAlbumMbids,
+            );
+            selected.push(...fallbackSelections);
         }
 
         return separateArtists(

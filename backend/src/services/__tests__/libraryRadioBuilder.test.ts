@@ -89,7 +89,10 @@ jest.mock("../../utils/shuffle", () => ({
     shuffleArray: (values: unknown[]) => values,
 }));
 
-import { buildMultiTrackRadio } from "../libraryRadioBuilder";
+import {
+    buildMultiTrackRadio,
+    selectTracksWithArtistDiversity,
+} from "../libraryRadioBuilder";
 
 const createSeedTrack = (genre: string) => ({
     id: "seed-1",
@@ -103,6 +106,27 @@ const createSeedTrack = (genre: string) => ({
             userGenres: [],
         },
     },
+});
+
+describe("selectTracksWithArtistDiversity", () => {
+    it("returns a shorter result instead of unbounded narrow-pool refill", () => {
+        const tracks = [
+            { id: "a-1", artistId: "artist-a" },
+            { id: "a-2", artistId: "artist-a" },
+            { id: "a-3", artistId: "artist-a" },
+            { id: "a-4", artistId: "artist-a" },
+            { id: "a-5", artistId: "artist-a" },
+            { id: "b-1", artistId: "artist-b" },
+        ];
+
+        const selected = selectTracksWithArtistDiversity(tracks, 6, 1, 2);
+
+        expect(selected.map((track) => track.id)).toEqual([
+            "a-1",
+            "b-1",
+            "a-2",
+        ]);
+    });
 });
 
 describe("buildMultiTrackRadio genre fallback", () => {

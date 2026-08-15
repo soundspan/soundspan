@@ -10,17 +10,26 @@ import { getMergedGenres } from "../utils/metadataOverrides";
 import { shuffleArray } from "../utils/shuffle";
 import { escapeLikePattern } from "../utils/likePattern";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import { applyArtistCap } from "./programmaticPlaylistArtistCap";
 
+/** Return the strict per-artist cap for a requested radio queue length. */
 export const getRadioArtistCapForLimit = (limit: number): number => {
     if (!Number.isFinite(limit) || limit <= 0) return 2;
     return Math.max(2, Math.floor(limit / 12));
 };
 
+/** Return the bounded relaxed per-artist cap for a radio queue length. */
 export const getRelaxedRadioArtistCapForLimit = (limit: number): number => {
     const strictCap = getRadioArtistCapForLimit(limit);
     return Math.max(strictCap + 1, Math.ceil(limit / 6));
 };
 
+/**
+ * Select ranked radio tracks under strict and relaxed artist caps.
+ *
+ * The final refill remains bounded by the shared 30%-share ceiling, so a
+ * narrow one- or two-artist pool may return fewer tracks than requested.
+ */
 export const selectTracksWithArtistDiversity = <
     T extends { id: string; artistId: string },
 >(
@@ -29,52 +38,18 @@ export const selectTracksWithArtistDiversity = <
     strictCap: number,
     relaxedCap: number,
 ): T[] => {
-    if (!Array.isArray(tracks) || targetCount <= 0) {
-        return [];
-    }
-
-    const selected: T[] = [];
-    const deferred: T[] = [];
-    const artistCounts = new Map<string, number>();
-
-    const trySelect = (track: T, cap: number): boolean => {
-        const artistKey =
-            typeof track.artistId === "string" && track.artistId.length > 0
-                ? track.artistId
-                : `unknown:${track.id}`;
-        const count = artistCounts.get(artistKey) ?? 0;
-
-        if (count >= cap) {
-            return false;
-        }
-
-        artistCounts.set(artistKey, count + 1);
-        selected.push(track);
-        return true;
-    };
-
-    for (const track of tracks) {
-        if (selected.length >= targetCount) break;
-        if (!trySelect(track, strictCap)) {
-            deferred.push(track);
-        }
-    }
-
-    if (selected.length < targetCount) {
-        for (const track of deferred) {
-            if (selected.length >= targetCount) break;
-            trySelect(track, relaxedCap);
-        }
-    }
-
-    if (selected.length < targetCount) {
-        for (const track of deferred) {
-            if (selected.length >= targetCount) break;
-            selected.push(track);
-        }
-    }
-
-    return selected.slice(0, targetCount);
+    return applyArtistCap(tracks, {
+        preserveInputOrder: true,
+        targetCount,
+        maxPerArtist: strictCap,
+        getArtistId: (track) => track.artistId,
+        fallback: {
+            enabled: true,
+            relaxationStep: Math.max(1, relaxedCap - strictCap),
+            maxRelaxedPerArtist: relaxedCap,
+            refillFromExcludedAfterMaxRelaxation: true,
+        },
+    });
 };
 
 /**

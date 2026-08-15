@@ -201,6 +201,7 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - `search`/`search2`/`search3` now honor `musicFolderId` filtering, normalize quoted-empty full-sync queries (`query=\"\"`), and treat zero counts as bounded full-sync requests.
 - `search`/`search2`/`search3` now pass through large offset values without a hard `10000` clamp so client pagination can complete on very large libraries.
 - Song/album protocol payloads now project `genre` from library metadata (prefer `userGenres`, then `genres`), and genre-filtered song responses (`getSongsByGenre`, `getRandomSongs` with `genre`) force explicit `genre` values in each returned song item.
+- `getRandomSongs` now uses artist-diversity weighted sampling before returning its flat shuffled song list.
 - `getTopSongs` now deterministically falls back to case-insensitive artist-name lookup when ID-path lookup misses, including artist names containing hyphens.
 - `getSimilarSongs` uses artist-to-similar-artist graph data; `getSimilarSongs2` merges similar-artist tracks with genre and same-artist fallback sources to avoid empty responses when similarity metadata is sparse.
 - `getLyrics` currently resolves by best-match library track (artist/title query), then returns plain lyrics or synced lyrics flattened to plain text lines.

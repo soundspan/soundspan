@@ -73,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Discover Weekly now rotates play-weighted seed artists deterministically each
+  user-week and decays scores for artists featured in up to three of the prior
+  six weeks.
+- Subsonic `getRandomSongs` now uses artist-diversity weighted sampling before
+  shuffling its response.
+- Score-ranked discovery and artist-radio selection now share the common artist
+  cap primitive. Narrow artist-radio pools respect the hard artist-share ceiling
+  and may return fewer tracks instead of using an uncapped refill.
 - Federated audiobook mirror IDs now use the Node.js `randomUUID()` standard
   library API; the direct `@paralleldrive/cuid2` dependency was removed.
 

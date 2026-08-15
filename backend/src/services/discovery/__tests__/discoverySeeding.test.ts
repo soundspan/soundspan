@@ -43,8 +43,14 @@ describe("DiscoverySeeding", () => {
     let seeding: DiscoverySeeding;
 
     beforeEach(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date("2026-08-12T12:00:00.000Z"));
         jest.clearAllMocks();
         seeding = new DiscoverySeeding();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     describe("getSeedArtists", () => {
@@ -126,14 +132,18 @@ describe("DiscoverySeeding", () => {
             const result = await seeding.getSeedArtists(userId);
 
             expect(result).toHaveLength(5);
-            expect(result[0]).toEqual({
-                name: "Artist One",
-                mbid: "valid-mbid-1",
-            });
-            expect(result[1]).toEqual({
-                name: "Artist Two",
-                mbid: "valid-mbid-2",
-            });
+            expect(result).toEqual(
+                expect.arrayContaining([
+                    {
+                        name: "Artist One",
+                        mbid: "valid-mbid-1",
+                    },
+                    {
+                        name: "Artist Two",
+                        mbid: "valid-mbid-2",
+                    },
+                ]),
+            );
         });
 
         it("should filter out artists with temp- MBIDs", async () => {
@@ -214,7 +224,7 @@ describe("DiscoverySeeding", () => {
             // Should have 4 valid artists (artist-1 has temp- MBID)
             expect(result).toHaveLength(4);
             expect(result.find((a) => a.mbid === "temp-12345")).toBeUndefined();
-            expect(result[0]).toEqual({
+            expect(result).toContainEqual({
                 name: "Artist Two",
                 mbid: "valid-mbid-2",
             });
@@ -298,7 +308,7 @@ describe("DiscoverySeeding", () => {
             // Should have 4 valid artists (artist-1 has null MBID)
             expect(result).toHaveLength(4);
             expect(result.find((a) => a.mbid === null)).toBeUndefined();
-            expect(result[0]).toEqual({
+            expect(result).toContainEqual({
                 name: "Artist Two",
                 mbid: "valid-mbid-2",
             });
@@ -403,6 +413,55 @@ describe("DiscoverySeeding", () => {
             expect(result.length).toBeLessThanOrEqual(5);
         });
 
+        it("dampens aggregated artist plays and rotates the deterministic sample across weeks", async () => {
+            const recentPlays = [
+                { trackId: "a-1", _count: { id: 64 } },
+                { trackId: "a-2", _count: { id: 36 } },
+                { trackId: "b-1", _count: { id: 36 } },
+                { trackId: "c-1", _count: { id: 25 } },
+                { trackId: "d-1", _count: { id: 16 } },
+                { trackId: "e-1", _count: { id: 9 } },
+                { trackId: "f-1", _count: { id: 4 } },
+            ];
+            const tracks = recentPlays.map((play) => {
+                const artistId = play.trackId.slice(0, 1);
+                return {
+                    id: play.trackId,
+                    album: {
+                        artistId,
+                        artist: {
+                            id: artistId,
+                            name: `Artist ${artistId.toUpperCase()}`,
+                            mbid: `mbid-${artistId}`,
+                        },
+                    },
+                };
+            });
+
+            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(
+                recentPlays,
+            );
+            (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
+
+            const first = await seeding.getSeedArtists(userId, 3);
+            const repeated = await seeding.getSeedArtists(userId, 3);
+
+            jest.setSystemTime(new Date("2026-08-19T12:00:00.000Z"));
+            const followingWeek = await seeding.getSeedArtists(userId, 3);
+
+            expect(first.map((artist) => artist.mbid)).toEqual([
+                "mbid-a",
+                "mbid-c",
+                "mbid-e",
+            ]);
+            expect(repeated).toEqual(first);
+            expect(followingWeek.map((artist) => artist.mbid)).toEqual([
+                "mbid-b",
+                "mbid-a",
+                "mbid-c",
+            ]);
+        });
+
         it("should deduplicate artists from multiple tracks", async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [
@@ -480,11 +539,13 @@ describe("DiscoverySeeding", () => {
 
             // Should have 3 unique artists despite 5 tracks (artist-1 appears 3 times)
             expect(result).toHaveLength(3);
-            expect(result.map((a) => a.name)).toEqual([
-                "Same Artist",
-                "Different Artist",
-                "Third Artist",
-            ]);
+            expect(result.map((a) => a.name)).toEqual(
+                expect.arrayContaining([
+                    "Same Artist",
+                    "Different Artist",
+                    "Third Artist",
+                ]),
+            );
         });
     });
 

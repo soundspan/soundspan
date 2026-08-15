@@ -267,28 +267,31 @@ describe("subsonic core compatibility handlers", () => {
     });
 
     it("defaults random-song size and ignores an invalid fromYear while shuffling", async () => {
-        const candidateSongs = Array.from({ length: 20 }, (_, index) => ({
-            id: `track-${index + 1}`,
-            title: `Song ${index + 1}`,
-            trackNo: index + 1,
-            discNo: 1,
-            duration: 180,
-            fileSize: 1234,
-            mime: "audio/mpeg",
-            filePath: `Artist One/Album One/${index + 1}.mp3`,
-            album: {
-                id: "album-1",
-                title: "Album One",
-                year: 2024,
-                coverUrl: null,
-                genres: [],
-                userGenres: null,
-                artist: {
-                    id: "artist-1",
-                    name: "Artist One",
+        const candidateSongs = Array.from({ length: 20 }, (_, index) => {
+            const artistNumber = Math.floor(index / 4) + 1;
+            return {
+                id: `track-${index + 1}`,
+                title: `Song ${index + 1}`,
+                trackNo: index + 1,
+                discNo: 1,
+                duration: 180,
+                fileSize: 1234,
+                mime: "audio/mpeg",
+                filePath: `Artist ${artistNumber}/Album/${index + 1}.mp3`,
+                album: {
+                    id: `album-${artistNumber}`,
+                    title: `Album ${artistNumber}`,
+                    year: 2024,
+                    coverUrl: null,
+                    genres: [],
+                    userGenres: null,
+                    artist: {
+                        id: `artist-${artistNumber}`,
+                        name: `Artist ${artistNumber}`,
+                    },
                 },
-            },
-        }));
+            };
+        });
         mockTrackFindMany.mockResolvedValue(candidateSongs);
         const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.6);
 
@@ -317,6 +320,52 @@ describe("subsonic core compatibility handlers", () => {
                 take: 5000,
             }),
         );
+        randomSpy.mockRestore();
+    });
+
+    it("weights random songs by artist before returning a flat shuffle", async () => {
+        const makeSong = (artistId: string, index: number) => ({
+            id: `${artistId}-track-${index}`,
+            title: `${artistId} Song ${index}`,
+            trackNo: index,
+            discNo: 1,
+            duration: 180,
+            fileSize: 1234,
+            mime: "audio/mpeg",
+            filePath: `${artistId}/Album/${index}.mp3`,
+            album: {
+                id: `${artistId}-album-${index}`,
+                title: `${artistId} Album`,
+                year: 2024,
+                coverUrl: null,
+                genres: [],
+                userGenres: null,
+                artist: {
+                    id: artistId,
+                    name: artistId,
+                },
+            },
+        });
+        const dominant = Array.from({ length: 20 }, (_, index) =>
+            makeSong("artist-a", index + 1),
+        );
+        const tail = ["artist-b", "artist-c", "artist-d", "artist-e"].flatMap(
+            (artistId) => [makeSong(artistId, 1), makeSong(artistId, 2)],
+        );
+        mockTrackFindMany.mockResolvedValue([...dominant, ...tail]);
+        const randomSpy = jest.spyOn(Math, "random").mockReturnValue(0.999);
+
+        await handleGetRandomSongs(buildReq({ size: "10" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            randomSongs: { song: Array<{ artist: string }> };
+        };
+        const artistACount = payload.randomSongs.song.filter(
+            (song) => song.artist === "artist-a",
+        ).length;
+        expect(payload.randomSongs.song).toHaveLength(10);
+        expect(artistACount).toBeLessThanOrEqual(3);
+        expect(randomSpy).toHaveBeenCalled();
         randomSpy.mockRestore();
     });
 

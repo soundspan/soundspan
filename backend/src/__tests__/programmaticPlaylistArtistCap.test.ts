@@ -38,6 +38,48 @@ function countByArtist(tracks: TestTrack[]): Map<string, number> {
 }
 
 describe("applyArtistCap", () => {
+    it("uses a custom artist identity before the album artist path", () => {
+        const input = [
+            { ...makeTrack("a-1", "album-a"), artistId: "artist-a" },
+            { ...makeTrack("a-2", "album-b"), artistId: "artist-a" },
+            { ...makeTrack("u-1", "album-u"), artistId: "" },
+            { ...makeTrack("u-2", "album-u"), artistId: "" },
+        ];
+
+        const selected = applyArtistCap(input, {
+            maxPerArtist: 1,
+            preserveInputOrder: true,
+            getArtistId: (track) => track.artistId,
+        });
+
+        expect(selected.map((track) => track.id)).toEqual([
+            "a-1",
+            "u-1",
+            "u-2",
+        ]);
+    });
+
+    it("carries artist counts from tracks selected by an earlier pass", () => {
+        const selected = applyArtistCap(
+            [
+                makeTrack("a-new-1", "artist-a"),
+                makeTrack("a-new-2", "artist-a"),
+                makeTrack("b-new-1", "artist-b"),
+            ],
+            {
+                maxPerArtist: 2,
+                targetCount: 3,
+                preserveInputOrder: true,
+                alreadySelected: [makeTrack("a-existing", "artist-a")],
+            },
+        );
+
+        expect(selected.map((track) => track.id)).toEqual([
+            "a-new-1",
+            "b-new-1",
+        ]);
+    });
+
     it("enforces max-per-artist cap", () => {
         const input: TestTrack[] = [
             makeTrack("a-1", "artist-a"),

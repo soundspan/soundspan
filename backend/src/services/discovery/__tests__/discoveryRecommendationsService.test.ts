@@ -1,4 +1,4 @@
-import { addMonths, endOfWeek, startOfWeek, subDays } from "date-fns";
+import { addMonths, endOfWeek, startOfWeek, subDays, subWeeks } from "date-fns";
 import { DiscoveryRecommendationsService } from "../discoveryRecommendations";
 import { discoverySeeding } from "../discoverySeeding";
 import { prisma } from "../../../utils/db";
@@ -12,6 +12,7 @@ jest.mock("date-fns", () => {
         endOfWeek: jest.fn(),
         startOfWeek: jest.fn(),
         subDays: jest.fn(),
+        subWeeks: jest.fn(),
     };
 });
 
@@ -79,6 +80,7 @@ const WEEK_START = new Date("2025-03-17T00:00:00.000Z");
 const WEEK_END = new Date("2025-03-23T23:59:59.999Z");
 const SUB_120 = new Date("2024-11-19T12:00:00.000Z");
 const SUB_14 = new Date("2025-03-05T12:00:00.000Z");
+const SUB_6_WEEKS = new Date("2025-02-03T00:00:00.000Z");
 const EXPIRES_AT = new Date("2025-09-19T12:00:00.000Z");
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
@@ -90,6 +92,7 @@ const mockAddMonths = addMonths as jest.MockedFunction<typeof addMonths>;
 const mockEndOfWeek = endOfWeek as jest.MockedFunction<typeof endOfWeek>;
 const mockStartOfWeek = startOfWeek as jest.MockedFunction<typeof startOfWeek>;
 const mockSubDays = subDays as jest.MockedFunction<typeof subDays>;
+const mockSubWeeks = subWeeks as jest.MockedFunction<typeof subWeeks>;
 
 describe("DiscoveryRecommendationsService", () => {
     let service: DiscoveryRecommendationsService;
@@ -106,11 +109,13 @@ describe("DiscoveryRecommendationsService", () => {
             (_date: Parameters<typeof subDays>[0], amount: number) =>
                 amount === 120 ? SUB_120 : SUB_14,
         );
+        mockSubWeeks.mockReturnValue(SUB_6_WEEKS);
         mockAddMonths.mockReturnValue(EXPIRES_AT);
 
         mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(0);
         (mockPrisma.likedTrack.findMany as jest.Mock).mockResolvedValue([]);
         (mockPrisma.dislikedEntity.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
 
         service = new DiscoveryRecommendationsService();
     });
@@ -338,6 +343,110 @@ describe("DiscoveryRecommendationsService", () => {
             });
             expect(result.get("fallback-1")).toBe(0.4);
             expect(result.get("fallback-2")).toBe(0.4);
+        });
+
+        it("decays existing scores by distinct recently featured weeks without adding artists", async () => {
+            jest.spyOn(
+                service as any,
+                "resolveSeedArtistIds",
+            ).mockResolvedValue(["seed-artist"]);
+            (mockPrisma.similarArtist.findMany as jest.Mock).mockResolvedValue([
+                { toArtistId: "repeat-artist", weight: 0.9 },
+                { toArtistId: "fresh-artist", weight: 0.8 },
+            ]);
+            (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue(
+                [
+                    {
+                        artistMbid: "repeat-mbid",
+                        artistName: "Repeat Artist",
+                        weekStartDate: new Date("2025-03-10T00:00:00.000Z"),
+                    },
+                    {
+                        artistMbid: "repeat-mbid",
+                        artistName: "Repeat Artist",
+                        weekStartDate: new Date("2025-03-10T00:00:00.000Z"),
+                    },
+                    {
+                        artistMbid: null,
+                        artistName: "repeat artist",
+                        weekStartDate: new Date("2025-03-03T00:00:00.000Z"),
+                    },
+                    {
+                        artistMbid: "repeat-mbid",
+                        artistName: "Repeat Artist",
+                        weekStartDate: new Date("2025-02-24T00:00:00.000Z"),
+                    },
+                    {
+                        artistMbid: "missing-mbid",
+                        artistName: "Missing Artist",
+                        weekStartDate: new Date("2025-03-10T00:00:00.000Z"),
+                    },
+                ],
+            );
+            (mockPrisma.artist.findMany as jest.Mock).mockResolvedValue([
+                {
+                    id: "repeat-artist",
+                    mbid: "repeat-mbid",
+                    name: "Repeat Artist",
+                },
+                {
+                    id: "not-in-score-map",
+                    mbid: "missing-mbid",
+                    name: "Missing Artist",
+                },
+            ]);
+
+            const result = await (service as any).buildArtistScoreMap("user-1");
+
+            expect(mockPrisma.discoveryAlbum.findMany).toHaveBeenCalledWith({
+                where: {
+                    userId: "user-1",
+                    weekStartDate: {
+                        lt: WEEK_START,
+                        gte: SUB_6_WEEKS,
+                    },
+                },
+                select: {
+                    artistMbid: true,
+                    artistName: true,
+                    weekStartDate: true,
+                },
+            });
+            expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
+                where: {
+                    OR: [
+                        {
+                            mbid: {
+                                in: ["repeat-mbid", "missing-mbid"],
+                            },
+                        },
+                        {
+                            name: {
+                                equals: "Repeat Artist",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            name: {
+                                equals: "repeat artist",
+                                mode: "insensitive",
+                            },
+                        },
+                        {
+                            name: {
+                                equals: "Missing Artist",
+                                mode: "insensitive",
+                            },
+                        },
+                    ],
+                },
+                select: { id: true, mbid: true, name: true },
+            });
+            expect(result.get("repeat-artist")).toBeCloseTo(
+                0.9 * Math.pow(0.6, 3),
+            );
+            expect(result.get("fresh-artist")).toBe(0.8);
+            expect(result.has("not-in-score-map")).toBe(false);
         });
     });
 
