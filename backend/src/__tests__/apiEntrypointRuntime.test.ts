@@ -45,6 +45,8 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/listenTogether",
         "../routes/subsonic",
         "../routes/shareLinks",
+        "../routes/federation",
+        "../routes/federationAdmin",
     ];
 
     const flushPromises = async (): Promise<void> => {
@@ -87,6 +89,7 @@ describe("api entrypoint runtime behavior", () => {
                 audioAnalysis?: boolean;
                 discovery?: boolean;
                 autoPlaylists?: boolean;
+                federation?: boolean;
             };
         };
         bcryptHashImpl?: (value: string, salt: number) => Promise<string>;
@@ -170,6 +173,10 @@ describe("api entrypoint runtime behavior", () => {
         const startPersistLoop = jest.fn();
         const stopPersistLoop = jest.fn();
         const persistAllGroups = jest.fn(async () => undefined);
+        const ensureFederationIdentity = jest.fn(async () => ({
+            federationInstanceId: "instance-1",
+            catalogEpoch: "epoch-1",
+        }));
 
         const serverEventHandlers = new Map<string, (...args: any[]) => void>();
         const server: any = {};
@@ -214,6 +221,7 @@ describe("api entrypoint runtime behavior", () => {
                 audioAnalysis: true,
                 discovery: true,
                 autoPlaylists: true,
+                federation: true,
                 ...(configOverrides?.features || {}),
             },
         };
@@ -267,6 +275,9 @@ describe("api entrypoint runtime behavior", () => {
             stopPersistLoop,
             persistAllGroups,
         }));
+        jest.doMock("../services/federationPeers", () => ({
+            ensureFederationIdentity,
+        }));
         jest.doMock("../middleware/errorHandler", () => ({ errorHandler }));
         jest.doMock("../middleware/auth", () => ({
             requireAuth,
@@ -319,6 +330,7 @@ describe("api entrypoint runtime behavior", () => {
             startPersistLoop,
             stopPersistLoop,
             persistAllGroups,
+            ensureFederationIdentity,
             createBullBoard,
             BullAdapter,
             ExpressAdapter,
@@ -374,6 +386,12 @@ describe("api entrypoint runtime behavior", () => {
         }
         return call[1] as (...args: any[]) => any;
     }
+
+    beforeEach(() => {
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout,
+        );
+    });
 
     afterEach(() => {
         process.env = originalEnv;
@@ -484,6 +502,7 @@ describe("api entrypoint runtime behavior", () => {
                     audioAnalysis: false,
                     discovery: false,
                     autoPlaylists: false,
+                    federation: false,
                 },
             },
         });
@@ -502,6 +521,8 @@ describe("api entrypoint runtime behavior", () => {
             "/api/mixes",
             "/api/analysis",
             "/api/vibe",
+            "/api/federation/v1",
+            "/api/federation/admin",
         ]) {
             const call = mocks.app.use.mock.calls.find(
                 (args: unknown[]) => args[0] === prefix,
@@ -533,6 +554,7 @@ describe("api entrypoint runtime behavior", () => {
                 code: "FEATURE_DISABLED",
             });
         }
+        expect(mocks.ensureFederationIdentity).not.toHaveBeenCalled();
     });
 
     it("mounts gated routers normally when feature flags are on", async () => {
@@ -567,6 +589,7 @@ describe("api entrypoint runtime behavior", () => {
             expect(call![1]).toBe("api-limiter");
             expect(call).toHaveLength(3);
         }
+        expect(mocks.ensureFederationIdentity).toHaveBeenCalledTimes(1);
     });
 
     it("mounts every API prefix behind its expected limiter and router (mount contract)", async () => {
@@ -660,6 +683,14 @@ describe("api entrypoint runtime behavior", () => {
             "/api/listen-together": [
                 "api-limiter",
                 route("../routes/listenTogether"),
+            ],
+            "/api/federation/v1": [
+                "api-limiter",
+                route("../routes/federation"),
+            ],
+            "/api/federation/admin": [
+                "api-limiter",
+                route("../routes/federationAdmin"),
             ],
             "/rest": [route("../routes/subsonic")],
         };

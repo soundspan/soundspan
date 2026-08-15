@@ -131,6 +131,8 @@ describe("config module", () => {
             "https://app.example",
             "http://localhost:5173",
         ]);
+        expect(config.features.federation).toBe(false);
+        expect(config.workers.federationTombstoneRetentionDays).toBe(90);
     });
 
     it("constructs DATABASE_URL from percent-encoded PostgreSQL components", async () => {
@@ -566,6 +568,8 @@ describe("config module", () => {
             ENRICHMENT_CLAIM_TTL_MS: "900001",
             TRACK_RECONCILIATION_MAX_ROWS: "10001",
             TRACK_RECONCILIATION_TIMEOUT_MS: "600001",
+            FEDERATION_ENABLED: "true",
+            FEDERATION_TOMBSTONE_RETENTION_DAYS: "30",
         });
 
         expect(config.appVersion).toBe("2.0.0-test");
@@ -585,7 +589,9 @@ describe("config module", () => {
             trackReconciliationMaxRows: 10_001,
             trackReconciliationTimeoutMs: 600_001,
             trackRemovalRetentionDays: 90,
+            federationTombstoneRetentionDays: 30,
         });
+        expect(config.features.federation).toBe(true);
     });
 
     it("preserves migrated value defaults and literal flag parsing", async () => {
@@ -619,6 +625,7 @@ describe("config module", () => {
             trackReconciliationMaxRows: 10_000,
             trackReconciliationTimeoutMs: 10 * 60 * 1000,
             trackRemovalRetentionDays: 90,
+            federationTombstoneRetentionDays: 90,
         });
     });
 
@@ -786,6 +793,23 @@ describe("config module", () => {
             AUDIOBOOKSHELF_API_KEY: "abs-token",
         });
         expect(keyOnly.config.audiobookshelf).toBeUndefined();
+    });
+
+    it("accepts zero and rejects malformed federation tombstone retention", async () => {
+        const zero = await loadConfigModule({
+            FEDERATION_TOMBSTONE_RETENTION_DAYS: "0",
+        });
+        expect(zero.config.workers.federationTombstoneRetentionDays).toBe(0);
+
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+        await expect(
+            loadConfigModule({ FEDERATION_TOMBSTONE_RETENTION_DAYS: "-1" }),
+        ).rejects.toThrow("process.exit:1");
+        exitSpy.mockRestore();
     });
 
     it("logs validation errors and exits for invalid environment variables", async () => {

@@ -1,0 +1,310 @@
+const prisma = {
+    systemSettings: {
+        upsert: jest.fn(),
+        updateMany: jest.fn(),
+        findUnique: jest.fn(),
+    },
+    artist: { count: jest.fn(), findMany: jest.fn() },
+    album: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
+    track: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
+    federationTombstone: { findMany: jest.fn() },
+};
+
+jest.mock("../../utils/db", () => ({ prisma }));
+jest.mock("../trackEmbeddings", () => ({
+    fetchEmbeddingsByTrackIds: jest.fn(),
+}));
+jest.mock("../../config", () => ({
+    config: {
+        appVersion: "2.0.2-test",
+        federation: { instanceName: "soundspan-host" },
+    },
+}));
+
+import { fetchEmbeddingsByTrackIds } from "../trackEmbeddings";
+import {
+    decodeFederationDeltaCursor,
+    getFederationCatalogDelta,
+    getFederationCatalogItems,
+    getFederationManifest,
+} from "../federationCatalog";
+
+const at = new Date("2026-08-15T12:00:00.000Z");
+
+function artist(id: string) {
+    return {
+        id,
+        name: `Artist ${id}`,
+        mbid: `mbid-${id}`,
+        normalizedName: `artist ${id}`,
+        lastSynced: at,
+    };
+}
+
+function album(id: string) {
+    return {
+        id,
+        artistId: "artist-1",
+        title: `Album ${id}`,
+        rgMbid: `rg-${id}`,
+        year: 2026,
+        primaryType: "Album",
+        lastSynced: at,
+    };
+}
+
+function track(id: string) {
+    return {
+        id,
+        albumId: "album-1",
+        title: `Track ${id}`,
+        discNo: 1,
+        trackNo: 2,
+        duration: 180,
+        mime: "audio/flac",
+        fileSize: 1234,
+        recordingMbid: `recording-${id}`,
+        isrc: `ISRC${id}`,
+        audioHash: `sha256:${id}`,
+        updatedAt: at,
+    };
+}
+
+describe("federation catalog exports", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        prisma.systemSettings.upsert.mockResolvedValue({});
+        prisma.systemSettings.updateMany.mockResolvedValue({ count: 0 });
+        prisma.systemSettings.findUnique.mockResolvedValue({
+            federationInstanceId: "instance-1",
+            catalogEpoch: "epoch-1",
+        });
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([]);
+    });
+
+    it("builds a manifest from visible local library counts", async () => {
+        prisma.artist.count.mockResolvedValue(2);
+        prisma.album.count.mockResolvedValue(3);
+        prisma.track.count.mockResolvedValue(4);
+
+        await expect(getFederationManifest(true)).resolves.toEqual({
+            instanceId: "instance-1",
+            name: "soundspan-host",
+            version: "2.0.2-test",
+            catalogEpoch: "epoch-1",
+            mediaTypes: ["artist", "album", "track"],
+            counts: { artists: 2, albums: 3, tracks: 4 },
+            embeddingsAvailable: true,
+        });
+        expect(prisma.track.count).toHaveBeenCalledWith({
+            where: expect.objectContaining({
+                origin: "LOCAL",
+                peerId: null,
+                removedAt: null,
+                album: expect.objectContaining({
+                    location: "LIBRARY",
+                    peerId: null,
+                }),
+            }),
+        });
+    });
+
+    it("keyset-pages generic artist envelopes at the requested boundary", async () => {
+        prisma.artist.findMany.mockResolvedValue([
+            artist("a1"),
+            artist("a2"),
+            artist("a3"),
+        ]);
+
+        const result = await getFederationCatalogItems({
+            mediaType: "artist",
+            cursor: "a0",
+            limit: 2,
+            includeEmbeddings: false,
+        });
+
+        expect(prisma.artist.findMany).toHaveBeenCalledWith({
+            where: expect.objectContaining({ id: { gt: "a0" }, peerId: null }),
+            orderBy: { id: "asc" },
+            take: 3,
+            select: expect.any(Object),
+        });
+        expect(result).toEqual({
+            items: [
+                {
+                    id: "a1",
+                    mediaType: "artist",
+                    updatedAt: at,
+                    attributes: {
+                        name: "Artist a1",
+                        mbid: "mbid-a1",
+                        normalizedName: "artist a1",
+                    },
+                },
+                {
+                    id: "a2",
+                    mediaType: "artist",
+                    updatedAt: at,
+                    attributes: {
+                        name: "Artist a2",
+                        mbid: "mbid-a2",
+                        normalizedName: "artist a2",
+                    },
+                },
+            ],
+            nextCursor: "a2",
+        });
+    });
+
+    it("emits album and track parent refs and gates embeddings by scope", async () => {
+        prisma.album.findMany.mockResolvedValue([album("album-1")]);
+        prisma.track.findMany.mockResolvedValue([track("track-1")]);
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "track-1", embedding: [0.1, 0.2] },
+        ]);
+
+        const albumResult = await getFederationCatalogItems({
+            mediaType: "album",
+            limit: 200,
+            includeEmbeddings: false,
+        });
+        const trackWithout = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: false,
+        });
+        const trackWith = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: true,
+        });
+
+        expect(albumResult.items[0]).toEqual(
+            expect.objectContaining({ parentRef: "artist-1" }),
+        );
+        expect(trackWithout.items[0]).toEqual(
+            expect.objectContaining({ parentRef: "album-1" }),
+        );
+        expect(trackWithout.items[0].attributes).not.toHaveProperty(
+            "embedding",
+        );
+        expect(trackWith.items[0].attributes).toEqual(
+            expect.objectContaining({ embedding: [0.1, 0.2] }),
+        );
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    origin: "LOCAL",
+                    peerId: null,
+                    removedAt: null,
+                    album: expect.objectContaining({
+                        location: "LIBRARY",
+                        peerId: null,
+                    }),
+                }),
+            }),
+        );
+    });
+
+    it("expresses non-transitive export filters for every catalog type", async () => {
+        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockResolvedValue([]);
+
+        await getFederationCatalogItems({
+            mediaType: "artist",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        await getFederationCatalogItems({
+            mediaType: "album",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+        await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 10,
+            includeEmbeddings: false,
+        });
+
+        expect(prisma.artist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    peerId: null,
+                    albums: { some: { location: "LIBRARY", peerId: null } },
+                },
+            }),
+        );
+        expect(prisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    location: "LIBRARY",
+                    peerId: null,
+                    artist: { peerId: null },
+                },
+            }),
+        );
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    origin: "LOCAL",
+                    peerId: null,
+                    removedAt: null,
+                    album: {
+                        location: "LIBRARY",
+                        peerId: null,
+                        artist: { peerId: null },
+                    },
+                },
+            }),
+        );
+    });
+
+    it("returns a typed epoch mismatch without querying catalog rows", async () => {
+        const result = await getFederationCatalogDelta({
+            since: new Date("2026-08-15T11:00:00.000Z"),
+            epoch: "old-epoch",
+            limit: 200,
+            includeEmbeddings: false,
+            now: at,
+        });
+
+        expect(result).toEqual({
+            kind: "epochMismatch",
+            currentEpoch: "epoch-1",
+        });
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
+    });
+
+    it("bounds and keyset-pages merged delta changes and tombstones", async () => {
+        prisma.artist.findMany.mockResolvedValue([artist("a1")]);
+        prisma.album.findMany.mockResolvedValue([album("b1")]);
+        prisma.track.findMany.mockResolvedValue([track("c1")]);
+        prisma.federationTombstone.findMany.mockResolvedValue([
+            {
+                id: "d1",
+                entityType: "track",
+                entityId: "deleted-1",
+                deletedAt: at,
+            },
+        ]);
+
+        const result = await getFederationCatalogDelta({
+            since: new Date("2026-08-15T11:00:00.000Z"),
+            epoch: "epoch-1",
+            limit: 2,
+            includeEmbeddings: false,
+            now: new Date("2026-08-15T12:01:00.000Z"),
+        });
+
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") throw new Error("expected delta payload");
+        expect(result.changes.length + result.tombstones.length).toBe(2);
+        expect(result.nextCursor).toEqual(expect.any(String));
+        expect(decodeFederationDeltaCursor(result.nextCursor!)).toEqual({
+            updatedAt: at,
+            id: "b1",
+        });
+        expect(result.nextSince).toEqual(new Date("2026-08-15T12:01:00.000Z"));
+    });
+});

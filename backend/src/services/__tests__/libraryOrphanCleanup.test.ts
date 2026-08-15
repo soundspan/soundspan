@@ -4,13 +4,14 @@ describe("cleanupOrphanedLibraryEntities", () => {
         jest.clearAllMocks();
     });
 
-    function loadCleanup() {
+    function loadCleanup(federationEnabled = false) {
         const logger = {
             info: jest.fn(),
             child: jest.fn(),
         };
         logger.child.mockReturnValue(logger);
-        const prisma = {
+        let prisma: any;
+        prisma = {
             album: {
                 findMany: jest.fn(
                     async (_args: { where?: { peerId?: string | null } }) => [
@@ -27,10 +28,21 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 ),
                 deleteMany: jest.fn(async () => ({ count: 1 })),
             },
+            federationTombstone: {
+                createMany: jest.fn(async ({ data }: { data: unknown[] }) => ({
+                    count: data.length,
+                })),
+            },
+            $transaction: jest.fn(async (callback: (tx: unknown) => unknown) =>
+                callback(prisma),
+            ),
         };
 
         jest.doMock("../../utils/db", () => ({ prisma }));
         jest.doMock("../../utils/logger", () => ({ logger }));
+        jest.doMock("../../config", () => ({
+            config: { features: { federation: federationEnabled } },
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../libraryOrphanCleanup");
@@ -47,6 +59,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
 
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: { peerId: null, tracks: { none: {} } },
+            orderBy: { id: "asc" },
+            take: 10_000,
             select: { id: true },
         });
         expect(prisma.album.deleteMany).toHaveBeenCalledWith({
@@ -58,6 +72,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
         });
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
             where: { peerId: null, albums: { none: {} } },
+            orderBy: { id: "asc" },
+            take: 10_000,
             select: { id: true },
         });
         expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
@@ -71,12 +87,12 @@ describe("cleanupOrphanedLibraryEntities", () => {
 
     it("leaves peer-owned entities untouched during an empty sync window", async () => {
         const { module, prisma } = loadCleanup();
-        prisma.album.findMany.mockImplementationOnce(async (args) => {
+        prisma.album.findMany.mockImplementationOnce(async (args: any) => {
             return args.where?.peerId === null
                 ? []
                 : [{ id: "federated-album", peerId: "peer-1" }];
         });
-        prisma.artist.findMany.mockImplementationOnce(async (args) => {
+        prisma.artist.findMany.mockImplementationOnce(async (args: any) => {
             return args.where?.peerId === null
                 ? []
                 : [{ id: "federated-artist", peerId: "peer-1" }];
@@ -99,5 +115,34 @@ describe("cleanupOrphanedLibraryEntities", () => {
         );
         expect(prisma.album.deleteMany).not.toHaveBeenCalled();
         expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("writes album and artist tombstones in the deletion transaction when federation is enabled", async () => {
+        const { module, prisma } = loadCleanup(true);
+
+        await module.cleanupOrphanedLibraryEntities();
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.federationTombstone.createMany).toHaveBeenNthCalledWith(
+            1,
+            {
+                data: [{ entityType: "album", entityId: "local-album" }],
+            },
+        );
+        expect(prisma.federationTombstone.createMany).toHaveBeenNthCalledWith(
+            2,
+            {
+                data: [{ entityType: "artist", entityId: "local-artist" }],
+            },
+        );
+    });
+
+    it("writes no orphan tombstones when federation is disabled", async () => {
+        const { module, prisma } = loadCleanup(false);
+
+        await module.cleanupOrphanedLibraryEntities();
+
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.federationTombstone.createMany).not.toHaveBeenCalled();
     });
 });

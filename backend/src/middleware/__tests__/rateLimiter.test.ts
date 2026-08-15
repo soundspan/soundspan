@@ -9,6 +9,10 @@ type RateLimitOptions = {
     validate: { trustProxy: boolean };
     skipSuccessfulRequests?: boolean;
     skip?: (req: { path: string }) => boolean;
+    keyGenerator?: (req: {
+        ip: string;
+        federationPeer?: { id: string };
+    }) => string;
     handler?: (
         req: { ip: string; method: string; path: string },
         res: {
@@ -54,7 +58,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(10);
+        expect(mockRateLimit).toHaveBeenCalledTimes(12);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.playbackStateLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
@@ -65,6 +69,8 @@ describe("rateLimiter middleware config", () => {
         expect(mod.ytMusicSearchLimiter).toBeDefined();
         expect(mod.ytMusicStreamLimiter).toBeDefined();
         expect(mod.webhookLimiter).toBeDefined();
+        expect(mod.federationPeerLimiter).toBeDefined();
+        expect(mod.federationPairingLimiter).toBeDefined();
 
         const expectedConfigs = [
             { index: 0, windowMs: 60_000, max: 5000 },
@@ -77,6 +83,8 @@ describe("rateLimiter middleware config", () => {
             { index: 7, windowMs: 60_000, max: 30 },
             { index: 8, windowMs: 60_000, max: 20 },
             { index: 9, windowMs: 60_000, max: 60 },
+            { index: 10, windowMs: 60_000, max: 1000 },
+            { index: 11, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -89,6 +97,16 @@ describe("rateLimiter middleware config", () => {
         }
 
         expect(getOptions(2).skipSuccessfulRequests).toBe(true);
+    });
+
+    it("keys authenticated federation limits by peer identity", async () => {
+        await loadRateLimiterModule();
+        const keyGenerator = getOptions(10).keyGenerator!;
+
+        expect(
+            keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
+        ).toBe("peer-1");
+        expect(keyGenerator({ ip: "10.0.0.1" })).toBe("unresolved-peer");
     });
 
     it("uses standard headers, disables legacy headers, and disables trustProxy validation for all limiters", async () => {

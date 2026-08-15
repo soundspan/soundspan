@@ -72,6 +72,8 @@ const AUTH_MATRIX: AuthExpectation[] = [
         path: "/api/webhooks/lidarr/verify",
         anonymous: true,
     },
+    { method: "post", path: "/api/federation/v1/pair", anonymous: true },
+    { method: "get", path: "/api/federation/v1/manifest", anonymous: false },
     { method: "get", path: "/api/auth/me", anonymous: false },
     { method: "post", path: "/api/api-keys", anonymous: false },
     { method: "post", path: "/api/onboarding/complete", anonymous: false },

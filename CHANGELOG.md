@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added database schema groundwork for federated library sharing, including
-  peer and tombstone records plus catalog provenance fields. No federation
-  routes or user-facing behavior are enabled yet.
+  peer and tombstone records plus catalog provenance fields.
+- Added opt-in host-side federation with scoped, HMAC-protected peer
+  credentials, short-lived pairing codes, administrator lifecycle routes, and
+  the read-only manifest, catalog, delta, cover, and Range-streaming API.
+  Federation is disabled by default with `FEDERATION_ENABLED=false`.
+- Federation-enabled deletion cleanup now writes track, album, and artist
+  tombstones transactionally. `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls
+  their retention window (default `90`; minimum `0`).
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges

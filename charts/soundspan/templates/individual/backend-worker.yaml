@@ -114,6 +114,8 @@ spec:
             "AUDIO_ANALYSIS_ENABLED" true
             "DISCOVERY_ENABLED" true
             "AUTO_PLAYLISTS_ENABLED" true
+            "FEDERATION_ENABLED" true
+            "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
             "LIDARR_ENABLED" true
             "LIDARR_URL" true
             "LIDARR_API_KEY" true
@@ -323,6 +325,20 @@ spec:
             {{- else if .Values.config.docsPublic }}
             - name: DOCS_PUBLIC
               value: "true"
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "FEDERATION_ENABLED" }}
+            - name: FEDERATION_ENABLED
+              value: {{ index $backendWorkerEnv "FEDERATION_ENABLED" | quote }}
+            {{- else }}
+            - name: FEDERATION_ENABLED
+              value: {{ .Values.config.features.federation | quote }}
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "FEDERATION_TOMBSTONE_RETENTION_DAYS" }}
+            - name: FEDERATION_TOMBSTONE_RETENTION_DAYS
+              value: {{ index $backendWorkerEnv "FEDERATION_TOMBSTONE_RETENTION_DAYS" | quote }}
+            {{- else }}
+            - name: FEDERATION_TOMBSTONE_RETENTION_DAYS
+              value: {{ .Values.config.federationTombstoneRetentionDays | quote }}
             {{- end }}
             {{- if hasKey $backendWorkerEnv "AUDIO_ANALYSIS_ENABLED" }}
             - name: AUDIO_ANALYSIS_ENABLED

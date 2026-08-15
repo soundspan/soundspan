@@ -63,6 +63,27 @@ export interface CanonicalMediaSearchResult {
     raw: Record<string, unknown>;
 }
 
+/** Music media types currently exported by federation v1. */
+export type FederationMediaType = "artist" | "album" | "track";
+
+/** Generic additive federation catalog envelope shared by hosts and consumers. */
+export interface FederationMediaItemEnvelope<
+    Attributes extends Record<string, unknown> = Record<string, unknown>,
+> {
+    id: string;
+    mediaType: FederationMediaType;
+    updatedAt: Date | string;
+    parentRef?: string;
+    attributes: Attributes;
+}
+
+/** Deleted catalog identity emitted by the federation delta feed. */
+export interface FederationCatalogTombstone {
+    entityType: FederationMediaType;
+    entityId: string;
+    deletedAt: Date | string;
+}
+
 const normalizeString = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
         return undefined;

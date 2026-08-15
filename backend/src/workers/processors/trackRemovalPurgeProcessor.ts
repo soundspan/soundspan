@@ -1,4 +1,5 @@
 import type { Job } from "bull";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { config } from "../../config";
 import { backfillAllArtistCounts } from "../../services/artistCountsService";
@@ -107,7 +108,39 @@ async function deletePurgeBatch(
     cutoff: Date,
 ): Promise<number> {
     if (batch.length === 0) return 0;
-    const result = await prisma.track.deleteMany({
+    if (!config.features.federation) {
+        return deleteTrackRows(prisma, batch, cutoff);
+    }
+    return prisma.$transaction(async (transaction) => {
+        const deleted = await deleteTrackRows(transaction, batch, cutoff);
+        const deletedIds = await resolveDeletedTrackIds(
+            transaction,
+            batch,
+            deleted,
+        );
+        if (deletedIds.length !== deleted) {
+            throw new Error(
+                "Track deletion count changed during tombstone write",
+            );
+        }
+        if (deletedIds.length > 0) {
+            await transaction.federationTombstone.createMany({
+                data: deletedIds.map((entityId) => ({
+                    entityType: "track",
+                    entityId,
+                })),
+            });
+        }
+        return deleted;
+    });
+}
+
+async function deleteTrackRows(
+    client: typeof prisma | Prisma.TransactionClient,
+    batch: readonly { id: string }[],
+    cutoff: Date,
+): Promise<number> {
+    const result = await client.track.deleteMany({
         where: {
             id: { in: batch.map((track) => track.id) },
             origin: "LOCAL",
@@ -115,6 +148,21 @@ async function deletePurgeBatch(
         },
     });
     return result.count;
+}
+
+async function resolveDeletedTrackIds(
+    client: typeof prisma | Prisma.TransactionClient,
+    batch: readonly { id: string }[],
+    deleted: number,
+): Promise<string[]> {
+    if (deleted === batch.length) return batch.map((track) => track.id);
+    const remaining = await client.track.findMany({
+        where: { id: { in: batch.map((track) => track.id) } },
+        take: batch.length,
+        select: { id: true },
+    });
+    const remainingIds = new Set(remaining.map((track) => track.id));
+    return batch.map((track) => track.id).filter((id) => !remainingIds.has(id));
 }
 
 async function enqueueContinuation(
@@ -138,6 +186,20 @@ async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
     log.info(
         `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${processed} artist counts with ${failedCount} errors`,
     );
+}
+
+async function cleanupExpiredFederationTombstones(now: Date): Promise<void> {
+    if (!config.features.federation) return;
+    const cutoff = new Date(
+        now.getTime() -
+            config.workers.federationTombstoneRetentionDays * DAY_MS,
+    );
+    const result = await prisma.federationTombstone.deleteMany({
+        where: { deletedAt: { lt: cutoff } },
+    });
+    if (result.count > 0) {
+        log.info(`Deleted ${result.count} expired federation tombstones`);
+    }
 }
 
 function sumDeletedTracks(deletedSoFar: number, deleted: number): number {
@@ -167,8 +229,11 @@ export async function processTrackRemovalPurge(
             cursor.cutoff,
             sweepDeleted,
         );
-    } else if (sweepDeleted > 0) {
-        await refreshCatalogAfterPurge(sweepDeleted);
+    } else {
+        if (sweepDeleted > 0) {
+            await refreshCatalogAfterPurge(sweepDeleted);
+        }
+        await cleanupExpiredFederationTombstones(new Date());
     }
     log.info(
         `Purged ${deleted} expired removed tracks (selected ${batch.length}, sweepDeleted=${sweepDeleted}, continued=${continued})`,

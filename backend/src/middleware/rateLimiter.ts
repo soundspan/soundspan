@@ -163,3 +163,25 @@ export const webhookLimiter = rateLimit({
     legacyHeaders: false,
     ...trustProxyValidation,
 });
+
+// Federation catalog and stream traffic is keyed by the authenticated peer,
+// so changing source IP cannot mint a new bucket for the same credential.
+export const federationPeerLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 1000,
+    message: "Too many federation requests. Please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.federationPeer?.id || "unresolved-peer",
+    ...trustProxyValidation,
+});
+
+// Pairing is unauthenticated until a valid single-use code is consumed.
+export const federationPairingLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: "Too many federation pairing attempts. Please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...trustProxyValidation,
+});

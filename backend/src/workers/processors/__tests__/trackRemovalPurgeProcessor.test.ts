@@ -12,6 +12,7 @@ describe("trackRemovalPurgeProcessor", () => {
         }>,
         retentionDays = 90,
         deletedCount = candidates.length,
+        federationEnabled = false,
     ) {
         const logger = {
             debug: jest.fn(),
@@ -22,7 +23,8 @@ describe("trackRemovalPurgeProcessor", () => {
         };
         logger.child.mockReturnValue(logger);
 
-        const prisma = {
+        let prisma: any;
+        prisma = {
             track: {
                 findMany: jest.fn(
                     async (args: { where?: { origin?: string } }) =>
@@ -36,6 +38,13 @@ describe("trackRemovalPurgeProcessor", () => {
                     count: deletedCount,
                 })),
             },
+            federationTombstone: {
+                createMany: jest.fn(async () => ({ count: deletedCount })),
+                deleteMany: jest.fn(async () => ({ count: 0 })),
+            },
+            $transaction: jest.fn(async (callback: (tx: unknown) => unknown) =>
+                callback(prisma),
+            ),
         };
         const schedulerQueue = { add: jest.fn(async () => ({})) };
         const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
@@ -50,7 +59,13 @@ describe("trackRemovalPurgeProcessor", () => {
         jest.doMock("../../../utils/logger", () => ({ logger }));
         jest.doMock("../../../utils/db", () => ({ prisma }));
         jest.doMock("../../../config", () => ({
-            config: { workers: { trackRemovalRetentionDays: retentionDays } },
+            config: {
+                features: { federation: federationEnabled },
+                workers: {
+                    trackRemovalRetentionDays: retentionDays,
+                    federationTombstoneRetentionDays: 90,
+                },
+            },
         }));
         jest.doMock("../../queues", () => ({ schedulerQueue }));
         jest.doMock("../../../services/libraryOrphanCleanup", () => ({
@@ -109,6 +124,38 @@ describe("trackRemovalPurgeProcessor", () => {
         });
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
         expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("writes track tombstones and cleans expired tombstones on a federation terminal page", async () => {
+        jest.useFakeTimers().setSystemTime(
+            new Date("2026-08-15T12:00:00.000Z"),
+        );
+        const { module, prisma } = loadProcessor(
+            [{ id: "track-old" }],
+            90,
+            1,
+            true,
+        );
+
+        await module.processTrackRemovalPurge(buildJob());
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.federationTombstone.createMany).toHaveBeenCalledWith({
+            data: [{ entityType: "track", entityId: "track-old" }],
+        });
+        expect(prisma.federationTombstone.deleteMany).toHaveBeenCalledWith({
+            where: { deletedAt: { lt: new Date("2026-05-17T12:00:00.000Z") } },
+        });
+    });
+
+    it("writes no tombstones when federation is disabled", async () => {
+        const { module, prisma } = loadProcessor([{ id: "track-old" }]);
+
+        await module.processTrackRemovalPurge(buildJob());
+
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.federationTombstone.createMany).not.toHaveBeenCalled();
+        expect(prisma.federationTombstone.deleteMany).not.toHaveBeenCalled();
     });
 
     it("uses the current instant as the exclusive cutoff when retention is zero", async () => {

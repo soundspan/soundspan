@@ -81,6 +81,7 @@ const mockExtractCoverArt = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
     workers: { trackRemovalRetentionDays: 90 },
+    features: { federation: false },
 };
 
 jest.mock("fs", () => ({
@@ -1497,10 +1498,14 @@ describe("MusicScannerService.scanLibrary", () => {
         });
         expect(mockPrisma.album.findMany).toHaveBeenCalledWith({
             where: { peerId: null, tracks: { none: {} } },
+            orderBy: { id: "asc" },
+            take: 10_000,
             select: { id: true },
         });
         expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
             where: { peerId: null, albums: { none: {} } },
+            orderBy: { id: "asc" },
+            take: 10_000,
             select: { id: true },
         });
         expect(mockPrisma.album.deleteMany).not.toHaveBeenCalled();

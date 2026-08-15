@@ -102,7 +102,7 @@ function addCriticalSecretIssue(
     });
 }
 
-const trackRemovalRetentionDaysSchema = z
+const nonnegativeIntegerEnvSchema = z
     .string()
     .regex(/^(0|[1-9]\d*)$/, "must be an integer greater than or equal to 0")
     .refine((value) => Number.isSafeInteger(Number(value)), {
@@ -128,7 +128,8 @@ const envSchema = z
         PORT: z.string().optional(),
         NODE_ENV: z.enum(["development", "production", "test"]).optional(),
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
-        TRACK_REMOVAL_RETENTION_DAYS: trackRemovalRetentionDaysSchema,
+        TRACK_REMOVAL_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
+        FEDERATION_TOMBSTONE_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -164,6 +165,10 @@ try {
 
 const trackRemovalRetentionDays = Number.parseInt(
     process.env.TRACK_REMOVAL_RETENTION_DAYS ?? "90",
+    10,
+);
+const federationTombstoneRetentionDays = Number.parseInt(
+    process.env.FEDERATION_TOMBSTONE_RETENTION_DAYS ?? "90",
     10,
 );
 
@@ -378,6 +383,14 @@ export const config = {
         discovery: parseEnvBool(process.env.DISCOVERY_ENABLED, true),
         // Made For You mixes / programmatic playlist generation
         autoPlaylists: parseEnvBool(process.env.AUTO_PLAYLISTS_ENABLED, true),
+        // Read-only instance federation API and host credential management.
+        federation: parseEnvBool(process.env.FEDERATION_ENABLED, false),
+    },
+
+    federation: {
+        // SystemSettings has no instance-name field today. Container/host name
+        // is the established deployment identity fallback for federation v1.
+        instanceName: process.env.HOSTNAME || "soundspan",
     },
 
     // Keep analyzer queues short enough that waiting work is not mistaken for
@@ -539,6 +552,7 @@ export const config = {
 
     workers: {
         trackRemovalRetentionDays,
+        federationTombstoneRetentionDays,
         get moodBucketClaimTtlMs(): number {
             return positiveIntEnvOr(
                 process.env.MOOD_BUCKET_CLAIM_TTL_MS,

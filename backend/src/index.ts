@@ -104,6 +104,8 @@ function isCompressionExcludedPath(path: string): boolean {
         (path.startsWith("/api/podcasts/") && path.includes("/stream")) ||
         path.startsWith("/api/library/cover-art/") ||
         path.startsWith("/api/library/image/") ||
+        path.startsWith("/api/federation/v1/stream/") ||
+        path.startsWith("/api/federation/v1/cover/") ||
         path.startsWith("/rest/stream") ||
         path.startsWith("/rest/download")
     );
@@ -302,6 +304,28 @@ app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
 app.use("/api/homepage", apiLimiter, homepageRoutes);
 app.use("/api/spotify", apiLimiter, spotifyRoutes);
 app.use("/api/browse", apiLimiter, browseRoutes);
+if (config.features.federation) {
+    app.use(
+        "/api/federation/v1",
+        apiLimiter,
+        require("./routes/federation").default,
+    );
+    app.use(
+        "/api/federation/admin",
+        apiLimiter,
+        require("./routes/federationAdmin").default,
+    );
+} else {
+    logger.info(
+        "[Features] Federation disabled (FEDERATION_ENABLED=false); federation API and admin routes return 404",
+    );
+    app.use("/api/federation/v1", apiLimiter, createFeatureDisabledHandler());
+    app.use(
+        "/api/federation/admin",
+        apiLimiter,
+        createFeatureDisabledHandler(),
+    );
+}
 if (config.features.audioAnalysis) {
     app.use("/api/analysis", apiLimiter, require("./routes/analysis").default);
 } else {
@@ -566,6 +590,11 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
     const { initializeMusicConfig } = await import("./config");
     await initializeMusicConfig();
     await segmentedSegmentService.initializeDashCapabilityProbe();
+    if (config.features.federation) {
+        const { ensureFederationIdentity } =
+            await import("./services/federationPeers");
+        await ensureFederationIdentity();
+    }
 
     if (runWorkerRole) {
         // Initialize Bull queue workers

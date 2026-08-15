@@ -43,6 +43,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/fanart.ts` | Core |
 | `backend/src/services/featureDetection.ts` | Core |
 | `backend/src/services/fileValidator.ts` | Core |
+| `backend/src/services/federationCatalog.ts` | Host federation manifest, filtered catalog envelopes, and deltas |
+| `backend/src/services/federationPeers.ts` | Peer credentials, identity, and pairing lifecycle |
 | `backend/src/services/genericImportJobRunner.ts` | Core |
 | `backend/src/services/hybridSimilarity.ts` | Core |
 | `backend/src/services/imageBackfill.ts` | Core |

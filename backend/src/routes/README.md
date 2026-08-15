@@ -81,6 +81,8 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/discover.ts` | `/api/discover` |
 | `backend/src/routes/downloads.ts` | `/api/downloads` |
 | `backend/src/routes/enrichment.ts` | `/api/enrichment` |
+| `backend/src/routes/federation.ts` | `/api/federation/v1` |
+| `backend/src/routes/federationAdmin.ts` | `/api/federation/admin` |
 | `backend/src/routes/homepage.ts` | `/api/homepage` |
 | `backend/src/routes/library.ts` | `/api/library` |
 | `backend/src/routes/listeningState.ts` | `/api/listening-state` |
@@ -126,6 +128,7 @@ stays rate limited (`apiLimiter`) and returns
 - `AUDIO_ANALYSIS_ENABLED`: `/api/analysis`, `/api/vibe`
 - `DISCOVERY_ENABLED`: `/api/discover`, `/api/recommendations`
 - `AUTO_PLAYLISTS_ENABLED`: `/api/mixes`
+- `FEDERATION_ENABLED`: `/api/federation/v1`, `/api/federation/admin`
 
 Exception: the CLAP analyzer machine callbacks in
 `backend/src/routes/analysisInternal.ts` (`/api/analysis/vibe/failure`,
