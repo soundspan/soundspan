@@ -48,6 +48,17 @@ function copyResponseHeaders(
     }
 }
 
+function parseContentLength(headers: Record<string, unknown>): number | null {
+    const value = headers["content-length"];
+    const parsed =
+        typeof value === "number"
+            ? value
+            : typeof value === "string"
+              ? Number(value)
+              : Number.NaN;
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 async function markPeerOffline(peerId: string): Promise<void> {
     const result = await prisma.federationPeer.updateMany({
         where: { id: peerId, outboundStatus: "ACTIVE" },
@@ -86,21 +97,35 @@ async function loadPeerStream(
 async function proxyRangeMiss(
     input: FederationStreamInput,
     signal: AbortSignal,
-): Promise<Readable> {
+    state: ProxyStreamState,
+): Promise<void> {
     const range = input.req.headers.range;
     const response = await loadPeerStream(
         input,
         typeof range === "string" ? range : undefined,
         signal,
     );
+    state.upstream = response.data;
     input.res.status(response.status);
     copyResponseHeaders(input.res, response.headers);
     await pipeline(response.data, input.res);
-    return response.data;
 }
 
 interface ProxyStreamState {
     upstream: Readable | null;
+}
+
+async function passthroughPeerStream(
+    input: FederationStreamInput,
+    source: {
+        status: number;
+        headers?: Record<string, unknown>;
+        stream: Readable;
+    },
+): Promise<void> {
+    input.res.status(source.status);
+    copyResponseHeaders(input.res, source.headers ?? {});
+    await pipeline(source.stream, input.res);
 }
 
 async function serveFederatedStream(
@@ -128,7 +153,7 @@ async function serveFederatedStream(
         return;
     }
     if (typeof input.req.headers.range === "string") {
-        state.upstream = await proxyRangeMiss(input, signal);
+        await proxyRangeMiss(input, signal, state);
         return;
     }
     const complete = await service.cacheFederatedStream(
@@ -146,9 +171,16 @@ async function serveFederatedStream(
                     typeof contentType === "string"
                         ? contentType
                         : fallbackMime,
+                status: response.status,
+                contentLength: parseContentLength(response.headers),
+                headers: response.headers,
             };
         },
     );
+    if ("stream" in complete) {
+        await passthroughPeerStream(input, complete);
+        return;
+    }
     await service.streamFileWithRangeSupport(
         input.req,
         input.res,

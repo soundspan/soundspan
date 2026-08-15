@@ -51,6 +51,7 @@ import { proxyFederatedCover } from "../services/federationCoverProxy";
 
 const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
+const log = logger.child("Subsonic");
 
 const LIBRARY_LOCATION = "LIBRARY";
 const SUBSONIC_ALBUM_LOCATION_WHERE: Prisma.EnumAlbumLocationFilter = {
@@ -60,6 +61,10 @@ const LIBRARY_TRACK_WHERE = {
     ...TRACK_VISIBLE_WHERE,
     ...TRACK_BROWSE_WHERE,
     album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
+} satisfies Prisma.TrackWhereInput;
+const PLAYLIST_TRACK_WHERE = {
+    ...TRACK_VISIBLE_WHERE,
+    ...TRACK_BROWSE_WHERE,
 } satisfies Prisma.TrackWhereInput;
 
 const LIBRARY_ALBUM_WHERE = {
@@ -4644,7 +4649,8 @@ async function proxySubsonicFederatedStream(input: {
             sourceMime: track.mime,
             quality: input.quality,
         });
-    } catch {
+    } catch (error: unknown) {
+        log.warn("Federated stream proxy failed", { error });
         if (!res.headersSent) {
             sendSubsonicError(
                 res,
@@ -5443,7 +5449,7 @@ async function getPlaylistDurations(
         where: {
             playlistId: { in: nonEmptyIds },
             trackId: { not: null },
-            track: LIBRARY_TRACK_WHERE,
+            track: PLAYLIST_TRACK_WHERE,
         },
         select: {
             playlistId: true,
@@ -5470,7 +5476,7 @@ async function getPlaylistCoverFlags(
         where: {
             playlistId: { in: playlistIds },
             track: {
-                ...LIBRARY_TRACK_WHERE,
+                ...PLAYLIST_TRACK_WHERE,
                 album: {
                     AND: [
                         { coverUrl: { not: null } },
@@ -5511,7 +5517,7 @@ export async function handleGetPlaylists(
                                     { trackId: null },
                                     {
                                         track: {
-                                            ...LIBRARY_TRACK_WHERE,
+                                            ...PLAYLIST_TRACK_WHERE,
                                         },
                                     },
                                 ],
@@ -5595,7 +5601,7 @@ export async function handleGetPlaylist(
             },
             include: {
                 items: {
-                    where: { track: LIBRARY_TRACK_WHERE },
+                    where: { track: PLAYLIST_TRACK_WHERE },
                     orderBy: { sort: "asc" },
                     select: {
                         track: {

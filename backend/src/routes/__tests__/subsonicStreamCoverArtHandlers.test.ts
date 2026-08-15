@@ -7,6 +7,14 @@ const mockDestroyStreamingService = jest.fn();
 const mockLookup = jest.fn();
 const mockProxyFederatedTrackStream = jest.fn();
 const mockProxyFederatedCover = jest.fn();
+const mockSubsonicLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockSubsonicLogger.child.mockReturnValue(mockSubsonicLogger);
 const mockAudioStreamingService = jest.fn().mockImplementation(() => ({
     getStreamFilePath: mockGetStreamFilePath,
     streamFileWithRangeSupport: mockStreamFileWithRangeSupport,
@@ -74,6 +82,7 @@ jest.mock("../../services/federationStreamProxy", () => ({
 jest.mock("../../services/federationCoverProxy", () => ({
     proxyFederatedCover: mockProxyFederatedCover,
 }));
+jest.mock("../../utils/logger", () => ({ logger: mockSubsonicLogger }));
 
 jest.mock("../../config", () => ({
     config: {
@@ -111,7 +120,9 @@ function buildRes(): Response {
         setHeader: jest.fn(),
         status: jest.fn(),
         send: jest.fn(),
+        end: jest.fn(),
         headersSent: false,
+        writableEnded: false,
     };
     (res.status as jest.Mock).mockReturnValue(res);
     return res as Response;
@@ -197,6 +208,67 @@ describe("handleStream", () => {
             quality: "original",
         });
         expect(mockAudioServiceConstructor).not.toHaveBeenCalled();
+    });
+
+    it("logs a normalized warning when an active federated proxy fails", async () => {
+        const failure = new Error("transient peer failure");
+        mockTrackFindFirst.mockResolvedValue({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                outboundStatus: "ACTIVE",
+            },
+        });
+        mockProxyFederatedTrackStream.mockRejectedValueOnce(failure);
+
+        await handleStream(buildReq({ id: "tr-federated-track" }), buildRes());
+
+        expect(mockSubsonicLogger.warn).toHaveBeenCalledWith(
+            "Federated stream proxy failed",
+            { error: failure },
+        );
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            SubsonicErrorCode.GENERIC,
+            "Federation peer is offline",
+            "json",
+            undefined,
+        );
+    });
+
+    it("ends a failed federated stream after headers without writing an error body", async () => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "federated-track",
+            origin: "FEDERATED",
+            remoteId: "remote-track",
+            mime: "audio/flac",
+            filePath: null,
+            fileModified: new Date("2026-08-15T12:00:00Z"),
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                outboundStatus: "ACTIVE",
+            },
+        });
+        mockProxyFederatedTrackStream.mockRejectedValueOnce(
+            new Error("mid-stream failure"),
+        );
+        const res = buildRes();
+        (res as Response & { headersSent: boolean }).headersSent = true;
+
+        await handleStream(buildReq({ id: "tr-federated-track" }), res);
+
+        expect(res.end).toHaveBeenCalledTimes(1);
+        expect(mockSendError).not.toHaveBeenCalled();
+        expect(mockSubsonicLogger.warn).toHaveBeenCalledTimes(1);
     });
 
     it("maps an offline federated peer to a Subsonic generic error", async () => {

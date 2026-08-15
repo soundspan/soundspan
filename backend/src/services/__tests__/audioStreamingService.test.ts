@@ -533,6 +533,8 @@ describe("AudioStreamingService", () => {
             const loadStream = jest.fn().mockResolvedValue({
                 stream: Readable.from(["peer-audio"]),
                 mimeType: "audio/flac",
+                status: 200,
+                contentLength: null,
             });
 
             const result = await service.cacheFederatedStream(
@@ -542,10 +544,14 @@ describe("AudioStreamingService", () => {
                 "audio/flac",
                 loadStream,
             );
+            if ("stream" in result) {
+                throw new Error("Expected a completed federated cache fill");
+            }
 
             expect(loadStream).toHaveBeenCalledTimes(1);
             expect(mockPipeline).toHaveBeenCalledWith(
                 expect.any(Readable),
+                expect.any(Object),
                 expect.any(Object),
             );
             expect(mockFsRename).toHaveBeenCalledWith(
@@ -606,6 +612,8 @@ describe("AudioStreamingService", () => {
                 return {
                     stream: Readable.from(["peer-audio"]),
                     mimeType: "audio/mpeg",
+                    status: 200,
+                    contentLength: null,
                 };
             });
 
@@ -629,6 +637,174 @@ describe("AudioStreamingService", () => {
             await expect(Promise.all([first, second])).resolves.toHaveLength(2);
             expect(loadStream).toHaveBeenCalledTimes(1);
             expect(mockPrisma.transcodedFile.upsert).toHaveBeenCalledTimes(1);
+        });
+
+        it("returns an oversized known-length response for direct passthrough", async () => {
+            const fiveBytesInGb = 5 / (1024 * 1024 * 1024);
+            const service = createService(fiveBytesInGb);
+            const source = {
+                stream: Readable.from(["123456"]),
+                mimeType: "audio/flac",
+                status: 200,
+                contentLength: 6,
+            };
+
+            await expect(
+                service.cacheFederatedStream(
+                    "fed-track-too-large",
+                    "original",
+                    new Date("2026-08-15T12:00:00.000Z"),
+                    "audio/flac",
+                    async () => source,
+                ),
+            ).resolves.toBe(source);
+            expect(mockPipeline).not.toHaveBeenCalled();
+            expect(mockFsCreateWriteStream).not.toHaveBeenCalled();
+            expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
+        });
+
+        it("gives coalesced oversized callers independent passthrough streams", async () => {
+            const fiveBytesInGb = 5 / (1024 * 1024 * 1024);
+            const service = createService(fiveBytesInGb);
+            const firstSource = {
+                stream: Readable.from(["first"]),
+                mimeType: "audio/flac",
+                status: 200,
+                contentLength: 6,
+            };
+            const secondSource = {
+                stream: Readable.from(["second"]),
+                mimeType: "audio/flac",
+                status: 200,
+                contentLength: 6,
+            };
+            const loadStream = jest
+                .fn()
+                .mockResolvedValueOnce(firstSource)
+                .mockResolvedValueOnce(secondSource);
+
+            const first = service.cacheFederatedStream(
+                "fed-track-concurrent-oversized",
+                "original",
+                new Date("2026-08-15T12:00:00.000Z"),
+                "audio/flac",
+                loadStream,
+            );
+            const second = service.cacheFederatedStream(
+                "fed-track-concurrent-oversized",
+                "original",
+                new Date("2026-08-15T12:00:00.000Z"),
+                "audio/flac",
+                loadStream,
+            );
+
+            await expect(Promise.all([first, second])).resolves.toEqual([
+                firstSource,
+                secondSource,
+            ]);
+            expect(loadStream).toHaveBeenCalledTimes(2);
+            expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
+        });
+
+        it.each([206, 416])(
+            "never caches a non-complete %s response",
+            async (status) => {
+                const service = createService();
+                const source = {
+                    stream: Readable.from(["partial"]),
+                    mimeType: "audio/flac",
+                    status,
+                    contentLength: 7,
+                };
+
+                await expect(
+                    service.cacheFederatedStream(
+                        `fed-track-${status}`,
+                        "original",
+                        new Date("2026-08-15T12:00:00.000Z"),
+                        "audio/flac",
+                        async () => source,
+                    ),
+                ).resolves.toBe(source);
+                expect(mockPipeline).not.toHaveBeenCalled();
+                expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
+            },
+        );
+
+        it("aborts an unknown-length fill at remaining capacity and removes both paths", async () => {
+            const fiveBytesInGb = 5 / (1024 * 1024 * 1024);
+            const service = createService(fiveBytesInGb);
+            mockPipeline.mockImplementationOnce(
+                async (source: Readable, byteGuard: any) => {
+                    for await (const chunk of source) {
+                        await new Promise<void>((resolve, reject) => {
+                            byteGuard._transform(
+                                Buffer.isBuffer(chunk)
+                                    ? chunk
+                                    : Buffer.from(chunk),
+                                "buffer",
+                                (error: Error | null) =>
+                                    error ? reject(error) : resolve(),
+                            );
+                        });
+                    }
+                },
+            );
+
+            await expect(
+                service.cacheFederatedStream(
+                    "fed-track-overflow",
+                    "original",
+                    new Date("2026-08-15T12:00:00.000Z"),
+                    "audio/flac",
+                    async () => ({
+                        stream: Readable.from(["123456"]),
+                        mimeType: "audio/flac",
+                        status: 200,
+                        contentLength: null,
+                    }),
+                ),
+            ).rejects.toThrow("Federated cache fill exceeded");
+
+            const unlinkedPaths = mockFsUnlink.mock.calls.map(([value]) =>
+                String(value),
+            );
+            expect(unlinkedPaths).toEqual([
+                expect.stringContaining(".tmp-"),
+                expect.stringMatching(/\.audio$/),
+            ]);
+            expect(mockFsRename).not.toHaveBeenCalled();
+            expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
+        });
+
+        it("cleans both cache paths atomically when the file pipeline rejects", async () => {
+            const service = createService();
+            const writeFailure = new Error("cache write failed");
+            mockPipeline.mockRejectedValueOnce(writeFailure);
+
+            await expect(
+                service.cacheFederatedStream(
+                    "fed-track-write-failure",
+                    "original",
+                    new Date("2026-08-15T12:00:00.000Z"),
+                    "audio/flac",
+                    async () => ({
+                        stream: Readable.from(["peer-audio"]),
+                        mimeType: "audio/flac",
+                        status: 200,
+                        contentLength: null,
+                    }),
+                ),
+            ).rejects.toBe(writeFailure);
+
+            expect(
+                mockFsUnlink.mock.calls.map(([value]) => String(value)),
+            ).toEqual([
+                expect.stringContaining(".tmp-"),
+                expect.stringMatching(/\.audio$/),
+            ]);
+            expect(mockFsRename).not.toHaveBeenCalled();
+            expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
         });
     });
 

@@ -18,6 +18,9 @@ const enqueueFederationSyncNow = jest.fn();
 jest.mock("../../services/federationPeers", () => ({
     ...service,
     FederationPeerConflictError: class FederationPeerConflictError extends Error {},
+    FederationScopeMismatchError: class FederationScopeMismatchError extends Error {
+        readonly code = "FEDERATION_SCOPE_MISMATCH";
+    },
     FEDERATION_SCOPE_VALUES: ["library:read", "stream:read", "embeddings:read"],
 }));
 jest.mock("../../workers/federationJobs", () => ({
@@ -296,6 +299,7 @@ describe("federation admin routes", () => {
 
         expect(response.status).toBe(201);
         expect(service.pairAndLinkConsumerFederationPeer).toHaveBeenCalledWith({
+            direction: "CONSUMER",
             baseUrl: "https://peer.example",
             code: "ABCDEFGH",
             name: "Paired Library",
@@ -303,6 +307,61 @@ describe("federation admin routes", () => {
             createdById: "admin-1",
         });
     });
+
+    it("threads the BOTH opt-in through pairing", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/peers/link/pair")
+            .set("Authorization", "Bearer admin")
+            .send({
+                direction: "BOTH",
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Paired Library",
+            });
+
+        expect(response.status).toBe(201);
+        expect(service.pairAndLinkConsumerFederationPeer).toHaveBeenCalledWith(
+            expect.objectContaining({ direction: "BOTH" }),
+        );
+    });
+
+    it.each(["/peers/link", "/peers/link/pair"])(
+        "maps a scope mismatch from %s to 422",
+        async (path) => {
+            const { FederationScopeMismatchError } = jest.requireMock(
+                "../../services/federationPeers",
+            );
+            const target = path.endsWith("/pair")
+                ? service.pairAndLinkConsumerFederationPeer
+                : service.createBothFederationPeer;
+            target.mockRejectedValueOnce(new FederationScopeMismatchError());
+            const payload = path.endsWith("/pair")
+                ? {
+                      direction: "BOTH",
+                      baseUrl: "https://peer.example",
+                      code: "ABCDEFGH",
+                      name: "Paired Library",
+                      scopes: ["stream:read"],
+                  }
+                : {
+                      direction: "BOTH",
+                      baseUrl: "https://peer.example",
+                      token: "peer-token",
+                      scopes: ["stream:read"],
+                  };
+
+            const response = await request(app)
+                .post(`/api/federation/admin${path}`)
+                .set("Authorization", "Bearer admin")
+                .send(payload);
+
+            expect(response.status).toBe(422);
+            expect(response.body).toEqual({
+                error: "Federation peer scopes do not overlap",
+                code: "FEDERATION_SCOPE_MISMATCH",
+            });
+        },
+    );
 
     it("enqueues a bounded per-peer sync now job", async () => {
         const response = await request(app)

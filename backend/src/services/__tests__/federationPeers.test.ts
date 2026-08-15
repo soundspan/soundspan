@@ -74,6 +74,8 @@ import {
     createFederationPairingCode,
     createHostFederationPeer,
     deleteFederationPeer,
+    FederationPeerConflictError,
+    FederationScopeMismatchError,
     getConsumerPeerConnection,
     linkConsumerFederationPeer,
     listFederationPeers,
@@ -352,6 +354,27 @@ describe("federation consumer peers", () => {
         expect(mockEncrypt).toHaveBeenCalledWith("paired-token");
     });
 
+    it("does not request a reciprocal callback unless BOTH is selected", async () => {
+        mockConfig.soundspanCallbackUrl = "https://consumer.example/app";
+
+        const result = await pairAndLinkConsumerFederationPeer({
+            baseUrl: "https://host.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            createdById: "admin-1",
+        });
+
+        expect(mockPairFederationPeer).toHaveBeenCalledWith({
+            baseUrl: "https://host.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+        });
+        expect(prisma.federationPairingCode.create).not.toHaveBeenCalled();
+        expect(result.peer).toEqual(
+            expect.objectContaining({ direction: "CONSUMER" }),
+        );
+    });
+
     it("sends the configured consumer URL instead of the host URL", async () => {
         mockConfig.soundspanCallbackUrl = "https://consumer.example/app";
 
@@ -360,6 +383,7 @@ describe("federation consumer peers", () => {
             code: "ABCDEFGH",
             name: "Consumer Name",
             createdById: "admin-1",
+            direction: "BOTH",
         });
 
         expect(mockPairFederationPeer).toHaveBeenCalledWith(
@@ -394,6 +418,7 @@ describe("federation consumer peers", () => {
             code: "ABCDEFGH",
             name: "Consumer Name",
             createdById: "admin-1",
+            direction: "BOTH",
         });
 
         expect(result.peer).toEqual(
@@ -438,6 +463,7 @@ describe("federation consumer peers", () => {
             code: "ABCDEFGH",
             name: "Consumer Name",
             createdById: "admin-1",
+            direction: "BOTH",
         });
 
         expect(result.warning).toBe("remote upgrade failed");
@@ -464,6 +490,43 @@ describe("federation consumer peers", () => {
             }),
         ).rejects.toMatchObject({ name: "FederationPeerConflictError" });
         expect(mockGetManifest).not.toHaveBeenCalled();
+        expect(prisma.federationPeer.create).not.toHaveBeenCalled();
+    });
+
+    it("checks for a duplicate URL when a reciprocal upgrade target is stale", async () => {
+        prisma.federationPeer.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: "existing-peer" });
+
+        await expect(
+            linkConsumerFederationPeer({
+                baseUrl: "https://peer.example/path",
+                token: "raw-token",
+                createdById: "admin-1",
+                upgradePeerId: "stale-host-row",
+            }),
+        ).rejects.toBeInstanceOf(FederationPeerConflictError);
+        expect(prisma.federationPeer.create).not.toHaveBeenCalled();
+    });
+
+    it("uses a stable typed error when paired scopes do not overlap", async () => {
+        mockConfig.soundspanCallbackUrl = "https://consumer.example";
+        mockPairFederationPeer.mockResolvedValueOnce({
+            token: "paired-token",
+            reciprocalPeerId: "local-host-row",
+            peer: { id: "remote-peer", scopes: ["embeddings:read"] },
+        });
+
+        await expect(
+            pairAndLinkConsumerFederationPeer({
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Consumer Name",
+                createdById: "admin-1",
+                scopes: ["stream:read"],
+                direction: "BOTH",
+            }),
+        ).rejects.toBeInstanceOf(FederationScopeMismatchError);
         expect(prisma.federationPeer.create).not.toHaveBeenCalled();
     });
 

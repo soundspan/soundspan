@@ -85,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Federation pairing now denies reciprocal library sharing by default. The
+  consumer sends callback credentials and upgrades to `BOTH` only when an
+  administrator explicitly selects bidirectional sharing.
+- Federated stream cache fills now accept only complete status-200 responses,
+  bypass known oversized responses, enforce a remaining-capacity byte ceiling
+  for unknown lengths, and remove partial files after overflow or write
+  failure.
+- Subsonic playlist listing and item reads again include visible playlist
+  tracks from discovery albums while retaining federated local-wins dedup
+  suppression.
 - Federation deltas now detect artist and album changes through maintained
   update timestamps, recover missing parent rows directly, reject expired
   cursors with a full resync, and anchor initial cursors to host time.

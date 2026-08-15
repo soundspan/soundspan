@@ -73,6 +73,16 @@ export class FederationPeerConflictError extends Error {
     }
 }
 
+/** Requested and granted federation scopes have no shared capability. */
+export class FederationScopeMismatchError extends Error {
+    readonly code = "FEDERATION_SCOPE_MISMATCH";
+
+    constructor() {
+        super("Federation peer scopes do not overlap");
+        this.name = "FederationScopeMismatchError";
+    }
+}
+
 /** Validated values used to link a consumer-direction peer. */
 export interface LinkConsumerPeerInput {
     baseUrl: string;
@@ -262,6 +272,19 @@ async function findReciprocalUpgrade(
     });
 }
 
+async function findDuplicateConsumerPeer(
+    baseUrl: string,
+): Promise<{ id: string } | null> {
+    return prisma.federationPeer.findFirst({
+        where: {
+            baseUrl,
+            direction: { in: ["CONSUMER", "BOTH"] },
+            outboundStatus: { not: "REVOKED" },
+        },
+        select: { id: true },
+    });
+}
+
 async function persistConsumerLink(
     input: LinkConsumerPeerInput,
     baseUrl: string,
@@ -286,6 +309,9 @@ async function persistConsumerLink(
             select: publicPeerSelect,
         });
     }
+    if (input.upgradePeerId && (await findDuplicateConsumerPeer(baseUrl))) {
+        throw new FederationPeerConflictError();
+    }
     return prisma.federationPeer.create({
         data: {
             ...shared,
@@ -304,14 +330,7 @@ export async function linkConsumerFederationPeer(
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
     const duplicate = input.upgradePeerId
         ? null
-        : await prisma.federationPeer.findFirst({
-              where: {
-                  baseUrl,
-                  direction: { in: ["CONSUMER", "BOTH"] },
-                  outboundStatus: { not: "REVOKED" },
-              },
-              select: { id: true },
-          });
+        : await findDuplicateConsumerPeer(baseUrl);
     if (duplicate) throw new FederationPeerConflictError();
     const outboundToken = encrypt(input.token);
     const manifest = await createFederationClient({
@@ -346,8 +365,7 @@ export async function createBothFederationPeer(
     const scopes = input.scopes.filter((scope) =>
         outboundScopes.includes(scope),
     );
-    if (scopes.length === 0)
-        throw new Error("Federation peer scopes do not overlap");
+    if (scopes.length === 0) throw new FederationScopeMismatchError();
     const credential = newCredential();
     await ensureFederationIdentity();
     const peer = await prisma.federationPeer.create({
@@ -371,6 +389,7 @@ export async function createBothFederationPeer(
 
 /** Exchanges a short code, then links the resulting token through manifest validation. */
 export async function pairAndLinkConsumerFederationPeer(input: {
+    direction?: "CONSUMER" | "BOTH";
     baseUrl: string;
     code: string;
     name: string;
@@ -378,7 +397,10 @@ export async function pairAndLinkConsumerFederationPeer(input: {
     scopes?: FederationScope[];
 }): Promise<{ peer: PublicFederationPeer; warning?: string }> {
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
-    const consumerBaseUrl = httpsCallbackOrigin();
+    const reciprocalRequested = input.direction === "BOTH";
+    const consumerBaseUrl = reciprocalRequested
+        ? httpsCallbackOrigin()
+        : undefined;
     const scopes = input.scopes ?? ["library:read", "stream:read"];
     const reciprocal = consumerBaseUrl
         ? await createFederationPairingCode({
@@ -402,7 +424,7 @@ export async function pairAndLinkConsumerFederationPeer(input: {
         ? mutualScopes(paired.peer.scopes, scopes)
         : paired.peer.scopes;
     if (linkedScopes.length === 0) {
-        throw new Error("Federation peer scopes do not overlap");
+        throw new FederationScopeMismatchError();
     }
     const peer = await linkConsumerFederationPeer({
         baseUrl,
@@ -413,7 +435,10 @@ export async function pairAndLinkConsumerFederationPeer(input: {
         scopes: linkedScopes,
     });
     const warning =
-        paired.warning ?? (consumerBaseUrl ? undefined : RECIPROCAL_WARNING);
+        paired.warning ??
+        (reciprocalRequested && !consumerBaseUrl
+            ? RECIPROCAL_WARNING
+            : undefined);
     return warning ? { peer, warning } : { peer };
 }
 

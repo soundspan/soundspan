@@ -118,3 +118,48 @@ test("one-time credential dialog shows the token and irreversible warning", asyn
     assert.match(html, /you won&#x27;t see this again/i);
     assert.match(html, /Copy token/);
 });
+
+test("two-way option maps link and pair payloads to BOTH with scopes", async () => {
+    const { buildLinkPeerInput, buildPairPeerInput } =
+        await import("../../features/settings/components/sections/FederationSection");
+
+    assert.deepEqual(
+        buildLinkPeerInput("Friend", "https://peer.example", "tok", {
+            twoWay: false,
+            embeddings: false,
+        }),
+        { baseUrl: "https://peer.example", token: "tok", name: "Friend" },
+    );
+    assert.deepEqual(
+        buildLinkPeerInput("", "https://peer.example", "tok", {
+            twoWay: true,
+            embeddings: false,
+        }),
+        {
+            baseUrl: "https://peer.example",
+            token: "tok",
+            direction: "BOTH",
+            scopes: ["library:read", "stream:read"],
+        },
+    );
+    assert.deepEqual(
+        buildPairPeerInput("Friend", "https://peer.example", "CODE1234", {
+            twoWay: true,
+            embeddings: true,
+        }),
+        {
+            name: "Friend",
+            baseUrl: "https://peer.example",
+            code: "CODE1234",
+            direction: "BOTH",
+            scopes: ["library:read", "stream:read", "embeddings:read"],
+        },
+    );
+    assert.deepEqual(
+        buildPairPeerInput("Friend", "https://peer.example", "CODE1234", {
+            twoWay: false,
+            embeddings: true,
+        }),
+        { name: "Friend", baseUrl: "https://peer.example", code: "CODE1234" },
+    );
+});

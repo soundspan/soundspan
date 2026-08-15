@@ -105,6 +105,24 @@ function buildRes(): Response {
     return {} as Response;
 }
 
+const PLAYLIST_TRACK_WHERE = {
+    removedAt: null,
+    AND: [
+        {
+            OR: [
+                { origin: "LOCAL" },
+                {
+                    origin: "FEDERATED",
+                    OR: [
+                        { dedupOfTrackId: null },
+                        { dedupOfTrack: { removedAt: { not: null } } },
+                    ],
+                },
+            ],
+        },
+    ],
+};
+
 describe("subsonic collections/core compatibility handlers", () => {
     const mockPlaylistFindMany = prisma.playlist.findMany as jest.Mock;
     const mockPlaylistFindFirst = prisma.playlist.findFirst as jest.Mock;
@@ -218,7 +236,7 @@ describe("subsonic collections/core compatibility handlers", () => {
         await handleGetPlaylists(buildReq({}), buildRes());
 
         const playlistQuery = mockPlaylistFindMany.mock.calls[0][0];
-        expect(playlistQuery).toMatchObject({
+        expect(playlistQuery).toEqual({
             where: { userId: "user-1" },
             orderBy: { createdAt: "desc" },
             include: {
@@ -228,12 +246,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                             where: {
                                 OR: [
                                     { trackId: null },
-                                    {
-                                        track: {
-                                            removedAt: null,
-                                            AND: expect.any(Array),
-                                        },
-                                    },
+                                    { track: PLAYLIST_TRACK_WHERE },
                                 ],
                             },
                         },
@@ -248,10 +261,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
-                track: expect.objectContaining({
-                    removedAt: null,
-                    AND: expect.any(Array),
-                }),
+                track: PLAYLIST_TRACK_WHERE,
             },
             select: {
                 playlistId: true,
@@ -262,8 +272,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
                 track: {
-                    removedAt: null,
-                    AND: expect.any(Array),
+                    ...PLAYLIST_TRACK_WHERE,
                     album: {
                         AND: [
                             { coverUrl: { not: null } },
@@ -346,10 +355,7 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-a", "playlist-b"] },
                 trackId: { not: null },
-                track: expect.objectContaining({
-                    removedAt: null,
-                    AND: expect.any(Array),
-                }),
+                track: PLAYLIST_TRACK_WHERE,
             },
             select: {
                 playlistId: true,
@@ -473,18 +479,14 @@ describe("subsonic collections/core compatibility handlers", () => {
                     id: "playlist-1",
                     userId: "user-1",
                 },
-                include: expect.objectContaining({
-                    items: expect.objectContaining({
-                        where: {
-                            track: expect.objectContaining({
-                                removedAt: null,
-                                AND: expect.any(Array),
-                            }),
-                        },
-                    }),
-                }),
+                include: expect.any(Object),
             }),
         );
+        const playlistItems =
+            mockPlaylistFindFirst.mock.calls[0][0].include.items;
+        expect(playlistItems.where).toEqual({
+            track: PLAYLIST_TRACK_WHERE,
+        });
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({

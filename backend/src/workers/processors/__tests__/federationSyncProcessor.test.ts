@@ -77,6 +77,7 @@ jest.mock("../../../utils/logger", () => {
 });
 jest.mock("../../../services/federationClient", () => ({
     createFederationClient,
+    MAX_PAGE_ITEMS: 500,
     FederationEpochMismatchError: MockEpochMismatchError,
     FederationStaleCursorError: MockStaleCursorError,
     FederationHttpError: MockFederationHttpError,
@@ -619,14 +620,27 @@ describe("federation sync processor", () => {
     });
 
     it("rebinds a stable federated identity when the remote track id changes", async () => {
-        prisma.track.findMany.mockResolvedValue([]);
-        prisma.track.findFirst.mockResolvedValueOnce({
-            id: "prior-fed-row",
-            audioHash: "sha256:abc",
+        prisma.track.findMany.mockImplementation(async ({ where }) => {
+            if (where?.origin === "FEDERATED") {
+                return [
+                    {
+                        id: "prior-fed-row",
+                        remoteId: "old-remote-track",
+                        audioHash: "sha256:abc",
+                        recordingMbid: null,
+                        isrc: null,
+                        albumId: "album-local-row",
+                        discNo: 1,
+                        trackNo: 2,
+                    },
+                ];
+            }
+            return [];
         });
 
         await processFederationSync(job());
 
+        expect(prisma.track.findFirst).not.toHaveBeenCalled();
         expect(prisma.track.update).toHaveBeenCalledWith({
             where: { id: "prior-fed-row" },
             data: { remoteId: "remote-track-1" },
@@ -951,7 +965,8 @@ describe("federation sync processor", () => {
         expect(prisma.album.findMany).toHaveBeenCalledTimes(1);
         expect(
             prisma.track.findMany.mock.calls.filter(
-                ([args]) => args.where.peerId === "peer-1",
+                ([args]) =>
+                    args.where.peerId === "peer-1" && args.where.remoteId,
             ),
         ).toHaveLength(1);
         expect(
@@ -959,11 +974,51 @@ describe("federation sync processor", () => {
                 Boolean(args.where.audioHash),
             ),
         ).toHaveLength(1);
+        const localDedupQueries = prisma.track.findMany.mock.calls.filter(
+            ([args]) => args.where.origin === "LOCAL",
+        );
+        expect(localDedupQueries.length).toBeGreaterThan(0);
+        for (const [args] of localDedupQueries) {
+            expect(args.orderBy).toEqual({ id: "asc" });
+        }
+        expect(prisma.track.findFirst).not.toHaveBeenCalled();
+        expect(
+            prisma.track.findMany.mock.calls.filter(
+                ([args]) => args.where.origin === "FEDERATED",
+            ),
+        ).toHaveLength(1);
         expect(
             prisma.track.update.mock.calls.filter(
                 ([args]) => args.data.dedupOfTrackId === "local-a",
             ),
         ).toHaveLength(2);
+    });
+
+    it("rejects a page that exceeds the shared federation item bound", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        client.getCatalogDelta.mockResolvedValue({
+            kind: "ok",
+            changes: Array.from({ length: 501 }, (_, index) => ({
+                ...artist,
+                id: `remote-artist-${index}`,
+                attributes: {
+                    ...artist.attributes,
+                    mbid: `artist-mbid-${index}`,
+                },
+            })),
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+        });
+
+        await expect(processFederationSync(job())).rejects.toThrow(
+            "Federation page exceeded the item bound",
+        );
+        expect(prisma.artist.upsert).not.toHaveBeenCalled();
     });
 
     it("recomputes only artists touched by an incremental page", async () => {
@@ -1053,6 +1108,32 @@ describe("federation sync processor", () => {
                 lastSyncCursor: "2026-08-15T11:59:59.000Z",
             }),
         });
+    });
+
+    it("routes a corrupt saved cursor through epoch recovery into a full resync", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: "{corrupt",
+        });
+        client.getManifest
+            .mockResolvedValueOnce(manifest)
+            .mockResolvedValueOnce(manifest);
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+        });
+
+        expect(client.getCatalogDelta).not.toHaveBeenCalled();
+        expect(prisma.federationPeer.update).toHaveBeenCalledWith({
+            where: { id: "peer-1" },
+            data: { lastSyncCursor: null, catalogEpoch: "epoch-1" },
+        });
+        expect(client.getManifest).toHaveBeenCalledTimes(2);
+        expect(client.getCatalogItems).toHaveBeenNthCalledWith(
+            1,
+            "artist",
+            undefined,
+        );
     });
 
     it("resumes a saved page and converges to uninterrupted cleanup", async () => {

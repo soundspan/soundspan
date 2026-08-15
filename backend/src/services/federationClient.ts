@@ -11,7 +11,8 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
 const MAX_CONCURRENT_REQUESTS = 8;
-const MAX_PAGE_ITEMS = 500;
+/** Maximum number of catalog changes accepted or requested in one page. */
+export const MAX_PAGE_ITEMS = 500;
 const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);

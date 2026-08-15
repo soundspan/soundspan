@@ -8,11 +8,7 @@ export type FederationScope =
 
 export type FederationPeerDirection = "HOST" | "CONSUMER" | "BOTH";
 
-export type FederationPeerStatus =
-    | "PENDING"
-    | "ACTIVE"
-    | "OFFLINE"
-    | "REVOKED";
+export type FederationPeerStatus = "PENDING" | "ACTIVE" | "OFFLINE" | "REVOKED";
 
 /** Public federation peer data returned without credential material. */
 export interface FederationPeer {

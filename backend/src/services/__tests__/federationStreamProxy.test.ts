@@ -227,6 +227,104 @@ describe("federated stream proxy", () => {
         );
     });
 
+    it("passes through a known-length response that exceeds cache capacity", async () => {
+        getStream.mockResolvedValueOnce({
+            status: 200,
+            headers: {
+                "content-type": "audio/flac",
+                "content-length": "999999999999",
+                "accept-ranges": "bytes",
+            },
+            data: Readable.from(["audio"]),
+        });
+        cacheFederatedStream.mockImplementationOnce(
+            async (_trackId, _quality, _modified, _mime, loadStream) =>
+                loadStream(),
+        );
+        const req = createRequest();
+        const res = createResponse();
+        let body = "";
+        res.on("data", (chunk) => {
+            body += chunk.toString();
+        });
+
+        await proxyFederatedTrackStream({
+            req: req as never,
+            res: res as never,
+            peer,
+            remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/flac",
+            quality: "original",
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.headers).toEqual({
+            "content-type": "audio/flac",
+            "content-length": "999999999999",
+            "accept-ranges": "bytes",
+        });
+        expect(body).toBe("audio");
+        expect(streamFileWithRangeSupport).not.toHaveBeenCalled();
+    });
+
+    it.each([206, 416])(
+        "passes through non-200 status %s without serving a cache file",
+        async (status) => {
+            getStream.mockResolvedValueOnce({
+                status,
+                headers: { "content-range": "bytes */5" },
+                data: Readable.from([]),
+            });
+            cacheFederatedStream.mockImplementationOnce(
+                async (_trackId, _quality, _modified, _mime, loadStream) =>
+                    loadStream(),
+            );
+            const res = createResponse();
+
+            await proxyFederatedTrackStream({
+                req: createRequest() as never,
+                res: res as never,
+                peer,
+                remoteId: "remote-track-1",
+                trackId: "fed-track-1",
+                sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+                sourceMime: "audio/flac",
+                quality: "original",
+            });
+
+            expect(res.statusCode).toBe(status);
+            expect(streamFileWithRangeSupport).not.toHaveBeenCalled();
+        },
+    );
+
+    it("destroys the response after a non-transient mid-stream Range failure", async () => {
+        const upstream = new PassThrough();
+        getStream.mockResolvedValueOnce({
+            status: 206,
+            headers: { "content-range": "bytes 0-4/5" },
+            data: upstream,
+        });
+        const res = createResponse();
+        const operation = proxyFederatedTrackStream({
+            req: createRequest("bytes=0-4") as never,
+            res: res as never,
+            peer,
+            remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/flac",
+            quality: "original",
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        upstream.destroy(new Error("decoder stream failed"));
+
+        await expect(operation).resolves.toBeUndefined();
+        expect(res.destroyed).toBe(true);
+        expect(prisma.federationPeer.updateMany).not.toHaveBeenCalled();
+    });
+
     it("serves Range requests from a complete cache hit without peer I/O", async () => {
         getCachedFederatedStreamFilePath.mockResolvedValueOnce({
             filePath: "/cache/federated.audio",

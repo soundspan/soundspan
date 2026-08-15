@@ -5,6 +5,7 @@ import {
     FederationEpochMismatchError,
     FederationHttpError,
     FederationStaleCursorError,
+    MAX_PAGE_ITEMS,
     type FederationEnvelope,
     type FederationManifest,
 } from "../../services/federationClient";
@@ -22,7 +23,6 @@ import { clearTrackTranscodeCache } from "../../services/trackReplacement";
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
 const MAX_REMOTE_PAGES = 10_000;
-const MAX_PAGE_ITEMS = 500;
 const CLEANUP_BATCH_SIZE = 200;
 const MAX_CLEANUP_PAGES = 10_000;
 const MAX_SEEN_ITEMS = 2_000_000;
@@ -126,11 +126,21 @@ type RemoteTrackRow = {
     remoteId: string;
     audioHash: string | null;
 };
+type RebindTrackRow = {
+    id: string;
+    audioHash: string | null;
+    recordingMbid: string | null;
+    isrc: string | null;
+    albumId: string;
+    discNo: number;
+    trackNo: number;
+};
 
 interface PageState {
     artists: Map<string, RemoteArtistRow>;
     albums: Map<string, RemoteAlbumRow>;
     tracks: Map<string, RemoteTrackRow>;
+    rebindTracks: Map<string, RebindTrackRow>;
     artistCollisionRemoteIds: Set<string>;
     albumCollisionRemoteIds: Set<string>;
     loadedArtistMbids: Set<string>;
@@ -510,36 +520,12 @@ async function applyTrackDedup(
 }
 
 async function rebindFederatedTrack(
-    context: SyncContext,
     state: PageState,
     item: TrackEnvelope,
-    albumId: string,
 ): Promise<RemoteTrackRow | null> {
     const current = state.tracks.get(item.id);
     if (current) return current;
-    const attributes = item.attributes;
-    const identity = [
-        ...(attributes.audioHash ? [{ audioHash: attributes.audioHash }] : []),
-        ...(attributes.recordingMbid
-            ? [{ recordingMbid: attributes.recordingMbid }]
-            : []),
-        ...(attributes.isrc ? [{ isrc: attributes.isrc }] : []),
-        {
-            albumId,
-            discNo: attributes.discNo,
-            trackNo: attributes.trackNo,
-        },
-    ];
-    const prior = await prisma.track.findFirst({
-        where: {
-            peerId: context.peerId,
-            origin: "FEDERATED",
-            removedAt: null,
-            OR: identity,
-        },
-        orderBy: { id: "asc" },
-        select: { id: true, audioHash: true },
-    });
+    const prior = state.rebindTracks.get(item.id);
     if (!prior) return null;
     await prisma.track.update({
         where: { id: prior.id },
@@ -646,6 +632,9 @@ interface GroupedPage {
 }
 
 function groupPage(items: readonly FederationEnvelope[]): GroupedPage {
+    if (items.length > MAX_PAGE_ITEMS) {
+        throw new RangeError("Federation page exceeded the item bound");
+    }
     const grouped: GroupedPage = { artists: [], albums: [], tracks: [] };
     for (let index = 0; index < MAX_PAGE_ITEMS; index += 1) {
         const item = items[index];
@@ -662,6 +651,7 @@ function newPageState(): PageState {
         artists: new Map(),
         albums: new Map(),
         tracks: new Map(),
+        rebindTracks: new Map(),
         artistCollisionRemoteIds: new Set(),
         albumCollisionRemoteIds: new Set(),
         loadedArtistMbids: new Set(),
@@ -783,6 +773,79 @@ async function loadTrackPageState(
     }
 }
 
+function trackRebindIdentity(item: TrackEnvelope, albumId: string) {
+    const attributes = item.attributes;
+    return [
+        ...(attributes.audioHash ? [{ audioHash: attributes.audioHash }] : []),
+        ...(attributes.recordingMbid
+            ? [{ recordingMbid: attributes.recordingMbid }]
+            : []),
+        ...(attributes.isrc ? [{ isrc: attributes.isrc }] : []),
+        {
+            albumId,
+            discNo: attributes.discNo,
+            trackNo: attributes.trackNo,
+        },
+    ];
+}
+
+function matchesRebindCandidate(
+    row: RebindTrackRow,
+    item: TrackEnvelope,
+    albumId: string,
+): boolean {
+    const attributes = item.attributes;
+    return (
+        (Boolean(attributes.audioHash) &&
+            row.audioHash === attributes.audioHash) ||
+        (Boolean(attributes.recordingMbid) &&
+            row.recordingMbid === attributes.recordingMbid) ||
+        (Boolean(attributes.isrc) && row.isrc === attributes.isrc) ||
+        (row.albumId === albumId &&
+            row.discNo === attributes.discNo &&
+            row.trackNo === attributes.trackNo)
+    );
+}
+
+async function loadTrackRebindPageState(
+    context: SyncContext,
+    state: PageState,
+    items: readonly TrackEnvelope[],
+    resolvedAlbums: ReadonlyMap<string, RemoteAlbumRow>,
+): Promise<void> {
+    const missing = items.filter((item) => !state.tracks.has(item.id));
+    if (missing.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: {
+            peerId: context.peerId,
+            origin: "FEDERATED",
+            removedAt: null,
+            OR: missing.flatMap((item) => {
+                const album = resolvedAlbums.get(item.id);
+                return album ? trackRebindIdentity(item, album.id) : [];
+            }),
+        },
+        orderBy: { id: "asc" },
+        select: {
+            id: true,
+            audioHash: true,
+            recordingMbid: true,
+            isrc: true,
+            albumId: true,
+            discNo: true,
+            trackNo: true,
+        },
+    });
+    for (const item of missing) {
+        const album = resolvedAlbums.get(item.id);
+        if (!album) continue;
+        const prior = rows.find((row) =>
+            matchesRebindCandidate(row, item, album.id),
+        );
+        if (prior) state.rebindTracks.set(item.id, prior);
+    }
+}
+
 async function loadPageState(
     context: SyncContext,
     grouped: GroupedPage,
@@ -862,6 +925,7 @@ async function applyTracks(
     resolvedAlbums: ReadonlyMap<string, RemoteAlbumRow>,
     remember: boolean,
 ): Promise<void> {
+    await loadTrackRebindPageState(context, state, items, resolvedAlbums);
     const albums = new Map(state.albums);
     for (const item of items) {
         const album = resolvedAlbums.get(item.id);
@@ -871,12 +935,7 @@ async function applyTracks(
     for (const item of items) {
         const album = resolvedAlbums.get(item.id);
         if (!album) continue;
-        const existing = await rebindFederatedTrack(
-            context,
-            state,
-            item,
-            album.id,
-        );
+        const existing = await rebindFederatedTrack(state, item);
         await upsertTrack(
             context,
             item,

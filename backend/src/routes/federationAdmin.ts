@@ -9,6 +9,7 @@ import {
     deleteFederationPeer,
     FEDERATION_SCOPE_VALUES,
     FederationPeerConflictError,
+    FederationScopeMismatchError,
     linkConsumerFederationPeer,
     listFederationPeers,
     pairAndLinkConsumerFederationPeer,
@@ -68,7 +69,7 @@ const bothLinkSchema = z.strictObject({
 });
 const consumerLinkSchema = z.union([consumerOnlyLinkSchema, bothLinkSchema]);
 const consumerPairSchema = z.strictObject({
-    direction: z.enum(["CONSUMER", "BOTH"]).optional(),
+    direction: z.enum(["CONSUMER", "BOTH"]).default("CONSUMER"),
     baseUrl: httpsUrlSchema,
     code: z
         .string()
@@ -146,9 +147,29 @@ router.post(
  *     summary: Validate and link a consumer or bidirectional federation peer
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [baseUrl, token]
+ *             properties:
+ *               direction:
+ *                 type: string
+ *                 enum: [CONSUMER, BOTH]
+ *                 default: CONSUMER
+ *                 description: BOTH explicitly enables sharing this instance back to the linked peer; omission creates a consumer-only link.
+ *               baseUrl: { type: string, format: uri }
+ *               token: { type: string }
+ *               name: { type: string }
+ *               scopes:
+ *                 type: array
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read] }
  *     responses:
  *       201: { description: Consumer peer linked }
  *       400: { description: Invalid link input }
+ *       422: { description: Requested and peer scopes do not overlap }
  *       429: { description: Request rate limit exceeded }
  *       502: { description: Peer manifest validation failed }
  */
@@ -184,6 +205,14 @@ router.post(
                     { code: "FEDERATION_PEER_CONFLICT" },
                 );
             }
+            if (error instanceof FederationScopeMismatchError) {
+                return sendRouteError(
+                    res,
+                    422,
+                    "Federation peer scopes do not overlap",
+                    { code: error.code },
+                );
+            }
             return sendRouteError(res, 502, "Peer manifest validation failed", {
                 code: "FEDERATION_PEER_INVALID",
             });
@@ -194,12 +223,32 @@ router.post(
 /** @openapi
  * /api/federation/admin/peers/link/pair:
  *   post:
- *     summary: Pair and reciprocally link a federation peer
+ *     summary: Pair a consumer peer with optional reciprocal sharing
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [baseUrl, code, name]
+ *             properties:
+ *               direction:
+ *                 type: string
+ *                 enum: [CONSUMER, BOTH]
+ *                 default: CONSUMER
+ *                 description: BOTH opts into a reciprocal callback and library grant; omission never shares this instance back.
+ *               baseUrl: { type: string, format: uri }
+ *               code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{8}$' }
+ *               name: { type: string }
+ *               scopes:
+ *                 type: array
+ *                 items: { type: string, enum: [library:read, stream:read, embeddings:read] }
  *     responses:
  *       201: { description: Consumer peer paired and linked }
  *       400: { description: Invalid pairing input }
+ *       422: { description: Requested and peer scopes do not overlap }
  *       429: { description: Request rate limit exceeded }
  *       502: { description: Peer pairing or manifest validation failed }
  */
@@ -216,7 +265,15 @@ router.post(
                 createdById: req.user.id,
             });
             return res.status(201).json(result);
-        } catch (_error: unknown) {
+        } catch (error: unknown) {
+            if (error instanceof FederationScopeMismatchError) {
+                return sendRouteError(
+                    res,
+                    422,
+                    "Federation peer scopes do not overlap",
+                    { code: error.code },
+                );
+            }
             return sendRouteError(res, 502, "Peer pairing failed", {
                 code: "FEDERATION_PAIR_FAILED",
             });

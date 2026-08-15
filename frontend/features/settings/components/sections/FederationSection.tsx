@@ -20,6 +20,8 @@ import type {
     FederationPeer,
     FederationPeerStatus,
     FederationScope,
+    LinkFederationPeerInput,
+    PairFederationPeerInput,
 } from "@/lib/api/federation";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -27,7 +29,7 @@ import { SettingsSection } from "../ui";
 
 type AddMode = "host" | "link" | "pair";
 
-interface LinkDirectionOptions {
+export interface LinkDirectionOptions {
     twoWay: boolean;
     embeddings: boolean;
 }
@@ -38,6 +40,40 @@ function linkScopes(options: LinkDirectionOptions): FederationScope[] {
     return options.embeddings
         ? [...DEFAULT_SCOPES, "embeddings:read"]
         : DEFAULT_SCOPES;
+}
+
+/** Maps the add-peer form's direction options onto the link request body. */
+export function buildLinkPeerInput(
+    name: string,
+    baseUrl: string,
+    token: string,
+    options: LinkDirectionOptions,
+): LinkFederationPeerInput {
+    return {
+        baseUrl,
+        token,
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(options.twoWay
+            ? { direction: "BOTH" as const, scopes: linkScopes(options) }
+            : {}),
+    };
+}
+
+/** Maps the add-peer form's direction options onto the pair request body. */
+export function buildPairPeerInput(
+    name: string,
+    baseUrl: string,
+    code: string,
+    options: LinkDirectionOptions,
+): PairFederationPeerInput {
+    return {
+        name,
+        baseUrl,
+        code,
+        ...(options.twoWay
+            ? { direction: "BOTH" as const, scopes: linkScopes(options) }
+            : {}),
+    };
 }
 const inputClassName =
     "w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-white/30 focus:outline-none";
@@ -65,7 +101,8 @@ function hasOutbound(peer: FederationPeer): boolean {
 }
 
 function isFullyRevoked(peer: FederationPeer): boolean {
-    const inboundRevoked = !hasInbound(peer) || peer.inboundStatus === "REVOKED";
+    const inboundRevoked =
+        !hasInbound(peer) || peer.inboundStatus === "REVOKED";
     const outboundRevoked =
         !hasOutbound(peer) || peer.outboundStatus === "REVOKED";
     return inboundRevoked && outboundRevoked;
@@ -689,33 +726,17 @@ function FederationAddControls(props: {
                 }
                 onLink={(name, baseUrl, token, options) =>
                     run(async () => {
-                        await api.linkFederationPeer({
-                            baseUrl,
-                            token,
-                            ...(name.trim() ? { name: name.trim() } : {}),
-                            ...(options.twoWay
-                                ? {
-                                      direction: "BOTH" as const,
-                                      scopes: linkScopes(options),
-                                  }
-                                : {}),
-                        });
+                        await api.linkFederationPeer(
+                            buildLinkPeerInput(name, baseUrl, token, options),
+                        );
                         await props.loadPeers();
                     })
                 }
                 onPair={(name, baseUrl, code, options) =>
                     run(async () => {
-                        await api.pairFederationPeer({
-                            name,
-                            baseUrl,
-                            code,
-                            ...(options.twoWay
-                                ? {
-                                      direction: "BOTH" as const,
-                                      scopes: linkScopes(options),
-                                  }
-                                : {}),
-                        });
+                        await api.pairFederationPeer(
+                            buildPairPeerInput(name, baseUrl, code, options),
+                        );
                         await props.loadPeers();
                     })
                 }
