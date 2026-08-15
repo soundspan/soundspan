@@ -119,11 +119,13 @@ describe("trackRemovalPurgeProcessor", () => {
         const candidates = Array.from({ length: 101 }, (_, index) => ({
             id: `track-${index.toString().padStart(3, "0")}`,
         }));
-        const { module, prisma, schedulerQueue } = loadProcessor(
-            candidates,
-            90,
-            100,
-        );
+        const {
+            module,
+            prisma,
+            schedulerQueue,
+            cleanupOrphanedLibraryEntities,
+            backfillAllArtistCounts,
+        } = loadProcessor(candidates, 90, 100);
 
         await expect(
             module.processTrackRemovalPurge(buildJob()),
@@ -146,6 +148,7 @@ describe("trackRemovalPurgeProcessor", () => {
             {
                 startAfterId: "track-099",
                 cutoffAt: "2026-05-16T12:00:00.000Z",
+                deletedSoFar: 100,
             },
             {
                 attempts: 3,
@@ -155,6 +158,8 @@ describe("trackRemovalPurgeProcessor", () => {
                 removeOnFail: 10,
             },
         );
+        expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
     });
 
     it("resumes after a validated cursor with the persisted cutoff", async () => {
@@ -162,7 +167,11 @@ describe("trackRemovalPurgeProcessor", () => {
         const { module, prisma } = loadProcessor([{ id: "track-101" }]);
 
         await module.processTrackRemovalPurge(
-            buildJob({ startAfterId: "track-100", cutoffAt }),
+            buildJob({
+                startAfterId: "track-100",
+                cutoffAt,
+                deletedSoFar: 100,
+            }),
         );
 
         expect(prisma.track.findMany).toHaveBeenCalledWith({
@@ -185,6 +194,65 @@ describe("trackRemovalPurgeProcessor", () => {
             ),
         ).rejects.toBeDefined();
         expect(prisma.track.findMany).not.toHaveBeenCalled();
+    });
+
+    it.each([-1, 1.5, "100", undefined])(
+        "rejects malformed continuation deletedSoFar %p",
+        async (deletedSoFar) => {
+            const { module, prisma } = loadProcessor([]);
+
+            await expect(
+                module.processTrackRemovalPurge(
+                    buildJob({
+                        startAfterId: "track-100",
+                        cutoffAt: "2026-05-16T12:00:00.000Z",
+                        ...(deletedSoFar === undefined ? {} : { deletedSoFar }),
+                    }),
+                ),
+            ).rejects.toBeDefined();
+            expect(prisma.track.findMany).not.toHaveBeenCalled();
+        },
+    );
+
+    it("refreshes the catalog once after a multi-page sweep and logs the cumulative count", async () => {
+        const firstPage = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${index.toString().padStart(3, "0")}`,
+        }));
+        const {
+            module,
+            logger,
+            prisma,
+            schedulerQueue,
+            cleanupOrphanedLibraryEntities,
+            backfillAllArtistCounts,
+        } = loadProcessor(firstPage, 90, 100);
+
+        await module.processTrackRemovalPurge(buildJob());
+        expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+
+        const secondPage = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${(index + 100).toString().padStart(3, "0")}`,
+        }));
+        prisma.track.findMany.mockResolvedValueOnce(secondPage);
+        prisma.track.deleteMany.mockResolvedValueOnce({ count: 50 });
+        const continuationCalls = schedulerQueue.add.mock
+            .calls as unknown as Array<[string, Record<string, unknown>]>;
+        const firstContinuation = continuationCalls[0]?.[1];
+        await module.processTrackRemovalPurge(buildJob(firstContinuation));
+        expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
+        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+
+        prisma.track.findMany.mockResolvedValueOnce([{ id: "track-200" }]);
+        prisma.track.deleteMany.mockResolvedValueOnce({ count: 0 });
+        const secondContinuation = continuationCalls[1]?.[1];
+        await module.processTrackRemovalPurge(buildJob(secondContinuation));
+
+        expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
+        expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
+        expect(logger.info).toHaveBeenCalledWith(
+            expect.stringContaining("Post-purge cleanup for 150 tracks"),
+        );
     });
 
     it("skips cleanup when no rows are purged", async () => {

@@ -32,6 +32,9 @@ jest.mock("../../utils/db", () => ({
         syncGroupMember: {
             findMany: jest.fn(),
         },
+        track: {
+            findMany: jest.fn(),
+        },
     },
 }));
 
@@ -45,6 +48,7 @@ const mockSet = redisClient.set as jest.Mock;
 const mockUserFindMany = prisma.user.findMany as jest.Mock;
 const mockSyncGroupMemberFindMany = prisma.syncGroupMember
     .findMany as jest.Mock;
+const mockTrackFindMany = prisma.track.findMany as jest.Mock;
 
 function asAsyncIterable<T>(items: T[]): AsyncIterable<T> {
     return {
@@ -102,6 +106,10 @@ describe("social presence compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockUserFindMany.mockResolvedValue([]);
+        mockTrackFindMany.mockImplementation(
+            async (args: { where: { id: { in: string[] } } }) =>
+                args.where.id.in.map((id) => ({ id })),
+        );
     });
 
     it("returns online roster with privacy filtering and listen-together indicator", async () => {
@@ -245,6 +253,132 @@ describe("social presence compatibility", () => {
         expect(res.body).toEqual({ users: [] });
         expect(mockUserFindMany).not.toHaveBeenCalled();
         expect(mockSyncGroupMemberFindMany).not.toHaveBeenCalled();
+    });
+
+    it("hides removed local now-listening tracks and keeps active tracks", async () => {
+        const now = Date.now();
+        mockScanIterator.mockReturnValue(
+            asScanIterable([
+                "social:presence:user:user-active",
+                "social:presence:user:user-removed",
+                "social:presence:user:user-remote",
+            ]),
+        );
+        mockMGet.mockResolvedValue([String(now), String(now), String(now)]);
+        mockUserFindMany.mockResolvedValueOnce([
+            {
+                id: "user-active",
+                username: "active",
+                displayName: "Active",
+                settings: {
+                    shareOnlinePresence: true,
+                    shareListeningStatus: true,
+                },
+                playbackStates: [
+                    {
+                        playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
+                        queue: [
+                            {
+                                id: "track-active",
+                                title: "Active Song",
+                                duration: 180,
+                                artist: { name: "Artist" },
+                                album: { title: "Album" },
+                            },
+                        ],
+                        currentIndex: 0,
+                    },
+                ],
+            },
+            {
+                id: "user-removed",
+                username: "removed",
+                displayName: "Removed",
+                settings: {
+                    shareOnlinePresence: true,
+                    shareListeningStatus: true,
+                },
+                playbackStates: [
+                    {
+                        playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
+                        queue: [
+                            {
+                                id: "track-removed",
+                                title: "Removed Song",
+                                duration: 200,
+                                artist: { name: "Artist" },
+                                album: { title: "Album" },
+                            },
+                        ],
+                        currentIndex: 0,
+                    },
+                ],
+            },
+            {
+                id: "user-remote",
+                username: "remote",
+                displayName: "Remote",
+                settings: {
+                    shareOnlinePresence: true,
+                    shareListeningStatus: true,
+                },
+                playbackStates: [
+                    {
+                        playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
+                        queue: [
+                            {
+                                id: "yt:video-1",
+                                title: "Remote Song",
+                                duration: 220,
+                                mediaSource: "youtube",
+                                artist: { name: "Remote Artist" },
+                                album: { title: "Remote Album" },
+                            },
+                        ],
+                        currentIndex: 0,
+                    },
+                ],
+            },
+        ]);
+        mockSyncGroupMemberFindMany.mockResolvedValue([]);
+        mockTrackFindMany.mockResolvedValueOnce([{ id: "track-active" }]);
+        const res = createRes();
+
+        await onlineHandler({ user: { id: "viewer-1" } } as any, res);
+
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
+        expect(mockTrackFindMany).toHaveBeenCalledWith({
+            where: {
+                removedAt: null,
+                id: { in: ["track-active", "track-removed"] },
+            },
+            select: { id: true },
+        });
+        expect(res.body.users).toEqual([
+            expect.objectContaining({
+                id: "user-active",
+                listeningStatus: "playing",
+                listeningTrack: expect.objectContaining({
+                    id: "track-active",
+                }),
+            }),
+            expect.objectContaining({
+                id: "user-remote",
+                listeningStatus: "playing",
+                listeningTrack: expect.objectContaining({ id: "yt:video-1" }),
+            }),
+            expect.objectContaining({
+                id: "user-removed",
+                listeningStatus: "idle",
+                listeningTrack: null,
+            }),
+        ]);
     });
 
     it("returns null listening track when playback queue payload is invalid", async () => {

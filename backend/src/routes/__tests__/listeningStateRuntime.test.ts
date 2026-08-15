@@ -25,6 +25,9 @@ const prisma = {
         findUnique: jest.fn(),
         findMany: jest.fn(),
     },
+    track: {
+        findMany: jest.fn(),
+    },
 };
 
 jest.mock("../../utils/db", () => ({
@@ -37,6 +40,7 @@ import { prisma as prismaClient } from "../../utils/db";
 const mockUpsert = prismaClient.listeningState.upsert as jest.Mock;
 const mockFindUnique = prismaClient.listeningState.findUnique as jest.Mock;
 const mockFindMany = prismaClient.listeningState.findMany as jest.Mock;
+const mockTrackFindMany = prismaClient.track.findMany as jest.Mock;
 
 function getHandler(method: "get" | "post", path: string) {
     const layer = (router as any).stack.find(
@@ -94,6 +98,7 @@ describe("listeningState routes runtime", () => {
         mockFindMany.mockResolvedValue([
             { id: "state-1", updatedAt: new Date("2026-02-17T00:00:00.000Z") },
         ]);
+        mockTrackFindMany.mockResolvedValue([]);
     });
 
     it("validates payload for POST / and returns zod details", async () => {
@@ -319,6 +324,61 @@ describe("listeningState routes runtime", () => {
             orderBy: { updatedAt: "desc" },
             take: 10,
         });
+    });
+
+    it("drops missing or removed music tracks with one visible-track query", async () => {
+        const activeTrackState = {
+            id: "state-active",
+            kind: "music",
+            entityId: "track-active",
+        };
+        const removedTrackState = {
+            id: "state-removed",
+            kind: "music",
+            entityId: "track-removed",
+        };
+        const missingTrackState = {
+            id: "state-missing",
+            kind: "music",
+            entityId: "track-missing",
+        };
+        const bookState = {
+            id: "state-book",
+            kind: "book",
+            entityId: "book-1",
+        };
+        const podcastState = {
+            id: "state-podcast",
+            kind: "podcast",
+            entityId: "podcast-1",
+        };
+        mockFindMany.mockResolvedValueOnce([
+            activeTrackState,
+            removedTrackState,
+            missingTrackState,
+            bookState,
+            podcastState,
+        ]);
+        mockTrackFindMany.mockResolvedValueOnce([{ id: "track-active" }]);
+        const req = {
+            user: { id: "u1", username: "u1", role: "user" },
+            query: {},
+        } as any;
+        const res = createRes();
+
+        await getRecent(req, res);
+
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
+        expect(mockTrackFindMany).toHaveBeenCalledWith({
+            where: {
+                removedAt: null,
+                id: {
+                    in: ["track-active", "track-removed", "track-missing"],
+                },
+            },
+            select: { id: true },
+        });
+        expect(res.body).toEqual([activeTrackState, bookState, podcastState]);
     });
 
     it("returns 500 when recent state query fails", async () => {

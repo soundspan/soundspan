@@ -23,13 +23,31 @@ const purgeJobDataSchema = z
         mode: z.enum(["startup", "repeat"]).optional(),
         startAfterId: z.string().trim().min(1).max(128).optional(),
         cutoffAt: z.iso.datetime({ offset: true }).optional(),
+        deletedSoFar: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(Number.MAX_SAFE_INTEGER)
+            .optional(),
     })
     .superRefine((data, context) => {
-        if (Boolean(data.startAfterId) === Boolean(data.cutoffAt)) return;
-        context.addIssue({
-            code: "custom",
-            message: "Track removal purge cursor and cutoff must be paired",
-        });
+        const hasStartAfterId = Boolean(data.startAfterId);
+        const hasCutoffAt = Boolean(data.cutoffAt);
+        if (hasStartAfterId !== hasCutoffAt) {
+            context.addIssue({
+                code: "custom",
+                message: "Track removal purge cursor and cutoff must be paired",
+            });
+        }
+        const hasContinuation = hasStartAfterId && hasCutoffAt;
+        if (hasContinuation !== (data.deletedSoFar !== undefined)) {
+            context.addIssue({
+                code: "custom",
+                path: ["deletedSoFar"],
+                message:
+                    "Track removal purge continuation requires deletedSoFar",
+            });
+        }
     });
 
 /** Bull job name for expired soft-removed track purge pages. */
@@ -40,6 +58,7 @@ export interface TrackRemovalPurgeJobData {
     mode?: "startup" | "repeat";
     startAfterId?: string;
     cutoffAt?: string;
+    deletedSoFar?: number;
 }
 
 /** Summary returned by one bounded purge page. */
@@ -48,7 +67,11 @@ export interface TrackRemovalPurgeResult {
     continued: boolean;
 }
 
-type PurgeCursor = { startAfterId?: string; cutoff: Date };
+type PurgeCursor = {
+    startAfterId?: string;
+    cutoff: Date;
+    deletedSoFar: number;
+};
 
 function parsePurgeCursor(data: unknown): PurgeCursor {
     const parsed = purgeJobDataSchema.parse(data ?? {});
@@ -57,7 +80,11 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
         : new Date(
               Date.now() - config.workers.trackRemovalRetentionDays * DAY_MS,
           );
-    return { startAfterId: parsed.startAfterId, cutoff };
+    return {
+        startAfterId: parsed.startAfterId,
+        cutoff,
+        deletedSoFar: parsed.deletedSoFar ?? 0,
+    };
 }
 
 async function loadPurgePage(
@@ -91,10 +118,11 @@ async function deletePurgeBatch(
 async function enqueueContinuation(
     startAfterId: string,
     cutoff: Date,
+    deletedSoFar: number,
 ): Promise<void> {
     await schedulerQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
-        { startAfterId, cutoffAt: cutoff.toISOString() },
+        { startAfterId, cutoffAt: cutoff.toISOString(), deletedSoFar },
         {
             ...CONTINUATION_OPTIONS,
             jobId: `scheduler:track-removal-purge:${startAfterId}`,
@@ -102,12 +130,22 @@ async function enqueueContinuation(
     );
 }
 
-async function refreshCatalogAfterPurge(): Promise<void> {
+async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
     const orphans = await cleanupOrphanedLibraryEntities();
     const counts = await backfillAllArtistCounts();
     log.info(
-        `Post-purge cleanup deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${counts.processed} artist counts with ${counts.errors} errors`,
+        `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${counts.processed} artist counts with ${counts.errors} errors`,
     );
+}
+
+function sumDeletedTracks(deletedSoFar: number, deleted: number): number {
+    const total = deletedSoFar + deleted;
+    if (!Number.isSafeInteger(total)) {
+        throw new Error(
+            "Track removal purge deleted count exceeded safe range",
+        );
+    }
+    return total;
 }
 
 /** Hard-deletes one bounded page of tracks past the removal retention window. */
@@ -118,14 +156,20 @@ export async function processTrackRemovalPurge(
     const candidates = await loadPurgePage(cursor);
     const batch = candidates.slice(0, BATCH_SIZE);
     const deleted = await deletePurgeBatch(batch, cursor.cutoff);
-    if (deleted > 0) await refreshCatalogAfterPurge();
+    const sweepDeleted = sumDeletedTracks(cursor.deletedSoFar, deleted);
 
     const continued = candidates.length > BATCH_SIZE;
     if (continued) {
-        await enqueueContinuation(batch[BATCH_SIZE - 1].id, cursor.cutoff);
+        await enqueueContinuation(
+            batch[BATCH_SIZE - 1].id,
+            cursor.cutoff,
+            sweepDeleted,
+        );
+    } else if (sweepDeleted > 0) {
+        await refreshCatalogAfterPurge(sweepDeleted);
     }
     log.info(
-        `Purged ${deleted} expired removed tracks (selected ${batch.length}, continued=${continued})`,
+        `Purged ${deleted} expired removed tracks (selected ${batch.length}, sweepDeleted=${sweepDeleted}, continued=${continued})`,
     );
     return { deleted, continued };
 }

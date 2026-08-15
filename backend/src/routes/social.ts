@@ -8,6 +8,8 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
+import { resolveCanonicalMediaSource } from "@soundspan/media-metadata-contract";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = express.Router();
 
@@ -88,6 +90,21 @@ type QueueTrackProjection = {
     coverArt: string | null;
 };
 
+type QueueTrackCandidate = {
+    projection: QueueTrackProjection;
+    localTrackId: string | null;
+};
+
+type ListeningUser = {
+    id: string;
+    settings: { shareListeningStatus: boolean } | null;
+    playbackStates: Array<{
+        playbackType: string;
+        queue: unknown;
+        currentIndex: number;
+    }>;
+};
+
 function asNonEmptyString(value: unknown): string | null {
     if (typeof value !== "string") return null;
     const trimmed = value.trim();
@@ -109,7 +126,7 @@ function getElapsedMs(value: unknown): number | null {
 function extractQueueTrack(
     queueRaw: unknown,
     currentIndex: number,
-): QueueTrackProjection | null {
+): QueueTrackCandidate | null {
     if (!Array.isArray(queueRaw)) return null;
     const candidate = queueRaw[currentIndex];
     if (!candidate || typeof candidate !== "object") return null;
@@ -122,6 +139,10 @@ function extractQueueTrack(
     const album =
         item.album && typeof item.album === "object"
             ? (item.album as Record<string, unknown>)
+            : null;
+    const provider =
+        item.provider && typeof item.provider === "object"
+            ? (item.provider as Record<string, unknown>)
             : null;
 
     if (
@@ -136,16 +157,71 @@ function extractQueueTrack(
         return null;
     }
 
+    const source = resolveCanonicalMediaSource({
+        mediaSource: item.mediaSource ?? provider?.source,
+        streamSource: item.streamSource,
+        sourceType: item.sourceType,
+        tidalTrackId: item.tidalTrackId,
+        youtubeVideoId: item.youtubeVideoId,
+    });
     return {
-        id: item.id,
-        title: item.title,
-        duration: item.duration,
-        artistName: artist.name,
-        artistId: asNonEmptyString(artist.id),
-        albumTitle: album.title,
-        albumId: asNonEmptyString(album.id),
-        coverArt: typeof album.coverArt === "string" ? album.coverArt : null,
+        projection: {
+            id: item.id,
+            title: item.title,
+            duration: item.duration,
+            artistName: artist.name,
+            artistId: asNonEmptyString(artist.id),
+            albumTitle: album.title,
+            albumId: asNonEmptyString(album.id),
+            coverArt:
+                typeof album.coverArt === "string" ? album.coverArt : null,
+        },
+        localTrackId: source === "local" ? item.id : null,
     };
+}
+
+async function resolveVisibleListeningTracks(
+    users: ListeningUser[],
+): Promise<Map<string, QueueTrackProjection | null>> {
+    const candidates = new Map(
+        users.map((user) => {
+            const state = user.playbackStates[0];
+            const candidate =
+                user.settings?.shareListeningStatus === true &&
+                state?.playbackType === "track"
+                    ? extractQueueTrack(state.queue, state.currentIndex)
+                    : null;
+            return [user.id, candidate] as const;
+        }),
+    );
+    const localTrackIds = Array.from(
+        new Set(
+            Array.from(candidates.values()).flatMap((candidate) =>
+                candidate?.localTrackId ? [candidate.localTrackId] : [],
+            ),
+        ),
+    );
+    const visibleTracks =
+        localTrackIds.length === 0
+            ? []
+            : await prisma.track.findMany({
+                  where: {
+                      ...TRACK_VISIBLE_WHERE,
+                      id: { in: localTrackIds },
+                  },
+                  select: { id: true },
+              });
+    const visibleTrackIds = new Set(visibleTracks.map((track) => track.id));
+    return new Map(
+        Array.from(candidates, ([userId, candidate]) => [
+            userId,
+            candidate &&
+            (!candidate.localTrackId ||
+                visibleTrackIds.has(candidate.localTrackId))
+                ? candidate.projection
+                : null,
+        ]),
+    );
 }
 
 function resolveListeningStatus(
@@ -372,6 +448,8 @@ router.get("/online", async (_req, res) => {
         const hasProfilePictureSet = new Set(
             usersWithPictures.map((u) => u.id),
         );
+        const listeningTracksByUserId =
+            await resolveVisibleListeningTracks(users);
 
         const socialUsers = users
             .filter((user) => user.settings?.shareOnlinePresence === true)
@@ -380,13 +458,7 @@ router.get("/online", async (_req, res) => {
                 const shareListening =
                     user.settings?.shareListeningStatus === true;
                 const listeningTrack =
-                    shareListening &&
-                    latestPlaybackState?.playbackType === "track"
-                        ? extractQueueTrack(
-                              latestPlaybackState.queue,
-                              latestPlaybackState.currentIndex,
-                          )
-                        : null;
+                    listeningTracksByUserId.get(user.id) ?? null;
                 const listeningStatus = resolveListeningStatus(
                     shareListening,
                     latestPlaybackState,

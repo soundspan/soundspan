@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { parseBoundedInt } from "../utils/queryParams";
 import { z } from "zod";
+import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 
 const router = Router();
 
@@ -15,6 +16,29 @@ const listeningStateSchema = z.object({
     trackId: z.string().optional(),
     positionMs: z.number().int().min(0),
 });
+
+async function filterVisibleTrackStates<
+    T extends { kind: string; entityId: string },
+>(states: T[]): Promise<T[]> {
+    const trackIds = Array.from(
+        new Set(
+            states
+                .filter((state) => state.kind === "music")
+                .map((state) => state.entityId),
+        ),
+    );
+    if (trackIds.length === 0) return states;
+
+    const visibleTracks = await prisma.track.findMany({
+        where: { ...TRACK_VISIBLE_WHERE, id: { in: trackIds } },
+        select: { id: true },
+    });
+    const visibleTrackIds = new Set(visibleTracks.map((track) => track.id));
+    return states.filter(
+        (state) =>
+            state.kind !== "music" || visibleTrackIds.has(state.entityId),
+    );
+}
 
 /**
  * @openapi
@@ -190,7 +214,7 @@ router.get("/recent", async (req, res) => {
             take: limit,
         });
 
-        res.json(states);
+        res.json(await filterVisibleTrackStates(states));
     } catch (error) {
         logger.error("Get recent listening states error:", error);
         res.status(500).json({
