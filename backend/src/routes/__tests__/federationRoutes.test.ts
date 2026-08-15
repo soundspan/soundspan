@@ -4,6 +4,7 @@ import request from "supertest";
 const catalog = {
     getFederationManifest: jest.fn(),
     getFederationCatalogItems: jest.fn(),
+    getFederationCatalogItem: jest.fn(),
     getFederationCatalogDelta: jest.fn(),
     findExportedFederationAlbum: jest.fn(),
     findExportedFederationTrack: jest.fn(),
@@ -95,6 +96,7 @@ describe("federation host routes", () => {
             items: [],
             nextCursor: null,
         });
+        catalog.getFederationCatalogItem.mockResolvedValue(null);
         catalog.getFederationCatalogDelta.mockResolvedValue({
             kind: "ok",
             changes: [],
@@ -146,6 +148,24 @@ describe("federation host routes", () => {
         expect(invalid.status).toBe(400);
     });
 
+    it("returns one directly addressed catalog item", async () => {
+        catalog.getFederationCatalogItem.mockResolvedValueOnce({
+            id: "artist-1",
+            mediaType: "artist",
+        });
+        const response = await request(app)
+            .get("/api/federation/v1/catalog/items/artist/artist-1")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read");
+
+        expect(response.status).toBe(200);
+        expect(catalog.getFederationCatalogItem).toHaveBeenCalledWith({
+            mediaType: "artist",
+            id: "artist-1",
+            includeEmbeddings: false,
+        });
+    });
+
     it("returns a typed 409 for a catalog epoch mismatch", async () => {
         catalog.getFederationCatalogDelta.mockResolvedValueOnce({
             kind: "epochMismatch",
@@ -163,6 +183,26 @@ describe("federation host routes", () => {
             error: "Federation catalog epoch mismatch",
             code: "FEDERATION_EPOCH_MISMATCH",
             currentEpoch: "epoch-2",
+        });
+    });
+
+    it("returns a typed 409 for a stale catalog cursor", async () => {
+        catalog.getFederationCatalogDelta.mockResolvedValueOnce({
+            kind: "staleCursor",
+            currentEpoch: "epoch-1",
+        });
+        const response = await request(app)
+            .get(
+                "/api/federation/v1/catalog/delta?since=2026-01-01T00:00:00.000Z&epoch=epoch-1",
+            )
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read");
+
+        expect(response.status).toBe(409);
+        expect(response.body).toEqual({
+            error: "Federation catalog cursor is stale",
+            code: "FEDERATION_STALE_CURSOR",
+            currentEpoch: "epoch-1",
         });
     });
 

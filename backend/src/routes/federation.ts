@@ -16,6 +16,7 @@ import {
     findExportedFederationAlbum,
     findExportedFederationTrack,
     getFederationCatalogDelta,
+    getFederationCatalogItem,
     getFederationCatalogItems,
     getFederationManifest,
 } from "../services/federationCatalog";
@@ -37,6 +38,10 @@ const catalogItemsSchema = z.strictObject({
     cursor: z.string().trim().min(1).max(128).optional(),
     limit: pageLimitSchema,
 });
+const catalogItemParamsSchema = z.strictObject({
+    type: z.enum(["artist", "album", "track"]),
+    id: z.string().trim().min(1).max(128),
+});
 const deltaQuerySchema = z.strictObject({
     since: z.iso
         .datetime({ offset: true })
@@ -52,7 +57,10 @@ const pairingSchema = z.strictObject({
         .toUpperCase()
         .regex(/^[A-HJ-NP-Z2-9]{8}$/),
     name: z.string().trim().min(1).max(120),
-    baseUrl: z.url().refine((value) => new URL(value).protocol === "https:"),
+    baseUrl: z
+        .url()
+        .refine((value) => new URL(value).protocol === "https:")
+        .optional(),
 });
 const streamQuerySchema = z.strictObject({
     quality: z.enum(["original", "high", "medium", "low"]).default("original"),
@@ -101,6 +109,7 @@ router.post(
  *       200: { description: Federation manifest }
  *       401: { description: Peer authentication required }
  *       403: { description: library:read scope required }
+ *       429: { description: Federation peer rate limit exceeded }
  */
 router.get(
     "/manifest",
@@ -124,6 +133,7 @@ router.get(
  *     responses:
  *       200: { description: Generic catalog envelope page }
  *       400: { description: Invalid query }
+ *       429: { description: Federation peer rate limit exceeded }
  */
 router.get(
     "/catalog/items",
@@ -144,6 +154,35 @@ router.get(
 );
 
 /** @openapi
+ * /api/federation/v1/catalog/items/{type}/{id}:
+ *   get:
+ *     summary: Get one federation catalog item by remote identity
+ *     tags: [Federation]
+ *     security: [{ federationPeerAuth: [] }]
+ *     responses:
+ *       200: { description: Generic catalog item envelope }
+ *       404: { description: Exported catalog item not found }
+ *       429: { description: Federation peer rate limit exceeded }
+ */
+router.get(
+    "/catalog/items/:type/:id",
+    requireFederationPeer("library:read"),
+    federationPeerLimiter,
+    asyncHandler(async (req, res) => {
+        const params = catalogItemParamsSchema.safeParse(req.params);
+        const query = emptyQuerySchema.safeParse(req.query);
+        if (!params.success || !query.success) return validationError(res);
+        const item = await getFederationCatalogItem({
+            mediaType: params.data.type,
+            id: params.data.id,
+            includeEmbeddings: includesEmbeddingScope(req),
+        });
+        if (!item) return sendRouteError(res, 404, "Catalog item not found");
+        return res.json(item);
+    }),
+);
+
+/** @openapi
  * /api/federation/v1/catalog/delta:
  *   get:
  *     summary: Get catalog changes and tombstones since an instant
@@ -152,6 +191,7 @@ router.get(
  *     responses:
  *       200: { description: Bounded delta page }
  *       409: { description: Catalog epoch mismatch; full resync required }
+ *       429: { description: Federation peer rate limit exceeded }
  */
 router.get(
     "/catalog/delta",
@@ -186,6 +226,17 @@ router.get(
                 },
             );
         }
+        if (result.kind === "staleCursor") {
+            return sendRouteError(
+                res,
+                409,
+                "Federation catalog cursor is stale",
+                {
+                    code: "FEDERATION_STALE_CURSOR",
+                    currentEpoch: result.currentEpoch,
+                },
+            );
+        }
         return res.json(result);
     }),
 );
@@ -200,6 +251,7 @@ router.get(
  *       200: { description: Cover image bytes }
  *       304: { description: Cover is unchanged }
  *       404: { description: Exported album or cover not found }
+ *       429: { description: Federation peer rate limit exceeded }
  */
 router.get(
     "/cover/:albumId",
@@ -264,6 +316,7 @@ async function streamExportedTrack(
  *       200: { description: Full audio response }
  *       206: { description: Partial audio response }
  *       404: { description: Exported track not found }
+ *       429: { description: Federation peer rate limit exceeded }
  */
 router.get(
     "/stream/:trackId",

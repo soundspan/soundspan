@@ -28,6 +28,11 @@ import {
 import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
 import { config } from "../config";
 import { extractTrackIdentityTags } from "./trackIdentityTags";
+import { trackMappingService } from "./trackMappingService";
+import {
+    federationDedupConfidence,
+    type FederationDedupIdentity,
+} from "../utils/federationDedup";
 
 const scanLogger = logger.child("MusicScannerService");
 
@@ -159,6 +164,7 @@ const TRACK_PATH_QUERY_BATCH_SIZE = 10_000;
 const REMOVED_TRACK_REVIVAL_POOL_LIMIT = 10_000;
 // Cap health writes at the worker database pool's four connections.
 const HEALTH_WRITE_BATCH_SIZE = 4;
+const MAX_FEDERATED_DEDUP_CANDIDATES = 10_000;
 
 interface ScanProgress {
     filesScanned: number;
@@ -572,6 +578,10 @@ export class MusicScannerService {
         result.tracksAdded -= revivedTracks;
         result.tracksUpdated += revivedTracks;
 
+        if (result.tracksAdded > 0) {
+            await this.reconcileFederatedDuplicates([...newTrackPaths]);
+        }
+
         if (unmatchedTracks.length > 0) {
             result.tracksRemoved = await this.handleMissingTracks(
                 unmatchedTracks,
@@ -614,6 +624,83 @@ export class MusicScannerService {
         });
 
         return result;
+    }
+
+    private dedupIdentity(track: {
+        audioHash: string | null;
+        recordingMbid: string | null;
+        isrc: string | null;
+        discNo: number;
+        trackNo: number;
+        album: { rgMbid: string };
+    }): FederationDedupIdentity {
+        return { ...track, albumRgMbid: track.album.rgMbid };
+    }
+
+    private async reconcileFederatedTrack(
+        local: IdentityTrackRow,
+    ): Promise<void> {
+        const candidates = await prisma.track.findMany({
+            where: {
+                origin: "FEDERATED",
+                removedAt: null,
+                OR: [
+                    ...(local.audioHash
+                        ? [{ audioHash: local.audioHash }]
+                        : []),
+                    ...(local.recordingMbid
+                        ? [{ recordingMbid: local.recordingMbid }]
+                        : []),
+                    ...(local.isrc ? [{ isrc: local.isrc }] : []),
+                    { discNo: local.discNo, trackNo: local.trackNo },
+                ],
+                AND: {
+                    OR: [
+                        { dedupOfTrackId: null },
+                        { dedupOfTrack: { removedAt: { not: null } } },
+                    ],
+                },
+            },
+            orderBy: { id: "asc" },
+            take: MAX_FEDERATED_DEDUP_CANDIDATES,
+            select: TRACK_IDENTITY_SELECT,
+        });
+        let confidence: number | null = null;
+        for (let index = 0; index < candidates.length; index += 1) {
+            const candidateConfidence = federationDedupConfidence(
+                this.dedupIdentity(local),
+                this.dedupIdentity(candidates[index]),
+            );
+            if (candidateConfidence === null) continue;
+            await prisma.track.update({
+                where: { id: candidates[index].id },
+                data: { dedupOfTrackId: local.id },
+            });
+            confidence = Math.max(confidence ?? 0, candidateConfidence);
+        }
+        if (confidence === null) return;
+        await trackMappingService.createMapping({
+            trackId: local.id,
+            confidence,
+            source: "federation",
+        });
+    }
+
+    private async reconcileFederatedDuplicates(
+        newTrackPaths: string[],
+    ): Promise<void> {
+        const tracks = await prisma.track.findMany({
+            where: {
+                filePath: { in: newTrackPaths },
+                origin: "LOCAL",
+                removedAt: null,
+            },
+            orderBy: { id: "asc" },
+            select: TRACK_IDENTITY_SELECT,
+        });
+        for (let index = 0; index < tracks.length; index += 1) {
+            await this.reconcileFederatedTrack(tracks[index]);
+        }
     }
 
     /**

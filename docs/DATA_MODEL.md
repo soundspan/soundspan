@@ -103,8 +103,8 @@ TrackMapping is **advisory, not authoritative**:
 
 | Entity | Purpose | Notes |
 |--------|---------|-------|
-| `Artist` | Universal artist (MusicBrainz-backed) | `mbid` (unique), enrichment fields, `remoteTrackCount`, optional peer identity |
-| `Album` | Universal album (release-group-backed) | `rgMbid` (unique), `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`), optional peer identity |
+| `Artist` | Universal artist (MusicBrainz-backed) | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, optional peer identity |
+| `Album` | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`), optional peer identity |
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 

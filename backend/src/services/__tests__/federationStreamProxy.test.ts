@@ -133,4 +133,23 @@ describe("federated stream proxy", () => {
         expect(upstreamSignal?.aborted).toBe(true);
         expect(upstream.destroyed).toBe(true);
     });
+
+    it("marks the peer offline after a transient upstream failure", async () => {
+        const { FederationHttpError } = jest.requireMock("../federationClient");
+        getStream.mockRejectedValueOnce(new FederationHttpError(503, true));
+
+        await expect(
+            proxyFederatedTrackStream({
+                req: createRequest() as never,
+                res: createResponse() as never,
+                peer,
+                remoteId: "remote-track-1",
+                quality: "original",
+            }),
+        ).rejects.toThrow("peer error");
+        expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
+            where: { id: "peer-1", status: "ACTIVE" },
+            data: { status: "OFFLINE" },
+        });
+    });
 });

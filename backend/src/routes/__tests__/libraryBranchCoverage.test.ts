@@ -1057,7 +1057,29 @@ describe("library branch coverage focus", () => {
                     NOT: {
                         albums: {
                             some: {
-                                tracks: { some: { removedAt: null } },
+                                tracks: {
+                                    some: {
+                                        removedAt: null,
+                                        OR: [
+                                            { origin: "LOCAL" },
+                                            {
+                                                origin: "FEDERATED",
+                                                OR: [
+                                                    {
+                                                        dedupOfTrackId: null,
+                                                    },
+                                                    {
+                                                        dedupOfTrack: {
+                                                            removedAt: {
+                                                                not: null,
+                                                            },
+                                                        },
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                },
                             },
                         },
                     },
@@ -1079,7 +1101,30 @@ describe("library branch coverage focus", () => {
                         {
                             albums: {
                                 some: {
-                                    tracks: { some: { removedAt: null } },
+                                    tracks: {
+                                        some: {
+                                            removedAt: null,
+                                            OR: [
+                                                { origin: "LOCAL" },
+                                                {
+                                                    origin: "FEDERATED",
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -1183,7 +1228,7 @@ describe("library branch coverage focus", () => {
             where: {
                 playlistId: "playlist-1",
                 trackId: { not: null },
-                track: { removedAt: null },
+                track: { removedAt: null, origin: "LOCAL" },
             },
             select: { trackId: true },
         });

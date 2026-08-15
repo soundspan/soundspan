@@ -937,16 +937,42 @@ tracksBrowseRouter.get(
 async function streamFederatedTrack(
     req: Request<{ id: string }>,
     res: Response,
-    track: { peerId: string | null; remoteId: string | null },
+    peer: {
+        id: string;
+        name: string;
+        baseUrl: string;
+        outboundToken: string;
+        status: string;
+    },
+    remoteId: string,
     requestedQuality: string,
 ): Promise<Response | void> {
-    if (!track.peerId || !track.remoteId) {
+    const quality = normalizeStreamingQuality(requestedQuality) ?? "medium";
+    try {
+        await proxyFederatedTrackStream({
+            req,
+            res,
+            peer,
+            remoteId,
+            quality,
+        });
+        return undefined;
+    } catch (error: unknown) {
+        logger.warn("Federated stream proxy failed", { error });
+        if (res.headersSent) {
+            if (!res.writableEnded) res.end();
+            return undefined;
+        }
         return sendRouteError(res, 503, "Federation peer is offline", {
             code: "PEER_OFFLINE",
         });
     }
+}
+
+async function loadActiveFederationStreamPeer(peerId: string | null) {
+    if (!peerId) return null;
     const peer = await prisma.federationPeer.findUnique({
-        where: { id: track.peerId },
+        where: { id: peerId },
         select: {
             id: true,
             name: true,
@@ -961,27 +987,13 @@ async function streamFederatedTrack(
         !peer.baseUrl ||
         !peer.outboundToken
     ) {
-        return sendRouteError(res, 503, "Federation peer is offline", {
-            code: "PEER_OFFLINE",
-        });
+        return null;
     }
-    const quality = normalizeStreamingQuality(requestedQuality) ?? "medium";
-    try {
-        await proxyFederatedTrackStream({
-            req,
-            res,
-            peer,
-            remoteId: track.remoteId,
-            quality,
-        });
-        return undefined;
-    } catch (error: unknown) {
-        logger.warn("Federated stream proxy failed", { error });
-        if (res.headersSent) return undefined;
-        return sendRouteError(res, 503, "Federation peer is offline", {
-            code: "PEER_OFFLINE",
-        });
-    }
+    return {
+        ...peer,
+        baseUrl: peer.baseUrl,
+        outboundToken: peer.outboundToken,
+    };
 }
 
 export async function handleStreamTrack(
@@ -1005,6 +1017,17 @@ export async function handleStreamTrack(
         if (!track) {
             logger.debug("[STREAM] Track not found");
             return sendRouteError(res, 404, "Track not found");
+        }
+
+        const isFederatedTrack =
+            config.features.federation && track.origin === "FEDERATED";
+        const federationPeer = isFederatedTrack
+            ? await loadActiveFederationStreamPeer(track.peerId)
+            : null;
+        if (isFederatedTrack && (!federationPeer || !track.remoteId)) {
+            return sendRouteError(res, 503, "Federation peer is offline", {
+                code: "PEER_OFFLINE",
+            });
         }
 
         // Log play start - only if this is a new playback session
@@ -1049,8 +1072,14 @@ export async function handleStreamTrack(
             }, using=${requestedQuality}, format=${ext}`,
         );
 
-        if (config.features.federation && track.origin === "FEDERATED") {
-            return streamFederatedTrack(req, res, track, requestedQuality);
+        if (isFederatedTrack && federationPeer && track.remoteId) {
+            return streamFederatedTrack(
+                req,
+                res,
+                federationPeer,
+                track.remoteId,
+                requestedQuality,
+            );
         }
 
         // === NATIVE FILE STREAMING ===

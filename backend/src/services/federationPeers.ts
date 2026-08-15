@@ -1,19 +1,18 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { config } from "../config";
 import { hashApiKey } from "../utils/apiKeyHash";
 import { prisma } from "../utils/db";
 import { decrypt, encrypt } from "../utils/encryption";
+import {
+    FEDERATION_SCOPE_VALUES,
+    parseFederationScopes,
+    type FederationScope,
+} from "../utils/federationScopes";
 import { createFederationClient, pairFederationPeer } from "./federationClient";
 
-/** Scopes recognized by the v1 host federation API. */
-export const FEDERATION_SCOPE_VALUES = [
-    "library:read",
-    "stream:read",
-    "embeddings:read",
-] as const;
-/** One authorization capability granted to a federation peer. */
-export type FederationScope = (typeof FEDERATION_SCOPE_VALUES)[number];
-const FEDERATION_SCOPE_SET = new Set<string>(FEDERATION_SCOPE_VALUES);
+export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
+export type { FederationScope } from "../utils/federationScopes";
 
 const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PAIRING_CODE_LENGTH = 8;
@@ -52,7 +51,15 @@ export interface CreateHostPeerInput {
 export interface PairingConsumeInput {
     code: string;
     name: string;
-    baseUrl: string;
+    baseUrl?: string;
+}
+
+/** A normalized active consumer URL is already linked. */
+export class FederationPeerConflictError extends Error {
+    constructor() {
+        super("Federation consumer peer already exists");
+        this.name = "FederationPeerConflictError";
+    }
 }
 
 /** Validated values used to link a consumer-direction peer. */
@@ -66,36 +73,6 @@ export interface LinkConsumerPeerInput {
 function newCredential(): { token: string; credentialHash: string } {
     const token = randomBytes(32).toString("hex");
     return { token, credentialHash: hashApiKey(token) };
-}
-
-/** Validates persisted or otherwise untyped federation scope values. */
-export function parseFederationScopes(
-    value: unknown,
-): FederationScope[] | null {
-    if (
-        !Array.isArray(value) ||
-        value.length === 0 ||
-        value.length > FEDERATION_SCOPE_VALUES.length
-    ) {
-        return null;
-    }
-    const scopes: FederationScope[] = [];
-    for (let index = 0; index < FEDERATION_SCOPE_VALUES.length; index += 1) {
-        if (index >= value.length) break;
-        const scope = value[index];
-        if (typeof scope !== "string" || !FEDERATION_SCOPE_SET.has(scope)) {
-            return null;
-        }
-        scopes.push(scope as FederationScope);
-    }
-    if (new Set(scopes).size !== scopes.length) return null;
-    if (
-        scopes.includes("embeddings:read") &&
-        !scopes.includes("library:read")
-    ) {
-        return null;
-    }
-    return scopes;
 }
 
 /** Ensures stable host identity and epoch values exist in SystemSettings. */
@@ -179,9 +156,19 @@ export async function rotateFederationPeerCredential(
     peerId: string,
 ): Promise<{ peer: PublicFederationPeer; token: string } | null> {
     const credential = newCredential();
+    const current = await prisma.federationPeer.findFirst({
+        where: {
+            id: peerId,
+            direction: "HOST",
+            status: { not: "REVOKED" },
+        },
+        select: { id: true, status: true },
+    });
+    if (!current) return null;
+    const nextStatus = current.status === "PENDING" ? "ACTIVE" : current.status;
     const result = await prisma.federationPeer.updateMany({
-        where: { id: peerId, status: { not: "REVOKED" } },
-        data: { credentialHash: credential.credentialHash, status: "ACTIVE" },
+        where: { id: peerId, direction: "HOST", status: current.status },
+        data: { credentialHash: credential.credentialHash, status: nextStatus },
     });
     if (result.count !== 1) return null;
     const peer = await prisma.federationPeer.findFirst({
@@ -223,6 +210,15 @@ export async function linkConsumerFederationPeer(
     input: LinkConsumerPeerInput,
 ): Promise<PublicFederationPeer> {
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
+    const duplicate = await prisma.federationPeer.findFirst({
+        where: {
+            baseUrl,
+            direction: { in: ["CONSUMER", "BOTH"] },
+            status: { not: "REVOKED" },
+        },
+        select: { id: true },
+    });
+    if (duplicate) throw new FederationPeerConflictError();
     const outboundToken = encrypt(input.token);
     const manifest = await createFederationClient({
         id: "pending-link",
@@ -253,11 +249,14 @@ export async function pairAndLinkConsumerFederationPeer(input: {
     createdById: string;
 }): Promise<PublicFederationPeer> {
     const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
+    const callbackUrl = new URL(config.soundspanCallbackUrl);
+    const consumerBaseUrl =
+        callbackUrl.protocol === "https:" ? callbackUrl.origin : undefined;
     const paired = await pairFederationPeer({
         baseUrl,
         code: input.code,
         name: input.name,
-        consumerBaseUrl: baseUrl,
+        ...(consumerBaseUrl ? { consumerBaseUrl } : {}),
     });
     return linkConsumerFederationPeer({
         baseUrl,

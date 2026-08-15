@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import { validateMusicConfig, MusicConfig } from "./utils/configValidator";
 import { logger } from "./utils/logger";
+import { validateEncryptionKey } from "./utils/encryption";
 import {
     isEnvFlagEnabled,
     parseEnvBool,
@@ -157,6 +158,7 @@ const envSchema = z
 
 try {
     envSchema.parse(process.env);
+    validateEncryptionKey();
     logger.debug("Environment variables validated");
 } catch (error) {
     if (error instanceof z.ZodError) {

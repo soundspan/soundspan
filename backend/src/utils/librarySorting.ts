@@ -31,14 +31,18 @@ export function trackBrowseWhere(
     origin: LibraryOriginFilter = "all",
 ): Prisma.TrackWhereInput {
     if (origin === "local") return { ...LOCAL_TRACK_WHERE };
+    const visibleFederated = {
+        origin: "FEDERATED" as const,
+        OR: [
+            { dedupOfTrackId: null },
+            { dedupOfTrack: { removedAt: { not: null } } },
+        ],
+    } satisfies Prisma.TrackWhereInput;
     if (origin === "peers") {
-        return { origin: "FEDERATED", dedupOfTrackId: null };
+        return visibleFederated;
     }
     return {
-        OR: [
-            { ...LOCAL_TRACK_WHERE },
-            { origin: "FEDERATED", dedupOfTrackId: null },
-        ],
+        OR: [{ ...LOCAL_TRACK_WHERE }, visibleFederated],
     };
 }
 

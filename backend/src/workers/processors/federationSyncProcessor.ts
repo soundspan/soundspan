@@ -3,11 +3,13 @@ import { z } from "zod";
 import {
     createFederationClient,
     FederationEpochMismatchError,
+    FederationStaleCursorError,
     type FederationEnvelope,
     type FederationManifest,
 } from "../../services/federationClient";
 import { backfillAllArtistCounts } from "../../services/artistCountsService";
 import { trackMappingService } from "../../services/trackMappingService";
+import { decodeFederationIdentity } from "../../utils/federationDedup";
 import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -41,12 +43,14 @@ interface SyncContext {
     counts: SyncCounts;
     seen: Record<MediaType, Set<string>>;
     albumRgMbids: Map<string, string>;
+    skippedInvalid: number;
 }
 
 /** Bounded summary of one completed peer sync. */
 export interface FederationSyncResult extends SyncCounts {
     mode: "full" | "incremental";
     cursor: string;
+    skippedInvalid: number;
 }
 
 function newSyncContext(peerId: string, scopes: string[]): SyncContext {
@@ -56,6 +60,7 @@ function newSyncContext(peerId: string, scopes: string[]): SyncContext {
         counts: { artists: 0, albums: 0, tracks: 0, tombstones: 0 },
         seen: { artist: new Set(), album: new Set(), track: new Set() },
         albumRgMbids: new Map(),
+        skippedInvalid: 0,
     };
 }
 
@@ -76,12 +81,6 @@ function rememberSeen(context: SyncContext, item: FederationEnvelope): void {
 function placeholderIdentity(peerId: string, value: string): string {
     const encoded = Buffer.from(value, "utf8").toString("base64url");
     return `federation:${peerId}:${encoded}`;
-}
-
-function decodePlaceholderIdentity(value: string): string {
-    const parts = value.split(":");
-    if (parts.length !== 3 || parts[0] !== "federation") return value;
-    return Buffer.from(parts[2], "base64url").toString("utf8");
 }
 
 async function upsertArtist(
@@ -126,23 +125,49 @@ async function upsertArtist(
     });
 }
 
-async function findRemoteArtistId(
-    peerId: string,
+async function loadRemoteArtistId(
+    context: SyncContext,
     remoteId: string,
-): Promise<string> {
+): Promise<string | null> {
     const artist = await prisma.artist.findUnique({
-        where: { peerId_remoteId: { peerId, remoteId } },
+        where: {
+            peerId_remoteId: { peerId: context.peerId, remoteId },
+        },
         select: { id: true },
     });
-    if (!artist) throw new Error("Federation album parent was not imported");
-    return artist.id;
+    return artist?.id ?? null;
+}
+
+async function ensureRemoteArtistId(
+    context: SyncContext,
+    client: ReturnType<typeof createFederationClient>,
+    remoteId: string,
+): Promise<string> {
+    const existingId = await loadRemoteArtistId(context, remoteId);
+    if (existingId) return existingId;
+    log.warn(
+        `peerId=${context.peerId} missing parent artist=${remoteId}; fetching directly`,
+    );
+    const parent = await client.getCatalogItem("artist", remoteId);
+    if (parent.mediaType !== "artist") {
+        throw new Error("Federation host returned the wrong parent type");
+    }
+    await upsertArtist(context, parent);
+    const importedId = await loadRemoteArtistId(context, remoteId);
+    if (!importedId) throw new Error("Federation artist parent import failed");
+    return importedId;
 }
 
 async function upsertAlbum(
     context: SyncContext,
     item: AlbumEnvelope,
+    client: ReturnType<typeof createFederationClient>,
 ): Promise<void> {
-    const artistId = await findRemoteArtistId(context.peerId, item.parentRef);
+    const artistId = await ensureRemoteArtistId(
+        context,
+        client,
+        item.parentRef,
+    );
     const existing = await prisma.album.findUnique({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
@@ -187,23 +212,43 @@ async function upsertAlbum(
     context.albumRgMbids.set(item.id, item.attributes.rgMbid);
 }
 
-async function findRemoteAlbum(
+async function loadRemoteAlbum(
     context: SyncContext,
     remoteId: string,
-): Promise<{ id: string; rgMbid: string }> {
+): Promise<{ id: string; rgMbid: string } | null> {
     const album = await prisma.album.findUnique({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId },
         },
         select: { id: true, rgMbid: true },
     });
-    if (!album) throw new Error("Federation track parent was not imported");
+    if (!album) return null;
     return {
         id: album.id,
         rgMbid:
             context.albumRgMbids.get(remoteId) ??
-            decodePlaceholderIdentity(album.rgMbid),
+            decodeFederationIdentity(album.rgMbid),
     };
+}
+
+async function ensureRemoteAlbum(
+    context: SyncContext,
+    client: ReturnType<typeof createFederationClient>,
+    remoteId: string,
+): Promise<{ id: string; rgMbid: string }> {
+    const existing = await loadRemoteAlbum(context, remoteId);
+    if (existing) return existing;
+    log.warn(
+        `peerId=${context.peerId} missing parent album=${remoteId}; fetching directly`,
+    );
+    const parent = await client.getCatalogItem("album", remoteId);
+    if (parent.mediaType !== "album") {
+        throw new Error("Federation host returned the wrong parent type");
+    }
+    await upsertAlbum(context, parent, client);
+    const imported = await loadRemoteAlbum(context, remoteId);
+    if (!imported) throw new Error("Federation album parent import failed");
+    return imported;
 }
 
 async function findLocalDedupMatch(
@@ -302,8 +347,9 @@ async function rebindFederatedTrack(
 async function upsertTrack(
     context: SyncContext,
     item: TrackEnvelope,
+    client: ReturnType<typeof createFederationClient>,
 ): Promise<void> {
-    const album = await findRemoteAlbum(context, item.parentRef);
+    const album = await ensureRemoteAlbum(context, client, item.parentRef);
     const attributes = item.attributes;
     await rebindFederatedTrack(context, item, album.id);
     const row = await prisma.track.upsert({
@@ -354,18 +400,21 @@ async function upsertTrack(
 
 async function applyEnvelope(
     context: SyncContext,
+    client: ReturnType<typeof createFederationClient>,
     item: FederationEnvelope,
     remember: boolean,
 ): Promise<void> {
     if (item.mediaType === "artist") await upsertArtist(context, item);
-    else if (item.mediaType === "album") await upsertAlbum(context, item);
-    else await upsertTrack(context, item);
+    else if (item.mediaType === "album")
+        await upsertAlbum(context, item, client);
+    else await upsertTrack(context, item, client);
     if (remember) rememberSeen(context, item);
     incrementCount(context, item.mediaType);
 }
 
 async function applyOrderedChanges(
     context: SyncContext,
+    client: ReturnType<typeof createFederationClient>,
     items: readonly FederationEnvelope[],
     remember: boolean,
 ): Promise<void> {
@@ -375,7 +424,7 @@ async function applyOrderedChanges(
         for (let index = 0; index < items.length; index += 1) {
             const item = items[index];
             if (item.mediaType === type) {
-                await applyEnvelope(context, item, remember);
+                await applyEnvelope(context, client, item, remember);
             }
         }
     }
@@ -389,7 +438,8 @@ async function syncFullType(
     let cursor: string | undefined;
     for (let page = 0; page < MAX_REMOTE_PAGES; page += 1) {
         const result = await client.getCatalogItems(mediaType, cursor);
-        await applyOrderedChanges(context, result.items, true);
+        context.skippedInvalid += result.skippedInvalid ?? 0;
+        await applyOrderedChanges(context, client, result.items, true);
         if (!result.nextCursor) return;
         cursor = result.nextCursor;
     }
@@ -505,9 +555,24 @@ async function finishSync(
         },
     });
     log.info(
-        `peerId=${context.peerId} mode=${mode} cursor=${cursor} artists=${context.counts.artists} albums=${context.counts.albums} tracks=${context.counts.tracks} tombstones=${context.counts.tombstones}`,
+        `peerId=${context.peerId} mode=${mode} cursor=${cursor} artists=${context.counts.artists} albums=${context.counts.albums} tracks=${context.counts.tracks} tombstones=${context.counts.tombstones} skippedInvalid=${context.skippedInvalid}`,
     );
-    return { mode, cursor, ...context.counts };
+    return {
+        mode,
+        cursor,
+        ...context.counts,
+        skippedInvalid: context.skippedInvalid,
+    };
+}
+
+function fullSyncCursor(manifest: FederationManifest, fallback: Date): string {
+    if (manifest.serverTime) {
+        const serverTime = new Date(manifest.serverTime);
+        if (Number.isFinite(serverTime.getTime()))
+            return serverTime.toISOString();
+    }
+    log.warn("Federation manifest lacks serverTime; using the local clock");
+    return fallback.toISOString();
 }
 
 async function runFullSync(
@@ -524,7 +589,7 @@ async function runFullSync(
     return finishSync(
         context,
         "full",
-        startedAt.toISOString(),
+        fullSyncCursor(manifest, startedAt),
         manifest.catalogEpoch,
     );
 }
@@ -548,7 +613,8 @@ async function runIncrementalSync(
             epoch: catalogEpoch,
             cursor: pageCursor,
         });
-        await applyOrderedChanges(context, result.changes, false);
+        context.skippedInvalid += result.skippedInvalid ?? 0;
+        await applyOrderedChanges(context, client, result.changes, false);
         await applyTombstones(context, result.tombstones);
         nextSince = new Date(result.nextSince);
         if (!result.nextCursor) {
@@ -600,7 +666,12 @@ export async function processFederationSync(
             peer.catalogEpoch,
         );
     } catch (error) {
-        if (!(error instanceof FederationEpochMismatchError)) throw error;
+        if (
+            !(error instanceof FederationEpochMismatchError) &&
+            !(error instanceof FederationStaleCursorError)
+        ) {
+            throw error;
+        }
         await prisma.federationPeer.update({
             where: { id: peer.id },
             data: { lastSyncCursor: null, catalogEpoch: error.currentEpoch },

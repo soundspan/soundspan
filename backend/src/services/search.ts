@@ -112,13 +112,23 @@ function visibleBrowseTracks(source: LibraryOriginFilter) {
 }
 
 function trackSourceSql(source: LibraryOriginFilter): Prisma.Sql {
+    const federatedVisible = Prisma.sql`
+        t.origin = ${"FEDERATED"}::"TrackOrigin"
+        AND (
+            t."dedupOfTrackId" IS NULL
+            OR EXISTS (
+                SELECT 1 FROM "Track" dedup_winner
+                WHERE dedup_winner.id = t."dedupOfTrackId"
+                  AND dedup_winner."removedAt" IS NOT NULL
+            )
+        )`;
     if (source === "local") {
         return Prisma.sql`t.origin = ${"LOCAL"}::"TrackOrigin"`;
     }
     if (source === "peers") {
-        return Prisma.sql`t.origin = ${"FEDERATED"}::"TrackOrigin" AND t."dedupOfTrackId" IS NULL`;
+        return federatedVisible;
     }
-    return Prisma.sql`(t.origin = ${"LOCAL"}::"TrackOrigin" OR (t.origin = ${"FEDERATED"}::"TrackOrigin" AND t."dedupOfTrackId" IS NULL))`;
+    return Prisma.sql`(t.origin = ${"LOCAL"}::"TrackOrigin" OR (${federatedVisible}))`;
 }
 
 function peerProjectionSql(alias: "a" | "t"): Prisma.Sql {

@@ -12,8 +12,8 @@ Companion to [federated-library-sharing.md](federated-library-sharing.md) (the s
 1. **Intelligence surfaces exclude federated tracks in v1.** Mixes, radio, vibe/similarity, discovery seeds, shuffle, and mood buckets operate on `origin: LOCAL` only. Rationale: deterministic behavior when peers sleep, and the spec already gates intelligence to phase 3. Browse, search, artist/album pages, playlists, and playback include federated items. A shared `LOCAL_TRACK_WHERE` fragment (sibling of `TRACK_VISIBLE_WHERE`) enforces this.
 2. **Subsonic (`/rest`) exposes local content only in v1** — per the spec's resolved decision 4. Documented in OPENSUBSONIC_COMPATIBILITY.md.
 3. **No transcoding of federated streams.** The consumer proxies bytes with Range passthrough; the quality parameter is forwarded to the host, which transcodes with its own cache. Protects consumer disk and keeps the host authoritative over its bandwidth.
-4. **Tombstones are written only while federation is enabled** (`FEDERATION_ENABLED`), from the two places rows die: the retention purge and orphan cleanup. Tombstone retention is 90 days (`FEDERATION_TOMBSTONE_RETENTION_DAYS`). Catalog epoch mismatches, rather than tombstone-age inference, trigger full resyncs.
-5. **Delta progress uses an `updatedAt` high-water mark plus instance `catalogEpoch`.** The consumer persists the high-water timestamp in `lastSyncCursor`; the host uses an opaque timestamp-and-ID cursor within each bounded delta page. A UUID `catalogEpoch` mismatch forces a full resync. A five-minute overlap on incremental pulls absorbs clock skew; idempotent upserts make overlap safe.
+4. **Tombstones are written only while federation is enabled** (`FEDERATION_ENABLED`), from the two places rows die: the retention purge and orphan cleanup. Tombstone retention is 90 days (`FEDERATION_TOMBSTONE_RETENTION_DAYS`). A cursor older than the retention window minus a two-day margin is rejected as stale, and the consumer performs a full resync. Duplicate tombstone rows for repeated deletion events are accepted because application is idempotent and retention removes them.
+5. **Delta progress uses an `updatedAt` high-water mark plus instance `catalogEpoch`.** Artist, album, and track rows all expose Prisma-maintained `updatedAt` values. The consumer persists the high-water timestamp in `lastSyncCursor`; the host uses a timestamp-and-ID keyset within each bounded delta page. A UUID `catalogEpoch` mismatch or stale cursor forces a full resync. Full sync starts from the host manifest's `serverTime`, with a logged local-clock fallback for older hosts. A five-minute overlap on incremental pulls absorbs clock skew; idempotent upserts make overlap safe.
 6. **Instance identity uses UUIDs.** Generated `federationInstanceId` and `catalogEpoch` UUIDs are stored in `SystemSettings` when identity is first needed and reported in the manifest.
 7. **Embedding sharing ships as scoped API support host-side** (`embeddings:read` includes 512-dim vectors in track envelopes) **and consumer-side import into `TrackEmbedding`**, but federated tracks still do not join vibe/similarity in v1 (decision 1). The data lands so enabling intelligence later is a query change, not a resync.
 8. **Downloads, offline caching, and share links exclude federated items.** You cannot share, zip, or offline-cache media you don't host. Stream-through is the only egress.
@@ -22,6 +22,26 @@ Companion to [federated-library-sharing.md](federated-library-sharing.md) (the s
 11. **Manifest instance name uses `HOSTNAME`.** `config.federation.instanceName` reports `process.env.HOSTNAME`, with `soundspan` as the fallback, because `SystemSettings` has no instance-name field.
 12. **Existing denormalized artist counts remain local-only.** Federation sync may run the count backfill after catalog changes, but `libraryAlbumCount`, `discoveryAlbumCount`, and `totalTrackCount` exclude `FEDERATED` tracks. Peer-aware browse and search use their own row filters and projections.
 13. **Lyrics remain local-only in v1.** The persisted-track lookup combines visible and local track predicates, so federated rows do not enter embedded or LRCLIB enrichment through the track-backed path.
+14. **Bidirectional peers are not supported in v1.** Creation and linking reject `BOTH`; the schema value remains reserved for future protocol work. Credential rotation applies only to host peers, preserves `ACTIVE` or `OFFLINE`, advances `PENDING` to `ACTIVE`, and never revives `REVOKED` peers.
+15. **Private-network federation is intentional.** Admin-configured HTTPS peer URLs may resolve to LAN, private, or VPN addresses. Federation requests disable redirects and bound time, retries, concurrency, and JSON response size. The public-address-only SSRF rule is not applied because private networking is a primary self-hosted use case; administrators must treat linked peers as trusted.
+16. **Removed tracks never seed intelligence.** `TRACK_VISIBLE_WHERE` applies to play and like history used by mixes, radio, and recommendations, so retained soft-removed rows cannot influence generated results.
+
+## Review disposition appendix
+
+The release review accepted these behaviors without code changes:
+
+- A stalled sync may transiently interleave with a replacement job; idempotent upserts repair the result.
+- A concurrent MusicBrainz-ID uniqueness race may fail one sync attempt; the bounded retry and next sync self-heal it.
+- Deleting a peer cascades its mirrored rows and playlist items. The destructive scope is disclosed in the changelog and confirmation UI.
+- Full-resync counters may count the same logical row more than once across overlapping pages; the effect is cosmetic.
+- Federation credentials share the configured HMAC pepper. Their independent random values and scoped verification make this acceptable for v1.
+- The peer-specific limiter runs after authentication. The global API limiter still covers unauthenticated traffic.
+- The 52 frontend component-suite failures measured on `main` remain the comparison baseline; the federation-specific regression must pass within that sweep.
+- Duplicate tombstone rows are accepted because tombstone application is idempotent.
+
+Known follow-up: batch catalog writes and reduce repeated
+`backfillAllArtistCounts` work for higher sync throughput. This review does not
+change those operations.
 
 ## Build chunks (each = one Codex dispatch + review gate + commit)
 

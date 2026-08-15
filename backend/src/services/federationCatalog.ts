@@ -36,7 +36,7 @@ const artistSelect = {
     name: true,
     mbid: true,
     normalizedName: true,
-    lastSynced: true,
+    updatedAt: true,
 } satisfies Prisma.ArtistSelect;
 
 const albumSelect = {
@@ -46,7 +46,7 @@ const albumSelect = {
     rgMbid: true,
     year: true,
     primaryType: true,
-    lastSynced: true,
+    updatedAt: true,
 } satisfies Prisma.AlbumSelect;
 
 const trackSelect = {
@@ -118,7 +118,7 @@ function artistEnvelope(row: ArtistRow): FederationMediaItemEnvelope {
     return {
         id: row.id,
         mediaType: "artist",
-        updatedAt: row.lastSynced,
+        updatedAt: row.updatedAt,
         attributes: {
             name: row.name,
             mbid: row.mbid,
@@ -131,7 +131,7 @@ function albumEnvelope(row: AlbumRow): FederationMediaItemEnvelope {
     return {
         id: row.id,
         mediaType: "album",
-        updatedAt: row.lastSynced,
+        updatedAt: row.updatedAt,
         parentRef: row.artistId,
         attributes: {
             title: row.title,
@@ -242,8 +242,40 @@ export async function getFederationCatalogItems(input: {
     );
 }
 
+/** Returns one visible catalog item for missing-parent recovery. */
+export async function getFederationCatalogItem(input: {
+    mediaType: FederationMediaType;
+    id: string;
+    includeEmbeddings: boolean;
+}): Promise<FederationMediaItemEnvelope | null> {
+    if (input.mediaType === "artist") {
+        const row = await prisma.artist.findFirst({
+            where: { id: input.id, ...EXPORTED_ARTIST_WHERE },
+            select: artistSelect,
+        });
+        return row ? artistEnvelope(row) : null;
+    }
+    if (input.mediaType === "album") {
+        const row = await prisma.album.findFirst({
+            where: { id: input.id, ...EXPORTED_ALBUM_WHERE },
+            select: albumSelect,
+        });
+        return row ? albumEnvelope(row) : null;
+    }
+    const row = await prisma.track.findFirst({
+        where: { id: input.id, ...EXPORTED_TRACK_WHERE },
+        select: trackSelect,
+    });
+    if (!row) return null;
+    const embeddings = await embeddingMap([row], input.includeEmbeddings);
+    return trackEnvelope(row, embeddings.get(row.id));
+}
+
 /** Builds instance identity and visible local-library counts for federation v1. */
-export async function getFederationManifest(embeddingsAvailable: boolean) {
+export async function getFederationManifest(
+    embeddingsAvailable: boolean,
+    now: Date = new Date(),
+) {
     const identity = await ensureFederationIdentity();
     const [artists, albums, tracks] = await Promise.all([
         prisma.artist.count({ where: EXPORTED_ARTIST_WHERE }),
@@ -258,11 +290,12 @@ export async function getFederationManifest(embeddingsAvailable: boolean) {
         mediaTypes: ["artist", "album", "track"] as FederationMediaType[],
         counts: { artists, albums, tracks },
         embeddingsAvailable,
+        serverTime: now,
     };
 }
 
 function cursorPredicate(
-    field: "lastSynced" | "updatedAt" | "deletedAt",
+    field: "updatedAt" | "deletedAt",
     cursor?: FederationDeltaCursor,
 ) {
     if (!cursor) return {};
@@ -284,11 +317,11 @@ async function loadArtistDelta(
         where: {
             ...EXPORTED_ARTIST_WHERE,
             AND: [
-                { lastSynced: { gt: since, lte: until } },
-                cursorPredicate("lastSynced", cursor),
+                { updatedAt: { gt: since, lte: until } },
+                cursorPredicate("updatedAt", cursor),
             ],
         },
-        orderBy: [{ lastSynced: "asc" }, { id: "asc" }],
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take,
         select: artistSelect,
     });
@@ -304,11 +337,11 @@ async function loadAlbumDelta(
         where: {
             ...EXPORTED_ALBUM_WHERE,
             AND: [
-                { lastSynced: { gt: since, lte: until } },
-                cursorPredicate("lastSynced", cursor),
+                { updatedAt: { gt: since, lte: until } },
+                cursorPredicate("updatedAt", cursor),
             ],
         },
-        orderBy: [{ lastSynced: "asc" }, { id: "asc" }],
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take,
         select: albumSelect,
     });
@@ -356,7 +389,10 @@ async function loadTombstoneDelta(
 
 function compareDeltaEvents(left: DeltaEvent, right: DeltaEvent): number {
     const timeOrder = left.updatedAt.getTime() - right.updatedAt.getTime();
-    return timeOrder || left.id.localeCompare(right.id);
+    if (timeOrder !== 0) return timeOrder;
+    if (left.id < right.id) return -1;
+    if (left.id > right.id) return 1;
+    return 0;
 }
 
 async function buildDeltaEvents(input: {
@@ -377,12 +413,12 @@ async function buildDeltaEvents(input: {
     return [
         ...artists.map((row) => ({
             id: row.id,
-            updatedAt: row.lastSynced,
+            updatedAt: row.updatedAt,
             envelope: artistEnvelope(row),
         })),
         ...albums.map((row) => ({
             id: row.id,
-            updatedAt: row.lastSynced,
+            updatedAt: row.updatedAt,
             envelope: albumEnvelope(row),
         })),
         ...tracks.map((row) => ({
@@ -419,6 +455,19 @@ export async function getFederationCatalogDelta(input: {
         };
     }
     const snapshotAt = input.now ?? new Date();
+    const retainedDays = Math.max(
+        0,
+        config.workers.federationTombstoneRetentionDays - 2,
+    );
+    const oldestCursor = new Date(
+        snapshotAt.getTime() - retainedDays * 24 * 60 * 60 * 1_000,
+    );
+    if (input.since < oldestCursor) {
+        return {
+            kind: "staleCursor" as const,
+            currentEpoch: identity.catalogEpoch,
+        };
+    }
     const events = await buildDeltaEvents({ ...input, until: snapshotAt });
     const page = events.slice(0, input.limit);
     const last = page[page.length - 1];

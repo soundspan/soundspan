@@ -49,7 +49,11 @@ export async function proxyFederatedCover(input: {
             input.remoteId,
             controller.signal,
         );
-        if (response.status === 404) return false;
+        if (response.status === 404) {
+            const body = response.data as { destroy?: () => void };
+            body.destroy?.();
+            return false;
+        }
         copyCoverHeaders(input.res, response.headers);
         if (response.status === 304) {
             input.res.status(304).end();

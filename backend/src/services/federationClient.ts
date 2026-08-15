@@ -8,6 +8,7 @@ const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
 const MAX_CONCURRENT_REQUESTS = 8;
 const MAX_PAGE_ITEMS = 500;
+const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
 
@@ -78,9 +79,10 @@ export const federationManifestSchema = z.strictObject({
         tracks: z.number().int().nonnegative(),
     }),
     embeddingsAvailable: z.boolean(),
+    serverTime: dateTimeSchema.optional(),
 });
-const catalogPageSchema = z.strictObject({
-    items: z.array(federationEnvelopeSchema).max(MAX_PAGE_ITEMS),
+const catalogPageShapeSchema = z.strictObject({
+    items: z.array(z.unknown()).max(MAX_PAGE_ITEMS),
     nextCursor: z.string().min(1).max(512).nullable(),
 });
 const tombstoneSchema = z.strictObject({
@@ -88,15 +90,15 @@ const tombstoneSchema = z.strictObject({
     entityId: z.string().min(1).max(128),
     deletedAt: dateTimeSchema,
 });
-const deltaSchema = z.strictObject({
+const deltaPageShapeSchema = z.strictObject({
     kind: z.literal("ok"),
-    changes: z.array(federationEnvelopeSchema).max(MAX_PAGE_ITEMS),
-    tombstones: z.array(tombstoneSchema).max(MAX_PAGE_ITEMS),
+    changes: z.array(z.unknown()).max(MAX_PAGE_ITEMS),
+    tombstones: z.array(z.unknown()).max(MAX_PAGE_ITEMS),
     nextCursor: z.string().min(1).max(512).nullable(),
     nextSince: dateTimeSchema,
 });
 const epochMismatchSchema = z.object({
-    code: z.literal("FEDERATION_EPOCH_MISMATCH"),
+    code: z.enum(["FEDERATION_EPOCH_MISMATCH", "FEDERATION_STALE_CURSOR"]),
     currentEpoch: z.string().min(1).max(128),
 });
 const pairedPeerSchema = z.strictObject({
@@ -118,8 +120,19 @@ const pairedPeerSchema = z.strictObject({
 
 export type FederationManifest = z.infer<typeof federationManifestSchema>;
 export type FederationEnvelope = z.infer<typeof federationEnvelopeSchema>;
-export type FederationCatalogPage = z.infer<typeof catalogPageSchema>;
-export type FederationDelta = z.infer<typeof deltaSchema>;
+export interface FederationCatalogPage {
+    items: FederationEnvelope[];
+    nextCursor: string | null;
+    skippedInvalid: number;
+}
+export interface FederationDelta {
+    kind: "ok";
+    changes: FederationEnvelope[];
+    tombstones: Array<z.infer<typeof tombstoneSchema>>;
+    nextCursor: string | null;
+    nextSince: z.infer<typeof dateTimeSchema>;
+    skippedInvalid: number;
+}
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
 export class FederationHttpError extends Error {
@@ -149,6 +162,14 @@ export class FederationEpochMismatchError extends Error {
     constructor(public readonly currentEpoch: string) {
         super("Federation catalog epoch mismatch");
         this.name = "FederationEpochMismatchError";
+    }
+}
+
+/** Peer no longer retains every tombstone needed by the supplied cursor. */
+export class FederationStaleCursorError extends Error {
+    constructor(public readonly currentEpoch: string) {
+        super("Federation catalog cursor is stale");
+        this.name = "FederationStaleCursorError";
     }
 }
 
@@ -202,6 +223,49 @@ function parseResponse<T>(schema: z.ZodType<T>, value: unknown): T {
     return result.data;
 }
 
+function parseLenientItems<T>(
+    values: readonly unknown[],
+    schema: z.ZodType<T>,
+): { items: T[]; skippedInvalid: number } {
+    const items: T[] = [];
+    let skippedInvalid = 0;
+    for (
+        let index = 0;
+        index < values.length && index < MAX_PAGE_ITEMS;
+        index += 1
+    ) {
+        const parsed = schema.safeParse(values[index]);
+        if (parsed.success) items.push(parsed.data);
+        else skippedInvalid += 1;
+    }
+    return { items, skippedInvalid };
+}
+
+function parseCatalogPage(value: unknown): FederationCatalogPage {
+    const page = parseResponse(catalogPageShapeSchema, value);
+    const parsed = parseLenientItems(page.items, federationEnvelopeSchema);
+    return { ...parsed, nextCursor: page.nextCursor };
+}
+
+function parseDeltaPage(value: unknown): FederationDelta {
+    const page = parseResponse(deltaPageShapeSchema, value);
+    const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
+    const tombstones = parseLenientItems(page.tombstones, tombstoneSchema);
+    return {
+        kind: "ok",
+        changes: changes.items,
+        tombstones: tombstones.items,
+        nextCursor: page.nextCursor,
+        nextSince: page.nextSince,
+        skippedInvalid: changes.skippedInvalid + tombstones.skippedInvalid,
+    };
+}
+
+function destroyStreamBody(response: AxiosResponse): void {
+    const body = response.data as { destroy?: () => void } | undefined;
+    body?.destroy?.();
+}
+
 class FederationClient {
     private readonly baseUrl: URL;
     private readonly token: string;
@@ -236,6 +300,9 @@ class FederationClient {
                 if (response.status < 500 || attempt + 1 === this.attempts) {
                     return response;
                 }
+                if (config.responseType === "stream") {
+                    destroyStreamBody(response);
+                }
             } catch (error) {
                 if (
                     !isTransientNetworkError(error) ||
@@ -261,6 +328,8 @@ class FederationClient {
             method: "GET",
             ...config,
             url: peerUrl(this.baseUrl, path),
+            maxContentLength: MAX_JSON_BODY_BYTES,
+            maxBodyLength: MAX_JSON_BODY_BYTES,
         });
         if (response.status < 200 || response.status >= 300) {
             throw new FederationHttpError(
@@ -284,13 +353,32 @@ class FederationClient {
         cursor?: string,
         signal?: AbortSignal,
     ): Promise<FederationCatalogPage> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(this.baseUrl, "/api/federation/v1/catalog/items"),
+            params: { type: mediaType, limit: MAX_PAGE_ITEMS, cursor },
+            signal,
+            maxContentLength: MAX_JSON_BODY_BYTES,
+            maxBodyLength: MAX_JSON_BODY_BYTES,
+        });
+        if (response.status < 200 || response.status >= 300) {
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return parseCatalogPage(response.data);
+    }
+
+    async getCatalogItem(
+        mediaType: z.infer<typeof mediaTypeSchema>,
+        id: string,
+        signal?: AbortSignal,
+    ): Promise<FederationEnvelope> {
         return this.requestJson(
-            "/api/federation/v1/catalog/items",
-            catalogPageSchema,
-            {
-                params: { type: mediaType, limit: MAX_PAGE_ITEMS, cursor },
-                signal,
-            },
+            `/api/federation/v1/catalog/items/${mediaType}/${encodeURIComponent(id)}`,
+            federationEnvelopeSchema,
+            { signal },
         );
     }
 
@@ -310,9 +398,14 @@ class FederationClient {
                 limit: MAX_PAGE_ITEMS,
             },
             signal: input.signal,
+            maxContentLength: MAX_JSON_BODY_BYTES,
+            maxBodyLength: MAX_JSON_BODY_BYTES,
         });
         if (response.status === 409) {
             const mismatch = parseResponse(epochMismatchSchema, response.data);
+            if (mismatch.code === "FEDERATION_STALE_CURSOR") {
+                throw new FederationStaleCursorError(mismatch.currentEpoch);
+            }
             throw new FederationEpochMismatchError(mismatch.currentEpoch);
         }
         if (response.status < 200 || response.status >= 300) {
@@ -321,7 +414,7 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseResponse(deltaSchema, response.data);
+        return parseDeltaPage(response.data);
     }
 
     async getStream(input: {
@@ -342,6 +435,7 @@ class FederationClient {
             signal: input.signal,
         });
         if (![200, 206, 416].includes(response.status)) {
+            destroyStreamBody(response);
             throw new FederationHttpError(
                 response.status,
                 response.status >= 500,
@@ -364,6 +458,7 @@ class FederationClient {
             signal,
         });
         if (![200, 304, 404].includes(response.status)) {
+            destroyStreamBody(response);
             throw new FederationHttpError(
                 response.status,
                 response.status >= 500,
@@ -395,6 +490,8 @@ async function requestPairWithRetry(
                     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
                     maxRedirects: 0,
                     validateStatus: () => true,
+                    maxContentLength: MAX_JSON_BODY_BYTES,
+                    maxBodyLength: MAX_JSON_BODY_BYTES,
                 }),
             );
             if (response.status < 500 || attempt + 1 === attempts) {
@@ -418,7 +515,7 @@ export async function pairFederationPeer(input: {
     baseUrl: string;
     code: string;
     name: string;
-    consumerBaseUrl: string;
+    consumerBaseUrl?: string;
     options?: FederationClientOptions;
 }): Promise<{ token: string }> {
     const baseUrl = resolveBaseUrl(input.baseUrl);
@@ -430,7 +527,9 @@ export async function pairFederationPeer(input: {
             data: {
                 code: input.code,
                 name: input.name,
-                baseUrl: input.consumerBaseUrl,
+                ...(input.consumerBaseUrl
+                    ? { baseUrl: input.consumerBaseUrl }
+                    : {}),
             },
         },
         options,

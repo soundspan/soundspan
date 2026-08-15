@@ -13,7 +13,13 @@ describe("library federation scoping", () => {
         expect(trackBrowseWhere("all")).toEqual({
             OR: [
                 { origin: "LOCAL" },
-                { origin: "FEDERATED", dedupOfTrackId: null },
+                {
+                    origin: "FEDERATED",
+                    OR: [
+                        { dedupOfTrackId: null },
+                        { dedupOfTrack: { removedAt: { not: null } } },
+                    ],
+                },
             ],
         });
     });
@@ -21,7 +27,10 @@ describe("library federation scoping", () => {
     it("suppresses federated duplicates in peer-only browsing", () => {
         expect(trackBrowseWhere("peers")).toEqual({
             origin: "FEDERATED",
-            dedupOfTrackId: null,
+            OR: [
+                { dedupOfTrackId: null },
+                { dedupOfTrack: { removedAt: { not: null } } },
+            ],
         });
     });
 

@@ -22,6 +22,7 @@ import {
     createFederationClient,
     FederationHttpError,
     FederationResponseError,
+    FederationStaleCursorError,
     pairFederationPeer,
 } from "../federationClient";
 
@@ -39,6 +40,18 @@ const manifest = {
     mediaTypes: ["artist", "album", "track"],
     counts: { artists: 1, albums: 2, tracks: 3 },
     embeddingsAvailable: false,
+    serverTime: "2026-08-15T12:00:00.000Z",
+};
+
+const artistEnvelope = {
+    id: "artist-1",
+    mediaType: "artist",
+    updatedAt: "2026-08-15T12:00:00.000Z",
+    attributes: {
+        name: "Artist",
+        mbid: "mbid-1",
+        normalizedName: "artist",
+    },
 };
 
 describe("federation HTTP client", () => {
@@ -58,11 +71,111 @@ describe("federation HTTP client", () => {
                 url: "https://peer.example/api/federation/v1/manifest",
                 timeout: 15_000,
                 maxRedirects: 0,
+                maxContentLength: 8 * 1024 * 1024,
+                maxBodyLength: 8 * 1024 * 1024,
                 headers: expect.objectContaining({
                     Authorization: "Bearer secret-token",
                 }),
             }),
         );
+    });
+
+    it("fetches one catalog item by type and encoded id", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: artistEnvelope,
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItem("artist", "artist/id"),
+        ).resolves.toEqual(artistEnvelope);
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://peer.example/api/federation/v1/catalog/items/artist/artist%2Fid",
+            }),
+        );
+    });
+
+    it("skips invalid catalog page items and reports their count", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [artistEnvelope, { invalid: true }],
+                nextCursor: null,
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("artist"),
+        ).resolves.toEqual({
+            items: [artistEnvelope],
+            nextCursor: null,
+            skippedInvalid: 1,
+        });
+    });
+
+    it("treats a stale cursor response as a full-resync signal", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 409,
+            data: {
+                code: "FEDERATION_STALE_CURSOR",
+                currentEpoch: "epoch-1",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-01-01T00:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).rejects.toBeInstanceOf(FederationStaleCursorError);
+    });
+
+    it("destroys stream bodies before retrying or rejecting", async () => {
+        const retryBody = { destroy: jest.fn() };
+        const rejectedBody = { destroy: jest.fn() };
+        axiosRequest
+            .mockResolvedValueOnce({ status: 503, data: retryBody })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: { destroy: jest.fn() },
+            });
+        await createFederationClient(peer, { retryDelayMs: 0 }).getStream({
+            remoteId: "track-1",
+            quality: "original",
+        });
+        expect(retryBody.destroy).toHaveBeenCalledTimes(1);
+
+        axiosRequest.mockReset();
+        axiosRequest.mockResolvedValueOnce({ status: 404, data: rejectedBody });
+        await expect(
+            createFederationClient(peer, { attempts: 1 }).getStream({
+                remoteId: "track-1",
+                quality: "original",
+            }),
+        ).rejects.toBeInstanceOf(FederationHttpError);
+        expect(rejectedBody.destroy).toHaveBeenCalledTimes(1);
+
+        axiosRequest.mockReset();
+        const coverBody = { destroy: jest.fn() };
+        axiosRequest.mockResolvedValueOnce({ status: 401, data: coverBody });
+        await expect(
+            createFederationClient(peer, { attempts: 1 }).getCover("album-1"),
+        ).rejects.toBeInstanceOf(FederationHttpError);
+        expect(coverBody.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects an oversized JSON response at the transport boundary", async () => {
+        const oversized = Object.assign(
+            new Error("maxContentLength size of 8388608 exceeded"),
+            { isAxiosError: true, code: "ERR_BAD_RESPONSE" },
+        );
+        axiosRequest.mockRejectedValueOnce(oversized);
+
+        await expect(createFederationClient(peer).getManifest()).rejects.toBe(
+            oversized,
+        );
+        expect(axiosRequest).toHaveBeenCalledTimes(1);
     });
 
     it("retries transient 5xx responses only and stops after three attempts", async () => {

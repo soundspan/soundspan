@@ -18,6 +18,7 @@ jest.mock("../../config", () => ({
     config: {
         appVersion: "2.0.2-test",
         federation: { instanceName: "soundspan-host" },
+        workers: { federationTombstoneRetentionDays: 90 },
     },
 }));
 
@@ -25,6 +26,7 @@ import { fetchEmbeddingsByTrackIds } from "../trackEmbeddings";
 import {
     decodeFederationDeltaCursor,
     getFederationCatalogDelta,
+    getFederationCatalogItem,
     getFederationCatalogItems,
     getFederationManifest,
 } from "../federationCatalog";
@@ -37,7 +39,8 @@ function artist(id: string) {
         name: `Artist ${id}`,
         mbid: `mbid-${id}`,
         normalizedName: `artist ${id}`,
-        lastSynced: at,
+        lastSynced: new Date("2026-08-01T00:00:00.000Z"),
+        updatedAt: at,
     };
 }
 
@@ -49,7 +52,8 @@ function album(id: string) {
         rgMbid: `rg-${id}`,
         year: 2026,
         primaryType: "Album",
-        lastSynced: at,
+        lastSynced: new Date("2026-08-01T00:00:00.000Z"),
+        updatedAt: at,
     };
 }
 
@@ -87,7 +91,7 @@ describe("federation catalog exports", () => {
         prisma.album.count.mockResolvedValue(3);
         prisma.track.count.mockResolvedValue(4);
 
-        await expect(getFederationManifest(true)).resolves.toEqual({
+        await expect(getFederationManifest(true, at)).resolves.toEqual({
             instanceId: "instance-1",
             name: "soundspan-host",
             version: "2.0.2-test",
@@ -95,6 +99,7 @@ describe("federation catalog exports", () => {
             mediaTypes: ["artist", "album", "track"],
             counts: { artists: 2, albums: 3, tracks: 4 },
             embeddingsAvailable: true,
+            serverTime: at,
         });
         expect(prisma.track.count).toHaveBeenCalledWith({
             where: expect.objectContaining({
@@ -107,6 +112,24 @@ describe("federation catalog exports", () => {
                 }),
             }),
         });
+    });
+
+    it("returns one exported item by type and id", async () => {
+        prisma.album.findFirst.mockResolvedValue(album("album-1"));
+
+        await expect(
+            getFederationCatalogItem({
+                mediaType: "album",
+                id: "album-1",
+                includeEmbeddings: false,
+            }),
+        ).resolves.toEqual(
+            expect.objectContaining({
+                id: "album-1",
+                mediaType: "album",
+                updatedAt: at,
+            }),
+        );
     });
 
     it("keyset-pages generic artist envelopes at the requested boundary", async () => {
@@ -276,6 +299,22 @@ describe("federation catalog exports", () => {
         expect(prisma.artist.findMany).not.toHaveBeenCalled();
     });
 
+    it("returns a typed stale cursor before querying catalog rows", async () => {
+        const result = await getFederationCatalogDelta({
+            since: new Date("2026-05-01T00:00:00.000Z"),
+            epoch: "epoch-1",
+            limit: 200,
+            includeEmbeddings: false,
+            now: at,
+        });
+
+        expect(result).toEqual({
+            kind: "staleCursor",
+            currentEpoch: "epoch-1",
+        });
+        expect(prisma.artist.findMany).not.toHaveBeenCalled();
+    });
+
     it("bounds and keyset-pages merged delta changes and tombstones", async () => {
         prisma.artist.findMany.mockResolvedValue([artist("a1")]);
         prisma.album.findMany.mockResolvedValue([album("b1")]);
@@ -306,5 +345,20 @@ describe("federation catalog exports", () => {
             id: "b1",
         });
         expect(result.nextSince).toEqual(new Date("2026-08-15T12:01:00.000Z"));
+        expect(prisma.artist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    AND: expect.arrayContaining([
+                        { updatedAt: expect.any(Object) },
+                    ]),
+                }),
+                orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+            }),
+        );
+        expect(prisma.album.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+            }),
+        );
     });
 });

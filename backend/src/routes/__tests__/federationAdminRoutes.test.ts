@@ -16,6 +16,7 @@ const enqueueFederationSyncNow = jest.fn();
 
 jest.mock("../../services/federationPeers", () => ({
     ...service,
+    FederationPeerConflictError: class FederationPeerConflictError extends Error {},
     FEDERATION_SCOPE_VALUES: ["library:read", "stream:read", "embeddings:read"],
 }));
 jest.mock("../../workers/federationJobs", () => ({
@@ -113,6 +114,34 @@ describe("federation admin routes", () => {
         expect(service.createHostFederationPeer).not.toHaveBeenCalled();
     });
 
+    it("rejects the unsupported BOTH direction with a clear error", async () => {
+        const host = await request(app)
+            .post("/api/federation/admin/peers")
+            .set("Authorization", "Bearer admin")
+            .send({
+                direction: "BOTH",
+                name: "Peer",
+                scopes: ["library:read"],
+            });
+        const consumer = await request(app)
+            .post("/api/federation/admin/peers/link")
+            .set("Authorization", "Bearer admin")
+            .send({
+                direction: "BOTH",
+                baseUrl: "https://peer.example",
+                token: "peer-token",
+            });
+
+        expect(host.status).toBe(400);
+        expect(host.body).toEqual({
+            error: "Peer direction BOTH is not supported",
+        });
+        expect(consumer.status).toBe(400);
+        expect(consumer.body).toEqual(host.body);
+        expect(service.createHostFederationPeer).not.toHaveBeenCalled();
+        expect(service.linkConsumerFederationPeer).not.toHaveBeenCalled();
+    });
+
     it("lists peers without credential material", async () => {
         service.listFederationPeers.mockResolvedValueOnce([
             { id: "peer-1", name: "Peer" },
@@ -206,6 +235,26 @@ describe("federation admin routes", () => {
             code: "FEDERATION_PEER_INVALID",
         });
         expect(JSON.stringify(response.body)).not.toContain("peer-token");
+    });
+
+    it("returns a typed 409 for a duplicate consumer peer URL", async () => {
+        const { FederationPeerConflictError } = jest.requireMock(
+            "../../services/federationPeers",
+        );
+        service.linkConsumerFederationPeer.mockRejectedValueOnce(
+            new FederationPeerConflictError(),
+        );
+
+        const response = await request(app)
+            .post("/api/federation/admin/peers/link")
+            .set("Authorization", "Bearer admin")
+            .send({ baseUrl: "https://peer.example", token: "peer-token" });
+
+        expect(response.status).toBe(409);
+        expect(response.body).toEqual({
+            error: "Federation consumer peer already exists",
+            code: "FEDERATION_PEER_CONFLICT",
+        });
     });
 
     it("exchanges a pairing code before linking the consumer peer", async () => {

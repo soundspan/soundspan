@@ -151,6 +151,8 @@ test("applies limit to rendered rows but play action still queues all tracks", a
         title: "Track 1",
         displayTitle: null,
         duration: 180,
+        source: undefined,
+        peer: undefined,
         artist: { id: "artist-1", name: "Artist 1" },
         album: { id: "album-1", title: "Album 1", coverArt: null },
     });

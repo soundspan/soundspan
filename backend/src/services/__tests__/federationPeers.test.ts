@@ -8,6 +8,7 @@ const mockCreateFederationClient = jest.fn(() => ({
 const mockPairFederationPeer = jest.fn();
 const mockEncrypt = jest.fn((value: string) => `enc:${value}`);
 const mockDecrypt = jest.fn((value: string) => value.replace(/^enc:/, ""));
+const mockConfig = { soundspanCallbackUrl: "http://backend:3006" };
 
 const prisma = {
     systemSettings: {
@@ -33,6 +34,9 @@ const prisma = {
 };
 
 jest.mock("../../utils/db", () => ({ prisma }));
+jest.mock("../../config", () => ({
+    config: mockConfig,
+}));
 jest.mock("../../utils/encryption", () => ({
     encrypt: mockEncrypt,
     decrypt: mockDecrypt,
@@ -69,6 +73,7 @@ const manifest = {
 describe("federation peer credentials", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockConfig.soundspanCallbackUrl = "http://backend:3006";
         prisma.systemSettings.upsert.mockResolvedValue({});
         prisma.systemSettings.updateMany.mockResolvedValue({ count: 1 });
         prisma.systemSettings.findUnique.mockResolvedValue({
@@ -113,16 +118,32 @@ describe("federation peer credentials", () => {
     });
 
     it("rotates a credential and invalidates the old hash", async () => {
+        prisma.federationPeer.findFirst
+            .mockResolvedValueOnce({ id: "peer-1", status: "OFFLINE" })
+            .mockResolvedValueOnce({ id: "peer-1", status: "OFFLINE" });
         const result = await rotateFederationPeerCredential("peer-1");
 
         expect(result?.token).toMatch(/^[0-9a-f]{64}$/);
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
-            where: { id: "peer-1", status: { not: "REVOKED" } },
+            where: {
+                id: "peer-1",
+                direction: "HOST",
+                status: "OFFLINE",
+            },
             data: {
                 credentialHash: hashApiKey(result!.token),
-                status: "ACTIVE",
+                status: "OFFLINE",
             },
         });
+    });
+
+    it("does not rotate consumer-direction credentials", async () => {
+        prisma.federationPeer.findFirst.mockResolvedValueOnce(null);
+
+        await expect(
+            rotateFederationPeerCredential("consumer-1"),
+        ).resolves.toBeNull();
+        expect(prisma.federationPeer.updateMany).not.toHaveBeenCalled();
     });
 
     it("lists without secrets, revokes for audit, and supports explicit deletion", async () => {
@@ -155,6 +176,7 @@ describe("federation peer credentials", () => {
 describe("federation consumer peers", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        prisma.federationPeer.findFirst.mockResolvedValue(null);
         mockGetManifest.mockResolvedValue(manifest);
         mockPairFederationPeer.mockResolvedValue({ token: "paired-token" });
         prisma.federationPeer.create.mockImplementation(async ({ data }) => {
@@ -223,12 +245,45 @@ describe("federation consumer peers", () => {
             baseUrl: "https://peer.example",
             code: "ABCDEFGH",
             name: "Consumer Name",
-            consumerBaseUrl: "https://peer.example",
         });
         expect(mockCreateFederationClient).toHaveBeenCalledWith(
             expect.objectContaining({ outboundToken: "enc:paired-token" }),
         );
         expect(mockEncrypt).toHaveBeenCalledWith("paired-token");
+    });
+
+    it("sends the configured consumer URL instead of the host URL", async () => {
+        mockConfig.soundspanCallbackUrl = "https://consumer.example/app";
+
+        await pairAndLinkConsumerFederationPeer({
+            baseUrl: "https://host.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            createdById: "admin-1",
+        });
+
+        expect(mockPairFederationPeer).toHaveBeenCalledWith({
+            baseUrl: "https://host.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            consumerBaseUrl: "https://consumer.example",
+        });
+    });
+
+    it("rejects a duplicate normalized non-revoked consumer URL", async () => {
+        prisma.federationPeer.findFirst.mockResolvedValueOnce({
+            id: "existing-peer",
+        });
+
+        await expect(
+            linkConsumerFederationPeer({
+                baseUrl: "https://peer.example/path",
+                token: "raw-token",
+                createdById: "admin-1",
+            }),
+        ).rejects.toMatchObject({ name: "FederationPeerConflictError" });
+        expect(mockGetManifest).not.toHaveBeenCalled();
+        expect(prisma.federationPeer.create).not.toHaveBeenCalled();
     });
 
     it("decrypts outbound credentials only for internal peer calls", async () => {

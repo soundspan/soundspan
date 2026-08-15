@@ -7,6 +7,7 @@ import {
     createHostFederationPeer,
     deleteFederationPeer,
     FEDERATION_SCOPE_VALUES,
+    FederationPeerConflictError,
     linkConsumerFederationPeer,
     listFederationPeers,
     pairAndLinkConsumerFederationPeer,
@@ -32,6 +33,7 @@ const httpsUrlSchema = z
     .url()
     .refine((value) => new URL(value).protocol === "https:");
 const createPeerSchema = z.strictObject({
+    direction: z.literal("HOST").optional(),
     name: z.string().trim().min(1).max(120),
     scopes: scopesSchema,
     baseUrl: httpsUrlSchema.optional(),
@@ -43,11 +45,13 @@ const peerParamsSchema = z.strictObject({
     id: z.string().trim().min(1).max(128),
 });
 const consumerLinkSchema = z.strictObject({
+    direction: z.literal("CONSUMER").optional(),
     baseUrl: httpsUrlSchema,
     token: z.string().trim().min(1).max(4_096),
     name: z.string().trim().min(1).max(120).optional(),
 });
 const consumerPairSchema = z.strictObject({
+    direction: z.literal("CONSUMER").optional(),
     baseUrl: httpsUrlSchema,
     code: z
         .string()
@@ -61,6 +65,18 @@ function invalidRequest(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation peer request");
 }
 
+function directionError(res: Response, body: unknown): Response | null {
+    if (
+        body &&
+        typeof body === "object" &&
+        "direction" in body &&
+        (body as { direction?: unknown }).direction === "BOTH"
+    ) {
+        return sendRouteError(res, 400, "Peer direction BOTH is not supported");
+    }
+    return null;
+}
+
 router.use(requireAuth, requireAdmin);
 
 /** @openapi
@@ -72,6 +88,7 @@ router.use(requireAuth, requireAdmin);
  *     responses:
  *       200: { description: Federation peer list }
  *       403: { description: Administrator access required }
+ *       429: { description: Request rate limit exceeded }
  */
 router.get(
     "/peers",
@@ -89,14 +106,19 @@ router.get(
  *     responses:
  *       201: { description: Peer and one-time credential }
  *       400: { description: Invalid peer input }
+ *       429: { description: Request rate limit exceeded }
  */
 router.post(
     "/peers",
     asyncHandler(async (req, res) => {
         const parsed = createPeerSchema.safeParse(req.body);
-        if (!parsed.success || !req.user) return invalidRequest(res);
+        if (!parsed.success || !req.user) {
+            return directionError(res, req.body) ?? invalidRequest(res);
+        }
         const result = await createHostFederationPeer({
-            ...parsed.data,
+            name: parsed.data.name,
+            scopes: parsed.data.scopes,
+            baseUrl: parsed.data.baseUrl,
             createdById: req.user.id,
         });
         return res.status(201).json(result);
@@ -112,20 +134,31 @@ router.post(
  *     responses:
  *       201: { description: Consumer peer linked }
  *       400: { description: Invalid link input }
+ *       429: { description: Request rate limit exceeded }
  *       502: { description: Peer manifest validation failed }
  */
 router.post(
     "/peers/link",
     asyncHandler(async (req, res) => {
         const parsed = consumerLinkSchema.safeParse(req.body);
-        if (!parsed.success || !req.user) return invalidRequest(res);
+        if (!parsed.success || !req.user) {
+            return directionError(res, req.body) ?? invalidRequest(res);
+        }
         try {
             const peer = await linkConsumerFederationPeer({
                 ...parsed.data,
                 createdById: req.user.id,
             });
             return res.status(201).json({ peer });
-        } catch (_error: unknown) {
+        } catch (error: unknown) {
+            if (error instanceof FederationPeerConflictError) {
+                return sendRouteError(
+                    res,
+                    409,
+                    "Federation consumer peer already exists",
+                    { code: "FEDERATION_PEER_CONFLICT" },
+                );
+            }
             return sendRouteError(res, 502, "Peer manifest validation failed", {
                 code: "FEDERATION_PEER_INVALID",
             });
@@ -142,13 +175,16 @@ router.post(
  *     responses:
  *       201: { description: Consumer peer paired and linked }
  *       400: { description: Invalid pairing input }
+ *       429: { description: Request rate limit exceeded }
  *       502: { description: Peer pairing or manifest validation failed }
  */
 router.post(
     "/peers/link/pair",
     asyncHandler(async (req, res) => {
         const parsed = consumerPairSchema.safeParse(req.body);
-        if (!parsed.success || !req.user) return invalidRequest(res);
+        if (!parsed.success || !req.user) {
+            return directionError(res, req.body) ?? invalidRequest(res);
+        }
         try {
             const peer = await pairAndLinkConsumerFederationPeer({
                 ...parsed.data,
@@ -172,6 +208,7 @@ router.post(
  *     responses:
  *       200: { description: Peer and replacement one-time credential }
  *       404: { description: Federation peer not found }
+ *       429: { description: Request rate limit exceeded }
  */
 router.post(
     "/peers/:id/rotate",
@@ -194,6 +231,7 @@ router.post(
  *     responses:
  *       200: { description: Federation peer revoked }
  *       404: { description: Federation peer not found }
+ *       429: { description: Request rate limit exceeded }
  */
 router.post(
     "/peers/:id/revoke",
@@ -216,6 +254,7 @@ router.post(
  *     responses:
  *       202: { description: Sync job queued or coalesced }
  *       400: { description: Invalid peer id }
+ *       429: { description: Request rate limit exceeded }
  */
 router.post(
     "/peers/:id/sync",
@@ -236,6 +275,7 @@ router.post(
  *     responses:
  *       204: { description: Federation peer deleted }
  *       404: { description: Federation peer not found }
+ *       429: { description: Request rate limit exceeded }
  */
 router.delete(
     "/peers/:id",
@@ -258,6 +298,7 @@ router.delete(
  *     responses:
  *       201: { description: Eight-character pairing code and expiry }
  *       400: { description: Invalid scope input }
+ *       429: { description: Request rate limit exceeded }
  */
 router.post(
     "/pairing-codes",

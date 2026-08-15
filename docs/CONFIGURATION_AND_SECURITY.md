@@ -110,6 +110,14 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - Consumer outbound tokens are encrypted and decrypted through the settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. API and admin responses exclude both outbound tokens and credential hashes.
 - Peer base URLs must use HTTPS. The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it.
 
+Federation intentionally permits HTTPS peer URLs on private, LAN, and VPN
+networks. Private addressing is a primary self-hosted deployment model, and
+peer configuration is restricted to administrators. Outbound federation calls
+disable redirects and use bounded timeouts and response sizes, but they do not
+apply the public-address-only SSRF policy used for untrusted user-supplied
+URLs. Administrators must therefore treat a linked peer as trusted and limit
+admin access accordingly.
+
 ## Webhook and Admin Security
 
 - Lidarr webhook signatures are supported and should be configured

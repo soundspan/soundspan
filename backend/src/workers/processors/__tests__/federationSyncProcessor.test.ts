@@ -6,16 +6,31 @@ class MockEpochMismatchError extends Error {
         super("epoch mismatch");
     }
 }
+class MockStaleCursorError extends Error {
+    constructor(public readonly currentEpoch: string) {
+        super("stale cursor");
+    }
+}
 
 const client = {
     getManifest: jest.fn(),
     getCatalogItems: jest.fn(),
     getCatalogDelta: jest.fn(),
+    getCatalogItem: jest.fn(),
 };
 const createFederationClient = jest.fn(() => client);
 const createMapping = jest.fn();
 const upsertTrackEmbedding = jest.fn();
 const backfillAllArtistCounts = jest.fn();
+
+const mockLog = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLog.child.mockReturnValue(mockLog);
 
 const prisma = {
     federationPeer: {
@@ -48,19 +63,12 @@ const prisma = {
 
 jest.mock("../../../utils/db", () => ({ prisma }));
 jest.mock("../../../utils/logger", () => {
-    const logger = {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        child: jest.fn(),
-    };
-    logger.child.mockReturnValue(logger);
-    return { logger };
+    return { logger: mockLog };
 });
 jest.mock("../../../services/federationClient", () => ({
     createFederationClient,
     FederationEpochMismatchError: MockEpochMismatchError,
+    FederationStaleCursorError: MockStaleCursorError,
 }));
 jest.mock("../../../services/trackMappingService", () => ({
     trackMappingService: { createMapping },
@@ -93,6 +101,7 @@ const manifest = {
     mediaTypes: ["artist", "album", "track"],
     counts: { artists: 1, albums: 1, tracks: 1 },
     embeddingsAvailable: true,
+    serverTime: "2026-08-15T11:59:59.000Z",
 };
 
 const artist = {
@@ -141,9 +150,11 @@ function job() {
 }
 
 function catalogPageFor(type: string) {
-    if (type === "artist") return { items: [artist], nextCursor: null };
-    if (type === "album") return { items: [album], nextCursor: null };
-    return { items: [track], nextCursor: null };
+    if (type === "artist")
+        return { items: [artist], nextCursor: null, skippedInvalid: 0 };
+    if (type === "album")
+        return { items: [album], nextCursor: null, skippedInvalid: 0 };
+    return { items: [track], nextCursor: null, skippedInvalid: 0 };
 }
 
 describe("federation sync processor", () => {
@@ -155,6 +166,7 @@ describe("federation sync processor", () => {
         client.getCatalogItems.mockImplementation((type: string) =>
             Promise.resolve(catalogPageFor(type)),
         );
+        client.getCatalogItem.mockResolvedValue(artist);
         prisma.artist.findUnique.mockResolvedValue({ id: "artist-local-row" });
         prisma.artist.findFirst.mockResolvedValue(null);
         prisma.artist.upsert.mockResolvedValue({ id: "artist-local-row" });
@@ -221,7 +233,7 @@ describe("federation sync processor", () => {
             data: expect.objectContaining({
                 status: "ACTIVE",
                 catalogEpoch: "epoch-1",
-                lastSyncCursor: expect.any(String),
+                lastSyncCursor: "2026-08-15T11:59:59.000Z",
                 lastSeenAt: expect.any(Date),
             }),
         });
@@ -230,7 +242,83 @@ describe("federation sync processor", () => {
             artists: 1,
             albums: 1,
             tracks: 1,
+            skippedInvalid: 0,
         });
+    });
+
+    it("warns when an older host manifest lacks serverTime", async () => {
+        client.getManifest.mockResolvedValueOnce({
+            ...manifest,
+            serverTime: undefined,
+        });
+
+        await processFederationSync(job());
+
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            "Federation manifest lacks serverTime; using the local clock",
+        );
+    });
+
+    it("fetches and applies a missing parent before an incremental child", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        prisma.artist.findUnique
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: "artist-local-row" });
+        client.getCatalogDelta.mockResolvedValueOnce({
+            kind: "ok",
+            changes: [album],
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+        });
+
+        await processFederationSync(job());
+
+        expect(client.getCatalogItem).toHaveBeenCalledWith(
+            "artist",
+            "remote-artist-1",
+        );
+        expect(prisma.artist.upsert).toHaveBeenCalled();
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            expect.stringContaining("missing parent"),
+        );
+    });
+
+    it("fetches a missing album hierarchy before an incremental track", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        prisma.album.findUnique
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "album-local-row",
+                rgMbid: "release-group-1",
+            });
+        client.getCatalogItem.mockResolvedValueOnce(album);
+        client.getCatalogDelta.mockResolvedValueOnce({
+            kind: "ok",
+            changes: [track],
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+        });
+
+        await processFederationSync(job());
+
+        expect(client.getCatalogItem).toHaveBeenCalledWith(
+            "album",
+            "remote-album-1",
+        );
+        expect(prisma.album.upsert).toHaveBeenCalled();
+        expect(prisma.track.upsert).toHaveBeenCalled();
     });
 
     it("does not mutate catalog rows when a validated page request fails", async () => {
@@ -339,6 +427,7 @@ describe("federation sync processor", () => {
             ],
             nextCursor: null,
             nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
         });
 
         const result = await processFederationSync(job());
@@ -378,6 +467,62 @@ describe("federation sync processor", () => {
             where: { id: "peer-1" },
             data: expect.objectContaining({ catalogEpoch: "epoch-2" }),
         });
+    });
+
+    it("falls back to full sync after a typed stale-cursor 409", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            ...peer,
+            lastSyncCursor: "2026-01-01T00:00:00.000Z",
+        });
+        client.getCatalogDelta.mockRejectedValueOnce(
+            new MockStaleCursorError("epoch-1"),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            mode: "full",
+        });
+        expect(prisma.federationPeer.update).toHaveBeenCalledWith({
+            where: { id: "peer-1" },
+            data: { lastSyncCursor: null, catalogEpoch: "epoch-1" },
+        });
+    });
+
+    it("does not advance the cursor when a later incremental page fails", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        client.getCatalogDelta
+            .mockResolvedValueOnce({
+                kind: "ok",
+                changes: [],
+                tombstones: [],
+                nextCursor: "page-2",
+                nextSince: "2026-08-15T12:11:00.000Z",
+                skippedInvalid: 0,
+            })
+            .mockRejectedValueOnce(new Error("page two failed"));
+
+        await expect(processFederationSync(job())).rejects.toThrow(
+            "page two failed",
+        );
+        expect(prisma.federationPeer.update).not.toHaveBeenCalled();
+    });
+
+    it("reports invalid items skipped by the client", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve({
+                ...catalogPageFor(type),
+                skippedInvalid: type === "track" ? 1 : 0,
+            }),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            skippedInvalid: 1,
+        });
+        expect(mockLog.info).toHaveBeenCalledWith(
+            expect.stringContaining("skippedInvalid=1"),
+        );
     });
 
     it.each([

@@ -13,14 +13,20 @@ const MAX_CONSUMER_PEERS = 500;
 
 /** Enqueues or coalesces one peer's sync through a deterministic Bull job id. */
 export async function enqueueFederationSyncNow(peerId: string): Promise<void> {
+    const primaryJobId = `federation-sync:${peerId}`;
+    const primary = await federationQueue.getJob(primaryJobId);
+    const state = primary ? await primary.getState() : null;
+    const jobId =
+        state === "active" ? `${primaryJobId}:followup` : primaryJobId;
     await federationQueue.add(
         FEDERATION_SYNC_JOB_NAME,
         { peerId },
         {
-            jobId: `federation-sync:${peerId}`,
-            attempts: 1,
+            jobId,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 1_000 },
             removeOnComplete: true,
-            removeOnFail: true,
+            removeOnFail: 10,
         },
     );
 }

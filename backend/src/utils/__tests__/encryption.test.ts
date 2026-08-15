@@ -79,16 +79,23 @@ describe("encryption utils", () => {
         jest.resetModules();
     });
 
-    it("throws on import when encryption keys are missing", async () => {
-        await expect(loadEncryptionModule()).rejects.toThrow(
+    it("loads without a key and validates lazily on first use", async () => {
+        const { encrypt, validateEncryptionKey } = await loadEncryptionModule();
+
+        expect(() => validateEncryptionKey()).toThrow(
+            "SETTINGS_ENCRYPTION_KEY or ENCRYPTION_KEY",
+        );
+        expect(() => encrypt("secret")).toThrow(
             "SETTINGS_ENCRYPTION_KEY or ENCRYPTION_KEY",
         );
     });
 
-    it("throws on import when using the insecure default key", async () => {
-        await expect(
-            loadEncryptionModule({ settingsKey: INSECURE_DEFAULT_KEY }),
-        ).rejects.toThrow("insecure default value");
+    it("rejects the insecure default key when validation runs", async () => {
+        const { validateEncryptionKey } = await loadEncryptionModule({
+            settingsKey: INSECURE_DEFAULT_KEY,
+        });
+
+        expect(() => validateEncryptionKey()).toThrow("insecure default value");
     });
 
     it.each([
@@ -97,7 +104,9 @@ describe("encryption utils", () => {
     ])(
         "throws on import when %s is shorter than 32 characters",
         async (_, keys) => {
-            await expect(loadEncryptionModule(keys)).rejects.toThrow(
+            const { validateEncryptionKey } = await loadEncryptionModule(keys);
+
+            expect(() => validateEncryptionKey()).toThrow(
                 "at least 32 characters",
             );
         },

@@ -1722,9 +1722,41 @@ describe("library stream runtime coverage", () => {
                 error: "Federation peer is offline",
                 code: "PEER_OFFLINE",
             });
+            expect(mockPlayCreate).not.toHaveBeenCalled();
             expect(mockProxyFederatedTrackStream).not.toHaveBeenCalled();
         },
     );
+
+    it("terminates a post-headers proxy failure without a second response", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        const res = createRes();
+        res.headersSent = true;
+        res.writableEnded = false;
+        mockProxyFederatedTrackStream.mockRejectedValueOnce(
+            new Error("upstream reset after headers"),
+        );
+
+        await streamHandler(
+            {
+                params: { id: "fed-track-1" },
+                query: {},
+                headers: {},
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.end).toHaveBeenCalledTimes(1);
+        expect(res.status).not.toHaveBeenCalledWith(503);
+    });
 });
 
 describe("library catalog list runtime coverage", () => {
@@ -2912,7 +2944,19 @@ describe("library catalog list runtime coverage", () => {
                                                 { origin: "LOCAL" },
                                                 {
                                                     origin: "FEDERATED",
-                                                    dedupOfTrackId: null,
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
                                                 },
                                             ],
                                         },
@@ -2927,7 +2971,19 @@ describe("library catalog list runtime coverage", () => {
                                                 { origin: "LOCAL" },
                                                 {
                                                     origin: "FEDERATED",
-                                                    dedupOfTrackId: null,
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
                                                 },
                                             ],
                                         },
@@ -2942,7 +2998,19 @@ describe("library catalog list runtime coverage", () => {
                                                 { origin: "LOCAL" },
                                                 {
                                                     origin: "FEDERATED",
-                                                    dedupOfTrackId: null,
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
                                                 },
                                             ],
                                         },
@@ -3011,7 +3079,14 @@ describe("library catalog list runtime coverage", () => {
                                 { origin: "LOCAL" },
                                 {
                                     origin: "FEDERATED",
-                                    dedupOfTrackId: null,
+                                    OR: [
+                                        { dedupOfTrackId: null },
+                                        {
+                                            dedupOfTrack: {
+                                                removedAt: { not: null },
+                                            },
+                                        },
+                                    ],
                                 },
                             ],
                         },
@@ -3207,7 +3282,17 @@ describe("library catalog list runtime coverage", () => {
                     removedAt: null,
                     OR: [
                         { origin: "LOCAL" },
-                        { origin: "FEDERATED", dedupOfTrackId: null },
+                        {
+                            origin: "FEDERATED",
+                            OR: [
+                                { dedupOfTrackId: null },
+                                {
+                                    dedupOfTrack: {
+                                        removedAt: { not: null },
+                                    },
+                                },
+                            ],
+                        },
                     ],
                 },
                 skip: 1,

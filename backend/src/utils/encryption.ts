@@ -21,8 +21,7 @@ const LEGACY_IV_BYTES = 16;
 
 /**
  * Get and validate the raw encryption key string from the environment.
- * Throws if missing, weak, or using the insecure default. Validated on module
- * load to fail fast.
+ * Throws if missing, weak, or using the insecure default.
  */
 function getRawEncryptionKey(): string {
     const { value: key } = resolveSettingsEncryptionKey(process.env);
@@ -72,9 +71,31 @@ function deriveLegacyKey(rawKey: string): Buffer {
     return Buffer.from(rawKey.slice(0, 32));
 }
 
-// Validate on module load to fail fast.
-const RAW_ENCRYPTION_KEY = getRawEncryptionKey();
-const LEGACY_ENCRYPTION_KEY = deriveLegacyKey(RAW_ENCRYPTION_KEY);
+let rawEncryptionKey: string | null = null;
+let legacyEncryptionKey: Buffer | null = null;
+
+/** Validates and memoizes the process encryption key. */
+export function validateEncryptionKey(): void {
+    if (rawEncryptionKey !== null) return;
+    rawEncryptionKey = getRawEncryptionKey();
+    legacyEncryptionKey = deriveLegacyKey(rawEncryptionKey);
+}
+
+function requireRawEncryptionKey(): string {
+    validateEncryptionKey();
+    if (rawEncryptionKey === null) {
+        throw new Error("Encryption key validation did not initialize a key");
+    }
+    return rawEncryptionKey;
+}
+
+function requireLegacyEncryptionKey(): Buffer {
+    validateEncryptionKey();
+    if (legacyEncryptionKey === null) {
+        throw new Error("Encryption key validation did not initialize a key");
+    }
+    return legacyEncryptionKey;
+}
 
 // Bounded cache of scrypt-derived v2 keys, keyed by salt hex. The derived key is
 // a pure function of (RAW_ENCRYPTION_KEY, salt) and RAW_ENCRYPTION_KEY is fixed
@@ -90,7 +111,11 @@ function deriveGcmKey(salt: Buffer): Buffer {
     if (cached) {
         return cached;
     }
-    const key = crypto.scryptSync(RAW_ENCRYPTION_KEY, salt, SCRYPT_KEYLEN);
+    const key = crypto.scryptSync(
+        requireRawEncryptionKey(),
+        salt,
+        SCRYPT_KEYLEN,
+    );
     if (GCM_KEY_CACHE.size >= GCM_KEY_CACHE_MAX) {
         // FIFO-evict the oldest entry to keep the cache bounded.
         const oldest = GCM_KEY_CACHE.keys().next().value;
@@ -210,7 +235,7 @@ function decryptLegacy(text: string): string {
         }
         const decipher = crypto.createDecipheriv(
             LEGACY_ALGORITHM,
-            LEGACY_ENCRYPTION_KEY,
+            requireLegacyEncryptionKey(),
             iv,
         );
         let decrypted = decipher.update(encryptedText);

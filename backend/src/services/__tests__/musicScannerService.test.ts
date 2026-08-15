@@ -78,6 +78,7 @@ const mockCanonicalizeVariousArtists = jest.fn((name: string) => name);
 const mockExtractPrimaryArtist = jest.fn((name: string) => name);
 const mockParseArtistFromPath = jest.fn((name: string) => name);
 const mockExtractCoverArt = jest.fn();
+const mockCreateMapping = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
     workers: { trackRemovalRetentionDays: 90 },
@@ -150,6 +151,10 @@ jest.mock("../artistCountsService", () => ({
 
 jest.mock("../audioHash", () => ({
     computeAudioStreamHash: mockComputeAudioStreamHash,
+}));
+
+jest.mock("../trackMappingService", () => ({
+    trackMappingService: { createMapping: mockCreateMapping },
 }));
 
 jest.mock("../../config", () => ({
@@ -305,11 +310,57 @@ describe("MusicScannerService.scanLibrary", () => {
         mockComputeAudioStreamHash.mockResolvedValue(
             "sha256:" + "ab".repeat(32),
         );
+        mockCreateMapping.mockResolvedValue({ id: "mapping-1" });
     });
 
     afterEach(() => {
         jest.useRealTimers();
         jest.restoreAllMocks();
+    });
+
+    it("hides a federated duplicate when a matching local rip arrives", async () => {
+        const scanner = new MusicScannerService();
+        const audioHash = "sha256:" + "ad".repeat(32);
+        const local = identityTrack("local-new", "Artist/Track.flac", {
+            audioHash,
+        });
+        const federated = {
+            ...identityTrack("federated-1", "unused", { audioHash }),
+            filePath: null,
+            origin: "FEDERATED",
+        };
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue(["/music/Artist/Track.flac"]);
+        mockPrisma.track.findMany.mockImplementation(async (args) => {
+            if (
+                args.where?.filePath?.in &&
+                args.where?.origin === "LOCAL" &&
+                args.where?.removedAt === null
+            ) {
+                return [local];
+            }
+            if (args.where?.filePath?.in) return [];
+            if (args.where?.origin === "FEDERATED") return [federated];
+            return [];
+        });
+        mockPrisma.track.upsert.mockResolvedValue(local);
+        mockComputeAudioStreamHash.mockResolvedValue(audioHash);
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+            where: { id: "federated-1" },
+            data: { dedupOfTrackId: "local-new" },
+        });
+        expect(mockCreateMapping).toHaveBeenCalledWith({
+            trackId: "local-new",
+            confidence: 1,
+            source: "federation",
+        });
     });
 
     it("chunks active-scan path lookups beyond the bind-parameter batch size", async () => {

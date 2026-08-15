@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     materialize peer music with local-wins identity deduplication, and proxy
     covers and streams without exposing encrypted outbound tokens to browsers.
     `FEDERATION_SYNC_INTERVAL_MINUTES` controls sync scheduling (default `15`).
+    Deleting a peer also permanently removes its mirrored catalog and any
+    playlist items that reference those mirrored tracks.
   - Library, search, artist, album, playlist, queue, and now-playing surfaces
     show peer provenance, source filters, and offline state. Deduplicated peer
     copies stay hidden while the matching local track wins.
@@ -48,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Soft-removed tracks retained for recovery no longer seed mixes, radio, or
+  recommendations through play or like history.
 - Library scans now soft-remove missing tracks instead of cascading immediate
   deletion. Same-path returns and cross-scan moves revive the original track
   row, including its playlists, likes, history, and analysis metadata.
@@ -61,6 +65,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Federation deltas now detect artist and album changes through maintained
+  update timestamps, recover missing parent rows directly, reject expired
+  cursors with a full resync, and anchor initial cursors to host time.
+- Federation sync now rechecks deduplication when a matching local file arrives,
+  reveals peer copies whose local winner was soft-removed, retries bounded jobs,
+  and queues one follow-up when “sync now” overlaps an active run.
+- Federation peer calls now cap JSON responses, release rejected stream bodies,
+  preserve peer status during host credential rotation, reject duplicate links
+  and unsupported bidirectional peers, and avoid logging failed offline plays.
 - Soft-removed library tracks are now excluded from library, search, radio,
   recommendation, streaming, Subsonic, sharing, import-matching, and offline
   read surfaces. Playlists and play history retain removed entries as

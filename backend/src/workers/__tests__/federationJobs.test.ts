@@ -2,6 +2,7 @@ const federationQueue = {
     add: jest.fn(),
     process: jest.fn(),
     isReady: jest.fn(),
+    getJob: jest.fn(),
 };
 const prisma = {
     federationPeer: { findMany: jest.fn() },
@@ -35,6 +36,7 @@ describe("federation queue registration", () => {
         jest.clearAllMocks();
         federationQueue.isReady.mockResolvedValue(undefined);
         federationQueue.add.mockResolvedValue({ id: "job-1" });
+        federationQueue.getJob.mockResolvedValue(null);
         prisma.federationPeer.findMany.mockResolvedValue([
             { id: "peer-1" },
             { id: "peer-2" },
@@ -87,12 +89,33 @@ describe("federation queue registration", () => {
         expect(federationQueue.add).toHaveBeenCalledWith(
             FEDERATION_SYNC_JOB_NAME,
             { peerId: "peer-1" },
-            expect.objectContaining({ jobId: "federation-sync:peer-1" }),
+            expect.objectContaining({
+                jobId: "federation-sync:peer-1",
+                attempts: 3,
+                backoff: { type: "exponential", delay: 1_000 },
+                removeOnFail: 10,
+            }),
         );
         expect(federationQueue.add).toHaveBeenCalledWith(
             FEDERATION_SYNC_JOB_NAME,
             { peerId: "peer-2" },
             expect.objectContaining({ jobId: "federation-sync:peer-2" }),
+        );
+    });
+
+    it("dedupes one follow-up job while the primary sync is active", async () => {
+        federationQueue.getJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("active"),
+        });
+
+        await enqueueFederationSyncNow("peer-1");
+
+        expect(federationQueue.add).toHaveBeenCalledWith(
+            FEDERATION_SYNC_JOB_NAME,
+            { peerId: "peer-1" },
+            expect.objectContaining({
+                jobId: "federation-sync:peer-1:followup",
+            }),
         );
     });
 });

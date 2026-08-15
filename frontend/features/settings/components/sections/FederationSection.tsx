@@ -477,21 +477,186 @@ function SubmitButton({ busy, label }: { busy: boolean; label: string }) {
     );
 }
 
-/** Admin settings surface for federation peer lifecycle management. */
-export function FederationSection() {
-    const { federation } = useFeatures();
+type RunPeerAction = (
+    peer: FederationPeer,
+    action: () => Promise<void>,
+) => Promise<void>;
+
+function PeerManagementPanel(props: {
+    loading: boolean;
+    peers: FederationPeer[];
+    busyPeerId: string | null;
+    runPeerAction: RunPeerAction;
+    setCredential: (value: { peerName: string; token: string }) => void;
+    setDeletePeer: (peer: FederationPeer) => void;
+}) {
+    if (props.loading) {
+        return (
+            <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            </div>
+        );
+    }
+    return (
+        <FederationPeersList
+            peers={props.peers}
+            busyPeerId={props.busyPeerId}
+            onSync={(peer) =>
+                void props.runPeerAction(peer, () =>
+                    api.syncFederationPeer(peer.id).then(() => undefined),
+                )
+            }
+            onRotate={(peer) =>
+                void props.runPeerAction(peer, async () => {
+                    const result = await api.rotateFederationPeerCredential(
+                        peer.id,
+                    );
+                    props.setCredential({
+                        peerName: result.peer.name,
+                        token: result.token,
+                    });
+                })
+            }
+            onRevoke={(peer) =>
+                void props.runPeerAction(peer, () =>
+                    api.revokeFederationPeer(peer.id).then(() => undefined),
+                )
+            }
+            onDelete={props.setDeletePeer}
+        />
+    );
+}
+
+function PairingCodeControl(props: {
+    busy: boolean;
+    pairingCode: string | null;
+    onCreate: () => void;
+}) {
+    return (
+        <>
+            <button
+                type="button"
+                onClick={props.onCreate}
+                disabled={props.busy}
+                className={secondaryButtonClassName}
+            >
+                <LinkIcon className="h-3.5 w-3.5" />
+                Create pairing code
+            </button>
+            {props.pairingCode && (
+                <p className="text-sm text-gray-300">
+                    Pairing code:{" "}
+                    <code className="rounded bg-black/30 px-2 py-1 text-white">
+                        {props.pairingCode}
+                    </code>
+                </p>
+            )}
+        </>
+    );
+}
+
+function FederationAddControls(props: {
+    busy: boolean;
+    pairingCode: string | null;
+    setBusy: (busy: boolean) => void;
+    setError: (error: string | null) => void;
+    setCredential: (value: { peerName: string; token: string }) => void;
+    setPairingCode: (code: string) => void;
+    loadPeers: () => Promise<void>;
+}) {
+    const run = (action: () => Promise<void>) =>
+        withAddAction(props.setBusy, props.setError, action);
+    return (
+        <>
+            <AddPeerPanel
+                busy={props.busy}
+                onHost={(name, scopes) =>
+                    run(async () => {
+                        const result = await api.createFederationPeer({
+                            name,
+                            scopes,
+                        });
+                        props.setCredential({
+                            peerName: result.peer.name,
+                            token: result.token,
+                        });
+                        await props.loadPeers();
+                    })
+                }
+                onLink={(name, baseUrl, token) =>
+                    run(async () => {
+                        await api.linkFederationPeer({
+                            baseUrl,
+                            token,
+                            ...(name.trim() ? { name: name.trim() } : {}),
+                        });
+                        await props.loadPeers();
+                    })
+                }
+                onPair={(name, baseUrl, code) =>
+                    run(async () => {
+                        await api.pairFederationPeer({ name, baseUrl, code });
+                        await props.loadPeers();
+                    })
+                }
+            />
+            <PairingCodeControl
+                busy={props.busy}
+                pairingCode={props.pairingCode}
+                onCreate={() =>
+                    void run(async () => {
+                        const result =
+                            await api.createFederationPairingCode(
+                                DEFAULT_SCOPES,
+                            );
+                        props.setPairingCode(result.code);
+                    })
+                }
+            />
+        </>
+    );
+}
+
+function FederationDialogs(props: {
+    credential: { peerName: string; token: string } | null;
+    deletePeer: FederationPeer | null;
+    setCredential: (value: null) => void;
+    setDeletePeer: (value: FederationPeer | null) => void;
+    runPeerAction: RunPeerAction;
+}) {
+    return (
+        <>
+            {props.credential && (
+                <OneTimeCredentialDialog
+                    peerName={props.credential.peerName}
+                    token={props.credential.token}
+                    onClose={() => props.setCredential(null)}
+                />
+            )}
+            <ConfirmDialog
+                isOpen={props.deletePeer !== null}
+                onClose={() => props.setDeletePeer(null)}
+                onConfirm={() => {
+                    const peer = props.deletePeer;
+                    props.setDeletePeer(null);
+                    if (peer)
+                        void props.runPeerAction(peer, () =>
+                            api.deleteFederationPeer(peer.id),
+                        );
+                }}
+                title="Delete federation peer?"
+                message={`Delete ${props.deletePeer?.name ?? "this peer"} and all synced federation data?`}
+                confirmText="Delete"
+                variant="danger"
+            />
+        </>
+    );
+}
+
+function useFederationPeers(federation: boolean) {
     const [peers, setPeers] = useState<FederationPeer[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [busyPeerId, setBusyPeerId] = useState<string | null>(null);
-    const [addBusy, setAddBusy] = useState(false);
-    const [credential, setCredential] = useState<{
-        peerName: string;
-        token: string;
-    } | null>(null);
-    const [deletePeer, setDeletePeer] = useState<FederationPeer | null>(null);
-    const [pairingCode, setPairingCode] = useState<string | null>(null);
-
     const loadPeers = useCallback(async () => {
         if (!federation) return;
         setLoading(true);
@@ -505,15 +670,18 @@ export function FederationSection() {
             setLoading(false);
         }
     }, [federation]);
-
     useEffect(() => {
         void loadPeers();
     }, [loadPeers]);
+    return { peers, loading, error, setError, loadPeers };
+}
 
-    const runPeerAction = async (
-        peer: FederationPeer,
-        action: () => Promise<void>,
-    ) => {
+function usePeerAction(
+    loadPeers: () => Promise<void>,
+    setError: (error: string | null) => void,
+) {
+    const [busyPeerId, setBusyPeerId] = useState<string | null>(null);
+    const runPeerAction: RunPeerAction = async (peer, action) => {
         setBusyPeerId(peer.id);
         setError(null);
         try {
@@ -525,6 +693,70 @@ export function FederationSection() {
             setBusyPeerId(null);
         }
     };
+    return { busyPeerId, runPeerAction };
+}
+
+interface FederationSettingsContentProps {
+    error: string | null;
+    loading: boolean;
+    peers: FederationPeer[];
+    busyPeerId: string | null;
+    addBusy: boolean;
+    pairingCode: string | null;
+    runPeerAction: RunPeerAction;
+    setCredential: (value: { peerName: string; token: string }) => void;
+    setDeletePeer: (peer: FederationPeer) => void;
+    setAddBusy: (busy: boolean) => void;
+    setError: (error: string | null) => void;
+    setPairingCode: (code: string) => void;
+    loadPeers: () => Promise<void>;
+}
+
+function FederationSettingsContent(props: FederationSettingsContentProps) {
+    return (
+        <div className="space-y-4">
+            {props.error && (
+                <p
+                    role="alert"
+                    className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300"
+                >
+                    {props.error}
+                </p>
+            )}
+            <PeerManagementPanel
+                loading={props.loading}
+                peers={props.peers}
+                busyPeerId={props.busyPeerId}
+                runPeerAction={props.runPeerAction}
+                setCredential={props.setCredential}
+                setDeletePeer={props.setDeletePeer}
+            />
+            <FederationAddControls
+                busy={props.addBusy}
+                pairingCode={props.pairingCode}
+                setBusy={props.setAddBusy}
+                setError={props.setError}
+                setCredential={props.setCredential}
+                setPairingCode={props.setPairingCode}
+                loadPeers={props.loadPeers}
+            />
+        </div>
+    );
+}
+
+/** Admin settings surface for federation peer lifecycle management. */
+export function FederationSection() {
+    const { federation } = useFeatures();
+    const { peers, loading, error, setError, loadPeers } =
+        useFederationPeers(federation);
+    const { busyPeerId, runPeerAction } = usePeerAction(loadPeers, setError);
+    const [addBusy, setAddBusy] = useState(false);
+    const [credential, setCredential] = useState<{
+        peerName: string;
+        token: string;
+    } | null>(null);
+    const [deletePeer, setDeletePeer] = useState<FederationPeer | null>(null);
+    const [pairingCode, setPairingCode] = useState<string | null>(null);
 
     if (!federation) return null;
     return (
@@ -533,132 +765,27 @@ export function FederationSection() {
             title="Federation"
             description="Link trusted soundspan instances for read-only library browsing and streaming."
         >
-            <div className="space-y-4">
-                {error && (
-                    <p
-                        role="alert"
-                        className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300"
-                    >
-                        {error}
-                    </p>
-                )}
-                {loading ? (
-                    <div className="flex justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
-                    </div>
-                ) : (
-                    <FederationPeersList
-                        peers={peers}
-                        busyPeerId={busyPeerId}
-                        onSync={(peer) =>
-                            void runPeerAction(peer, async () => {
-                                await api.syncFederationPeer(peer.id);
-                            })
-                        }
-                        onRotate={(peer) =>
-                            void runPeerAction(peer, async () => {
-                                const result =
-                                    await api.rotateFederationPeerCredential(
-                                        peer.id,
-                                    );
-                                setCredential({
-                                    peerName: result.peer.name,
-                                    token: result.token,
-                                });
-                            })
-                        }
-                        onRevoke={(peer) =>
-                            void runPeerAction(peer, async () => {
-                                await api.revokeFederationPeer(peer.id);
-                            })
-                        }
-                        onDelete={setDeletePeer}
-                    />
-                )}
-                <AddPeerPanel
-                    busy={addBusy}
-                    onHost={async (name, scopes) =>
-                        withAddAction(setAddBusy, setError, async () => {
-                            const result = await api.createFederationPeer({
-                                name,
-                                scopes,
-                            });
-                            setCredential({
-                                peerName: result.peer.name,
-                                token: result.token,
-                            });
-                            await loadPeers();
-                        })
-                    }
-                    onLink={async (name, baseUrl, token) =>
-                        withAddAction(setAddBusy, setError, async () => {
-                            await api.linkFederationPeer({
-                                baseUrl,
-                                token,
-                                ...(name.trim() ? { name: name.trim() } : {}),
-                            });
-                            await loadPeers();
-                        })
-                    }
-                    onPair={async (name, baseUrl, code) =>
-                        withAddAction(setAddBusy, setError, async () => {
-                            await api.pairFederationPeer({
-                                name,
-                                baseUrl,
-                                code,
-                            });
-                            await loadPeers();
-                        })
-                    }
-                />
-                <button
-                    type="button"
-                    onClick={() =>
-                        void withAddAction(setAddBusy, setError, async () => {
-                            const result =
-                                await api.createFederationPairingCode(
-                                    DEFAULT_SCOPES,
-                                );
-                            setPairingCode(result.code);
-                        })
-                    }
-                    disabled={addBusy}
-                    className={secondaryButtonClassName}
-                >
-                    <LinkIcon className="h-3.5 w-3.5" />
-                    Create pairing code
-                </button>
-                {pairingCode && (
-                    <p className="text-sm text-gray-300">
-                        Pairing code:{" "}
-                        <code className="rounded bg-black/30 px-2 py-1 text-white">
-                            {pairingCode}
-                        </code>
-                    </p>
-                )}
-            </div>
-            {credential && (
-                <OneTimeCredentialDialog
-                    peerName={credential.peerName}
-                    token={credential.token}
-                    onClose={() => setCredential(null)}
-                />
-            )}
-            <ConfirmDialog
-                isOpen={deletePeer !== null}
-                onClose={() => setDeletePeer(null)}
-                onConfirm={() => {
-                    const peer = deletePeer;
-                    setDeletePeer(null);
-                    if (peer)
-                        void runPeerAction(peer, async () => {
-                            await api.deleteFederationPeer(peer.id);
-                        });
-                }}
-                title="Delete federation peer?"
-                message={`Delete ${deletePeer?.name ?? "this peer"} and all synced federation data?`}
-                confirmText="Delete"
-                variant="danger"
+            <FederationSettingsContent
+                error={error}
+                loading={loading}
+                peers={peers}
+                busyPeerId={busyPeerId}
+                addBusy={addBusy}
+                pairingCode={pairingCode}
+                runPeerAction={runPeerAction}
+                setCredential={setCredential}
+                setDeletePeer={setDeletePeer}
+                setAddBusy={setAddBusy}
+                setError={setError}
+                setPairingCode={setPairingCode}
+                loadPeers={loadPeers}
+            />
+            <FederationDialogs
+                credential={credential}
+                deletePeer={deletePeer}
+                setCredential={setCredential}
+                setDeletePeer={setDeletePeer}
+                runPeerAction={runPeerAction}
             />
         </SettingsSection>
     );

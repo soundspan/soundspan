@@ -3,7 +3,7 @@ import { sendRouteError } from "../routes/routeErrorResponse";
 import {
     parseFederationScopes,
     type FederationScope,
-} from "../services/federationPeers";
+} from "../utils/federationScopes";
 import { hashApiKey } from "../utils/apiKeyHash";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";

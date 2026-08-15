@@ -278,7 +278,14 @@ describe("search service", () => {
                                     { origin: "LOCAL" },
                                     {
                                         origin: "FEDERATED",
-                                        dedupOfTrackId: null,
+                                        OR: [
+                                            { dedupOfTrackId: null },
+                                            {
+                                                dedupOfTrack: {
+                                                    removedAt: { not: null },
+                                                },
+                                            },
+                                        ],
                                     },
                                 ],
                             },
@@ -938,7 +945,19 @@ describe("search service", () => {
                                                 { origin: "LOCAL" },
                                                 {
                                                     origin: "FEDERATED",
-                                                    dedupOfTrackId: null,
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
                                                 },
                                             ],
                                         },
@@ -980,7 +999,19 @@ describe("search service", () => {
                                                 { origin: "LOCAL" },
                                                 {
                                                     origin: "FEDERATED",
-                                                    dedupOfTrackId: null,
+                                                    OR: [
+                                                        {
+                                                            dedupOfTrackId:
+                                                                null,
+                                                        },
+                                                        {
+                                                            dedupOfTrack: {
+                                                                removedAt: {
+                                                                    not: null,
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
                                                 },
                                             ],
                                         },

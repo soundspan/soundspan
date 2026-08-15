@@ -241,6 +241,7 @@ model Artist {
   heroUrl             String?
   genres              Json?
   lastSynced          DateTime                 @default(now())
+  updatedAt           DateTime                 @default(now()) @updatedAt
   lastEnriched        DateTime?
   enrichmentStatus    String                   @default("pending")
   searchVector        Unsupported("tsvector")?
@@ -274,6 +275,7 @@ model Artist {
   @@index([discoveryAlbumCount])
   @@index([totalTrackCount])
   @@index([remoteTrackCount])
+  @@index([updatedAt, id])
 }
 
 model Album {
@@ -287,6 +289,7 @@ model Album {
   label            String?
   genres           Json?
   lastSynced       DateTime                 @default(now())
+  updatedAt        DateTime                 @default(now()) @updatedAt
   location         AlbumLocation            @default(LIBRARY)
   searchVector     Unsupported("tsvector")?
   displayTitle     String?
@@ -310,6 +313,7 @@ model Album {
   @@index([title])
   @@index([searchVector], type: Gin)
   @@index([hasUserOverrides])
+  @@index([updatedAt, id])
 }
 
 model Track {
