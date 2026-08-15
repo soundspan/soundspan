@@ -231,7 +231,7 @@ describe("plays routes integration", () => {
                             select: {
                                 id: true,
                                 name: true,
-                                status: true,
+                                outboundStatus: true,
                             },
                         },
                         album: {

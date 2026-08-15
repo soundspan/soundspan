@@ -449,7 +449,11 @@ router.get("/", async (req, res) => {
                 track: {
                     include: {
                         federationPeer: {
-                            select: { id: true, name: true, status: true },
+                            select: {
+                                id: true,
+                                name: true,
+                                outboundStatus: true,
+                            },
                         },
                         album: {
                             include: {

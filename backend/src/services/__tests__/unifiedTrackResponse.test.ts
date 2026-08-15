@@ -66,7 +66,7 @@ describe("unifiedTrackResponse", () => {
             federationPeer: {
                 id: "peer-1",
                 name: "Peer One",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
         });
 
@@ -263,7 +263,7 @@ describe("unifiedTrackResponse", () => {
                 federationPeer: {
                     id: "peer-1",
                     name: "Peer One",
-                    status: "OFFLINE",
+                    outboundStatus: "OFFLINE",
                 },
                 album: {
                     title: "Federated Album",

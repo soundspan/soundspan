@@ -86,6 +86,17 @@ describe("federation queue registration", () => {
         )?.[2];
         await tick({});
 
+        expect(prisma.federationPeer.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    direction: { in: ["CONSUMER", "BOTH"] },
+                    outboundStatus: { not: "REVOKED" },
+                    baseUrl: { not: null },
+                    outboundToken: { not: null },
+                },
+            }),
+        );
+
         expect(federationQueue.add).toHaveBeenCalledWith(
             FEDERATION_SYNC_JOB_NAME,
             { peerId: "peer-1" },

@@ -13,27 +13,31 @@ interface HealthCounts {
 
 async function markPeerActive(peer: {
     id: string;
-    status: string;
+    outboundStatus: string | null;
 }): Promise<void> {
     await prisma.federationPeer.updateMany({
-        where: { id: peer.id, status: { not: "REVOKED" } },
-        data: { status: "ACTIVE", lastSeenAt: new Date() },
+        where: { id: peer.id, outboundStatus: { not: "REVOKED" } },
+        data: { outboundStatus: "ACTIVE", lastSeenAt: new Date() },
     });
-    if (peer.status !== "ACTIVE") {
-        log.info(`peerId=${peer.id} status=ACTIVE previous=${peer.status}`);
+    if (peer.outboundStatus !== "ACTIVE") {
+        log.info(
+            `peerId=${peer.id} status=ACTIVE previous=${peer.outboundStatus}`,
+        );
     }
 }
 
 async function markPeerOffline(peer: {
     id: string;
-    status: string;
+    outboundStatus: string | null;
 }): Promise<void> {
     await prisma.federationPeer.updateMany({
-        where: { id: peer.id, status: { not: "REVOKED" } },
-        data: { status: "OFFLINE" },
+        where: { id: peer.id, outboundStatus: { not: "REVOKED" } },
+        data: { outboundStatus: "OFFLINE" },
     });
-    if (peer.status !== "OFFLINE") {
-        log.info(`peerId=${peer.id} status=OFFLINE previous=${peer.status}`);
+    if (peer.outboundStatus !== "OFFLINE") {
+        log.info(
+            `peerId=${peer.id} status=OFFLINE previous=${peer.outboundStatus}`,
+        );
     }
 }
 
@@ -42,7 +46,7 @@ export async function processFederationHealth(): Promise<HealthCounts> {
     const peers = await prisma.federationPeer.findMany({
         where: {
             direction: { in: ["CONSUMER", "BOTH"] },
-            status: { not: "REVOKED" },
+            outboundStatus: { not: "REVOKED" },
             baseUrl: { not: null },
             outboundToken: { not: null },
         },
@@ -52,7 +56,7 @@ export async function processFederationHealth(): Promise<HealthCounts> {
             id: true,
             baseUrl: true,
             outboundToken: true,
-            status: true,
+            outboundStatus: true,
         },
     });
     const counts: HealthCounts = { checked: 0, online: 0, offline: 0 };

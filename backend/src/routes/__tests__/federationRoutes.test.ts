@@ -10,7 +10,7 @@ const catalog = {
     findExportedFederationTrack: jest.fn(),
     decodeFederationDeltaCursor: jest.fn(),
 };
-const peers = { consumePairingCode: jest.fn() };
+const peers = { consumeFederationPairingRequest: jest.fn() };
 const streamFileWithRangeSupport = jest.fn();
 const getStreamFilePath = jest.fn();
 const destroy = jest.fn();
@@ -228,7 +228,7 @@ describe("federation host routes", () => {
     });
 
     it("consumes validated pairing input without peer authentication", async () => {
-        peers.consumePairingCode.mockResolvedValueOnce({
+        peers.consumeFederationPairingRequest.mockResolvedValueOnce({
             peer: { id: "peer-1" },
             token: "token-once",
         });
@@ -245,6 +245,37 @@ describe("federation host routes", () => {
             peer: { id: "peer-1" },
             token: "token-once",
         });
+        expect(peers.consumeFederationPairingRequest).toHaveBeenCalledWith({
+            code: "ABCDEFGH",
+            name: "Peer",
+            baseUrl: "https://peer.example",
+        });
+    });
+
+    it("accepts a bounded reciprocal pairing request", async () => {
+        peers.consumeFederationPairingRequest.mockResolvedValueOnce({
+            peer: { id: "peer-1", direction: "BOTH" },
+            token: "token-once",
+            reciprocalPeerId: "peer-2",
+        });
+
+        const response = await request(app)
+            .post("/api/federation/v1/pair")
+            .send({
+                code: "ABCDEFGH",
+                name: "Peer",
+                baseUrl: "https://peer.example",
+                reciprocalPairingCode: "HGFEDCBA",
+                reciprocalScopes: ["library:read", "stream:read"],
+            });
+
+        expect(response.status).toBe(201);
+        expect(peers.consumeFederationPairingRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                reciprocalPairingCode: "HGFEDCBA",
+                reciprocalScopes: ["library:read", "stream:read"],
+            }),
+        );
     });
 
     it("serves only exported covers and rejects URL overrides", async () => {

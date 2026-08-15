@@ -305,7 +305,7 @@ export async function handleGetCoverArt(
                             id: true,
                             baseUrl: true,
                             outboundToken: true,
-                            status: true,
+                            outboundStatus: true,
                         },
                     },
                     artist: { select: { name: true } },
@@ -376,7 +376,7 @@ export async function handleGetCoverArt(
                 if (
                     config.features.federation &&
                     album.remoteId &&
-                    album.federationPeer?.status === "ACTIVE" &&
+                    album.federationPeer?.outboundStatus === "ACTIVE" &&
                     album.federationPeer.baseUrl &&
                     album.federationPeer.outboundToken
                 ) {

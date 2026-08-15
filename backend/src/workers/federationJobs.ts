@@ -43,7 +43,9 @@ async function enqueueConsumerPeerSyncs(): Promise<void> {
     const peers = await prisma.federationPeer.findMany({
         where: {
             direction: { in: ["CONSUMER", "BOTH"] },
-            status: { not: "REVOKED" },
+            outboundStatus: { not: "REVOKED" },
+            baseUrl: { not: null },
+            outboundToken: { not: null },
         },
         orderBy: { id: "asc" },
         take: MAX_CONSUMER_PEERS,

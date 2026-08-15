@@ -116,7 +116,7 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 
 | Entity | Purpose | Key Fields |
 | --- | --- | --- |
-| `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, `status`, `lastSeenAt`, `lastSyncCursor`, `catalogEpoch`, `createdById` |
+| `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `lastSeenAt`, `lastSyncCursor`, `catalogEpoch`, `createdById` |
 | `FederationPairingCode` | Short-lived, single-use admin pairing grant | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById` |
 | `FederationTombstone` | Deleted host catalog identity retained for incremental peer deltas | `entityType`, `entityId`, indexed `deletedAt` |
 
@@ -124,6 +124,14 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 administrator cannot be deleted while the peer remains. Deleting a peer
 cascades to its mirrored artists, albums, and tracks. Pairing codes cascade
 with their creating user.
+
+`inboundStatus` controls credentials presented by the peer and is populated for
+`HOST` and `BOTH`. `outboundStatus` controls sync, health, playback, and online
+provenance for `CONSUMER` and `BOTH`. Revocation sets both fields to `REVOKED`.
+This separation ensures an outbound health failure cannot disable valid inbound
+authentication on a bidirectional row. During full sync, `lastSyncCursor` may
+contain a JSON full-phase page cursor; completed syncs store the delta
+high-water timestamp.
 
 Mirrored `Artist`, `Album`, and `Track` rows store a nullable `peerId` and the
 host's `remoteId`; each model has a unique `(peerId, remoteId)` pair. Local rows
@@ -300,7 +308,7 @@ Album loads → check TrackMapping for existing mappings
 | `AlbumLocation` | `LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED` | `Album.location` |
 | `TrackOrigin` | `LOCAL`, `FEDERATED` | `Track.origin` |
 | `PeerDirection` | `HOST`, `CONSUMER`, `BOTH` | `FederationPeer.direction` |
-| `PeerStatus` | `PENDING`, `ACTIVE`, `OFFLINE`, `REVOKED` | `FederationPeer.status` |
+| `PeerStatus` | `PENDING`, `ACTIVE`, `OFFLINE`, `REVOKED` | `FederationPeer.inboundStatus`, `FederationPeer.outboundStatus` |
 
 ## Migration Conventions
 

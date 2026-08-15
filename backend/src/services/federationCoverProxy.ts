@@ -31,7 +31,7 @@ export async function proxyFederatedCover(input: {
         id: string;
         baseUrl: string | null;
         outboundToken: string | null;
-        status: string;
+        outboundStatus: string | null;
     };
     remoteId: string;
 }): Promise<boolean> {

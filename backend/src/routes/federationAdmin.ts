@@ -4,6 +4,7 @@ import { requireAdmin, requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import {
     createFederationPairingCode,
+    createBothFederationPeer,
     createHostFederationPeer,
     deleteFederationPeer,
     FEDERATION_SCOPE_VALUES,
@@ -32,26 +33,42 @@ const scopesSchema = z
 const httpsUrlSchema = z
     .url()
     .refine((value) => new URL(value).protocol === "https:");
-const createPeerSchema = z.strictObject({
+const hostPeerSchema = z.strictObject({
     direction: z.literal("HOST").optional(),
     name: z.string().trim().min(1).max(120),
     scopes: scopesSchema,
     baseUrl: httpsUrlSchema.optional(),
 });
+const bothPeerSchema = z.strictObject({
+    direction: z.literal("BOTH"),
+    name: z.string().trim().min(1).max(120),
+    scopes: scopesSchema,
+    baseUrl: httpsUrlSchema,
+    token: z.string().trim().min(1).max(4_096),
+});
+const createPeerSchema = z.union([hostPeerSchema, bothPeerSchema]);
 const pairingCodeSchema = z.strictObject({
     scopes: scopesSchema.default(["library:read", "stream:read"]),
 });
 const peerParamsSchema = z.strictObject({
     id: z.string().trim().min(1).max(128),
 });
-const consumerLinkSchema = z.strictObject({
+const consumerOnlyLinkSchema = z.strictObject({
     direction: z.literal("CONSUMER").optional(),
     baseUrl: httpsUrlSchema,
     token: z.string().trim().min(1).max(4_096),
     name: z.string().trim().min(1).max(120).optional(),
 });
+const bothLinkSchema = z.strictObject({
+    direction: z.literal("BOTH"),
+    baseUrl: httpsUrlSchema,
+    token: z.string().trim().min(1).max(4_096),
+    name: z.string().trim().min(1).max(120).optional(),
+    scopes: scopesSchema,
+});
+const consumerLinkSchema = z.union([consumerOnlyLinkSchema, bothLinkSchema]);
 const consumerPairSchema = z.strictObject({
-    direction: z.literal("CONSUMER").optional(),
+    direction: z.enum(["CONSUMER", "BOTH"]).optional(),
     baseUrl: httpsUrlSchema,
     code: z
         .string()
@@ -59,22 +76,11 @@ const consumerPairSchema = z.strictObject({
         .toUpperCase()
         .regex(/^[A-HJ-NP-Z2-9]{8}$/),
     name: z.string().trim().min(1).max(120),
+    scopes: scopesSchema.default(["library:read", "stream:read"]),
 });
 
 function invalidRequest(res: Response): Response {
     return sendRouteError(res, 400, "Invalid federation peer request");
-}
-
-function directionError(res: Response, body: unknown): Response | null {
-    if (
-        body &&
-        typeof body === "object" &&
-        "direction" in body &&
-        (body as { direction?: unknown }).direction === "BOTH"
-    ) {
-        return sendRouteError(res, 400, "Peer direction BOTH is not supported");
-    }
-    return null;
 }
 
 router.use(requireAuth, requireAdmin);
@@ -82,7 +88,7 @@ router.use(requireAuth, requireAdmin);
 /** @openapi
  * /api/federation/admin/peers:
  *   get:
- *     summary: List federation peers without credential material
+ *     summary: List federation peers with independent inbound and outbound statuses
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
  *     responses:
@@ -100,7 +106,7 @@ router.get(
 /** @openapi
  * /api/federation/admin/peers:
  *   post:
- *     summary: Create a host-direction federation credential
+ *     summary: Create a host or bidirectional federation peer
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
  *     responses:
@@ -113,14 +119,23 @@ router.post(
     asyncHandler(async (req, res) => {
         const parsed = createPeerSchema.safeParse(req.body);
         if (!parsed.success || !req.user) {
-            return directionError(res, req.body) ?? invalidRequest(res);
+            return invalidRequest(res);
         }
-        const result = await createHostFederationPeer({
-            name: parsed.data.name,
-            scopes: parsed.data.scopes,
-            baseUrl: parsed.data.baseUrl,
-            createdById: req.user.id,
-        });
+        const result =
+            parsed.data.direction === "BOTH"
+                ? await createBothFederationPeer({
+                      name: parsed.data.name,
+                      scopes: parsed.data.scopes,
+                      baseUrl: parsed.data.baseUrl,
+                      outboundToken: parsed.data.token,
+                      createdById: req.user.id,
+                  })
+                : await createHostFederationPeer({
+                      name: parsed.data.name,
+                      scopes: parsed.data.scopes,
+                      baseUrl: parsed.data.baseUrl,
+                      createdById: req.user.id,
+                  });
         return res.status(201).json(result);
     }),
 );
@@ -128,7 +143,7 @@ router.post(
 /** @openapi
  * /api/federation/admin/peers/link:
  *   post:
- *     summary: Validate and link a consumer-direction federation peer
+ *     summary: Validate and link a consumer or bidirectional federation peer
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
  *     responses:
@@ -142,9 +157,19 @@ router.post(
     asyncHandler(async (req, res) => {
         const parsed = consumerLinkSchema.safeParse(req.body);
         if (!parsed.success || !req.user) {
-            return directionError(res, req.body) ?? invalidRequest(res);
+            return invalidRequest(res);
         }
         try {
+            if (parsed.data.direction === "BOTH") {
+                const result = await createBothFederationPeer({
+                    baseUrl: parsed.data.baseUrl,
+                    outboundToken: parsed.data.token,
+                    name: parsed.data.name,
+                    scopes: parsed.data.scopes,
+                    createdById: req.user.id,
+                });
+                return res.status(201).json(result);
+            }
             const peer = await linkConsumerFederationPeer({
                 ...parsed.data,
                 createdById: req.user.id,
@@ -169,7 +194,7 @@ router.post(
 /** @openapi
  * /api/federation/admin/peers/link/pair:
  *   post:
- *     summary: Pair and link a consumer-direction federation peer
+ *     summary: Pair and reciprocally link a federation peer
  *     tags: [Federation Admin]
  *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
  *     responses:
@@ -183,14 +208,14 @@ router.post(
     asyncHandler(async (req, res) => {
         const parsed = consumerPairSchema.safeParse(req.body);
         if (!parsed.success || !req.user) {
-            return directionError(res, req.body) ?? invalidRequest(res);
+            return invalidRequest(res);
         }
         try {
-            const peer = await pairAndLinkConsumerFederationPeer({
+            const result = await pairAndLinkConsumerFederationPeer({
                 ...parsed.data,
                 createdById: req.user.id,
             });
-            return res.status(201).json({ peer });
+            return res.status(201).json(result);
         } catch (_error: unknown) {
             return sendRouteError(res, 502, "Peer pairing failed", {
                 code: "FEDERATION_PAIR_FAILED",

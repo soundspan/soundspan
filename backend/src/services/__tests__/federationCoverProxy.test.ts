@@ -29,7 +29,7 @@ it("destroys a 404 upstream cover body", async () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
             remoteId: "album-1",
         }),

@@ -8,7 +8,10 @@ import {
     type FederationEnvelope,
     type FederationManifest,
 } from "../../services/federationClient";
-import { backfillAllArtistCounts } from "../../services/artistCountsService";
+import {
+    backfillAllArtistCounts,
+    updateArtistCountsInBatches,
+} from "../../services/artistCountsService";
 import { trackMappingService } from "../../services/trackMappingService";
 import { decodeFederationIdentity } from "../../utils/federationDedup";
 import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
@@ -19,6 +22,7 @@ import { clearTrackTranscodeCache } from "../../services/trackReplacement";
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
 const MAX_REMOTE_PAGES = 10_000;
+const MAX_PAGE_ITEMS = 500;
 const CLEANUP_BATCH_SIZE = 200;
 const MAX_CLEANUP_PAGES = 10_000;
 const MAX_SEEN_ITEMS = 2_000_000;
@@ -48,6 +52,7 @@ interface SyncContext {
     albumRgMbids: Map<string, string>;
     unavailableParents: Record<ParentMediaType, Set<string>>;
     warnedParents: Set<string>;
+    touchedArtistIds: Set<string>;
     skippedInvalid: number;
 }
 
@@ -67,6 +72,7 @@ function newSyncContext(peerId: string, scopes: string[]): SyncContext {
         albumRgMbids: new Map(),
         unavailableParents: { artist: new Set(), album: new Set() },
         warnedParents: new Set(),
+        touchedArtistIds: new Set(),
         skippedInvalid: 0,
     };
 }
@@ -108,16 +114,37 @@ function isMissingExportedParent(error: unknown): boolean {
     return error instanceof FederationHttpError && error.status === 404;
 }
 
-async function upsertArtist(
+type RemoteArtistRow = { id: string; remoteId: string; mbid: string };
+type RemoteAlbumRow = {
+    id: string;
+    remoteId: string;
+    rgMbid: string;
+    artistId: string;
+};
+type RemoteTrackRow = {
+    id: string;
+    remoteId: string;
+    audioHash: string | null;
+};
+
+interface PageState {
+    artists: Map<string, RemoteArtistRow>;
+    albums: Map<string, RemoteAlbumRow>;
+    tracks: Map<string, RemoteTrackRow>;
+    artistCollisionRemoteIds: Set<string>;
+    albumCollisionRemoteIds: Set<string>;
+    loadedArtistMbids: Set<string>;
+    loadedAlbumRgMbids: Set<string>;
+}
+
+async function hasArtistCollision(
     context: SyncContext,
+    state: PageState,
     item: ArtistEnvelope,
-): Promise<void> {
-    const existing = await prisma.artist.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
-        },
-        select: { id: true, mbid: true },
-    });
+): Promise<boolean> {
+    if (state.loadedArtistMbids.has(item.attributes.mbid)) {
+        return state.artistCollisionRemoteIds.has(item.id);
+    }
     const collision = await prisma.artist.findFirst({
         where: {
             mbid: item.attributes.mbid,
@@ -125,12 +152,22 @@ async function upsertArtist(
         },
         select: { id: true },
     });
+    return collision !== null;
+}
+
+async function upsertArtist(
+    context: SyncContext,
+    state: PageState,
+    item: ArtistEnvelope,
+): Promise<RemoteArtistRow> {
+    const existing = state.artists.get(item.id);
+    const collision = await hasArtistCollision(context, state, item);
     const mbid =
         existing?.mbid ??
         (collision
             ? placeholderIdentity(context.peerId, item.attributes.mbid)
             : item.attributes.mbid);
-    await prisma.artist.upsert({
+    const row = await prisma.artist.upsert({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
         },
@@ -147,30 +184,23 @@ async function upsertArtist(
             normalizedName: item.attributes.normalizedName,
             lastSynced: new Date(item.updatedAt),
         },
+        select: { id: true, remoteId: true, mbid: true },
     });
-}
-
-async function loadRemoteArtistId(
-    context: SyncContext,
-    remoteId: string,
-): Promise<string | null> {
-    const artist = await prisma.artist.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId },
-        },
-        select: { id: true },
-    });
-    return artist?.id ?? null;
+    const normalized = { ...row, remoteId: row.remoteId ?? item.id };
+    state.artists.set(item.id, normalized);
+    context.touchedArtistIds.add(row.id);
+    return normalized;
 }
 
 async function ensureRemoteArtistId(
     context: SyncContext,
+    state: PageState,
     client: ReturnType<typeof createFederationClient>,
     remoteId: string,
     remember: boolean,
 ): Promise<string | null> {
-    const existingId = await loadRemoteArtistId(context, remoteId);
-    if (existingId) return existingId;
+    const existing = state.artists.get(remoteId);
+    if (existing) return existing.id;
     if (context.unavailableParents.artist.has(remoteId)) {
         warnParentRecovery(context, "artist", remoteId, "skipping child");
         return null;
@@ -187,21 +217,45 @@ async function ensureRemoteArtistId(
     if (parent.mediaType !== "artist") {
         throw new Error("Federation host returned the wrong parent type");
     }
-    await upsertArtist(context, parent);
-    const importedId = await loadRemoteArtistId(context, remoteId);
-    if (!importedId) throw new Error("Federation artist parent import failed");
+    const imported = await upsertArtist(context, state, parent);
     if (remember) rememberSeen(context, parent);
-    return importedId;
+    return imported.id;
+}
+
+async function resolveAlbumRgMbid(
+    context: SyncContext,
+    state: PageState,
+    item: AlbumEnvelope,
+): Promise<string> {
+    const existing = state.albums.get(item.id);
+    if (existing) return existing.rgMbid;
+    if (state.loadedAlbumRgMbids.has(item.attributes.rgMbid)) {
+        return state.albumCollisionRemoteIds.has(item.id)
+            ? placeholderIdentity(context.peerId, item.attributes.rgMbid)
+            : item.attributes.rgMbid;
+    }
+    const collision = await prisma.album.findFirst({
+        where: {
+            rgMbid: item.attributes.rgMbid,
+            NOT: { peerId: context.peerId, remoteId: item.id },
+        },
+        select: { id: true },
+    });
+    return collision
+        ? placeholderIdentity(context.peerId, item.attributes.rgMbid)
+        : item.attributes.rgMbid;
 }
 
 async function upsertAlbum(
     context: SyncContext,
+    state: PageState,
     item: AlbumEnvelope,
     client: ReturnType<typeof createFederationClient>,
     remember: boolean,
 ): Promise<boolean> {
     const artistId = await ensureRemoteArtistId(
         context,
+        state,
         client,
         item.parentRef,
         remember,
@@ -210,25 +264,8 @@ async function upsertAlbum(
         context.unavailableParents.album.add(item.id);
         return false;
     }
-    const existing = await prisma.album.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
-        },
-        select: { id: true, rgMbid: true },
-    });
-    const collision = await prisma.album.findFirst({
-        where: {
-            rgMbid: item.attributes.rgMbid,
-            NOT: { peerId: context.peerId, remoteId: item.id },
-        },
-        select: { id: true },
-    });
-    const rgMbid =
-        existing?.rgMbid ??
-        (collision
-            ? placeholderIdentity(context.peerId, item.attributes.rgMbid)
-            : item.attributes.rgMbid);
-    await prisma.album.upsert({
+    const rgMbid = await resolveAlbumRgMbid(context, state, item);
+    const row = await prisma.album.upsert({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
         },
@@ -250,38 +287,30 @@ async function upsertAlbum(
             primaryType: item.attributes.primaryType,
             lastSynced: new Date(item.updatedAt),
         },
+        select: { id: true, remoteId: true, rgMbid: true, artistId: true },
     });
+    state.albums.set(item.id, { ...row, remoteId: row.remoteId ?? item.id });
     context.albumRgMbids.set(item.id, item.attributes.rgMbid);
+    context.touchedArtistIds.add(artistId);
     return true;
-}
-
-async function loadRemoteAlbum(
-    context: SyncContext,
-    remoteId: string,
-): Promise<{ id: string; rgMbid: string } | null> {
-    const album = await prisma.album.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId },
-        },
-        select: { id: true, rgMbid: true },
-    });
-    if (!album) return null;
-    return {
-        id: album.id,
-        rgMbid:
-            context.albumRgMbids.get(remoteId) ??
-            decodeFederationIdentity(album.rgMbid),
-    };
 }
 
 async function ensureRemoteAlbum(
     context: SyncContext,
+    state: PageState,
     client: ReturnType<typeof createFederationClient>,
     remoteId: string,
     remember: boolean,
-): Promise<{ id: string; rgMbid: string } | null> {
-    const existing = await loadRemoteAlbum(context, remoteId);
-    if (existing) return existing;
+): Promise<RemoteAlbumRow | null> {
+    const existing = state.albums.get(remoteId);
+    if (existing) {
+        return {
+            ...existing,
+            rgMbid:
+                context.albumRgMbids.get(remoteId) ??
+                decodeFederationIdentity(existing.rgMbid),
+        };
+    }
     if (context.unavailableParents.album.has(remoteId)) {
         warnParentRecovery(context, "album", remoteId, "skipping child");
         return null;
@@ -298,53 +327,176 @@ async function ensureRemoteAlbum(
     if (parent.mediaType !== "album") {
         throw new Error("Federation host returned the wrong parent type");
     }
-    const applied = await upsertAlbum(context, parent, client, remember);
+    const applied = await upsertAlbum(context, state, parent, client, remember);
     if (!applied) return null;
-    const imported = await loadRemoteAlbum(context, remoteId);
+    const imported = state.albums.get(remoteId);
     if (!imported) throw new Error("Federation album parent import failed");
     if (remember) rememberSeen(context, parent);
-    return imported;
+    return {
+        ...imported,
+        rgMbid:
+            context.albumRgMbids.get(remoteId) ??
+            decodeFederationIdentity(imported.rgMbid),
+    };
 }
 
-async function findLocalDedupMatch(
+type DedupMatch = { id: string; confidence: number };
+
+interface DedupIndex {
+    audioHash: Map<string, string>;
+    recordingMbid: Map<string, string>;
+    isrc: Map<string, string>;
+    position: Map<string, string>;
+}
+
+function uniqueValues(values: Array<string | null>): string[] {
+    return [
+        ...new Set(values.filter((value): value is string => Boolean(value))),
+    ];
+}
+
+function setFirst(map: Map<string, string>, key: string, id: string): void {
+    if (!map.has(key)) map.set(key, id);
+}
+
+function positionKey(rgMbid: string, discNo: number, trackNo: number): string {
+    return JSON.stringify([rgMbid, discNo, trackNo]);
+}
+
+const LOCAL_DEDUP_WHERE = { origin: "LOCAL" as const, removedAt: null };
+
+async function loadAudioDedupMatches(
+    tracks: readonly TrackEnvelope[],
+    target: Map<string, string>,
+): Promise<void> {
+    const values = uniqueValues(
+        tracks.map((item) => item.attributes.audioHash),
+    );
+    if (values.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: { ...LOCAL_DEDUP_WHERE, audioHash: { in: values } },
+        orderBy: { id: "asc" },
+        select: { id: true, audioHash: true },
+    });
+    for (const row of rows) {
+        if (row.audioHash) setFirst(target, row.audioHash, row.id);
+    }
+}
+
+async function loadRecordingDedupMatches(
+    tracks: readonly TrackEnvelope[],
+    target: Map<string, string>,
+): Promise<void> {
+    const values = uniqueValues(
+        tracks.map((item) => item.attributes.recordingMbid),
+    );
+    if (values.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: { ...LOCAL_DEDUP_WHERE, recordingMbid: { in: values } },
+        orderBy: { id: "asc" },
+        select: { id: true, recordingMbid: true },
+    });
+    for (const row of rows) {
+        if (row.recordingMbid) setFirst(target, row.recordingMbid, row.id);
+    }
+}
+
+async function loadIsrcDedupMatches(
+    tracks: readonly TrackEnvelope[],
+    target: Map<string, string>,
+): Promise<void> {
+    const values = uniqueValues(tracks.map((item) => item.attributes.isrc));
+    if (values.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: { ...LOCAL_DEDUP_WHERE, isrc: { in: values } },
+        orderBy: { id: "asc" },
+        select: { id: true, isrc: true },
+    });
+    for (const row of rows) {
+        if (row.isrc) setFirst(target, row.isrc, row.id);
+    }
+}
+
+async function loadPositionDedupMatches(
+    tracks: readonly TrackEnvelope[],
+    albums: ReadonlyMap<string, RemoteAlbumRow>,
+    target: Map<string, string>,
+): Promise<void> {
+    const positional = tracks.flatMap((item) => {
+        const album = albums.get(item.parentRef);
+        return album
+            ? [
+                  {
+                      discNo: item.attributes.discNo,
+                      trackNo: item.attributes.trackNo,
+                      album: {
+                          rgMbid: album.rgMbid,
+                          location: "LIBRARY" as const,
+                      },
+                  },
+              ]
+            : [];
+    });
+    if (positional.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: { ...LOCAL_DEDUP_WHERE, OR: positional },
+        orderBy: { id: "asc" },
+        select: {
+            id: true,
+            discNo: true,
+            trackNo: true,
+            album: { select: { rgMbid: true } },
+        },
+    });
+    for (const row of rows) {
+        const key = positionKey(row.album.rgMbid, row.discNo, row.trackNo);
+        setFirst(target, key, row.id);
+    }
+}
+
+async function loadDedupIndex(
+    tracks: readonly TrackEnvelope[],
+    albums: ReadonlyMap<string, RemoteAlbumRow>,
+): Promise<DedupIndex> {
+    const index: DedupIndex = {
+        audioHash: new Map(),
+        recordingMbid: new Map(),
+        isrc: new Map(),
+        position: new Map(),
+    };
+    await loadAudioDedupMatches(tracks, index.audioHash);
+    await loadRecordingDedupMatches(tracks, index.recordingMbid);
+    await loadIsrcDedupMatches(tracks, index.isrc);
+    await loadPositionDedupMatches(tracks, albums, index.position);
+    return index;
+}
+
+function findDedupMatch(
+    index: DedupIndex,
     item: TrackEnvelope,
     albumRgMbid: string,
-): Promise<{ id: string; confidence: number } | null> {
-    const base = { origin: "LOCAL" as const, removedAt: null };
-    const keys = [
-        ["audioHash", item.attributes.audioHash, 1],
-        ["recordingMbid", item.attributes.recordingMbid, 0.95],
-        ["isrc", item.attributes.isrc, 0.9],
-    ] as const;
-    for (let index = 0; index < keys.length; index += 1) {
-        const [field, value, confidence] = keys[index];
-        if (!value) continue;
-        const match = await prisma.track.findFirst({
-            where: { ...base, [field]: value },
-            orderBy: { id: "asc" },
-            select: { id: true },
-        });
-        if (match) return { id: match.id, confidence };
-    }
-    const positional = await prisma.track.findFirst({
-        where: {
-            ...base,
-            discNo: item.attributes.discNo,
-            trackNo: item.attributes.trackNo,
-            album: { rgMbid: albumRgMbid, location: "LIBRARY" },
-        },
-        orderBy: { id: "asc" },
-        select: { id: true },
-    });
-    return positional ? { id: positional.id, confidence: 0.8 } : null;
+): DedupMatch | null {
+    const attributes = item.attributes;
+    const audio = attributes.audioHash
+        ? index.audioHash.get(attributes.audioHash)
+        : undefined;
+    if (audio) return { id: audio, confidence: 1 };
+    const recording = attributes.recordingMbid
+        ? index.recordingMbid.get(attributes.recordingMbid)
+        : undefined;
+    if (recording) return { id: recording, confidence: 0.95 };
+    const isrc = attributes.isrc ? index.isrc.get(attributes.isrc) : undefined;
+    if (isrc) return { id: isrc, confidence: 0.9 };
+    const positional = index.position.get(
+        positionKey(albumRgMbid, attributes.discNo, attributes.trackNo),
+    );
+    return positional ? { id: positional, confidence: 0.8 } : null;
 }
 
 async function applyTrackDedup(
     trackId: string,
-    item: TrackEnvelope,
-    albumRgMbid: string,
+    match: DedupMatch | null,
 ): Promise<void> {
-    const match = await findLocalDedupMatch(item, albumRgMbid);
     await prisma.track.update({
         where: { id: trackId },
         data: { dedupOfTrackId: match?.id ?? null },
@@ -359,16 +511,12 @@ async function applyTrackDedup(
 
 async function rebindFederatedTrack(
     context: SyncContext,
+    state: PageState,
     item: TrackEnvelope,
     albumId: string,
-): Promise<void> {
-    const current = await prisma.track.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
-        },
-        select: { id: true },
-    });
-    if (current) return;
+): Promise<RemoteTrackRow | null> {
+    const current = state.tracks.get(item.id);
+    if (current) return current;
     const attributes = item.attributes;
     const identity = [
         ...(attributes.audioHash ? [{ audioHash: attributes.audioHash }] : []),
@@ -390,13 +538,20 @@ async function rebindFederatedTrack(
             OR: identity,
         },
         orderBy: { id: "asc" },
-        select: { id: true },
+        select: { id: true, audioHash: true },
     });
-    if (!prior) return;
+    if (!prior) return null;
     await prisma.track.update({
         where: { id: prior.id },
         data: { remoteId: item.id },
     });
+    const rebound = {
+        id: prior.id,
+        remoteId: item.id,
+        audioHash: prior.audioHash,
+    };
+    state.tracks.set(item.id, rebound);
+    return rebound;
 }
 
 function syncedAudioFeatures(attributes: TrackEnvelope["attributes"]) {
@@ -453,24 +608,11 @@ function syncedTrackValues(item: TrackEnvelope, albumId: string) {
 async function upsertTrack(
     context: SyncContext,
     item: TrackEnvelope,
-    client: ReturnType<typeof createFederationClient>,
-    remember: boolean,
+    album: RemoteAlbumRow,
+    existing: RemoteTrackRow | null,
+    match: DedupMatch | null,
 ): Promise<boolean> {
-    const album = await ensureRemoteAlbum(
-        context,
-        client,
-        item.parentRef,
-        remember,
-    );
-    if (!album) return false;
     const attributes = item.attributes;
-    await rebindFederatedTrack(context, item, album.id);
-    const existing = await prisma.track.findUnique({
-        where: {
-            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
-        },
-        select: { id: true, audioHash: true },
-    });
     const hashChanged =
         attributes.audioHash !== undefined &&
         existing !== null &&
@@ -489,31 +631,261 @@ async function upsertTrack(
         select: { id: true },
     });
     if (hashChanged) await clearTrackTranscodeCache(row.id);
-    await applyTrackDedup(row.id, item, album.rgMbid);
+    await applyTrackDedup(row.id, match);
     if (attributes.embedding && context.scopes.includes("embeddings:read")) {
         await upsertTrackEmbedding(row.id, attributes.embedding);
     }
+    context.touchedArtistIds.add(album.artistId);
     return true;
 }
 
-async function applyEnvelope(
+interface GroupedPage {
+    artists: ArtistEnvelope[];
+    albums: AlbumEnvelope[];
+    tracks: TrackEnvelope[];
+}
+
+function groupPage(items: readonly FederationEnvelope[]): GroupedPage {
+    const grouped: GroupedPage = { artists: [], albums: [], tracks: [] };
+    for (let index = 0; index < MAX_PAGE_ITEMS; index += 1) {
+        const item = items[index];
+        if (!item) break;
+        if (item.mediaType === "artist") grouped.artists.push(item);
+        else if (item.mediaType === "album") grouped.albums.push(item);
+        else grouped.tracks.push(item);
+    }
+    return grouped;
+}
+
+function newPageState(): PageState {
+    return {
+        artists: new Map(),
+        albums: new Map(),
+        tracks: new Map(),
+        artistCollisionRemoteIds: new Set(),
+        albumCollisionRemoteIds: new Set(),
+        loadedArtistMbids: new Set(),
+        loadedAlbumRgMbids: new Set(),
+    };
+}
+
+async function loadArtistPageState(
     context: SyncContext,
-    client: ReturnType<typeof createFederationClient>,
+    grouped: GroupedPage,
+    state: PageState,
+): Promise<void> {
+    const remoteIds = uniqueValues([
+        ...grouped.artists.map((item) => item.id),
+        ...grouped.albums.map((item) => item.parentRef),
+    ]);
+    const mbids = uniqueValues(
+        grouped.artists.map((item) => item.attributes.mbid),
+    );
+    for (const mbid of mbids) state.loadedArtistMbids.add(mbid);
+    if (remoteIds.length === 0 && mbids.length === 0) return;
+    const rows = await prisma.artist.findMany({
+        where: {
+            OR: [
+                { peerId: context.peerId, remoteId: { in: remoteIds } },
+                { mbid: { in: mbids } },
+            ],
+        },
+        select: { id: true, peerId: true, remoteId: true, mbid: true },
+    });
+    for (const row of rows) {
+        if (row.peerId === context.peerId && row.remoteId) {
+            state.artists.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        }
+    }
+    for (const item of grouped.artists) {
+        const duplicateInPage = grouped.artists.some(
+            (candidate) =>
+                candidate.id < item.id &&
+                candidate.attributes.mbid === item.attributes.mbid,
+        );
+        const collision = rows.some(
+            (row) =>
+                row.mbid === item.attributes.mbid &&
+                (row.peerId !== context.peerId || row.remoteId !== item.id),
+        );
+        if (collision || duplicateInPage) {
+            state.artistCollisionRemoteIds.add(item.id);
+        }
+    }
+}
+
+async function loadAlbumPageState(
+    context: SyncContext,
+    grouped: GroupedPage,
+    state: PageState,
+): Promise<void> {
+    const remoteIds = uniqueValues([
+        ...grouped.albums.map((item) => item.id),
+        ...grouped.tracks.map((item) => item.parentRef),
+    ]);
+    const rgMbids = uniqueValues(
+        grouped.albums.map((item) => item.attributes.rgMbid),
+    );
+    for (const rgMbid of rgMbids) state.loadedAlbumRgMbids.add(rgMbid);
+    if (remoteIds.length === 0 && rgMbids.length === 0) return;
+    const rows = await prisma.album.findMany({
+        where: {
+            OR: [
+                { peerId: context.peerId, remoteId: { in: remoteIds } },
+                { rgMbid: { in: rgMbids } },
+            ],
+        },
+        select: {
+            id: true,
+            peerId: true,
+            remoteId: true,
+            rgMbid: true,
+            artistId: true,
+        },
+    });
+    for (const row of rows) {
+        if (row.peerId === context.peerId && row.remoteId) {
+            state.albums.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        }
+    }
+    for (const item of grouped.albums) {
+        const duplicateInPage = grouped.albums.some(
+            (candidate) =>
+                candidate.id < item.id &&
+                candidate.attributes.rgMbid === item.attributes.rgMbid,
+        );
+        const collision = rows.some(
+            (row) =>
+                row.rgMbid === item.attributes.rgMbid &&
+                (row.peerId !== context.peerId || row.remoteId !== item.id),
+        );
+        if (collision || duplicateInPage) {
+            state.albumCollisionRemoteIds.add(item.id);
+        }
+    }
+}
+
+async function loadTrackPageState(
+    context: SyncContext,
+    grouped: GroupedPage,
+    state: PageState,
+): Promise<void> {
+    const remoteIds = grouped.tracks.map((item) => item.id);
+    if (remoteIds.length === 0) return;
+    const rows = await prisma.track.findMany({
+        where: { peerId: context.peerId, remoteId: { in: remoteIds } },
+        select: { id: true, remoteId: true, audioHash: true },
+    });
+    for (const row of rows) {
+        if (row.remoteId) {
+            state.tracks.set(row.remoteId, { ...row, remoteId: row.remoteId });
+        }
+    }
+}
+
+async function loadPageState(
+    context: SyncContext,
+    grouped: GroupedPage,
+): Promise<PageState> {
+    const state = newPageState();
+    await Promise.all([
+        loadArtistPageState(context, grouped, state),
+        loadAlbumPageState(context, grouped, state),
+        loadTrackPageState(context, grouped, state),
+    ]);
+    return state;
+}
+
+function recordApplied(
+    context: SyncContext,
     item: FederationEnvelope,
     remember: boolean,
-): Promise<void> {
-    if (item.mediaType === "artist") await upsertArtist(context, item);
-    else if (item.mediaType === "album") {
-        if (!(await upsertAlbum(context, item, client, remember))) {
-            context.skippedInvalid += 1;
-            return;
-        }
-    } else if (!(await upsertTrack(context, item, client, remember))) {
-        context.skippedInvalid += 1;
-        return;
-    }
+): void {
     if (remember) rememberSeen(context, item);
     incrementCount(context, item.mediaType);
+}
+
+async function applyArtists(
+    context: SyncContext,
+    state: PageState,
+    items: readonly ArtistEnvelope[],
+    remember: boolean,
+): Promise<void> {
+    for (const item of items) {
+        await upsertArtist(context, state, item);
+        recordApplied(context, item, remember);
+    }
+}
+
+async function applyAlbums(
+    context: SyncContext,
+    state: PageState,
+    client: ReturnType<typeof createFederationClient>,
+    items: readonly AlbumEnvelope[],
+    remember: boolean,
+): Promise<void> {
+    for (const item of items) {
+        if (!(await upsertAlbum(context, state, item, client, remember))) {
+            context.skippedInvalid += 1;
+            continue;
+        }
+        recordApplied(context, item, remember);
+    }
+}
+
+async function resolveTrackAlbums(
+    context: SyncContext,
+    state: PageState,
+    client: ReturnType<typeof createFederationClient>,
+    items: readonly TrackEnvelope[],
+    remember: boolean,
+): Promise<Map<string, RemoteAlbumRow>> {
+    const resolved = new Map<string, RemoteAlbumRow>();
+    for (const item of items) {
+        const album = await ensureRemoteAlbum(
+            context,
+            state,
+            client,
+            item.parentRef,
+            remember,
+        );
+        if (album) resolved.set(item.id, album);
+        else context.skippedInvalid += 1;
+    }
+    return resolved;
+}
+
+async function applyTracks(
+    context: SyncContext,
+    state: PageState,
+    items: readonly TrackEnvelope[],
+    resolvedAlbums: ReadonlyMap<string, RemoteAlbumRow>,
+    remember: boolean,
+): Promise<void> {
+    const albums = new Map(state.albums);
+    for (const item of items) {
+        const album = resolvedAlbums.get(item.id);
+        if (album) albums.set(item.parentRef, album);
+    }
+    const dedup = await loadDedupIndex(items, albums);
+    for (const item of items) {
+        const album = resolvedAlbums.get(item.id);
+        if (!album) continue;
+        const existing = await rebindFederatedTrack(
+            context,
+            state,
+            item,
+            album.id,
+        );
+        await upsertTrack(
+            context,
+            item,
+            album,
+            existing,
+            findDedupMatch(dedup, item, album.rgMbid),
+        );
+        recordApplied(context, item, remember);
+    }
 }
 
 async function applyOrderedChanges(
@@ -522,28 +894,83 @@ async function applyOrderedChanges(
     items: readonly FederationEnvelope[],
     remember: boolean,
 ): Promise<void> {
-    const order: readonly MediaType[] = ["artist", "album", "track"];
-    for (let typeIndex = 0; typeIndex < order.length; typeIndex += 1) {
-        const type = order[typeIndex];
-        for (let index = 0; index < items.length; index += 1) {
-            const item = items[index];
-            if (item.mediaType === type) {
-                await applyEnvelope(context, client, item, remember);
-            }
-        }
+    const grouped = groupPage(items);
+    const state = await loadPageState(context, grouped);
+    await applyArtists(context, state, grouped.artists, remember);
+    await applyAlbums(context, state, client, grouped.albums, remember);
+    const resolvedAlbums = await resolveTrackAlbums(
+        context,
+        state,
+        client,
+        grouped.tracks,
+        remember,
+    );
+    const validTracks = grouped.tracks.filter((item) =>
+        resolvedAlbums.has(item.id),
+    );
+    await applyTracks(context, state, validTracks, resolvedAlbums, remember);
+}
+
+const fullProgressSchema = z.strictObject({
+    phase: z.literal("full"),
+    mediaType: z.enum(["artist", "album", "track", "cleanup"]),
+    cursor: z.string().min(1).max(512).nullable(),
+    serverTime: z.iso.datetime({ offset: true }),
+    epoch: z.string().min(1).max(128),
+});
+type FullProgress = z.infer<typeof fullProgressSchema>;
+type FullMediaType = FullProgress["mediaType"];
+const FULL_TYPES: readonly MediaType[] = ["artist", "album", "track"];
+
+function parseFullProgress(value: string | null): FullProgress | null {
+    if (!value?.startsWith("{")) return null;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        const result = fullProgressSchema.safeParse(parsed);
+        return result.success ? result.data : null;
+    } catch (_error: unknown) {
+        return null;
     }
+}
+
+async function saveFullProgress(
+    context: SyncContext,
+    progress: FullProgress,
+): Promise<void> {
+    await prisma.federationPeer.update({
+        where: { id: context.peerId },
+        data: {
+            lastSyncCursor: JSON.stringify(progress),
+            catalogEpoch: progress.epoch,
+        },
+    });
+}
+
+function nextFullType(mediaType: MediaType): FullMediaType {
+    if (mediaType === "artist") return "album";
+    if (mediaType === "album") return "track";
+    return "cleanup";
 }
 
 async function syncFullType(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
-    mediaType: MediaType,
+    progress: FullProgress,
 ): Promise<void> {
-    let cursor: string | undefined;
+    if (progress.mediaType === "cleanup") return;
+    let cursor = progress.cursor ?? undefined;
     for (let page = 0; page < MAX_REMOTE_PAGES; page += 1) {
-        const result = await client.getCatalogItems(mediaType, cursor);
+        const result = await client.getCatalogItems(progress.mediaType, cursor);
         context.skippedInvalid += result.skippedInvalid ?? 0;
         await applyOrderedChanges(context, client, result.items, true);
+        const next: FullProgress = {
+            ...progress,
+            mediaType: result.nextCursor
+                ? progress.mediaType
+                : nextFullType(progress.mediaType),
+            cursor: result.nextCursor,
+        };
+        await saveFullProgress(context, next);
         if (!result.nextCursor) return;
         cursor = result.nextCursor;
     }
@@ -608,6 +1035,27 @@ async function cleanupFullSync(context: SyncContext): Promise<void> {
     );
 }
 
+async function collectFreshHostIds(
+    context: SyncContext,
+    client: ReturnType<typeof createFederationClient>,
+): Promise<void> {
+    for (const mediaType of FULL_TYPES) {
+        context.seen[mediaType].clear();
+        let cursor: string | undefined;
+        for (let page = 0; page < MAX_REMOTE_PAGES; page += 1) {
+            const result = await client.getCatalogItems(mediaType, cursor);
+            for (const item of result.items) rememberSeen(context, item);
+            if (!result.nextCursor) break;
+            cursor = result.nextCursor;
+            if (page + 1 === MAX_REMOTE_PAGES) {
+                throw new Error(
+                    "Federation cleanup scan exceeded the page bound",
+                );
+            }
+        }
+    }
+}
+
 async function applyTombstones(
     context: SyncContext,
     tombstones: readonly { entityType: MediaType; entityId: string }[],
@@ -620,11 +1068,23 @@ async function applyTombstones(
     const albumIds = idsFor("album");
     const artistIds = idsFor("artist");
     if (trackIds.length > 0) {
+        const rows = await prisma.track.findMany({
+            where: { peerId: context.peerId, remoteId: { in: trackIds } },
+            select: { album: { select: { artistId: true } } },
+        });
+        for (const row of rows) {
+            context.touchedArtistIds.add(row.album.artistId);
+        }
         await prisma.track.deleteMany({
             where: { peerId: context.peerId, remoteId: { in: trackIds } },
         });
     }
     if (albumIds.length > 0) {
+        const rows = await prisma.album.findMany({
+            where: { peerId: context.peerId, remoteId: { in: albumIds } },
+            select: { artistId: true },
+        });
+        for (const row of rows) context.touchedArtistIds.add(row.artistId);
         await prisma.album.deleteMany({
             where: { peerId: context.peerId, remoteId: { in: albumIds } },
         });
@@ -648,14 +1108,17 @@ async function finishSync(
         context.counts.albums +
         context.counts.tracks +
         context.counts.tombstones;
-    if (changed > 0) await backfillAllArtistCounts();
+    if (changed > 0 && mode === "full") await backfillAllArtistCounts();
+    if (changed > 0 && mode === "incremental") {
+        await updateArtistCountsInBatches([...context.touchedArtistIds].sort());
+    }
     await prisma.federationPeer.update({
         where: { id: context.peerId },
         data: {
             lastSyncCursor: cursor,
             catalogEpoch,
             lastSeenAt: new Date(),
-            status: "ACTIVE",
+            outboundStatus: "ACTIVE",
         },
     });
     log.info(
@@ -682,20 +1145,37 @@ function fullSyncCursor(manifest: FederationManifest, fallback: Date): string {
 async function runFullSync(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
+    progress: FullProgress,
+    resumed: boolean,
+): Promise<FederationSyncResult> {
+    const startIndex =
+        progress.mediaType === "cleanup"
+            ? FULL_TYPES.length
+            : FULL_TYPES.indexOf(progress.mediaType);
+    for (let index = 0; index < FULL_TYPES.length; index += 1) {
+        if (index < startIndex) continue;
+        await syncFullType(context, client, {
+            ...progress,
+            mediaType: FULL_TYPES[index],
+            cursor: index === startIndex ? progress.cursor : null,
+        });
+    }
+    if (resumed) await collectFreshHostIds(context, client);
+    await cleanupFullSync(context);
+    return finishSync(context, "full", progress.serverTime, progress.epoch);
+}
+
+function newFullProgress(
     manifest: FederationManifest,
     startedAt: Date,
-): Promise<FederationSyncResult> {
-    const types: readonly MediaType[] = ["artist", "album", "track"];
-    for (let index = 0; index < types.length; index += 1) {
-        await syncFullType(context, client, types[index]);
-    }
-    await cleanupFullSync(context);
-    return finishSync(
-        context,
-        "full",
-        fullSyncCursor(manifest, startedAt),
-        manifest.catalogEpoch,
-    );
+): FullProgress {
+    return {
+        phase: "full",
+        mediaType: "artist",
+        cursor: null,
+        serverTime: fullSyncCursor(manifest, startedAt),
+        epoch: manifest.catalogEpoch,
+    };
 }
 
 async function runIncrementalSync(
@@ -734,33 +1214,52 @@ async function runIncrementalSync(
     throw new Error("Federation delta sync exceeded the page bound");
 }
 
-/** Runs one serialized, resumable full or incremental consumer-peer sync. */
-export async function processFederationSync(
-    job: Job<{ peerId: string }>,
-): Promise<FederationSyncResult> {
-    const data = jobDataSchema.parse(job.data);
+async function getAvailableConsumerPeer(peerId: string) {
     const peer = await prisma.federationPeer.findUnique({
-        where: { id: data.peerId },
+        where: { id: peerId },
     });
     if (
         !peer ||
         !["CONSUMER", "BOTH"].includes(peer.direction) ||
-        peer.status === "REVOKED" ||
+        peer.outboundStatus === "REVOKED" ||
         !peer.baseUrl ||
         !peer.outboundToken
     ) {
         throw new Error("Federation consumer peer is unavailable");
     }
+    return peer;
+}
+
+/** Runs one serialized, resumable full or incremental consumer-peer sync. */
+export async function processFederationSync(
+    job: Job<{ peerId: string }>,
+): Promise<FederationSyncResult> {
+    const data = jobDataSchema.parse(job.data);
+    const peer = await getAvailableConsumerPeer(data.peerId);
     const startedAt = new Date();
     const client = createFederationClient(peer);
     const manifest = await client.getManifest();
     const context = newSyncContext(peer.id, peer.scopes);
+    const fullProgress = parseFullProgress(peer.lastSyncCursor);
+    if (
+        fullProgress &&
+        fullProgress.epoch === manifest.catalogEpoch &&
+        peer.catalogEpoch === fullProgress.epoch
+    ) {
+        return runFullSync(context, client, fullProgress, true);
+    }
     if (
         !peer.lastSyncCursor ||
         !peer.catalogEpoch ||
-        peer.catalogEpoch !== manifest.catalogEpoch
+        peer.catalogEpoch !== manifest.catalogEpoch ||
+        fullProgress
     ) {
-        return runFullSync(context, client, manifest, startedAt);
+        return runFullSync(
+            context,
+            client,
+            newFullProgress(manifest, startedAt),
+            false,
+        );
     }
     try {
         return await runIncrementalSync(
@@ -781,6 +1280,11 @@ export async function processFederationSync(
             data: { lastSyncCursor: null, catalogEpoch: error.currentEpoch },
         });
         const refreshedManifest = await client.getManifest();
-        return runFullSync(context, client, refreshedManifest, startedAt);
+        return runFullSync(
+            context,
+            client,
+            newFullProgress(refreshedManifest, startedAt),
+            false,
+        );
     }
 }

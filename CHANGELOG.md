@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tombstones transactionally.
     `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;
     minimum `3`).
+  - Federation peers can now link bidirectionally as one `BOTH` row. Reciprocal
+    pairing uses bounded callbacks and degrades to a working one-directional
+    link with a warning when the callback fails. Inbound authentication and
+    outbound health now have independent statuses. (#479)
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges
@@ -58,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Federation sync now batches per-page identity and local dedup reads, limits
+  incremental artist-count recomputation to touched artists, and persists a
+  full-sync page cursor. Resumed full syncs perform a fresh catalog-ID pass
+  before cleanup so they converge with uninterrupted syncs. (#478)
 - Search queries are now limited to 500 characters. Undeclared query
   parameters remain ignored for compatibility with existing callers.
 - Library orphan cleanup deletes at most 10,000 albums and 10,000 artists per
@@ -84,8 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reveals peer copies whose local winner was soft-removed, retries bounded jobs,
   and queues one follow-up when “sync now” overlaps an active run.
 - Federation peer calls now cap JSON responses, release rejected stream bodies,
-  preserve peer status during host credential rotation, reject duplicate links
-  and unsupported bidirectional peers, and avoid logging failed offline plays.
+  preserve inbound status during credential rotation, reject duplicate links,
+  and avoid logging failed offline plays.
 - Soft-removed library tracks are now excluded from library, search, radio,
   recommendation, streaming, Subsonic, sharing, import-matching, and offline
   read surfaces. Playlists and play history retain removed entries as

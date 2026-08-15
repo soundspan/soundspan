@@ -4540,7 +4540,7 @@ async function loadFederatedCoverTarget(
                                 id: true,
                                 baseUrl: true,
                                 outboundToken: true,
-                                status: true,
+                                outboundStatus: true,
                             },
                         },
                     },
@@ -4559,7 +4559,7 @@ async function loadFederatedCoverTarget(
                     id: true,
                     baseUrl: true,
                     outboundToken: true,
-                    status: true,
+                    outboundStatus: true,
                 },
             },
         },
@@ -4577,7 +4577,7 @@ async function proxySubsonicFederatedCover(
     if (
         !target?.remoteId ||
         !peer ||
-        peer.status !== "ACTIVE" ||
+        peer.outboundStatus !== "ACTIVE" ||
         !peer.baseUrl ||
         !peer.outboundToken
     ) {
@@ -4602,7 +4602,7 @@ type SubsonicStreamTrack = {
         id: string;
         baseUrl: string | null;
         outboundToken: string | null;
-        status: string;
+        outboundStatus: string | null;
     } | null;
 };
 
@@ -4620,7 +4620,7 @@ async function proxySubsonicFederatedStream(input: {
     if (
         !track.remoteId ||
         !peer ||
-        peer.status !== "ACTIVE" ||
+        peer.outboundStatus !== "ACTIVE" ||
         !peer.baseUrl ||
         !peer.outboundToken
     ) {
@@ -4709,7 +4709,7 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
                         id: true,
                         baseUrl: true,
                         outboundToken: true,
-                        status: true,
+                        outboundStatus: true,
                     },
                 },
             },
@@ -4870,7 +4870,7 @@ export async function handleDownload(
                         id: true,
                         baseUrl: true,
                         outboundToken: true,
-                        status: true,
+                        outboundStatus: true,
                     },
                 },
             },

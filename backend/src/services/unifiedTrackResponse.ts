@@ -36,7 +36,7 @@ export interface UnifiedLocalTrackRecord {
     federationPeer?: {
         id: string;
         name: string;
-        status: "PENDING" | "ACTIVE" | "OFFLINE" | "REVOKED";
+        outboundStatus: "PENDING" | "ACTIVE" | "OFFLINE" | "REVOKED" | null;
     } | null;
     album: {
         id?: string | null;
@@ -124,7 +124,7 @@ export function normalizeLocalTrack(
                   peer: {
                       id: track.federationPeer.id,
                       name: track.federationPeer.name,
-                      online: track.federationPeer.status === "ACTIVE",
+                      online: track.federationPeer.outboundStatus === "ACTIVE",
                   },
               }
             : { source: "local" as const };

@@ -125,6 +125,22 @@ describe("artistCountsService", () => {
         });
     });
 
+    it("updates a scoped artist set across bounded batches", async () => {
+        const { mod, prisma } = loadModule();
+        const artistIds = Array.from(
+            { length: 205 },
+            (_, index) => `artist-${index}`,
+        );
+        prisma.album.count.mockResolvedValue(0);
+        prisma.track.count.mockResolvedValue(0);
+        prisma.artist.update.mockResolvedValue({});
+
+        await expect(
+            mod.updateArtistCountsInBatches(artistIds),
+        ).resolves.toEqual({ updated: 205, failed: 0 });
+        expect(prisma.artist.update).toHaveBeenCalledTimes(205);
+    });
+
     it("updates by album id and track id when related artist exists", async () => {
         const { mod, prisma } = loadModule();
         prisma.album.count.mockResolvedValue(0);

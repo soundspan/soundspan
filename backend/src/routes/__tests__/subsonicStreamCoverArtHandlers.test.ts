@@ -176,7 +176,7 @@ describe("handleStream", () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
         };
         mockTrackFindFirst.mockResolvedValue(track);
@@ -211,7 +211,7 @@ describe("handleStream", () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "OFFLINE",
+                outboundStatus: "OFFLINE",
             },
         });
 
@@ -424,7 +424,7 @@ describe("handleGetCoverArt", () => {
             id: "peer-1",
             baseUrl: "https://peer.example",
             outboundToken: "encrypted-token",
-            status: "ACTIVE",
+            outboundStatus: "ACTIVE",
         };
         mockAlbumFindFirst
             .mockResolvedValueOnce({ coverUrl: null })

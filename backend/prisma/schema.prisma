@@ -453,7 +453,8 @@ model FederationPeer {
   credentialHash String?       @unique
   outboundToken  String?
   scopes         String[]
-  status         PeerStatus
+  inboundStatus  PeerStatus?
+  outboundStatus PeerStatus?
   lastSeenAt     DateTime?
   lastSyncCursor String?
   catalogEpoch   String?

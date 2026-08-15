@@ -3,6 +3,7 @@ import request from "supertest";
 
 const service = {
     createHostFederationPeer: jest.fn(),
+    createBothFederationPeer: jest.fn(),
     listFederationPeers: jest.fn(),
     rotateFederationPeerCredential: jest.fn(),
     revokeFederationPeer: jest.fn(),
@@ -50,6 +51,10 @@ describe("federation admin routes", () => {
             peer: { id: "peer-1" },
             token: "token-once",
         });
+        service.createBothFederationPeer.mockResolvedValue({
+            peer: { id: "both-peer-1", direction: "BOTH" },
+            token: "both-token-once",
+        });
         service.rotateFederationPeerCredential.mockResolvedValue({
             peer: { id: "peer-1" },
             token: "rotated-once",
@@ -65,8 +70,7 @@ describe("federation admin routes", () => {
             name: "Remote Library",
         });
         service.pairAndLinkConsumerFederationPeer.mockResolvedValue({
-            id: "paired-peer-1",
-            name: "Paired Library",
+            peer: { id: "paired-peer-1", name: "Paired Library" },
         });
         enqueueFederationSyncNow.mockResolvedValue(undefined);
     });
@@ -114,7 +118,7 @@ describe("federation admin routes", () => {
         expect(service.createHostFederationPeer).not.toHaveBeenCalled();
     });
 
-    it("rejects the unsupported BOTH direction with a clear error", async () => {
+    it("accepts BOTH through create and manual link with both credentials", async () => {
         const host = await request(app)
             .post("/api/federation/admin/peers")
             .set("Authorization", "Bearer admin")
@@ -122,6 +126,8 @@ describe("federation admin routes", () => {
                 direction: "BOTH",
                 name: "Peer",
                 scopes: ["library:read"],
+                baseUrl: "https://peer.example",
+                token: "peer-token",
             });
         const consumer = await request(app)
             .post("/api/federation/admin/peers/link")
@@ -130,28 +136,49 @@ describe("federation admin routes", () => {
                 direction: "BOTH",
                 baseUrl: "https://peer.example",
                 token: "peer-token",
+                scopes: ["library:read"],
             });
 
-        expect(host.status).toBe(400);
-        expect(host.body).toEqual({
-            error: "Peer direction BOTH is not supported",
+        expect(host.status).toBe(201);
+        expect(consumer.status).toBe(201);
+        expect(service.createBothFederationPeer).toHaveBeenNthCalledWith(1, {
+            name: "Peer",
+            scopes: ["library:read"],
+            baseUrl: "https://peer.example",
+            outboundToken: "peer-token",
+            createdById: "admin-1",
         });
-        expect(consumer.status).toBe(400);
-        expect(consumer.body).toEqual(host.body);
-        expect(service.createHostFederationPeer).not.toHaveBeenCalled();
-        expect(service.linkConsumerFederationPeer).not.toHaveBeenCalled();
+        expect(service.createBothFederationPeer).toHaveBeenNthCalledWith(2, {
+            baseUrl: "https://peer.example",
+            outboundToken: "peer-token",
+            name: undefined,
+            scopes: ["library:read"],
+            createdById: "admin-1",
+        });
     });
 
     it("lists peers without credential material", async () => {
         service.listFederationPeers.mockResolvedValueOnce([
-            { id: "peer-1", name: "Peer" },
+            {
+                id: "peer-1",
+                name: "Peer",
+                inboundStatus: "ACTIVE",
+                outboundStatus: "OFFLINE",
+            },
         ]);
         const response = await request(app)
             .get("/api/federation/admin/peers")
             .set("Authorization", "Bearer admin");
         expect(response.status).toBe(200);
         expect(response.body).toEqual({
-            peers: [{ id: "peer-1", name: "Peer" }],
+            peers: [
+                {
+                    id: "peer-1",
+                    name: "Peer",
+                    inboundStatus: "ACTIVE",
+                    outboundStatus: "OFFLINE",
+                },
+            ],
         });
         expect(JSON.stringify(response.body)).not.toContain("credentialHash");
     });
@@ -272,6 +299,7 @@ describe("federation admin routes", () => {
             baseUrl: "https://peer.example",
             code: "ABCDEFGH",
             name: "Paired Library",
+            scopes: ["library:read", "stream:read"],
             createdById: "admin-1",
         });
     });

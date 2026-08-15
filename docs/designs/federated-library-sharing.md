@@ -101,7 +101,8 @@ model FederationPeer {
   credentialHash String?  @unique           // host side: hmac: HMAC-SHA256 of the token we issued
   outboundToken String?                     // consumer side: encrypted token we present (SETTINGS_ENCRYPTION_KEY, like tidal tokens)
   scopes        String[]                    // library:read, stream:read, embeddings:read
-  status        PeerStatus                  // PENDING | ACTIVE | OFFLINE | REVOKED
+  inboundStatus PeerStatus?                 // auth state for HOST | BOTH
+  outboundStatus PeerStatus?                // health state for CONSUMER | BOTH
   lastSeenAt    DateTime?
   lastSyncCursor String?
   catalogEpoch  String?
@@ -113,7 +114,7 @@ model FederationPeer {
 
 - Issue/rotate/revoke via admin-only routes (`requireAuth` + `requireAdmin`, pattern of `routes/admin.ts`). Raw token shown once; stored as `hmac:` hash via `apiKeyHash.ts` helpers. No fixed lifetime; revocation is status change (auditable), not row delete.
 - Auth middleware `requireFederationPeer(scope)` attaches **`req.federationPeer`, never `req.user`** — downstream `userId`-scoped queries fail safely instead of impersonating a user. Constant-time compare per `internalAuth.ts`. Per-peer rate limiting.
-- Pairing handshake: an admin on the host generates a short-lived pairing code; an admin on the consumer enters `https://host.example` plus the code; the consumer calls `POST /api/federation/v1/pair` and receives its scoped token; both sides create their `FederationPeer` row. Manual token exchange remains the fallback.
+- Pairing handshake: an admin on the host generates a short-lived pairing code; an admin on the consumer enters `https://host.example` plus the code. The consumer generates a reciprocal code and calls `POST /api/federation/v1/pair`; the host consumes its code, calls the consumer back through the same bounded endpoint, and both sides upgrade one row to `BOTH`. Callback failure leaves the original one-directional link active with a warning. Manual HOST, CONSUMER, and BOTH token exchange remains available.
 
 ### Layer 2 — Swarm layer (consumer side)
 
@@ -146,7 +147,7 @@ When a federated track matches an active local track, the consumer retains the f
 
 **Playback.** `handleStreamTrack` (`backend/src/routes/library/tracks.ts`) branches on `origin`. A cache hit serves the complete peer response locally with Range support. A non-Range miss fetches the full peer stream into a temporary transcode-cache file, atomically publishes it with a `TranscodedFile` row, and then serves it. A Range miss proxies directly without caching partial bytes. Concurrent first requests coalesce by `(trackId, quality)`. An audio-hash change or peer deletion removes rows and files. `Play` logging works unchanged. Segmented/DASH streaming remains local-only.
 
-**Offline degradation.** A lightweight health check pings `GET /manifest` at startup and hourly and flips `FederationPeer.status` between `ACTIVE` and `OFFLINE`; stream failures also mark a peer offline. Catalog rows stay in the DB, so browse/search never break. API responses include `peer: { id, name, online }` on federated items; the frontend renders offline items greyed with `UnplayableBadge`-style treatment, and playback resolution skips them.
+**Offline degradation.** A lightweight health check pings `GET /manifest` at startup and hourly and flips `FederationPeer.outboundStatus` between `ACTIVE` and `OFFLINE`; stream failures also mark only the outbound direction offline. `inboundStatus` remains independent, so a `BOTH` peer can continue authenticating inbound requests during an outbound outage. Catalog rows stay in the DB, so browse/search never break. API responses include `peer: { id, name, online }` on federated items; the frontend renders offline items greyed with `UnplayableBadge`-style treatment, and playback resolution skips them.
 
 **Provenance UI (frontend).**
 

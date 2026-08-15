@@ -405,6 +405,52 @@ describe("federation HTTP client", () => {
         expect(axiosRequest).toHaveBeenCalledTimes(1);
     });
 
+    it("sends and validates reciprocal pairing fields", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 201,
+            data: {
+                peer: {
+                    id: "peer-2",
+                    name: "Peer Two",
+                    direction: "BOTH",
+                    baseUrl: "https://consumer.example",
+                    scopes: ["library:read", "stream:read"],
+                    inboundStatus: "ACTIVE",
+                    outboundStatus: "ACTIVE",
+                    lastSeenAt: null,
+                    lastSyncCursor: null,
+                    catalogEpoch: null,
+                    createdAt: "2026-08-15T12:00:00.000Z",
+                    updatedAt: "2026-08-15T12:00:00.000Z",
+                },
+                token: "paired-token",
+                reciprocalPeerId: "peer-3",
+            },
+        });
+
+        await expect(
+            pairFederationPeer({
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Consumer",
+                consumerBaseUrl: "https://consumer.example",
+                reciprocalPairingCode: "HGFEDCBA",
+                reciprocalScopes: ["library:read", "stream:read"],
+                options: { retryDelayMs: 0 },
+            }),
+        ).resolves.toEqual(
+            expect.objectContaining({ reciprocalPeerId: "peer-3" }),
+        );
+        expect(axiosRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    reciprocalPairingCode: "HGFEDCBA",
+                    reciprocalScopes: ["library:read", "stream:read"],
+                }),
+            }),
+        );
+    });
+
     it("rejects a malformed pairing response at the public trust boundary", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 201,

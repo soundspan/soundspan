@@ -133,7 +133,7 @@ function trackSourceSql(source: LibraryOriginFilter): Prisma.Sql {
 
 function peerProjectionSql(alias: "a" | "t"): Prisma.Sql {
     return Prisma.raw(
-        `CASE WHEN ${alias}."peerId" IS NOT NULL THEN json_build_object('id', fp.id, 'name', fp.name, 'online', fp.status = 'ACTIVE') ELSE NULL END`,
+        `CASE WHEN ${alias}."peerId" IS NOT NULL THEN json_build_object('id', fp.id, 'name', fp.name, 'online', COALESCE(fp."outboundStatus" = 'ACTIVE', false)) ELSE NULL END`,
     );
 }
 
@@ -205,7 +205,7 @@ export class SearchService {
                 heroUrl: true,
                 peerId: true,
                 federationPeer: {
-                    select: { id: true, name: true, status: true },
+                    select: { id: true, name: true, outboundStatus: true },
                 },
             },
             take: limit,
@@ -224,7 +224,7 @@ export class SearchService {
                       peer: {
                           id: federationPeer.id,
                           name: federationPeer.name,
-                          online: federationPeer.status === "ACTIVE",
+                          online: federationPeer.outboundStatus === "ACTIVE",
                       },
                   }
                 : {}),
@@ -345,7 +345,7 @@ export class SearchService {
                 },
                 peerId: true,
                 federationPeer: {
-                    select: { id: true, name: true, status: true },
+                    select: { id: true, name: true, outboundStatus: true },
                 },
             },
             take: limit,
@@ -369,7 +369,7 @@ export class SearchService {
                       peer: {
                           id: r.federationPeer.id,
                           name: r.federationPeer.name,
-                          online: r.federationPeer.status === "ACTIVE",
+                          online: r.federationPeer.outboundStatus === "ACTIVE",
                       },
                   }
                 : {}),
@@ -498,7 +498,7 @@ export class SearchService {
                 },
                 origin: true,
                 federationPeer: {
-                    select: { id: true, name: true, status: true },
+                    select: { id: true, name: true, outboundStatus: true },
                 },
             },
             take: limit,
@@ -523,7 +523,7 @@ export class SearchService {
                       peer: {
                           id: r.federationPeer.id,
                           name: r.federationPeer.name,
-                          online: r.federationPeer.status === "ACTIVE",
+                          online: r.federationPeer.outboundStatus === "ACTIVE",
                       },
                   }
                 : {}),

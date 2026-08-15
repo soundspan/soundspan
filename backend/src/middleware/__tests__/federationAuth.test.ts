@@ -45,8 +45,9 @@ function peer(overrides: Record<string, unknown> = {}) {
     return {
         id: "peer-1",
         name: "Peer One",
+        direction: "HOST",
         scopes: ["library:read", "stream:read"],
-        status: "ACTIVE",
+        inboundStatus: "ACTIVE",
         lastSeenAt: new Date("2026-08-15T10:00:00.000Z"),
         ...overrides,
     };
@@ -63,7 +64,7 @@ describe("requireFederationPeer", () => {
     it.each([
         ["missing", undefined, null],
         ["unknown", `Bearer ${rawToken}`, null],
-        ["revoked", `Bearer ${rawToken}`, peer({ status: "REVOKED" })],
+        ["revoked", `Bearer ${rawToken}`, peer({ inboundStatus: "REVOKED" })],
     ])(
         "returns a uniform 401 for %s credentials",
         async (_name, auth, record) => {
@@ -84,6 +85,53 @@ describe("requireFederationPeer", () => {
             });
             expect(next).not.toHaveBeenCalled();
             expect(req.user).toBeUndefined();
+        },
+    );
+
+    it("keeps BOTH inbound auth active when outbound health is offline", async () => {
+        mockFindUnique.mockResolvedValue(
+            peer({
+                direction: "BOTH",
+                inboundStatus: "ACTIVE",
+                outboundStatus: "OFFLINE",
+            }),
+        );
+        const req = {
+            headers: { authorization: `Bearer ${rawToken}` },
+        } as Request;
+        const next = jest.fn() as NextFunction;
+
+        await requireFederationPeer("library:read")(
+            req,
+            createResponse() as unknown as Response,
+            next,
+        );
+
+        expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["HOST", true],
+        ["BOTH", true],
+        ["CONSUMER", false],
+    ])(
+        "enforces the %s inbound direction capability",
+        async (direction, allowed) => {
+            mockFindUnique.mockResolvedValue(peer({ direction }));
+            const req = {
+                headers: { authorization: `Bearer ${rawToken}` },
+            } as Request;
+            const res = createResponse();
+            const next = jest.fn() as NextFunction;
+
+            await requireFederationPeer("library:read")(
+                req,
+                res as unknown as Response,
+                next,
+            );
+
+            expect(next).toHaveBeenCalledTimes(allowed ? 1 : 0);
+            expect(res.statusCode).toBe(allowed ? 200 : 401);
         },
     );
 

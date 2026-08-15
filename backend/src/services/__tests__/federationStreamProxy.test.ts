@@ -190,8 +190,8 @@ describe("federated stream proxy", () => {
             }),
         ).rejects.toThrow("peer error");
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
-            where: { id: "peer-1", status: "ACTIVE" },
-            data: { status: "OFFLINE" },
+            where: { id: "peer-1", outboundStatus: "ACTIVE" },
+            data: { outboundStatus: "OFFLINE" },
         });
     });
 

@@ -30,6 +30,7 @@ const createFederationClient = jest.fn(() => client);
 const createMapping = jest.fn();
 const upsertTrackEmbedding = jest.fn();
 const backfillAllArtistCounts = jest.fn();
+const updateArtistCountsInBatches = jest.fn();
 const clearTrackTranscodeCache = jest.fn();
 
 const mockLog = {
@@ -88,6 +89,7 @@ jest.mock("../../../services/trackEmbeddings", () => ({
 }));
 jest.mock("../../../services/artistCountsService", () => ({
     backfillAllArtistCounts,
+    updateArtistCountsInBatches,
 }));
 jest.mock("../../../services/trackReplacement", () => ({
     clearTrackTranscodeCache,
@@ -101,7 +103,8 @@ const peer = {
     baseUrl: "https://peer.example",
     outboundToken: "encrypted-token",
     scopes: ["library:read", "stream:read", "embeddings:read"],
-    status: "ACTIVE",
+    inboundStatus: null,
+    outboundStatus: "ACTIVE",
     lastSyncCursor: null as string | null,
     catalogEpoch: "epoch-1",
 };
@@ -207,8 +210,23 @@ describe("federation sync processor", () => {
         client.getCatalogItem.mockResolvedValue(artist);
         prisma.artist.findUnique.mockResolvedValue({ id: "artist-local-row" });
         prisma.artist.findFirst.mockResolvedValue(null);
-        prisma.artist.upsert.mockResolvedValue({ id: "artist-local-row" });
-        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.artist.upsert.mockResolvedValue({
+            id: "artist-local-row",
+            remoteId: "remote-artist-1",
+            mbid: "artist-mbid-1",
+        });
+        prisma.artist.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "artist-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-artist-1",
+                          mbid: "artist-mbid-1",
+                      },
+                  ]
+                : [],
+        );
         prisma.artist.deleteMany.mockResolvedValue({ count: 0 });
         prisma.album.findUnique.mockResolvedValue({
             id: "album-local-row",
@@ -217,19 +235,48 @@ describe("federation sync processor", () => {
         prisma.album.findFirst.mockResolvedValue(null);
         prisma.album.upsert.mockResolvedValue({
             id: "album-local-row",
+            remoteId: "remote-album-1",
             rgMbid: "release-group-1",
+            artistId: "artist-local-row",
         });
-        prisma.album.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "album-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-album-1",
+                          rgMbid: "release-group-1",
+                          artistId: "artist-local-row",
+                      },
+                  ]
+                : [],
+        );
         prisma.album.deleteMany.mockResolvedValue({ count: 0 });
         prisma.track.findUnique.mockResolvedValue({ id: "fed-track-row" });
         prisma.track.findFirst.mockResolvedValue(null);
         prisma.track.upsert.mockResolvedValue({ id: "fed-track-row" });
         prisma.track.update.mockResolvedValue({});
-        prisma.track.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId === "peer-1" && where?.remoteId
+                ? [
+                      {
+                          id: "fed-track-row",
+                          remoteId: "remote-track-1",
+                          audioHash: "sha256:abc",
+                          album: { artistId: "artist-local-row" },
+                      },
+                  ]
+                : [],
+        );
         prisma.track.deleteMany.mockResolvedValue({ count: 0 });
         createMapping.mockResolvedValue({ id: "mapping-1" });
         upsertTrackEmbedding.mockResolvedValue(undefined);
         backfillAllArtistCounts.mockResolvedValue({ processed: 1, errors: 0 });
+        updateArtistCountsInBatches.mockResolvedValue({
+            updated: 1,
+            errors: 0,
+        });
         clearTrackTranscodeCache.mockResolvedValue(undefined);
     });
 
@@ -287,10 +334,10 @@ describe("federation sync processor", () => {
                 }),
             }),
         );
-        expect(prisma.federationPeer.update).toHaveBeenCalledWith({
+        expect(prisma.federationPeer.update).toHaveBeenLastCalledWith({
             where: { id: "peer-1" },
             data: expect.objectContaining({
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
                 catalogEpoch: "epoch-1",
                 lastSyncCursor: "2026-08-15T11:59:59.000Z",
                 lastSeenAt: expect.any(Date),
@@ -305,11 +352,41 @@ describe("federation sync processor", () => {
         });
     });
 
+    it.each([
+        ["CONSUMER", "ACTIVE", true],
+        ["BOTH", "OFFLINE", true],
+        ["HOST", null, false],
+    ])(
+        "enforces %s/%s outbound sync capability",
+        async (direction, outboundStatus, allowed) => {
+            prisma.federationPeer.findUnique.mockResolvedValue({
+                ...peer,
+                direction,
+                outboundStatus,
+            });
+            const run = processFederationSync(job());
+            if (allowed)
+                await expect(run).resolves.toMatchObject({ mode: "full" });
+            else
+                await expect(run).rejects.toThrow(
+                    "Federation consumer peer is unavailable",
+                );
+        },
+    );
+
     it("invalidates cached streams when a federated audio hash changes", async () => {
-        prisma.track.findUnique.mockResolvedValue({
-            id: "fed-track-row",
-            audioHash: "sha256:old",
-        });
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId === "peer-1" && where?.remoteId
+                ? [
+                      {
+                          id: "fed-track-row",
+                          remoteId: "remote-track-1",
+                          audioHash: "sha256:old",
+                          album: { artistId: "artist-local-row" },
+                      },
+                  ]
+                : [],
+        );
 
         await processFederationSync(job());
 
@@ -317,11 +394,6 @@ describe("federation sync processor", () => {
     });
 
     it("keeps cached streams when the federated audio hash is unchanged", async () => {
-        prisma.track.findUnique.mockResolvedValue({
-            id: "fed-track-row",
-            audioHash: "sha256:abc",
-        });
-
         await processFederationSync(job());
 
         expect(clearTrackTranscodeCache).not.toHaveBeenCalled();
@@ -345,10 +417,7 @@ describe("federation sync processor", () => {
             ...peer,
             lastSyncCursor: "2026-08-15T12:10:00.000Z",
         });
-        prisma.artist.findUnique
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({ id: "artist-local-row" });
+        prisma.artist.findMany.mockResolvedValue([]);
         client.getCatalogDelta.mockResolvedValueOnce({
             kind: "ok",
             changes: [album],
@@ -375,13 +444,7 @@ describe("federation sync processor", () => {
             ...peer,
             lastSyncCursor: "2026-08-15T12:10:00.000Z",
         });
-        prisma.album.findUnique
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({
-                id: "album-local-row",
-                rgMbid: "release-group-1",
-            });
+        prisma.album.findMany.mockResolvedValue([]);
         client.getCatalogItem.mockResolvedValueOnce(album);
         client.getCatalogDelta.mockResolvedValueOnce({
             kind: "ok",
@@ -413,34 +476,35 @@ describe("federation sync processor", () => {
         client.getCatalogItem.mockImplementation((type: string) =>
             Promise.resolve(type === "album" ? album : artist),
         );
-        prisma.artist.findUnique
-            .mockReset()
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({ id: "artist-local-row" });
-        prisma.album.findUnique
-            .mockReset()
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({
-                id: "album-local-row",
-                rgMbid: "release-group-1",
-            });
-        prisma.track.findMany
-            .mockResolvedValueOnce([
-                { id: "fed-track-row", remoteId: "remote-track-1" },
-            ])
-            .mockResolvedValueOnce([]);
-        prisma.album.findMany
-            .mockResolvedValueOnce([
-                { id: "album-local-row", remoteId: "remote-album-1" },
-            ])
-            .mockResolvedValueOnce([]);
-        prisma.artist.findMany
-            .mockResolvedValueOnce([
-                { id: "artist-local-row", remoteId: "remote-artist-1" },
-            ])
-            .mockResolvedValueOnce([]);
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId === "peer-1" && !where?.remoteId && !where?.id
+                ? [{ id: "fed-track-row", remoteId: "remote-track-1" }]
+                : [],
+        );
+        prisma.album.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? []
+                : where?.id
+                  ? []
+                  : [
+                        {
+                            id: "album-local-row",
+                            remoteId: "remote-album-1",
+                        },
+                    ],
+        );
+        prisma.artist.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? []
+                : where?.id
+                  ? []
+                  : [
+                        {
+                            id: "artist-local-row",
+                            remoteId: "remote-artist-1",
+                        },
+                    ],
+        );
 
         await processFederationSync(job());
 
@@ -472,8 +536,8 @@ describe("federation sync processor", () => {
             }
             return Promise.resolve(album);
         });
-        prisma.artist.findUnique.mockResolvedValue(null);
-        prisma.album.findUnique.mockResolvedValue(null);
+        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockResolvedValue([]);
 
         await expect(processFederationSync(job())).resolves.toMatchObject({
             mode: "full",
@@ -503,7 +567,7 @@ describe("federation sync processor", () => {
         client.getCatalogItem.mockRejectedValueOnce(
             new MockFederationHttpError(404),
         );
-        prisma.album.findUnique.mockResolvedValue(null);
+        prisma.album.findMany.mockResolvedValue([]);
 
         await expect(processFederationSync(job())).resolves.toMatchObject({
             mode: "full",
@@ -555,8 +619,11 @@ describe("federation sync processor", () => {
     });
 
     it("rebinds a stable federated identity when the remote track id changes", async () => {
-        prisma.track.findUnique.mockResolvedValueOnce(null);
-        prisma.track.findFirst.mockResolvedValueOnce({ id: "prior-fed-row" });
+        prisma.track.findMany.mockResolvedValue([]);
+        prisma.track.findFirst.mockResolvedValueOnce({
+            id: "prior-fed-row",
+            audioHash: "sha256:abc",
+        });
 
         await processFederationSync(job());
 
@@ -577,21 +644,40 @@ describe("federation sync processor", () => {
     });
 
     it("deletes unseen full-sync rows in bounded child-first batches", async () => {
-        prisma.track.findMany
-            .mockResolvedValueOnce([
-                { id: "stale-track", remoteId: "old-track" },
-            ])
-            .mockResolvedValueOnce([]);
-        prisma.album.findMany
-            .mockResolvedValueOnce([
-                { id: "stale-album", remoteId: "old-album" },
-            ])
-            .mockResolvedValueOnce([]);
-        prisma.artist.findMany
-            .mockResolvedValueOnce([
-                { id: "stale-artist", remoteId: "old-artist" },
-            ])
-            .mockResolvedValueOnce([]);
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId === "peer-1" && !where?.remoteId && !where?.id
+                ? [{ id: "stale-track", remoteId: "old-track" }]
+                : [],
+        );
+        prisma.album.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "album-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-album-1",
+                          rgMbid: "release-group-1",
+                          artistId: "artist-local-row",
+                      },
+                  ]
+                : where?.id
+                  ? []
+                  : [{ id: "stale-album", remoteId: "old-album" }],
+        );
+        prisma.artist.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "artist-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-artist-1",
+                          mbid: "artist-mbid-1",
+                      },
+                  ]
+                : where?.id
+                  ? []
+                  : [{ id: "stale-artist", remoteId: "old-artist" }],
+        );
 
         await processFederationSync(job());
 
@@ -746,26 +832,50 @@ describe("federation sync processor", () => {
         "records %s local-wins dedup through TrackMapping",
         async (_tier, identity, confidence) => {
             const local = { id: "local-track-1" };
-            prisma.track.findFirst.mockImplementation(async ({ where }) => {
+            prisma.track.findMany.mockImplementation(async ({ where }) => {
+                if (where.peerId === "peer-1" && where.remoteId) {
+                    return [
+                        {
+                            id: "fed-track-row",
+                            remoteId: "remote-track-1",
+                            audioHash: "sha256:abc",
+                            album: { artistId: "artist-local-row" },
+                        },
+                    ];
+                }
                 if (
                     identity.audioHash &&
-                    where.audioHash === identity.audioHash
+                    where.audioHash?.in?.includes(identity.audioHash)
                 )
-                    return local;
+                    return [{ ...local, audioHash: identity.audioHash }];
                 if (
                     identity.recordingMbid &&
-                    where.recordingMbid === identity.recordingMbid
+                    where.recordingMbid?.in?.includes(identity.recordingMbid)
                 )
-                    return local;
-                if (identity.isrc && where.isrc === identity.isrc) return local;
+                    return [
+                        {
+                            ...local,
+                            recordingMbid: identity.recordingMbid,
+                        },
+                    ];
+                if (identity.isrc && where.isrc?.in?.includes(identity.isrc)) {
+                    return [{ ...local, isrc: identity.isrc }];
+                }
                 if (
                     !identity.audioHash &&
                     !identity.recordingMbid &&
                     !identity.isrc &&
-                    where.album
+                    where.OR
                 )
-                    return local;
-                return null;
+                    return [
+                        {
+                            ...local,
+                            discNo: 1,
+                            trackNo: 2,
+                            album: { rgMbid: "release-group-1" },
+                        },
+                    ];
+                return [];
             });
             client.getCatalogItems.mockImplementation((type: string) => {
                 if (type !== "track")
@@ -795,6 +905,249 @@ describe("federation sync processor", () => {
         },
     );
 
+    it("batches one mixed page and preserves the lowest-id dedup tie winner", async () => {
+        const secondTrack = {
+            ...track,
+            id: "remote-track-2",
+            attributes: {
+                ...track.attributes,
+                title: "Track Two",
+                trackNo: 3,
+                recordingMbid: "recording-2",
+                isrc: "US-AAA-26-00002",
+            },
+        };
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        client.getCatalogDelta.mockResolvedValue({
+            kind: "ok",
+            changes: [artist, album, track, secondTrack],
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+        });
+        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockImplementation(async ({ where }) => {
+            if (where.peerId === "peer-1") return [];
+            if (where.audioHash) {
+                return [
+                    { id: "local-a", audioHash: "sha256:abc" },
+                    { id: "local-b", audioHash: "sha256:abc" },
+                ];
+            }
+            return [];
+        });
+        prisma.track.upsert
+            .mockResolvedValueOnce({ id: "fed-track-1" })
+            .mockResolvedValueOnce({ id: "fed-track-2" });
+
+        await processFederationSync(job());
+
+        expect(prisma.artist.findMany).toHaveBeenCalledTimes(1);
+        expect(prisma.album.findMany).toHaveBeenCalledTimes(1);
+        expect(
+            prisma.track.findMany.mock.calls.filter(
+                ([args]) => args.where.peerId === "peer-1",
+            ),
+        ).toHaveLength(1);
+        expect(
+            prisma.track.findMany.mock.calls.filter(([args]) =>
+                Boolean(args.where.audioHash),
+            ),
+        ).toHaveLength(1);
+        expect(
+            prisma.track.update.mock.calls.filter(
+                ([args]) => args.data.dedupOfTrackId === "local-a",
+            ),
+        ).toHaveLength(2);
+    });
+
+    it("recomputes only artists touched by an incremental page", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        client.getCatalogDelta.mockResolvedValue({
+            kind: "ok",
+            changes: [artist],
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+        });
+
+        await processFederationSync(job());
+
+        expect(updateArtistCountsInBatches).toHaveBeenCalledWith([
+            "artist-local-row",
+        ]);
+        expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+    });
+
+    it("persists the next full page cursor before a later page fails", async () => {
+        client.getCatalogItems.mockImplementation(
+            (type: string, cursor?: string) => {
+                if (type === "track" && cursor === "track-page-2") {
+                    return Promise.reject(new Error("track page failed"));
+                }
+                const page = catalogPageFor(type);
+                return Promise.resolve({
+                    ...page,
+                    nextCursor:
+                        type === "track" ? "track-page-2" : page.nextCursor,
+                });
+            },
+        );
+
+        await expect(processFederationSync(job())).rejects.toThrow(
+            "track page failed",
+        );
+
+        const progressWrites = prisma.federationPeer.update.mock.calls
+            .map(([args]) => args.data.lastSyncCursor)
+            .filter(
+                (value) => typeof value === "string" && value.startsWith("{"),
+            )
+            .map((value) => JSON.parse(value));
+        expect(progressWrites).toContainEqual({
+            phase: "full",
+            mediaType: "track",
+            cursor: "track-page-2",
+            serverTime: "2026-08-15T11:59:59.000Z",
+            epoch: "epoch-1",
+        });
+    });
+
+    it("discards full resume state when the manifest epoch changes", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            catalogEpoch: "epoch-old",
+            lastSyncCursor: JSON.stringify({
+                phase: "full",
+                mediaType: "track",
+                cursor: "old-track-page",
+                serverTime: "2026-08-15T10:00:00.000Z",
+                epoch: "epoch-old",
+            }),
+        });
+
+        await processFederationSync(job());
+
+        expect(client.getCatalogItems).toHaveBeenNthCalledWith(
+            1,
+            "artist",
+            undefined,
+        );
+        expect(client.getCatalogItems).not.toHaveBeenCalledWith(
+            "track",
+            "old-track-page",
+        );
+        expect(prisma.federationPeer.update).toHaveBeenLastCalledWith({
+            where: { id: "peer-1" },
+            data: expect.objectContaining({
+                catalogEpoch: "epoch-1",
+                lastSyncCursor: "2026-08-15T11:59:59.000Z",
+            }),
+        });
+    });
+
+    it("resumes a saved page and converges to uninterrupted cleanup", async () => {
+        const cleanupRows = {
+            artist: [
+                { id: "artist-local-row", remoteId: "remote-artist-1" },
+                { id: "stale-artist", remoteId: "stale-artist" },
+            ],
+            album: [
+                { id: "album-local-row", remoteId: "remote-album-1" },
+                { id: "stale-album", remoteId: "stale-album" },
+            ],
+            track: [
+                { id: "fed-track-row", remoteId: "remote-track-1" },
+                { id: "stale-track", remoteId: "stale-track" },
+            ],
+        };
+        prisma.artist.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "artist-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-artist-1",
+                          mbid: "artist-mbid-1",
+                      },
+                  ]
+                : where?.id
+                  ? []
+                  : cleanupRows.artist,
+        );
+        prisma.album.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "album-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-album-1",
+                          rgMbid: "release-group-1",
+                          artistId: "artist-local-row",
+                      },
+                  ]
+                : where?.id
+                  ? []
+                  : cleanupRows.album,
+        );
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId && !where?.remoteId
+                ? where?.id
+                    ? []
+                    : cleanupRows.track
+                : [],
+        );
+        await processFederationSync(job());
+        const uninterrupted = [
+            ...prisma.track.deleteMany.mock.calls,
+            ...prisma.album.deleteMany.mock.calls,
+            ...prisma.artist.deleteMany.mock.calls,
+        ].map(([args]) => args.where.id.in);
+
+        prisma.track.deleteMany.mockClear();
+        prisma.album.deleteMany.mockClear();
+        prisma.artist.deleteMany.mockClear();
+        client.getCatalogItems.mockClear();
+        prisma.federationPeer.findUnique.mockResolvedValue({
+            ...peer,
+            lastSyncCursor: JSON.stringify({
+                phase: "full",
+                mediaType: "track",
+                cursor: "resume-track-page",
+                serverTime: "2026-08-15T11:59:59.000Z",
+                epoch: "epoch-1",
+            }),
+        });
+
+        await processFederationSync(job());
+        expect(client.getCatalogItems).toHaveBeenNthCalledWith(
+            1,
+            "track",
+            "resume-track-page",
+        );
+        const resumed = [
+            ...prisma.track.deleteMany.mock.calls,
+            ...prisma.album.deleteMany.mock.calls,
+            ...prisma.artist.deleteMany.mock.calls,
+        ].map(([args]) => args.where.id.in);
+
+        expect(resumed).toEqual(uninterrupted);
+        expect(resumed).toEqual([
+            ["stale-track"],
+            ["stale-album"],
+            ["stale-artist"],
+        ]);
+    });
+
     it("imports embeddings only when the persisted peer scope permits it", async () => {
         await processFederationSync(job());
         expect(upsertTrackEmbedding).toHaveBeenCalledWith(
@@ -813,8 +1166,23 @@ describe("federation sync processor", () => {
         );
         prisma.artist.findUnique.mockResolvedValue({ id: "artist-local-row" });
         prisma.artist.findFirst.mockResolvedValue(null);
-        prisma.artist.upsert.mockResolvedValue({ id: "artist-local-row" });
-        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.artist.upsert.mockResolvedValue({
+            id: "artist-local-row",
+            remoteId: "remote-artist-1",
+            mbid: "artist-mbid-1",
+        });
+        prisma.artist.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "artist-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-artist-1",
+                          mbid: "artist-mbid-1",
+                      },
+                  ]
+                : [],
+        );
         prisma.album.findUnique.mockResolvedValue({
             id: "album-local-row",
             rgMbid: "release-group-1",
@@ -822,13 +1190,38 @@ describe("federation sync processor", () => {
         prisma.album.findFirst.mockResolvedValue(null);
         prisma.album.upsert.mockResolvedValue({
             id: "album-local-row",
+            remoteId: "remote-album-1",
             rgMbid: "release-group-1",
+            artistId: "artist-local-row",
         });
-        prisma.album.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockImplementation(async ({ where }) =>
+            where?.OR
+                ? [
+                      {
+                          id: "album-local-row",
+                          peerId: "peer-1",
+                          remoteId: "remote-album-1",
+                          rgMbid: "release-group-1",
+                          artistId: "artist-local-row",
+                      },
+                  ]
+                : [],
+        );
         prisma.track.findUnique.mockResolvedValue({ id: "fed-track-row" });
         prisma.track.findFirst.mockResolvedValue(null);
         prisma.track.upsert.mockResolvedValue({ id: "fed-track-row" });
-        prisma.track.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockImplementation(async ({ where }) =>
+            where?.peerId === "peer-1" && where?.remoteId
+                ? [
+                      {
+                          id: "fed-track-row",
+                          remoteId: "remote-track-1",
+                          audioHash: "sha256:abc",
+                          album: { artistId: "artist-local-row" },
+                      },
+                  ]
+                : [],
+        );
         backfillAllArtistCounts.mockResolvedValue({ processed: 1, errors: 0 });
 
         await processFederationSync(job());

@@ -50,8 +50,8 @@ function copyResponseHeaders(
 
 async function markPeerOffline(peerId: string): Promise<void> {
     const result = await prisma.federationPeer.updateMany({
-        where: { id: peerId, status: "ACTIVE" },
-        data: { status: "OFFLINE" },
+        where: { id: peerId, outboundStatus: "ACTIVE" },
+        data: { outboundStatus: "OFFLINE" },
     });
     if (result.count === 1) {
         log.info(`peerId=${peerId} status=OFFLINE previous=ACTIVE`);

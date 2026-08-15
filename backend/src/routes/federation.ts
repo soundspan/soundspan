@@ -20,7 +20,10 @@ import {
     getFederationCatalogItems,
     getFederationManifest,
 } from "../services/federationCatalog";
-import { consumePairingCode } from "../services/federationPeers";
+import {
+    consumeFederationPairingRequest,
+    FEDERATION_SCOPE_VALUES,
+} from "../services/federationPeers";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { handleGetCoverArt } from "./library/coverArt";
 import { sendRouteError } from "./routeErrorResponse";
@@ -50,18 +53,34 @@ const deltaQuerySchema = z.strictObject({
     cursor: z.string().trim().min(1).max(512).optional(),
     limit: pageLimitSchema,
 });
-const pairingSchema = z.strictObject({
-    code: z
-        .string()
-        .trim()
-        .toUpperCase()
-        .regex(/^[A-HJ-NP-Z2-9]{8}$/),
-    name: z.string().trim().min(1).max(120),
-    baseUrl: z
-        .url()
-        .refine((value) => new URL(value).protocol === "https:")
-        .optional(),
-});
+const pairingCodeValueSchema = z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-HJ-NP-Z2-9]{8}$/);
+const pairingScopesSchema = z
+    .array(z.enum(FEDERATION_SCOPE_VALUES))
+    .min(1)
+    .max(FEDERATION_SCOPE_VALUES.length)
+    .refine((values) => new Set(values).size === values.length);
+const pairingSchema = z
+    .strictObject({
+        code: pairingCodeValueSchema,
+        name: z.string().trim().min(1).max(120),
+        baseUrl: z
+            .url()
+            .refine((value) => new URL(value).protocol === "https:")
+            .optional(),
+        reciprocalPairingCode: pairingCodeValueSchema.optional(),
+        reciprocalScopes: pairingScopesSchema.optional(),
+        requestedScopes: pairingScopesSchema.optional(),
+    })
+    .refine(
+        (value) =>
+            Boolean(value.reciprocalPairingCode) ===
+                Boolean(value.reciprocalScopes) &&
+            (!value.reciprocalPairingCode || Boolean(value.baseUrl)),
+    );
 const streamQuerySchema = z.strictObject({
     quality: z.enum(["original", "high", "medium", "low"]).default("original"),
 });
@@ -78,7 +97,7 @@ function includesEmbeddingScope(req: Request): boolean {
 /** @openapi
  * /api/federation/v1/pair:
  *   post:
- *     summary: Consume a federation pairing code
+ *     summary: Consume a federation pairing code with optional reciprocal callback
  *     tags: [Federation]
  *     responses:
  *       201: { description: Peer credential issued once }
@@ -92,7 +111,7 @@ router.post(
         const parsed = pairingSchema.safeParse(req.body);
         const query = emptyQuerySchema.safeParse(req.query);
         if (!parsed.success || !query.success) return validationError(res);
-        const result = await consumePairingCode(parsed.data);
+        const result = await consumeFederationPairingRequest(parsed.data);
         if (!result)
             return sendRouteError(res, 400, "Invalid or expired pairing code");
         return res.status(201).json(result);

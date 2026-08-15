@@ -27,8 +27,9 @@ declare global {
 type AuthPeer = {
     id: string;
     name: string;
+    direction: string;
     scopes: FederationScope[];
-    status: string;
+    inboundStatus: string | null;
     lastSeenAt: Date | null;
 };
 
@@ -45,8 +46,9 @@ async function resolvePeer(token: string): Promise<AuthPeer | null> {
         select: {
             id: true,
             name: true,
+            direction: true,
             scopes: true,
-            status: true,
+            inboundStatus: true,
             lastSeenAt: true,
         },
     });
@@ -82,7 +84,11 @@ export function requireFederationPeer(
     return async (req: Request, res: Response, next: NextFunction) => {
         const token = bearerToken(req);
         const peer = token ? await resolvePeer(token) : null;
-        if (!peer || peer.status !== "ACTIVE") {
+        if (
+            !peer ||
+            !["HOST", "BOTH"].includes(peer.direction) ||
+            peer.inboundStatus !== "ACTIVE"
+        ) {
             return sendRouteError(
                 res,
                 401,

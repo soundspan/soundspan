@@ -223,7 +223,7 @@ export async function handleGetTracks(req: Request, res: Response) {
                     },
                 },
                 federationPeer: {
-                    select: { id: true, name: true, status: true },
+                    select: { id: true, name: true, outboundStatus: true },
                 },
             },
         }),
@@ -238,7 +238,7 @@ export async function handleGetTracks(req: Request, res: Response) {
             ? {
                   id: federationPeer.id,
                   name: federationPeer.name,
-                  online: federationPeer.status === "ACTIVE",
+                  online: federationPeer.outboundStatus === "ACTIVE",
               }
             : undefined,
         album: {
@@ -529,7 +529,11 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
                   },
                   include: {
                       federationPeer: {
-                          select: { id: true, name: true, status: true },
+                          select: {
+                              id: true,
+                              name: true,
+                              outboundStatus: true,
+                          },
                       },
                       album: {
                           include: {
@@ -942,7 +946,7 @@ async function streamFederatedTrack(
         name: string;
         baseUrl: string;
         outboundToken: string;
-        status: string;
+        outboundStatus: string | null;
     },
     remoteId: string,
     trackId: string,
@@ -984,12 +988,12 @@ async function loadActiveFederationStreamPeer(peerId: string | null) {
             name: true,
             baseUrl: true,
             outboundToken: true,
-            status: true,
+            outboundStatus: true,
         },
     });
     if (
         !peer ||
-        peer.status !== "ACTIVE" ||
+        peer.outboundStatus !== "ACTIVE" ||
         !peer.baseUrl ||
         !peer.outboundToken
     ) {

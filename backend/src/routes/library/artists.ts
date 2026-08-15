@@ -300,7 +300,11 @@ export async function handleGetArtists(req: Request, res: Response) {
                         remoteTrackCount: true,
                         peerId: true,
                         federationPeer: {
-                            select: { id: true, name: true, status: true },
+                            select: {
+                                id: true,
+                                name: true,
+                                outboundStatus: true,
+                            },
                         },
                     },
                     cursor: cursor ? { id: cursor as string } : undefined,
@@ -350,7 +354,9 @@ export async function handleGetArtists(req: Request, res: Response) {
                           peer: {
                               id: artist.federationPeer.id,
                               name: artist.federationPeer.name,
-                              online: artist.federationPeer.status === "ACTIVE",
+                              online:
+                                  artist.federationPeer.outboundStatus ===
+                                  "ACTIVE",
                           },
                       }
                     : {}),
@@ -455,7 +461,7 @@ export async function handleGetArtist(
             orderBy: { year: Prisma.SortOrder.desc },
             include: {
                 federationPeer: {
-                    select: { id: true, name: true, status: true },
+                    select: { id: true, name: true, outboundStatus: true },
                 },
                 tracks: {
                     where: browseTrackWhere,
@@ -466,7 +472,11 @@ export async function handleGetArtist(
                     take: 10, // Top tracks
                     include: {
                         federationPeer: {
-                            select: { id: true, name: true, status: true },
+                            select: {
+                                id: true,
+                                name: true,
+                                outboundStatus: true,
+                            },
                         },
                         album: {
                             select: {
@@ -481,7 +491,7 @@ export async function handleGetArtist(
         },
         ownedAlbums: true,
         federationPeer: {
-            select: { id: true, name: true, status: true },
+            select: { id: true, name: true, outboundStatus: true },
         },
         // Note: similarFrom (FK-based) is no longer used for display
         // We now use similarArtistsJson which is fetched by default
@@ -585,7 +595,8 @@ export async function handleGetArtist(
                           peer: {
                               id: federationPeer.id,
                               name: federationPeer.name,
-                              online: federationPeer.status === "ACTIVE",
+                              online:
+                                  federationPeer.outboundStatus === "ACTIVE",
                           },
                       }
                     : {}),
@@ -600,7 +611,7 @@ export async function handleGetArtist(
                 ? {
                       id: album.federationPeer.id,
                       name: album.federationPeer.name,
-                      online: album.federationPeer.status === "ACTIVE",
+                      online: album.federationPeer.outboundStatus === "ACTIVE",
                   }
                 : undefined,
         }));
@@ -816,7 +827,8 @@ export async function handleGetArtist(
                           peer: {
                               id: federationPeer.id,
                               name: federationPeer.name,
-                              online: federationPeer.status === "ACTIVE",
+                              online:
+                                  federationPeer.outboundStatus === "ACTIVE",
                           },
                       }
                     : {}),
@@ -1240,7 +1252,7 @@ export async function handleGetArtist(
             ? {
                   id: federationPeer.id,
                   name: federationPeer.name,
-                  online: federationPeer.status === "ACTIVE",
+                  online: federationPeer.outboundStatus === "ACTIVE",
               }
             : undefined,
         coverArt: heroUrl, // Use fetched hero image (falls back to artist.heroUrl)

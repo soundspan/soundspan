@@ -28,7 +28,8 @@ const peer = {
     baseUrl: "https://peer.example",
     outboundToken: "encrypted-token",
     direction: "CONSUMER",
-    status: "ACTIVE",
+    inboundStatus: null,
+    outboundStatus: "ACTIVE",
 };
 
 describe("federation peer health processor", () => {
@@ -46,8 +47,8 @@ describe("federation peer health processor", () => {
             offline: 0,
         });
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
-            where: { id: "peer-1", status: { not: "REVOKED" } },
-            data: { status: "ACTIVE", lastSeenAt: expect.any(Date) },
+            where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
+            data: { outboundStatus: "ACTIVE", lastSeenAt: expect.any(Date) },
         });
         expect(log.info).not.toHaveBeenCalled();
     });
@@ -57,14 +58,14 @@ describe("federation peer health processor", () => {
 
         await processFederationHealth();
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
-            where: { id: "peer-1", status: { not: "REVOKED" } },
-            data: { status: "OFFLINE" },
+            where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
+            data: { outboundStatus: "OFFLINE" },
         });
         expect(log.info).toHaveBeenCalledTimes(1);
 
         jest.clearAllMocks();
         prisma.federationPeer.findMany.mockResolvedValue([
-            { ...peer, status: "OFFLINE" },
+            { ...peer, outboundStatus: "OFFLINE" },
         ]);
         prisma.federationPeer.updateMany.mockResolvedValue({ count: 1 });
         getManifest.mockRejectedValue(new Error("timeout"));
@@ -74,13 +75,27 @@ describe("federation peer health processor", () => {
 
     it("recovers an offline peer with one transition log", async () => {
         prisma.federationPeer.findMany.mockResolvedValue([
-            { ...peer, status: "OFFLINE" },
+            {
+                ...peer,
+                direction: "BOTH",
+                inboundStatus: "ACTIVE",
+                outboundStatus: "OFFLINE",
+            },
         ]);
 
         await processFederationHealth();
 
         expect(log.info).toHaveBeenCalledWith(
             "peerId=peer-1 status=ACTIVE previous=OFFLINE",
+        );
+        expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
+            where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
+            data: { outboundStatus: "ACTIVE", lastSeenAt: expect.any(Date) },
+        });
+        expect(prisma.federationPeer.updateMany).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: { inboundStatus: expect.anything() },
+            }),
         );
     });
 });

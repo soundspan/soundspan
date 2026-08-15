@@ -2,6 +2,10 @@ import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { decrypt } from "../utils/encryption";
+import {
+    FEDERATION_SCOPE_VALUES,
+    type FederationScope,
+} from "../utils/federationScopes";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ATTEMPTS = 3;
@@ -134,14 +138,29 @@ const epochMismatchSchema = z.object({
     code: z.enum(["FEDERATION_EPOCH_MISMATCH", "FEDERATION_STALE_CURSOR"]),
     currentEpoch: z.string().min(1).max(128),
 });
+const pairedScopesSchema = z
+    .array(z.enum(FEDERATION_SCOPE_VALUES))
+    .min(1)
+    .max(FEDERATION_SCOPE_VALUES.length)
+    .refine((scopes) => new Set(scopes).size === scopes.length)
+    .refine(
+        (scopes) =>
+            !scopes.includes("embeddings:read") ||
+            scopes.includes("library:read"),
+    );
 const pairedPeerSchema = z.strictObject({
     peer: z.strictObject({
         id: z.string().min(1).max(128),
         name: z.string().min(1).max(120),
         direction: z.enum(["HOST", "CONSUMER", "BOTH"]),
         baseUrl: z.string().nullable(),
-        scopes: z.array(z.string().min(1).max(100)).max(3),
-        status: z.enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"]),
+        scopes: pairedScopesSchema,
+        inboundStatus: z
+            .enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"])
+            .nullable(),
+        outboundStatus: z
+            .enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"])
+            .nullable(),
         lastSeenAt: dateTimeSchema.nullable(),
         lastSyncCursor: z.string().nullable(),
         catalogEpoch: z.string().nullable(),
@@ -149,6 +168,8 @@ const pairedPeerSchema = z.strictObject({
         updatedAt: dateTimeSchema,
     }),
     token: z.string().min(1).max(4_096),
+    reciprocalPeerId: z.string().min(1).max(128).optional(),
+    warning: z.string().min(1).max(500).optional(),
 });
 
 export type FederationManifest = z.infer<typeof federationManifestSchema>;
@@ -549,8 +570,11 @@ export async function pairFederationPeer(input: {
     code: string;
     name: string;
     consumerBaseUrl?: string;
+    reciprocalPairingCode?: string;
+    reciprocalScopes?: FederationScope[];
+    requestedScopes?: FederationScope[];
     options?: FederationClientOptions;
-}): Promise<{ token: string }> {
+}): Promise<z.infer<typeof pairedPeerSchema>> {
     const baseUrl = resolveBaseUrl(input.baseUrl);
     const options = input.options ?? {};
     const response = await requestPairWithRetry(
@@ -562,6 +586,15 @@ export async function pairFederationPeer(input: {
                 name: input.name,
                 ...(input.consumerBaseUrl
                     ? { baseUrl: input.consumerBaseUrl }
+                    : {}),
+                ...(input.reciprocalPairingCode
+                    ? {
+                          reciprocalPairingCode: input.reciprocalPairingCode,
+                          reciprocalScopes: input.reciprocalScopes,
+                      }
+                    : {}),
+                ...(input.requestedScopes
+                    ? { requestedScopes: input.requestedScopes }
                     : {}),
             },
         },

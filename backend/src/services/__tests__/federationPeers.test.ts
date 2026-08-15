@@ -8,8 +8,19 @@ const mockCreateFederationClient = jest.fn(() => ({
 const mockPairFederationPeer = jest.fn();
 const mockEncrypt = jest.fn((value: string) => `enc:${value}`);
 const mockDecrypt = jest.fn((value: string) => value.replace(/^enc:/, ""));
-const mockConfig = { soundspanCallbackUrl: "http://backend:3006" };
+const mockConfig = {
+    soundspanCallbackUrl: "http://backend:3006",
+    federation: { instanceName: "Local Library" },
+};
 const mockRemoveReplacementCacheFiles = jest.fn();
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+mockLogger.child.mockReturnValue(mockLogger);
 
 const prisma = {
     systemSettings: {
@@ -22,6 +33,7 @@ const prisma = {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
+        update: jest.fn(),
         updateMany: jest.fn(),
         deleteMany: jest.fn(),
     },
@@ -45,6 +57,7 @@ jest.mock("../../utils/encryption", () => ({
     encrypt: mockEncrypt,
     decrypt: mockDecrypt,
 }));
+jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 jest.mock("../federationClient", () => ({
     createFederationClient: mockCreateFederationClient,
     pairFederationPeer: mockPairFederationPeer,
@@ -56,6 +69,8 @@ jest.mock("../trackReplacement", () => ({
 import { hashApiKey } from "../../utils/apiKeyHash";
 import {
     consumePairingCode,
+    consumeFederationPairingRequest,
+    createBothFederationPeer,
     createFederationPairingCode,
     createHostFederationPeer,
     deleteFederationPeer,
@@ -101,6 +116,13 @@ describe("federation peer credentials", () => {
             ...data,
         }));
         prisma.federationPeer.findFirst.mockResolvedValue({ id: "peer-1" });
+        prisma.federationPeer.update.mockImplementation(async ({ data }) => ({
+            id: "peer-1",
+            createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+            inboundStatus: "ACTIVE",
+            ...data,
+        }));
         prisma.federationPeer.updateMany.mockResolvedValue({ count: 1 });
         prisma.transcodedFile.findMany.mockResolvedValue([]);
         mockRemoveReplacementCacheFiles.mockResolvedValue(undefined);
@@ -119,7 +141,8 @@ describe("federation peer credentials", () => {
                 name: "Peer One",
                 credentialHash: hashApiKey(result.token),
                 direction: "HOST",
-                status: "ACTIVE",
+                inboundStatus: "ACTIVE",
+                outboundStatus: null,
             }),
             select: expect.not.objectContaining({ credentialHash: true }),
         });
@@ -128,20 +151,25 @@ describe("federation peer credentials", () => {
 
     it("rotates a credential and invalidates the old hash", async () => {
         prisma.federationPeer.findFirst
-            .mockResolvedValueOnce({ id: "peer-1", status: "OFFLINE" })
-            .mockResolvedValueOnce({ id: "peer-1", status: "OFFLINE" });
+            .mockResolvedValueOnce({
+                id: "peer-1",
+                inboundStatus: "OFFLINE",
+            })
+            .mockResolvedValueOnce({
+                id: "peer-1",
+                inboundStatus: "OFFLINE",
+            });
         const result = await rotateFederationPeerCredential("peer-1");
 
         expect(result?.token).toMatch(/^[0-9a-f]{64}$/);
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: {
                 id: "peer-1",
-                direction: "HOST",
-                status: "OFFLINE",
+                inboundStatus: "OFFLINE",
             },
             data: {
                 credentialHash: hashApiKey(result!.token),
-                status: "OFFLINE",
+                inboundStatus: "OFFLINE",
             },
         });
     });
@@ -174,7 +202,8 @@ describe("federation peer credentials", () => {
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1" },
             data: {
-                status: "REVOKED",
+                inboundStatus: "REVOKED",
+                outboundStatus: "REVOKED",
                 credentialHash: null,
                 outboundToken: null,
             },
@@ -204,7 +233,29 @@ describe("federation consumer peers", () => {
         jest.clearAllMocks();
         prisma.federationPeer.findFirst.mockResolvedValue(null);
         mockGetManifest.mockResolvedValue(manifest);
-        mockPairFederationPeer.mockResolvedValue({ token: "paired-token" });
+        mockPairFederationPeer.mockResolvedValue({
+            token: "paired-token",
+            peer: {
+                id: "remote-peer",
+                scopes: ["library:read", "stream:read"],
+            },
+        });
+        prisma.federationPairingCode.deleteMany.mockResolvedValue({ count: 0 });
+        prisma.federationPairingCode.findUnique.mockResolvedValue(null);
+        prisma.federationPairingCode.create.mockResolvedValue({});
+        prisma.systemSettings.upsert.mockResolvedValue({});
+        prisma.systemSettings.updateMany.mockResolvedValue({ count: 1 });
+        prisma.systemSettings.findUnique.mockResolvedValue({
+            federationInstanceId: "instance-1",
+            catalogEpoch: "epoch-1",
+        });
+        prisma.federationPeer.update.mockImplementation(async ({ data }) => ({
+            id: "local-host-row",
+            createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+            inboundStatus: "ACTIVE",
+            ...data,
+        }));
         prisma.federationPeer.create.mockImplementation(async ({ data }) => {
             const { outboundToken: _outboundToken, ...publicData } = data;
             return {
@@ -236,7 +287,8 @@ describe("federation consumer peers", () => {
                 baseUrl: "https://peer.example",
                 outboundToken: "enc:raw-token",
                 scopes: ["library:read", "stream:read", "embeddings:read"],
-                status: "ACTIVE",
+                inboundStatus: null,
+                outboundStatus: "ACTIVE",
                 catalogEpoch: "epoch-9",
                 createdById: "admin-1",
                 lastSeenAt: expect.any(Date),
@@ -257,6 +309,28 @@ describe("federation consumer peers", () => {
             }),
         ).rejects.toThrow("malformed peer");
         expect(prisma.federationPeer.create).not.toHaveBeenCalled();
+    });
+
+    it("creates a manual BOTH peer with independent active statuses", async () => {
+        const result = await createBothFederationPeer({
+            baseUrl: "https://peer.example",
+            outboundToken: "remote-token",
+            name: "Mutual Peer",
+            createdById: "admin-1",
+            scopes: ["library:read", "stream:read"],
+        });
+
+        expect(result.token).toMatch(/^[0-9a-f]{64}$/);
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                direction: "BOTH",
+                inboundStatus: "ACTIVE",
+                outboundStatus: "ACTIVE",
+                credentialHash: hashApiKey(result.token),
+                outboundToken: "enc:remote-token",
+            }),
+            select: expect.any(Object),
+        });
     });
 
     it("exchanges a pairing code and then runs the same validated link flow", async () => {
@@ -288,12 +362,93 @@ describe("federation consumer peers", () => {
             createdById: "admin-1",
         });
 
-        expect(mockPairFederationPeer).toHaveBeenCalledWith({
+        expect(mockPairFederationPeer).toHaveBeenCalledWith(
+            expect.objectContaining({
+                baseUrl: "https://host.example",
+                code: "ABCDEFGH",
+                name: "Consumer Name",
+                consumerBaseUrl: "https://consumer.example",
+                reciprocalPairingCode:
+                    expect.stringMatching(/^[A-HJ-NP-Z2-9]{8}$/),
+                reciprocalScopes: ["library:read", "stream:read"],
+            }),
+        );
+    });
+
+    it("upgrades the reciprocal callback row instead of creating a duplicate", async () => {
+        mockConfig.soundspanCallbackUrl = "https://consumer.example";
+        mockPairFederationPeer.mockResolvedValue({
+            token: "paired-token",
+            reciprocalPeerId: "local-host-row",
+            peer: {
+                id: "remote-both-row",
+                scopes: ["library:read", "stream:read"],
+            },
+        });
+        prisma.federationPeer.findFirst.mockResolvedValue({
+            id: "local-host-row",
+        });
+
+        const result = await pairAndLinkConsumerFederationPeer({
             baseUrl: "https://host.example",
             code: "ABCDEFGH",
             name: "Consumer Name",
-            consumerBaseUrl: "https://consumer.example",
+            createdById: "admin-1",
         });
+
+        expect(result.peer).toEqual(
+            expect.objectContaining({
+                id: "local-host-row",
+                direction: "BOTH",
+            }),
+        );
+        expect(prisma.federationPeer.create).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ direction: "CONSUMER" }),
+            }),
+        );
+        expect(prisma.federationPeer.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "local-host-row" },
+                data: expect.objectContaining({
+                    direction: "BOTH",
+                    outboundStatus: "ACTIVE",
+                }),
+            }),
+        );
+    });
+
+    it("keeps a degraded reciprocal upgrade within the shared scope grant", async () => {
+        mockConfig.soundspanCallbackUrl = "https://consumer.example";
+        mockPairFederationPeer.mockResolvedValue({
+            token: "paired-token",
+            reciprocalPeerId: "local-host-row",
+            warning: "remote upgrade failed",
+            peer: {
+                id: "remote-host-row",
+                scopes: ["library:read", "stream:read", "embeddings:read"],
+            },
+        });
+        prisma.federationPeer.findFirst.mockResolvedValue({
+            id: "local-host-row",
+        });
+
+        const result = await pairAndLinkConsumerFederationPeer({
+            baseUrl: "https://host.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            createdById: "admin-1",
+        });
+
+        expect(result.warning).toBe("remote upgrade failed");
+        expect(prisma.federationPeer.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    direction: "BOTH",
+                    scopes: ["library:read", "stream:read"],
+                }),
+            }),
+        );
     });
 
     it("rejects a duplicate normalized non-revoked consumer URL", async () => {
@@ -318,7 +473,7 @@ describe("federation consumer peers", () => {
             baseUrl: "https://peer.example",
             outboundToken: "enc:stored-token",
             direction: "CONSUMER",
-            status: "ACTIVE",
+            outboundStatus: "ACTIVE",
         });
 
         await expect(
@@ -328,7 +483,7 @@ describe("federation consumer peers", () => {
             baseUrl: "https://peer.example",
             outboundToken: "stored-token",
             direction: "CONSUMER",
-            status: "ACTIVE",
+            outboundStatus: "ACTIVE",
         });
         expect(mockDecrypt).toHaveBeenCalledWith("enc:stored-token");
     });
@@ -337,6 +492,7 @@ describe("federation consumer peers", () => {
 describe("federation pairing codes", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockConfig.soundspanCallbackUrl = "http://backend:3006";
         prisma.federationPairingCode.deleteMany.mockResolvedValue({ count: 0 });
         prisma.federationPairingCode.findUnique.mockResolvedValue(null);
         prisma.federationPairingCode.create.mockImplementation(
@@ -356,6 +512,14 @@ describe("federation pairing codes", () => {
         prisma.$transaction.mockImplementation(async (callback) =>
             callback(prisma),
         );
+        prisma.federationPeer.update.mockImplementation(async ({ data }) => ({
+            id: "peer-1",
+            direction: "BOTH",
+            inboundStatus: "ACTIVE",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            ...data,
+        }));
     });
 
     it("creates an eight-character code with a five-minute lifetime", async () => {
@@ -408,7 +572,7 @@ describe("federation pairing codes", () => {
             code: "ABCDEFGH",
             createdById: "admin-1",
             scopes: ["library:read", "stream:read"],
-            expiresAt: new Date("2026-08-15T12:05:00.000Z"),
+            expiresAt: new Date(Date.now() + 60_000),
             usedAt: null,
         });
 
@@ -475,5 +639,74 @@ describe("federation pairing codes", () => {
             ),
         ).resolves.toBeNull();
         expect(prisma.federationPairingCode.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("completes the host side of reciprocal pairing as one BOTH row", async () => {
+        mockConfig.soundspanCallbackUrl = "https://host.example";
+        prisma.federationPairingCode.findUnique.mockResolvedValue({
+            id: "code-1",
+            code: "ABCDEFGH",
+            createdById: "admin-1",
+            scopes: ["library:read", "stream:read"],
+            expiresAt: new Date(Date.now() + 60_000),
+            usedAt: null,
+        });
+        mockPairFederationPeer.mockResolvedValue({
+            token: "reciprocal-token",
+            peer: { id: "consumer-host-row" },
+        });
+
+        const result = await consumeFederationPairingRequest({
+            code: "ABCDEFGH",
+            name: "Consumer",
+            baseUrl: "https://consumer.example",
+            reciprocalPairingCode: "HGFEDCBA",
+            reciprocalScopes: ["library:read", "stream:read"],
+        });
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                reciprocalPeerId: "consumer-host-row",
+                peer: expect.objectContaining({ direction: "BOTH" }),
+            }),
+        );
+        expect(prisma.federationPeer.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    direction: "BOTH",
+                    outboundToken: "enc:reciprocal-token",
+                    outboundStatus: "ACTIVE",
+                }),
+            }),
+        );
+    });
+
+    it("keeps the issued HOST link when reciprocal pairing fails", async () => {
+        mockConfig.soundspanCallbackUrl = "https://host.example";
+        prisma.federationPairingCode.findUnique.mockResolvedValue({
+            id: "code-1",
+            code: "ABCDEFGH",
+            createdById: "admin-1",
+            scopes: ["library:read", "stream:read"],
+            expiresAt: new Date(Date.now() + 60_000),
+            usedAt: null,
+        });
+        mockPairFederationPeer.mockRejectedValue(new Error("callback failed"));
+
+        const result = await consumeFederationPairingRequest({
+            code: "ABCDEFGH",
+            name: "Consumer",
+            baseUrl: "https://consumer.example",
+            reciprocalPairingCode: "HGFEDCBA",
+            reciprocalScopes: ["library:read", "stream:read"],
+        });
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                warning: expect.stringContaining("one-directional"),
+                peer: expect.objectContaining({ direction: "HOST" }),
+            }),
+        );
+        expect(prisma.federationPeer.update).not.toHaveBeenCalled();
     });
 });

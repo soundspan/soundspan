@@ -1364,7 +1364,7 @@ describe("library stream runtime coverage", () => {
             name: "Peer One",
             baseUrl: "https://peer.example",
             outboundToken: "encrypted-token",
-            status: "ACTIVE",
+            outboundStatus: "ACTIVE",
         });
     });
 
@@ -1679,7 +1679,7 @@ describe("library stream runtime coverage", () => {
                 name: "Peer One",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
             remoteId: "remote-track-1",
             trackId: "fed-track-1",
@@ -5426,7 +5426,7 @@ describe("library catalog list runtime coverage", () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
             artist: { name: "Remote Artist" },
         });
@@ -5446,7 +5446,7 @@ describe("library catalog list runtime coverage", () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "ACTIVE",
+                outboundStatus: "ACTIVE",
             },
             remoteId: "remote-album-1",
         });
@@ -5466,7 +5466,7 @@ describe("library catalog list runtime coverage", () => {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
                 outboundToken: "encrypted-token",
-                status: "OFFLINE",
+                outboundStatus: "OFFLINE",
             },
             artist: { name: "Remote Artist" },
         });

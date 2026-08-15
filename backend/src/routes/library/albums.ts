@@ -227,7 +227,11 @@ export async function handleGetAlbums(req: Request, res: Response) {
                         },
                     },
                     federationPeer: {
-                        select: { id: true, name: true, status: true },
+                        select: {
+                            id: true,
+                            name: true,
+                            outboundStatus: true,
+                        },
                     },
                 },
             }),
@@ -242,7 +246,7 @@ export async function handleGetAlbums(req: Request, res: Response) {
                 ? {
                       id: federationPeer.id,
                       name: federationPeer.name,
-                      online: federationPeer.status === "ACTIVE",
+                      online: federationPeer.outboundStatus === "ACTIVE",
                   }
                 : undefined,
             coverArt: album.coverUrl,
@@ -323,13 +327,17 @@ export async function handleGetAlbum(
                       select: { id: true, mbid: true, name: true },
                   },
                   federationPeer: {
-                      select: { id: true, name: true, status: true },
+                      select: { id: true, name: true, outboundStatus: true },
                   },
                   tracks: {
                       where: browseTrackWhere,
                       include: {
                           federationPeer: {
-                              select: { id: true, name: true, status: true },
+                              select: {
+                                  id: true,
+                                  name: true,
+                                  outboundStatus: true,
+                              },
                           },
                       },
                       orderBy: [
@@ -352,7 +360,7 @@ export async function handleGetAlbum(
                       select: { id: true, mbid: true, name: true },
                   },
                   federationPeer: {
-                      select: { id: true, name: true, status: true },
+                      select: { id: true, name: true, outboundStatus: true },
                   },
               },
           });
@@ -383,7 +391,7 @@ export async function handleGetAlbum(
                   peer: {
                       id: federationPeer.id,
                       name: federationPeer.name,
-                      online: federationPeer.status === "ACTIVE",
+                      online: federationPeer.outboundStatus === "ACTIVE",
                   },
               }
             : {}),
@@ -397,7 +405,7 @@ export async function handleGetAlbum(
             ? {
                   id: federationPeer.id,
                   name: federationPeer.name,
-                  online: federationPeer.status === "ACTIVE",
+                  online: federationPeer.outboundStatus === "ACTIVE",
               }
             : undefined,
         artist: artistData,
