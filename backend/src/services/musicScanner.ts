@@ -54,7 +54,21 @@ type IdentityTrackRow = Prisma.TrackGetPayload<{
     select: typeof TRACK_IDENTITY_SELECT;
 }>;
 
-function isTrackRemoved(track: Pick<IdentityTrackRow, "removedAt">): boolean {
+type LocalIdentityTrackRow = Omit<IdentityTrackRow, "filePath"> & {
+    filePath: string;
+};
+
+function keepTracksWithPaths(
+    tracks: readonly IdentityTrackRow[],
+): LocalIdentityTrackRow[] {
+    return tracks.flatMap((track) =>
+        track.filePath === null ? [] : [{ ...track, filePath: track.filePath }],
+    );
+}
+
+function isTrackRemoved(
+    track: Pick<LocalIdentityTrackRow, "removedAt">,
+): boolean {
     return track.removedAt instanceof Date;
 }
 
@@ -66,8 +80,8 @@ function hasAudioReplacement(
 }
 
 function buildRebindData(
-    candidate: IdentityTrackRow,
-    missing: IdentityTrackRow,
+    candidate: LocalIdentityTrackRow,
+    missing: LocalIdentityTrackRow,
 ): Prisma.TrackUpdateArgs["data"] {
     const hashData =
         candidate.audioHash === null && missing.audioHash !== null
@@ -118,9 +132,9 @@ function isPrismaRecordNotFound(error: unknown): boolean {
 }
 
 function mergeTracksById(
-    first: readonly IdentityTrackRow[],
-    second: readonly IdentityTrackRow[],
-): IdentityTrackRow[] {
+    first: readonly LocalIdentityTrackRow[],
+    second: readonly LocalIdentityTrackRow[],
+): LocalIdentityTrackRow[] {
     const tracksById = new Map(first.map((track) => [track.id, track]));
     for (const track of second) tracksById.set(track.id, track);
     return [...tracksById.values()];
@@ -242,6 +256,7 @@ export class MusicScannerService {
         const removed = await prisma.track.updateMany({
             where: {
                 id: { in: tracks.map((track) => track.id) },
+                origin: "LOCAL",
                 removedAt: null,
             },
             data: { removedAt: new Date() },
@@ -253,7 +268,7 @@ export class MusicScannerService {
     }
 
     private async rebindMovedTrack(
-        match: TrackIdentityMatch<IdentityTrackRow, IdentityTrackRow>,
+        match: TrackIdentityMatch<LocalIdentityTrackRow, LocalIdentityTrackRow>,
         revival: boolean,
     ): Promise<void> {
         const replacement = hasAudioReplacement(
@@ -291,11 +306,11 @@ export class MusicScannerService {
     }
 
     private async rebindMovedTracks(
-        missing: IdentityTrackRow[],
+        missing: LocalIdentityTrackRow[],
         candidatePaths: readonly string[],
         revival = false,
     ): Promise<{
-        unmatched: IdentityTrackRow[];
+        unmatched: LocalIdentityTrackRow[];
         rebound: number;
         consumedCandidatePaths: string[];
     }> {
@@ -334,25 +349,34 @@ export class MusicScannerService {
 
     private async loadTracksByPaths(
         filePaths: readonly string[],
-    ): Promise<IdentityTrackRow[]> {
-        return processBatched(
+    ): Promise<LocalIdentityTrackRow[]> {
+        const tracks = await processBatched(
             [...filePaths],
             TRACK_PATH_QUERY_BATCH_SIZE,
             (batch) =>
                 prisma.track.findMany({
-                    where: { filePath: { in: batch } },
+                    where: {
+                        origin: "LOCAL",
+                        filePath: { in: batch },
+                    },
                     select: TRACK_IDENTITY_SELECT,
                 }),
         );
+        return keepTracksWithPaths(tracks);
     }
 
     private async loadTracksForScan(
         scannedPaths: ReadonlySet<string>,
-    ): Promise<IdentityTrackRow[]> {
-        const activeTracks = await prisma.track.findMany({
-            where: { removedAt: null },
+    ): Promise<LocalIdentityTrackRow[]> {
+        const activeRows = await prisma.track.findMany({
+            where: {
+                origin: "LOCAL",
+                filePath: { not: null },
+                removedAt: null,
+            },
             select: TRACK_IDENTITY_SELECT,
         });
+        const activeTracks = keepTracksWithPaths(activeRows);
         const tracksAtScannedPaths = await this.loadTracksByPaths([
             ...scannedPaths,
         ]);
@@ -366,12 +390,17 @@ export class MusicScannerService {
         const retentionDays = config.workers.trackRemovalRetentionDays;
         if (retentionDays === 0) return 0;
         const purgeCutoff = new Date(Date.now() - retentionDays * DAY_MS);
-        const removedTracks = await prisma.track.findMany({
-            where: { removedAt: { not: null, gte: purgeCutoff } },
+        const removedRows = await prisma.track.findMany({
+            where: {
+                origin: "LOCAL",
+                filePath: { not: null },
+                removedAt: { not: null, gte: purgeCutoff },
+            },
             orderBy: { removedAt: "desc" },
             take: REMOVED_TRACK_REVIVAL_POOL_LIMIT,
             select: TRACK_IDENTITY_SELECT,
         });
+        const removedTracks = keepTracksWithPaths(removedRows);
         const result = await this.rebindMovedTracks(
             removedTracks,
             candidatePaths,
@@ -1327,6 +1356,7 @@ export class MusicScannerService {
                 duration,
                 mime,
                 filePath: relativePath,
+                origin: "LOCAL",
                 fileModified: stats.mtime,
                 fileSize: stats.size,
                 recordingMbid,

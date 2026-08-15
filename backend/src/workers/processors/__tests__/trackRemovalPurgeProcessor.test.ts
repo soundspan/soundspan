@@ -6,7 +6,10 @@ describe("trackRemovalPurgeProcessor", () => {
     });
 
     function loadProcessor(
-        candidates: Array<{ id: string }>,
+        candidates: Array<{
+            id: string;
+            origin?: "LOCAL" | "FEDERATED";
+        }>,
         retentionDays = 90,
         deletedCount = candidates.length,
     ) {
@@ -21,7 +24,14 @@ describe("trackRemovalPurgeProcessor", () => {
 
         const prisma = {
             track: {
-                findMany: jest.fn(async () => candidates),
+                findMany: jest.fn(
+                    async (args: { where?: { origin?: string } }) =>
+                        args.where?.origin === "LOCAL"
+                            ? candidates.filter(
+                                  (track) => track.origin !== "FEDERATED",
+                              )
+                            : candidates,
+                ),
                 deleteMany: jest.fn(async (_args: unknown) => ({
                     count: deletedCount,
                 })),
@@ -83,6 +93,7 @@ describe("trackRemovalPurgeProcessor", () => {
 
         expect(prisma.track.findMany).toHaveBeenCalledWith({
             where: {
+                origin: "LOCAL",
                 removedAt: { lt: new Date("2026-05-16T12:00:00.000Z") },
             },
             orderBy: { id: "asc" },
@@ -92,6 +103,7 @@ describe("trackRemovalPurgeProcessor", () => {
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-old"] },
+                origin: "LOCAL",
                 removedAt: { lt: new Date("2026-05-16T12:00:00.000Z") },
             },
         });
@@ -108,7 +120,7 @@ describe("trackRemovalPurgeProcessor", () => {
 
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { removedAt: { lt: now } },
+                where: { origin: "LOCAL", removedAt: { lt: now } },
             }),
         );
     });
@@ -136,6 +148,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 id: {
                     in: expect.arrayContaining(["track-000", "track-099"]),
                 },
+                origin: "LOCAL",
                 removedAt: { lt: new Date("2026-05-16T12:00:00.000Z") },
             },
         });
@@ -176,6 +189,7 @@ describe("trackRemovalPurgeProcessor", () => {
 
         expect(prisma.track.findMany).toHaveBeenCalledWith({
             where: {
+                origin: "LOCAL",
                 removedAt: { lt: new Date(cutoffAt) },
                 id: { gt: "track-100" },
             },
@@ -267,5 +281,22 @@ describe("trackRemovalPurgeProcessor", () => {
         ).resolves.toEqual({ deleted: 0, continued: false });
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
         expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+    });
+
+    it("does not select federated tracks for local retention purge", async () => {
+        const { module, prisma, cleanupOrphanedLibraryEntities } =
+            loadProcessor([{ id: "track-federated", origin: "FEDERATED" }]);
+
+        await expect(
+            module.processTrackRemovalPurge(buildJob()),
+        ).resolves.toEqual({ deleted: 0, continued: false });
+
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({ origin: "LOCAL" }),
+            }),
+        );
+        expect(prisma.track.deleteMany).not.toHaveBeenCalled();
+        expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
     });
 });

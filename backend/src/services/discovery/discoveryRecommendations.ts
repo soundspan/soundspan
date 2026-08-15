@@ -333,6 +333,8 @@ export class DiscoveryRecommendationsService {
             where: {
                 ...TRACK_VISIBLE_WHERE,
                 duration: { gt: 0 },
+                filePath: { not: null },
+                origin: "LOCAL",
                 ...(recentTrackIds.length > 0
                     ? { id: { notIn: recentTrackIds } }
                     : {}),
@@ -407,6 +409,7 @@ export class DiscoveryRecommendationsService {
 
         for (const candidate of scoredCandidates) {
             if (selected.length >= targetCount) break;
+            if (candidate.track.filePath === null) continue;
             if (selectedTrackIds.has(candidate.track.id)) continue;
             if (selectedAlbumIds.has(candidate.track.albumId)) continue;
             if (
@@ -443,6 +446,7 @@ export class DiscoveryRecommendationsService {
         if (selected.length < targetCount) {
             for (const candidate of deferredPrimaryCandidates) {
                 if (selected.length >= targetCount) break;
+                if (candidate.track.filePath === null) continue;
                 if (selectedTrackIds.has(candidate.track.id)) continue;
                 if (selectedAlbumIds.has(candidate.track.albumId)) continue;
                 if (
@@ -481,6 +485,8 @@ export class DiscoveryRecommendationsService {
                 where: {
                     ...TRACK_VISIBLE_WHERE,
                     duration: { gt: 0 },
+                    filePath: { not: null },
+                    origin: "LOCAL",
                     id: { notIn: Array.from(selectedTrackIds) },
                     album: {
                         location: "LIBRARY",
@@ -515,6 +521,7 @@ export class DiscoveryRecommendationsService {
 
             for (const track of fallbackTracks) {
                 if (selected.length >= targetCount) break;
+                if (track.filePath === null) continue;
                 if (selectedTrackIds.has(track.id)) continue;
                 if (selectedAlbumIds.has(track.albumId)) continue;
                 if (!canSelectArtist(track.album.artist.id, strictArtistCap)) {
@@ -552,6 +559,7 @@ export class DiscoveryRecommendationsService {
             if (selected.length < targetCount) {
                 for (const track of deferredFallbackTracks) {
                     if (selected.length >= targetCount) break;
+                    if (track.filePath === null) continue;
                     if (selectedTrackIds.has(track.id)) continue;
                     if (selectedAlbumIds.has(track.albumId)) continue;
                     if (

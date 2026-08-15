@@ -1018,7 +1018,11 @@ class PlaylistImportService {
 
     private async getLocalLibraryCandidates(): Promise<LocalTrackCandidate[]> {
         const tracks = await prisma.track.findMany({
-            where: TRACK_VISIBLE_WHERE,
+            where: {
+                ...TRACK_VISIBLE_WHERE,
+                filePath: { not: null },
+                origin: "LOCAL",
+            },
             select: {
                 id: true,
                 title: true,
@@ -1033,14 +1037,20 @@ class PlaylistImportService {
             },
         });
 
-        return tracks.map((t) => ({
-            id: t.id,
-            title: t.title,
-            duration: t.duration,
-            albumTitle: t.album.title,
-            artistName: t.album.artist.name,
-            filePath: t.filePath,
-        }));
+        return tracks.flatMap((track) =>
+            track.filePath === null
+                ? []
+                : [
+                      {
+                          id: track.id,
+                          title: track.title,
+                          duration: track.duration,
+                          albumTitle: track.album.title,
+                          artistName: track.album.artist.name,
+                          filePath: track.filePath,
+                      },
+                  ],
+        );
     }
 
     private async checkYtMusicAuth(userId: string): Promise<boolean> {

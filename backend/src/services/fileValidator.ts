@@ -84,6 +84,7 @@ export class FileValidatorService {
 
         // Get all tracks from the database
         const tracks = await prisma.track.findMany({
+            where: { origin: "LOCAL", filePath: { not: null } },
             select: {
                 id: true,
                 filePath: true,
@@ -101,6 +102,7 @@ export class FileValidatorService {
 
         for (const track of tracks) {
             await this.validationQueue.add(async () => {
+                if (track.filePath === null) return;
                 try {
                     const absolutePath = safeResolvePath(
                         config.music.musicPath,
@@ -163,8 +165,10 @@ export class FileValidatorService {
                 `[FileValidator] Recording ${missingTrackIds.length} missing tracks in library health...`,
             );
 
-            const missingTracks = tracks.filter((track) =>
-                missingTrackIds.includes(track.id),
+            const missingTracks = tracks.filter(
+                (track): track is typeof track & { filePath: string } =>
+                    track.filePath !== null &&
+                    missingTrackIds.includes(track.id),
             );
             await processBatched(
                 missingTracks,
@@ -204,7 +208,7 @@ export class FileValidatorService {
      */
     async validateTrack(trackId: string): Promise<boolean> {
         const track = await prisma.track.findUnique({
-            where: { id: trackId },
+            where: { id: trackId, origin: "LOCAL" },
             select: {
                 id: true,
                 filePath: true,
@@ -212,7 +216,7 @@ export class FileValidatorService {
             },
         });
 
-        if (!track) {
+        if (!track || track.filePath === null) {
             return false;
         }
 

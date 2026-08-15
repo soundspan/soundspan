@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added database schema groundwork for federated library sharing, including
+  peer and tombstone records plus catalog provenance fields. No federation
+  routes or user-facing behavior are enabled yet.
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges

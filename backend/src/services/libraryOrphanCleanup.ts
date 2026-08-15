@@ -12,7 +12,7 @@ export interface LibraryOrphanCleanupResult {
 /** Deletes albums without track rows, then artists without album rows. */
 export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCleanupResult> {
     const orphanedAlbums = await prisma.album.findMany({
-        where: { tracks: { none: {} } },
+        where: { peerId: null, tracks: { none: {} } },
         select: { id: true },
     });
     const albumsDeleted =
@@ -21,6 +21,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
                   await prisma.album.deleteMany({
                       where: {
                           id: { in: orphanedAlbums.map((album) => album.id) },
+                          peerId: null,
                           tracks: { none: {} },
                       },
                   })
@@ -28,7 +29,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
             : 0;
 
     const orphanedArtists = await prisma.artist.findMany({
-        where: { albums: { none: {} } },
+        where: { peerId: null, albums: { none: {} } },
         select: { id: true },
     });
     const artistsDeleted =
@@ -39,6 +40,7 @@ export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCle
                           id: {
                               in: orphanedArtists.map((artist) => artist.id),
                           },
+                          peerId: null,
                           albums: { none: {} },
                       },
                   })

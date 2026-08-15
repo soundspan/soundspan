@@ -59,6 +59,7 @@ model User {
   inviteCodesCreated     InviteCode[]          @relation("InviteCodesCreated")
   inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
   shareLinks             ShareLink[]
+  federationPeersCreated FederationPeer[]
 }
 
 model UserSettings {
@@ -226,6 +227,8 @@ model SystemSettings {
   ytMusicClientSecret         String? // Google OAuth client secret
   discNoBackfillDone          Boolean  @default(false)
   showVersion                 Boolean  @default(false)
+  federationInstanceId        String?
+  catalogEpoch                String?
 }
 
 model Artist {
@@ -251,13 +254,17 @@ model Artist {
   libraryAlbumCount   Int                      @default(0)
   totalTrackCount     Int                      @default(0)
   remoteTrackCount    Int                      @default(0)
+  peerId              String?
+  remoteId            String?
   albums              Album[]
   ownedAlbums         OwnedAlbum[]
   similarFrom         SimilarArtist[]          @relation("FromArtist")
   similarTo           SimilarArtist[]          @relation("ToArtist")
   tracksTidal         TrackTidal[]
   tracksYtMusic       TrackYtMusic[]
+  federationPeer      FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
 
+  @@unique([peerId, remoteId])
   @@index([name])
   @@index([normalizedName])
   @@index([searchVector], type: Gin)
@@ -287,11 +294,15 @@ model Album {
   userCoverUrl     String?
   userGenres       Json?
   originalYear     Int?
+  peerId           String?
+  remoteId         String?
   artist           Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  federationPeer   FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
   tracks           Track[]
   tracksTidal      TrackTidal[]
   tracksYtMusic    TrackYtMusic[]
 
+  @@unique([peerId, remoteId])
   @@index([artistId])
   @@index([location])
   @@index([artistId, location])
@@ -309,9 +320,12 @@ model Track {
   duration           Int
   mime               String?
   searchVector       Unsupported("tsvector")?
-  filePath           String                   @unique
+  filePath           String?                  @unique
   fileModified       DateTime
   fileSize           Int
+  origin             TrackOrigin              @default(LOCAL)
+  peerId             String?
+  remoteId           String?
   bpm                Float?
   beatsCount         Int?
   key                String?
@@ -384,12 +398,14 @@ model Track {
   plays           Play[]
   playlistItems   PlaylistItem[]
   album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  federationPeer  FederationPeer?  @relation(fields: [peerId], references: [id], onDelete: Cascade)
   trackGenres     TrackGenre[]
   transcodedFiles TranscodedFile[]
   embedding       TrackEmbedding?
   lyrics          TrackLyrics?
   syncGroups      SyncGroup[]      @relation("SyncGroupTrack")
 
+  @@unique([peerId, remoteId])
   @@index([albumId])
   @@index([albumId, discNo, trackNo])
   @@index([fileModified])
@@ -417,6 +433,38 @@ model Track {
   @@index([recordingMbid])
   @@index([isrc])
   @@index([removedAt])
+  @@index([origin])
+}
+
+model FederationPeer {
+  id             String        @id @default(cuid())
+  name           String
+  direction      PeerDirection
+  baseUrl        String?
+  credentialHash String?       @unique
+  outboundToken  String?
+  scopes         String[]
+  status         PeerStatus
+  lastSeenAt     DateTime?
+  lastSyncCursor String?
+  catalogEpoch   String?
+  createdById    String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  createdBy      User          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  artists        Artist[]
+  albums         Album[]
+  tracks         Track[]
+}
+
+model FederationTombstone {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  deletedAt  DateTime @default(now())
+
+  @@index([deletedAt])
+  @@index([entityType, entityId])
 }
 
 model Bookmark {
@@ -1171,6 +1219,25 @@ enum AlbumLocation {
   LIBRARY
   DISCOVER
   REMOTE
+  FEDERATED
+}
+
+enum TrackOrigin {
+  LOCAL
+  FEDERATED
+}
+
+enum PeerDirection {
+  HOST
+  CONSUMER
+  BOTH
+}
+
+enum PeerStatus {
+  PENDING
+  ACTIVE
+  OFFLINE
+  REVOKED
 }
 
 model TrackLyrics {

@@ -726,7 +726,7 @@ function formatSongForSubsonic(song: {
     duration: number;
     fileSize: number;
     mime: string | null;
-    filePath: string;
+    filePath: string | null;
     genre?: string | null;
     album: {
         id: string;
@@ -741,7 +741,8 @@ function formatSongForSubsonic(song: {
         };
     };
 }): Record<string, unknown> {
-    const suffix = getFileSuffix(song.filePath);
+    const suffix =
+        song.filePath === null ? undefined : getFileSuffix(song.filePath);
 
     const formatted: Record<string, unknown> = {
         id: toSubsonicId("track", song.id),

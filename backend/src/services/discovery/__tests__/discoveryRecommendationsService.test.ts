@@ -424,6 +424,8 @@ describe("DiscoveryRecommendationsService", () => {
                 where: {
                     removedAt: null,
                     duration: { gt: 0 },
+                    filePath: { not: null },
+                    origin: "LOCAL",
                     id: { notIn: ["recent-track"] },
                     album: {
                         location: "LIBRARY",
@@ -453,6 +455,8 @@ describe("DiscoveryRecommendationsService", () => {
                 where: {
                     removedAt: null,
                     duration: { gt: 0 },
+                    filePath: { not: null },
+                    origin: "LOCAL",
                     id: { notIn: ["track-priority"] },
                     album: {
                         location: "LIBRARY",

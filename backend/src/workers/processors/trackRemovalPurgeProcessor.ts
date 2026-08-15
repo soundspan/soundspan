@@ -92,6 +92,7 @@ async function loadPurgePage(
 ): Promise<Array<{ id: string }>> {
     return prisma.track.findMany({
         where: {
+            origin: "LOCAL",
             removedAt: { lt: cursor.cutoff },
             ...(cursor.startAfterId ? { id: { gt: cursor.startAfterId } } : {}),
         },
@@ -109,6 +110,7 @@ async function deletePurgeBatch(
     const result = await prisma.track.deleteMany({
         where: {
             id: { in: batch.map((track) => track.id) },
+            origin: "LOCAL",
             removedAt: { lt: cutoff },
         },
     });

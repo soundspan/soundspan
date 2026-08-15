@@ -757,6 +757,7 @@ class TrackReconciliationService {
     ): Promise<LocalTrackCandidate[]> {
         signal.throwIfAborted();
         const tracks = await prisma.track.findMany({
+            where: { origin: "LOCAL", filePath: { not: null } },
             select: {
                 id: true,
                 title: true,
@@ -772,14 +773,20 @@ class TrackReconciliationService {
         });
         signal.throwIfAborted();
 
-        return tracks.map((t) => ({
-            id: t.id,
-            title: t.title,
-            duration: t.duration,
-            albumTitle: t.album.title,
-            artistName: t.album.artist.name,
-            filePath: t.filePath,
-        }));
+        return tracks.flatMap((track) =>
+            track.filePath === null
+                ? []
+                : [
+                      {
+                          id: track.id,
+                          title: track.title,
+                          duration: track.duration,
+                          albumTitle: track.album.title,
+                          artistName: track.album.artist.name,
+                          filePath: track.filePath,
+                      },
+                  ],
+        );
     }
 }
 

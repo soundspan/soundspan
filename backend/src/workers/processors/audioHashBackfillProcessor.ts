@@ -40,6 +40,16 @@ export interface AudioHashBackfillResult {
 
 type BackfillTrack = { id: string; filePath: string };
 
+function keepTracksWithPaths(
+    tracks: ReadonlyArray<{ id: string; filePath: string | null }>,
+): BackfillTrack[] {
+    return tracks.flatMap((track) =>
+        track.filePath === null
+            ? []
+            : [{ id: track.id, filePath: track.filePath }],
+    );
+}
+
 const backfillJobDataSchema = z.strictObject({
     mode: z.literal("startup").optional(),
     startAfterId: z.string().trim().min(1).max(128).optional(),
@@ -49,9 +59,11 @@ const backfillJobDataSchema = z.strictObject({
 async function loadBackfillPage(
     startAfterId: string | undefined,
 ): Promise<BackfillTrack[]> {
-    return prisma.track.findMany({
+    const tracks = await prisma.track.findMany({
         where: {
             audioHash: null,
+            filePath: { not: null },
+            origin: "LOCAL",
             removedAt: null,
             ...(startAfterId ? { id: { gt: startAfterId } } : {}),
         },
@@ -59,6 +71,7 @@ async function loadBackfillPage(
         take: QUERY_SIZE,
         select: { id: true, filePath: true },
     });
+    return keepTracksWithPaths(tracks);
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -103,7 +116,7 @@ async function hashTrack(track: BackfillTrack): Promise<"hashed" | "skipped"> {
     if (!audioHash) return "skipped";
 
     const updated = await prisma.track.updateMany({
-        where: { id: track.id, audioHash: null },
+        where: { id: track.id, audioHash: null, origin: "LOCAL" },
         data: { audioHash, audioHashedAt: new Date(), ...identityTags },
     });
     return updated.count === 1 ? "hashed" : "skipped";

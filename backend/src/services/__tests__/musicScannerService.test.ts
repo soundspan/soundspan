@@ -161,6 +161,7 @@ const { MusicScannerService } =
 interface TestIdentityTrack {
     id: string;
     filePath: string;
+    origin: "LOCAL" | "FEDERATED";
     fileModified: Date;
     fileSize: number;
     duration: number;
@@ -185,6 +186,7 @@ function identityTrack(
     return {
         id,
         filePath,
+        origin: "LOCAL",
         fileModified: new Date("2026-01-01T00:00:00.000Z"),
         fileSize: 1_024,
         duration: 218,
@@ -346,6 +348,39 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(pathQueries).toHaveLength(2);
         expect(pathQueries[0][0].where.filePath.in).toHaveLength(10_000);
         expect(pathQueries[1][0].where.filePath.in).toHaveLength(1);
+    });
+
+    it("does not load or mark federated tracks as missing", async () => {
+        const scanner = new MusicScannerService();
+        const federatedTrack = identityTrack(
+            "track-federated",
+            "Peer/Track.flac",
+            { origin: "FEDERATED" },
+        );
+        jest.spyOn(
+            scanner as unknown as {
+                findAudioFiles(path: string): Promise<string[]>;
+            },
+            "findAudioFiles",
+        ).mockResolvedValue([]);
+        mockPrisma.track.findMany.mockImplementation(async (args) =>
+            args.where?.origin === "LOCAL" ? [] : [federatedTrack],
+        );
+
+        await expect(scanner.scanLibrary("/music")).resolves.toEqual(
+            expect.objectContaining({ tracksRemoved: 0 }),
+        );
+
+        expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
+            where: {
+                origin: "LOCAL",
+                filePath: { not: null },
+                removedAt: null,
+            },
+            select: expect.objectContaining({ filePath: true }),
+        });
+        expect(mockPrisma.libraryHealthRecord.upsert).not.toHaveBeenCalled();
+        expect(mockPrisma.track.updateMany).not.toHaveBeenCalled();
     });
 
     it("chunks moved-track candidate path lookups beyond the bind-parameter batch size", async () => {
@@ -576,6 +611,7 @@ describe("MusicScannerService.scanLibrary", () => {
                     title: "Test Track",
                     filePath: "Artist/Test Track.flac",
                     mime: "audio/flac",
+                    origin: "LOCAL",
                 }),
                 update: expect.objectContaining({
                     albumId: "album-1",
@@ -1200,15 +1236,24 @@ describe("MusicScannerService.scanLibrary", () => {
         const result = await scanner.scanLibrary("/music");
 
         expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(1, {
-            where: { removedAt: null },
+            where: {
+                origin: "LOCAL",
+                filePath: { not: null },
+                removedAt: null,
+            },
             select: expect.objectContaining({ removedAt: true }),
         });
         expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(2, {
-            where: { filePath: { in: ["New/01 Song.flac"] } },
+            where: {
+                origin: "LOCAL",
+                filePath: { in: ["New/01 Song.flac"] },
+            },
             select: expect.objectContaining({ removedAt: true }),
         });
         expect(mockPrisma.track.findMany).toHaveBeenNthCalledWith(3, {
             where: {
+                origin: "LOCAL",
+                filePath: { not: null },
                 removedAt: {
                     not: null,
                     gte: new Date("2025-12-01T00:00:00.000Z"),
@@ -1343,6 +1388,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-old-1", "track-old-2"] },
+                origin: "LOCAL",
                 removedAt: null,
             },
             data: { removedAt: expect.any(Date) },
@@ -1428,6 +1474,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-missing-1"] },
+                origin: "LOCAL",
                 removedAt: null,
             },
             data: { removedAt: expect.any(Date) },
@@ -1449,11 +1496,11 @@ describe("MusicScannerService.scanLibrary", () => {
             },
         });
         expect(mockPrisma.album.findMany).toHaveBeenCalledWith({
-            where: { tracks: { none: {} } },
+            where: { peerId: null, tracks: { none: {} } },
             select: { id: true },
         });
         expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
-            where: { albums: { none: {} } },
+            where: { peerId: null, albums: { none: {} } },
             select: { id: true },
         });
         expect(mockPrisma.album.deleteMany).not.toHaveBeenCalled();
@@ -1474,12 +1521,14 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["album-1"] },
+                peerId: null,
                 tracks: { none: {} },
             },
         });
         expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["artist-1"] },
+                peerId: null,
                 albums: { none: {} },
             },
         });

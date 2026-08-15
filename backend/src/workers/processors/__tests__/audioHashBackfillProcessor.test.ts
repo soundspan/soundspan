@@ -12,7 +12,11 @@ describe("audioHashBackfillProcessor", () => {
     });
 
     function loadProcessor(
-        tracks: Array<{ id: string; filePath: string }>,
+        tracks: Array<{
+            id: string;
+            filePath: string;
+            origin?: "LOCAL" | "FEDERATED";
+        }>,
         missingPaths: string[] = [],
     ) {
         const logger = {
@@ -26,7 +30,14 @@ describe("audioHashBackfillProcessor", () => {
 
         const prisma = {
             track: {
-                findMany: jest.fn(async () => tracks),
+                findMany: jest.fn(
+                    async (args: { where?: { origin?: string } }) =>
+                        args.where?.origin === "LOCAL"
+                            ? tracks.filter(
+                                  (track) => track.origin !== "FEDERATED",
+                              )
+                            : tracks,
+                ),
                 updateMany: jest.fn(async () => ({ count: 1 })),
             },
         };
@@ -121,7 +132,12 @@ describe("audioHashBackfillProcessor", () => {
 
         expect(logger.child).toHaveBeenCalledWith("AudioHashBackfillProcessor");
         expect(prisma.track.findMany).toHaveBeenCalledWith({
-            where: { audioHash: null, removedAt: null },
+            where: {
+                audioHash: null,
+                filePath: { not: null },
+                origin: "LOCAL",
+                removedAt: null,
+            },
             orderBy: { id: "asc" },
             take: 51,
             select: { id: true, filePath: true },
@@ -136,7 +152,7 @@ describe("audioHashBackfillProcessor", () => {
         );
         expect(prisma.track.updateMany).toHaveBeenCalledTimes(49);
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
-            where: { id: "track-000", audioHash: null },
+            where: { id: "track-000", audioHash: null, origin: "LOCAL" },
             data: {
                 audioHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
                 audioHashedAt: expect.any(Date),
@@ -179,6 +195,8 @@ describe("audioHashBackfillProcessor", () => {
         expect(prisma.track.findMany).toHaveBeenCalledWith({
             where: {
                 audioHash: null,
+                filePath: { not: null },
+                origin: "LOCAL",
                 removedAt: null,
                 id: { gt: "track-050" },
             },
@@ -187,6 +205,36 @@ describe("audioHashBackfillProcessor", () => {
             select: { id: true, filePath: true },
         });
         expect(schedulerQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("does not select federated tracks for local audio hashing", async () => {
+        const { module, prisma, computeAudioStreamHash } = loadProcessor([
+            {
+                id: "track-federated",
+                filePath: "Peer/Track.flac",
+                origin: "FEDERATED",
+            },
+        ]);
+
+        await expect(
+            module.processAudioHashBackfill(buildJob()),
+        ).resolves.toEqual({
+            processed: 0,
+            hashed: 0,
+            skipped: 0,
+            continued: false,
+        });
+
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    filePath: { not: null },
+                    origin: "LOCAL",
+                }),
+            }),
+        );
+        expect(computeAudioStreamHash).not.toHaveBeenCalled();
+        expect(prisma.track.updateMany).not.toHaveBeenCalled();
     });
 
     it("skips a hash write when a concurrent scan already populated it", async () => {
@@ -205,7 +253,11 @@ describe("audioHashBackfillProcessor", () => {
         });
         expect(prisma.track.updateMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { id: "track-raced", audioHash: null },
+                where: {
+                    id: "track-raced",
+                    audioHash: null,
+                    origin: "LOCAL",
+                },
             }),
         );
     });
