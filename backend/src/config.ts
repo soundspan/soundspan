@@ -128,6 +128,113 @@ const federationTombstoneRetentionEnvSchema = z
     })
     .optional();
 
+type OidcEnvInput = {
+    LOCAL_LOGIN_ENABLED?: string;
+    OIDC_ENABLED?: string;
+    OIDC_ISSUER_URL?: string;
+    OIDC_CLIENT_ID?: string;
+    OIDC_CLIENT_SECRET?: string;
+    OIDC_REDIRECT_URI?: string;
+    OIDC_MANAGE_ROLES?: string;
+    OIDC_ADMIN_GROUP?: string;
+};
+
+const REQUIRED_OIDC_KEYS = [
+    "OIDC_ISSUER_URL",
+    "OIDC_CLIENT_ID",
+    "OIDC_CLIENT_SECRET",
+    "OIDC_REDIRECT_URI",
+] as const;
+
+const OIDC_URL_KEYS = ["OIDC_ISSUER_URL", "OIDC_REDIRECT_URI"] as const;
+
+function isHttpUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
+function addLoginLockoutIssue(
+    localLoginEnabled: boolean,
+    oidcEnabled: boolean,
+    context: z.RefinementCtx,
+): void {
+    if (localLoginEnabled || oidcEnabled) return;
+    context.addIssue({
+        code: "custom",
+        path: ["LOCAL_LOGIN_ENABLED"],
+        message:
+            "LOCAL_LOGIN_ENABLED=false requires OIDC_ENABLED=true to prevent total lockout",
+    });
+}
+
+function addRoleManagementIssues(
+    env: OidcEnvInput,
+    oidcEnabled: boolean,
+    manageRoles: boolean,
+    context: z.RefinementCtx,
+): void {
+    if (!manageRoles) return;
+    if (!oidcEnabled) {
+        context.addIssue({
+            code: "custom",
+            path: ["OIDC_MANAGE_ROLES"],
+            message: "OIDC_MANAGE_ROLES=true requires OIDC_ENABLED=true",
+        });
+    }
+    if (!env.OIDC_ADMIN_GROUP?.trim()) {
+        context.addIssue({
+            code: "custom",
+            path: ["OIDC_ADMIN_GROUP"],
+            message: "OIDC_ADMIN_GROUP is required when OIDC_MANAGE_ROLES=true",
+        });
+    }
+}
+
+function addRequiredOidcIssues(
+    env: OidcEnvInput,
+    context: z.RefinementCtx,
+): void {
+    for (const key of REQUIRED_OIDC_KEYS) {
+        if (env[key]?.trim()) continue;
+        context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} is required when OIDC_ENABLED=true`,
+        });
+    }
+}
+
+function addOidcUrlIssues(env: OidcEnvInput, context: z.RefinementCtx): void {
+    for (const key of OIDC_URL_KEYS) {
+        const value = env[key]?.trim();
+        if (!value || isHttpUrl(value)) continue;
+        context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} must be a valid HTTP(S) URL`,
+        });
+    }
+}
+
+function addOidcConfigIssues(
+    env: OidcEnvInput,
+    context: z.RefinementCtx,
+): void {
+    const oidcEnabled = parseEnvBool(env.OIDC_ENABLED, false);
+    const localLoginEnabled = parseEnvBool(env.LOCAL_LOGIN_ENABLED, true);
+    const manageRoles = parseEnvBool(env.OIDC_MANAGE_ROLES, false);
+
+    addLoginLockoutIssue(localLoginEnabled, oidcEnabled, context);
+    addRoleManagementIssues(env, oidcEnabled, manageRoles, context);
+    if (!oidcEnabled) return;
+    addRequiredOidcIssues(env, context);
+    addOidcUrlIssues(env, context);
+}
+
 // Validate critical environment variables on startup.
 const envSchema = z
     .object({
@@ -150,6 +257,20 @@ const envSchema = z
         FEDERATION_TOMBSTONE_RETENTION_DAYS:
             federationTombstoneRetentionEnvSchema,
         FEDERATION_SYNC_INTERVAL_MINUTES: positiveIntegerEnvSchema,
+        LOCAL_LOGIN_ENABLED: z.string().optional(),
+        OIDC_ENABLED: z.string().optional(),
+        OIDC_ISSUER_URL: z.string().optional(),
+        OIDC_CLIENT_ID: z.string().optional(),
+        OIDC_CLIENT_SECRET: z.string().optional(),
+        OIDC_REDIRECT_URI: z.string().optional(),
+        OIDC_SCOPES: z.string().optional(),
+        OIDC_AUTO_PROVISION: z.string().optional(),
+        OIDC_MANAGE_ROLES: z.string().optional(),
+        OIDC_GROUPS_CLAIM: z.string().optional(),
+        OIDC_ADMIN_GROUP: z.string().optional(),
+        OIDC_EMAIL_CLAIM: z.string().optional(),
+        OIDC_NAME_CLAIM: z.string().optional(),
+        OIDC_PROVIDER_NAME: z.string().optional(),
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -165,6 +286,7 @@ const envSchema = z
             env.INTERNAL_API_SECRET,
             INSECURE_INTERNAL_API_SECRET,
         );
+        addOidcConfigIssues(env, context);
     });
 
 try {
@@ -271,6 +393,24 @@ export const config = {
 
     // One-shot admin password reset via env (consumed once at startup).
     adminResetPassword: process.env.ADMIN_RESET_PASSWORD,
+
+    localLoginEnabled: parseEnvBool(process.env.LOCAL_LOGIN_ENABLED, true),
+
+    oidc: {
+        enabled: parseEnvBool(process.env.OIDC_ENABLED, false),
+        issuerUrl: process.env.OIDC_ISSUER_URL || "",
+        clientId: process.env.OIDC_CLIENT_ID || "",
+        clientSecret: process.env.OIDC_CLIENT_SECRET || "",
+        redirectUri: process.env.OIDC_REDIRECT_URI || "",
+        scopes: process.env.OIDC_SCOPES || "openid profile email",
+        autoProvision: parseEnvBool(process.env.OIDC_AUTO_PROVISION, false),
+        manageRoles: parseEnvBool(process.env.OIDC_MANAGE_ROLES, false),
+        groupsClaim: process.env.OIDC_GROUPS_CLAIM || "groups",
+        adminGroup: process.env.OIDC_ADMIN_GROUP || "",
+        emailClaim: process.env.OIDC_EMAIL_CLAIM || "email",
+        nameClaim: process.env.OIDC_NAME_CLAIM || "name",
+        providerName: process.env.OIDC_PROVIDER_NAME || "SSO",
+    },
 
     // Raw OpenAPI JSON spec is public in production only when DOCS_PUBLIC=true.
     docsPublic: isEnvFlagEnabled(process.env.DOCS_PUBLIC),

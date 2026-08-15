@@ -16,7 +16,7 @@ model User {
   username               String                @unique
   displayName            String?
   email                  String?               @unique
-  passwordHash           String
+  passwordHash           String?
   subsonicPassword       String? // Encrypted plaintext for Subsonic token auth (md5 requires plaintext)
   role                   String                @default("user")
   onboardingComplete     Boolean               @default(false)
@@ -28,6 +28,7 @@ model User {
   moodMixParams          Json?
   tokenVersion           Int                   @default(0)
   createdAt              DateTime              @default(now())
+  appPasswords           AppPassword[]
   apiKeys                ApiKey[]
   audiobookProgress      AudiobookProgress[]
   cachedTracks           CachedTrack[]
@@ -56,6 +57,7 @@ model User {
   discoverConfig         UserDiscoverConfig?
   userMoodMix            UserMoodMix?
   settings               UserSettings?
+  externalIdentities     ExternalIdentity[]
   inviteCodesCreated     InviteCode[]          @relation("InviteCodesCreated")
   inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
   shareLinks             ShareLink[]
@@ -108,6 +110,36 @@ model InviteCodeUsage {
 
   @@index([inviteCodeId])
   @@index([usedBy])
+}
+
+model ExternalIdentity {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String
+  providerSubject String
+  email           String?
+  displayName     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@index([provider])
+}
+
+model AppPassword {
+  id              String    @id @default(cuid())
+  userId          String
+  displayName     String
+  encryptedSecret String // AES-GCM-encrypted secret for Subsonic token authentication
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  revokedAt       DateTime?
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([revokedAt])
 }
 
 model PlaybackState {

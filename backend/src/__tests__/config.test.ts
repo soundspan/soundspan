@@ -43,6 +43,20 @@ describe("config module", () => {
             SETTINGS_ENCRYPTION_KEY: "23456789012345678901234567890123",
             INTERNAL_API_SECRET: "34567890123456789012345678901234",
             MUSIC_PATH: "/music",
+            LOCAL_LOGIN_ENABLED: "true",
+            OIDC_ENABLED: "false",
+            OIDC_MANAGE_ROLES: "false",
+        };
+    }
+
+    function validOidcEnv(): Record<string, string> {
+        return {
+            OIDC_ENABLED: "true",
+            OIDC_ISSUER_URL: "https://idp.example/application/o/soundspan/",
+            OIDC_CLIENT_ID: "soundspan-client",
+            OIDC_CLIENT_SECRET: "client-secret-fixture",
+            OIDC_REDIRECT_URI:
+                "https://soundspan.example/api/auth/oidc/callback",
         };
     }
 
@@ -79,6 +93,32 @@ describe("config module", () => {
     afterEach(() => {
         process.env = originalEnv;
     });
+
+    async function expectStartupValidationFailure(
+        overrides: Record<string, string | undefined>,
+        expectedMessage: string,
+    ): Promise<void> {
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+
+        try {
+            await expect(loadConfigModule(overrides)).rejects.toThrow(
+                "process.exit:1",
+            );
+            expect(
+                mockLoggerError.mock.calls.some(
+                    (call) =>
+                        typeof call[0] === "string" &&
+                        call[0].includes(expectedMessage),
+                ),
+            ).toBe(true);
+        } finally {
+            exitSpy.mockRestore();
+        }
+    }
 
     it("builds config from validated env with explicit integrations", async () => {
         const { config } = await loadConfigModule({
@@ -140,6 +180,105 @@ describe("config module", () => {
         expect(config.features.federation).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
         expect(config.workers.federationSyncIntervalMinutes).toBe(15);
+    });
+
+    it("uses safe local-login and OIDC defaults", async () => {
+        const { config } = await loadConfigModule({
+            LOCAL_LOGIN_ENABLED: undefined,
+            OIDC_ENABLED: undefined,
+            OIDC_ISSUER_URL: undefined,
+            OIDC_CLIENT_ID: undefined,
+            OIDC_CLIENT_SECRET: undefined,
+            OIDC_REDIRECT_URI: undefined,
+            OIDC_SCOPES: undefined,
+            OIDC_AUTO_PROVISION: undefined,
+            OIDC_MANAGE_ROLES: undefined,
+            OIDC_GROUPS_CLAIM: undefined,
+            OIDC_ADMIN_GROUP: undefined,
+            OIDC_EMAIL_CLAIM: undefined,
+            OIDC_NAME_CLAIM: undefined,
+            OIDC_PROVIDER_NAME: undefined,
+        });
+
+        expect(config).toMatchObject({
+            localLoginEnabled: true,
+            oidc: {
+                enabled: false,
+                scopes: "openid profile email",
+                autoProvision: false,
+                manageRoles: false,
+                groupsClaim: "groups",
+                adminGroup: "",
+                emailClaim: "email",
+                nameClaim: "name",
+                providerName: "SSO",
+            },
+        });
+    });
+
+    it.each([
+        "OIDC_ISSUER_URL",
+        "OIDC_CLIENT_ID",
+        "OIDC_CLIENT_SECRET",
+        "OIDC_REDIRECT_URI",
+    ])("requires %s when OIDC is enabled", async (missingKey) => {
+        await expectStartupValidationFailure(
+            {
+                ...validOidcEnv(),
+                [missingKey]: undefined,
+            },
+            `${missingKey} is required when OIDC_ENABLED=true`,
+        );
+    });
+
+    it.each([
+        ["OIDC_ISSUER_URL", "not-a-url"],
+        ["OIDC_ISSUER_URL", "ftp://idp.example/issuer"],
+        ["OIDC_REDIRECT_URI", "not-a-url"],
+        ["OIDC_REDIRECT_URI", "ftp://soundspan.example/callback"],
+    ])("rejects non-HTTP(S) %s values", async (key, invalidValue) => {
+        await expectStartupValidationFailure(
+            {
+                ...validOidcEnv(),
+                [key]: invalidValue,
+            },
+            `${key} must be a valid HTTP(S) URL`,
+        );
+    });
+
+    it("rejects configurations that disable every login method", async () => {
+        await expectStartupValidationFailure(
+            {
+                LOCAL_LOGIN_ENABLED: "false",
+                OIDC_ENABLED: "false",
+            },
+            "LOCAL_LOGIN_ENABLED=false requires OIDC_ENABLED=true to prevent total lockout",
+        );
+    });
+
+    it.each([undefined, "", "   "])(
+        "requires a non-empty OIDC admin group when role management is enabled",
+        async (adminGroup) => {
+            await expectStartupValidationFailure(
+                {
+                    ...validOidcEnv(),
+                    OIDC_MANAGE_ROLES: "true",
+                    OIDC_ADMIN_GROUP: adminGroup,
+                },
+                "OIDC_ADMIN_GROUP is required when OIDC_MANAGE_ROLES=true",
+            );
+        },
+    );
+
+    it("rejects OIDC role management when OIDC is disabled", async () => {
+        await expectStartupValidationFailure(
+            {
+                OIDC_ENABLED: "false",
+                OIDC_MANAGE_ROLES: "true",
+                OIDC_ADMIN_GROUP: "soundspan-admins",
+            },
+            "OIDC_MANAGE_ROLES=true requires OIDC_ENABLED=true",
+        );
     });
 
     it("constructs DATABASE_URL from percent-encoded PostgreSQL components", async () => {

@@ -60,6 +60,7 @@
         "multer": "^2.2.0",
         "music-metadata": "^11.14.0",
         "node-cron": "^4.6.0",
+        "openid-client": "^6.8.5",
         "otplib": "^13.4.1",
         "p-limit": "^7.3.1",
         "p-queue": "^9.3.3",
