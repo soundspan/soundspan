@@ -1,6 +1,14 @@
 process.env.SESSION_SECRET =
     process.env.SESSION_SECRET || "federation-peers-test-secret-12345678";
 
+const mockGetManifest = jest.fn();
+const mockCreateFederationClient = jest.fn(() => ({
+    getManifest: mockGetManifest,
+}));
+const mockPairFederationPeer = jest.fn();
+const mockEncrypt = jest.fn((value: string) => `enc:${value}`);
+const mockDecrypt = jest.fn((value: string) => value.replace(/^enc:/, ""));
+
 const prisma = {
     systemSettings: {
         upsert: jest.fn(),
@@ -9,6 +17,7 @@ const prisma = {
     },
     federationPeer: {
         create: jest.fn(),
+        findUnique: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
         updateMany: jest.fn(),
@@ -24,6 +33,14 @@ const prisma = {
 };
 
 jest.mock("../../utils/db", () => ({ prisma }));
+jest.mock("../../utils/encryption", () => ({
+    encrypt: mockEncrypt,
+    decrypt: mockDecrypt,
+}));
+jest.mock("../federationClient", () => ({
+    createFederationClient: mockCreateFederationClient,
+    pairFederationPeer: mockPairFederationPeer,
+}));
 
 import { hashApiKey } from "../../utils/apiKeyHash";
 import {
@@ -31,10 +48,23 @@ import {
     createFederationPairingCode,
     createHostFederationPeer,
     deleteFederationPeer,
+    getConsumerPeerConnection,
+    linkConsumerFederationPeer,
     listFederationPeers,
+    pairAndLinkConsumerFederationPeer,
     revokeFederationPeer,
     rotateFederationPeerCredential,
 } from "../federationPeers";
+
+const manifest = {
+    instanceId: "remote-instance-1",
+    name: "Remote Library",
+    version: "2.0.2",
+    catalogEpoch: "epoch-9",
+    mediaTypes: ["artist", "album", "track"],
+    counts: { artists: 1, albums: 2, tracks: 3 },
+    embeddingsAvailable: true,
+};
 
 describe("federation peer credentials", () => {
     beforeEach(() => {
@@ -113,8 +143,113 @@ describe("federation peer credentials", () => {
         expect(listArgs.select).not.toHaveProperty("outboundToken");
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1" },
-            data: { status: "REVOKED", credentialHash: null },
+            data: {
+                status: "REVOKED",
+                credentialHash: null,
+                outboundToken: null,
+            },
         });
+    });
+});
+
+describe("federation consumer peers", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockGetManifest.mockResolvedValue(manifest);
+        mockPairFederationPeer.mockResolvedValue({ token: "paired-token" });
+        prisma.federationPeer.create.mockImplementation(async ({ data }) => {
+            const { outboundToken: _outboundToken, ...publicData } = data;
+            return {
+                id: "consumer-peer-1",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                updatedAt: new Date("2026-08-15T12:00:00.000Z"),
+                ...publicData,
+            };
+        });
+    });
+
+    it("validates the manifest before storing an encrypted outbound token", async () => {
+        const result = await linkConsumerFederationPeer({
+            baseUrl: "https://peer.example/",
+            token: "raw-token",
+            name: "Chosen Name",
+            createdById: "admin-1",
+        });
+
+        expect(mockCreateFederationClient).toHaveBeenCalledWith({
+            id: "pending-link",
+            baseUrl: "https://peer.example",
+            outboundToken: "enc:raw-token",
+        });
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                name: "Chosen Name",
+                direction: "CONSUMER",
+                baseUrl: "https://peer.example",
+                outboundToken: "enc:raw-token",
+                scopes: ["library:read", "stream:read", "embeddings:read"],
+                status: "ACTIVE",
+                catalogEpoch: "epoch-9",
+                createdById: "admin-1",
+                lastSeenAt: expect.any(Date),
+            }),
+            select: expect.not.objectContaining({ outboundToken: true }),
+        });
+        expect(JSON.stringify(result)).not.toContain("raw-token");
+    });
+
+    it("does not write a peer when manifest validation fails", async () => {
+        mockGetManifest.mockRejectedValueOnce(new Error("malformed peer"));
+
+        await expect(
+            linkConsumerFederationPeer({
+                baseUrl: "https://peer.example",
+                token: "raw-token",
+                createdById: "admin-1",
+            }),
+        ).rejects.toThrow("malformed peer");
+        expect(prisma.federationPeer.create).not.toHaveBeenCalled();
+    });
+
+    it("exchanges a pairing code and then runs the same validated link flow", async () => {
+        await pairAndLinkConsumerFederationPeer({
+            baseUrl: "https://peer.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            createdById: "admin-1",
+        });
+
+        expect(mockPairFederationPeer).toHaveBeenCalledWith({
+            baseUrl: "https://peer.example",
+            code: "ABCDEFGH",
+            name: "Consumer Name",
+            consumerBaseUrl: "https://peer.example",
+        });
+        expect(mockCreateFederationClient).toHaveBeenCalledWith(
+            expect.objectContaining({ outboundToken: "enc:paired-token" }),
+        );
+        expect(mockEncrypt).toHaveBeenCalledWith("paired-token");
+    });
+
+    it("decrypts outbound credentials only for internal peer calls", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            id: "consumer-peer-1",
+            baseUrl: "https://peer.example",
+            outboundToken: "enc:stored-token",
+            direction: "CONSUMER",
+            status: "ACTIVE",
+        });
+
+        await expect(
+            getConsumerPeerConnection("consumer-peer-1"),
+        ).resolves.toEqual({
+            id: "consumer-peer-1",
+            baseUrl: "https://peer.example",
+            outboundToken: "stored-token",
+            direction: "CONSUMER",
+            status: "ACTIVE",
+        });
+        expect(mockDecrypt).toHaveBeenCalledWith("enc:stored-token");
     });
 });
 

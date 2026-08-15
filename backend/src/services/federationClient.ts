@@ -1,0 +1,442 @@
+import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
+import pLimit from "p-limit";
+import { z } from "zod";
+import { decrypt } from "../utils/encryption";
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_ATTEMPTS = 3;
+const DEFAULT_RETRY_DELAY_MS = 250;
+const MAX_CONCURRENT_REQUESTS = 8;
+const MAX_PAGE_ITEMS = 500;
+const EMBEDDING_DIMENSIONS = 512;
+const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
+
+const mediaTypeSchema = z.enum(["artist", "album", "track"]);
+const dateTimeSchema = z.union([z.iso.datetime({ offset: true }), z.date()]);
+const artistAttributesSchema = z.strictObject({
+    name: z.string().min(1).max(1_000),
+    mbid: z.string().min(1).max(1_000),
+    normalizedName: z.string().max(1_000),
+});
+const albumAttributesSchema = z.strictObject({
+    title: z.string().min(1).max(2_000),
+    rgMbid: z.string().min(1).max(1_000),
+    year: z.number().int().min(0).max(9999).nullable(),
+    primaryType: z.string().min(1).max(200),
+});
+const embeddingSchema = z
+    .array(z.number().finite())
+    .length(EMBEDDING_DIMENSIONS);
+const trackAttributesSchema = z.strictObject({
+    title: z.string().min(1).max(2_000),
+    discNo: z.number().int().min(0).max(10_000),
+    trackNo: z.number().int().min(0).max(100_000),
+    duration: z.number().int().min(0).max(86_400),
+    mime: z.string().max(255).nullable(),
+    fileSize: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    recordingMbid: z.string().max(1_000).nullable(),
+    isrc: z.string().max(100).nullable(),
+    audioHash: z.string().max(1_000).nullable(),
+    embedding: embeddingSchema.optional(),
+});
+
+const artistEnvelopeSchema = z.strictObject({
+    id: z.string().min(1).max(128),
+    mediaType: z.literal("artist"),
+    updatedAt: dateTimeSchema,
+    attributes: artistAttributesSchema,
+});
+const albumEnvelopeSchema = z.strictObject({
+    id: z.string().min(1).max(128),
+    mediaType: z.literal("album"),
+    updatedAt: dateTimeSchema,
+    parentRef: z.string().min(1).max(128),
+    attributes: albumAttributesSchema,
+});
+const trackEnvelopeSchema = z.strictObject({
+    id: z.string().min(1).max(128),
+    mediaType: z.literal("track"),
+    updatedAt: dateTimeSchema,
+    parentRef: z.string().min(1).max(128),
+    attributes: trackAttributesSchema,
+});
+export const federationEnvelopeSchema = z.discriminatedUnion("mediaType", [
+    artistEnvelopeSchema,
+    albumEnvelopeSchema,
+    trackEnvelopeSchema,
+]);
+
+export const federationManifestSchema = z.strictObject({
+    instanceId: z.string().min(1).max(128),
+    name: z.string().min(1).max(200),
+    version: z.string().min(1).max(100),
+    catalogEpoch: z.string().min(1).max(128),
+    mediaTypes: z.array(mediaTypeSchema).max(32),
+    counts: z.strictObject({
+        artists: z.number().int().nonnegative(),
+        albums: z.number().int().nonnegative(),
+        tracks: z.number().int().nonnegative(),
+    }),
+    embeddingsAvailable: z.boolean(),
+});
+const catalogPageSchema = z.strictObject({
+    items: z.array(federationEnvelopeSchema).max(MAX_PAGE_ITEMS),
+    nextCursor: z.string().min(1).max(512).nullable(),
+});
+const tombstoneSchema = z.strictObject({
+    entityType: mediaTypeSchema,
+    entityId: z.string().min(1).max(128),
+    deletedAt: dateTimeSchema,
+});
+const deltaSchema = z.strictObject({
+    kind: z.literal("ok"),
+    changes: z.array(federationEnvelopeSchema).max(MAX_PAGE_ITEMS),
+    tombstones: z.array(tombstoneSchema).max(MAX_PAGE_ITEMS),
+    nextCursor: z.string().min(1).max(512).nullable(),
+    nextSince: dateTimeSchema,
+});
+const epochMismatchSchema = z.object({
+    code: z.literal("FEDERATION_EPOCH_MISMATCH"),
+    currentEpoch: z.string().min(1).max(128),
+});
+const pairedPeerSchema = z.strictObject({
+    peer: z.strictObject({
+        id: z.string().min(1).max(128),
+        name: z.string().min(1).max(120),
+        direction: z.enum(["HOST", "CONSUMER", "BOTH"]),
+        baseUrl: z.string().nullable(),
+        scopes: z.array(z.string().min(1).max(100)).max(3),
+        status: z.enum(["PENDING", "ACTIVE", "OFFLINE", "REVOKED"]),
+        lastSeenAt: dateTimeSchema.nullable(),
+        lastSyncCursor: z.string().nullable(),
+        catalogEpoch: z.string().nullable(),
+        createdAt: dateTimeSchema,
+        updatedAt: dateTimeSchema,
+    }),
+    token: z.string().min(1).max(4_096),
+});
+
+export type FederationManifest = z.infer<typeof federationManifestSchema>;
+export type FederationEnvelope = z.infer<typeof federationEnvelopeSchema>;
+export type FederationCatalogPage = z.infer<typeof catalogPageSchema>;
+export type FederationDelta = z.infer<typeof deltaSchema>;
+
+/** Peer returned a valid HTTP response outside the accepted status set. */
+export class FederationHttpError extends Error {
+    constructor(
+        public readonly status: number | null,
+        public readonly transient: boolean,
+    ) {
+        super(
+            status === null
+                ? "Federation request failed"
+                : `Federation peer returned ${status}`,
+        );
+        this.name = "FederationHttpError";
+    }
+}
+
+/** Peer returned malformed data at a JSON trust boundary. */
+export class FederationResponseError extends Error {
+    constructor() {
+        super("Federation peer returned malformed data");
+        this.name = "FederationResponseError";
+    }
+}
+
+/** Peer delta cursor belongs to a different catalog epoch. */
+export class FederationEpochMismatchError extends Error {
+    constructor(public readonly currentEpoch: string) {
+        super("Federation catalog epoch mismatch");
+        this.name = "FederationEpochMismatchError";
+    }
+}
+
+export interface FederationClientPeer {
+    id: string;
+    baseUrl: string | null;
+    outboundToken: string | null;
+}
+
+interface FederationClientOptions {
+    timeoutMs?: number;
+    attempts?: number;
+    retryDelayMs?: number;
+}
+
+function resolveBaseUrl(value: string | null): URL {
+    if (!value) throw new Error("Federation peer base URL is missing");
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) {
+        throw new Error("Federation peer base URL is invalid");
+    }
+    return url;
+}
+
+function peerUrl(baseUrl: URL, path: string): string {
+    return new URL(path, `${baseUrl.origin}/`).toString();
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+    if (!axios.isAxiosError(error)) return false;
+    return [
+        "ECONNABORTED",
+        "ECONNREFUSED",
+        "ECONNRESET",
+        "EAI_AGAIN",
+        "ENETUNREACH",
+        "ENOTFOUND",
+        "ETIMEDOUT",
+    ].includes(error.code ?? "");
+}
+
+async function waitForRetry(delayMs: number, attempt: number): Promise<void> {
+    const boundedDelay = Math.min(delayMs * 2 ** attempt, 4_000);
+    if (boundedDelay <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, boundedDelay));
+}
+
+function parseResponse<T>(schema: z.ZodType<T>, value: unknown): T {
+    const result = schema.safeParse(value);
+    if (!result.success) throw new FederationResponseError();
+    return result.data;
+}
+
+class FederationClient {
+    private readonly baseUrl: URL;
+    private readonly token: string;
+    private readonly timeoutMs: number;
+    private readonly attempts: number;
+    private readonly retryDelayMs: number;
+
+    constructor(peer: FederationClientPeer, options: FederationClientOptions) {
+        this.baseUrl = resolveBaseUrl(peer.baseUrl);
+        this.token = peer.outboundToken ? decrypt(peer.outboundToken) : "";
+        if (!this.token) throw new Error("Federation peer token is missing");
+        this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+        this.attempts = options.attempts ?? DEFAULT_ATTEMPTS;
+        this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+    }
+
+    private async request(config: AxiosRequestConfig): Promise<AxiosResponse> {
+        for (let attempt = 0; attempt < this.attempts; attempt += 1) {
+            try {
+                const response = await requestLimit(() =>
+                    axios.request({
+                        ...config,
+                        timeout: this.timeoutMs,
+                        maxRedirects: 0,
+                        validateStatus: () => true,
+                        headers: {
+                            ...config.headers,
+                            Authorization: `Bearer ${this.token}`,
+                        },
+                    }),
+                );
+                if (response.status < 500 || attempt + 1 === this.attempts) {
+                    return response;
+                }
+            } catch (error) {
+                if (
+                    !isTransientNetworkError(error) ||
+                    attempt + 1 === this.attempts
+                ) {
+                    if (isTransientNetworkError(error)) {
+                        throw new FederationHttpError(null, true);
+                    }
+                    throw error;
+                }
+            }
+            await waitForRetry(this.retryDelayMs, attempt);
+        }
+        throw new FederationHttpError(null, true);
+    }
+
+    private async requestJson<T>(
+        path: string,
+        schema: z.ZodType<T>,
+        config: AxiosRequestConfig = {},
+    ): Promise<T> {
+        const response = await this.request({
+            method: "GET",
+            ...config,
+            url: peerUrl(this.baseUrl, path),
+        });
+        if (response.status < 200 || response.status >= 300) {
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return parseResponse(schema, response.data);
+    }
+
+    async getManifest(signal?: AbortSignal): Promise<FederationManifest> {
+        return this.requestJson(
+            "/api/federation/v1/manifest",
+            federationManifestSchema,
+            { signal },
+        );
+    }
+
+    async getCatalogItems(
+        mediaType: z.infer<typeof mediaTypeSchema>,
+        cursor?: string,
+        signal?: AbortSignal,
+    ): Promise<FederationCatalogPage> {
+        return this.requestJson(
+            "/api/federation/v1/catalog/items",
+            catalogPageSchema,
+            {
+                params: { type: mediaType, limit: MAX_PAGE_ITEMS, cursor },
+                signal,
+            },
+        );
+    }
+
+    async getCatalogDelta(input: {
+        since: Date;
+        epoch: string;
+        cursor?: string;
+        signal?: AbortSignal;
+    }): Promise<FederationDelta> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(this.baseUrl, "/api/federation/v1/catalog/delta"),
+            params: {
+                since: input.since.toISOString(),
+                epoch: input.epoch,
+                cursor: input.cursor,
+                limit: MAX_PAGE_ITEMS,
+            },
+            signal: input.signal,
+        });
+        if (response.status === 409) {
+            const mismatch = parseResponse(epochMismatchSchema, response.data);
+            throw new FederationEpochMismatchError(mismatch.currentEpoch);
+        }
+        if (response.status < 200 || response.status >= 300) {
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return parseResponse(deltaSchema, response.data);
+    }
+
+    async getStream(input: {
+        remoteId: string;
+        quality: string;
+        range?: string;
+        signal?: AbortSignal;
+    }): Promise<AxiosResponse<NodeJS.ReadableStream>> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(
+                this.baseUrl,
+                `/api/federation/v1/stream/${encodeURIComponent(input.remoteId)}`,
+            ),
+            params: { quality: input.quality },
+            headers: input.range ? { Range: input.range } : {},
+            responseType: "stream",
+            signal: input.signal,
+        });
+        if (![200, 206, 416].includes(response.status)) {
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return response as AxiosResponse<NodeJS.ReadableStream>;
+    }
+
+    async getCover(
+        remoteId: string,
+        signal?: AbortSignal,
+    ): Promise<AxiosResponse<NodeJS.ReadableStream>> {
+        const response = await this.request({
+            method: "GET",
+            url: peerUrl(
+                this.baseUrl,
+                `/api/federation/v1/cover/${encodeURIComponent(remoteId)}`,
+            ),
+            responseType: "stream",
+            signal,
+        });
+        if (![200, 304, 404].includes(response.status)) {
+            throw new FederationHttpError(
+                response.status,
+                response.status >= 500,
+            );
+        }
+        return response as AxiosResponse<NodeJS.ReadableStream>;
+    }
+}
+
+/** Creates the single bounded HTTP adapter used for one persisted consumer peer. */
+export function createFederationClient(
+    peer: FederationClientPeer,
+    options: FederationClientOptions = {},
+): FederationClient {
+    return new FederationClient(peer, options);
+}
+
+async function requestPairWithRetry(
+    config: AxiosRequestConfig,
+    options: FederationClientOptions,
+): Promise<AxiosResponse> {
+    const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
+    const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+            const response = await requestLimit(() =>
+                axios.request({
+                    ...config,
+                    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+                    maxRedirects: 0,
+                    validateStatus: () => true,
+                }),
+            );
+            if (response.status < 500 || attempt + 1 === attempts) {
+                return response;
+            }
+        } catch (error) {
+            if (!isTransientNetworkError(error) || attempt + 1 === attempts) {
+                if (isTransientNetworkError(error)) {
+                    throw new FederationHttpError(null, true);
+                }
+                throw error;
+            }
+        }
+        await waitForRetry(retryDelayMs, attempt);
+    }
+    throw new FederationHttpError(null, true);
+}
+
+/** Exchanges a short pairing code through the same bounded transport policy. */
+export async function pairFederationPeer(input: {
+    baseUrl: string;
+    code: string;
+    name: string;
+    consumerBaseUrl: string;
+    options?: FederationClientOptions;
+}): Promise<{ token: string }> {
+    const baseUrl = resolveBaseUrl(input.baseUrl);
+    const options = input.options ?? {};
+    const response = await requestPairWithRetry(
+        {
+            method: "POST",
+            url: peerUrl(baseUrl, "/api/federation/v1/pair"),
+            data: {
+                code: input.code,
+                name: input.name,
+                baseUrl: input.consumerBaseUrl,
+            },
+        },
+        options,
+    );
+    if (response.status < 200 || response.status >= 300) {
+        throw new FederationHttpError(response.status, response.status >= 500);
+    }
+    return parseResponse(pairedPeerSchema, response.data);
+}

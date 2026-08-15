@@ -17,6 +17,7 @@ export const ENCRYPTED_SETTINGS_COLUMNS = {
     // while legacy 2FA ciphertext lingers.
     user: ["subsonicPassword", "twoFactorSecret", "twoFactorRecoveryCodes"],
     userSettings: ["ytMusicOAuthJson", "tidalOAuthJson"],
+    federationPeer: ["outboundToken"],
     systemSettings: [
         "lidarrApiKey",
         "lidarrWebhookSecret",
@@ -42,6 +43,7 @@ export type EncryptedModelName = keyof typeof ENCRYPTED_SETTINGS_COLUMNS;
  */
 export const ENCRYPTED_MODEL_PRIMARY_KEYS: Record<EncryptedModelName, string> =
     {
+        federationPeer: "id",
         user: "id",
         userSettings: "userId",
         systemSettings: "id",

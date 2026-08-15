@@ -227,6 +227,13 @@ describe("plays routes integration", () => {
             include: {
                 track: {
                     include: {
+                        federationPeer: {
+                            select: {
+                                id: true,
+                                name: true,
+                                status: true,
+                            },
+                        },
                         album: {
                             include: {
                                 artist: {

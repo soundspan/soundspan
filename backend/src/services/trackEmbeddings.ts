@@ -17,6 +17,30 @@ export interface TrackEmbeddingRow {
     embedding: number[];
 }
 
+const EMBEDDING_DIMENSIONS = 512;
+
+/** Upserts one validated CLAP vector received from a trusted service boundary. */
+export async function upsertTrackEmbedding(
+    trackId: string,
+    embedding: readonly number[],
+): Promise<void> {
+    if (
+        embedding.length !== EMBEDDING_DIMENSIONS ||
+        embedding.some((value) => !Number.isFinite(value))
+    ) {
+        throw new Error("Track embedding must contain 512 finite values");
+    }
+    const vector = `[${embedding.join(",")}]`;
+    await prisma.$executeRaw`
+        INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+        VALUES (${trackId}, ${vector}::vector, 'laion-clap-music', NOW())
+        ON CONFLICT (track_id) DO UPDATE SET
+            embedding = EXCLUDED.embedding,
+            model_version = EXCLUDED.model_version,
+            analyzed_at = EXCLUDED.analyzed_at
+    `;
+}
+
 /**
  * Fetch the CLAP embeddings for `trackIds` (parsed to number arrays), in no
  * guaranteed order. Ids without an embedding row are simply absent from the

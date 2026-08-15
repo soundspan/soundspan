@@ -12,6 +12,7 @@ const log =
 
 const SOURCE_PRIORITY: Record<CreateMappingData["source"], number> = {
     manual: 4,
+    federation: 4,
     isrc: 3,
     "import-match": 2,
     "gap-fill": 1,
@@ -55,7 +56,7 @@ export interface CreateMappingData {
     trackTidalId?: string;
     trackYtMusicId?: string;
     confidence: number;
-    source: "gap-fill" | "isrc" | "import-match" | "manual";
+    source: "gap-fill" | "isrc" | "import-match" | "manual" | "federation";
 }
 
 export interface EnsureRemoteTrackData {

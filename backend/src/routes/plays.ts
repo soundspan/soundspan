@@ -448,6 +448,9 @@ router.get("/", async (req, res) => {
             include: {
                 track: {
                     include: {
+                        federationPeer: {
+                            select: { id: true, name: true, status: true },
+                        },
                         album: {
                             include: {
                                 artist: {

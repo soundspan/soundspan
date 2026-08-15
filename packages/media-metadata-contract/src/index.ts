@@ -66,6 +66,16 @@ export interface CanonicalMediaSearchResult {
 /** Music media types currently exported by federation v1. */
 export type FederationMediaType = "artist" | "album" | "track";
 
+/** Source discriminator emitted by unified track response serializers. */
+export type UnifiedTrackSource = "local" | "tidal" | "youtube" | "federated";
+
+/** Safe peer provenance attached to a federated unified track response. */
+export interface FederatedTrackPeer {
+    id: string;
+    name: string;
+    online: boolean;
+}
+
 /** Generic additive federation catalog envelope shared by hosts and consumers. */
 export interface FederationMediaItemEnvelope<
     Attributes extends Record<string, unknown> = Record<string, unknown>,

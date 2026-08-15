@@ -8,11 +8,18 @@ const service = {
     revokeFederationPeer: jest.fn(),
     deleteFederationPeer: jest.fn(),
     createFederationPairingCode: jest.fn(),
+    linkConsumerFederationPeer: jest.fn(),
+    pairAndLinkConsumerFederationPeer: jest.fn(),
 };
+
+const enqueueFederationSyncNow = jest.fn();
 
 jest.mock("../../services/federationPeers", () => ({
     ...service,
     FEDERATION_SCOPE_VALUES: ["library:read", "stream:read", "embeddings:read"],
+}));
+jest.mock("../../workers/federationJobs", () => ({
+    enqueueFederationSyncNow,
 }));
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: Request, res: Response, next: NextFunction) => {
@@ -52,6 +59,15 @@ describe("federation admin routes", () => {
             code: "ABCDEFGH",
             expiresAt: new Date("2026-08-15T12:05:00.000Z"),
         });
+        service.linkConsumerFederationPeer.mockResolvedValue({
+            id: "consumer-peer-1",
+            name: "Remote Library",
+        });
+        service.pairAndLinkConsumerFederationPeer.mockResolvedValue({
+            id: "paired-peer-1",
+            name: "Paired Library",
+        });
+        enqueueFederationSyncNow.mockResolvedValue(undefined);
     });
 
     it("requires administrator authentication for management", async () => {
@@ -147,5 +163,77 @@ describe("federation admin routes", () => {
             scopes: ["library:read", "stream:read"],
         });
         expect(response.body.code).toBe("ABCDEFGH");
+    });
+
+    it("links a consumer peer only after its manifest validates", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/peers/link")
+            .set("Authorization", "Bearer admin")
+            .send({
+                baseUrl: "https://peer.example/",
+                token: "peer-token",
+                name: "Remote Library",
+            });
+
+        expect(response.status).toBe(201);
+        expect(response.body).toEqual({
+            peer: { id: "consumer-peer-1", name: "Remote Library" },
+        });
+        expect(service.linkConsumerFederationPeer).toHaveBeenCalledWith({
+            baseUrl: "https://peer.example/",
+            token: "peer-token",
+            name: "Remote Library",
+            createdById: "admin-1",
+        });
+    });
+
+    it("returns a typed 502 without persisting malformed peer data", async () => {
+        service.linkConsumerFederationPeer.mockRejectedValueOnce(
+            new Error("malformed response with secret peer-token"),
+        );
+
+        const response = await request(app)
+            .post("/api/federation/admin/peers/link")
+            .set("Authorization", "Bearer admin")
+            .send({
+                baseUrl: "https://peer.example",
+                token: "peer-token",
+            });
+
+        expect(response.status).toBe(502);
+        expect(response.body).toEqual({
+            error: "Peer manifest validation failed",
+            code: "FEDERATION_PEER_INVALID",
+        });
+        expect(JSON.stringify(response.body)).not.toContain("peer-token");
+    });
+
+    it("exchanges a pairing code before linking the consumer peer", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/peers/link/pair")
+            .set("Authorization", "Bearer admin")
+            .send({
+                baseUrl: "https://peer.example",
+                code: "ABCDEFGH",
+                name: "Paired Library",
+            });
+
+        expect(response.status).toBe(201);
+        expect(service.pairAndLinkConsumerFederationPeer).toHaveBeenCalledWith({
+            baseUrl: "https://peer.example",
+            code: "ABCDEFGH",
+            name: "Paired Library",
+            createdById: "admin-1",
+        });
+    });
+
+    it("enqueues a bounded per-peer sync now job", async () => {
+        const response = await request(app)
+            .post("/api/federation/admin/peers/peer-1/sync")
+            .set("Authorization", "Bearer admin");
+
+        expect(response.status).toBe(202);
+        expect(response.body).toEqual({ queued: true });
+        expect(enqueueFederationSyncNow).toHaveBeenCalledWith("peer-1");
     });
 });

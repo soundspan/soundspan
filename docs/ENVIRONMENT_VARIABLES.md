@@ -126,6 +126,7 @@ Experimental feature note:
 | `TRACK_RECONCILIATION_TIMEOUT_MS` | `backend`, `backend-worker` | Optional | `600000` | Deadline for one remote-to-local track mapping reconciliation run. Valid values are `1..3300000` (55 minutes); invalid values use the default. In-flight Prisma queries finish before cancellation is observed. |
 | `TRACK_REMOVAL_RETENTION_DAYS` | `backend`, `backend-worker` | Optional | `90` | Days to retain soft-removed tracks for automatic revival before the daily purge permanently deletes them. Must be an integer greater than or equal to `0`; `0` purges removed tracks on the next purge cycle. |
 | `FEDERATION_TOMBSTONE_RETENTION_DAYS` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `90` | Days to retain federation deletion markers for peer delta synchronization. Must be an integer greater than or equal to `0`; cleanup runs on the terminal track-purge page. |
+| `FEDERATION_SYNC_INTERVAL_MINUTES` | `backend-worker`, `soundspan` (AIO) | Optional | `15` | Minutes between bounded consumer-peer catalog sync scheduling passes. Must be an integer greater than or equal to `1`; the worker also runs one health check at startup and hourly thereafter. |
 
 ## Frontend Variables
 
@@ -152,7 +153,7 @@ Experimental feature note:
 | `ANALYSIS_QUEUE_RESERVATION_TTL_SECONDS` | `backend-worker` | Optional | `3600` | TTL for per-track Redis admission reservations that suppress duplicate queue entries. Maximum accepted value is 86400 seconds. |
 | `DISCOVERY_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Discover Weekly (cron + queue processors), the `/api/discover` + `/api/recommendations` routes, and the discovery auto-download lifecycle. |
 | `AUTO_PLAYLISTS_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Made For You mixes (on-demand programmatic playlists) and the `/api/mixes` routes. |
-| `FEDERATION_ENABLED` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Enables scoped peer credential administration, pairing, the read-only `/api/federation/v1` host API, identity initialization, and deletion tombstones. When disabled, federation prefixes return `404` with `code: FEATURE_DISABLED` and cleanup writes no tombstones. |
+| `FEDERATION_ENABLED` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Enables host and consumer federation routes, peer linking, catalog sync and health jobs, identity initialization, tombstones, and federated playback. When disabled, federation prefixes return `404` with `code: FEATURE_DISABLED`, jobs are not registered, and cleanup writes no tombstones. |
 | `LIDARR_ENABLED` | `backend`, `backend-worker` | Optional | `false` | Enables Lidarr integration logic from env fallback paths. |
 | `LIDARR_URL` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr base URL. |
 | `LIDARR_API_KEY` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr API key. |

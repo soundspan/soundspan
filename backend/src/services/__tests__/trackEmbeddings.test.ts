@@ -1,9 +1,33 @@
 jest.mock("../../utils/db", () => ({
-    prisma: { $queryRaw: jest.fn() },
+    prisma: { $executeRaw: jest.fn(), $queryRaw: jest.fn() },
 }));
 
 import { prisma } from "../../utils/db";
-import { fetchEmbeddingsByTrackIds } from "../trackEmbeddings";
+import {
+    fetchEmbeddingsByTrackIds,
+    upsertTrackEmbedding,
+} from "../trackEmbeddings";
+
+beforeEach(() => {
+    jest.clearAllMocks();
+});
+
+describe("upsertTrackEmbedding", () => {
+    it("writes a complete finite CLAP vector", async () => {
+        (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+
+        await upsertTrackEmbedding("track-1", Array(512).fill(0.25));
+
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects malformed vectors before writing", async () => {
+        await expect(upsertTrackEmbedding("track-1", [0.25])).rejects.toThrow(
+            "512 finite values",
+        );
+        expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+});
 
 describe("fetchEmbeddingsByTrackIds", () => {
     it("joins visible tracks before returning embeddings", async () => {

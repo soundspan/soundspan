@@ -10,6 +10,7 @@ import {
     validationQueue,
     schedulerQueue,
     genericImportQueue,
+    federationQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import {
@@ -59,6 +60,10 @@ import {
     processTrackRemovalPurge,
     TRACK_REMOVAL_PURGE_JOB_NAME,
 } from "./processors/trackRemovalPurgeProcessor";
+import {
+    registerFederationProcessors,
+    registerFederationSchedules,
+} from "./federationJobs";
 
 const log = logger.child("WorkerScheduler");
 const claimLog = log.child("SchedulerClaim");
@@ -1028,6 +1033,13 @@ genericImportQueue.process(
     GENERIC_IMPORT_WORKER_CONCURRENCY,
     processGenericImport,
 );
+if (config.features.federation) {
+    registerFederationProcessors();
+} else {
+    log.info(
+        "Federation disabled (FEDERATION_ENABLED=false); federation processors and schedules not registered",
+    );
+}
 async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
     const mode = job?.data?.mode === "startup" ? "startup" : "repeat";
 
@@ -1354,6 +1366,12 @@ registerSchedulerJobs()
         log.error("Failed to register scheduler queue jobs:", err);
     });
 
+if (config.features.federation) {
+    registerFederationSchedules().catch((error: unknown) => {
+        log.error("Failed to register federation schedules", error);
+    });
+}
+
 genericImportJobRunner.registerRecoveryJobs().catch((error) => {
     log.error("Failed to register generic import recovery jobs", { error });
 });
@@ -1382,6 +1400,7 @@ export async function shutdownWorkers(): Promise<void> {
     validationQueue.removeAllListeners();
     schedulerQueue.removeAllListeners();
     genericImportQueue.removeAllListeners();
+    federationQueue.removeAllListeners();
 
     // Close all queues gracefully
     await Promise.all([
@@ -1391,6 +1410,7 @@ export async function shutdownWorkers(): Promise<void> {
         validationQueue.close(),
         schedulerQueue.close(),
         genericImportQueue.close(),
+        federationQueue.close(),
     ]);
 
     // Disconnect enrichment state service Redis connections (2 connections)
@@ -1428,4 +1448,5 @@ export {
     validationQueue,
     schedulerQueue,
     genericImportQueue,
+    federationQueue,
 };

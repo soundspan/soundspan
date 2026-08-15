@@ -133,6 +133,7 @@ describe("config module", () => {
         ]);
         expect(config.features.federation).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
+        expect(config.workers.federationSyncIntervalMinutes).toBe(15);
     });
 
     it("constructs DATABASE_URL from percent-encoded PostgreSQL components", async () => {
@@ -570,6 +571,7 @@ describe("config module", () => {
             TRACK_RECONCILIATION_TIMEOUT_MS: "600001",
             FEDERATION_ENABLED: "true",
             FEDERATION_TOMBSTONE_RETENTION_DAYS: "30",
+            FEDERATION_SYNC_INTERVAL_MINUTES: "7",
         });
 
         expect(config.appVersion).toBe("2.0.0-test");
@@ -590,6 +592,7 @@ describe("config module", () => {
             trackReconciliationTimeoutMs: 600_001,
             trackRemovalRetentionDays: 90,
             federationTombstoneRetentionDays: 30,
+            federationSyncIntervalMinutes: 7,
         });
         expect(config.features.federation).toBe(true);
     });
@@ -626,6 +629,7 @@ describe("config module", () => {
             trackReconciliationTimeoutMs: 10 * 60 * 1000,
             trackRemovalRetentionDays: 90,
             federationTombstoneRetentionDays: 90,
+            federationSyncIntervalMinutes: 15,
         });
     });
 
@@ -808,6 +812,23 @@ describe("config module", () => {
         }) as never);
         await expect(
             loadConfigModule({ FEDERATION_TOMBSTONE_RETENTION_DAYS: "-1" }),
+        ).rejects.toThrow("process.exit:1");
+        exitSpy.mockRestore();
+    });
+
+    it("requires a positive federation sync interval", async () => {
+        const one = await loadConfigModule({
+            FEDERATION_SYNC_INTERVAL_MINUTES: "1",
+        });
+        expect(one.config.workers.federationSyncIntervalMinutes).toBe(1);
+
+        const exitSpy = jest.spyOn(process, "exit").mockImplementation(((
+            code?: number,
+        ) => {
+            throw new Error(`process.exit:${code}`);
+        }) as never);
+        await expect(
+            loadConfigModule({ FEDERATION_SYNC_INTERVAL_MINUTES: "0" }),
         ).rejects.toThrow("process.exit:1");
         exitSpy.mockRestore();
     });

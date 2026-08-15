@@ -21,6 +21,7 @@ const ENCRYPTED_MODEL_QUERIERS: Record<
     EncryptedModelName,
     (select: Record<string, boolean>) => Promise<Array<Record<string, unknown>>>
 > = {
+    federationPeer: (select) => prisma.federationPeer.findMany({ select }),
     user: (select) => prisma.user.findMany({ select }),
     userSettings: (select) => prisma.userSettings.findMany({ select }),
     systemSettings: (select) => prisma.systemSettings.findMany({ select }),

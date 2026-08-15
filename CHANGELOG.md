@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Federation-enabled deletion cleanup now writes track, album, and artist
   tombstones transactionally. `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls
   their retention window (default `90`; minimum `0`).
+- Added federation consumer linking, bounded catalog synchronization, peer
+  health monitoring, identity-tier deduplication, and streaming/cover proxies.
+  Outbound peer tokens are encrypted at rest, and
+  `FEDERATION_SYNC_INTERVAL_MINUTES` controls periodic sync (default `15`).
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges

@@ -1,3 +1,8 @@
+import type {
+    FederatedTrackPeer,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
+
 /**
  * Canonical normalized track contract used across local and remote sources.
  */
@@ -8,7 +13,8 @@ export interface UnifiedTrackResponse {
     trackNo: number | null;
     artist: { id: string | null; name: string };
     album: { id: string | null; title: string; coverArt: string | null };
-    source: "local" | "tidal" | "youtube";
+    source: UnifiedTrackSource;
+    peer?: FederatedTrackPeer;
     provider: {
         tidalTrackId: number | null;
         youtubeVideoId: string | null;
@@ -26,6 +32,12 @@ export interface UnifiedLocalTrackRecord {
     filePath?: string | null;
     displayTitle?: string | null;
     removedAt?: Date | null;
+    origin?: "LOCAL" | "FEDERATED";
+    federationPeer?: {
+        id: string;
+        name: string;
+        status: "PENDING" | "ACTIVE" | "OFFLINE" | "REVOKED";
+    } | null;
     album: {
         id?: string | null;
         title: string;
@@ -86,8 +98,8 @@ export interface UnifiedPlaylistTrackItemResponse {
     sort: number;
     type: "track";
     provider: {
-        source: "local" | "tidal" | "youtube" | "unknown";
-        label: "LOCAL" | "TIDAL" | "YOUTUBE" | "UNKNOWN";
+        source: UnifiedTrackSource | "unknown";
+        label: "LOCAL" | "TIDAL" | "YOUTUBE" | "FEDERATED" | "UNKNOWN";
         tidalTrackId: number | null;
         youtubeVideoId: string | null;
     };
@@ -105,6 +117,17 @@ export interface UnifiedPlaylistTrackItemResponse {
 export function normalizeLocalTrack(
     track: UnifiedLocalTrackRecord,
 ): UnifiedTrackResponse {
+    const federated =
+        track.origin === "FEDERATED" && track.federationPeer
+            ? {
+                  source: "federated" as const,
+                  peer: {
+                      id: track.federationPeer.id,
+                      name: track.federationPeer.name,
+                      online: track.federationPeer.status === "ACTIVE",
+                  },
+              }
+            : { source: "local" as const };
     return {
         id: track.id,
         title: track.title,
@@ -127,7 +150,7 @@ export function normalizeLocalTrack(
             title: track.album.title || "Unknown Album",
             coverArt: track.album.coverUrl ?? track.album.coverArt ?? null,
         },
-        source: "local",
+        ...federated,
         provider: {
             tidalTrackId: null,
             youtubeVideoId: null,
@@ -137,6 +160,31 @@ export function normalizeLocalTrack(
             : {}),
         displayTitle:
             typeof track.displayTitle === "string" ? track.displayTitle : null,
+    };
+}
+
+function formatPersistedTrackItem(
+    item: UnifiedPlaylistItemRecord,
+): UnifiedPlaylistTrackItemResponse {
+    const normalizedTrack = normalizeLocalTrack(item.track!);
+    const isFederated = normalizedTrack.source === "federated";
+    const isPlayable = !isFederated || normalizedTrack.peer?.online === true;
+    return {
+        ...buildBaseTrackItem(item),
+        provider: {
+            source: normalizedTrack.source,
+            label: isFederated ? "FEDERATED" : "LOCAL",
+            tidalTrackId: null,
+            youtubeVideoId: null,
+        },
+        playback: isPlayable
+            ? { isPlayable: true, reason: null, message: null }
+            : {
+                  isPlayable: false,
+                  reason: "peer_offline",
+                  message: `Playback is unavailable while ${normalizedTrack.peer?.name ?? "the federation peer"} is offline.`,
+              },
+        track: toLegacyCompatibleTrackShape(normalizedTrack),
     };
 }
 
@@ -270,22 +318,7 @@ export function formatUnifiedTrackItem(
     item: UnifiedPlaylistItemRecord,
 ): UnifiedPlaylistTrackItemResponse {
     if (item.track) {
-        const normalizedTrack = normalizeLocalTrack(item.track);
-        return {
-            ...buildBaseTrackItem(item),
-            provider: {
-                source: "local",
-                label: "LOCAL",
-                tidalTrackId: null,
-                youtubeVideoId: null,
-            },
-            playback: {
-                isPlayable: true,
-                reason: null,
-                message: null,
-            },
-            track: toLegacyCompatibleTrackShape(normalizedTrack),
-        };
+        return formatPersistedTrackItem(item);
     }
 
     if (item.trackTidal) {

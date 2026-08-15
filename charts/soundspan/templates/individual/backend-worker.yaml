@@ -116,6 +116,7 @@ spec:
             "AUTO_PLAYLISTS_ENABLED" true
             "FEDERATION_ENABLED" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
+            "FEDERATION_SYNC_INTERVAL_MINUTES" true
             "LIDARR_ENABLED" true
             "LIDARR_URL" true
             "LIDARR_API_KEY" true
@@ -339,6 +340,13 @@ spec:
             {{- else }}
             - name: FEDERATION_TOMBSTONE_RETENTION_DAYS
               value: {{ .Values.config.federationTombstoneRetentionDays | quote }}
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "FEDERATION_SYNC_INTERVAL_MINUTES" }}
+            - name: FEDERATION_SYNC_INTERVAL_MINUTES
+              value: {{ index $backendWorkerEnv "FEDERATION_SYNC_INTERVAL_MINUTES" | quote }}
+            {{- else }}
+            - name: FEDERATION_SYNC_INTERVAL_MINUTES
+              value: {{ .Values.config.federationSyncIntervalMinutes | quote }}
             {{- end }}
             {{- if hasKey $backendWorkerEnv "AUDIO_ANALYSIS_ENABLED" }}
             - name: AUDIO_ANALYSIS_ENABLED

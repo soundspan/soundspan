@@ -203,6 +203,9 @@ const playlistItemInclude = {
         // Full Track scalars include removedAt while preserving the existing
         // response shape for active playlist items.
         include: {
+            federationPeer: {
+                select: { id: true, name: true, status: true },
+            },
             album: {
                 include: {
                     artist: {

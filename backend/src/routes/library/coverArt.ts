@@ -27,6 +27,8 @@ import {
     coversBaseDir,
 } from "../../services/nativeCoverHealing";
 import { sendFileFromRoot } from "../../utils/sendFileFromRoot";
+import { proxyFederatedCover } from "../../services/federationCoverProxy";
+import { config } from "../../config";
 import {
     applyCoverArtCorsHeaders,
     buildCoverArtCorsHeaders,
@@ -296,6 +298,16 @@ export async function handleGetCoverArt(
                     title: true,
                     rgMbid: true,
                     coverUrl: true,
+                    peerId: true,
+                    remoteId: true,
+                    federationPeer: {
+                        select: {
+                            id: true,
+                            baseUrl: true,
+                            outboundToken: true,
+                            status: true,
+                        },
+                    },
                     artist: { select: { name: true } },
                 },
             });
@@ -361,6 +373,25 @@ export async function handleGetCoverArt(
                 );
                 coverUrl = fetchedCoverUrl;
             } else {
+                if (
+                    config.features.federation &&
+                    album.remoteId &&
+                    album.federationPeer?.status === "ACTIVE" &&
+                    album.federationPeer.baseUrl &&
+                    album.federationPeer.outboundToken
+                ) {
+                    try {
+                        const proxied = await proxyFederatedCover({
+                            req,
+                            res,
+                            peer: album.federationPeer,
+                            remoteId: album.remoteId,
+                        });
+                        if (proxied) return;
+                    } catch (error: unknown) {
+                        logger.warn("Federated cover proxy failed", { error });
+                    }
+                }
                 return sendRouteError(res, 404, "Cover art not found");
             }
         }

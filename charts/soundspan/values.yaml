@@ -724,6 +724,8 @@ config:
   # -- Federation tombstone retention in days. Zero removes tombstones on the
   #    terminal purge page immediately after they become older than that page.
   federationTombstoneRetentionDays: 90
+  # -- Consumer federation catalog sync interval in minutes. Minimum 1.
+  federationSyncIntervalMinutes: 15
   # -- Coarse feature flags. Existing ML/recommendation flags default ON;
   #    federation defaults OFF.
   #    Rendered as AUDIO_ANALYSIS_ENABLED / DISCOVERY_ENABLED /

@@ -327,6 +327,7 @@ model Track {
   origin             TrackOrigin              @default(LOCAL)
   peerId             String?
   remoteId           String?
+  dedupOfTrackId     String?
   bpm                Float?
   beatsCount         Int?
   key                String?
@@ -400,6 +401,8 @@ model Track {
   playlistItems   PlaylistItem[]
   album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
   federationPeer  FederationPeer?  @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  dedupOfTrack    Track?           @relation("FederationTrackDedup", fields: [dedupOfTrackId], references: [id], onDelete: SetNull)
+  deduplicatedFederatedTracks Track[] @relation("FederationTrackDedup")
   trackGenres     TrackGenre[]
   transcodedFiles TranscodedFile[]
   embedding       TrackEmbedding?
@@ -435,6 +438,7 @@ model Track {
   @@index([isrc])
   @@index([removedAt])
   @@index([origin])
+  @@index([dedupOfTrackId])
 }
 
 model FederationPeer {
@@ -1335,7 +1339,7 @@ model TrackMapping {
   trackTidalId   String?
   trackYtMusicId String?
   confidence     Float
-  source         String        // "gap-fill" | "isrc" | "import-match" | "manual"
+  source         String        // "gap-fill" | "isrc" | "import-match" | "manual" | "federation"
   stale          Boolean       @default(false)
   createdAt      DateTime      @default(now())
   track          Track?        @relation(fields: [trackId], references: [id], onDelete: SetNull)

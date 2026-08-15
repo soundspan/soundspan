@@ -35,6 +35,7 @@ jest.mock("../../utils/db", () => ({
         },
         user: { findMany: jest.fn() },
         userSettings: { findMany: jest.fn() },
+        federationPeer: { findMany: jest.fn() },
         systemSettings: { findMany: jest.fn() },
         apiKey: { findMany: jest.fn() },
     },
@@ -49,6 +50,8 @@ import { prisma } from "../../utils/db";
 
 const mockUserFindMany = prisma.user.findMany as unknown as jest.Mock;
 const mockUserSettingsFindMany = prisma.userSettings
+    .findMany as unknown as jest.Mock;
+const mockFederationPeerFindMany = prisma.federationPeer
     .findMany as unknown as jest.Mock;
 const mockSystemSettingsFindMany = prisma.systemSettings
     .findMany as unknown as jest.Mock;
@@ -86,6 +89,7 @@ describe("admin secrets-status route", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockFederationPeerFindMany.mockResolvedValue([]);
     });
 
     it("counts legacy vs v2 encrypted settings values per model", async () => {
@@ -105,6 +109,9 @@ describe("admin secrets-status route", () => {
         mockUserSettingsFindMany.mockResolvedValue([
             { ytMusicOAuthJson: "v2:a:b:c:d", tidalOAuthJson: "11:22" },
         ]);
+        mockFederationPeerFindMany.mockResolvedValue([
+            { outboundToken: "v2:peer:salt:tag:ciphertext" },
+        ]);
         // 1 v2 + 1 legacy; unset columns ignored.
         mockSystemSettingsFindMany.mockResolvedValue([
             { lidarrApiKey: "v2:x:y:z:w", openaiApiKey: "33:44" },
@@ -122,11 +129,12 @@ describe("admin secrets-status route", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             settingsCipher: {
-                total: 8,
-                v2: 4,
+                total: 9,
+                v2: 5,
                 legacy: 4,
                 migrationComplete: false,
                 byModel: {
+                    federationPeer: { total: 1, v2: 1, legacy: 0 },
                     // subsonicPassword (v2 + legacy) + twoFactorSecret (v2) +
                     // twoFactorRecoveryCodes (legacy)
                     user: { total: 4, v2: 2, legacy: 2 },

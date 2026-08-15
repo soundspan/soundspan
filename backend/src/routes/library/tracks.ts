@@ -38,6 +38,7 @@ import {
     normalizeTidalTrack,
     normalizeYtMusicTrack,
 } from "../../services/unifiedTrackResponse";
+import { proxyFederatedTrackStream } from "../../services/federationStreamProxy";
 import {
     AUDIO_INFO_CACHE_TTL_MS,
     audioInfoCache,
@@ -496,6 +497,9 @@ export async function handleGetLikedTracks(req: Request, res: Response) {
                       id: { in: localTrackIds },
                   },
                   include: {
+                      federationPeer: {
+                          select: { id: true, name: true, status: true },
+                      },
                       album: {
                           include: {
                               artist: { select: { id: true, name: true } },
@@ -896,6 +900,56 @@ tracksBrowseRouter.get(
 /**
  * Handles GET /api/library/tracks/:id/stream.
  */
+async function streamFederatedTrack(
+    req: Request<{ id: string }>,
+    res: Response,
+    track: { peerId: string | null; remoteId: string | null },
+    requestedQuality: string,
+): Promise<Response | void> {
+    if (!track.peerId || !track.remoteId) {
+        return sendRouteError(res, 503, "Federation peer is offline", {
+            code: "PEER_OFFLINE",
+        });
+    }
+    const peer = await prisma.federationPeer.findUnique({
+        where: { id: track.peerId },
+        select: {
+            id: true,
+            name: true,
+            baseUrl: true,
+            outboundToken: true,
+            status: true,
+        },
+    });
+    if (
+        !peer ||
+        peer.status !== "ACTIVE" ||
+        !peer.baseUrl ||
+        !peer.outboundToken
+    ) {
+        return sendRouteError(res, 503, "Federation peer is offline", {
+            code: "PEER_OFFLINE",
+        });
+    }
+    const quality = normalizeStreamingQuality(requestedQuality) ?? "medium";
+    try {
+        await proxyFederatedTrackStream({
+            req,
+            res,
+            peer,
+            remoteId: track.remoteId,
+            quality,
+        });
+        return undefined;
+    } catch (error: unknown) {
+        logger.warn("Federated stream proxy failed", { error });
+        if (res.headersSent) return undefined;
+        return sendRouteError(res, 503, "Federation peer is offline", {
+            code: "PEER_OFFLINE",
+        });
+    }
+}
+
 export async function handleStreamTrack(
     req: Request<{ id: string }>,
     res: Response,
@@ -960,6 +1014,10 @@ export async function handleStreamTrack(
                 quality || "default"
             }, using=${requestedQuality}, format=${ext}`,
         );
+
+        if (config.features.federation && track.origin === "FEDERATED") {
+            return streamFederatedTrack(req, res, track, requestedQuality);
+        }
 
         // === NATIVE FILE STREAMING ===
         // Check if track has native file path

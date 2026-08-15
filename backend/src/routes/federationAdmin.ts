@@ -7,10 +7,13 @@ import {
     createHostFederationPeer,
     deleteFederationPeer,
     FEDERATION_SCOPE_VALUES,
+    linkConsumerFederationPeer,
     listFederationPeers,
+    pairAndLinkConsumerFederationPeer,
     revokeFederationPeer,
     rotateFederationPeerCredential,
 } from "../services/federationPeers";
+import { enqueueFederationSyncNow } from "../workers/federationJobs";
 import { sendRouteError } from "./routeErrorResponse";
 
 const router = Router();
@@ -38,6 +41,20 @@ const pairingCodeSchema = z.strictObject({
 });
 const peerParamsSchema = z.strictObject({
     id: z.string().trim().min(1).max(128),
+});
+const consumerLinkSchema = z.strictObject({
+    baseUrl: httpsUrlSchema,
+    token: z.string().trim().min(1).max(4_096),
+    name: z.string().trim().min(1).max(120).optional(),
+});
+const consumerPairSchema = z.strictObject({
+    baseUrl: httpsUrlSchema,
+    code: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-HJ-NP-Z2-9]{8}$/),
+    name: z.string().trim().min(1).max(120),
 });
 
 function invalidRequest(res: Response): Response {
@@ -87,6 +104,66 @@ router.post(
 );
 
 /** @openapi
+ * /api/federation/admin/peers/link:
+ *   post:
+ *     summary: Validate and link a consumer-direction federation peer
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Consumer peer linked }
+ *       400: { description: Invalid link input }
+ *       502: { description: Peer manifest validation failed }
+ */
+router.post(
+    "/peers/link",
+    asyncHandler(async (req, res) => {
+        const parsed = consumerLinkSchema.safeParse(req.body);
+        if (!parsed.success || !req.user) return invalidRequest(res);
+        try {
+            const peer = await linkConsumerFederationPeer({
+                ...parsed.data,
+                createdById: req.user.id,
+            });
+            return res.status(201).json({ peer });
+        } catch (_error: unknown) {
+            return sendRouteError(res, 502, "Peer manifest validation failed", {
+                code: "FEDERATION_PEER_INVALID",
+            });
+        }
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/peers/link/pair:
+ *   post:
+ *     summary: Pair and link a consumer-direction federation peer
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Consumer peer paired and linked }
+ *       400: { description: Invalid pairing input }
+ *       502: { description: Peer pairing or manifest validation failed }
+ */
+router.post(
+    "/peers/link/pair",
+    asyncHandler(async (req, res) => {
+        const parsed = consumerPairSchema.safeParse(req.body);
+        if (!parsed.success || !req.user) return invalidRequest(res);
+        try {
+            const peer = await pairAndLinkConsumerFederationPeer({
+                ...parsed.data,
+                createdById: req.user.id,
+            });
+            return res.status(201).json({ peer });
+        } catch (_error: unknown) {
+            return sendRouteError(res, 502, "Peer pairing failed", {
+                code: "FEDERATION_PAIR_FAILED",
+            });
+        }
+    }),
+);
+
+/** @openapi
  * /api/federation/admin/peers/{id}/rotate:
  *   post:
  *     summary: Rotate a federation peer credential
@@ -127,6 +204,26 @@ router.post(
             return sendRouteError(res, 404, "Federation peer not found");
         }
         return res.json({ success: true });
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/peers/{id}/sync:
+ *   post:
+ *     summary: Enqueue an immediate consumer catalog sync
+ *     tags: [Federation Admin]
+ *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     responses:
+ *       202: { description: Sync job queued or coalesced }
+ *       400: { description: Invalid peer id }
+ */
+router.post(
+    "/peers/:id/sync",
+    asyncHandler(async (req, res) => {
+        const parsed = peerParamsSchema.safeParse(req.params);
+        if (!parsed.success) return invalidRequest(res);
+        await enqueueFederationSyncNow(parsed.data.id);
+        return res.status(202).json({ queued: true });
     }),
 );
 

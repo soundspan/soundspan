@@ -50,6 +50,44 @@ describe("unifiedTrackResponse", () => {
         });
     });
 
+    it("normalizes federated tracks with peer provenance and online status", () => {
+        const result = normalizeLocalTrack({
+            id: "fed-track-1",
+            title: "Federated Song",
+            duration: 181,
+            trackNo: 4,
+            origin: "FEDERATED",
+            album: {
+                id: "fed-album-1",
+                title: "Federated Album",
+                coverUrl: null,
+                artist: { id: "fed-artist-1", name: "Remote Artist" },
+            },
+            federationPeer: {
+                id: "peer-1",
+                name: "Peer One",
+                status: "ACTIVE",
+            },
+        });
+
+        expect(result).toEqual({
+            id: "fed-track-1",
+            title: "Federated Song",
+            duration: 181,
+            trackNo: 4,
+            artist: { id: "fed-artist-1", name: "Remote Artist" },
+            album: {
+                id: "fed-album-1",
+                title: "Federated Album",
+                coverArt: null,
+            },
+            source: "federated",
+            peer: { id: "peer-1", name: "Peer One", online: true },
+            provider: { tidalTrackId: null, youtubeVideoId: null },
+            displayTitle: null,
+        });
+    });
+
     it("normalizes tidal tracks into canonical unified shape", () => {
         const result = normalizeTidalTrack({
             id: "tt-1",
@@ -207,5 +245,47 @@ describe("unifiedTrackResponse", () => {
         expect(youtubeMissingId.playback.reason).toBe(
             "missing_youtube_video_id",
         );
+    });
+
+    it("marks an offline federated playlist track unplayable", () => {
+        const result = formatUnifiedTrackItem({
+            id: "pli-fed-1",
+            playlistId: "pl-1",
+            trackId: "fed-track-1",
+            trackTidalId: null,
+            trackYtMusicId: null,
+            sort: 4,
+            track: {
+                id: "fed-track-1",
+                title: "Federated Song",
+                duration: 181,
+                origin: "FEDERATED",
+                federationPeer: {
+                    id: "peer-1",
+                    name: "Peer One",
+                    status: "OFFLINE",
+                },
+                album: {
+                    title: "Federated Album",
+                    artist: { name: "Remote Artist" },
+                },
+            },
+            trackTidal: null,
+            trackYtMusic: null,
+        });
+
+        expect(result.provider).toMatchObject({
+            source: "federated",
+            label: "FEDERATED",
+        });
+        expect(result.playback).toEqual({
+            isPlayable: false,
+            reason: "peer_offline",
+            message: "Playback is unavailable while Peer One is offline.",
+        });
+        expect(result.track).toMatchObject({
+            source: "federated",
+            peer: { id: "peer-1", name: "Peer One", online: false },
+        });
     });
 });

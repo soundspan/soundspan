@@ -28,6 +28,7 @@ describe("workers runtime behavior", () => {
         audioAnalysis?: boolean;
         discovery?: boolean;
         autoPlaylists?: boolean;
+        federation?: boolean;
     }) {
         const scanQueue = createQueueMock();
         const discoverQueue = createQueueMock();
@@ -35,6 +36,7 @@ describe("workers runtime behavior", () => {
         const validationQueue = createQueueMock();
         const schedulerQueue = createQueueMock();
         const genericImportQueue = createQueueMock();
+        const federationQueue = createQueueMock();
 
         const logger = {
             debug: jest.fn(),
@@ -61,6 +63,8 @@ describe("workers runtime behavior", () => {
             async () => undefined,
         );
         const registerRecoveryJobs = jest.fn(async () => undefined);
+        const registerFederationProcessors = jest.fn();
+        const registerFederationSchedules = jest.fn(async () => undefined);
         const runDataIntegrityCheck = jest.fn(async () => undefined);
         const shutdownDiscoverProcessor = jest.fn(async () => undefined);
         const cleanupExpiredCache = jest.fn(async () => undefined);
@@ -153,6 +157,11 @@ describe("workers runtime behavior", () => {
             validationQueue,
             schedulerQueue,
             genericImportQueue,
+            federationQueue,
+        }));
+        jest.doMock("../federationJobs", () => ({
+            registerFederationProcessors,
+            registerFederationSchedules,
         }));
         jest.doMock("../processors/scanProcessor", () => ({
             processScan: jest.fn(async () => ({
@@ -215,6 +224,7 @@ describe("workers runtime behavior", () => {
                     audioAnalysis: true,
                     discovery: true,
                     autoPlaylists: true,
+                    federation: false,
                     ...(featureOverrides ?? {}),
                 },
             },
@@ -260,6 +270,7 @@ describe("workers runtime behavior", () => {
             validationQueue,
             schedulerQueue,
             genericImportQueue,
+            federationQueue,
             logger,
             startUnifiedEnrichmentWorker,
             stopUnifiedEnrichmentWorker,
@@ -271,6 +282,8 @@ describe("workers runtime behavior", () => {
             processTrackRemovalPurge,
             finalizeGenericImportQueueFailure,
             registerRecoveryJobs,
+            registerFederationProcessors,
+            registerFederationSchedules,
             runDataIntegrityCheck,
             downloadQueueManager,
             simpleDownloadManager,
@@ -329,6 +342,8 @@ describe("workers runtime behavior", () => {
             mocks.processGenericImport,
         );
         expect(mocks.registerRecoveryJobs).toHaveBeenCalledTimes(1);
+        expect(mocks.registerFederationProcessors).not.toHaveBeenCalled();
+        expect(mocks.registerFederationSchedules).not.toHaveBeenCalled();
         expect(mocks.startUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startMoodBucketWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
@@ -369,6 +384,18 @@ describe("workers runtime behavior", () => {
                 removeOnFail: 10,
             },
         );
+    });
+
+    it("registers federation processors and schedules only when enabled", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks({ federation: true });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        expect(mocks.registerFederationProcessors).toHaveBeenCalledTimes(1);
+        expect(mocks.registerFederationSchedules).toHaveBeenCalledTimes(1);
     });
 
     it("dispatches track-removal purge jobs through the scheduler", async () => {

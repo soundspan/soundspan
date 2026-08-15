@@ -45,6 +45,7 @@ services:
       - AUTO_PLAYLISTS_ENABLED=${AUTO_PLAYLISTS_ENABLED:-true}
       - FEDERATION_ENABLED=${FEDERATION_ENABLED:-false}
       - FEDERATION_TOMBSTONE_RETENTION_DAYS=${FEDERATION_TOMBSTONE_RETENTION_DAYS:-90}
+      - FEDERATION_SYNC_INTERVAL_MINUTES=${FEDERATION_SYNC_INTERVAL_MINUTES:-15}
       # MusicCNN queue socket timeout; runtime enforces at least BRPOP timeout + 5s
       - AUDIO_REDIS_SOCKET_TIMEOUT=${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
       # CLAP queue socket timeout; runtime enforces at least poll interval + 5s

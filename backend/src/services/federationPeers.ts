@@ -2,6 +2,8 @@ import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { hashApiKey } from "../utils/apiKeyHash";
 import { prisma } from "../utils/db";
+import { decrypt, encrypt } from "../utils/encryption";
+import { createFederationClient, pairFederationPeer } from "./federationClient";
 
 /** Scopes recognized by the v1 host federation API. */
 export const FEDERATION_SCOPE_VALUES = [
@@ -27,6 +29,8 @@ const publicPeerSelect = {
     scopes: true,
     status: true,
     lastSeenAt: true,
+    lastSyncCursor: true,
+    catalogEpoch: true,
     createdAt: true,
     updatedAt: true,
 } satisfies Prisma.FederationPeerSelect;
@@ -49,6 +53,14 @@ export interface PairingConsumeInput {
     code: string;
     name: string;
     baseUrl: string;
+}
+
+/** Validated values used to link a consumer-direction peer. */
+export interface LinkConsumerPeerInput {
+    baseUrl: string;
+    token: string;
+    name?: string;
+    createdById: string;
 }
 
 function newCredential(): { token: string; credentialHash: string } {
@@ -183,9 +195,92 @@ export async function rotateFederationPeerCredential(
 export async function revokeFederationPeer(peerId: string): Promise<boolean> {
     const result = await prisma.federationPeer.updateMany({
         where: { id: peerId },
-        data: { status: "REVOKED", credentialHash: null },
+        data: {
+            status: "REVOKED",
+            credentialHash: null,
+            outboundToken: null,
+        },
     });
     return result.count === 1;
+}
+
+function normalizeConsumerBaseUrl(value: string): string {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+        throw new Error("Federation peer base URL is invalid");
+    }
+    return parsed.origin;
+}
+
+function consumerScopes(embeddingsAvailable: boolean): FederationScope[] {
+    return embeddingsAvailable
+        ? ["library:read", "stream:read", "embeddings:read"]
+        : ["library:read", "stream:read"];
+}
+
+/** Validates a remote manifest before persisting an encrypted consumer token. */
+export async function linkConsumerFederationPeer(
+    input: LinkConsumerPeerInput,
+): Promise<PublicFederationPeer> {
+    const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
+    const outboundToken = encrypt(input.token);
+    const manifest = await createFederationClient({
+        id: "pending-link",
+        baseUrl,
+        outboundToken,
+    }).getManifest();
+    return prisma.federationPeer.create({
+        data: {
+            name: input.name?.trim() || manifest.name,
+            direction: "CONSUMER",
+            baseUrl,
+            outboundToken,
+            scopes: consumerScopes(manifest.embeddingsAvailable),
+            status: "ACTIVE",
+            lastSeenAt: new Date(),
+            catalogEpoch: manifest.catalogEpoch,
+            createdById: input.createdById,
+        },
+        select: publicPeerSelect,
+    });
+}
+
+/** Exchanges a short code, then links the resulting token through manifest validation. */
+export async function pairAndLinkConsumerFederationPeer(input: {
+    baseUrl: string;
+    code: string;
+    name: string;
+    createdById: string;
+}): Promise<PublicFederationPeer> {
+    const baseUrl = normalizeConsumerBaseUrl(input.baseUrl);
+    const paired = await pairFederationPeer({
+        baseUrl,
+        code: input.code,
+        name: input.name,
+        consumerBaseUrl: baseUrl,
+    });
+    return linkConsumerFederationPeer({
+        baseUrl,
+        token: paired.token,
+        name: input.name,
+        createdById: input.createdById,
+    });
+}
+
+/** Loads and decrypts a consumer credential for internal-only peer calls. */
+export async function getConsumerPeerConnection(peerId: string) {
+    const peer = await prisma.federationPeer.findUnique({
+        where: { id: peerId },
+        select: {
+            id: true,
+            baseUrl: true,
+            outboundToken: true,
+            direction: true,
+            status: true,
+        },
+    });
+    if (!peer?.outboundToken) return null;
+    return { ...peer, outboundToken: decrypt(peer.outboundToken) };
 }
 
 /** Permanently deletes a peer record selected by an administrator. */

@@ -133,6 +133,16 @@ export const genericImportQueue = new Bull("generic-import", {
     },
 });
 
+/** Durable queue for bounded per-peer federation sync and health work. */
+export const federationQueue = new Bull("federation-sync", {
+    redis: redisConfig,
+    settings: defaultQueueSettings,
+    defaultJobOptions: {
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
+});
+
 // Export all queues for monitoring
 export const queues = [
     scanQueue,
@@ -142,6 +152,7 @@ export const queues = [
     analysisQueue,
     schedulerQueue,
     genericImportQueue,
+    federationQueue,
 ];
 
 // Add error handlers to all queues to prevent unhandled exceptions

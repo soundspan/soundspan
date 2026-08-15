@@ -109,6 +109,13 @@ const nonnegativeIntegerEnvSchema = z
         message: "must be a safe integer",
     })
     .optional();
+const positiveIntegerEnvSchema = z
+    .string()
+    .regex(/^[1-9]\d*$/, "must be a positive integer")
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message: "must be a safe integer",
+    })
+    .optional();
 
 // Validate critical environment variables on startup.
 const envSchema = z
@@ -130,6 +137,7 @@ const envSchema = z
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
         TRACK_REMOVAL_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
         FEDERATION_TOMBSTONE_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
+        FEDERATION_SYNC_INTERVAL_MINUTES: positiveIntegerEnvSchema,
     })
     .superRefine((env, context) => {
         const encryptionKey = resolveSettingsEncryptionKey(env);
@@ -169,6 +177,10 @@ const trackRemovalRetentionDays = Number.parseInt(
 );
 const federationTombstoneRetentionDays = Number.parseInt(
     process.env.FEDERATION_TOMBSTONE_RETENTION_DAYS ?? "90",
+    10,
+);
+const federationSyncIntervalMinutes = Number.parseInt(
+    process.env.FEDERATION_SYNC_INTERVAL_MINUTES ?? "15",
     10,
 );
 
@@ -553,6 +565,7 @@ export const config = {
     workers: {
         trackRemovalRetentionDays,
         federationTombstoneRetentionDays,
+        federationSyncIntervalMinutes,
         get moodBucketClaimTtlMs(): number {
             return positiveIntEnvOr(
                 process.env.MOOD_BUCKET_CLAIM_TTL_MS,

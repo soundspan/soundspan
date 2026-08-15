@@ -6,6 +6,8 @@ const mockStreamWithRangeSupport = jest.fn();
 const mockStreamDestroy = jest.fn();
 const mockParseFile = jest.fn();
 const mockLookup = jest.fn();
+const mockProxyFederatedTrackStream = jest.fn();
+const mockProxyFederatedCover = jest.fn();
 
 jest.mock("dns/promises", () => ({
     lookup: (...args: unknown[]) => mockLookup(...args),
@@ -89,6 +91,9 @@ jest.mock("../../utils/db", () => ({
         trackMapping: {
             findMany: jest.fn(),
         },
+        federationPeer: {
+            findUnique: jest.fn(),
+        },
         play: {
             findFirst: jest.fn(),
             create: jest.fn(),
@@ -162,6 +167,7 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        features: { federation: true },
         audiobookshelf: undefined,
         music: {
             musicPath: "/music",
@@ -173,6 +179,15 @@ jest.mock("../../config", () => ({
             shareCeiling: 0.3,
         },
     },
+}));
+
+jest.mock("../../services/federationStreamProxy", () => ({
+    proxyFederatedTrackStream: (...args: unknown[]) =>
+        mockProxyFederatedTrackStream(...args),
+}));
+jest.mock("../../services/federationCoverProxy", () => ({
+    proxyFederatedCover: (...args: unknown[]) =>
+        mockProxyFederatedCover(...args),
 }));
 
 jest.mock("../../workers/queues", () => ({
@@ -400,6 +415,8 @@ const mockPlayFindMany = prisma.play.findMany as jest.Mock;
 const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
 const mockTrackMappingFindMany = (prisma as any).trackMapping
     .findMany as jest.Mock;
+const mockFederationPeerFindUnique = (prisma as any).federationPeer
+    .findUnique as jest.Mock;
 const mockUserSettingsFindUnique = prisma.userSettings.findUnique as jest.Mock;
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
 const mockArtistFindUnique = prisma.artist.findUnique as jest.Mock;
@@ -1339,6 +1356,15 @@ describe("library stream runtime coverage", () => {
         });
         mockStreamWithRangeSupport.mockResolvedValue(undefined);
         mockStreamDestroy.mockImplementation(() => undefined);
+        mockProxyFederatedTrackStream.mockResolvedValue(undefined);
+        mockProxyFederatedCover.mockResolvedValue(true);
+        mockFederationPeerFindUnique.mockResolvedValue({
+            id: "peer-1",
+            name: "Peer One",
+            baseUrl: "https://peer.example",
+            outboundToken: "encrypted-token",
+            status: "ACTIVE",
+        });
     });
 
     it("returns 401 when stream request has no authenticated user", async () => {
@@ -1620,6 +1646,85 @@ describe("library stream runtime coverage", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to stream track" });
     });
+
+    it("proxies federated tracks and preserves local-user play logging", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({
+                id: "fed-track-1",
+                origin: "FEDERATED",
+                peerId: "peer-1",
+                remoteId: "remote-track-1",
+                filePath: null,
+            }),
+        );
+        const req = {
+            params: { id: "fed-track-1" },
+            query: { quality: "original" },
+            headers: { range: "bytes=0-99" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(mockPlayCreate).toHaveBeenCalledWith({
+            data: { userId: "user-1", trackId: "fed-track-1" },
+        });
+        expect(mockProxyFederatedTrackStream).toHaveBeenCalledWith({
+            req,
+            res,
+            peer: {
+                id: "peer-1",
+                name: "Peer One",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                status: "ACTIVE",
+            },
+            remoteId: "remote-track-1",
+            quality: "original",
+        });
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+    });
+
+    it.each(["OFFLINE", "REVOKED"])(
+        "returns typed 503 when the owning peer is %s",
+        async (status) => {
+            mockTrackFindUnique.mockResolvedValueOnce(
+                createNativeTrack({
+                    id: "fed-track-1",
+                    origin: "FEDERATED",
+                    peerId: "peer-1",
+                    remoteId: "remote-track-1",
+                    filePath: null,
+                }),
+            );
+            mockFederationPeerFindUnique.mockResolvedValueOnce({
+                id: "peer-1",
+                name: "Peer One",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                status,
+            });
+            const res = createRes();
+
+            await streamHandler(
+                {
+                    params: { id: "fed-track-1" },
+                    query: {},
+                    headers: {},
+                    user: { id: "user-1" },
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(503);
+            expect(res.body).toEqual({
+                error: "Federation peer is offline",
+                code: "PEER_OFFLINE",
+            });
+            expect(mockProxyFederatedTrackStream).not.toHaveBeenCalled();
+        },
+    );
 });
 
 describe("library catalog list runtime coverage", () => {
@@ -5096,6 +5201,78 @@ describe("library catalog list runtime coverage", () => {
         const errRes = createRes();
         await invokeWithErrorHandler(albumCoverHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
+    });
+
+    it("falls back to the owning peer when a federated album has no resolved cover", async () => {
+        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "fed-album-1",
+            title: "Federated Album",
+            rgMbid: "temp-federated",
+            coverUrl: null,
+            peerId: "peer-1",
+            remoteId: "remote-album-1",
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                status: "ACTIVE",
+            },
+            artist: { name: "Remote Artist" },
+        });
+        const req = {
+            params: { id: "fed-album-1" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockProxyFederatedCover).toHaveBeenCalledWith({
+            req,
+            res,
+            peer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                status: "ACTIVE",
+            },
+            remoteId: "remote-album-1",
+        });
+        expect(res.statusCode).toBe(200);
+    });
+
+    it("does not contact an offline peer for a missing federated cover", async () => {
+        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "fed-album-1",
+            title: "Federated Album",
+            rgMbid: "temp-federated",
+            coverUrl: null,
+            peerId: "peer-1",
+            remoteId: "remote-album-1",
+            federationPeer: {
+                id: "peer-1",
+                baseUrl: "https://peer.example",
+                outboundToken: "encrypted-token",
+                status: "OFFLINE",
+            },
+            artist: { name: "Remote Artist" },
+        });
+        const res = createRes();
+
+        await coverArtHandler(
+            {
+                params: { id: "fed-album-1" },
+                query: {},
+                headers: {},
+            } as any,
+            res,
+        );
+
+        expect(mockProxyFederatedCover).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(404);
     });
 
     it("serves local native cover IDs from disk and falls back to Deezer when missing", async () => {
