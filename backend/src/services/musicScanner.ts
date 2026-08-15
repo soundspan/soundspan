@@ -66,7 +66,15 @@ function hasAudioReplacement(
 
 function buildRebindData(
     candidate: IdentityTrackRow,
+    missing: IdentityTrackRow,
 ): Prisma.TrackUpdateArgs["data"] {
+    const hashData =
+        candidate.audioHash === null && missing.audioHash !== null
+            ? {}
+            : {
+                  audioHash: candidate.audioHash,
+                  audioHashedAt: candidate.audioHashedAt,
+              };
     return {
         filePath: candidate.filePath,
         fileModified: candidate.fileModified,
@@ -79,8 +87,7 @@ function buildRebindData(
         duration: candidate.duration,
         recordingMbid: candidate.recordingMbid,
         isrc: candidate.isrc,
-        audioHash: candidate.audioHash,
-        audioHashedAt: candidate.audioHashedAt,
+        ...hashData,
         removedAt: null,
     };
 }
@@ -256,7 +263,7 @@ export class MusicScannerService {
             await transaction.track.delete({
                 where: { id: match.candidate.id },
             });
-            const trackData = buildRebindData(match.candidate);
+            const trackData = buildRebindData(match.candidate, match.missing);
             let replacementCachePaths: string[] = [];
             if (replacement) {
                 replacementCachePaths = await applyTrackReplacement(
@@ -1305,8 +1312,12 @@ export class MusicScannerService {
         let computedAudioHash: string | null | undefined;
         if (computeHash) {
             computedAudioHash = await computeAudioStreamHash(absolutePath);
-            hashFields.audioHash = computedAudioHash;
-            hashFields.audioHashedAt = computedAudioHash ? new Date() : null;
+            if (computedAudioHash !== null || existingAudioHash === null) {
+                hashFields.audioHash = computedAudioHash;
+                hashFields.audioHashedAt = computedAudioHash
+                    ? new Date()
+                    : null;
+            }
         }
 
         const trackUpsert = {

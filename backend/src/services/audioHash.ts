@@ -62,11 +62,9 @@ export async function computeAudioStreamHash(
     try {
         stdout = await runFfmpeg(ffmpegBinary, args);
     } catch (error) {
-        hashLogger.warn(
-            `Failed to hash audio stream for ${filePath}: ${
-                error instanceof Error ? error.message : String(error)
-            }`,
-        );
+        hashLogger.warn(`Failed to hash audio stream for ${filePath}`, {
+            error,
+        });
         return null;
     }
 
@@ -94,12 +92,12 @@ function runFfmpeg(binary: string, args: string[]): Promise<string> {
             },
             (error, stdout, stderr) => {
                 if (error) {
+                    const failureMessage =
+                        stderr.trim() || "ffmpeg streamhash failed";
                     reject(
-                        new Error(
-                            stderr?.trim()
-                                ? `${error.message}: ${stderr.trim()}`
-                                : error.message,
-                        ),
+                        new Error(failureMessage, {
+                            cause: error,
+                        }),
                     );
                     return;
                 }

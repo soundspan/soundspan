@@ -584,6 +584,7 @@ describe("config module", () => {
             enrichmentClaimTtlMs: 900_001,
             trackReconciliationMaxRows: 10_001,
             trackReconciliationTimeoutMs: 600_001,
+            trackRemovalRetentionDays: 90,
         });
     });
 
@@ -617,6 +618,7 @@ describe("config module", () => {
             enrichmentClaimTtlMs: 900_000,
             trackReconciliationMaxRows: 10_000,
             trackReconciliationTimeoutMs: 10 * 60 * 1000,
+            trackRemovalRetentionDays: 90,
         });
     });
 

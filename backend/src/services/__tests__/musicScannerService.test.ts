@@ -416,8 +416,11 @@ describe("MusicScannerService.scanLibrary", () => {
 
     it("does not reset derived data when a moved candidate hash is unknown", async () => {
         const scanner = new MusicScannerService();
+        const storedHash = "sha256:" + "1f".repeat(32);
+        const storedHashedAt = new Date("2026-01-01T00:01:00.000Z");
         const missing = identityTrack("track-old", "Old/Track.flac", {
-            audioHash: "sha256:" + "1f".repeat(32),
+            audioHash: storedHash,
+            audioHashedAt: storedHashedAt,
             recordingMbid: "recording-1",
         });
         const candidate = identityTrack("track-new", "New/Track.flac", {
@@ -437,8 +440,13 @@ describe("MusicScannerService.scanLibrary", () => {
 
         expect(mockPrisma.track.update).toHaveBeenCalledWith({
             where: { id: "track-old" },
-            data: expect.objectContaining({ audioHash: null }),
+            data: expect.objectContaining({
+                filePath: "New/Track.flac",
+            }),
         });
+        const [updateArg] = mockPrisma.track.update.mock.calls[0];
+        expect(updateArg.data).not.toHaveProperty("audioHash");
+        expect(updateArg.data).not.toHaveProperty("audioHashedAt");
         expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
         expect(mockPrisma.transcodedFile.deleteMany).not.toHaveBeenCalled();
     });
@@ -702,7 +710,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
     });
 
-    it("clears a stale hash when a changed file fails to hash", async () => {
+    it("preserves a stored hash when a changed file fails to hash", async () => {
         const scanner = new MusicScannerService();
         const audioFile = "/music/Artist/Track.mp3";
 
@@ -728,6 +736,39 @@ describe("MusicScannerService.scanLibrary", () => {
         await scanner.scanLibrary("/music");
 
         expect(mockComputeAudioStreamHash).toHaveBeenCalledWith(audioFile);
+        const [upsertArg] = mockPrisma.track.upsert.mock.calls[0];
+        expect(upsertArg.update).not.toHaveProperty("audioHash");
+        expect(upsertArg.update).not.toHaveProperty("audioHashedAt");
+        expect(mockPrisma.track.update).not.toHaveBeenCalled();
+        expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.transcodedFile.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("writes null hash fields when an unhashed changed file fails to hash", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-1",
+                filePath: "Artist/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+                audioHash: null,
+            },
+        ]);
+        mockStat.mockResolvedValue({
+            mtime: new Date("2026-02-01T00:00:00.000Z"),
+            size: 777,
+        });
+        mockComputeAudioStreamHash.mockResolvedValue(null);
+        mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-1" });
+
+        await scanner.scanLibrary("/music");
+
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
                 update: expect.objectContaining({

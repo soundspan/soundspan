@@ -343,9 +343,14 @@ router.get("/genres", async (req, res) => {
     try {
         const genres = await prisma.genre.findMany({
             where: {
-                trackGenres: {
-                    some: { track: { removedAt: null } },
-                },
+                OR: [
+                    { trackGenres: { none: {} } },
+                    {
+                        trackGenres: {
+                            some: { track: { removedAt: null } },
+                        },
+                    },
+                ],
             },
             orderBy: { name: "asc" },
             include: {

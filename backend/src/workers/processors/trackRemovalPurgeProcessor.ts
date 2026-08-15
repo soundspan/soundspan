@@ -132,9 +132,9 @@ async function enqueueContinuation(
 
 async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
     const orphans = await cleanupOrphanedLibraryEntities();
-    const counts = await backfillAllArtistCounts();
+    const { processed, errors: failedCount } = await backfillAllArtistCounts();
     log.info(
-        `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${counts.processed} artist counts with ${counts.errors} errors`,
+        `Post-purge cleanup for ${deleted} tracks deleted ${orphans.albumsDeleted} albums and ${orphans.artistsDeleted} artists; refreshed ${processed} artist counts with ${failedCount} errors`,
     );
 }
 

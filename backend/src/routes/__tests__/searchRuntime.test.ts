@@ -288,10 +288,10 @@ describe("search route runtime behavior", () => {
         expect(res.body).toEqual({ error: "Search failed" });
     });
 
-    it("returns genres with track counts", async () => {
+    it("returns empty and visible genres while hiding all-removed genres", async () => {
         mockGenreFindMany.mockResolvedValueOnce([
-            { id: "genre-1", name: "Alternative", _count: { trackGenres: 12 } },
-            { id: "genre-2", name: "Ambient", _count: { trackGenres: 5 } },
+            { id: "genre-empty", name: "Ambient", _count: { trackGenres: 0 } },
+            { id: "genre-mixed", name: "Rock", _count: { trackGenres: 5 } },
         ]);
 
         const req = {} as any;
@@ -300,9 +300,14 @@ describe("search route runtime behavior", () => {
 
         expect(mockGenreFindMany).toHaveBeenCalledWith({
             where: {
-                trackGenres: {
-                    some: { track: { removedAt: null } },
-                },
+                OR: [
+                    { trackGenres: { none: {} } },
+                    {
+                        trackGenres: {
+                            some: { track: { removedAt: null } },
+                        },
+                    },
+                ],
             },
             orderBy: { name: "asc" },
             include: {
@@ -317,9 +322,12 @@ describe("search route runtime behavior", () => {
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual([
-            { id: "genre-1", name: "Alternative", trackCount: 12 },
-            { id: "genre-2", name: "Ambient", trackCount: 5 },
+            { id: "genre-empty", name: "Ambient", trackCount: 0 },
+            { id: "genre-mixed", name: "Rock", trackCount: 5 },
         ]);
+        expect(res.body).not.toContainEqual(
+            expect.objectContaining({ id: "genre-all-removed" }),
+        );
     });
 
     it("returns 500 when genre lookup fails", async () => {

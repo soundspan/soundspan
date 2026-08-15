@@ -17,6 +17,12 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => ({
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+        })),
     },
 }));
 
@@ -32,6 +38,10 @@ jest.mock("../../utils/db", () => ({
         systemSettings: { findMany: jest.fn() },
         apiKey: { findMany: jest.fn() },
     },
+}));
+
+jest.mock("../../config", () => ({
+    config: { workers: { trackRemovalRetentionDays: 90 } },
 }));
 
 import router from "../admin";

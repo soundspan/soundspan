@@ -82,6 +82,7 @@ jest.mock("../../utils/db", () => ({
         },
         track: {
             findUnique: jest.fn(),
+            findFirst: jest.fn(),
             update: jest.fn(),
         },
         systemSettings: {
@@ -122,7 +123,7 @@ const mockArtistUpdate = prisma.artist.update as jest.Mock;
 const mockAlbumFindUnique = prisma.album.findUnique as jest.Mock;
 const mockAlbumFindFirst = prisma.album.findFirst as jest.Mock;
 const mockAlbumUpdate = prisma.album.update as jest.Mock;
-const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
+const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
 const mockTrackUpdate = prisma.track.update as jest.Mock;
 const mockOwnedAlbumDeleteMany = prisma.ownedAlbum.deleteMany as jest.Mock;
 const mockOwnedAlbumUpsert = prisma.ownedAlbum.upsert as jest.Mock;
@@ -174,6 +175,7 @@ describe("enrichment metadata compatibility", () => {
         jest.clearAllMocks();
         mockArtistFindFirst.mockResolvedValue(null);
         mockAlbumFindFirst.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue({ id: "track-1" });
     });
 
     it("stores track metadata as non-destructive user overrides", async () => {
@@ -600,7 +602,7 @@ describe("enrichment metadata compatibility", () => {
     });
 
     it("returns 404 when resetting metadata for a missing track", async () => {
-        mockTrackFindUnique.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue(null);
 
         const req = {
             params: { id: "missing-track" },
