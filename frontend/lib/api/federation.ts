@@ -6,14 +6,23 @@ export type FederationScope =
     | "stream:read"
     | "embeddings:read";
 
+export type FederationPeerDirection = "HOST" | "CONSUMER" | "BOTH";
+
+export type FederationPeerStatus =
+    | "PENDING"
+    | "ACTIVE"
+    | "OFFLINE"
+    | "REVOKED";
+
 /** Public federation peer data returned without credential material. */
 export interface FederationPeer {
     id: string;
     name: string;
-    direction: "HOST" | "CONSUMER";
+    direction: FederationPeerDirection;
     baseUrl: string | null;
     scopes: FederationScope[];
-    status: "PENDING" | "ACTIVE" | "OFFLINE" | "REVOKED";
+    inboundStatus: FederationPeerStatus | null;
+    outboundStatus: FederationPeerStatus | null;
     lastSeenAt: string | null;
     lastSyncCursor: string | null;
     catalogEpoch: string | null;
@@ -25,18 +34,24 @@ export interface CreateFederationPeerInput {
     name: string;
     scopes: FederationScope[];
     baseUrl?: string;
+    direction?: "HOST" | "BOTH";
+    token?: string;
 }
 
 export interface LinkFederationPeerInput {
     baseUrl: string;
     token: string;
     name?: string;
+    direction?: "CONSUMER" | "BOTH";
+    scopes?: FederationScope[];
 }
 
 export interface PairFederationPeerInput {
     baseUrl: string;
     code: string;
     name: string;
+    direction?: "CONSUMER" | "BOTH";
+    scopes?: FederationScope[];
 }
 
 export interface FederationCredentialResponse {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
+    ArrowLeftRight,
     Clipboard,
     KeyRound,
     Link as LinkIcon,
@@ -15,14 +16,29 @@ import {
     Unlink,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { FederationPeer, FederationScope } from "@/lib/api/federation";
+import type {
+    FederationPeer,
+    FederationPeerStatus,
+    FederationScope,
+} from "@/lib/api/federation";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsSection } from "../ui";
 
 type AddMode = "host" | "link" | "pair";
 
+interface LinkDirectionOptions {
+    twoWay: boolean;
+    embeddings: boolean;
+}
+
 const DEFAULT_SCOPES: FederationScope[] = ["library:read", "stream:read"];
+
+function linkScopes(options: LinkDirectionOptions): FederationScope[] {
+    return options.embeddings
+        ? [...DEFAULT_SCOPES, "embeddings:read"]
+        : DEFAULT_SCOPES;
+}
 const inputClassName =
     "w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-white/30 focus:outline-none";
 const secondaryButtonClassName =
@@ -40,20 +56,42 @@ function formatLastSeen(value: string | null): string {
         : `Last seen ${parsed.toLocaleString()}`;
 }
 
-function StatusChip({ status }: { status: FederationPeer["status"] }) {
+function hasInbound(peer: FederationPeer): boolean {
+    return peer.direction === "HOST" || peer.direction === "BOTH";
+}
+
+function hasOutbound(peer: FederationPeer): boolean {
+    return peer.direction === "CONSUMER" || peer.direction === "BOTH";
+}
+
+function isFullyRevoked(peer: FederationPeer): boolean {
+    const inboundRevoked = !hasInbound(peer) || peer.inboundStatus === "REVOKED";
+    const outboundRevoked =
+        !hasOutbound(peer) || peer.outboundStatus === "REVOKED";
+    return inboundRevoked && outboundRevoked;
+}
+
+function StatusChip({
+    status,
+    label,
+}: {
+    status: FederationPeerStatus | null;
+    label?: string;
+}) {
+    const shown = status ?? "PENDING";
     const tone =
-        status === "ACTIVE"
+        shown === "ACTIVE"
             ? "bg-green-500/15 text-green-300"
-            : status === "OFFLINE"
+            : shown === "OFFLINE"
               ? "bg-gray-500/20 text-gray-300"
-              : status === "REVOKED"
+              : shown === "REVOKED"
                 ? "bg-red-500/15 text-red-300"
                 : "bg-amber-500/15 text-amber-300";
     return (
         <span
             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${tone}`}
         >
-            {status}
+            {label ? `${label} ${shown}` : shown}
         </span>
     );
 }
@@ -120,7 +158,9 @@ function PeerCard({
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-highlight">
-                        {peer.direction === "HOST" ? (
+                        {peer.direction === "BOTH" ? (
+                            <ArrowLeftRight className="h-4 w-4" />
+                        ) : peer.direction === "HOST" ? (
                             <Server className="h-4 w-4" />
                         ) : (
                             <Network className="h-4 w-4" />
@@ -131,9 +171,30 @@ function PeerCard({
                             <h3 className="truncate text-sm font-medium text-white">
                                 {peer.name}
                             </h3>
-                            <StatusChip status={peer.status} />
+                            {peer.direction === "BOTH" ? (
+                                <>
+                                    <StatusChip
+                                        status={peer.inboundStatus}
+                                        label="IN"
+                                    />
+                                    <StatusChip
+                                        status={peer.outboundStatus}
+                                        label="OUT"
+                                    />
+                                </>
+                            ) : (
+                                <StatusChip
+                                    status={
+                                        hasInbound(peer)
+                                            ? peer.inboundStatus
+                                            : peer.outboundStatus
+                                    }
+                                />
+                            )}
                             <span className="text-[10px] uppercase text-gray-500">
-                                {peer.direction}
+                                {peer.direction === "BOTH"
+                                    ? "TWO-WAY"
+                                    : peer.direction}
                             </span>
                         </div>
                         <p className="mt-1 truncate text-xs text-gray-400">
@@ -179,7 +240,7 @@ function PeerActions(props: {
     return (
         <div className="flex flex-wrap justify-end gap-2">
             {busy && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-            {peer.direction === "CONSUMER" && peer.status !== "REVOKED" && (
+            {hasOutbound(peer) && peer.outboundStatus !== "REVOKED" && (
                 <ActionButton
                     label="Sync now"
                     onClick={() => onSync(peer)}
@@ -187,7 +248,7 @@ function PeerActions(props: {
                     icon={<RefreshCw className="h-3.5 w-3.5" />}
                 />
             )}
-            {peer.direction === "HOST" && peer.status !== "REVOKED" && (
+            {hasInbound(peer) && peer.inboundStatus !== "REVOKED" && (
                 <ActionButton
                     label="Rotate"
                     onClick={() => onRotate(peer)}
@@ -195,7 +256,7 @@ function PeerActions(props: {
                     icon={<RotateCw className="h-3.5 w-3.5" />}
                 />
             )}
-            {peer.status !== "REVOKED" && (
+            {!isFullyRevoked(peer) && (
                 <ActionButton
                     label="Revoke"
                     onClick={() => onRevoke(peer)}
@@ -301,8 +362,18 @@ function AddPeerPanel({
     busy,
 }: {
     onHost: (name: string, scopes: FederationScope[]) => Promise<void>;
-    onLink: (name: string, baseUrl: string, token: string) => Promise<void>;
-    onPair: (name: string, baseUrl: string, code: string) => Promise<void>;
+    onLink: (
+        name: string,
+        baseUrl: string,
+        token: string,
+        options: LinkDirectionOptions,
+    ) => Promise<void>;
+    onPair: (
+        name: string,
+        baseUrl: string,
+        code: string,
+        options: LinkDirectionOptions,
+    ) => Promise<void>;
     busy: boolean;
 }) {
     const [mode, setMode] = useState<AddMode>("link");
@@ -405,17 +476,30 @@ function ConsumerLinkForm({
     busy,
 }: {
     mode: Exclude<AddMode, "host">;
-    onLink: (name: string, baseUrl: string, token: string) => Promise<void>;
-    onPair: (name: string, baseUrl: string, code: string) => Promise<void>;
+    onLink: (
+        name: string,
+        baseUrl: string,
+        token: string,
+        options: LinkDirectionOptions,
+    ) => Promise<void>;
+    onPair: (
+        name: string,
+        baseUrl: string,
+        code: string,
+        options: LinkDirectionOptions,
+    ) => Promise<void>;
     busy: boolean;
 }) {
     const [name, setName] = useState("");
     const [baseUrl, setBaseUrl] = useState("");
     const [secret, setSecret] = useState("");
+    const [twoWay, setTwoWay] = useState(false);
+    const [embeddings, setEmbeddings] = useState(false);
     const submit = async (event: FormEvent) => {
         event.preventDefault();
-        if (mode === "link") await onLink(name, baseUrl, secret);
-        else await onPair(name, baseUrl, secret);
+        const options: LinkDirectionOptions = { twoWay, embeddings };
+        if (mode === "link") await onLink(name, baseUrl, secret, options);
+        else await onPair(name, baseUrl, secret, options);
         setSecret("");
     };
     return (
@@ -452,6 +536,26 @@ function ConsumerLinkForm({
                     autoComplete="off"
                 />
             </label>
+            <label className="flex items-center gap-2 text-xs text-gray-300">
+                <input
+                    type="checkbox"
+                    checked={twoWay}
+                    onChange={(event) => setTwoWay(event.target.checked)}
+                />
+                Two-way — also share this library back with the peer
+            </label>
+            {twoWay && (
+                <label className="ml-6 flex items-center gap-2 text-xs text-gray-300">
+                    <input
+                        type="checkbox"
+                        checked={embeddings}
+                        onChange={(event) =>
+                            setEmbeddings(event.target.checked)
+                        }
+                    />
+                    Share embeddings (opt-in)
+                </label>
+            )}
             <SubmitButton
                 busy={busy}
                 label={mode === "link" ? "Link peer" : "Pair peer"}
@@ -583,19 +687,35 @@ function FederationAddControls(props: {
                         await props.loadPeers();
                     })
                 }
-                onLink={(name, baseUrl, token) =>
+                onLink={(name, baseUrl, token, options) =>
                     run(async () => {
                         await api.linkFederationPeer({
                             baseUrl,
                             token,
                             ...(name.trim() ? { name: name.trim() } : {}),
+                            ...(options.twoWay
+                                ? {
+                                      direction: "BOTH" as const,
+                                      scopes: linkScopes(options),
+                                  }
+                                : {}),
                         });
                         await props.loadPeers();
                     })
                 }
-                onPair={(name, baseUrl, code) =>
+                onPair={(name, baseUrl, code, options) =>
                     run(async () => {
-                        await api.pairFederationPeer({ name, baseUrl, code });
+                        await api.pairFederationPeer({
+                            name,
+                            baseUrl,
+                            code,
+                            ...(options.twoWay
+                                ? {
+                                      direction: "BOTH" as const,
+                                      scopes: linkScopes(options),
+                                  }
+                                : {}),
+                        });
                         await props.loadPeers();
                     })
                 }

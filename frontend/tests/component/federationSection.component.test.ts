@@ -8,6 +8,7 @@ const Icon = (props: Record<string, unknown> = {}) =>
 
 mock.module("lucide-react", {
     namedExports: {
+        ArrowLeftRight: Icon,
         Check: Icon,
         Clipboard: Icon,
         KeyRound: Icon,
@@ -49,6 +50,7 @@ test("federation peer list renders active, offline, and revoked status chips", a
         direction: "CONSUMER" as const,
         baseUrl: "https://peer.example",
         scopes: ["library:read" as const, "stream:read" as const],
+        inboundStatus: null,
         lastSeenAt: "2026-08-15T12:00:00.000Z",
         lastSyncCursor: null,
         catalogEpoch: null,
@@ -62,19 +64,27 @@ test("federation peer list renders active, offline, and revoked status chips", a
                     ...basePeer,
                     id: "active",
                     name: "Alpha",
-                    status: "ACTIVE" as const,
+                    outboundStatus: "ACTIVE" as const,
                 },
                 {
                     ...basePeer,
                     id: "offline",
                     name: "Beta",
-                    status: "OFFLINE" as const,
+                    outboundStatus: "OFFLINE" as const,
                 },
                 {
                     ...basePeer,
                     id: "revoked",
                     name: "Gamma",
-                    status: "REVOKED" as const,
+                    outboundStatus: "REVOKED" as const,
+                },
+                {
+                    ...basePeer,
+                    id: "mutual",
+                    name: "Delta",
+                    direction: "BOTH" as const,
+                    inboundStatus: "ACTIVE" as const,
+                    outboundStatus: "OFFLINE" as const,
                 },
             ],
             busyPeerId: null,
@@ -89,6 +99,9 @@ test("federation peer list renders active, offline, and revoked status chips", a
     assert.match(html, /OFFLINE/);
     assert.match(html, /REVOKED/);
     assert.match(html, /library:read/);
+    assert.match(html, /IN ACTIVE/);
+    assert.match(html, /OUT OFFLINE/);
+    assert.match(html, /TWO-WAY/);
 });
 
 test("one-time credential dialog shows the token and irreversible warning", async () => {
