@@ -27,6 +27,7 @@ import {
 } from "./trackReplacement";
 import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
 import { config } from "../config";
+import { extractTrackIdentityTags } from "./trackIdentityTags";
 
 const scanLogger = logger.child("MusicScannerService");
 
@@ -876,11 +877,7 @@ export class MusicScannerService {
         const discNo = metadata.common.disk?.no || 1;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
-        const recordingMbid =
-            metadata.common.musicbrainz_recordingid?.trim() || null;
-        const rawIsrc = metadata.common.isrc as string[] | string | undefined;
-        const firstIsrc = typeof rawIsrc === "string" ? rawIsrc : rawIsrc?.[0];
-        const isrc = firstIsrc?.trim() || null;
+        const { recordingMbid, isrc } = extractTrackIdentityTags(metadata);
 
         // Artist and album info
         // IMPORTANT: Prefer albumartist over artist to keep albums grouped under the primary artist

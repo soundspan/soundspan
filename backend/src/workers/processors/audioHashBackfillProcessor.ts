@@ -1,9 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { Job } from "bull";
+import { parseFile } from "music-metadata";
 import { z } from "zod";
 import { config } from "../../config";
 import { computeAudioStreamHash } from "../../services/audioHash";
+import { extractTrackIdentityTags } from "../../services/trackIdentityTags";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { schedulerQueue } from "../queues";
@@ -77,6 +79,18 @@ async function fileExists(filePath: string): Promise<boolean> {
     }
 }
 
+async function readTrackIdentityTags(
+    filePath: string,
+): Promise<{ recordingMbid: string | null; isrc: string | null }> {
+    try {
+        const metadata = await parseFile(filePath);
+        return extractTrackIdentityTags(metadata);
+    } catch (error) {
+        log.warn(`Failed to read identity tags for ${filePath}`, { error });
+        return { recordingMbid: null, isrc: null };
+    }
+}
+
 async function hashTrack(track: BackfillTrack): Promise<"hashed" | "skipped"> {
     const absolutePath = path.join(config.music.musicPath, track.filePath);
     if (!(await fileExists(absolutePath))) {
@@ -84,12 +98,13 @@ async function hashTrack(track: BackfillTrack): Promise<"hashed" | "skipped"> {
         return "skipped";
     }
 
+    const identityTags = await readTrackIdentityTags(absolutePath);
     const audioHash = await computeAudioStreamHash(absolutePath);
     if (!audioHash) return "skipped";
 
     const updated = await prisma.track.updateMany({
         where: { id: track.id, audioHash: null },
-        data: { audioHash, audioHashedAt: new Date() },
+        data: { audioHash, audioHashedAt: new Date(), ...identityTags },
     });
     return updated.count === 1 ? "hashed" : "skipped";
 }

@@ -70,7 +70,7 @@ model Track {
 
 None of these are unique: legitimate duplicates exist (same file copied twice, same recording on album + compilation). They are match keys, not primary keys. The hash string embeds its algorithm (`sha256:`) so the scheme can evolve without a second column.
 
-**Hash cost control.** The scanner never re-reads unchanged files: a hash is computed only when a file is new, or when its `fileSize`/`fileModified` differ from the stored row (the same change-detection the scanner already performs). Steady-state scans hash nothing. The initial backfill is one full-library read pass — run as a bounded, resumable background job through the existing worker/queue pattern (`backend/src/workers/`), not inline in the first scan, so the first post-upgrade scan doesn't take hours. Until a row has `audioHash`, matching simply falls through to the tag tiers below.
+**Hash cost control.** The scanner never re-reads unchanged files: a hash is computed only when a file is new, or when its `fileSize`/`fileModified` differ from the stored row (the same change-detection the scanner already performs). Steady-state scans hash nothing. The initial backfill is one full-library read pass that populates `audioHash`, `recordingMbid`, and `isrc` — run as a bounded, resumable background job through the existing worker/queue pattern (`backend/src/workers/`), not inline in the first scan, so the first post-upgrade scan doesn't take hours. Until a row has `audioHash`, matching simply falls through to the tag tiers below.
 
 ### Precedence: path first, then content
 
@@ -121,7 +121,7 @@ The existing "empty directory" guard stays: when a scan finds zero audio files (
 
 | Phase | Scope |
 | --- | --- |
-| **1. Identity columns** | Schema migration; scanner reads `recordingMbid`/`isrc` from tags in the existing metadata pass; audio-hash computation for new/changed files; backfill worker for the existing library |
+| **1. Identity columns** | Schema migration; scanner reads `recordingMbid`/`isrc` from tags in the existing metadata pass; audio-hash computation for new/changed files; backfill worker populates audio hashes and tag identity keys for the existing library |
 | **2. Soft delete + revival** | `removedAt` migration; scanner marks instead of deletes; revival tiers on scan; exclusion audit across read surfaces; purge worker + retention config; Library Health surface |
 | **3. Move detection & replacement semantics** | Same-scan and cross-scan tier matching; replacement detection (same path, hash delta) with analysis/embedding/transcode re-queue |
 | **4 (deferred). Fingerprinting** | Opt-in AcoustID/Chromaprint (`fpcalc`) as a tier above tags for untagged libraries, via the analyzer-queue pattern — only if 1–3 prove insufficient |

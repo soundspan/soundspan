@@ -1,3 +1,10 @@
+type ParsedIdentityMetadata = {
+    common: {
+        musicbrainz_recordingid?: string;
+        isrc?: string | string[];
+    };
+};
+
 describe("audioHashBackfillProcessor", () => {
     afterEach(() => {
         jest.resetModules();
@@ -26,10 +33,21 @@ describe("audioHashBackfillProcessor", () => {
         const schedulerQueue = {
             add: jest.fn(async () => ({})),
         };
-        const computeAudioStreamHash = jest.fn(async (filePath: string) => {
+        const computeAudioStreamHash = jest.fn<
+            Promise<string | null>,
+            [string]
+        >(async (filePath) => {
             const suffix = filePath.length.toString(16).padStart(2, "0");
             return `sha256:${suffix.repeat(32)}`;
         });
+        const parseFile = jest.fn<Promise<ParsedIdentityMetadata>, [string]>(
+            async () => ({
+                common: {
+                    musicbrainz_recordingid: " recording-default ",
+                    isrc: [" USRC17607839 "],
+                },
+            }),
+        );
         const access = jest.fn(async (filePath: string) => {
             if (missingPaths.includes(filePath)) {
                 const error = new Error(
@@ -49,6 +67,9 @@ describe("audioHashBackfillProcessor", () => {
         jest.doMock("../../../services/audioHash", () => ({
             computeAudioStreamHash,
         }));
+        jest.doMock("music-metadata", () => ({ parseFile }), {
+            virtual: true,
+        });
         jest.doMock("../../queues", () => ({ schedulerQueue }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -59,6 +80,7 @@ describe("audioHashBackfillProcessor", () => {
             prisma,
             schedulerQueue,
             computeAudioStreamHash,
+            parseFile,
             access,
         };
     }
@@ -85,6 +107,7 @@ describe("audioHashBackfillProcessor", () => {
             prisma,
             schedulerQueue,
             computeAudioStreamHash,
+            parseFile,
         } = loadProcessor(tracks, [missingPath]);
 
         await expect(
@@ -105,12 +128,20 @@ describe("audioHashBackfillProcessor", () => {
         });
         expect(computeAudioStreamHash).toHaveBeenCalledTimes(49);
         expect(computeAudioStreamHash).not.toHaveBeenCalledWith(missingPath);
+        expect(parseFile).toHaveBeenCalledTimes(49);
+        expect(parseFile).toHaveBeenCalledWith("/music/Artist/Track-0.flac");
+        expect(parseFile).not.toHaveBeenCalledWith(
+            "/music/Artist/Track-0.flac",
+            expect.anything(),
+        );
         expect(prisma.track.updateMany).toHaveBeenCalledTimes(49);
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-000", audioHash: null },
             data: {
                 audioHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
                 audioHashedAt: expect.any(Date),
+                recordingMbid: "recording-default",
+                isrc: "USRC17607839",
             },
         });
         expect(schedulerQueue.add).toHaveBeenCalledWith(
@@ -177,6 +208,109 @@ describe("audioHashBackfillProcessor", () => {
                 where: { id: "track-raced", audioHash: null },
             }),
         );
+    });
+
+    it("normalizes string and array ISRC tag shapes", async () => {
+        const { module, prisma, parseFile } = loadProcessor([
+            { id: "track-array", filePath: "Artist/Array.flac" },
+            { id: "track-string", filePath: "Artist/String.flac" },
+        ]);
+        parseFile
+            .mockResolvedValueOnce({
+                common: {
+                    musicbrainz_recordingid: " recording-array ",
+                    isrc: [" ARRAY-FIRST ", "ARRAY-SECOND"],
+                },
+            })
+            .mockResolvedValueOnce({
+                common: {
+                    musicbrainz_recordingid: "recording-string",
+                    isrc: " STRING-ISRC ",
+                },
+            });
+
+        await module.processAudioHashBackfill(buildJob());
+
+        expect(prisma.track.updateMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    recordingMbid: "recording-array",
+                    isrc: "ARRAY-FIRST",
+                }),
+            }),
+        );
+        expect(prisma.track.updateMany).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    recordingMbid: "recording-string",
+                    isrc: "STRING-ISRC",
+                }),
+            }),
+        );
+    });
+
+    it("writes null tag keys when identity tags are absent", async () => {
+        const { module, prisma, parseFile } = loadProcessor([
+            { id: "track-untagged", filePath: "Artist/Untagged.flac" },
+        ]);
+        parseFile.mockResolvedValueOnce({ common: {} });
+
+        await module.processAudioHashBackfill(buildJob());
+
+        expect(prisma.track.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    recordingMbid: null,
+                    isrc: null,
+                }),
+            }),
+        );
+    });
+
+    it("still writes a successful hash when metadata parsing fails", async () => {
+        const { module, prisma, parseFile } = loadProcessor([
+            { id: "track-bad-tags", filePath: "Artist/Bad-Tags.flac" },
+        ]);
+        parseFile.mockRejectedValueOnce(new Error("unreadable tags"));
+
+        await expect(
+            module.processAudioHashBackfill(buildJob()),
+        ).resolves.toEqual({
+            processed: 1,
+            hashed: 1,
+            skipped: 0,
+            continued: false,
+        });
+        expect(prisma.track.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    audioHash: expect.stringMatching(/^sha256:/),
+                    recordingMbid: null,
+                    isrc: null,
+                }),
+            }),
+        );
+    });
+
+    it("writes nothing when hashing fails", async () => {
+        const { module, prisma, computeAudioStreamHash, parseFile } =
+            loadProcessor([
+                { id: "track-no-hash", filePath: "Artist/No-Hash.flac" },
+            ]);
+        computeAudioStreamHash.mockResolvedValueOnce(null);
+
+        await expect(
+            module.processAudioHashBackfill(buildJob()),
+        ).resolves.toEqual({
+            processed: 1,
+            hashed: 0,
+            skipped: 1,
+            continued: false,
+        });
+        expect(parseFile).toHaveBeenCalledWith("/music/Artist/No-Hash.flac");
+        expect(prisma.track.updateMany).not.toHaveBeenCalled();
     });
 
     it("rejects a continuation without a validated sweep token", async () => {
