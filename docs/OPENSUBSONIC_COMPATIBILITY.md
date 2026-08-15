@@ -1,6 +1,6 @@
 # OpenSubsonic Compatibility (Current Fork Status)
 
-Last updated: 2026-02-14
+Last updated: 2026-08-15
 
 ## Scope
 
@@ -47,6 +47,11 @@ Tier B mutation/readiness:
 Soft-removed local tracks are omitted from browse, search, album, playlist,
 similar-song, and random-song responses. `stream` and `download` return
 not-found responses for soft-removed track IDs.
+
+The `/rest` contract exposes local library content only. Federated artists,
+albums, tracks, playlist items, covers, streams, downloads, and lyrics are
+excluded by design in v1, even when `FEDERATION_ENABLED=true`. Federation is
+available through the soundspan web API and application instead.
 
 Alias support:
 

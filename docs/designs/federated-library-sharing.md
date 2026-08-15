@@ -1,6 +1,6 @@
 # Federated Library Sharing ("Swarming")
 
-Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: design phase, no implementation yet.
+Spec drafted 2026-08-14 for [issue #451](https://github.com/BonzTM/soundspan/issues/451). Status: **implemented, pending release**. The v1 implementation shipped through chunks F1–F8; contract documentation is synchronized in F9.
 
 ## Summary
 
@@ -30,7 +30,7 @@ Two layers ship independently, matching the issue:
 
 ## Why native federation (vs a Jellyswarrm-style proxy)
 
-A multiplexing proxy in front of N instances would need to re-implement search ranking, discovery, mixes, vibe, and dedup itself, and provenance would be bolted on. Natively, remote items become rows the existing intelligence already ranks over: Postgres FTS (`backend/src/services/search.ts`), pgvector similarity (`backend/src/services/hybridSimilarity.ts`), mixes, and radio. The codebase already runs a multi-source model (local file → TIDAL → YT Music, see `docs/ARCHITECTURE.md` "Track Resolution Priority") — federation adds a fourth source along seams that mostly exist.
+A multiplexing proxy in front of N instances would need to re-implement search ranking, discovery, mixes, vibe, and dedup itself, and provenance would be bolted on. Natively, remote items become database rows that Postgres FTS (`backend/src/services/search.ts`) can rank directly and that later intelligence phases can consume without live peer fan-out. The codebase already runs a multi-source model (local file → TIDAL → YT Music, see `docs/ARCHITECTURE.md` "Track Resolution Priority") — federation adds a fourth source along seams that mostly exist.
 
 ## Existing building blocks (verified in-repo)
 
@@ -54,17 +54,17 @@ A multiplexing proxy in front of N instances would need to re-implement search r
 ```
 Instance A (consumer)                      Instance B (host)
 ┌──────────────────────────┐               ┌──────────────────────────┐
-│ browse/search/vibe over  │   catalog     │ /api/federation/v1/*     │
+│ browse/search over       │   catalog     │ /api/federation/v1/*     │
 │ local DB (incl. federated│◄──sync────────│  manifest, delta, art    │
 │ rows)                    │   (worker)    │  stream                  │
 │                          │               │                          │
-│ /api/federation/peers/:id│   stream      │ auth: Bearer peer token  │
-│ /stream/:trackId (proxy) │──proxy───────►│ scope: library:read,     │
+│ /api/library/tracks/:id  │   stream      │ auth: Bearer peer token  │
+│ /stream (proxy)          │──proxy───────►│ scope: library:read,     │
 └──────────────────────────┘               │        stream:read       │
                                            └──────────────────────────┘
 ```
 
-**Catalog sync, not live fan-out.** The consumer periodically pulls the peer's catalog (manifest + deltas) and materializes it as first-class `Artist`/`Album`/`Track` rows marked `FEDERATED`. Browse, search (`searchVector` populates on insert), pagination, and Subsonic then work unchanged and stay fast when a peer is slow or down. Live fan-out search was rejected: `services/search.ts` is raw ranked SQL with no abstraction layer to insert a merge into, and fan-out couples every search to the slowest peer.
+**Catalog sync, not live fan-out.** The consumer periodically pulls the peer's catalog (manifest + deltas) and materializes it as first-class `Artist`/`Album`/`Track` rows marked `FEDERATED`. Web browse, search (`searchVector` populates on insert), and pagination then stay fast when a peer is slow or down. Subsonic and intelligence surfaces remain local-only in v1. Live fan-out search was rejected: `services/search.ts` is raw ranked SQL with no abstraction layer to insert a merge into, and fan-out couples every search to the slowest peer.
 
 **Streams proxy through the consumer's backend.** The frontend stays same-origin (no CORS on peers, no token exchange in the browser, no changes to the 8k-line `AudioPlaybackOrchestrator`). This follows the TIDAL/YT proxy pattern exactly. Direct-to-peer streaming is a possible later optimization behind the same URL shape.
 
@@ -76,7 +76,7 @@ Endpoints (all read-only, all peer-credential-authenticated):
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /manifest` | Instance identity: name, version, supported `mediaTypes`, counts, catalog cursor/etag |
+| `GET /manifest` | UUID instance identity and catalog epoch, `HOSTNAME`-based name, version, supported `mediaTypes`, local-only counts, embedding availability |
 | `GET /catalog/items?type=&cursor=` | Paged media items in a generic envelope (see below); `type` ∈ `artist \| album \| track` in v1 |
 | `GET /catalog/delta?since=` | Changed/removed items since cursor, same envelope (drives incremental sync) |
 | `GET /cover/:itemId` | Cover art bytes (ETag) |
@@ -87,8 +87,8 @@ Endpoints (all read-only, all peer-credential-authenticated):
 Notes:
 
 - Only `location=LIBRARY` content is exported. `DISCOVER` and already-`REMOTE`/`FEDERATED` items are excluded — this also prevents transitive re-export (peer-of-a-peer laundering).
-- Delta feed is cheap to build from `Track.fileModified`/row `updatedAt` plus a tombstone table for deletes (`FederationTombstone(entityType, entityId, deletedAt)` written by the scanner's delete path).
-- Embedding export (512-dim CLAP vector from `TrackEmbedding`) is included behind scope `embeddings:read` so remote tracks can participate in vibe/similarity on the consumer without re-analysis. ~2KB/track; optional per-link.
+- Delta feed uses row update timestamps plus `FederationTombstone(entityType, entityId, deletedAt)` records written by retention purge and orphan cleanup while federation is enabled.
+- Embedding export (512-dim CLAP vector from `TrackEmbedding`) is included behind scope `embeddings:read`. The consumer stores scoped embeddings for later federated intelligence support; v1 vibe and similarity queries remain local-only. ~2KB/track; optional per link.
 
 **Peer credentials** — new Prisma model, deliberately *not* `ApiKey` (ApiKeys hard-expire at 90 days, map 1:1 to a human user, and grant write surface):
 
@@ -104,14 +104,16 @@ model FederationPeer {
   status        PeerStatus                  // PENDING | ACTIVE | OFFLINE | REVOKED
   lastSeenAt    DateTime?
   lastSyncCursor String?
+  catalogEpoch  String?
   createdById   String                      // admin user
   createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 ```
 
 - Issue/rotate/revoke via admin-only routes (`requireAuth` + `requireAdmin`, pattern of `routes/admin.ts`). Raw token shown once; stored as `hmac:` hash via `apiKeyHash.ts` helpers. No fixed lifetime; revocation is status change (auditable), not row delete.
 - Auth middleware `requireFederationPeer(scope)` attaches **`req.federationPeer`, never `req.user`** — downstream `userId`-scoped queries fail safely instead of impersonating a user. Constant-time compare per `internalAuth.ts`. Per-peer rate limiting.
-- Pairing handshake (nice-to-have over manual token paste): admin on host generates a short-lived pairing code (à la `DeviceLinkCode`); admin on consumer enters `https://host.example` + code; consumer calls `POST /api/federation/v1/pair` and receives its scoped token; both sides create their `FederationPeer` row. Manual token exchange remains the fallback.
+- Pairing handshake: an admin on the host generates a short-lived pairing code; an admin on the consumer enters `https://host.example` plus the code; the consumer calls `POST /api/federation/v1/pair` and receives its scoped token; both sides create their `FederationPeer` row. Manual token exchange remains the fallback.
 
 ### Layer 2 — Swarm layer (consumer side)
 
@@ -120,21 +122,17 @@ model FederationPeer {
 - `Album.location` gains `FEDERATED` (or reuses `REMOTE` with a peer FK; new variant preferred — `REMOTE` currently means "streaming-only Tidal/YT artist content").
 - `Track` gains `origin` (`LOCAL | FEDERATED`), nullable `filePath` (federated rows have none; unique constraint keeps ignoring NULLs in Postgres), and `@@unique([peerId, remoteId])`.
 - `Artist`/`Album`/`Track` gain nullable `peerId → FederationPeer` + `remoteId` (the peer's cuid for the entity).
-- Serialized track IDs for the frontend/Subsonic follow the existing convention (`tidal:<id>` in `services/unifiedTrackResponse.ts`) as `federated:<peerId>:<trackId>` where a discriminated ID is needed; within the DB they are ordinary cuids, so `Play`, `PlaylistItem`, and `TrackMapping` reference them with the **existing** `trackId` column — no new polymorphic FK columns (the per-source-table pattern of `TrackTidal` is explicitly avoided; it's the part of the current model that scales worst).
+- Federated track IDs remain ordinary local `Track.id` cuids. The wire envelope carries the host ID, which is stored as the unique `(peerId, remoteId)` pair. `Play` and `PlaylistItem` use the existing `trackId` column, while API responses discriminate the row with `source: "federated"` and peer provenance. No new polymorphic FK columns are required.
 
-**Sync worker.** New Bull queue + processor in `backend/src/workers/` (`federation-sync`): initial full catalog pull, then scheduled delta pulls (default 15 min, configurable). Upserts rows, populates `searchVector` (automatic on insert), updates denormalized counts via `artistCountsService.ts`, imports embeddings into `TrackEmbedding` when scoped. Bounded batches, resumable via `lastSyncCursor`, per-peer advisory lock so replicas don't double-sync.
+**Sync worker.** The Bull `federation-sync` queue performs an initial full catalog pull, then scheduled delta pulls (default 15 min, configurable). It upserts rows, populates `searchVector` through database behavior, and imports embeddings into `TrackEmbedding` when scoped. Bounded pages, `lastSyncCursor`, catalog epochs, and deterministic per-peer Bull job IDs make work resumable, idempotent, and coalesced. Existing denormalized artist counts remain local-only in v1.
 
-**Dedup.** Reuse the existing arbitration hierarchy from `trackMappingService.ts`, extended with the durable identity keys from the prerequisite feature (`docs/designs/durable-track-identity.md`):
+**Dedup.** Track arbitration uses the durable identity keys from the prerequisite feature (`docs/designs/durable-track-identity.md`) in this order: `audioHash`, `recordingMbid`, `isrc`, then `(rgMbid, discNo, trackNo)`. The catalog envelope carries these keys. Federated artist and album rows remain peer-owned; global MBID collisions receive deterministic placeholder identities. Within one peer, track identity keys can rebind a changed host `remoteId` to the existing federated row instead of dropping and recreating it.
 
-1. Album: `rgMbid` exact match (strongest key; both sides run MusicBrainz enrichment). Skip `temp-` placeholder mbids.
-2. Artist: `mbid`, then `normalizedName` (`utils/artistNormalization.ts`).
-3. Track: `recordingMbid`, then `isrc`, then `(rgMbid, discNo, trackNo)`, then normalized title + duration tolerance. The catalog envelope carries all of these keys. Matches key on durable attributes, not the peer's cuid — when a peer's IDs churn (file reorg on their side), the consumer re-binds `remoteId` on its existing federated row instead of dropping and recreating it.
-
-When a federated album matches a local `LIBRARY` album, the consumer records the link (in `TrackMapping` with `source: "federation"`) but **does not insert duplicate browse rows** — local wins, and the federated copy is retained only as an alternate stream source. Dedup across two *peers* keeps one row (first-synced wins) with alternates recorded. A per-peer "show duplicates" toggle is out of scope for v1.
+When a federated track matches an active local track, the consumer retains the federated row, sets its `dedupOfTrackId` self-relation to the local winner, and records a `TrackMapping` with `source: "federation"`. Browse and search suppress federated rows with a dedup target. The hidden peer row remains available as provenance and an alternate source, and becomes visible if the local target disappears. A per-peer "show duplicates" toggle and cross-peer dedup UI are out of scope for v1.
 
 **Playback.** `handleStreamTrack` (`backend/src/routes/library/tracks.ts`) branches on `origin`: federated tracks proxy from `GET {peer.baseUrl}/api/federation/v1/stream/:remoteId` with the outbound token, streaming the response through with Range passthrough — the `tidalStreaming.ts` pattern. `Play` logging works unchanged (real `trackId`). Transcode caching of remote streams is off in v1 (respect the owner's bandwidth over disk; revisit later). Segmented/DASH streaming: out of scope v1; `routes/streaming.ts` keeps `sourceType: ["local"]`.
 
-**Offline degradation.** A lightweight health check (worker pings `GET /manifest` on schedule; stream failures mark immediately) flips `FederationPeer.status` to `OFFLINE`. Catalog rows stay in the DB, so browse/search never break. API responses include `peer: { id, name, online }` on federated items; the frontend renders offline items greyed with `UnplayableBadge`-style treatment, and playback resolution skips them. An admin setting chooses grey-out (default) vs hide.
+**Offline degradation.** A lightweight health check pings `GET /manifest` at startup and hourly and flips `FederationPeer.status` between `ACTIVE` and `OFFLINE`; stream failures also mark a peer offline. Catalog rows stay in the DB, so browse/search never break. API responses include `peer: { id, name, online }` on federated items; the frontend renders offline items greyed with `UnplayableBadge`-style treatment, and playback resolution skips them.
 
 **Provenance UI (frontend).**
 
@@ -142,7 +140,7 @@ When a federated album matches a local `LIBRARY` album, the consumer records the
 - Injected via existing `TrackRowSlots.titleBadges` at the ~8–12 `toRowItem()` adapter call sites (album page, playlist page, discover, search, queue…). `MediaCard` already takes `badge?: ReactNode`; `PlayableCard`'s enum `badge` prop widens; `AlbumsGrid`'s hand-rolled card gets a small edit.
 - Now playing: badge alongside `SyncBadge`/`PlaybackQualityBadge` in `FullPlayer.tsx`.
 - Filters: a "Peers" pill in `SearchFilters.tsx` gated on the `federation` feature flag (exact precedent: the Soulseek pill), plus an All/Local/Peers toggle on the library pages.
-- Playlists/mixes/recommendations get the badge for free via the shared `TrackList` slots; mix/radio *generation* includes federated tracks only when the peer is online and the user hasn't filtered them out.
+- Playlists get provenance through the shared track-row slots. Mix, radio, vibe, discovery, and recommendation generation remain local-only in v1.
 - New API mixin `frontend/lib/api/federation.ts` on `ApiClientCore` (mechanical, 23 precedents).
 
 **Admin UI.** `FederationSection.tsx` under `features/settings/components/sections/` + sidebar entry in `app/admin/page.tsx`: list peers (`ConnectionCard` pattern with status/test), add peer (pairing code or URL+token), scope checkboxes, sync now / view last sync, revoke. Feature flag `FEDERATION_ENABLED` (default `false`) follows the existing coarse-flag pattern (`config.features.*` — routes unmounted and workers unregistered when off), surfaced to the frontend via `features-context.tsx`.
@@ -151,20 +149,20 @@ When a federated album matches a local `LIBRARY` album, the consumer records the
 
 - Peer tokens: 32-byte random, HMAC-hashed at rest (`apiKeyHash.ts`), shown once, revocable, scoped, never a user identity. Outbound tokens encrypted at rest like TIDAL OAuth material.
 - Read-only enforced structurally: the federation router simply has no mutating endpoints, and `req.federationPeer` (not `req.user`) means existing write routes can't be reached with a peer credential at all.
-- HTTPS required for peer `baseUrl` in production (validated on save; explicit override env for LAN/dev).
-- Per-peer rate limits on catalog and stream endpoints; stream concurrency cap per peer to protect host bandwidth.
+- HTTPS is required for every peer `baseUrl` and is validated during manual linking and pairing.
+- Per-peer rate limits protect catalog and stream endpoints.
 - No transitive re-export (only `LIBRARY` content is served). No user PII crosses the wire — catalog is media metadata only; plays/likes/playlists never leave the instance.
 - Outbound requests from the sync worker follow Modern Coding Rules #4: timeouts, retry limits, backoff, bounded pagination.
 - Licensing note for docs: federation shares access to media between private instances; the admin enabling it is responsible for who they link with (same posture as share links today).
 
 ## Phasing
 
-| Phase | Scope | Ships value alone? |
+| Phase | Scope | Implementation status |
 | --- | --- | --- |
-| **0. Durable track identity** (separate feature, ships first) | `Track.recordingMbid`/`isrc` columns read from tags + scanner move detection — see `docs/designs/durable-track-identity.md` | Yes — fixes local data loss on file reorgs (playlists, likes, embeddings) independent of federation |
-| **1. Federation API** | `FederationPeer` model + admin issue/revoke UI + read-only v1 API (manifest/catalog/cover/stream) + peer auth middleware | Yes — external consumers/scripts can browse & stream with a scoped token; also the substrate for phase 2 |
-| **2. Swarm read path** | Consumer peer linking (pairing flow), sync worker, `FEDERATED` rows, stream proxy, provenance badges + filters, offline greying | Yes — the headline feature |
-| **3. Intelligence & polish** | Embedding import → vibe/mixes/radio inclusion, dedup arbitration UI, Subsonic exposure of federated items, per-peer settings (hide/show, bandwidth caps) | Incremental |
+| **0. Durable track identity** | Stable local identities and dedup keys | Shipped before federation as #457; consumed by F1 and F4. |
+| **1. Federation API** | Peer model, credentials, administrator lifecycle, and read-only host API | Shipped in F1–F3; the administrator UI shipped in F6. |
+| **2. Swarm read path** | Pairing/linking, materialized sync, dedup, proxies, provenance, filters, and offline state | Shipped in F4–F7. |
+| **3. Intelligence & polish** | Embedding transport plus explicit v1 surface policy | Embedding export/import shipped in F3–F4; F8 keeps intelligence, counts, lyrics, Subsonic, downloads, offline caching, and shares local-only. Broader intelligence and Subsonic exposure remain post-v1 work. |
 
 ## Feasibility assessment
 
@@ -176,7 +174,7 @@ When a federated album matches a local `LIBRARY` album, the consumer records the
 - Remote streams already proxy through the backend (two precedents), and stream URLs are query-token media-element URLs, so the player needs almost nothing.
 - Dedup keys exist at album/artist level (`rgMbid @unique`, `mbid @unique`, `normalizedName`) with an arbitration model (`TrackMapping.confidence/source`) to extend.
 - Credential plumbing (hashing, constant-time compare, pairing-code flow, admin section pattern) is all reusable.
-- Materialized sync means search/browse/Subsonic/vibe work on federated rows with near-zero changes to those subsystems.
+- Materialized sync lets web search and browse work on federated rows without live peer fan-out. Imported embeddings preserve a later path to vibe support, while v1 Subsonic and intelligence queries remain local-only.
 
 **Hard parts / risks:**
 
@@ -185,7 +183,7 @@ When a federated album matches a local `LIBRARY` album, the consumer records the
 3. **Deletion/consistency drift** — peers must emit tombstones and consumers must handle cursor resets (peer re-scanned, DB restored). Full-resync fallback required; sync must be idempotent.
 4. **Mixes/discovery contamination** — federated tracks entering mood buckets, Discover Weekly seeds, and shuffle needs explicit inclusion rules (online-only, user filter respected) or the feature feels broken when a peer sleeps. Phase 3 gates this deliberately.
 5. **Version skew** — peers on different soundspan versions. The `/v1` prefix + manifest version handshake addresses it; catalog payloads must evolve additively.
-6. **Host bandwidth** — N friends streaming from one home connection. Per-peer stream concurrency caps and quality caps in v1; no transcode-cache of others' media by default.
+6. **Host bandwidth** — N friends can stream from one home connection. Per-peer request rate limits protect the host, the consumer forwards the requested quality to host-side transcoding, and the consumer does not transcode-cache peer media.
 7. **Blast radius of browse-query changes** — every list endpoint (and Subsonic) must default correctly for users who never enable federation. The `FEDERATION_ENABLED=false` default plus `origin` filters keeps the flag-off path byte-identical.
 
 **Rough effort (working sessions, not calendar):**
@@ -200,10 +198,10 @@ Testing per repo contract: behavioral tests against real PostgreSQL for sync/ded
 
 ## Resolved decisions (2026-08-14)
 
-Confirmed with the project owner:
+Confirmed with the project owner and implemented in the pending-release v1:
 
 1. **New `FEDERATED` variant** in `Album.location` (and the track `origin` discriminator). `REMOTE` keeps meaning streaming-only Tidal/YT content; filters and denormalized counts stay unambiguous.
 2. **Embedding sharing is opt-in per link.** `embeddings:read` is a per-peer admin checkbox, off by default.
-3. **Local always wins** when the same release exists locally and on a peer. The federated copy is retained only as a hidden alternate stream source.
-4. **Subsonic exposure lands in phase 3.** External Subsonic clients see local media only until the web-app federation path is proven.
+3. **Local always wins** when the same track exists locally and on a peer. The federated row points to the local winner through `dedupOfTrackId` and is suppressed from browse/search as a hidden alternate source.
+4. **Subsonic remains local-only in v1.** External Subsonic clients do not receive federated media; broader exposure remains post-v1 work.
 5. **All media types federate eventually.** Music ships first, but the catalog API uses the generic media-item envelope from day one so podcasts and audiobooks become additive `mediaType` values, not a v2 API.

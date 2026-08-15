@@ -101,6 +101,15 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - Credentials are only decrypted for active sidecar operations
 - TIDAL tokens are refreshed automatically and re-encrypted when needed
 
+## Federation Credential Security
+
+- Instance links use dedicated `Authorization: Bearer` credentials. They do not reuse user JWTs or API keys and never establish a user identity on the host.
+- Host-issued credentials are random 32-byte tokens. The raw value is returned only when issued or rotated; the database stores an HMAC hash for constant-time verification.
+- Each credential grants an explicit subset of `library:read`, `stream:read`, and `embeddings:read`. Embedding access also requires library access.
+- Revocation clears credential material and changes the peer to `REVOKED`. Deleting a peer also cascades its consumer-side mirrored catalog rows.
+- Consumer outbound tokens are encrypted and decrypted through the settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. API and admin responses exclude both outbound tokens and credential hashes.
+- Peer base URLs must use HTTPS. The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it.
+
 ## Webhook and Admin Security
 
 - Lidarr webhook signatures are supported and should be configured

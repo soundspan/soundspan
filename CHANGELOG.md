@@ -8,19 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added database schema groundwork for federated library sharing, including
-  peer and tombstone records plus catalog provenance fields.
-- Added opt-in host-side federation with scoped, HMAC-protected peer
-  credentials, short-lived pairing codes, administrator lifecycle routes, and
-  the read-only manifest, catalog, delta, cover, and Range-streaming API.
-  Federation is disabled by default with `FEDERATION_ENABLED=false`.
-- Federation-enabled deletion cleanup now writes track, album, and artist
-  tombstones transactionally. `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls
-  their retention window (default `90`; minimum `0`).
-- Added federation consumer linking, bounded catalog synchronization, peer
-  health monitoring, identity-tier deduplication, and streaming/cover proxies.
-  Outbound peer tokens are encrypted at rest, and
-  `FEDERATION_SYNC_INTERVAL_MINUTES` controls periodic sync (default `15`).
+- Added opt-in federated library sharing, disabled by default with
+  `FEDERATION_ENABLED=false`:
+  - Host instances expose a read-only `/api/federation/v1` manifest, catalog,
+    delta, cover, and Range-streaming API through scoped, HMAC-protected peer
+    credentials, short-lived pairing codes, and administrator lifecycle
+    controls.
+  - Consumer instances link peers, run bounded catalog sync and health jobs,
+    materialize peer music with local-wins identity deduplication, and proxy
+    covers and streams without exposing encrypted outbound tokens to browsers.
+    `FEDERATION_SYNC_INTERVAL_MINUTES` controls sync scheduling (default `15`).
+  - Library, search, artist, album, playlist, queue, and now-playing surfaces
+    show peer provenance, source filters, and offline state. Deduplicated peer
+    copies stay hidden while the matching local track wins.
+  - Mixes, radio, recommendations, discovery, vibe analysis, Subsonic,
+    lyrics, sharing, offline downloads, imports, Listen Together resolution,
+    analysis queues, and denormalized artist counts remain local-only in v1.
+  - Federation-aware deletion cleanup writes track, album, and artist
+    tombstones transactionally.
+    `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;
+    minimum `0`).
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges
@@ -38,13 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rescan restores a track when its file returns.
 - The enrichment failures modal now provides confirmed, tab-specific “Retry
   all” actions for Audio Analysis and Vibe Embeddings failures.
-- Added a feature-gated federation admin surface for linking, pairing,
-  credential rotation, revocation, deletion, and immediate synchronization.
-- Federated library results now show peer provenance in browse, search,
-  playlists, queue, and now-playing surfaces. Offline peer tracks remain
-  visible but are greyed and unplayable.
-- Search and Library now provide peer-source filters when federation is
-  enabled.
 
 ### Changed
 
@@ -58,10 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed playlist items now use a muted, greyed treatment with a restore-file
   tooltip, while other unavailable-provider items keep their existing warning
   treatment.
-- Radio, mixes, recommendations, discovery, vibe analysis, Subsonic, sharing,
-  offline downloads, imports, Listen Together resolution, lyrics enrichment,
-  and analysis queues now operate only on local tracks. Browse and search keep
-  federated tracks while suppressing remote duplicates when a local copy wins.
 
 ### Fixed
 

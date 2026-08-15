@@ -16,6 +16,7 @@ graph TD
     YT["ytmusic-streamer<br/>FastAPI :8586"]
     AA["audio-analyzer<br/>Essentia/MusiCNN"]
     AC["audio-analyzer-clap<br/>LAION-CLAP"]
+    PEER["peer soundspan instance<br/>/api/federation/v1"]
 
     Browser -->|HTTP/WS| FE
     FE -->|"custom-server streaming proxy /api/*, /rest/*, Listen Together WS"| BE
@@ -30,6 +31,7 @@ graph TD
     AC --> PG
     AC --> RD
     AC -->|HTTP| BE
+    BE <-->|"HTTPS catalog, cover, stream"| PEER
 ```
 
 ## Service Communication Map
@@ -49,6 +51,7 @@ graph TD
 | audio-analyzer-clap | PostgreSQL | TCP (direct) | 5432 | Connection string | Embedding writes |
 | audio-analyzer-clap | Redis | TCP | 6379 | None | BRPOP job queue |
 | audio-analyzer-clap | backend | HTTP | 3006 | `INTERNAL_API_SECRET` | Track metadata lookup |
+| backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`) | 443 | Scoped instance Bearer token | Pairing, catalog sync, health checks, cover art, and audio streaming |
 
 ## Compose File Matrix
 
@@ -122,10 +125,14 @@ Download endpoints (start/status/list/cancel) are admin-gated server-side (`requ
 When a track needs playback, resolution follows this priority chain:
 
 ```
-Local file (Track.filePath) → TIDAL (if user connected) → YouTube Music → Unplayable
+LOCAL Track.filePath → TIDAL (if user connected) → YouTube Music → Unplayable
+FEDERATED Track → owning peer stream proxy → Unplayable when peer is offline
 ```
 
-The `TrackMapping` table bridges between local tracks and provider tracks. Mappings are populated lazily during gap-fill, playlist import, or background reconciliation.
+The `TrackMapping` table bridges between local tracks and provider tracks.
+Mappings are populated lazily during gap-fill, playlist import, background
+reconciliation, or federation deduplication. A federated row can also point to
+its local winner through `Track.dedupOfTrackId`.
 
 ### Listen Together (Real-Time Sync)
 
@@ -137,6 +144,39 @@ Browser ↔ Socket.IO WebSocket ↔ backend:3006
 ```
 
 Listen Together uses in-memory state with Redis-backed cluster sync for multi-replica deployments. Mutation locks prevent concurrent state corruption. State is periodically persisted to PostgreSQL.
+
+### Federated Library Sharing
+
+```mermaid
+sequenceDiagram
+    participant Host as Host instance
+    participant API as /api/federation/v1
+    participant Worker as Consumer federation-sync worker
+    participant DB as Consumer PostgreSQL
+    participant Browser as Consumer browser
+    participant Proxy as Consumer backend
+
+    Host->>API: Export visible local artists, albums, tracks, tombstones
+    Worker->>API: Pull manifest, catalog pages, or deltas
+    API-->>Worker: Scoped generic media envelopes
+    Worker->>DB: Upsert FEDERATED rows and local-wins dedup links
+    Browser->>Proxy: Request federated cover or track stream
+    Proxy->>API: Forward Range request with peer Bearer token
+    API-->>Proxy: Cover or audio bytes
+    Proxy-->>Browser: Same-origin streamed response
+```
+
+The host mounts the read-only `/api/federation/v1` surface for pairing,
+manifest, catalog, delta, cover, and stream requests. It exports only visible
+local library rows, so content received from another peer is never re-exported.
+The consumer periodically materializes peer metadata in its own database. Its
+browse and search reads therefore stay available when a peer is offline.
+
+The browser never receives an instance credential. Federated cover and stream
+requests use the consumer's ordinary authenticated routes; the consumer backend
+decrypts its outbound token and proxies the request to the owning peer. Audio
+Range headers pass through, and the host remains responsible for any requested
+transcoding and cache use.
 
 ### Audio Analysis Pipeline
 
@@ -181,7 +221,22 @@ The backend supports three runtime roles via `BACKEND_PROCESS_ROLE`:
 
 For small deployments, `all` is fine. For scale-out, run separate `api` and `worker` containers sharing the same DB and Redis.
 
-Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`, `AUTO_PLAYLISTS_ENABLED`, all default `true`) gate both sides: with a flag off, the API process does not mount the subsystem's routes (requests get `404` with `code: FEATURE_DISABLED`) and the worker process does not register its queues/crons. The flags are exposed through Helm values (`config.features.*`) and forwarded by the docker-compose files.
+Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`, and
+`AUTO_PLAYLISTS_ENABLED`, all default `true`; `FEDERATION_ENABLED`, default
+`false`) gate both sides. With a flag off, the API process mounts a disabled
+handler for the subsystem's routes (requests get `404` with
+`code: FEATURE_DISABLED`) and the worker process does not register its queues or
+schedules. Disabling federation also prevents identity initialization,
+tombstone writes, peer sync/health work, and federated playback branches. The
+flags are exposed through Helm values (`config.features.*`) and forwarded by
+the docker-compose files.
+
+### Scheduled Federation Jobs
+
+| Job | Schedule | Purpose |
+| --- | --- | --- |
+| Federation sync (`federation-sync` queue: `sync-tick` → `peer-sync`) | Startup after 10 seconds and every `FEDERATION_SYNC_INTERVAL_MINUTES` (default 15) | Enqueue one coalesced, bounded catalog sync for each non-revoked consumer peer. The sync processor runs with concurrency 2. |
+| Federation health (`federation-sync` queue: `peer-health`) | Startup and hourly | Ping consumer-peer manifests and update peer `ACTIVE`/`OFFLINE` status. Health work runs with concurrency 1. |
 
 The worker process runs an event-loop stall watchdog (`services/workerEventLoopMonitor.ts`): its `/health/live` endpoint answers unconditionally, so a liveness-probe timeout always means the single-threaded event loop was blocked. Attribution has two paths: stalls the loop recovers from are logged by a `monitorEventLoopDelay` sampler naming the active Bull jobs (threshold `WORKER_EVENT_LOOP_WARN_MS`, default 1s); stalls that end in a kubelet kill can never reach that sampler (a pegged loop runs no timers), so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb whose final occurrence before death names the culprit.
 
