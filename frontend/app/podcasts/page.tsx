@@ -12,6 +12,9 @@ import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
 import Image from "next/image";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { useFeatures } from "@/lib/features-context";
+import { PeerBadge } from "@/components/ui/PeerBadge";
+import type { PeerPodcastListing } from "@/lib/api/podcasts";
 
 // Always proxy images through the backend for caching and mobile compatibility
 const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
@@ -581,6 +584,8 @@ export default function PodcastsPage() {
                     </section>
                 )}
 
+                <PeerPodcastsSection />
+
                 {showGenreDiscoverySkeleton && (
                     <section>
                         <h2 className="text-xl font-bold text-white mb-6">
@@ -689,6 +694,101 @@ export default function PodcastsPage() {
                     )}
             </div>
         </div>
+    );
+}
+
+function PeerPodcastsSection() {
+    const { federation } = useFeatures();
+    const { isAuthenticated } = useAuth();
+    const { toast } = useToast();
+    const [subscribingId, setSubscribingId] = useState<string | null>(null);
+    const enabled = federation && isAuthenticated;
+    const { data: listings = [], refetch } = useQuery({
+        queryKey: ["podcasts", "peers"],
+        queryFn: () => api.getPeerPodcasts(),
+        staleTime: 5 * 60 * 1000,
+        enabled,
+    });
+
+    if (!enabled || listings.length === 0) return null;
+
+    const subscribe = async (listing: PeerPodcastListing) => {
+        setSubscribingId(listing.id);
+        try {
+            const response = await api.subscribePodcast(listing.feedUrl);
+            if (response.success) {
+                toast.success(`Subscribed to ${listing.title}`);
+                await refetch();
+                return;
+            }
+            toast.error("Failed to subscribe");
+        } catch (error: unknown) {
+            toast.error(
+                error instanceof Error ? error.message : "Failed to subscribe",
+            );
+        } finally {
+            setSubscribingId(null);
+        }
+    };
+
+    return (
+        <section>
+            <h2 className="text-xl font-bold text-white mb-6">
+                From your peers
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {listings.map((listing) => (
+                    <div
+                        key={listing.id}
+                        className="rounded-lg bg-surface-hover p-3"
+                    >
+                        <div className="relative mb-3 aspect-square overflow-hidden rounded-md bg-surface-highlight">
+                            {getProxiedImageUrl(
+                                listing.imageUrl ?? undefined,
+                            ) && (
+                                <Image
+                                    src={
+                                        getProxiedImageUrl(
+                                            listing.imageUrl ?? undefined,
+                                        ) as string
+                                    }
+                                    alt=""
+                                    fill
+                                    sizes="200px"
+                                    className="object-cover"
+                                />
+                            )}
+                        </div>
+                        <h3 className="mb-0.5 truncate text-sm font-semibold text-white">
+                            {listing.title}
+                        </h3>
+                        <p className="truncate text-xs text-gray-400">
+                            {listing.author ?? ""}
+                        </p>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                            <PeerBadge
+                                peerName={listing.peer.name}
+                                online={listing.peer.online}
+                            />
+                            {listing.subscribed ? (
+                                <span className="text-[10px] uppercase text-gray-500">
+                                    Subscribed
+                                </span>
+                            ) : (
+                                <button
+                                    type="button"
+                                    disabled={subscribingId === listing.id}
+                                    onClick={() => void subscribe(listing)}
+                                    className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-black disabled:opacity-50"
+                                >
+                                    Subscribe
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </section>
     );
 }
 

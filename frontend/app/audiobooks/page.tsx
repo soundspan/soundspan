@@ -34,6 +34,8 @@ interface Audiobook {
         sequence: string;
     } | null;
     genres?: string[];
+    source?: "federated";
+    peer?: { id: string; name: string; online: boolean } | null;
     progress: {
         currentTime: number;
         progress: number;
@@ -547,6 +549,7 @@ export default function AudiobooksPage() {
                                             author={book.author}
                                             coverUrl={book.coverUrl}
                                             progress={book.progress}
+                                            peer={book.peer ?? null}
                                             index={index}
                                             getCoverUrl={getCoverUrl}
                                         />
@@ -621,6 +624,7 @@ export default function AudiobooksPage() {
                                                     author={book.author}
                                                     coverUrl={book.coverUrl}
                                                     progress={book.progress}
+                                                    peer={book.peer ?? null}
                                                     index={index}
                                                     getCoverUrl={getCoverUrl}
                                                 />
@@ -643,6 +647,7 @@ export default function AudiobooksPage() {
                                         author={book.author}
                                         coverUrl={book.coverUrl}
                                         progress={book.progress}
+                                        peer={book.peer ?? null}
                                         index={index}
                                         getCoverUrl={getCoverUrl}
                                     />

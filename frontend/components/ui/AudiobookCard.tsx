@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Book, CheckCircle } from "lucide-react";
 import { CachedImage } from "./CachedImage";
+import { PeerBadge } from "./PeerBadge";
 
 interface AudiobookCardProps {
     id: string;
@@ -14,6 +15,7 @@ interface AudiobookCardProps {
         isFinished: boolean;
     } | null;
     seriesBadge?: string; // e.g., "5 books" for series cards
+    peer?: { name: string; online: boolean } | null;
     index?: number;
     getCoverUrl: (url: string) => string | null;
 }
@@ -28,6 +30,7 @@ export function AudiobookCard({
     coverUrl,
     progress,
     seriesBadge,
+    peer = null,
     index = 0,
     getCoverUrl,
 }: AudiobookCardProps) {
@@ -91,6 +94,16 @@ export function AudiobookCard({
                         {seriesBadge && (
                             <div className="absolute top-2 right-2 bg-ai rounded px-2 py-1 text-xs font-bold shadow-lg">
                                 {seriesBadge}
+                            </div>
+                        )}
+
+                        {/* Peer Provenance Badge */}
+                        {peer && (
+                            <div className="absolute bottom-2 left-2">
+                                <PeerBadge
+                                    peerName={peer.name}
+                                    online={peer.online}
+                                />
                             </div>
                         )}
                     </div>

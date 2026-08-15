@@ -11,12 +11,31 @@ export interface PodcastDiscoveryItem {
     itunesId?: number;
 }
 
+/** A podcast catalog listing shared by a federation peer. */
+export interface PeerPodcastListing {
+    id: string;
+    peerId: string;
+    remoteId: string;
+    feedUrl: string;
+    title: string;
+    author: string | null;
+    imageUrl: string | null;
+    updatedAt: string;
+    source: "federated";
+    peer: { id: string; name: string; online: boolean };
+    subscribed: boolean;
+}
+
 /** Add podcast-domain operations to an API client base class. */
 export function WithPodcasts<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class PodcastsApi extends Base {
         // Podcasts
         async getPodcasts() {
             return this.request<ApiData[]>("/podcasts");
+        }
+
+        async getPeerPodcasts() {
+            return this.request<PeerPodcastListing[]>("/podcasts/peers");
         }
 
         async getPodcast(id: string) {
