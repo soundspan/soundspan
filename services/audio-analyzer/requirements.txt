@@ -18,7 +18,7 @@ tensorflow>=2.13.0,<2.16.0
 essentia-tensorflow==2.1b6.dev1389
 
 # Queue and database
-redis>=4.5.0
+redis>=6.4.0
 psycopg2-binary>=2.9.0
 
 # NumPy 1.26.x is the last 1.x line and matches the jointly locked TensorFlow
