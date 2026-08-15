@@ -9,6 +9,7 @@ const mockPairFederationPeer = jest.fn();
 const mockEncrypt = jest.fn((value: string) => `enc:${value}`);
 const mockDecrypt = jest.fn((value: string) => value.replace(/^enc:/, ""));
 const mockConfig = { soundspanCallbackUrl: "http://backend:3006" };
+const mockRemoveReplacementCacheFiles = jest.fn();
 
 const prisma = {
     systemSettings: {
@@ -30,6 +31,9 @@ const prisma = {
         create: jest.fn(),
         updateMany: jest.fn(),
     },
+    transcodedFile: {
+        findMany: jest.fn(),
+    },
     $transaction: jest.fn(),
 };
 
@@ -44,6 +48,9 @@ jest.mock("../../utils/encryption", () => ({
 jest.mock("../federationClient", () => ({
     createFederationClient: mockCreateFederationClient,
     pairFederationPeer: mockPairFederationPeer,
+}));
+jest.mock("../trackReplacement", () => ({
+    removeReplacementCacheFiles: mockRemoveReplacementCacheFiles,
 }));
 
 import { hashApiKey } from "../../utils/apiKeyHash";
@@ -95,6 +102,8 @@ describe("federation peer credentials", () => {
         }));
         prisma.federationPeer.findFirst.mockResolvedValue({ id: "peer-1" });
         prisma.federationPeer.updateMany.mockResolvedValue({ count: 1 });
+        prisma.transcodedFile.findMany.mockResolvedValue([]);
+        mockRemoveReplacementCacheFiles.mockResolvedValue(undefined);
     });
 
     it("returns a 32-byte token once and stores only its HMAC", async () => {
@@ -170,6 +179,23 @@ describe("federation peer credentials", () => {
                 outboundToken: null,
             },
         });
+    });
+
+    it("removes federated cache files after peer deletion cascades their rows", async () => {
+        prisma.transcodedFile.findMany.mockResolvedValue([
+            { cachePath: "peer-track-medium.audio" },
+        ]);
+        prisma.federationPeer.deleteMany.mockResolvedValue({ count: 1 });
+
+        await expect(deleteFederationPeer("peer-1")).resolves.toBe(true);
+
+        expect(prisma.transcodedFile.findMany).toHaveBeenCalledWith({
+            where: { track: { peerId: "peer-1" } },
+            select: { cachePath: true },
+        });
+        expect(mockRemoveReplacementCacheFiles).toHaveBeenCalledWith([
+            "peer-track-medium.audio",
+        ]);
     });
 });
 

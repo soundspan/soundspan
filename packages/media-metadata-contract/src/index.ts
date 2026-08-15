@@ -76,6 +76,49 @@ export interface FederatedTrackPeer {
     online: boolean;
 }
 
+/** Optional analyzer metadata carried by federation track envelopes. */
+export interface FederationTrackAudioFeatures {
+    bpm?: number | null;
+    beatsCount?: number | null;
+    key?: string | null;
+    keyScale?: string | null;
+    keyStrength?: number | null;
+    energy?: number | null;
+    loudness?: number | null;
+    dynamicRange?: number | null;
+    danceability?: number | null;
+    valence?: number | null;
+    arousal?: number | null;
+    instrumentalness?: number | null;
+    acousticness?: number | null;
+    speechiness?: number | null;
+    moodHappy?: number | null;
+    moodSad?: number | null;
+    moodRelaxed?: number | null;
+    moodAggressive?: number | null;
+    moodParty?: number | null;
+    moodAcoustic?: number | null;
+    moodElectronic?: number | null;
+    danceabilityMl?: number | null;
+    moodTags?: string[] | null;
+    essentiaGenres?: string[] | null;
+    lastfmTags?: string[] | null;
+}
+
+/** Track-specific attributes published by the additive federation v1 envelope. */
+export interface FederationTrackAttributes extends FederationTrackAudioFeatures {
+    title: string;
+    discNo: number;
+    trackNo: number;
+    duration: number;
+    mime: string | null;
+    fileSize: number;
+    recordingMbid: string | null;
+    isrc: string | null;
+    audioHash: string | null;
+    embedding?: number[];
+}
+
 /** Generic additive federation catalog envelope shared by hosts and consumers. */
 export interface FederationMediaItemEnvelope<
     Attributes extends Record<string, unknown> = Record<string, unknown>,

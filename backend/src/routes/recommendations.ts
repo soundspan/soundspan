@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { lastFmService } from "../services/lastfm";
@@ -154,7 +154,7 @@ router.get("/for-you", async (req, res) => {
                 userId,
                 track: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                 },
             },
             orderBy: { playedAt: "desc" },
@@ -635,9 +635,9 @@ router.get("/tracks", async (req, res) => {
         const seedTrack = seedTrackId
             ? await prisma.track.findUnique({
                   where: {
-                      ...TRACK_VISIBLE_WHERE,
-                      ...LOCAL_TRACK_WHERE,
                       id: seedTrackId as string,
+                      ...TRACK_VISIBLE_WHERE,
+                      AND: [TRACK_BROWSE_WHERE],
                   },
                   include: {
                       album: {
@@ -684,7 +684,7 @@ router.get("/tracks", async (req, res) => {
                 sameArtistTracks = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         id: { not: seedTrack.id },
                         album: {
                             artistId: seedTrack.album.artist.id,
@@ -699,7 +699,7 @@ router.get("/tracks", async (req, res) => {
                 sameArtistTracks = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         album: {
                             artist: {
                                 OR: [
@@ -779,7 +779,7 @@ router.get("/tracks", async (req, res) => {
             candidateTracks = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                     album: {
                         artist: {
                             OR: artistOrClauses,
@@ -798,7 +798,7 @@ router.get("/tracks", async (req, res) => {
             candidateTracks = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                     title: {
                         in: lfmTracks.map((track) => track.title),
                         mode: "insensitive",

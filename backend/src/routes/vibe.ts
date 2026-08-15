@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { runAnnQuery } from "../utils/annQuery";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { blockingBlPop, redisClient } from "../utils/redis";
@@ -44,6 +44,7 @@ import { fetchEmbeddingsByTrackIds } from "../services/trackEmbeddings";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
+import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 
 const router = Router();
 
@@ -187,7 +188,7 @@ async function fetchTrackEmbedding(trackId: string): Promise<number[] | null> {
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin" AND te.track_id = ${trackId}
+          AND ${TRACK_BROWSE_SQL} AND te.track_id = ${trackId}
         LIMIT 1
     `;
     if (!rows.length) return null;
@@ -250,7 +251,7 @@ async function findNearestToEmbedding(
             JOIN "Album" a ON t."albumId" = a.id
             JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND ${TRACK_BROWSE_SQL}
               AND te.track_id != ALL(${excludeIds}::text[])
             ORDER BY te.embedding <=> ${embedding}::vector
             LIMIT ${limit}
@@ -268,7 +269,7 @@ async function findNearestToEmbedding(
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND ${TRACK_BROWSE_SQL}
         ORDER BY te.embedding <=> ${embedding}::vector
         LIMIT ${limit}
     `);
@@ -471,7 +472,7 @@ async function resolveTrackDestination(
         where: {
             id: toTrackId,
             ...TRACK_VISIBLE_WHERE,
-            ...LOCAL_TRACK_WHERE,
+            AND: [TRACK_BROWSE_WHERE],
         },
         include: { album: { include: { artist: true } } },
     });
@@ -530,7 +531,7 @@ async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
             score: { gte: MOOD_BUCKET_MIN_SCORE },
             track: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 embedding: { isNot: null },
             },
         },
@@ -771,7 +772,7 @@ router.get(
                     score: { gte: MOOD_BUCKET_MIN_SCORE },
                     track: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         embedding: { isNot: null },
                     },
                 },
@@ -1072,7 +1073,7 @@ router.get<{ trackId: string }>(
                 where: {
                     id: trackId,
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    AND: [TRACK_BROWSE_WHERE],
                 },
                 select: {
                     energy: true,
@@ -1327,7 +1328,7 @@ router.post(
                 JOIN "Album" a ON t."albumId" = a.id
                 JOIN "Artist" ar ON a."artistId" = ar.id
                 WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND ${TRACK_BROWSE_SQL}
                   AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
                 ORDER BY te.embedding <=> ${searchEmbedding}::vector
                 LIMIT ${limit * 3}
@@ -1462,7 +1463,7 @@ router.get(
     asyncHandler(async (req, res) => {
         try {
             const totalTracks = await prisma.track.count({
-                where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                where: { ...TRACK_VISIBLE_WHERE, ...TRACK_BROWSE_WHERE },
             });
 
             const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
@@ -1470,7 +1471,7 @@ router.get(
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
             WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND ${TRACK_BROWSE_SQL}
         `;
 
             const embeddedCount = Number(embeddedTracks[0]?.count || 0);

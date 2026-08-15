@@ -10,6 +10,7 @@ import {
     type FederationScope,
 } from "../utils/federationScopes";
 import { createFederationClient, pairFederationPeer } from "./federationClient";
+import { removeReplacementCacheFiles } from "./trackReplacement";
 
 export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
 export type { FederationScope } from "../utils/federationScopes";
@@ -284,9 +285,18 @@ export async function getConsumerPeerConnection(peerId: string) {
 
 /** Permanently deletes a peer record selected by an administrator. */
 export async function deleteFederationPeer(peerId: string): Promise<boolean> {
+    const cachedFiles = await prisma.transcodedFile.findMany({
+        where: { track: { peerId } },
+        select: { cachePath: true },
+    });
     const result = await prisma.federationPeer.deleteMany({
         where: { id: peerId },
     });
+    if (result.count === 1) {
+        await removeReplacementCacheFiles(
+            cachedFiles.map((file) => file.cachePath),
+        );
+    }
     return result.count === 1;
 }
 

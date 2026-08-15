@@ -1,7 +1,7 @@
 import { addMonths, endOfWeek, startOfWeek, subDays } from "date-fns";
 import { prisma } from "../../utils/db";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
 import { logger } from "../../utils/logger";
@@ -192,7 +192,7 @@ export class DiscoveryRecommendationsService {
                     playedAt: { gte: subDays(new Date(), 120) },
                     track: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                     },
                 },
                 select: {
@@ -339,15 +339,13 @@ export class DiscoveryRecommendationsService {
         const candidateTracks = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 duration: { gt: 0 },
-                filePath: { not: null },
-                origin: "LOCAL",
                 ...(recentTrackIds.length > 0
                     ? { id: { notIn: recentTrackIds } }
                     : {}),
                 album: {
-                    location: "LIBRARY",
+                    location: { in: ["LIBRARY", "FEDERATED"] },
                     ...(prioritizedArtistIds.length > 0
                         ? { artistId: { in: prioritizedArtistIds } }
                         : {}),
@@ -417,7 +415,6 @@ export class DiscoveryRecommendationsService {
 
         for (const candidate of scoredCandidates) {
             if (selected.length >= targetCount) break;
-            if (candidate.track.filePath === null) continue;
             if (selectedTrackIds.has(candidate.track.id)) continue;
             if (selectedAlbumIds.has(candidate.track.albumId)) continue;
             if (
@@ -438,7 +435,7 @@ export class DiscoveryRecommendationsService {
                 trackId: candidate.track.id,
                 title: candidate.track.title,
                 duration: candidate.track.duration,
-                filePath: candidate.track.filePath,
+                filePath: candidate.track.filePath ?? "",
                 albumId: candidate.track.albumId,
                 albumTitle: candidate.track.album.title,
                 albumMbid: candidate.track.album.rgMbid,
@@ -454,7 +451,6 @@ export class DiscoveryRecommendationsService {
         if (selected.length < targetCount) {
             for (const candidate of deferredPrimaryCandidates) {
                 if (selected.length >= targetCount) break;
-                if (candidate.track.filePath === null) continue;
                 if (selectedTrackIds.has(candidate.track.id)) continue;
                 if (selectedAlbumIds.has(candidate.track.albumId)) continue;
                 if (
@@ -474,7 +470,7 @@ export class DiscoveryRecommendationsService {
                     trackId: candidate.track.id,
                     title: candidate.track.title,
                     duration: candidate.track.duration,
-                    filePath: candidate.track.filePath,
+                    filePath: candidate.track.filePath ?? "",
                     albumId: candidate.track.albumId,
                     albumTitle: candidate.track.album.title,
                     albumMbid: candidate.track.album.rgMbid,
@@ -492,13 +488,11 @@ export class DiscoveryRecommendationsService {
             const fallbackTracks = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                     duration: { gt: 0 },
-                    filePath: { not: null },
-                    origin: "LOCAL",
                     id: { notIn: Array.from(selectedTrackIds) },
                     album: {
-                        location: "LIBRARY",
+                        location: { in: ["LIBRARY", "FEDERATED"] },
                         ...(excludedAlbumMbids.length > 0
                             ? { rgMbid: { notIn: excludedAlbumMbids } }
                             : {}),
@@ -530,7 +524,6 @@ export class DiscoveryRecommendationsService {
 
             for (const track of fallbackTracks) {
                 if (selected.length >= targetCount) break;
-                if (track.filePath === null) continue;
                 if (selectedTrackIds.has(track.id)) continue;
                 if (selectedAlbumIds.has(track.albumId)) continue;
                 if (!canSelectArtist(track.album.artist.id, strictArtistCap)) {
@@ -552,7 +545,7 @@ export class DiscoveryRecommendationsService {
                     trackId: track.id,
                     title: track.title,
                     duration: track.duration,
-                    filePath: track.filePath,
+                    filePath: track.filePath ?? "",
                     albumId: track.albumId,
                     albumTitle: track.album.title,
                     albumMbid: track.album.rgMbid,
@@ -568,7 +561,6 @@ export class DiscoveryRecommendationsService {
             if (selected.length < targetCount) {
                 for (const track of deferredFallbackTracks) {
                     if (selected.length >= targetCount) break;
-                    if (track.filePath === null) continue;
                     if (selectedTrackIds.has(track.id)) continue;
                     if (selectedAlbumIds.has(track.albumId)) continue;
                     if (
@@ -594,7 +586,7 @@ export class DiscoveryRecommendationsService {
                         trackId: track.id,
                         title: track.title,
                         duration: track.duration,
-                        filePath: track.filePath,
+                        filePath: track.filePath ?? "",
                         albumId: track.albumId,
                         albumTitle: track.album.title,
                         albumMbid: track.album.rgMbid,
@@ -762,7 +754,7 @@ export class DiscoveryRecommendationsService {
             ? await prisma.track.findMany({
                   where: {
                       ...TRACK_VISIBLE_WHERE,
-                      ...LOCAL_TRACK_WHERE,
+                      ...TRACK_BROWSE_WHERE,
                       id: { in: trackIds },
                   },
                   include: {

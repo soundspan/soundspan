@@ -60,7 +60,7 @@ import {
 import {
     ALBUM_SORT_MAP,
     ARTIST_SORT_MAP,
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_SORT_MAP,
     TRACK_VISIBLE_WHERE,
     parseLibraryOrigin,
@@ -781,7 +781,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
 
     // Get total count of tracks
     const totalTracks = await prisma.track.count({
-        where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+        where: { ...TRACK_VISIBLE_WHERE, ...TRACK_BROWSE_WHERE },
     });
 
     if (totalTracks === 0) {
@@ -794,7 +794,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
     if (totalTracks <= limit) {
         // Fetch all tracks and shuffle
         tracksData = await prisma.track.findMany({
-            where: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+            where: { ...TRACK_VISIBLE_WHERE, ...TRACK_BROWSE_WHERE },
             include: {
                 album: {
                     include: {
@@ -821,7 +821,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         const randomIds = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 random: { gte: pivot },
             },
             orderBy: { random: "asc" },
@@ -834,7 +834,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
             const topUpIds = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                     random: { lt: pivot },
                 },
                 orderBy: { random: "asc" },
@@ -848,7 +848,7 @@ export async function handleGetShuffledTracks(req: Request, res: Response) {
         tracksData = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 id: { in: randomIds.map((r) => r.id) },
             },
             include: {
@@ -945,6 +945,9 @@ async function streamFederatedTrack(
         status: string;
     },
     remoteId: string,
+    trackId: string,
+    sourceModified: Date,
+    sourceMime: string | null,
     requestedQuality: string,
 ): Promise<Response | void> {
     const quality = normalizeStreamingQuality(requestedQuality) ?? "medium";
@@ -954,6 +957,9 @@ async function streamFederatedTrack(
             res,
             peer,
             remoteId,
+            trackId,
+            sourceModified,
+            sourceMime,
             quality,
         });
         return undefined;
@@ -1078,6 +1084,9 @@ export async function handleStreamTrack(
                 res,
                 federationPeer,
                 track.remoteId,
+                track.id,
+                track.fileModified,
+                track.mime,
                 requestedQuality,
             );
         }

@@ -146,8 +146,13 @@ describe("subsonic browse compatibility handlers", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
-                    location: "LIBRARY",
-                    tracks: { some: { removedAt: null, origin: "LOCAL" } },
+                    location: { in: ["LIBRARY", "FEDERATED"] },
+                    tracks: {
+                        some: expect.objectContaining({
+                            removedAt: null,
+                            AND: expect.any(Array),
+                        }),
+                    },
                 },
                 skip: 0,
                 take: 1,
@@ -316,11 +321,11 @@ describe("subsonic browse compatibility handlers", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    location: "LIBRARY",
+                    location: { in: ["LIBRARY", "FEDERATED"] },
                     tracks: {
-                        some: {
+                        some: expect.objectContaining({
                             removedAt: null,
-                            origin: "LOCAL",
+                            AND: expect.any(Array),
                             trackGenres: {
                                 some: {
                                     genre: {
@@ -331,7 +336,7 @@ describe("subsonic browse compatibility handlers", () => {
                                     },
                                 },
                             },
-                        },
+                        }),
                     },
                 }),
                 take: 1,
@@ -373,7 +378,7 @@ describe("subsonic browse compatibility handlers", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    location: "LIBRARY",
+                    location: { in: ["LIBRARY", "FEDERATED"] },
                     year: {
                         gte: 2020,
                         lte: 2025,
@@ -423,7 +428,9 @@ describe("subsonic browse compatibility handlers", () => {
         expect(artistQuery.select).toMatchObject({
             _count: {
                 select: {
-                    albums: { where: { location: "LIBRARY" } },
+                    albums: {
+                        where: { location: { in: ["LIBRARY", "FEDERATED"] } },
+                    },
                 },
             },
         });
@@ -591,14 +598,14 @@ describe("subsonic browse compatibility handlers", () => {
     it("returns songs for a requested genre", async () => {
         mockTrackFindMany.mockResolvedValue([
             {
-                id: "track-1",
+                id: "federated-track-1",
                 title: "Song One",
                 trackNo: 1,
                 discNo: 1,
                 duration: 200,
                 fileSize: 1234,
                 mime: "audio/mpeg",
-                filePath: "Artist One/A Album/01 Song One.mp3",
+                filePath: null,
                 album: {
                     id: "album-1",
                     title: "A Album",
@@ -640,9 +647,9 @@ describe("subsonic browse compatibility handlers", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
-                    id: { in: ["track-1"] },
-                    album: { location: "LIBRARY" },
+                    AND: expect.any(Array),
+                    id: { in: ["federated-track-1"] },
+                    album: { location: { in: ["LIBRARY", "FEDERATED"] } },
                 },
             }),
         );
@@ -652,7 +659,7 @@ describe("subsonic browse compatibility handlers", () => {
                 songsByGenre: expect.objectContaining({
                     song: expect.arrayContaining([
                         expect.objectContaining({
-                            id: "tr-track-1",
+                            id: "tr-federated-track-1",
                             albumId: "al-album-1",
                             genre: "rock",
                         }),
@@ -679,14 +686,14 @@ describe("subsonic browse compatibility handlers", () => {
     it("returns random songs with applied filters", async () => {
         mockTrackFindMany.mockResolvedValue([
             {
-                id: "track-1",
+                id: "federated-track-1",
                 title: "Song One",
                 trackNo: 1,
                 discNo: 1,
                 duration: 200,
                 fileSize: 1234,
                 mime: "audio/mpeg",
-                filePath: "Artist One/A Album/01 Song One.mp3",
+                filePath: null,
                 album: {
                     id: "album-1",
                     title: "A Album",
@@ -726,7 +733,7 @@ describe("subsonic browse compatibility handlers", () => {
                 randomSongs: expect.objectContaining({
                     song: expect.arrayContaining([
                         expect.objectContaining({
-                            id: "tr-track-1",
+                            id: "tr-federated-track-1",
                             genre: "rock",
                         }),
                     ]),
@@ -888,9 +895,12 @@ describe("subsonic browse compatibility handlers", () => {
                 where: expect.objectContaining({
                     albums: {
                         some: {
-                            location: "LIBRARY",
+                            location: { in: ["LIBRARY", "FEDERATED"] },
                             tracks: {
-                                some: { removedAt: null, origin: "LOCAL" },
+                                some: expect.objectContaining({
+                                    removedAt: null,
+                                    AND: expect.any(Array),
+                                }),
                             },
                         },
                     },
@@ -901,7 +911,7 @@ describe("subsonic browse compatibility handlers", () => {
         expect(mockAlbumFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    location: "LIBRARY",
+                    location: { in: ["LIBRARY", "FEDERATED"] },
                 }),
                 take: 5000,
             }),
@@ -910,7 +920,7 @@ describe("subsonic browse compatibility handlers", () => {
             expect.objectContaining({
                 where: expect.objectContaining({
                     album: {
-                        location: "LIBRARY",
+                        location: { in: ["LIBRARY", "FEDERATED"] },
                     },
                 }),
                 take: 50000,
@@ -973,14 +983,14 @@ describe("subsonic browse compatibility handlers", () => {
         ]);
         mockTrackFindMany.mockResolvedValue([
             {
-                id: "track-1",
+                id: "federated-track-1",
                 title: "Song One",
                 trackNo: 1,
                 discNo: 1,
                 duration: 200,
                 fileSize: 1234,
                 mime: "audio/mpeg",
-                filePath: "Artist One/A Album/01 Song One.mp3",
+                filePath: null,
                 album: {
                     id: "album-1",
                     title: "A Album",
@@ -1030,6 +1040,13 @@ describe("subsonic browse compatibility handlers", () => {
             }),
             "json",
             undefined,
+        );
+        expect(
+            (mockSendSuccess.mock.calls[0][1] as any).searchResult3.song,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: "tr-federated-track-1" }),
+            ]),
         );
     });
 

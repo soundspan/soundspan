@@ -2,6 +2,7 @@ import type {
     FederationCatalogTombstone,
     FederationMediaItemEnvelope,
     FederationMediaType,
+    FederationTrackAttributes,
 } from "@soundspan/media-metadata-contract";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
@@ -61,6 +62,31 @@ const trackSelect = {
     recordingMbid: true,
     isrc: true,
     audioHash: true,
+    bpm: true,
+    beatsCount: true,
+    key: true,
+    keyScale: true,
+    keyStrength: true,
+    energy: true,
+    loudness: true,
+    dynamicRange: true,
+    danceability: true,
+    valence: true,
+    arousal: true,
+    instrumentalness: true,
+    acousticness: true,
+    speechiness: true,
+    moodHappy: true,
+    moodSad: true,
+    moodRelaxed: true,
+    moodAggressive: true,
+    moodParty: true,
+    moodAcoustic: true,
+    moodElectronic: true,
+    danceabilityMl: true,
+    moodTags: true,
+    essentiaGenres: true,
+    lastfmTags: true,
     updatedAt: true,
 } satisfies Prisma.TrackSelect;
 
@@ -142,6 +168,53 @@ function albumEnvelope(row: AlbumRow): FederationMediaItemEnvelope {
     };
 }
 
+function trackAudioFeatures(
+    row: TrackRow,
+): Pick<
+    FederationTrackAttributes,
+    keyof Omit<
+        FederationTrackAttributes,
+        | "title"
+        | "discNo"
+        | "trackNo"
+        | "duration"
+        | "mime"
+        | "fileSize"
+        | "recordingMbid"
+        | "isrc"
+        | "audioHash"
+        | "embedding"
+    >
+> {
+    return {
+        bpm: row.bpm,
+        beatsCount: row.beatsCount,
+        key: row.key,
+        keyScale: row.keyScale,
+        keyStrength: row.keyStrength,
+        energy: row.energy,
+        loudness: row.loudness,
+        dynamicRange: row.dynamicRange,
+        danceability: row.danceability,
+        valence: row.valence,
+        arousal: row.arousal,
+        instrumentalness: row.instrumentalness,
+        acousticness: row.acousticness,
+        speechiness: row.speechiness,
+        moodHappy: row.moodHappy,
+        moodSad: row.moodSad,
+        moodRelaxed: row.moodRelaxed,
+        moodAggressive: row.moodAggressive,
+        moodParty: row.moodParty,
+        moodAcoustic: row.moodAcoustic,
+        moodElectronic: row.moodElectronic,
+        danceabilityMl: row.danceabilityMl,
+        moodTags: row.moodTags,
+        essentiaGenres: row.essentiaGenres,
+        lastfmTags: row.lastfmTags,
+    };
+}
+
 function trackEnvelope(
     row: TrackRow,
     embedding?: number[],
@@ -161,8 +234,9 @@ function trackEnvelope(
             recordingMbid: row.recordingMbid,
             isrc: row.isrc,
             audioHash: row.audioHash,
+            ...trackAudioFeatures(row),
             ...(embedding ? { embedding } : {}),
-        },
+        } satisfies FederationTrackAttributes,
     };
 }
 

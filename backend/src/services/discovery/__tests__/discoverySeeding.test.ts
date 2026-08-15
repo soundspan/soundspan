@@ -340,7 +340,12 @@ describe("DiscoverySeeding", () => {
             });
             expect(mockPrisma.album.groupBy).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    where: { location: "LIBRARY" },
+                    where: {
+                        OR: expect.arrayContaining([
+                            { location: "LIBRARY" },
+                            expect.objectContaining({ location: "FEDERATED" }),
+                        ]),
+                    },
                 }),
             );
         });

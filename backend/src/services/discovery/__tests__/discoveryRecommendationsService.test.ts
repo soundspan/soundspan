@@ -287,7 +287,7 @@ describe("DiscoveryRecommendationsService", () => {
                 where: {
                     userId: "user-1",
                     playedAt: { gte: SUB_120 },
-                    track: { removedAt: null, origin: "LOCAL" },
+                    track: { removedAt: null, AND: expect.any(Array) },
                 },
                 select: {
                     track: {
@@ -424,12 +424,11 @@ describe("DiscoveryRecommendationsService", () => {
             ).toEqual({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     duration: { gt: 0 },
-                    filePath: { not: null },
                     id: { notIn: ["recent-track"] },
                     album: {
-                        location: "LIBRARY",
+                        location: { in: ["LIBRARY", "FEDERATED"] },
                         artistId: { in: ["artist-priority"] },
                         rgMbid: { notIn: ["excluded-rg"] },
                     },
@@ -455,12 +454,11 @@ describe("DiscoveryRecommendationsService", () => {
             ).toEqual({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     duration: { gt: 0 },
-                    filePath: { not: null },
                     id: { notIn: ["track-priority"] },
                     album: {
-                        location: "LIBRARY",
+                        location: { in: ["LIBRARY", "FEDERATED"] },
                         rgMbid: { notIn: ["excluded-rg"] },
                     },
                 },
@@ -1070,7 +1068,7 @@ describe("DiscoveryRecommendationsService", () => {
             expect(mockPrisma.track.findMany).toHaveBeenCalledWith({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     id: { in: ["track-1", "track-2", "missing-track"] },
                 },
                 include: {

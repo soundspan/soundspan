@@ -8,6 +8,30 @@ export const VISIBLE_TRACK_SQL = Prisma.sql`t."removedAt" IS NULL`;
 /** SQL predicate for tracks physically owned by this instance (Track alias `t`). */
 export const LOCAL_TRACK_SQL = Prisma.sql`t.origin = ${"LOCAL"}::"TrackOrigin"`;
 
+type TrackSqlAlias = "t" | "candidate_track" | "source_track";
+
+/** Builds the browse origin/dedup predicate for a code-owned Track alias. */
+export function trackBrowseSql(alias: TrackSqlAlias = "t"): Prisma.Sql {
+    const trackAlias = Prisma.raw(alias);
+    return Prisma.sql`(
+        ${trackAlias}.origin = ${"LOCAL"}::"TrackOrigin"
+        OR (
+            ${trackAlias}.origin = ${"FEDERATED"}::"TrackOrigin"
+            AND (
+                ${trackAlias}."dedupOfTrackId" IS NULL
+                OR EXISTS (
+                    SELECT 1 FROM "Track" dedup_winner
+                    WHERE dedup_winner.id = ${trackAlias}."dedupOfTrackId"
+                      AND dedup_winner."removedAt" IS NOT NULL
+                )
+            )
+        )
+    )`;
+}
+
+/** SQL origin/dedup predicate for first-class library pools using alias `t`. */
+export const TRACK_BROWSE_SQL = trackBrowseSql();
+
 /** Builds the parameterized SQL predicate for a library-radio mood pool. */
 export const moodPoolCondition = (moodValue: string): Prisma.Sql => {
     switch (moodValue) {

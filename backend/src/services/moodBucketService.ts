@@ -8,7 +8,7 @@
 
 import { logger } from "../utils/logger";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { prisma, Prisma } from "../utils/db";
@@ -251,7 +251,7 @@ export class MoodBucketService {
             "assignTrackToMoods.track.findUnique",
             () =>
                 prisma.track.findUnique({
-                    where: { id: trackId, ...LOCAL_TRACK_WHERE },
+                    where: { id: trackId, AND: [TRACK_BROWSE_WHERE] },
                     select: {
                         id: true,
                         analysisStatus: true,
@@ -518,7 +518,7 @@ export class MoodBucketService {
                 where: {
                     mood,
                     score: { gte: MOOD_BUCKET_MIN_SCORE },
-                    track: { removedAt: null, ...LOCAL_TRACK_WHERE },
+                    track: { removedAt: null, ...TRACK_BROWSE_WHERE },
                 },
             });
             const config = MOOD_CONFIG[mood];
@@ -566,7 +566,7 @@ export class MoodBucketService {
             where: {
                 mood,
                 score: { gte: MOOD_BUCKET_MIN_SCORE },
-                track: { ...TRACK_VISIBLE_WHERE, ...LOCAL_TRACK_WHERE },
+                track: { ...TRACK_VISIBLE_WHERE, ...TRACK_BROWSE_WHERE },
             },
             select: { trackId: true, score: true },
             orderBy: { score: "desc" },
@@ -589,7 +589,7 @@ export class MoodBucketService {
         const tracks = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 id: { in: pooledIds },
             },
             select: {
@@ -759,7 +759,7 @@ export class MoodBucketService {
             const tracks = await prisma.track.findMany({
                 where: {
                     analysisStatus: "completed",
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                 },
                 select: {
                     id: true,

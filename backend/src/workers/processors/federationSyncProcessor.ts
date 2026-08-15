@@ -14,6 +14,7 @@ import { decodeFederationIdentity } from "../../utils/federationDedup";
 import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { clearTrackTranscodeCache } from "../../services/trackReplacement";
 
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
@@ -398,6 +399,57 @@ async function rebindFederatedTrack(
     });
 }
 
+function syncedAudioFeatures(attributes: TrackEnvelope["attributes"]) {
+    return {
+        bpm: attributes.bpm,
+        beatsCount: attributes.beatsCount,
+        key: attributes.key,
+        keyScale: attributes.keyScale,
+        keyStrength: attributes.keyStrength,
+        energy: attributes.energy,
+        loudness: attributes.loudness,
+        dynamicRange: attributes.dynamicRange,
+        danceability: attributes.danceability,
+        valence: attributes.valence,
+        arousal: attributes.arousal,
+        instrumentalness: attributes.instrumentalness,
+        acousticness: attributes.acousticness,
+        speechiness: attributes.speechiness,
+        moodHappy: attributes.moodHappy,
+        moodSad: attributes.moodSad,
+        moodRelaxed: attributes.moodRelaxed,
+        moodAggressive: attributes.moodAggressive,
+        moodParty: attributes.moodParty,
+        moodAcoustic: attributes.moodAcoustic,
+        moodElectronic: attributes.moodElectronic,
+        danceabilityMl: attributes.danceabilityMl,
+        moodTags: attributes.moodTags ?? [],
+        essentiaGenres: attributes.essentiaGenres ?? [],
+        lastfmTags: attributes.lastfmTags ?? [],
+    };
+}
+
+function syncedTrackValues(item: TrackEnvelope, albumId: string) {
+    const attributes = item.attributes;
+    return {
+        albumId,
+        title: attributes.title,
+        discNo: attributes.discNo,
+        trackNo: attributes.trackNo,
+        duration: attributes.duration,
+        mime: attributes.mime,
+        fileSize: attributes.fileSize,
+        fileModified: new Date(item.updatedAt),
+        recordingMbid: attributes.recordingMbid,
+        isrc: attributes.isrc,
+        audioHash: attributes.audioHash,
+        ...syncedAudioFeatures(attributes),
+        origin: "FEDERATED" as const,
+        filePath: null,
+        removedAt: null,
+    };
+}
+
 async function upsertTrack(
     context: SyncContext,
     item: TrackEnvelope,
@@ -413,6 +465,17 @@ async function upsertTrack(
     if (!album) return false;
     const attributes = item.attributes;
     await rebindFederatedTrack(context, item, album.id);
+    const existing = await prisma.track.findUnique({
+        where: {
+            peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
+        },
+        select: { id: true, audioHash: true },
+    });
+    const hashChanged =
+        attributes.audioHash !== undefined &&
+        existing !== null &&
+        existing.audioHash !== attributes.audioHash;
+    const values = syncedTrackValues(item, album.id);
     const row = await prisma.track.upsert({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
@@ -420,39 +483,12 @@ async function upsertTrack(
         create: {
             peerId: context.peerId,
             remoteId: item.id,
-            albumId: album.id,
-            title: attributes.title,
-            discNo: attributes.discNo,
-            trackNo: attributes.trackNo,
-            duration: attributes.duration,
-            mime: attributes.mime,
-            fileSize: attributes.fileSize,
-            fileModified: new Date(item.updatedAt),
-            recordingMbid: attributes.recordingMbid,
-            isrc: attributes.isrc,
-            audioHash: attributes.audioHash,
-            origin: "FEDERATED",
-            filePath: null,
-            removedAt: null,
+            ...values,
         },
-        update: {
-            albumId: album.id,
-            title: attributes.title,
-            discNo: attributes.discNo,
-            trackNo: attributes.trackNo,
-            duration: attributes.duration,
-            mime: attributes.mime,
-            fileSize: attributes.fileSize,
-            fileModified: new Date(item.updatedAt),
-            recordingMbid: attributes.recordingMbid,
-            isrc: attributes.isrc,
-            audioHash: attributes.audioHash,
-            origin: "FEDERATED",
-            filePath: null,
-            removedAt: null,
-        },
+        update: values,
         select: { id: true },
     });
+    if (hashChanged) await clearTrackTranscodeCache(row.id);
     await applyTrackDedup(row.id, item, album.rgMbid);
     if (attributes.embedding && context.scopes.includes("embeddings:read")) {
         await upsertTrackEmbedding(row.id, attributes.embedding);

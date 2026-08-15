@@ -330,8 +330,8 @@ describe("subsonic state/admin compatibility handlers", () => {
                     userId: "user-1",
                     track: {
                         removedAt: null,
-                        origin: "LOCAL",
-                        album: { location: "LIBRARY" },
+                        AND: expect.any(Array),
+                        album: { location: { in: ["LIBRARY", "FEDERATED"] } },
                     },
                 },
             }),
@@ -373,8 +373,8 @@ describe("subsonic state/admin compatibility handlers", () => {
                 where: {
                     id: "track-1",
                     removedAt: null,
-                    origin: "LOCAL",
-                    album: { location: "LIBRARY" },
+                    AND: expect.any(Array),
+                    album: { location: { in: ["LIBRARY", "FEDERATED"] } },
                 },
             }),
         );
@@ -708,7 +708,9 @@ describe("subsonic state/admin compatibility handlers", () => {
         expect(artistQuery.select).toMatchObject({
             _count: {
                 select: {
-                    albums: { where: { location: "LIBRARY" } },
+                    albums: {
+                        where: { location: { in: ["LIBRARY", "FEDERATED"] } },
+                    },
                 },
             },
         });
@@ -717,8 +719,8 @@ describe("subsonic state/admin compatibility handlers", () => {
             by: ["albumId"],
             where: {
                 removedAt: null,
-                origin: "LOCAL",
-                album: { location: "LIBRARY" },
+                AND: expect.any(Array),
+                album: { location: { in: ["LIBRARY", "FEDERATED"] } },
                 albumId: { in: ["album-2", "album-1"] },
             },
             _count: { _all: true },

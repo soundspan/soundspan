@@ -46,6 +46,11 @@ export function trackBrowseWhere(
     };
 }
 
+/** Shared origin and dedup predicate that composes with caller-owned `OR` arms. */
+export const TRACK_BROWSE_WHERE = {
+    AND: [trackBrowseWhere()],
+} satisfies Prisma.TrackWhereInput;
+
 /** Supported artist-list sort expressions keyed by the public query value. */
 export const ARTIST_SORT_MAP: Record<
     string,

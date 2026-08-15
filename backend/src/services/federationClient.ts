@@ -28,6 +28,13 @@ const albumAttributesSchema = z.strictObject({
 const embeddingSchema = z
     .array(z.number().finite())
     .length(EMBEDDING_DIMENSIONS);
+const optionalFiniteNumberSchema = z.number().finite().nullable().optional();
+const optionalFeatureStringSchema = z.string().max(200).nullable().optional();
+const optionalFeatureArraySchema = z
+    .array(z.string().max(200))
+    .max(64)
+    .nullable()
+    .optional();
 const trackAttributesSchema = z.strictObject({
     title: z.string().min(1).max(2_000),
     discNo: z.number().int().min(0).max(10_000),
@@ -38,6 +45,31 @@ const trackAttributesSchema = z.strictObject({
     recordingMbid: z.string().max(1_000).nullable(),
     isrc: z.string().max(100).nullable(),
     audioHash: z.string().max(1_000).nullable(),
+    bpm: optionalFiniteNumberSchema,
+    beatsCount: z.number().int().finite().nullable().optional(),
+    key: optionalFeatureStringSchema,
+    keyScale: optionalFeatureStringSchema,
+    keyStrength: optionalFiniteNumberSchema,
+    energy: optionalFiniteNumberSchema,
+    loudness: optionalFiniteNumberSchema,
+    dynamicRange: optionalFiniteNumberSchema,
+    danceability: optionalFiniteNumberSchema,
+    valence: optionalFiniteNumberSchema,
+    arousal: optionalFiniteNumberSchema,
+    instrumentalness: optionalFiniteNumberSchema,
+    acousticness: optionalFiniteNumberSchema,
+    speechiness: optionalFiniteNumberSchema,
+    moodHappy: optionalFiniteNumberSchema,
+    moodSad: optionalFiniteNumberSchema,
+    moodRelaxed: optionalFiniteNumberSchema,
+    moodAggressive: optionalFiniteNumberSchema,
+    moodParty: optionalFiniteNumberSchema,
+    moodAcoustic: optionalFiniteNumberSchema,
+    moodElectronic: optionalFiniteNumberSchema,
+    danceabilityMl: optionalFiniteNumberSchema,
+    moodTags: optionalFeatureArraySchema,
+    essentiaGenres: optionalFeatureArraySchema,
+    lastfmTags: optionalFeatureArraySchema,
     embedding: embeddingSchema.optional(),
 });
 

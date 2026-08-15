@@ -30,6 +30,7 @@ const createFederationClient = jest.fn(() => client);
 const createMapping = jest.fn();
 const upsertTrackEmbedding = jest.fn();
 const backfillAllArtistCounts = jest.fn();
+const clearTrackTranscodeCache = jest.fn();
 
 const mockLog = {
     debug: jest.fn(),
@@ -87,6 +88,9 @@ jest.mock("../../../services/trackEmbeddings", () => ({
 }));
 jest.mock("../../../services/artistCountsService", () => ({
     backfillAllArtistCounts,
+}));
+jest.mock("../../../services/trackReplacement", () => ({
+    clearTrackTranscodeCache,
 }));
 
 import { processFederationSync } from "../federationSyncProcessor";
@@ -150,6 +154,31 @@ const track = {
         recordingMbid: null,
         isrc: null,
         audioHash: "sha256:abc",
+        bpm: 122.5,
+        beatsCount: 367,
+        key: "F#",
+        keyScale: "minor",
+        keyStrength: 0.77,
+        energy: 0.71,
+        loudness: -8.2,
+        dynamicRange: 10.4,
+        danceability: 0.69,
+        valence: 0.48,
+        arousal: 0.74,
+        instrumentalness: 0.12,
+        acousticness: 0.24,
+        speechiness: 0.03,
+        moodHappy: 0.58,
+        moodSad: 0.14,
+        moodRelaxed: 0.31,
+        moodAggressive: 0.09,
+        moodParty: 0.52,
+        moodAcoustic: 0.2,
+        moodElectronic: 0.8,
+        danceabilityMl: 0.72,
+        moodTags: ["focused"],
+        essentiaGenres: ["electronic"],
+        lastfmTags: ["synthwave"],
         embedding: Array.from({ length: 512 }, () => 0.25),
     },
 };
@@ -201,6 +230,7 @@ describe("federation sync processor", () => {
         createMapping.mockResolvedValue({ id: "mapping-1" });
         upsertTrackEmbedding.mockResolvedValue(undefined);
         backfillAllArtistCounts.mockResolvedValue({ processed: 1, errors: 0 });
+        clearTrackTranscodeCache.mockResolvedValue(undefined);
     });
 
     it("imports a full catalog in parent order and persists the final cursor", async () => {
@@ -214,6 +244,26 @@ describe("federation sync processor", () => {
         );
         expect(prisma.album.upsert.mock.invocationCallOrder[0]).toBeLessThan(
             prisma.track.upsert.mock.invocationCallOrder[0],
+        );
+        expect(prisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    bpm: 122.5,
+                    beatsCount: 367,
+                    energy: 0.71,
+                    moodTags: ["focused"],
+                    essentiaGenres: ["electronic"],
+                    lastfmTags: ["synthwave"],
+                }),
+                update: expect.objectContaining({
+                    bpm: 122.5,
+                    beatsCount: 367,
+                    energy: 0.71,
+                    moodTags: ["focused"],
+                    essentiaGenres: ["electronic"],
+                    lastfmTags: ["synthwave"],
+                }),
+            }),
         );
         expect(prisma.album.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -253,6 +303,28 @@ describe("federation sync processor", () => {
             tracks: 1,
             skippedInvalid: 0,
         });
+    });
+
+    it("invalidates cached streams when a federated audio hash changes", async () => {
+        prisma.track.findUnique.mockResolvedValue({
+            id: "fed-track-row",
+            audioHash: "sha256:old",
+        });
+
+        await processFederationSync(job());
+
+        expect(clearTrackTranscodeCache).toHaveBeenCalledWith("fed-track-row");
+    });
+
+    it("keeps cached streams when the federated audio hash is unchanged", async () => {
+        prisma.track.findUnique.mockResolvedValue({
+            id: "fed-track-row",
+            audioHash: "sha256:abc",
+        });
+
+        await processFederationSync(job());
+
+        expect(clearTrackTranscodeCache).not.toHaveBeenCalled();
     });
 
     it("warns when an older host manifest lacks serverTime", async () => {

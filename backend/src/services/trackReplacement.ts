@@ -72,6 +72,18 @@ export async function removeReplacementCacheFiles(
     }
 }
 
+/** Deletes cached stream rows and files without resetting analysis state. */
+export async function clearTrackTranscodeCache(trackId: string): Promise<void> {
+    const cachedFiles = await prisma.transcodedFile.findMany({
+        where: { trackId },
+        select: { cachePath: true },
+    });
+    await prisma.transcodedFile.deleteMany({ where: { trackId } });
+    await removeReplacementCacheFiles(
+        cachedFiles.map((file) => file.cachePath),
+    );
+}
+
 /** Applies replacement semantics to a same-path track update. */
 export async function resetTrackAfterReplacement(
     trackId: string,

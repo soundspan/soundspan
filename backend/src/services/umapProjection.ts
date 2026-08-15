@@ -5,6 +5,7 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { parseEmbedding } from "../utils/embedding";
+import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 
 const MIN_TRACKS_FOR_UMAP = 5;
 const MAX_EMBEDDINGS = 15000;
@@ -285,7 +286,7 @@ async function doCompute(): Promise<VibeMapResponse> {
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
-          AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND ${TRACK_BROWSE_SQL}
         ORDER BY RANDOM()
         LIMIT ${MAX_EMBEDDINGS}
     `;

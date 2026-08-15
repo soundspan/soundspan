@@ -48,10 +48,15 @@ Soft-removed local tracks are omitted from browse, search, album, playlist,
 similar-song, and random-song responses. `stream` and `download` return
 not-found responses for soft-removed track IDs.
 
-The `/rest` contract exposes local library content only. Federated artists,
-albums, tracks, playlist items, covers, streams, downloads, and lyrics are
-excluded by design in v1, even when `FEDERATION_ENABLED=true`. Federation is
-available through the soundspan web API and application instead.
+The `/rest` contract exposes visible local and federated library content with
+the same local-wins deduplication used by the web library. Search, album,
+artist, playlist, and state responses include peer-owned tracks. `stream` and
+`download` proxy federated audio through the owning peer and preserve Range
+requests; complete responses may be served from the consumer transcode cache.
+`getCoverArt` falls back to the peer cover proxy when local cover metadata is
+absent. An unavailable peer produces Subsonic error code `0` (`GENERIC`) with
+the message `Federation peer is offline`. Embedded-file lyrics remain
+local-only, while federated tracks may use metadata-based LRCLIB lookup.
 
 Alias support:
 

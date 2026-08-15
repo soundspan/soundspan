@@ -1682,6 +1682,9 @@ describe("library stream runtime coverage", () => {
                 status: "ACTIVE",
             },
             remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2024-01-01T00:00:00.000Z"),
+            sourceMime: undefined,
             quality: "original",
         });
         expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
@@ -3795,10 +3798,12 @@ describe("library catalog list runtime coverage", () => {
         // Exactly one findMany — the fetch-all call, which carries no pivot
         // filter (the sampling query would pass `where: { random: ... }`).
         expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
-        expect(mockTrackFindMany.mock.calls[0][0].where).toEqual({
-            removedAt: null,
-            origin: "LOCAL",
-        });
+        expect(mockTrackFindMany.mock.calls[0][0].where).toEqual(
+            expect.objectContaining({
+                removedAt: null,
+                AND: expect.any(Array),
+            }),
+        );
         expect(mockShuffleArray).toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body.total).toBe(5);
@@ -3835,7 +3840,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     random: { gte: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -3851,7 +3856,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     id: { in: ["track-9", "track-8"] },
                 },
             }),
@@ -3901,7 +3906,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     random: { gte: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -3915,7 +3920,7 @@ describe("library catalog list runtime coverage", () => {
             expect.objectContaining({
                 where: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     random: { lt: expect.any(Number) },
                 },
                 orderBy: { random: "asc" },
@@ -6636,7 +6641,7 @@ describe("library catalog list runtime coverage", () => {
         expect(mockLikedTrackFindMany).toHaveBeenCalledWith({
             where: {
                 userId: "user-1",
-                track: { removedAt: null, origin: "LOCAL" },
+                track: { removedAt: null, AND: expect.any(Array) },
             },
             select: { trackId: true },
             orderBy: { likedAt: "desc" },

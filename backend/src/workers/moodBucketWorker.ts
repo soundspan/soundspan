@@ -17,6 +17,7 @@ import { prisma } from "../utils/db";
 import { moodBucketService } from "../services/moodBucketService";
 import { createIORedisClient } from "../utils/ioredis";
 import { config } from "../config";
+import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 
 const log = logger.child("MoodBucket");
 
@@ -186,6 +187,7 @@ async function processNewlyAnalyzedTracks(): Promise<number> {
             FROM "Track" t
             LEFT JOIN "MoodBucket" mb ON mb."trackId" = t.id
             WHERE t."removedAt" IS NULL
+              AND ${TRACK_BROWSE_SQL}
               AND t."analysisStatus" = 'completed'
             GROUP BY t.id, t.title, t."analyzedAt"
             HAVING COUNT(mb.*) = 0

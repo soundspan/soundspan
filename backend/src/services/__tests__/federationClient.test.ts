@@ -54,6 +54,49 @@ const artistEnvelope = {
     },
 };
 
+const trackEnvelope = {
+    id: "track-1",
+    mediaType: "track",
+    updatedAt: "2026-08-15T12:00:00.000Z",
+    parentRef: "album-1",
+    attributes: {
+        title: "Track",
+        discNo: 1,
+        trackNo: 1,
+        duration: 180,
+        mime: "audio/flac",
+        fileSize: 1234,
+        recordingMbid: null,
+        isrc: null,
+        audioHash: "sha256:track-1",
+        bpm: 120.5,
+        beatsCount: 360,
+        key: "A",
+        keyScale: "minor",
+        keyStrength: 0.8,
+        energy: 0.7,
+        loudness: -9.5,
+        dynamicRange: 8.1,
+        danceability: 0.6,
+        valence: 0.4,
+        arousal: 0.65,
+        instrumentalness: 0.2,
+        acousticness: 0.3,
+        speechiness: 0.05,
+        moodHappy: 0.4,
+        moodSad: 0.2,
+        moodRelaxed: 0.3,
+        moodAggressive: 0.1,
+        moodParty: 0.5,
+        moodAcoustic: 0.25,
+        moodElectronic: 0.75,
+        danceabilityMl: 0.62,
+        moodTags: ["focused"],
+        essentiaGenres: ["electronic"],
+        lastfmTags: ["synthwave"],
+    },
+};
+
 describe("federation HTTP client", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -112,6 +155,73 @@ describe("federation HTTP client", () => {
             nextCursor: null,
             skippedInvalid: 1,
         });
+    });
+
+    it("accepts bounded audio features and tolerates their absence", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: { items: [trackEnvelope], nextCursor: null },
+        });
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).resolves.toMatchObject({ items: [trackEnvelope], skippedInvalid: 0 });
+
+        const attributesWithoutFeatures = {
+            title: "Old Host Track",
+            discNo: 1,
+            trackNo: 2,
+            duration: 181,
+            mime: null,
+            fileSize: 5678,
+            recordingMbid: null,
+            isrc: null,
+            audioHash: null,
+        };
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [
+                    { ...trackEnvelope, attributes: attributesWithoutFeatures },
+                ],
+                nextCursor: null,
+            },
+        });
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).resolves.toMatchObject({
+            items: [
+                expect.objectContaining({
+                    attributes: attributesWithoutFeatures,
+                }),
+            ],
+            skippedInvalid: 0,
+        });
+    });
+
+    it.each([
+        ["non-finite number", { energy: Number.POSITIVE_INFINITY }],
+        ["oversized feature array", { moodTags: Array(65).fill("mood") }],
+        ["oversized feature array entry", { lastfmTags: ["x".repeat(201)] }],
+    ])("rejects a track with a %s", async (_case, invalidFeature) => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [
+                    {
+                        ...trackEnvelope,
+                        attributes: {
+                            ...trackEnvelope.attributes,
+                            ...invalidFeature,
+                        },
+                    },
+                ],
+                nextCursor: null,
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).resolves.toMatchObject({ items: [], skippedInvalid: 1 });
     });
 
     it("skips invalid delta changes but rejects malformed tombstones", async () => {

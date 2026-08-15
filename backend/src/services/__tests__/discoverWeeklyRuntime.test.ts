@@ -2502,7 +2502,11 @@ describe("discover weekly runtime behavior", () => {
                     return [
                         {
                             id: `track-${rgMbid}`,
-                            filePath: `/music/${rgMbid}.flac`,
+                            title: `Track ${rgMbid}`,
+                            filePath:
+                                rgMbid === "rg-popular-0"
+                                    ? null
+                                    : `/music/${rgMbid}.flac`,
                             album: {
                                 id: `album-${rgMbid}`,
                                 title: `Album ${rgMbid}`,
@@ -2517,7 +2521,7 @@ describe("discover weekly runtime behavior", () => {
                 }
 
                 if (
-                    query?.where?.album?.location === "LIBRARY" &&
+                    query?.where?.album?.location?.in?.includes("FEDERATED") &&
                     !query?.orderBy
                 ) {
                     return [
@@ -2544,7 +2548,7 @@ describe("discover weekly runtime behavior", () => {
                     return [
                         {
                             id: "track-popular-anchor-only",
-                            filePath: "/music/popular-anchor-only.flac",
+                            filePath: null,
                             album: {
                                 id: "album-popular-anchor-only",
                                 title: "Popular Anchor Only",
@@ -2582,10 +2586,21 @@ describe("discover weekly runtime behavior", () => {
         ).resolves.toBeUndefined();
 
         expect(tx.discoveryTrack.create).toHaveBeenCalled();
+        expect(tx.discoveryTrack.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    trackId: "track-rg-popular-0",
+                    fileName: "Track rg-popular-0",
+                    filePath: "",
+                }),
+            }),
+        );
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    album: expect.objectContaining({ location: "LIBRARY" }),
+                    album: expect.objectContaining({
+                        location: { in: ["LIBRARY", "FEDERATED"] },
+                    }),
                 }),
                 orderBy: expect.any(Object),
             }),

@@ -231,7 +231,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                                     {
                                         track: {
                                             removedAt: null,
-                                            origin: "LOCAL",
+                                            AND: expect.any(Array),
                                         },
                                     },
                                 ],
@@ -248,7 +248,10 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-1"] },
                 trackId: { not: null },
-                track: { removedAt: null, origin: "LOCAL" },
+                track: expect.objectContaining({
+                    removedAt: null,
+                    AND: expect.any(Array),
+                }),
             },
             select: {
                 playlistId: true,
@@ -260,7 +263,7 @@ describe("subsonic collections/core compatibility handlers", () => {
                 playlistId: { in: ["playlist-1", "playlist-2"] },
                 track: {
                     removedAt: null,
-                    origin: "LOCAL",
+                    AND: expect.any(Array),
                     album: {
                         AND: [
                             { coverUrl: { not: null } },
@@ -343,7 +346,10 @@ describe("subsonic collections/core compatibility handlers", () => {
             where: {
                 playlistId: { in: ["playlist-a", "playlist-b"] },
                 trackId: { not: null },
-                track: { removedAt: null, origin: "LOCAL" },
+                track: expect.objectContaining({
+                    removedAt: null,
+                    AND: expect.any(Array),
+                }),
             },
             select: {
                 playlistId: true,
@@ -469,7 +475,12 @@ describe("subsonic collections/core compatibility handlers", () => {
                 },
                 include: expect.objectContaining({
                     items: expect.objectContaining({
-                        where: { track: { removedAt: null, origin: "LOCAL" } },
+                        where: {
+                            track: expect.objectContaining({
+                                removedAt: null,
+                                AND: expect.any(Array),
+                            }),
+                        },
                     }),
                 }),
             }),

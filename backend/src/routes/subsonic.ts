@@ -22,7 +22,10 @@ import {
     toSubsonicId,
     type SubsonicEntityType,
 } from "../utils/subsonicIds";
-import { AudioStreamingService } from "../services/audioStreaming";
+import {
+    AudioStreamingService,
+    type Quality,
+} from "../services/audioStreaming";
 import {
     negotiateCoverArtFormat,
     resizeCoverArt,
@@ -39,20 +42,29 @@ import {
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { fetchExternalImage } from "../services/imageProxy";
+import {
+    TRACK_BROWSE_WHERE,
+    TRACK_VISIBLE_WHERE,
+} from "../utils/librarySorting";
+import { proxyFederatedTrackStream } from "../services/federationStreamProxy";
+import { proxyFederatedCover } from "../services/federationCoverProxy";
 
 const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 
 const LIBRARY_LOCATION = "LIBRARY";
+const SUBSONIC_ALBUM_LOCATION_WHERE: Prisma.EnumAlbumLocationFilter = {
+    in: [LIBRARY_LOCATION, "FEDERATED"],
+};
 const LIBRARY_TRACK_WHERE = {
-    removedAt: null,
-    origin: "LOCAL",
-    album: { location: LIBRARY_LOCATION },
+    ...TRACK_VISIBLE_WHERE,
+    ...TRACK_BROWSE_WHERE,
+    album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
 } satisfies Prisma.TrackWhereInput;
 
 const LIBRARY_ALBUM_WHERE = {
-    location: LIBRARY_LOCATION,
-    tracks: { some: { removedAt: null, origin: "LOCAL" } },
+    location: SUBSONIC_ALBUM_LOCATION_WHERE,
+    tracks: { some: LIBRARY_TRACK_WHERE },
 } satisfies Prisma.AlbumWhereInput;
 const SUBSONIC_COVER_CACHE_CONTROL = "public, max-age=86400";
 const DEFAULT_SUBSONIC_AVATAR_PNG = Buffer.from(
@@ -258,7 +270,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
         },
     },
     tracks: {
-        where: { removedAt: null, origin: "LOCAL" },
+        where: LIBRARY_TRACK_WHERE,
         select: {
             duration: true,
         },
@@ -331,10 +343,9 @@ async function buildAlbumPlayStats(
         where: {
             userId,
             track: {
-                removedAt: null,
-                origin: "LOCAL",
+                ...LIBRARY_TRACK_WHERE,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
         },
@@ -363,7 +374,7 @@ async function buildAlbumPlayStats(
                 in: trackIds,
             },
             album: {
-                location: LIBRARY_LOCATION,
+                location: SUBSONIC_ALBUM_LOCATION_WHERE,
             },
         },
         select: {
@@ -1130,7 +1141,7 @@ export async function handleGetArtist(
                         genres: true,
                         userGenres: true,
                         tracks: {
-                            where: { removedAt: null, origin: "LOCAL" },
+                            where: LIBRARY_TRACK_WHERE,
                             select: {
                                 duration: true,
                             },
@@ -1138,7 +1149,7 @@ export async function handleGetArtist(
                         _count: {
                             select: {
                                 tracks: {
-                                    where: { removedAt: null, origin: "LOCAL" },
+                                    where: LIBRARY_TRACK_WHERE,
                                 },
                             },
                         },
@@ -1252,7 +1263,7 @@ export async function handleGetAlbum(
                     },
                 },
                 tracks: {
-                    where: { removedAt: null, origin: "LOCAL" },
+                    where: LIBRARY_TRACK_WHERE,
                     select: {
                         id: true,
                         title: true,
@@ -1361,7 +1372,7 @@ export async function handleGetSong(
                 ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -1543,7 +1554,7 @@ export async function handleSearch3(
                         },
                     },
                     tracks: {
-                        where: { removedAt: null, origin: "LOCAL" },
+                        where: LIBRARY_TRACK_WHERE,
                         select: {
                             duration: true,
                         },
@@ -1551,7 +1562,7 @@ export async function handleSearch3(
                     _count: {
                         select: {
                             tracks: {
-                                where: { removedAt: null, origin: "LOCAL" },
+                                where: LIBRARY_TRACK_WHERE,
                             },
                         },
                     },
@@ -1566,7 +1577,7 @@ export async function handleSearch3(
                 where: {
                     ...LIBRARY_TRACK_WHERE,
                     album: {
-                        location: LIBRARY_LOCATION,
+                        location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     },
                     ...(query
                         ? {
@@ -2125,7 +2136,7 @@ export async function handleGetSimilarSongs(
             where: {
                 ...LIBRARY_TRACK_WHERE,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     artistId: {
                         in: similarArtistIds,
                     },
@@ -2248,7 +2259,7 @@ export async function handleGetSimilarSongs2(
                 ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -2301,7 +2312,7 @@ export async function handleGetSimilarSongs2(
                               not: trackId,
                           },
                           album: {
-                              location: LIBRARY_LOCATION,
+                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
                               artistId: {
                                   in: similarArtistIds,
                               },
@@ -2328,7 +2339,7 @@ export async function handleGetSimilarSongs2(
                               not: trackId,
                           },
                           album: {
-                              location: LIBRARY_LOCATION,
+                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
                           },
                           ...genreFilter,
                       },
@@ -2345,7 +2356,7 @@ export async function handleGetSimilarSongs2(
                     not: trackId,
                 },
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     artistId: sourceArtistId,
                 },
             },
@@ -2472,11 +2483,10 @@ export async function handleGetTopSongs(
             by: ["trackId"],
             where: {
                 track: {
-                    removedAt: null,
-                    origin: "LOCAL",
+                    ...LIBRARY_TRACK_WHERE,
                     album: {
                         artistId: artist.id,
-                        location: LIBRARY_LOCATION,
+                        location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     },
                 },
             },
@@ -2494,7 +2504,7 @@ export async function handleGetTopSongs(
                 ...LIBRARY_TRACK_WHERE,
                 album: {
                     artistId: artist.id,
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -2679,7 +2689,7 @@ async function handleSearchLike(
                         },
                     },
                     tracks: {
-                        where: { removedAt: null, origin: "LOCAL" },
+                        where: LIBRARY_TRACK_WHERE,
                         select: {
                             duration: true,
                         },
@@ -2687,7 +2697,7 @@ async function handleSearchLike(
                     _count: {
                         select: {
                             tracks: {
-                                where: { removedAt: null, origin: "LOCAL" },
+                                where: LIBRARY_TRACK_WHERE,
                             },
                         },
                     },
@@ -2702,7 +2712,7 @@ async function handleSearchLike(
                 where: {
                     ...LIBRARY_TRACK_WHERE,
                     album: {
-                        location: LIBRARY_LOCATION,
+                        location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     },
                     ...(query
                         ? {
@@ -2998,8 +3008,7 @@ async function handleGetAlbumListLike(
 
                 where.tracks = {
                     some: {
-                        removedAt: null,
-                        origin: "LOCAL",
+                        ...LIBRARY_TRACK_WHERE,
                         trackGenres: {
                             some: {
                                 genre: {
@@ -3123,7 +3132,7 @@ async function getArtistMusicDirectory(
                     genres: true,
                     userGenres: true,
                     tracks: {
-                        where: { removedAt: null, origin: "LOCAL" },
+                        where: LIBRARY_TRACK_WHERE,
                         select: {
                             duration: true,
                         },
@@ -3186,7 +3195,7 @@ async function getAlbumMusicDirectory(
                 },
             },
             tracks: {
-                where: { removedAt: null, origin: "LOCAL" },
+                where: LIBRARY_TRACK_WHERE,
                 select: {
                     id: true,
                     title: true,
@@ -3337,10 +3346,9 @@ export async function handleGetGenres(
                 trackGenres: {
                     some: {
                         track: {
-                            removedAt: null,
-                            origin: "LOCAL",
+                            ...LIBRARY_TRACK_WHERE,
                             album: {
-                                location: LIBRARY_LOCATION,
+                                location: SUBSONIC_ALBUM_LOCATION_WHERE,
                             },
                         },
                     },
@@ -3351,10 +3359,9 @@ export async function handleGetGenres(
                 trackGenres: {
                     where: {
                         track: {
-                            removedAt: null,
-                            origin: "LOCAL",
+                            ...LIBRARY_TRACK_WHERE,
                             album: {
-                                location: LIBRARY_LOCATION,
+                                location: SUBSONIC_ALBUM_LOCATION_WHERE,
                             },
                         },
                     },
@@ -3453,7 +3460,7 @@ export async function handleGetSongsByGenre(
             where: {
                 ...LIBRARY_TRACK_WHERE,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
                 trackGenres: {
                     some: {
@@ -3580,7 +3587,7 @@ export async function handleGetRandomSongs(
         const where: Prisma.TrackWhereInput = {
             ...LIBRARY_TRACK_WHERE,
             album: {
-                location: LIBRARY_LOCATION,
+                location: SUBSONIC_ALBUM_LOCATION_WHERE,
             },
         };
 
@@ -3601,7 +3608,7 @@ export async function handleGetRandomSongs(
             const minYear = fromYear ?? toYear;
             const maxYear = toYear ?? fromYear;
             where.album = {
-                location: LIBRARY_LOCATION,
+                location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 year: {
                     ...(minYear !== null ? { gte: minYear } : {}),
                     ...(maxYear !== null ? { lte: maxYear } : {}),
@@ -3805,7 +3812,7 @@ export async function handleGetPlayQueue(
                               in: uniqueTrackIds,
                           },
                           album: {
-                              location: LIBRARY_LOCATION,
+                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
                           },
                       },
                       select: {
@@ -3930,7 +3937,7 @@ export async function handleSavePlayQueue(
                               in: uniqueTrackIds,
                           },
                           album: {
-                              location: LIBRARY_LOCATION,
+                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
                           },
                       },
                       select: {
@@ -4371,7 +4378,7 @@ async function resolveCoverArtUrl(
                 ...LIBRARY_TRACK_WHERE,
                 id: entityId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -4397,10 +4404,9 @@ async function resolveCoverArtUrl(
                 items: {
                     where: {
                         track: {
-                            removedAt: null,
-                            origin: "LOCAL",
+                            ...LIBRARY_TRACK_WHERE,
                             album: {
-                                location: LIBRARY_LOCATION,
+                                location: SUBSONIC_ALBUM_LOCATION_WHERE,
                             },
                         },
                     },
@@ -4457,7 +4463,7 @@ async function resolveCoverArtUrl(
                 ...LIBRARY_TRACK_WHERE,
                 id: entityId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -4479,10 +4485,9 @@ async function resolveCoverArtUrl(
                 items: {
                     where: {
                         track: {
-                            removedAt: null,
-                            origin: "LOCAL",
+                            ...LIBRARY_TRACK_WHERE,
                             album: {
-                                location: LIBRARY_LOCATION,
+                                location: SUBSONIC_ALBUM_LOCATION_WHERE,
                             },
                         },
                     },
@@ -4519,9 +4524,143 @@ async function resolveCoverArtUrl(
     );
 }
 
-/**
- * Executes handleStream.
- */
+async function loadFederatedCoverTarget(
+    type: SubsonicEntityType | undefined,
+    entityId: string,
+) {
+    if (type === "track") {
+        const track = await prisma.track.findFirst({
+            where: { id: entityId, ...LIBRARY_TRACK_WHERE },
+            select: {
+                album: {
+                    select: {
+                        remoteId: true,
+                        federationPeer: {
+                            select: {
+                                id: true,
+                                baseUrl: true,
+                                outboundToken: true,
+                                status: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return track?.album ?? null;
+    }
+    if (type !== "album" && type !== undefined) return null;
+    return prisma.album.findFirst({
+        where: { id: entityId, ...LIBRARY_ALBUM_WHERE },
+        select: {
+            remoteId: true,
+            federationPeer: {
+                select: {
+                    id: true,
+                    baseUrl: true,
+                    outboundToken: true,
+                    status: true,
+                },
+            },
+        },
+    });
+}
+
+async function proxySubsonicFederatedCover(
+    req: Request,
+    res: Response,
+    type: SubsonicEntityType | undefined,
+    entityId: string,
+): Promise<boolean> {
+    const target = await loadFederatedCoverTarget(type, entityId);
+    const peer = target?.federationPeer;
+    if (
+        !target?.remoteId ||
+        !peer ||
+        peer.status !== "ACTIVE" ||
+        !peer.baseUrl ||
+        !peer.outboundToken
+    ) {
+        return false;
+    }
+    return proxyFederatedCover({
+        req,
+        res,
+        peer,
+        remoteId: target.remoteId,
+    });
+}
+
+type SubsonicStreamTrack = {
+    id: string;
+    origin: "LOCAL" | "FEDERATED";
+    remoteId: string | null;
+    mime: string | null;
+    filePath: string | null;
+    fileModified: Date;
+    federationPeer: {
+        id: string;
+        baseUrl: string | null;
+        outboundToken: string | null;
+        status: string;
+    } | null;
+};
+
+async function proxySubsonicFederatedStream(input: {
+    req: Request;
+    res: Response;
+    track: SubsonicStreamTrack;
+    quality: Quality;
+    format: ResponseFormat;
+    callback?: string;
+}): Promise<boolean> {
+    const { track, res } = input;
+    if (track.origin !== "FEDERATED") return false;
+    const peer = track.federationPeer;
+    if (
+        !track.remoteId ||
+        !peer ||
+        peer.status !== "ACTIVE" ||
+        !peer.baseUrl ||
+        !peer.outboundToken
+    ) {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.GENERIC,
+            "Federation peer is offline",
+            input.format,
+            input.callback,
+        );
+        return true;
+    }
+    try {
+        await proxyFederatedTrackStream({
+            req: input.req,
+            res,
+            peer,
+            remoteId: track.remoteId,
+            trackId: track.id,
+            sourceModified: track.fileModified,
+            sourceMime: track.mime,
+            quality: input.quality,
+        });
+    } catch {
+        if (!res.headersSent) {
+            sendSubsonicError(
+                res,
+                SubsonicErrorCode.GENERIC,
+                "Federation peer is offline",
+                input.format,
+                input.callback,
+            );
+        } else if (!res.writableEnded) {
+            res.end();
+        }
+    }
+    return true;
+}
+
+/** Executes handleStream. */
 export async function handleStream(req: Request, res: Response): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const rawId = getRequiredQueryString(req, res, "id", format, callback);
@@ -4555,17 +4694,52 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
                 ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
                 id: true,
+                origin: true,
+                remoteId: true,
+                mime: true,
                 filePath: true,
                 fileModified: true,
+                federationPeer: {
+                    select: {
+                        id: true,
+                        baseUrl: true,
+                        outboundToken: true,
+                        status: true,
+                    },
+                },
             },
         });
 
-        if (!track || !track.filePath || !track.fileModified) {
+        if (!track) {
+            sendSubsonicError(
+                res,
+                SubsonicErrorCode.NOT_FOUND,
+                "Song not found",
+                format,
+                callback,
+            );
+            return;
+        }
+
+        if (
+            await proxySubsonicFederatedStream({
+                req,
+                res,
+                track,
+                quality,
+                format,
+                callback,
+            })
+        ) {
+            return;
+        }
+
+        if (!track.filePath || !track.fileModified) {
             sendSubsonicError(
                 res,
                 SubsonicErrorCode.NOT_FOUND,
@@ -4681,15 +4855,52 @@ export async function handleDownload(
                 ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
+                id: true,
+                origin: true,
+                remoteId: true,
+                mime: true,
                 filePath: true,
+                fileModified: true,
+                federationPeer: {
+                    select: {
+                        id: true,
+                        baseUrl: true,
+                        outboundToken: true,
+                        status: true,
+                    },
+                },
             },
         });
 
-        if (!track || !track.filePath) {
+        if (!track) {
+            sendSubsonicError(
+                res,
+                SubsonicErrorCode.NOT_FOUND,
+                "Song not found",
+                format,
+                callback,
+            );
+            return;
+        }
+
+        if (
+            await proxySubsonicFederatedStream({
+                req,
+                res,
+                track,
+                quality: "original",
+                format,
+                callback,
+            })
+        ) {
+            return;
+        }
+
+        if (!track.filePath) {
             sendSubsonicError(
                 res,
                 SubsonicErrorCode.NOT_FOUND,
@@ -4763,7 +4974,7 @@ export async function handleGetLyrics(
                       }
                     : undefined,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     artist: rawArtist
                         ? {
                               name: {
@@ -4870,7 +5081,7 @@ export async function handleGetLyricsBySongId(
                 ...LIBRARY_TRACK_WHERE,
                 id: trackId,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -4981,6 +5192,9 @@ export async function handleGetCoverArt(
     try {
         const coverUrl = await resolveCoverArtUrl(type, entityId, req.user!.id);
         if (!coverUrl) {
+            if (await proxySubsonicFederatedCover(req, res, type, entityId)) {
+                return;
+            }
             sendSubsonicError(
                 res,
                 SubsonicErrorCode.NOT_FOUND,
@@ -5108,7 +5322,7 @@ async function ensureLibraryTracksExist(trackIds: string[]): Promise<boolean> {
                 in: trackIds,
             },
             album: {
-                location: LIBRARY_LOCATION,
+                location: SUBSONIC_ALBUM_LOCATION_WHERE,
             },
         },
         select: {
@@ -5179,7 +5393,7 @@ async function resolveStarMutationTrackIds(input: {
                     in: albumIds,
                 },
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -5197,7 +5411,7 @@ async function resolveStarMutationTrackIds(input: {
             where: {
                 ...LIBRARY_TRACK_WHERE,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                     artistId: {
                         in: artistIds,
                     },
@@ -5229,7 +5443,7 @@ async function getPlaylistDurations(
         where: {
             playlistId: { in: nonEmptyIds },
             trackId: { not: null },
-            track: { removedAt: null, origin: "LOCAL" },
+            track: LIBRARY_TRACK_WHERE,
         },
         select: {
             playlistId: true,
@@ -5256,8 +5470,7 @@ async function getPlaylistCoverFlags(
         where: {
             playlistId: { in: playlistIds },
             track: {
-                removedAt: null,
-                origin: "LOCAL",
+                ...LIBRARY_TRACK_WHERE,
                 album: {
                     AND: [
                         { coverUrl: { not: null } },
@@ -5298,8 +5511,7 @@ export async function handleGetPlaylists(
                                     { trackId: null },
                                     {
                                         track: {
-                                            removedAt: null,
-                                            origin: "LOCAL",
+                                            ...LIBRARY_TRACK_WHERE,
                                         },
                                     },
                                 ],
@@ -5383,7 +5595,7 @@ export async function handleGetPlaylist(
             },
             include: {
                 items: {
-                    where: { track: { removedAt: null, origin: "LOCAL" } },
+                    where: { track: LIBRARY_TRACK_WHERE },
                     orderBy: { sort: "asc" },
                     select: {
                         track: {
@@ -6057,7 +6269,7 @@ export async function handleGetNowPlaying(
                     in: trackIds,
                 },
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
             select: {
@@ -6390,10 +6602,9 @@ async function buildStarredPayload(userId: string): Promise<{
         where: {
             userId,
             track: {
-                removedAt: null,
-                origin: "LOCAL",
+                ...LIBRARY_TRACK_WHERE,
                 album: {
-                    location: LIBRARY_LOCATION,
+                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
                 },
             },
         },

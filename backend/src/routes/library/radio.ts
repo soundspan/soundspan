@@ -13,7 +13,7 @@ import { shuffleArray } from "../../utils/shuffle";
 import { separateArtists } from "../../utils/separateArtists";
 import { escapeLikePattern } from "../../utils/likePattern";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
 import {
@@ -40,7 +40,7 @@ import {
 } from "../../services/libraryRadioBuilder";
 import {
     hasReliableEnhancedAnalysis,
-    LOCAL_TRACK_SQL,
+    TRACK_BROWSE_SQL,
     moodPoolCondition,
     VISIBLE_TRACK_SQL,
 } from "../../utils/libraryRadioPredicates";
@@ -114,7 +114,7 @@ export async function handleGetGenres(req: Request, res: Response) {
             CROSS JOIN LATERAL jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
             JOIN "Album" a ON a."artistId" = ar.id
             JOIN "Track" t ON t."albumId" = a.id
-            WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND ar.genres IS NOT NULL
+            WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND ar.genres IS NOT NULL
             GROUP BY LOWER(g.genre)
             HAVING COUNT(DISTINCT t.id) >= ${minTracks}
             ORDER BY track_count DESC
@@ -183,7 +183,7 @@ export async function handleGetDecades(req: Request, res: Response) {
                     tracks: {
                         where: {
                             ...TRACK_VISIBLE_WHERE,
-                            ...LOCAL_TRACK_WHERE,
+                            ...TRACK_BROWSE_WHERE,
                         },
                     },
                 },
@@ -316,7 +316,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             // First, get tracks with NO plays at all (truly undiscovered)
             const unplayedTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND NOT EXISTS (
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND NOT EXISTS (
                         SELECT 1 FROM "Play" p WHERE p."trackId" = t.id
                     )
                     ORDER BY random()
@@ -334,7 +334,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                         SELECT t.id
                         FROM "Track" t
                         LEFT JOIN "Play" p ON p."trackId" = t.id
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL}
+                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                         GROUP BY t.id
                         ORDER BY COUNT(p.id) ASC
                         LIMIT ${limitNum * 2}
@@ -355,7 +355,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                     userId,
                     track: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                     },
                 },
                 select: { trackId: true },
@@ -376,7 +376,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                     SELECT t.id, COUNT(p.id) as play_count
                     FROM "Track" t
                     LEFT JOIN "Play" p ON p."trackId" = t.id
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL}
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                     GROUP BY t.id
                     HAVING COUNT(p.id) > 0
                     ORDER BY play_count DESC
@@ -392,7 +392,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 );
                 const randomTracks = await prisma.$queryRaw<{ id: string }[]>`
                         SELECT t.id FROM "Track" t
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL}
+                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                         ORDER BY random()
                         LIMIT ${limitNum * 4}
                     `;
@@ -408,7 +408,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             const decadeTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
                     JOIN "Album" a ON a.id = t."albumId"
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND (
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
                         (a."originalYear" >= ${decadeStart} AND a."originalYear" < ${decadeStart + 10})
                         OR (a."originalYear" IS NULL AND a."year" >= ${decadeStart} AND a."year" < ${decadeStart + 10})
                     )
@@ -435,7 +435,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             >`
                     SELECT t.id
                     FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND (
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
                     EXISTS (
                         SELECT 1 FROM unnest(t."lastfmTags") AS tag(name)
                         WHERE LOWER(tag.name) LIKE ${genrePattern} ESCAPE '\\'
@@ -460,7 +460,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                         FROM "Artist" ar
                         JOIN "Album" a ON a."artistId" = ar.id
                         JOIN "Track" t ON t."albumId" = a.id
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND (
+                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
                             (ar.genres IS NOT NULL AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
                                 WHERE LOWER(g.genre) LIKE ${genrePattern} ESCAPE '\\'
@@ -494,7 +494,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             const moodCondition = moodPoolCondition(moodValue);
             const moodTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND ${moodCondition}
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND ${moodCondition}
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
                 `;
@@ -509,7 +509,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             // Strategy 1: Audio analysis - high energy AND fast BPM
             const energyTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL}
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                       AND t."analysisStatus" = ${"completed"}
                       AND ((t.energy >= ${0.65} AND t.bpm >= ${115})
                            OR t."moodTags" && ARRAY[${"workout"}, ${"energetic"}, ${"upbeat"}]::text[])
@@ -579,7 +579,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                     >`
                             SELECT t.id FROM "Track" t
                             JOIN "Album" a ON a.id = t."albumId"
-                            WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND a.genres IS NOT NULL
+                            WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND a.genres IS NOT NULL
                               AND EXISTS (
                                 SELECT 1 FROM unnest(${workoutGenreNames}::text[]) AS g(name)
                                 WHERE (a.genres #>> '{}') LIKE '%' || g.name || '%'
@@ -620,7 +620,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             const artistTracks = await prisma.track.findMany({
                 where: {
                     ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
+                    ...TRACK_BROWSE_WHERE,
                     album: { artistId },
                 },
                 select: {
@@ -763,7 +763,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 const similarTrackRows = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         album: { artistId: { in: similarArtistIds } },
                     },
                     select: {
@@ -938,9 +938,9 @@ export async function handleGetRadio(req: Request, res: Response) {
             // 1. Get the source track's audio features (including Enhanced mode fields)
             const sourceTrack = (await prisma.track.findUnique({
                 where: {
-                    ...TRACK_VISIBLE_WHERE,
-                    ...LOCAL_TRACK_WHERE,
                     id: sourceTrackId,
+                    ...TRACK_VISIBLE_WHERE,
+                    AND: [TRACK_BROWSE_WHERE],
                 },
                 include: {
                     album: {
@@ -1014,7 +1014,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 const analyzedTracks = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         id: { not: sourceTrackId },
                         analysisStatus: "completed",
                     },
@@ -1391,7 +1391,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 const artistTracks = await prisma.track.findMany({
                     where: {
                         ...TRACK_VISIBLE_WHERE,
-                        ...LOCAL_TRACK_WHERE,
+                        ...TRACK_BROWSE_WHERE,
                         album: { artistId: sourceArtistId },
                         id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
                     },
@@ -1428,7 +1428,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                     const similarArtistTracks = await prisma.track.findMany({
                         where: {
                             ...TRACK_VISIBLE_WHERE,
-                            ...LOCAL_TRACK_WHERE,
+                            ...TRACK_BROWSE_WHERE,
                             album: {
                                 artistId: {
                                     in: similarArtists.map((s) => s.toArtistId),
@@ -1454,7 +1454,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 // Search using the TrackGenre relation for better accuracy.
                 const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
                         SELECT t.id FROM "Track" t
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND EXISTS (
+                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND EXISTS (
                             SELECT 1 FROM "TrackGenre" tg
                             JOIN "Genre" g ON g.id = tg."genreId"
                             WHERE tg."trackId" = t.id
@@ -1483,7 +1483,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                 const remainingLimit = limitNum - vibeMatchedIds.length;
                 const randomTracks = await prisma.$queryRaw<{ id: string }[]>`
                         SELECT t.id FROM "Track" t
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL} AND t.id NOT IN (${Prisma.join(
+                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND t.id NOT IN (${Prisma.join(
                             [sourceTrackId, ...vibeMatchedIds],
                         )})
                         ORDER BY random()
@@ -1528,7 +1528,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                         userId,
                         track: {
                             ...TRACK_VISIBLE_WHERE,
-                            ...LOCAL_TRACK_WHERE,
+                            ...TRACK_BROWSE_WHERE,
                         },
                     },
                     select: { trackId: true },
@@ -1561,7 +1561,7 @@ export async function handleGetRadio(req: Request, res: Response) {
                         trackId: { not: null },
                         track: {
                             ...TRACK_VISIBLE_WHERE,
-                            ...LOCAL_TRACK_WHERE,
+                            ...TRACK_BROWSE_WHERE,
                         },
                     },
                     select: { trackId: true },
@@ -1628,7 +1628,7 @@ export async function handleGetRadio(req: Request, res: Response) {
             // Random selection from all tracks in library
             const allTracks = await prisma.$queryRaw<{ id: string }[]>`
                     SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${LOCAL_TRACK_SQL}
+                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
                     ORDER BY random()
                     LIMIT ${limitNum * 4}
                 `;
@@ -1654,7 +1654,7 @@ export async function handleGetRadio(req: Request, res: Response) {
         const poolArtistRows = await prisma.track.findMany({
             where: {
                 ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
+                ...TRACK_BROWSE_WHERE,
                 id: { in: basePoolIds },
             },
             select: { id: true, album: { select: { artistId: true } } },
@@ -1706,7 +1706,7 @@ export async function handleGetRadio(req: Request, res: Response) {
     const tracks = await prisma.track.findMany({
         where: {
             ...TRACK_VISIBLE_WHERE,
-            ...LOCAL_TRACK_WHERE,
+            ...TRACK_BROWSE_WHERE,
             id: { in: finalIds },
         },
         include: {
@@ -1747,9 +1747,9 @@ export async function handleGetRadio(req: Request, res: Response) {
         // Find source track for logging
         const srcTrack = await prisma.track.findUnique({
             where: {
-                ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
                 id: radioValue as string,
+                ...TRACK_VISIBLE_WHERE,
+                AND: [TRACK_BROWSE_WHERE],
             },
             include: {
                 album: { include: { artist: { select: { name: true } } } },

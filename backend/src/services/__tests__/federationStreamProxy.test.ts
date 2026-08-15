@@ -3,6 +3,10 @@ import { PassThrough, Readable } from "node:stream";
 
 const getStream = jest.fn();
 const createFederationClient = jest.fn(() => ({ getStream }));
+const getCachedFederatedStreamFilePath = jest.fn();
+const cacheFederatedStream = jest.fn();
+const streamFileWithRangeSupport = jest.fn();
+const destroyStreamingService = jest.fn();
 const prisma = {
     federationPeer: { updateMany: jest.fn() },
 };
@@ -17,6 +21,23 @@ jest.mock("../federationClient", () => ({
         ) {
             super("peer error");
         }
+    },
+}));
+jest.mock("../audioStreaming", () => ({
+    AudioStreamingService: jest.fn(() => ({
+        getCachedFederatedStreamFilePath,
+        cacheFederatedStream,
+        streamFileWithRangeSupport,
+        destroy: destroyStreamingService,
+    })),
+}));
+jest.mock("../../config", () => ({
+    config: {
+        music: {
+            musicPath: "/music",
+            transcodeCachePath: "/cache",
+            transcodeCacheMaxGb: 2,
+        },
     },
 }));
 
@@ -60,6 +81,17 @@ describe("federated stream proxy", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         prisma.federationPeer.updateMany.mockResolvedValue({ count: 1 });
+        getCachedFederatedStreamFilePath.mockResolvedValue(null);
+        cacheFederatedStream.mockImplementation(
+            async (_trackId, _quality, _modified, _mime, loadStream) => {
+                await loadStream();
+                return {
+                    filePath: "/cache/federated.audio",
+                    mimeType: "audio/flac",
+                };
+            },
+        );
+        streamFileWithRangeSupport.mockResolvedValue(undefined);
     });
 
     it.each([200, 206, 416])(
@@ -88,6 +120,9 @@ describe("federated stream proxy", () => {
                 res: res as never,
                 peer,
                 remoteId: "remote-track-1",
+                trackId: "fed-track-1",
+                sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+                sourceMime: "audio/flac",
                 quality: "original",
             });
 
@@ -105,6 +140,7 @@ describe("federated stream proxy", () => {
                 "content-range": "bytes 0-4/5",
             });
             expect(body).toBe("audio");
+            expect(cacheFederatedStream).not.toHaveBeenCalled();
             expect(JSON.stringify(res.headers)).not.toContain("must-not-leak");
         },
     );
@@ -116,13 +152,16 @@ describe("federated stream proxy", () => {
             upstreamSignal = input.signal;
             return { status: 200, headers: {}, data: upstream };
         });
-        const req = createRequest();
+        const req = createRequest("bytes=0-");
         const res = createResponse();
         const operation = proxyFederatedTrackStream({
             req: req as never,
             res: res as never,
             peer,
             remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/flac",
             quality: "medium",
         });
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -144,6 +183,9 @@ describe("federated stream proxy", () => {
                 res: createResponse() as never,
                 peer,
                 remoteId: "remote-track-1",
+                trackId: "fed-track-1",
+                sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+                sourceMime: "audio/flac",
                 quality: "original",
             }),
         ).rejects.toThrow("peer error");
@@ -151,5 +193,66 @@ describe("federated stream proxy", () => {
             where: { id: "peer-1", status: "ACTIVE" },
             data: { status: "OFFLINE" },
         });
+    });
+
+    it("fills a non-Range miss and serves the completed cached file", async () => {
+        getStream.mockResolvedValueOnce({
+            status: 200,
+            headers: { "content-type": "audio/flac" },
+            data: Readable.from(["audio"]),
+        });
+        const req = createRequest();
+        const res = createResponse();
+
+        await proxyFederatedTrackStream({
+            req: req as never,
+            res: res as never,
+            peer,
+            remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/flac",
+            quality: "original",
+        });
+
+        expect(getStream).toHaveBeenCalledWith(
+            expect.objectContaining({ range: undefined }),
+        );
+        expect(cacheFederatedStream).toHaveBeenCalledTimes(1);
+        expect(streamFileWithRangeSupport).toHaveBeenCalledWith(
+            req,
+            res,
+            "/cache/federated.audio",
+            "audio/flac",
+        );
+    });
+
+    it("serves Range requests from a complete cache hit without peer I/O", async () => {
+        getCachedFederatedStreamFilePath.mockResolvedValueOnce({
+            filePath: "/cache/federated.audio",
+            mimeType: "audio/mpeg",
+        });
+        const req = createRequest("bytes=10-19");
+        const res = createResponse();
+
+        await proxyFederatedTrackStream({
+            req: req as never,
+            res: res as never,
+            peer,
+            remoteId: "remote-track-1",
+            trackId: "fed-track-1",
+            sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+            sourceMime: "audio/mpeg",
+            quality: "medium",
+        });
+
+        expect(getStream).not.toHaveBeenCalled();
+        expect(cacheFederatedStream).not.toHaveBeenCalled();
+        expect(streamFileWithRangeSupport).toHaveBeenCalledWith(
+            req,
+            res,
+            "/cache/federated.audio",
+            "audio/mpeg",
+        );
     });
 });

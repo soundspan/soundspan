@@ -23,9 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Library, search, artist, album, playlist, queue, and now-playing surfaces
     show peer provenance, source filters, and offline state. Deduplicated peer
     copies stay hidden while the matching local track wins.
-  - Mixes, radio, recommendations, discovery, vibe analysis, Subsonic,
-    lyrics, sharing, offline downloads, imports, Listen Together resolution,
-    analysis queues, and denormalized artist counts remain local-only in v1.
+  - Federated tracks now participate in mixes, radio, recommendations,
+    discovery, vibe/similarity, mood buckets, shuffle, Listen Together,
+    metadata-based lyrics lookup, and Subsonic metadata/playlists/playback.
+    Local-wins deduplication suppresses peer twins while their local winner is
+    active. File analysis/enrichment, imports, acquisition/offline downloads,
+    share links, and denormalized artist counts remain local-only.
+  - Catalog sync carries optional analyzer feature columns with bounded wire
+    validation. Complete non-Range peer streams use the consumer's existing
+    transcode cache with concurrent-fill coalescing; Range misses pass through
+    without partial caching, and audio-hash changes or peer deletion remove
+    cached rows and files.
   - Federation-aware deletion cleanup writes track, album, and artist
     tombstones transactionally.
     `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;

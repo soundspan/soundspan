@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { promises as fsPromises } from "fs";
 import { pipeline } from "node:stream/promises";
+import type { Readable } from "node:stream";
 import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
@@ -27,6 +28,7 @@ ffmpeg.setFfmpegPath(ffmpegBinaryPath);
 
 const transcodeQueue = new PQueue({ concurrency: config.transcodeConcurrency });
 const inflightTranscodes = new Map<string, Promise<string>>();
+const inflightFederatedStreams = new Map<string, Promise<StreamFileInfo>>();
 
 // Quality settings
 export const QUALITY_SETTINGS = {
@@ -40,6 +42,11 @@ export type Quality = keyof typeof QUALITY_SETTINGS;
 
 interface StreamFileInfo {
     filePath: string;
+    mimeType: string;
+}
+
+interface FederatedStreamSource {
+    stream: Readable;
     mimeType: string;
 }
 
@@ -171,6 +178,105 @@ export class AudioStreamingService {
             filePath: transcodedPath,
             mimeType: "audio/mpeg",
         };
+    }
+
+    /** Returns a complete peer stream cache hit without source staleness checks. */
+    async getCachedFederatedStreamFilePath(
+        trackId: string,
+        quality: Quality,
+        mimeType: string,
+    ): Promise<StreamFileInfo | null> {
+        const cached = await prisma.transcodedFile.findFirst({
+            where: { trackId, quality },
+        });
+        if (!cached) return null;
+        const fullPath = path.join(this.transcodeCachePath, cached.cachePath);
+        if (!fs.existsSync(fullPath)) {
+            await prisma.transcodedFile.delete({ where: { id: cached.id } });
+            return null;
+        }
+        await prisma.transcodedFile.update({
+            where: { id: cached.id },
+            data: { lastAccessed: new Date() },
+        });
+        return { filePath: fullPath, mimeType };
+    }
+
+    /** Fills one complete federated stream cache entry with per-key coalescing. */
+    async cacheFederatedStream(
+        trackId: string,
+        quality: Quality,
+        sourceModified: Date,
+        fallbackMimeType: string,
+        loadStream: () => Promise<FederatedStreamSource>,
+    ): Promise<StreamFileInfo> {
+        const cached = await this.getCachedFederatedStreamFilePath(
+            trackId,
+            quality,
+            fallbackMimeType,
+        );
+        if (cached) return cached;
+        const key = `${trackId}-${quality}`;
+        return coalesceInFlightByKey(
+            inflightFederatedStreams,
+            key,
+            () =>
+                this.doCacheFederatedStream(
+                    trackId,
+                    quality,
+                    sourceModified,
+                    loadStream,
+                ),
+            {
+                onCoalescedWait: () =>
+                    logger.debug(
+                        `[STREAM] Joining in-flight federated cache fill for ${key}`,
+                    ),
+            },
+        );
+    }
+
+    private async doCacheFederatedStream(
+        trackId: string,
+        quality: Quality,
+        sourceModified: Date,
+        loadStream: () => Promise<FederatedStreamSource>,
+    ): Promise<StreamFileInfo> {
+        await this.ensureFederatedCacheCapacity();
+        const cacheFileName = this.federatedCacheFileName(trackId, quality);
+        const cachePath = path.join(this.transcodeCachePath, cacheFileName);
+        const tempPath = `${cachePath}.tmp-${crypto.randomUUID()}`;
+        const source = await loadStream();
+        try {
+            await pipeline(source.stream, fs.createWriteStream(tempPath));
+            await fs.promises.rename(tempPath, cachePath);
+            await this.persistTranscode(
+                trackId,
+                quality,
+                cacheFileName,
+                cachePath,
+                sourceModified,
+            );
+            return { filePath: cachePath, mimeType: source.mimeType };
+        } catch (error) {
+            await fs.promises.unlink(tempPath).catch(() => undefined);
+            await fs.promises.unlink(cachePath).catch(() => undefined);
+            throw error;
+        }
+    }
+
+    private async ensureFederatedCacheCapacity(): Promise<void> {
+        const currentSize = await this.getCacheSize();
+        if (currentSize <= this.transcodeCacheMaxGb * 0.9) return;
+        await this.evictCache(this.transcodeCacheMaxGb * 0.8);
+    }
+
+    private federatedCacheFileName(trackId: string, quality: Quality): string {
+        const hash = crypto
+            .createHash("md5")
+            .update(`federated-${trackId}-${quality}`)
+            .digest("hex");
+        return `${hash}.audio`;
     }
 
     /**

@@ -247,11 +247,18 @@ Deleting the local winner sets `dedupOfTrackId` to null, allowing the peer copy
 to become visible again. Peer-to-peer row identity remains the unique
 `(peerId, remoteId)` pair.
 
-Federated rows are available to the web library, search, playlists, and normal
-stream resolution. V1 intelligence producers, denormalized artist counts,
-lyrics, Subsonic, downloads, offline caching, and share links remain scoped to
-local tracks. Imported peer embeddings are retained for a later intelligence
-phase but are not queried by v1 vibe or similarity surfaces.
+Federated rows are available to the web library, search, playlists, normal
+stream resolution, intelligence surfaces, metadata-based lyrics lookup, and
+Subsonic. The track catalog envelope carries optional nullable analyzer fields:
+`bpm`, `beatsCount`, `key`, `keyScale`, `keyStrength`, `energy`, `loudness`,
+`dynamicRange`, `danceability`, `valence`, `arousal`, `instrumentalness`,
+`acousticness`, `speechiness`, seven mood scores, `danceabilityMl`, `moodTags`,
+`essentiaGenres`, and `lastfmTags`, plus the scoped optional embedding. The
+consumer validates finite numbers and bounded arrays/entries before upsert.
+Denormalized artist counts, local file analysis/enrichment, imports,
+acquisition/offline downloads, and share links remain local-only. Complete
+peer streams may use `TranscodedFile`; audio-hash changes and peer deletion
+invalidate both cache rows and files.
 
 ## Resolution Chains
 

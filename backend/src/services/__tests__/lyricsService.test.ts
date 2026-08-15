@@ -130,6 +130,7 @@ describe("lyrics service", () => {
     it("extracts embedded synchronized lyrics and caches them", async () => {
         mockPrisma.track.findUnique.mockResolvedValue({
             id: "track-embedded",
+            origin: "LOCAL",
             filePath: "/music/embedded.mp3",
             displayTitle: "Embedded Song",
             title: "Embedded Song",
@@ -181,6 +182,7 @@ describe("lyrics service", () => {
     it("extracts embedded plain lyrics and marks result as unsynced", async () => {
         mockPrisma.track.findUnique.mockResolvedValue({
             id: "track-embedded-plain",
+            origin: "LOCAL",
             filePath: "/music/plain.mp3",
             displayTitle: "Embedded Plain",
             title: "Embedded Plain",
@@ -986,9 +988,50 @@ describe("lyrics service", () => {
         expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 
+    it("uses LRCLIB without reading embedded files for a federated track", async () => {
+        mockPrisma.track.findUnique.mockResolvedValue({
+            id: "track-federated",
+            origin: "FEDERATED",
+            filePath: "/must-not-read/remote.flac",
+            displayTitle: "Remote Song",
+            title: "Remote Song",
+            duration: 180,
+            album: {
+                title: "Remote Album",
+                artist: { name: "Remote Artist" },
+            },
+        });
+        mockAxiosGet.mockResolvedValue({
+            data: [
+                {
+                    id: 701,
+                    trackName: "Remote Song",
+                    artistName: "Remote Artist",
+                    albumName: "Remote Album",
+                    duration: 180,
+                    instrumental: false,
+                    plainLyrics: "Remote lyric",
+                    syncedLyrics: null,
+                },
+            ],
+        } as any);
+
+        const result = await getLyrics("track-federated");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                plainLyrics: "Remote lyric",
+                source: "lrclib",
+            }),
+        );
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(mockFsExistsSync).not.toHaveBeenCalled();
+    });
+
     it("falls back to LRCLIB search when embedded lyrics are missing", async () => {
         mockPrisma.track.findUnique.mockResolvedValue({
             id: "track-embedded-empty",
+            origin: "LOCAL",
             filePath: "/music/empty.mp3",
             displayTitle: "Empty Embedded",
             title: "Empty Embedded",

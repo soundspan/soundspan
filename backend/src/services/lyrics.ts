@@ -1,7 +1,7 @@
 import axios from "axios";
 import { prisma } from "../utils/db";
 import {
-    LOCAL_TRACK_WHERE,
+    TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
@@ -726,7 +726,7 @@ export async function getLyrics(
         where: {
             id: trackId,
             ...TRACK_VISIBLE_WHERE,
-            ...LOCAL_TRACK_WHERE,
+            AND: [TRACK_BROWSE_WHERE],
         },
         include: {
             album: {
@@ -759,7 +759,7 @@ export async function getLyrics(
             : lookupContext?.duration;
 
     // 3. Try embedded lyrics from file tags (local files only)
-    if (track.filePath) {
+    if (track.origin === "LOCAL" && track.filePath) {
         const embedded = await withTimeout(
             () => extractEmbeddedLyrics(track.filePath as string),
             EMBEDDED_LOOKUP_TIMEOUT_MS,

@@ -281,7 +281,7 @@ describe("subsonic entity compatibility handlers", () => {
         );
     });
 
-    it("returns album payload with songs", async () => {
+    it("returns album payload with a federated song", async () => {
         mockAlbumFindFirst.mockResolvedValueOnce({
             id: "album-1",
             title: "Album One",
@@ -295,14 +295,14 @@ describe("subsonic entity compatibility handlers", () => {
             },
             tracks: [
                 {
-                    id: "track-1",
+                    id: "federated-track-1",
                     title: "Song One",
                     trackNo: 1,
                     discNo: 1,
                     duration: 180,
                     fileSize: 1024,
                     mime: "audio/mpeg",
-                    filePath: "Artist One/Album One/01 Song One.mp3",
+                    filePath: null,
                 },
             ],
         });
@@ -322,7 +322,7 @@ describe("subsonic entity compatibility handlers", () => {
                     artistId: "ar-artist-1",
                     song: expect.arrayContaining([
                         expect.objectContaining({
-                            id: "tr-track-1",
+                            id: "tr-federated-track-1",
                         }),
                     ]),
                 }),
