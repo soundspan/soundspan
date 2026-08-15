@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ISRCs for durable identity matching. New and changed files populate these
   keys during scans, while a bounded resumable worker backfills existing
   libraries automatically.
+- The dedicated backend worker image now bundles ffmpeg so scans and the
+  audio-hash backfill can compute durable track identity hashes.
 - Library Health now distinguishes and counts removed tracks that are pending
   retention purge, shows the configured retention window, and explains that a
   rescan restores a track when its file returns.
