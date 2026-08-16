@@ -4,6 +4,29 @@
 
 A hardening and architecture release: sitewide Content-Security-Policy, Prometheus metrics, HA-correct rate limiting, cookie-session retirement, multi-file audiobook streaming, and the completion of the god-file decomposition with a CI size guardrail.
 
+## Before you upgrade
+
+**Warning:** If you run a version earlier than 2.0.0, do not upgrade directly
+to 2.2.0. Complete the 2.0.0 breaking changes first. See
+[Upgrading from an earlier version](#upgrading-from-an-earlier-version).
+
+If you already run 2.0.x or 2.1.0, no manual steps are required:
+
+- The database migration for validated audiobook sections runs automatically
+  at startup (`prisma migrate deploy`). It adds one nullable column; existing
+  rows backfill lazily on first view or next sync.
+- The Content-Security-Policy ships in Report-Only mode by default. Playback
+  and share pages behave exactly as before; set `CSP_ENFORCE=true` only after
+  reviewing report-only output in your deployment.
+- Prometheus metrics fail closed: `GET /metrics` returns 401 until you set
+  `METRICS_TOKEN`.
+- Cookie-session authentication was removed, but no client used it; JWT,
+  API-key, Subsonic, and federation sign-ins are unchanged. Keep
+  `SESSION_SECRET` set — it remains required as the JWT signing fallback.
+- Rate limits for auth and abuse-control surfaces now share one counter
+  across replicas through the existing Redis dependency; no configuration
+  changes are needed.
+
 ## Fixed
 
 - Guarded every Python sidecar against Docker interpreter and uv lock-target
@@ -94,9 +117,22 @@ helm upgrade --install soundspan soundspan/soundspan --version 2.2.0
 
 ## Compatibility and Migration
 
-- No manual migration steps required for standard Docker and Helm deployments.
+- No manual migration steps are required for standard Docker and Helm
+  deployments upgrading from 2.0.x or 2.1.0; see
+  [Before you upgrade](#before-you-upgrade) for what changes automatically.
+- Upgrades from releases earlier than 2.0.0 must complete the 2.0.0 breaking
+  changes first; see below.
+
+## Upgrading from an earlier version
+
+If you are upgrading from a version earlier than 2.0.0, you must complete the
+2.0.0 upgrade before you install 2.2.0. The 2.0.0 release contains breaking
+changes that later releases depend on. Read the
+[2.0.0 release notes](https://github.com/soundspan/soundspan/blob/2.0.0/docs/release-notes/RELEASE_NOTES_2.0.0.md)
+and complete the
+[2.0.0 upgrade guide](https://github.com/soundspan/soundspan/blob/2.0.0/docs/UPGRADING_TO_2.0.0.md).
 
 ## Full Changelog
 
-- Compare changes: [2.1.0...HEAD](https://github.com/soundspan/soundspan/compare/2.1.0...HEAD)
-- Full changelog: https://github.com/soundspan/soundspan/blob/HEAD/CHANGELOG.md
+- Compare changes: [2.1.0...2.2.0](https://github.com/soundspan/soundspan/compare/2.1.0...2.2.0)
+- Full changelog: https://github.com/soundspan/soundspan/blob/2.2.0/CHANGELOG.md
