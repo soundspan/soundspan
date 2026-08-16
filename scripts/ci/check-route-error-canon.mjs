@@ -17,7 +17,9 @@ const BASELINE = Object.freeze({
     "backend/src/routes/apiKeys.ts": 3,
     "backend/src/routes/artists.ts": 4,
     "backend/src/routes/audiobooks.ts": 12,
-    "backend/src/routes/auth.ts": 19,
+    "backend/src/routes/auth/accountSecurity.ts": 9,
+    "backend/src/routes/auth/adminUserInvites.ts": 9,
+    "backend/src/routes/auth/localCredentials.ts": 1,
     "backend/src/routes/browse.ts": 16,
     "backend/src/routes/deviceLink.ts": 6,
     "backend/src/routes/discover.ts": 5,
@@ -60,8 +62,8 @@ const BASELINE = Object.freeze({
 // This independent ratchet prevents raw error properties and conversions from
 // being assigned or interpolated outside logger calls.
 const LEAK_BASELINE = Object.freeze({
-    // auth.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L813 and ~L1247); code-owned schema messages, not raw errors.
-    "backend/src/routes/auth.ts": 2,
+    // auth/adminUserInvites.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L479 and ~L897); code-owned schema messages, not raw errors.
+    "backend/src/routes/auth/adminUserInvites.ts": 2,
     // discover.ts +1: cleanup-loop detail const used only by logger.error (~L2267); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
     // discover.ts +1: the same logger-only cleanup detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/routes/discover.ts": 2,

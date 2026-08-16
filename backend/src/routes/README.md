@@ -73,7 +73,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/apiKeys.ts`            | `/api/api-keys`                                                                                       |
 | `backend/src/routes/artists.ts`            | `/api/artists`                                                                                        |
 | `backend/src/routes/audiobooks.ts`         | `/api/audiobooks`                                                                                     |
-| `backend/src/routes/auth.ts`               | `/api/auth`                                                                                           |
+| `backend/src/routes/auth.ts`               | `/api/auth` (compatibility re-export of `auth/index.ts`)                                              |
 | `backend/src/routes/browse.ts`             | `/api/browse`                                                                                         |
 | `backend/src/routes/deviceLink.ts`         | `/api/device-link`                                                                                    |
 | `backend/src/routes/discover.ts`           | `/api/discover`                                                                                       |
@@ -134,6 +134,22 @@ composed from these ten domain modules:
 | `library/radio.ts`            | Library radio generation routes                               |
 | `library/remoteTracks.ts`     | Remote-track preference routes                                |
 | `library/tracks.ts`           | Track browse, detail, preference, stream, and deletion routes |
+
+### Auth Submodules
+
+`backend/src/routes/auth.ts` is a compatibility re-export of
+`backend/src/routes/auth/index.ts`. The mounted `/api/auth` router preserves a
+single top-level route stack composed from these concern modules:
+
+| Module                     | Responsibility                                                    |
+| -------------------------- | ----------------------------------------------------------------- |
+| `auth/oidc.ts`             | Public auth config and OIDC login, callback, linking, and exchange |
+| `auth/localCredentials.ts` | Local login, logout, token refresh, and current-user routes         |
+| `auth/accountSecurity.ts`  | Password, email, 2FA, and Subsonic credential routes               |
+| `auth/appPasswords.ts`     | App-password listing, creation, and revocation                     |
+| `auth/linkedIdentities.ts` | External-identity listing and unlinking                            |
+| `auth/adminUserInvites.ts` | User administration, invite administration, and registration      |
+| `auth/shared.ts`           | Shared auth schemas and credential-verification helpers            |
 
 ## Feature-Gated Prefixes
 

@@ -1415,7 +1415,7 @@ describe("api entrypoint runtime behavior", () => {
         await flushPromises();
 
         // Roles are stored lowercase ("user" / "admin" — see prisma schema
-        // default and routes/auth.ts validation). Querying "ADMIN" made the
+        // default and routes/auth/adminUserInvites.ts validation). Querying "ADMIN" made the
         // emergency reset a silent no-op.
         expect(mocks.prisma.user.findFirst).toHaveBeenCalledWith({
             where: { role: "admin" },

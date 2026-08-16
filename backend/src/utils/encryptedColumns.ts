@@ -12,7 +12,7 @@
  */
 export const ENCRYPTED_SETTINGS_COLUMNS = {
     // twoFactorSecret / twoFactorRecoveryCodes use the same settings cipher via
-    // the `encrypt2FASecret = encrypt` alias in routes/auth.ts — they must be
+    // the `encrypt2FASecret = encrypt` alias in routes/auth/shared.ts — they must be
     // migrated and counted too, or `migrationComplete` would falsely report done
     // while legacy 2FA ciphertext lingers.
     user: ["subsonicPassword", "twoFactorSecret", "twoFactorRecoveryCodes"],

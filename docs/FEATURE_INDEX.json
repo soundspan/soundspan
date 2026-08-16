@@ -39,7 +39,14 @@
                 "routes": ["/login"]
             },
             "backend": {
-                "routes": ["auth.ts"],
+                "routes": [
+                    "auth/accountSecurity.ts",
+                    "auth/adminUserInvites.ts",
+                    "auth/appPasswords.ts",
+                    "auth/linkedIdentities.ts",
+                    "auth/localCredentials.ts",
+                    "auth/oidc.ts"
+                ],
                 "services": ["oidcAuth.ts", "oidcAccountResolution.ts"]
             },
             "tests": {
@@ -568,7 +575,12 @@
                 "routes": [
                     "settings.ts",
                     "systemSettings.ts",
-                    "auth.ts",
+                    "auth/accountSecurity.ts",
+                    "auth/adminUserInvites.ts",
+                    "auth/appPasswords.ts",
+                    "auth/linkedIdentities.ts",
+                    "auth/localCredentials.ts",
+                    "auth/oidc.ts",
                     "system.ts",
                     "notifications.ts",
                     "onboarding.ts",
