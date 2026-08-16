@@ -16,6 +16,10 @@
 
 {{CHANGED_ITEMS}}
 
+## Removed
+
+{{REMOVED_ITEMS}}
+
 ## Accessibility
 
 {{ACCESSIBILITY_ITEMS}}

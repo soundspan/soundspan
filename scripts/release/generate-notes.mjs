@@ -26,6 +26,7 @@ const RELEASE_CATEGORY_ALIASES = {
     fixed: ["Fixed", "Fixes"],
     added: ["Added", "New"],
     changed: ["Changed", "Updated"],
+    removed: ["Removed"],
     accessibility: ["Accessibility"],
     admin: ["Admin/Operations", "Admin", "Operations", "Database Migrations"],
     breaking: ["Breaking Changes", "Breaking"],
@@ -289,6 +290,10 @@ function loadReleaseItemsFromChangelog(version) {
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.changed,
     );
+    const removed = pickBulletsByHeadingAliases(
+        bulletsByHeading,
+        RELEASE_CATEGORY_ALIASES.removed,
+    );
     const accessibility = pickBulletsByHeadingAliases(
         bulletsByHeading,
         RELEASE_CATEGORY_ALIASES.accessibility,
@@ -308,6 +313,7 @@ function loadReleaseItemsFromChangelog(version) {
         security,
         added,
         changed,
+        removed,
         accessibility,
         admin,
         breaking,
@@ -383,6 +389,10 @@ function main() {
         "{{CHANGED_ITEMS}}": formatBulletBlock(
             categorized.changed,
             "No behavior changes documented in this release.",
+        ),
+        "{{REMOVED_ITEMS}}": formatBulletBlock(
+            categorized.removed,
+            "Nothing removed in this release.",
         ),
         "{{ACCESSIBILITY_ITEMS}}": formatBulletBlock(
             categorized.accessibility,

@@ -58,7 +58,7 @@ test("generates Accessibility bullets after the Changed section", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(
         result.stdout,
-        /## Changed\n\n- No behavior changes documented in this release\.\n\n## Accessibility\n\n- Added keyboard navigation to the release controls\./,
+        /## Removed\n\n- Nothing removed in this release\.\n\n## Accessibility\n\n- Added keyboard navigation to the release controls\./,
     );
 });
 
@@ -76,5 +76,22 @@ test("rejects a heading that is not supported", () => {
     assert.equal(
         result.stderr.trim(),
         "CHANGELOG.md section [9.9.9] contains unsupported heading(s) with bullets: experimental.",
+    );
+});
+
+test("generates Removed bullets after the Changed section", () => {
+    const result = runGenerator(`# Changelog
+
+## [9.9.9] - 2026-08-13
+
+### Removed
+
+- Retired the legacy release control surface.
+`);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+        result.stdout,
+        /## Changed\n\n- No behavior changes documented in this release\.\n\n## Removed\n\n- Retired the legacy release control surface\.\n\n## Accessibility/,
     );
 });
