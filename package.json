@@ -21,9 +21,11 @@
         "verify:helm": "./scripts/helm-chart-render-check.sh",
         "verify:python": "pytest services/tidal-downloader/tests -q && pytest services/ytmusic-streamer/tests -q && pytest services/audio-analyzer/tests -q && pytest services/audio-analyzer-clap/tests -q && pytest tests/ -q",
         "verify:python-quality": "ruff check services/ && ruff format --check services/ && mypy && MYPYPATH=services mypy services/tidal-downloader/app.py services/tidal-downloader/tests && MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/tests && MYPYPATH=services mypy services/audio-analyzer/analyzer.py && MYPYPATH=services mypy services/audio-analyzer-clap/analyzer.py",
-        "verify:gates": "node scripts/ci/check-route-error-canon.mjs && npm run check:error-canon:test && npm run check:infra-release:test && node --test scripts/ci/dockerfile-hygiene.test.mjs && npm --prefix frontend run lint:hex && npm --prefix backend test -- --maxWorkers=2 src/config/__tests__/openapiRouteSync.test.ts && npm run format:check",
+        "verify:gates": "node scripts/ci/check-route-error-canon.mjs && npm run check:error-canon:test && npm run check:override-staleness && npm run check:override-staleness:test && npm run check:infra-release:test && node --test scripts/ci/dockerfile-hygiene.test.mjs && npm --prefix frontend run lint:hex && npm --prefix backend test -- --maxWorkers=2 src/config/__tests__/openapiRouteSync.test.ts && npm run format:check",
         "check:error-canon": "node scripts/ci/check-route-error-canon.mjs",
         "check:error-canon:test": "node --test scripts/ci/__tests__/check-route-error-canon.test.mjs",
+        "check:override-staleness": "node scripts/ci/check-override-staleness.mjs",
+        "check:override-staleness:test": "node --test scripts/ci/__tests__/check-override-staleness.test.mjs",
         "check:infra-release:test": "node --test scripts/ci/__tests__/helm-service-selector-check.test.mjs scripts/ci/__tests__/release-version-validator.test.mjs scripts/release/__tests__/generate-notes.test.mjs",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"

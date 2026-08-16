@@ -264,6 +264,12 @@ jobs:
       - name: Test route error canonicalization gate
         run: npm run check:error-canon:test
 
+      - name: Check npm override staleness
+        run: npm run check:override-staleness
+
+      - name: Test npm override staleness gate
+        run: npm run check:override-staleness:test
+
       - name: Check Dockerfile hygiene
         run: node --test scripts/ci/dockerfile-hygiene.test.mjs
 

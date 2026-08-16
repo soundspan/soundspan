@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documented the npm security-override lifecycle, removed obsolete backend and
+  frontend overrides, and added an enforcement gate for dangling overrides with
+  non-blocking warnings for shed candidates. (#492)
 - Restructured the authentication routes into per-concern modules without changing the `/api/auth` contract.
 - Restructured the Subsonic-compatible routes into per-domain modules without changing the `/rest` contract.
 - Documentation drift sweep: corrected environment/deployment/API references across the docs tree and refreshed the route, feature, and test indexes.

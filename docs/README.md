@@ -33,8 +33,9 @@ This index is the central navigation page for all project documentation under `d
 6. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
 7. Use [`FEATURE_INDEX.json`](FEATURE_INDEX.json) for machine-readable feature-to-code mapping
 8. Use [`maintainers/README.md`](maintainers/README.md) for retained maintainer-only guidance
-9. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-10. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
+9. Use [`DEPENDENCY_OVERRIDES.md`](DEPENDENCY_OVERRIDES.md) for the npm override register and monthly shed policy
+10. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+11. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
 
 ---
 
@@ -70,6 +71,7 @@ This index is the central navigation page for all project documentation under `d
 | [`FEATURE_INDEX.json`](FEATURE_INDEX.json)                                       | Agents                   | Machine-readable feature-to-code mapping for navigation and verification                                                                       |
 | [`TESTING.md`](TESTING.md)                                                       | Contributors/operators   | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries                                     |
 | [`SECURITY.md`](SECURITY.md)                                                     | Contributors             | Security reporting, supported versions, and contributor security requirements                                                                  |
+| [`DEPENDENCY_OVERRIDES.md`](DEPENDENCY_OVERRIDES.md)                             | Contributors/maintainers | Active npm override register, add-new-override policy, removal conditions, and monthly shed procedure                                            |
 | [`../AGENTS.md`](../AGENTS.md)                                                   | Contributors/agents      | Active AWM repo contract and task loop                                                                                                         |
 | [`AWM_FEATURE_PLANS.md`](AWM_FEATURE_PLANS.md)                                   | Contributors/agents      | Visible repo-local schema for formal feature plans stored in AWM                                                                               |
 | [`modernization-roadmap.md`](modernization-roadmap.md)                           | Contributors/maintainers | Canonical index of modernization review findings (F1-F54), grouped into epics, with per-finding status tracking                                |
