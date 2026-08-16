@@ -144,10 +144,12 @@ const LEAK_BASELINE = Object.freeze({
     // spotify.ts +1: track-scraper error detail const consumed only by logger.debug (~L663); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
     // spotify.ts +1: the same logger-only detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/spotify.ts": 2,
-    // spotifyImport.ts remaining 9: error-classification const (~L48), import-job error fields (~L1521, ~L1768), and a non-logger import log line (~L1723); admin-visible import-job state, frozen under the slice-E scope guard; plus job.error/dbJob.error status-object passthroughs (~L289, ~L298, ~L364, ~L2655) and an errorMsg assigned from result.error (~L1694); frozen under the slice-J scope guard.
-    // spotifyImport.ts +2/new net +1: MusicBrainz error detail consts (~L996 and ~L1042) are logger-only; optional logger-call stripping also exempts one prior inline site; frozen under the ratchet-widening (slice-B2) scope guard.
-    // spotifyImport.ts +4: two retry classifiers and two logger-only detail ternaries expose error.message in consequent position; frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/spotifyImport.ts": 14,
+    // spotifyImport split: the prior spotifyImport.ts baseline of 14 is relocated verbatim across focused modules with the same total.
+    "backend/src/services/spotifyImport/jobManagement.ts": 1,
+    "backend/src/services/spotifyImport/lifecycle.ts": 3,
+    "backend/src/services/spotifyImport/matching.ts": 2,
+    "backend/src/services/spotifyImport/preview.ts": 2,
+    "backend/src/services/spotifyImport/state.ts": 6,
     // youtubeDownload.ts remaining 1: sidecar status mapping data.error (~L329); job-state plumbing, frozen under the slice-J scope guard.
     "backend/src/services/youtubeDownload.ts": 1,
     // queueCleaner.ts remaining 2: Prisma/retry error classification used only to decide whether the internal cleanup job retries.

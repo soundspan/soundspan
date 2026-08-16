@@ -295,7 +295,16 @@
                     "playlistImportService.ts",
                     "playlistTrackResolution.ts",
                     "spotify.ts",
-                    "spotifyImport.ts"
+                    "spotifyImport.ts",
+                    "spotifyImport/index.ts",
+                    "spotifyImport/jobManagement.ts",
+                    "spotifyImport/lifecycle.ts",
+                    "spotifyImport/matching.ts",
+                    "spotifyImport/pendingTracks.ts",
+                    "spotifyImport/playlistBuilder.ts",
+                    "spotifyImport/preview.ts",
+                    "spotifyImport/state.ts",
+                    "spotifyImport/types.ts"
                 ]
             },
             "tests": {
@@ -304,7 +313,13 @@
                     "importRoutes.integration.test.ts",
                     "spotifyRuntime.test.ts"
                 ],
-                "backend_contract": ["programmaticPlaylistArtistCap.test.ts"]
+                "backend_contract": [
+                    "programmaticPlaylistArtistCap.test.ts",
+                    "spotifyImportMatchConcurrency.test.ts",
+                    "spotifyImportModuleBoundariesRuntime.test.ts",
+                    "spotifyImportResilienceContract.test.ts",
+                    "spotifyImportRuntime.test.ts"
+                ]
             }
         },
         {

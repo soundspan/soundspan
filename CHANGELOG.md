@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-blocking warnings for shed candidates. (#492)
 - Restructured the programmatic playlist service into focused generator modules without changing its public contract or mix behavior.
 - Restructured the frontend audio playback orchestrator into focused policy modules and concern hooks without changing playback behavior.
+- Restructured the Spotify import service into focused matching, preview, lifecycle, playlist-building, job-management, and pending-track modules without changing its public contract or import behavior. (#485)
 - Restructured the authentication routes into per-concern modules without changing the `/api/auth` contract.
 - Restructured the Subsonic-compatible routes into per-domain modules without changing the `/rest` contract.
 - Documentation drift sweep: corrected environment/deployment/API references across the docs tree and refreshed the route, feature, and test indexes.

@@ -109,7 +109,16 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/socialPresenceEvents.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
 | `backend/src/services/spotify.ts` | Core |
-| `backend/src/services/spotifyImport.ts` | Core |
+| `backend/src/services/spotifyImport.ts` | Spotify import compatibility façade |
+| `backend/src/services/spotifyImport/index.ts` | Spotify import public module surface and shared service instance |
+| `backend/src/services/spotifyImport/jobManagement.ts` | Spotify import job reads, refresh, and cancellation |
+| `backend/src/services/spotifyImport/lifecycle.ts` | Spotify import job start, acquisition, completion, and scan lifecycle |
+| `backend/src/services/spotifyImport/matching.ts` | Spotify import library and MusicBrainz matching |
+| `backend/src/services/spotifyImport/pendingTracks.ts` | Spotify import pending-track reconciliation and reads |
+| `backend/src/services/spotifyImport/playlistBuilder.ts` | Spotify import playlist creation and post-scan matching |
+| `backend/src/services/spotifyImport/preview.ts` | Spotify and Deezer import preview generation |
+| `backend/src/services/spotifyImport/state.ts` | Shared Spotify import persistence, retry, cache, and logger state |
+| `backend/src/services/spotifyImport/types.ts` | Shared Spotify import contracts |
 | `backend/src/services/staleJobCleanup.ts` | Core |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
