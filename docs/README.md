@@ -83,6 +83,7 @@ This index is the central navigation page for all project documentation under `d
 
 | Document                                                                                                     | Status       | Purpose                                                                         |
 | ------------------------------------------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------- |
+| [`designs/vibe-embedding-provider.md`](designs/vibe-embedding-provider.md)                                   | Design phase | Pluggable vibe embedding provider, versioned embedding spaces, DCLAP default    |
 | [`designs/provider-strategy-track-mapping.md`](designs/provider-strategy-track-mapping.md)                   | Design phase | Provider strategy overhaul, browse redesign, TrackMapping data model            |
 | [`designs/explore-page-consolidation.md`](designs/explore-page-consolidation.md)                             | Design phase | Merge Home/Browse/Radio/Discovery into single Explore page                      |
 | [`designs/durable-track-identity.md`](designs/durable-track-identity.md)                                     | Shipped      | Durable local track identity, soft removal, revival, and retention purge design |
