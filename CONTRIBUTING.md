@@ -11,27 +11,30 @@ First off, thanks for taking the time to contribute! 🎉
 
 ## Git Hooks
 
-After cloning, activate the repo's pre-commit hook:
+The `.githooks` directory is optional, local-only, gitignored, and not tracked.
+Create it manually if you want to maintain a local pre-commit hook, then enable
+it with:
 
 ```bash
+mkdir -p .githooks
 git config core.hooksPath .githooks
 ```
 
-This runs `awm verify` on staged code files before each commit.
+Your local hook can run `awm verify` on staged code files before each commit.
 
 ## Branch Strategy
 
 All development happens on the `main` branch:
 
--   **All PRs should target `main`**
--   Every push to `main` triggers a nightly Docker build
--   Stable releases are created via version tags
+- **All PRs should target `main`**
+- Every push to `main` triggers a nightly Docker build
+- Stable releases are created via version tags
 
 ## Versioning Notes
 
--   Current development target: **`Unreleased`**
--   Use `nightly` images for testing unreleased features
--   Keep docs current with behavior changes (update `README.md` and `CHANGELOG.md` in the same PR when applicable)
+- Current development target: **`Unreleased`**
+- Use `nightly` images for testing unreleased features
+- Keep docs current with behavior changes (update `README.md` and `CHANGELOG.md` in the same PR when applicable)
 
 ## Making Contributions
 
@@ -78,9 +81,10 @@ Canonical testing guide:
 Summary:
 
 - Backend automated tests: Jest + ts-jest under `backend/src/**/__tests__/`
-- Frontend automated tests: Playwright under `frontend/tests/e2e/`
+- Frontend CI-gated tests: unit tests under `frontend/tests/unit/`, component tests under `frontend/tests/component/`, and the standalone typecheck
+- Frontend Playwright tests: local/on-demand E2E flows under `frontend/tests/e2e/`
 - Backend manual diagnostics (not Jest): `backend/scripts/manual-tests/`
-- Python sidecars: `tests/` scaffolds exist under `services/audio-analyzer/tests/` and `services/audio-analyzer-clap/tests/`; add `pytest` cases there
+- Python sidecars: all four sidecars have `pytest` suites under `services/*/tests/`
 
 Key backend commands:
 
@@ -101,7 +105,11 @@ Key frontend commands:
 
 ```bash
 npm --prefix frontend run lint
+npm --prefix frontend run typecheck
 npm --prefix frontend run build
+npm --prefix frontend run test:unit
+npm --prefix frontend run test:component
+npm --prefix frontend run test:coverage
 npm --prefix frontend run test:e2e
 npm --prefix frontend run test:predeploy
 ```
@@ -125,8 +133,8 @@ This repo now includes a dedicated **Quality Visibility** workflow:
 - Workflow: `.github/workflows/quality-visibility.yml`
 - Purpose: give ongoing visibility into tests and coverage without blocking day-to-day development
 - Signals:
-  - Backend Jest test run + coverage summary + coverage artifact upload
-  - Frontend lint/build quality checks + E2E spec inventory summary
+    - Backend Jest test run + coverage summary + coverage artifact upload
+    - Frontend lint/build checks, targeted unit coverage, and component tests; frontend typecheck runs as a separate visibility job
 
 ### Backend coverage artifacts
 
@@ -153,10 +161,10 @@ You can switch to stricter behavior with repository variables:
 - `CI_NON_BLOCKING_TEST_VISIBILITY=false` to make job failures blocking
 - `CI_ENFORCE_TEST_GATE=true` to enforce numeric coverage thresholds
 - Optional threshold vars:
-  - `COVERAGE_LINE_MIN`
-  - `COVERAGE_BRANCH_MIN`
-  - `COVERAGE_FUNCTION_MIN`
-  - `COVERAGE_STATEMENT_MIN`
+    - `COVERAGE_LINE_MIN`
+    - `COVERAGE_BRANCH_MIN`
+    - `COVERAGE_FUNCTION_MIN`
+    - `COVERAGE_STATEMENT_MIN`
 
 Recommended rollout:
 

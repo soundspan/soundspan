@@ -6,7 +6,7 @@ Repository contract for soundspan.
 
 1. Read this file for repo rules and conventions.
 2. See [CONTRIBUTING.md](CONTRIBUTING.md) for build, test, and PR workflow.
-3. If your agent runtime provides AWM, see [.awm/AGENTS-AWM.md](.awm/AGENTS-AWM.md) for the enhanced workflow.  If you are unaware or unsure of what AWM is, do not read the file.
+3. If your agent runtime provides AWM, see [.awm/AGENTS-AWM.md](.awm/AGENTS-AWM.md) for the enhanced workflow. If you are unaware or unsure of what AWM is, do not read the file.
 4. If using Claude, also read [CLAUDE.md](CLAUDE.md).
 
 ## Source Of Truth
@@ -18,14 +18,15 @@ Repository contract for soundspan.
 
 - The canonical external engineering-standards baseline for soundspan is the [coding-handbook](https://github.com/BonzTM/coding-handbook) repo (local sibling checkout at `~/git/coding-handbook` when available).
 - All contributors and AI agents — including any tools they drive (e.g. codex) — must follow the handbook's language module for the code they touch:
-  - `typescript/` for TS/JS (backend, frontend, packages)
-  - `python/` for the `services/**` sidecars
+    - `typescript/` for TS/JS (backend, frontend, packages)
+    - `python/` for the `services/**` sidecars
 - Precedence, so this composes with the rules below:
-  1. This AGENTS.md and its repository-specific rules win.
-  2. Then the coding-handbook language module.
-  3. Then general industry best practice.
+    1. This AGENTS.md and its repository-specific rules win.
+    2. Then the coding-handbook language module.
+    3. Then general industry best practice.
 
-  Handbook guidance that conflicts with an explicit rule in this file defers to this file.
+    Handbook guidance that conflicts with an explicit rule in this file defers to this file.
+
 - The handbook is the baseline the codebase's enterprise-standards refactor was aligned to; new work must not regress below it.
 
 ## Working Rules
@@ -42,18 +43,19 @@ Repository contract for soundspan.
 - **API boundary:** Use `frontend/lib/api.ts` as the frontend API boundary. No direct `fetch` calls from components.
 - **Backend config:** Read env through `backend/src/config.ts`.
 - **Database access:** Prefer Prisma for all DB access. Raw SQL (`$queryRaw`/`$executeRaw`) is permitted **only** for the classes of query Prisma cannot express, namely:
-  - **pgvector similarity / ANN** — ivfflat probe tuning and `<=>`/`<->` distance ordering over embedding columns (e.g. `backend/src/utils/annQuery.ts`, `backend/src/services/trackEmbeddings.ts`, `backend/src/services/hybridSimilarity.ts`).
-  - **PostgreSQL full-text search** — `tsvector`/`to_tsquery`/`ts_rank` ranking (e.g. `backend/src/services/search.ts`).
-  - **Row-level & advisory locking** — `FOR UPDATE SKIP LOCKED` job claiming and `pg_advisory_*` locks (e.g. `backend/src/routes/downloads.ts`, worker claim loops).
+    - **pgvector similarity / ANN** — ivfflat probe tuning and `<=>`/`<->` distance ordering over embedding columns (e.g. `backend/src/utils/annQuery.ts`, `backend/src/services/trackEmbeddings.ts`, `backend/src/services/hybridSimilarity.ts`).
+    - **PostgreSQL full-text search** — `tsvector`/`to_tsquery`/`ts_rank` ranking (e.g. `backend/src/services/search.ts`).
+    - **Row-level & advisory locking** — `FOR UPDATE SKIP LOCKED` job claiming and `pg_advisory_*` locks (e.g. `backend/src/routes/downloads.ts`, worker claim loops).
 
-  Constraints on any permitted raw SQL: use Prisma tagged-template `$queryRaw`/`$executeRaw` so every value is bound as a parameter; **never** `$queryRawUnsafe`/`$executeRawUnsafe` with interpolated external input (dynamic identifiers must come from code-owned allowlists); back it with a behavioral test against real PostgreSQL, not a source-text assertion (see Testing below). Anything a Prisma query can express — plain filters, counts, existence checks — must use Prisma, not raw SQL.
+    Constraints on any permitted raw SQL: use Prisma tagged-template `$queryRaw`/`$executeRaw` so every value is bound as a parameter; **never** `$queryRawUnsafe`/`$executeRawUnsafe` with interpolated external input (dynamic identifiers must come from code-owned allowlists); back it with a behavioral test against real PostgreSQL, not a source-text assertion (see Testing below). Anything a Prisma query can express — plain filters, counts, existence checks — must use Prisma, not raw SQL.
+
 - **Logging helpers:** Use shared logging helpers in runtime code, and scope logs with `logger.child("Scope")` rather than ad hoc `[bracket-tag]` message prefixes so scope is a structured field:
-  - frontend: `frontend/lib/logger.ts`
-  - backend: `backend/src/utils/logger.ts`
-  - python sidecars: `services/common/logging_utils.py`
+    - frontend: `frontend/lib/logger.ts`
+    - backend: `backend/src/utils/logger.ts`
+    - python sidecars: `services/common/logging_utils.py`
 - **Naming & placement conventions:** `camelCase` TypeScript source files; one route module per mounted prefix under `backend/src/routes/` (indexed in `backend/src/routes/README.md`); frontend domain modules live under `frontend/features/<domain>/` and are indexed in `frontend/features/README.md`; scheduled/background processors belong in `backend/src/workers/`. Known drift (colocated vs. tree tests, `components/vibe` placement) is documented in the relevant README rather than silently tolerated — follow the README when extending an area.
 - **Changelog:** Keep `CHANGELOG.md` updated for user-visible or behavior-changing work.
-- **Testing conventions:** Assert on **behavior**, not source text. The source-scraping `*Contract` suites that `readFileSync` a module and `.toContain(...)` a code snippet (e.g. the `backend/src/__tests__/audioAnalyzer*Contract.test.ts` set that greps `services/audio-analyzer/analyzer.py`) are **deprecated**: do not add new tests of that shape, and replace an existing one with a behavioral test whenever you touch the code it guards.
+- **Testing conventions:** Assert on **behavior**, not source text. The source-scraping `*Contract` suites that `readFileSync` a module and `.toContain(...)` a code snippet (for example, the remaining `clapTextEmbedRecoveryContract.test.ts`) are **deprecated**: do not add new tests of that shape, and replace an existing one with a behavioral test whenever you touch the code it guards.
 - **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched. **Exemption:** the Subsonic-compatible `/rest` surface (`backend/src/routes/subsonic.ts`) is contract-documented in [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md) instead of per-endpoint OpenAPI annotations; keep that document current in lieu of `@openapi` blocks for `/rest`.
 - **Storage:** SQLite at `.awm/context.db` by default. Configure `AWM_PG_DSN` for multi-agent coordination.
 
@@ -94,16 +96,16 @@ npm --prefix frontend install
 
 **`npm run verify:ci`** (from the repo root) reproduces every CI gate, including the Python gates (requires Python 3.13+ with each sidecar's `requirements-test.txt` and `services/requirements-quality.txt` installed). When you are not touching `services/**`, **`npm run verify`** runs the Node + Helm subset. Per-gate equivalents:
 
-| CI job (`quality-visibility.yml`) | Blocking? | Local command | Catches |
-| --- | --- | --- | --- |
-| Backend Tests + Coverage | Visibility | `npm run verify:backend` | backend Jest unit/runtime tests + coverage |
-| Frontend Quality Visibility | Visibility | Non-typecheck part of `npm run verify:frontend`: frontend `lint` + `build` + `test:coverage` + `test:component` | ESLint, Next build, targeted unit coverage, and component tests |
-| Python Sidecar Tests (matrix) | Visibility | `npm run verify:python` | pytest suites for the four `services/*` sidecars |
-| Python Quality | Enforcement | `npm run verify:python-quality` | ruff lint, ruff format check, mypy (+ tidal-downloader standalone) |
-| Enforcement Gates | Enforcement | `npm run verify:gates` | route-error canonicalization + gate self-test, frontend hardcoded-hex baseline, OpenAPI route sync, repo-wide Prettier format check |
-| Backend Typecheck | Visibility | `npm --prefix backend exec -- tsc --noEmit` | backend TypeScript checking |
-| Frontend Typecheck | Visibility | `npm --prefix frontend run typecheck` (also part of `verify:frontend`) | complete frontend source/test TypeScript checking |
-| Helm Chart Visibility | Visibility | `npm run verify:helm` | chart lint + render assertions |
+| CI job (`quality-visibility.yml`) | Blocking?   | Local command                                                                                                   | Catches                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend Tests + Coverage          | Visibility  | `npm run verify:backend`                                                                                        | backend Jest unit/runtime tests + coverage                                                                                                                                                                                                                                                                                  |
+| Frontend Quality Visibility       | Visibility  | Non-typecheck part of `npm run verify:frontend`: frontend `lint` + `build` + `test:coverage` + `test:component` | ESLint, Next build, targeted unit coverage, and component tests                                                                                                                                                                                                                                                             |
+| Python Sidecar Tests (matrix)     | Visibility  | `npm run verify:python`                                                                                         | pytest suites for the four `services/*` sidecars plus the root AIO image-hardening suite                                                                                                                                                                                                                                    |
+| Python Quality                    | Enforcement | `npm run verify:python-quality`                                                                                 | ruff lint, ruff format check, mypy (+ tidal-downloader standalone)                                                                                                                                                                                                                                                          |
+| Enforcement Gates                 | Enforcement | `npm run verify:gates`                                                                                          | route-error canonicalization + gate self-test, Dockerfile hygiene, infrastructure/release helper tests, frontend hardcoded-hex baseline, OpenAPI route sync, and repo-wide Prettier format check; local `verify:gates` also runs the infrastructure/release helper tests that the CI enforcement job does not currently run |
+| Backend Typecheck                 | Visibility  | `npm --prefix backend exec -- tsc --noEmit`                                                                     | backend TypeScript checking                                                                                                                                                                                                                                                                                                 |
+| Frontend Typecheck                | Visibility  | `npm --prefix frontend run typecheck` (also part of `verify:frontend`)                                          | complete frontend source/test TypeScript checking                                                                                                                                                                                                                                                                           |
+| Helm Chart Visibility             | Visibility  | `npm run verify:helm`                                                                                           | chart lint + render assertions                                                                                                                                                                                                                                                                                              |
 
 Only **Enforcement Gates** and **Python Quality** block a PR on every run; the remaining jobs run as visibility (`continue-on-error`) unless the repo variable `CI_NON_BLOCKING_TEST_VISIBILITY` is set to `false`.
 

@@ -41,7 +41,7 @@ How to write a handler:
    `vibeJourneyRequest.ts`), producing a typed value or a 400 `{ error }`.
 
 Reference exemplars: `vibe.ts`, `vibeJourneyRequest.ts`, `notifications.ts`,
-`library.ts`.
+`library/tracks.ts`.
 
 **Enforcement (ratchet):** `scripts/ci/check-route-error-canon.mjs`
 (`npm run check:error-canon`) runs two independent per-file ratchets and fails
@@ -55,11 +55,9 @@ if either regresses:
    `error.stack` used as a property value, e.g. `details: error?.message` or
    `error: error.message || "…"`). Echoing raw exception text to clients is an
    OWASP info-disclosure risk; return a static curated message and log the raw
-   error server-side instead. `discover.ts`, `enrichment.ts`, and `library.ts`
-   are at zero. The remaining routers still carrying the pattern
-   (`downloads.ts`, `listenTogether.ts`, `notifications.ts`,
-   `playbackState.ts`, `playlists.ts`, `podcasts.ts`) are frozen at their
-   current counts and remediated as follow-up.
+   error server-side instead. The authoritative file list and counts live in
+   `LEAK_BASELINE` in `scripts/ci/check-route-error-canon.mjs`; this ratchet
+   spans both route and service modules.
 
 Both baselines can only DECREASE: when you canonicalize a route, lower its
 baseline in that script; new route files start at zero. Full migration of every
@@ -67,55 +65,75 @@ route file is intentionally incremental (per touched file), not a big-bang.
 
 ## Mounted Route Modules
 
-| Route File | Mounted Prefixes |
-| --- | --- |
-| `backend/src/routes/analysis.ts` | `/api/analysis` |
-| `backend/src/routes/analysisInternal.ts` | `/api/analysis` (machine callbacks, mounted via `analysis.ts` and directly when the flag is off) |
-| `backend/src/routes/admin.ts` | `/api/admin` |
-| `backend/src/routes/apiKeys.ts` | `/api/api-keys` |
-| `backend/src/routes/artists.ts` | `/api/artists` |
-| `backend/src/routes/audiobooks.ts` | `/api/audiobooks` |
-| `backend/src/routes/auth.ts` | `/api/auth` |
-| `backend/src/routes/browse.ts` | `/api/browse` |
-| `backend/src/routes/deviceLink.ts` | `/api/device-link` |
-| `backend/src/routes/discover.ts` | `/api/discover` |
-| `backend/src/routes/downloads.ts` | `/api/downloads` |
-| `backend/src/routes/enrichment.ts` | `/api/enrichment` |
-| `backend/src/routes/federation.ts` | `/api/federation/v1` |
-| `backend/src/routes/federationAdmin.ts` | `/api/federation/admin` (peer lifecycle, consumer linking, and sync enqueue) |
-| `backend/src/routes/homepage.ts` | `/api/homepage` |
-| `backend/src/routes/library.ts` | `/api/library` |
-| `backend/src/routes/listeningState.ts` | `/api/listening-state` |
-| `backend/src/routes/listenTogether.ts` | `/api/listen-together` |
-| `backend/src/routes/lyrics.ts` | `/api/lyrics` |
-| `backend/src/routes/mixes.ts` | `/api/mixes` |
-| `backend/src/routes/notifications.ts` | `/api/notifications` |
-| `backend/src/routes/offline.ts` | `/api/offline` |
-| `backend/src/routes/onboarding.ts` | `/api/onboarding` |
-| `backend/src/routes/openapiSupplement.ts` | (doc-only: @openapi coverage for index.ts health/readiness and /api/docs.json endpoints; not mounted) |
-| `backend/src/routes/playbackState.ts` | `/api/playback-state` |
-| `backend/src/routes/playlistImport.ts` | `/api/import` |
-| `backend/src/routes/playlists.ts` | `/api/playlists` |
-| `backend/src/routes/plays.ts` | `/api/plays` |
-| `backend/src/routes/podcasts.ts` | `/api/podcasts` |
-| `backend/src/routes/recommendations.ts` | `/api/recommendations` |
-| `backend/src/routes/releases.ts` | `/api/releases` |
-| `backend/src/routes/routeErrorResponse.ts` | (not found in `backend/src/index.ts` mounts) |
-| `backend/src/routes/search.ts` | `/api/search` |
-| `backend/src/routes/shareLinks.ts` | `/api/share-links` |
-| `backend/src/routes/settings.ts` | `/api/settings` |
-| `backend/src/routes/social.ts` | `/api/social` |
-| `backend/src/routes/soulseek.ts` | `/api/soulseek` |
-| `backend/src/routes/streaming.ts` | `/api/streaming` |
-| `backend/src/routes/subsonic.ts` | `/rest` |
-| `backend/src/routes/system.ts` | `/api/system` |
-| `backend/src/routes/systemSettings.ts` | `/api/system-settings` |
-| `backend/src/routes/tidalStreaming.ts` | `/api/tidal-streaming` |
-| `backend/src/routes/trackMappings.ts` | `/api/track-mappings` |
-| `backend/src/routes/vibe.ts` | `/api/vibe` |
-| `backend/src/routes/webhooks.ts` | `/api/webhooks` |
-| `backend/src/routes/youtube.ts` | `/api/youtube` |
-| `backend/src/routes/youtubeMusic.ts` | `/api/ytmusic` |
+| Route File                                 | Mounted Prefixes                                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `backend/src/routes/admin.ts`              | `/api/admin`                                                                                          |
+| `backend/src/routes/analysis.ts`           | `/api/analysis`                                                                                       |
+| `backend/src/routes/analysisInternal.ts`   | `/api/analysis` (machine callbacks, mounted via `analysis.ts` and directly when the flag is off)      |
+| `backend/src/routes/apiKeys.ts`            | `/api/api-keys`                                                                                       |
+| `backend/src/routes/artists.ts`            | `/api/artists`                                                                                        |
+| `backend/src/routes/audiobooks.ts`         | `/api/audiobooks`                                                                                     |
+| `backend/src/routes/auth.ts`               | `/api/auth`                                                                                           |
+| `backend/src/routes/browse.ts`             | `/api/browse`                                                                                         |
+| `backend/src/routes/deviceLink.ts`         | `/api/device-link`                                                                                    |
+| `backend/src/routes/discover.ts`           | `/api/discover`                                                                                       |
+| `backend/src/routes/downloads.ts`          | `/api/downloads`                                                                                      |
+| `backend/src/routes/enrichment.ts`         | `/api/enrichment`                                                                                     |
+| `backend/src/routes/federation.ts`         | `/api/federation/v1`                                                                                  |
+| `backend/src/routes/federationAdmin.ts`    | `/api/federation/admin` (peer lifecycle, consumer linking, and sync enqueue)                          |
+| `backend/src/routes/homepage.ts`           | `/api/homepage`                                                                                       |
+| `backend/src/routes/library.ts`            | `/api/library`                                                                                        |
+| `backend/src/routes/listeningState.ts`     | `/api/listening-state`                                                                                |
+| `backend/src/routes/listenTogether.ts`     | `/api/listen-together`                                                                                |
+| `backend/src/routes/lyrics.ts`             | `/api/lyrics`                                                                                         |
+| `backend/src/routes/mixes.ts`              | `/api/mixes`                                                                                          |
+| `backend/src/routes/notifications.ts`      | `/api/notifications`                                                                                  |
+| `backend/src/routes/offline.ts`            | `/api/offline`                                                                                        |
+| `backend/src/routes/onboarding.ts`         | `/api/onboarding`                                                                                     |
+| `backend/src/routes/openapiSupplement.ts`  | (doc-only: @openapi coverage for index.ts health/readiness and /api/docs.json endpoints; not mounted) |
+| `backend/src/routes/playbackState.ts`      | `/api/playback-state`                                                                                 |
+| `backend/src/routes/playlistImport.ts`     | `/api/import`                                                                                         |
+| `backend/src/routes/playlists.ts`          | `/api/playlists`                                                                                      |
+| `backend/src/routes/plays.ts`              | `/api/plays`                                                                                          |
+| `backend/src/routes/podcasts.ts`           | `/api/podcasts`                                                                                       |
+| `backend/src/routes/recommendations.ts`    | `/api/recommendations`                                                                                |
+| `backend/src/routes/releases.ts`           | `/api/releases`                                                                                       |
+| `backend/src/routes/routeErrorResponse.ts` | Shared response helper; not a router                                                                  |
+| `backend/src/routes/search.ts`             | `/api/search`                                                                                         |
+| `backend/src/routes/settings.ts`           | `/api/settings`                                                                                       |
+| `backend/src/routes/shareLinks.ts`         | `/api/share-links`                                                                                    |
+| `backend/src/routes/social.ts`             | `/api/social`                                                                                         |
+| `backend/src/routes/soulseek.ts`           | `/api/soulseek`                                                                                       |
+| `backend/src/routes/streaming.ts`          | `/api/streaming`                                                                                      |
+| `backend/src/routes/subsonic.ts`           | `/rest`                                                                                               |
+| `backend/src/routes/system.ts`             | `/api/system`                                                                                         |
+| `backend/src/routes/systemSettings.ts`     | `/api/system-settings`                                                                                |
+| `backend/src/routes/tidalStreaming.ts`     | `/api/tidal-streaming`                                                                                |
+| `backend/src/routes/trackMappings.ts`      | `/api/track-mappings`                                                                                 |
+| `backend/src/routes/vibe.ts`               | `/api/vibe`                                                                                           |
+| `backend/src/routes/vibeJourneyRequest.ts` | Shared request-validation helper; not a router                                                        |
+| `backend/src/routes/webhooks.ts`           | `/api/webhooks`                                                                                       |
+| `backend/src/routes/youtube.ts`            | `/api/youtube`                                                                                        |
+| `backend/src/routes/youtubeMusic.ts`       | `/api/ytmusic`                                                                                        |
+
+### Library Submodules
+
+`backend/src/routes/library.ts` is a compatibility re-export of
+`backend/src/routes/library/index.ts`. The mounted `/api/library` router is
+composed from these ten domain modules:
+
+| Module                        | Responsibility                                                |
+| ----------------------------- | ------------------------------------------------------------- |
+| `library/albums.ts`           | Album browse, preference, and deletion routes                 |
+| `library/artistCounts.ts`     | Artist-count status and backfill routes                       |
+| `library/artists.ts`          | Artist list, detail, and deletion routes                      |
+| `library/coverArt.ts`         | Library cover-art delivery routes                             |
+| `library/imageBackfill.ts`    | Image-backfill administration routes                          |
+| `library/maintenance.ts`      | Scan and library-maintenance routes                           |
+| `library/metadataBackfill.ts` | Metadata-backfill administration routes                       |
+| `library/radio.ts`            | Library radio generation routes                               |
+| `library/remoteTracks.ts`     | Remote-track preference routes                                |
+| `library/tracks.ts`           | Track browse, detail, preference, stream, and deletion routes |
 
 ## Feature-Gated Prefixes
 

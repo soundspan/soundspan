@@ -11,11 +11,11 @@ It defines:
 
 ## Frameworks by Component
 
-| Component | Framework | Primary command(s) | Notes |
-| --- | --- | --- | --- |
-| Backend (`backend/`) | Jest + ts-jest | `npm --prefix backend test`, `npm --prefix backend run test:coverage` | Unit/integration/contract/runtime tests under `backend/src/**/__tests__` |
-| Frontend (`frontend/`) | Node test runner (unit + component + coverage), Playwright (E2E), ESLint, TypeScript | `npm --prefix frontend run typecheck`, `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:config:runtime`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Standalone typecheck covers source and test files; unit specs live under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e`; the runtime-config smoke reloads production Next.js config after dependency pruning in the AIO image |
-| Python sidecars (`services/*`) | `pytest`, Ruff, mypy | `npm run verify:python`, `npm run verify:python-quality`, or `pytest services/<service>/tests -q` per service | Test suites run through the `Python Sidecar Tests` matrix; blocking static-analysis and format checks run through `Python Quality`. The current suites contain 141 test functions total (tidal-downloader 55, ytmusic-streamer 81, audio-analyzer 3, audio-analyzer-clap 2), though counts will drift as coverage grows. |
+| Component                      | Framework                                                                            | Primary command(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Notes                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend (`backend/`)           | Jest + ts-jest                                                                       | `npm --prefix backend test`, `npm --prefix backend run test:coverage`                                                                                                                                                                                                                                                                                                                                                                                                                                        | Unit/integration/contract/runtime tests under `backend/src/**/__tests__`                                                                                                                                                                                                                     |
+| Frontend (`frontend/`)         | Node test runner (unit + component + coverage), Playwright (E2E), ESLint, TypeScript | `npm --prefix frontend run typecheck`, `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:config:runtime`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Standalone typecheck covers source and test files; unit specs live under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e`; the runtime-config smoke reloads production Next.js config after dependency pruning in the AIO image |
+| Python sidecars (`services/*`) | `pytest`, Ruff, mypy                                                                 | `npm run verify:python`, `npm run verify:python-quality`, or `pytest services/<service>/tests -q` per service                                                                                                                                                                                                                                                                                                                                                                                                | Test suites run through the `Python Sidecar Tests` matrix; blocking static-analysis and format checks run through `Python Quality`. Counts drift; see CI output for the current totals.                                                                                                      |
 
 ## Directory Structure (Canonical)
 
@@ -23,38 +23,42 @@ It defines:
 
 The backend uses colocated `__tests__` directories under `backend/src/`.
 
-| Path | Scope |
-| --- | --- |
-| `backend/src/__tests__/` | entrypoint/runtime/contract behavior crossing domains |
-| `backend/src/routes/__tests__/` | route compatibility and API contract tests |
-| `backend/src/services/__tests__/` | service-level behavior/regression tests |
-| `backend/src/services/discovery/__tests__/` | discovery subsystem tests |
-| `backend/src/workers/__tests__/` | worker orchestration/scheduler/claim behavior |
-| `backend/src/workers/processors/__tests__/` | queue processor behavior tests |
-| `backend/src/jobs/__tests__/` | background job modules |
-| `backend/src/middleware/__tests__/` | middleware auth/rate-limit behavior |
-| `backend/src/utils/__tests__/` | utility-level tests |
+| Path                                                  | Scope                                                             |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `backend/src/__tests__/`                              | entrypoint/runtime/contract behavior crossing domains             |
+| `backend/src/config/__tests__/`                       | configuration-adjacent contract and OpenAPI synchronization tests |
+| `backend/src/routes/__tests__/`                       | route compatibility and API contract tests                        |
+| `backend/src/scripts/__tests__/`                      | backend maintenance and migration script tests                    |
+| `backend/src/services/__tests__/`                     | service-level behavior/regression tests                           |
+| `backend/src/services/discovery/__tests__/`           | discovery subsystem tests                                         |
+| `backend/src/services/lidarr/__tests__/`              | Lidarr client and helper tests                                    |
+| `backend/src/services/segmented-streaming/__tests__/` | segmented-streaming service tests                                 |
+| `backend/src/workers/__tests__/`                      | worker orchestration/scheduler/claim behavior                     |
+| `backend/src/workers/processors/__tests__/`           | queue processor behavior tests                                    |
+| `backend/src/jobs/__tests__/`                         | background job modules                                            |
+| `backend/src/middleware/__tests__/`                   | middleware auth/rate-limit behavior                               |
+| `backend/src/utils/__tests__/`                        | utility-level tests                                               |
 
 ### Backend (manual/diagnostic scripts, not part of Jest suite)
 
 Manual scripts live under `backend/scripts/manual-tests/`.
 
-| Path | Purpose | Command |
-| --- | --- | --- |
-| `backend/scripts/manual-tests/artistNormalization.ts` | artist normalization diagnostics | `npm --prefix backend run test:manual:artist-normalization` |
-| `backend/scripts/manual-tests/downloadDedup.ts` | end-to-end download dedup diagnostics | `npm --prefix backend run test:manual:download-dedup` |
+| Path                                                  | Purpose                               | Command                                                     |
+| ----------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| `backend/scripts/manual-tests/artistNormalization.ts` | artist normalization diagnostics      | `npm --prefix backend run test:manual:artist-normalization` |
+| `backend/scripts/manual-tests/downloadDedup.ts`       | end-to-end download dedup diagnostics | `npm --prefix backend run test:manual:download-dedup`       |
 
 These scripts intentionally run outside Jest because they are operator diagnostics and may require live DB/service state.
 
 ### Frontend
 
-| Path | Scope |
-| --- | --- |
-| `frontend/tests/unit/*.test.ts` | lightweight unit/logic tests (Node test runner + TS strip-types) |
-| `frontend/tests/component/*.test.ts` | server-rendered component regressions for targeted UI surfaces |
-| `frontend/tests/e2e/*.spec.ts` | high-level smoke and user-flow tests |
-| `frontend/tests/e2e/predeploy/*.spec.ts` | release-readiness/predeploy flows |
-| `frontend/tests/e2e/fixtures/` | Playwright helper fixtures |
+| Path                                     | Scope                                                            |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `frontend/tests/unit/*.test.ts`          | lightweight unit/logic tests (Node test runner + TS strip-types) |
+| `frontend/tests/component/*.test.ts`     | server-rendered component regressions for targeted UI surfaces   |
+| `frontend/tests/e2e/*.spec.ts`           | high-level smoke and user-flow tests                             |
+| `frontend/tests/e2e/predeploy/*.spec.ts` | release-readiness/predeploy flows                                |
+| `frontend/tests/e2e/fixtures/`           | Playwright helper fixtures                                       |
 
 ## Naming Conventions
 
@@ -83,8 +87,8 @@ These scripts intentionally run outside Jest because they are operator diagnosti
 - `*.component.test.ts` under `frontend/tests/component/`.
 - Use Node test runner with module-mock support and the existing `tsx` loader path.
 - For social-surface changed-line coverage gating, use:
-  - `npm --prefix frontend run test:component:coverage:changed`
-  - Optional base override: `SOCIAL_COVERAGE_BASE=<git-ref> npm --prefix frontend run test:component:coverage:changed`
+    - `npm --prefix frontend run test:component:coverage:changed`
+    - Optional base override: `SOCIAL_COVERAGE_BASE=<git-ref> npm --prefix frontend run test:component:coverage:changed`
 
 ## Running Tests Locally
 
@@ -139,10 +143,10 @@ Notes:
 
 ### Python sidecars
 
-Use a Python 3.11+ environment with the quality tools from
+Use a Python 3.13+ environment with the quality tools from
 `services/requirements-quality.txt` and each sidecar's test requirements
 installed. The CI quality job uses Python 3.14 because tiddl requires Python
-3.13 or newer, while mypy retains Python 3.12 semantics through `pyproject.toml`;
+3.13 or newer, while mypy retains Python 3.11 semantics through `pyproject.toml`;
 the shared environment mirrors local verification.
 
 ```bash
@@ -185,15 +189,15 @@ Quality visibility workflow:
 
 - `.github/workflows/quality-visibility.yml`
 
-| CI job | Blocking | Checks |
-| --- | --- | --- |
-| Backend Tests + Coverage | Configurable | Backend Jest tests plus coverage summary and artifacts. |
-| Frontend Quality Visibility | Configurable | ESLint with the enforced 183-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility. |
-| Python Sidecar Tests (matrix) | Configurable | The four sidecar `pytest` suites. |
-| Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks. |
-| Helm Chart Visibility | Configurable | Helm lint and render assertions. |
-| Python Quality | **Yes** | `ruff check`, `ruff format --check`, the configured aggregate `mypy` run, and the standalone Tidal downloader `mypy` run needed to avoid the top-level `app` module collision. |
-| Enforcement Gates | **Yes** | Route-error canonicalization and its self-test, the 130-use hardcoded-hex baseline, OpenAPI route synchronization, and repository-wide Prettier checks. |
+| CI job                                 | Blocking     | Checks                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend Tests + Coverage               | Configurable | Backend Jest tests plus coverage summary and artifacts.                                                                                                                                                                                                                                                               |
+| Frontend Quality Visibility            | Configurable | ESLint with the enforced 183-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility.                                                                                                                                                                                      |
+| Python Sidecar Tests (matrix)          | Configurable | The four sidecar `pytest` suites. The root AIO image-hardening suite runs in Python Quality and is also included by local `npm run verify:python`.                                                                                                                                                                    |
+| Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
+| Helm Chart Visibility                  | Configurable | Helm lint and render assertions.                                                                                                                                                                                                                                                                                      |
+| Python Quality                         | **Yes**      | Root AIO image-hardening tests, `ruff check`, `ruff format --check`, the aggregate `mypy` run, and four per-sidecar `mypy` runs that avoid top-level module collisions.                                                                                                                                               |
+| Enforcement Gates                      | **Yes**      | Route-error canonicalization and its self-test, Dockerfile hygiene, the 130-use hardcoded-hex baseline, OpenAPI route synchronization, and repository-wide Prettier checks. Local `npm run verify:gates` also runs the infrastructure/release helper tests; the CI enforcement job does not currently run that check. |
 
 The configurable visibility jobs are non-blocking by default and can be made
 blocking through repository variables. `Python Quality` and `Enforcement Gates`
@@ -214,7 +218,8 @@ do not use `continue-on-error`; failures always fail the workflow.
 - `npm run format:check` applies Prettier checks to the contract, backend,
   frontend, root scripts, and root JSON. `ruff format --check services/` is the
   corresponding blocking Python format check.
-- `ruff check services/` and the two mypy invocations enforce the configured
+- `ruff check services/`, the aggregate mypy invocation, and four per-sidecar
+  mypy invocations enforce the configured
   Python lint and typing baseline.
 
 Backend coverage artifacts include:
@@ -307,10 +312,12 @@ Release helpers remain maintainer-invoked workflows outside `awm verify`; use `s
 
 Python sidecar `pytest` suites exist for all four sidecars:
 
-- `services/audio-analyzer/tests/` (3 test functions)
-- `services/audio-analyzer-clap/tests/` (2 test functions)
-- `services/tidal-downloader/tests/` (55 test functions)
-- `services/ytmusic-streamer/tests/` (81 test functions)
+- `services/audio-analyzer/tests/`
+- `services/audio-analyzer-clap/tests/`
+- `services/tidal-downloader/tests/`
+- `services/ytmusic-streamer/tests/`
+
+Counts drift; see CI output for current totals.
 
 All four sidecars have a `requirements-test.txt` manifest and run in CI through
 the `Python Sidecar Tests` matrix job. Run each sidecar suite in a separate

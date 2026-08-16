@@ -12,8 +12,8 @@ In production frontend images, `NEXT_PUBLIC_*` values are compiled into the brow
 
 - Runtime changes to `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_PATH_MODE`, or `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` on a pre-published image do not change browser behavior.
 - For pre-published images, use reverse-proxy path routing for backend API traffic:
-  - route `/api/*` to backend (`:3006`)
-  - route app pages/assets to frontend (`:3030`)
+    - route `/api/*` to backend (`:3006`)
+    - route app pages/assets to frontend (`:3030`)
 - Keep frontend runtime `BACKEND_URL` pointed at backend so frontend proxy routes can reach the API.
 - In Helm individual mode, the chart injects `BACKEND_URL` to the in-cluster backend service by default, sets `NEXT_PUBLIC_API_URL` to an empty string (equivalent to unset for prebuilt image behavior), and mirrors `LISTEN_TOGETHER_ALLOW_POLLING` into `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` (still subject to build-time behavior in prebuilt images).
 
@@ -34,6 +34,9 @@ docker run -d \
 
 Open `http://localhost:3030` and create your account.
 
+The AIO image starts both analyzers by default. Plan for up to 8 GiB of memory,
+or disable audio analysis on constrained hosts.
+
 ### AIO with GPU acceleration (optional)
 
 Requires NVIDIA Container Toolkit. See [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md).
@@ -50,26 +53,29 @@ docker run -d \
 
 ## Compose File Matrix
 
-| File | Purpose | Typical command |
-| --- | --- | --- |
-| `docker-compose.aio.yml` | All-in-one (AIO) soundspan container (frontend+backend+db+redis bundled) | `docker compose -f docker-compose.aio.yml up -d` |
-| `docker-compose.yml` | Split stack (frontend, backend, postgres, redis, sidecars, analyzers) with deployment-safe canonical ports and optional worker profile | `docker compose -f docker-compose.yml up -d` |
-| `docker-compose.override.ha.yml` | HA-focused override for split stack (`backend` API role, dynamic backend host-port for scale-out, worker profile ready) | `docker compose -f docker-compose.yml -f docker-compose.override.ha.yml --profile worker up -d` |
-| `docker-compose.services.yml` | Optional external Lidarr service layered onto either stack above | `docker compose -f docker-compose.yml -f docker-compose.services.yml up -d` |
-| `docker-compose.local.yml` | Local npm/tsx host-run dependencies only (postgres+redis; optional analyzer profile), using +1 collision-avoidance ports | `docker compose -f docker-compose.local.yml up -d postgres-local redis-local` |
-| `docker-compose.override.lite-mode.yml` | Optional override to disable analyzers in split stack | `cp docker-compose.override.lite-mode.yml docker-compose.override.yml && docker compose up -d` |
-| `docker-bake.json` | Docker Buildx Bake file for building images by group (core/db/external/analysis/aio) | `docker buildx bake core` |
+| File                                    | Purpose                                                                                                                                | Typical command                                                                                 |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `docker-compose.aio.yml`                | All-in-one (AIO) soundspan container (frontend+backend+db+redis bundled)                                                               | `docker compose -f docker-compose.aio.yml up -d`                                                |
+| `docker-compose.yml`                    | Split stack (frontend, backend, postgres, redis, sidecars, analyzers) with deployment-safe canonical ports and optional worker profile | `docker compose -f docker-compose.yml up -d`                                                    |
+| `docker-compose.override.ha.yml`        | HA-focused override for split stack (`backend` API role, dynamic backend host-port for scale-out, worker profile ready)                | `docker compose -f docker-compose.yml -f docker-compose.override.ha.yml --profile worker up -d` |
+| `docker-compose.services.yml`           | Optional external Lidarr service layered onto either stack above                                                                       | `docker compose -f docker-compose.yml -f docker-compose.services.yml up -d`                     |
+| `docker-compose.local.yml`              | Local npm/tsx host-run dependencies only (postgres+redis; optional analyzer profile), using +1 collision-avoidance ports               | `docker compose -f docker-compose.local.yml up -d postgres-local redis-local`                   |
+| `docker-compose.override.lite-mode.yml` | Optional override to disable analyzers in split stack                                                                                  | `cp docker-compose.override.lite-mode.yml docker-compose.override.yml && docker compose up -d`  |
+| `docker-bake.json`                      | Docker Buildx Bake file for building images by group (core/db/external/analysis/aio)                                                   | `docker buildx bake core`                                                                       |
 
 Deployment defaults in compose files use canonical ports:
 
 - Frontend: `3030 -> 3030`
 - Backend: `3006 -> 3006`
-- PostgreSQL: `5432 -> 5432`
-- Redis: `6379 -> 6379`
+- PostgreSQL: `5432 -> 5432` (bound to `127.0.0.1`)
+- Redis: `6379 -> 6379` (bound to `127.0.0.1`)
 
 For local host-run development, use +1 ports to avoid collisions:
 
 ```bash
+./scripts/dev-setup.sh
+
+# Manual startup after setup
 docker compose -f docker-compose.local.yml up -d postgres-local redis-local
 cd backend && PORT=3007 npm run dev
 cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_PATH_MODE=direct npm run dev
@@ -89,7 +95,7 @@ SOUNDSPAN_UI_BASE_URL=http://127.0.0.1:3031 npm --prefix frontend run test:prede
 - On constrained machines, prefer targeted Playwright chunks with one worker before full suites:
 
 ```bash
-SOUNDSPAN_UI_BASE_URL=http://127.0.0.1:3031 npx --prefix frontend playwright test tests/e2e/predeploy/social-history.spec.ts --workers=1
+SOUNDSPAN_UI_BASE_URL=http://127.0.0.1:3031 npm --prefix frontend exec -- playwright test tests/e2e/predeploy/social-history.spec.ts --workers=1
 ```
 
 ## Compose Multi-Replica Notes (Split Stack)
@@ -156,14 +162,14 @@ docker buildx version
 
 ### Groups
 
-| Group | Targets | Description |
-| --- | --- | --- |
-| `default` | frontend, backend, backend-worker, tidal-downloader, ytmusic-streamer, audio-analyzer, audio-analyzer-clap | All buildable split-stack images |
-| `core` | frontend, backend, backend-worker | Application services only |
-| `db` | postgres, redis | Tags upstream images locally (pgvector/pgvector:pg16, redis:7-alpine) |
-| `external` | tidal-downloader, ytmusic-streamer | Streaming sidecars |
-| `analysis` | audio-analyzer, audio-analyzer-clap | ML audio analysis services |
-| `aio` | soundspan-aio | All-in-one container |
+| Group      | Targets                                                                                                    | Description                                                           |
+| ---------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `default`  | frontend, backend, backend-worker, tidal-downloader, ytmusic-streamer, audio-analyzer, audio-analyzer-clap | All buildable split-stack images                                      |
+| `core`     | frontend, backend, backend-worker                                                                          | Application services only                                             |
+| `db`       | postgres, redis                                                                                            | Tags upstream images locally (pgvector/pgvector:pg16, redis:7-alpine) |
+| `external` | tidal-downloader, ytmusic-streamer                                                                         | Streaming sidecars                                                    |
+| `analysis` | audio-analyzer, audio-analyzer-clap                                                                        | ML audio analysis services                                            |
+| `aio`      | soundspan-aio                                                                                              | All-in-one container                                                  |
 
 ### Usage
 
@@ -200,7 +206,10 @@ docker buildx bake core external analysis
 Override tags (useful for pushing to a registry):
 
 ```bash
-docker buildx bake core --set '*.tags=ghcr.io/soundspan/soundspan-frontend:1.0.0' --set frontend.tags=ghcr.io/soundspan/soundspan-frontend:1.0.0
+docker buildx bake core \
+  --set frontend.tags=ghcr.io/soundspan/soundspan-frontend:1.0.0 \
+  --set backend.tags=ghcr.io/soundspan/soundspan-backend:1.0.0 \
+  --set backend-worker.tags=ghcr.io/soundspan/soundspan-backend-worker:1.0.0
 ```
 
 Override frontend build args:
@@ -219,7 +228,22 @@ docker buildx bake --print core
 
 ### Using bake with Compose
 
-You can continue using `docker compose up -d` after building with bake — Compose will use the locally tagged images if they match. To ensure Compose uses your bake-built images instead of rebuilding, reference the image tags in your `.env` or compose override.
+You can continue using `docker compose up -d` after building with bake. The
+split-stack services are build-only in `docker-compose.yml`, so use an override
+with explicit image keys when you want Compose to run the bake-built tags:
+
+```yaml
+# docker-compose.override.yml
+services:
+    frontend:
+        image: ghcr.io/soundspan/soundspan-frontend:1.0.0
+    backend:
+        image: ghcr.io/soundspan/soundspan-backend:1.0.0
+    backend-worker:
+        image: ghcr.io/soundspan/soundspan-backend-worker:1.0.0
+```
+
+Then run `docker compose --profile worker up -d`.
 
 ### Notes
 
@@ -229,9 +253,20 @@ You can continue using `docker compose up -d` after building with bake — Compo
 
 ## Updating a Deployment
 
+### AIO or other prebuilt images
+
 ```bash
-docker compose pull
-docker compose up -d
+docker compose -f docker-compose.aio.yml pull && \
+  docker compose -f docker-compose.aio.yml up -d
+```
+
+### Split stack
+
+The split-stack application and sidecar services are build-only. Refresh base
+images, rebuild locally, and restart the stack:
+
+```bash
+docker compose build --pull && docker compose up -d
 ```
 
 ## Maintainer Release Flow (Images + Helm Chart)
@@ -245,6 +280,7 @@ node scripts/release/version-sync.mjs --write --version 1.6.0
 ```
 
 This updates and verifies:
+
 - `backend/package.json` + `backend/package-lock.json`
 - `frontend/package.json` + `frontend/package-lock.json`
 - `charts/soundspan/Chart.yaml` (`version` + `appVersion`)
@@ -252,6 +288,7 @@ This updates and verifies:
 - `CHANGELOG.md` (`[Unreleased]` promotion + scaffold reset)
 
 It also validates the expected package names:
+
 - `soundspan-backend`
 - `soundspan-frontend`
 
@@ -274,6 +311,7 @@ node scripts/release/generate-notes.mjs \
 ```
 
 Helm release reference for notes and operator docs:
+
 - chart repo URL: `https://soundspan.github.io/soundspan`
 - chart name: `soundspan`
 - chart reference: `soundspan/soundspan`
@@ -285,10 +323,19 @@ gh release create 1.6.0 --target main --notes-file /tmp/soundspan-1.6.0-release-
 ```
 
 Publishing the release triggers:
+
 - All Docker image workflows (release-tagged images in GHCR)
 - Helm chart publishing to `gh-pages`
 
 The Helm chart workflow waits until all required release-tagged images exist in GHCR before publishing chart artifacts.
+
+### Prereleases
+
+Prerelease tags do not update the Docker `:latest` tags, but the Helm workflow
+still publishes the prerelease chart version to the repository index. Mark the
+GitHub release as a prerelease, for example with `gh release create
+2.2.0-rc.1 --prerelease`, and pin Helm upgrades with `--version 2.2.0-rc.1`.
+The release validator rejects semantic versions containing build metadata (`+`).
 
 ## Release Channels
 
@@ -325,6 +372,8 @@ If startup logs show permission errors, `chown` the host path to the UID/GID sho
 - API server (internal)
 - PostgreSQL database (internal)
 - Redis cache (internal)
+- MusicCNN/Essentia audio analyzer (enabled by default)
+- CLAP embedding analyzer (enabled by default)
 
 ---
 

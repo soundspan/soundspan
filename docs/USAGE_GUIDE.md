@@ -13,8 +13,8 @@ For configuration and security, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURAT
 
 ## Home and Search
 
-- Home surfaces continue listening, recently added items, radio stations, mixes, and recommendations
-- Search includes tabs for library, discovery, and podcasts
+- Home surfaces continue listening, recently added artists, Made For You mixes, recommendations, popular artists, community playlists, podcasts, and audiobooks
+- Search includes tabs for library, peers, discovery, Soulseek, and podcasts; peer and Soulseek tabs appear when their integrations are enabled
 - Discovery search supports preview/download/subscription actions
 
 ## Artist Playback Order
@@ -37,22 +37,22 @@ Player quality badges show active source details (codec/bitrate or bit depth/sam
 
 - Activity panel `Social` tab lists users who are online and sharing presence.
 - If a user shares listening activity, their current track appears inline in the Social roster.
-- Non-admin accounts only see `Notifications` and `Social` in the activity panel (`Active` and `History` remain admin-only).
+- Non-admin accounts only see `Notifications` and `Social` in the activity panel (`Active`, `History`, and `Imports` remain admin-only).
 - Open `My History` from `Settings -> History & Personalization` (`Open My History`) for queue-like controls: click-to-play, add to queue, and add to playlist.
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-| --- | --- |
-| Space | Play / Pause |
-| N | Next track |
-| P | Previous track |
-| S | Toggle shuffle |
-| M | Toggle mute |
-| Arrow Up | Volume up |
-| Arrow Down | Volume down |
-| Arrow Right | Seek forward 10 seconds |
-| Arrow Left | Seek backward 10 seconds |
+| Key         | Action                   |
+| ----------- | ------------------------ |
+| Space       | Play / Pause             |
+| N           | Next track               |
+| P           | Previous track           |
+| S           | Toggle shuffle           |
+| M           | Toggle mute              |
+| Arrow Up    | Volume up                |
+| Arrow Down  | Volume down              |
+| Arrow Right | Seek forward 10 seconds  |
+| Arrow Left  | Seek backward 10 seconds |
 
 ## Administration
 
@@ -67,7 +67,7 @@ Admins can manage users, integrations, downloads, enrichment automation, queue d
 - Enrichment controls
 - Activity panel events and active jobs
 - API keys and Swagger docs
-- Bull Board dashboard (`/admin/queues`)
+- Bull Board dashboard (`/api/admin/queues`)
 
 Technical admin configuration and security notes are in [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md).
 
@@ -77,5 +77,5 @@ Technical admin configuration and security notes are in [`CONFIGURATION_AND_SECU
 
 - [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
 - [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Environment variables and security hardening
-- [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, OpenSubsonic
+- [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, podcasts, and OpenSubsonic
 - [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container

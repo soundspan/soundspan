@@ -4,11 +4,14 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
 
 ### Added
 
 ### Changed
+
+- Documentation drift sweep: corrected environment/deployment/API references across the docs tree and refreshed the route, feature, and test indexes.
 
 ### Fixed
 
@@ -33,49 +36,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added administrator visibility for SSO-linked and OIDC-only users.
 - Added opt-in federated library sharing, disabled by default with
   `FEDERATION_ENABLED=false`:
-  - Host instances expose a read-only `/api/federation/v1` manifest, catalog,
-    delta, cover, and Range-streaming API through scoped, HMAC-protected peer
-    credentials, short-lived pairing codes, and administrator lifecycle
-    controls.
-  - Consumer instances link peers, run bounded catalog sync and health jobs,
-    materialize peer music with local-wins identity deduplication, and proxy
-    covers and streams without exposing encrypted outbound tokens to browsers.
-    `FEDERATION_SYNC_INTERVAL_MINUTES` controls sync scheduling (default `15`).
-    Deleting a peer also permanently removes its mirrored catalog and any
-    playlist items that reference those mirrored tracks.
-  - Library, search, artist, album, playlist, queue, and now-playing surfaces
-    show peer provenance, source filters, and offline state. Deduplicated peer
-    copies stay hidden while the matching local track wins.
-  - Federated tracks now participate in mixes, radio, recommendations,
-    discovery, vibe/similarity, mood buckets, shuffle, Listen Together,
-    metadata-based lyrics lookup, and Subsonic metadata/playlists/playback.
-    Local-wins deduplication suppresses peer twins while their local winner is
-    active. File analysis/enrichment, imports, acquisition/offline downloads,
-    share links, and denormalized artist counts remain local-only.
-  - Catalog sync carries optional analyzer feature columns with bounded wire
-    validation. Complete non-Range peer streams use the consumer's existing
-    transcode cache with concurrent-fill coalescing; Range misses pass through
-    without partial caching, and audio-hash changes or peer deletion remove
-    cached rows and files.
-  - Federation-aware deletion cleanup writes track, album, and artist
-    tombstones transactionally.
-    `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;
-    minimum `3`).
-  - Federation peers can now link bidirectionally as one `BOTH` row. Reciprocal
-    pairing uses bounded callbacks and degrades to a working one-directional
-    link with a warning when the callback fails. Inbound authentication and
-    outbound health now have independent statuses. (#479)
-  - Federation now includes podcast catalog listings and full audiobook
-    mirrors. Podcast feeds remain native subscriptions and episodes are not
-    mirrored. Federated audiobooks support list, detail, search, cover, Range
-    streaming, and local progress without requiring Audiobookshelf on the
-    consumer. The double proxy inherits the existing Audiobookshelf
-    `media.tracks[0]` single-track limitation. Closes #477.
-  - Federation peers now have per-peer duplicate visibility and nullable host
-    stream caps. Distributed concurrent-stream admission returns typed `429`
-    responses with retry guidance, bandwidth caps pace track and audiobook
-    streams, and administrators can keyset-page and pin link/unlink dedup
-    decisions or reset them to automatic matching. Closes #476.
+    - Host instances expose a read-only `/api/federation/v1` manifest, catalog,
+      delta, cover, and Range-streaming API through scoped, HMAC-protected peer
+      credentials, short-lived pairing codes, and administrator lifecycle
+      controls.
+    - Consumer instances link peers, run bounded catalog sync and health jobs,
+      materialize peer music with local-wins identity deduplication, and proxy
+      covers and streams without exposing encrypted outbound tokens to browsers.
+      `FEDERATION_SYNC_INTERVAL_MINUTES` controls sync scheduling (default `15`).
+      Deleting a peer also permanently removes its mirrored catalog and any
+      playlist items that reference those mirrored tracks.
+    - Library, search, artist, album, playlist, queue, and now-playing surfaces
+      show peer provenance, source filters, and offline state. Deduplicated peer
+      copies stay hidden while the matching local track wins.
+    - Federated tracks now participate in mixes, radio, recommendations,
+      discovery, vibe/similarity, mood buckets, shuffle, Listen Together,
+      metadata-based lyrics lookup, and Subsonic metadata/playlists/playback.
+      Local-wins deduplication suppresses peer twins while their local winner is
+      active. File analysis/enrichment, imports, acquisition/offline downloads,
+      share links, and denormalized artist counts remain local-only.
+    - Catalog sync carries optional analyzer feature columns with bounded wire
+      validation. Complete non-Range peer streams use the consumer's existing
+      transcode cache with concurrent-fill coalescing; Range misses pass through
+      without partial caching, and audio-hash changes or peer deletion remove
+      cached rows and files.
+    - Federation-aware deletion cleanup writes track, album, and artist
+      tombstones transactionally.
+      `FEDERATION_TOMBSTONE_RETENTION_DAYS` controls retention (default `90`;
+      minimum `3`).
+    - Federation peers can now link bidirectionally as one `BOTH` row. Reciprocal
+      pairing uses bounded callbacks and degrades to a working one-directional
+      link with a warning when the callback fails. Inbound authentication and
+      outbound health now have independent statuses. (#479)
+    - Federation now includes podcast catalog listings and full audiobook
+      mirrors. Podcast feeds remain native subscriptions and episodes are not
+      mirrored. Federated audiobooks support list, detail, search, cover, Range
+      streaming, and local progress without requiring Audiobookshelf on the
+      consumer. The double proxy inherits the existing Audiobookshelf
+      `media.tracks[0]` single-track limitation. Closes #477.
+    - Federation peers now have per-peer duplicate visibility and nullable host
+      stream caps. Distributed concurrent-stream admission returns typed `429`
+      responses with retry guidance, bandwidth caps pace track and audiobook
+      streams, and administrators can keyset-page and pin link/unlink dedup
+      decisions or reset them to automatic matching. Closes #476.
 - Removed library tracks are now retained for automatic revival when their
   files return. `TRACK_REMOVAL_RETENTION_DAYS` configures the retention window
   before the daily purge permanently deletes them (default `90`; `0` purges
@@ -435,22 +438,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   realigned.
 - Frontend (refactor slice P25, frontend-dedup): mechanical duplication
   collapse across the frontend, no user-visible behavior change.
-  - YouTube Music account linking (`YouTubeMusicSection`) now uses the shared
-    `useDeviceAuthPolling` hook instead of a third hand-rolled device-code
-    polling/expiry/countdown state machine, matching the Tidal sections. This
-    inherits the hook's bounded, race-safe polling, tracked timers with
-    deterministic cleanup, and generation-guarded cancellation.
-  - Extracted the duplicated device-code linking UI shared by the TIDAL and
-    YouTube Music settings sections into one presentational component
-    (`features/settings/components/ui/DeviceAuthLinkPanel`).
-  - Extracted the copy-pasted Explore media card (square thumbnail + title +
-    subtitle) into a shared `features/explore/components/BrowseCard`, adopted by
-    the featured-shelves and mixes sections for both TIDAL and YouTube Music.
-  - Consolidated nine local time/duration re-implementations onto
-    `utils/formatTime`, adding a documented `formatRelativeTime` helper for the
-    activity tabs (History, Notifications, Active Downloads).
-  - Replaced index-based React keys with stable content-derived keys in
-    `PreviewEpisodes` and `SyncedLyrics`.
+    - YouTube Music account linking (`YouTubeMusicSection`) now uses the shared
+      `useDeviceAuthPolling` hook instead of a third hand-rolled device-code
+      polling/expiry/countdown state machine, matching the Tidal sections. This
+      inherits the hook's bounded, race-safe polling, tracked timers with
+      deterministic cleanup, and generation-guarded cancellation.
+    - Extracted the duplicated device-code linking UI shared by the TIDAL and
+      YouTube Music settings sections into one presentational component
+      (`features/settings/components/ui/DeviceAuthLinkPanel`).
+    - Extracted the copy-pasted Explore media card (square thumbnail + title +
+      subtitle) into a shared `features/explore/components/BrowseCard`, adopted by
+      the featured-shelves and mixes sections for both TIDAL and YouTube Music.
+    - Consolidated nine local time/duration re-implementations onto
+      `utils/formatTime`, adding a documented `formatRelativeTime` helper for the
+      activity tabs (History, Notifications, Active Downloads).
+    - Replaced index-based React keys with stable content-derived keys in
+      `PreviewEpisodes` and `SyncedLyrics`.
 - Backend: began consolidating scattered `process.env` reads behind the
   `backend/src/config.ts` boundary mandated by `AGENTS.md`. Added typed config
   sections (`jwtSecret`, `docsPublic`, `adminResetPassword`,
@@ -806,31 +809,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanently stopping after a transient failure, and audiobook/podcast
   restore failures are logged instead of surfacing as unhandled rejections.
 - Backend reliability hardening (no behavior change for healthy paths):
-  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
-    forever when an album title cannot be resolved. The previous re-query
-    pagination re-fetched the same `albumId: null` rows on every iteration
-    (latching `isRunning` and inflating the processed counter without bound);
-    both the Tidal and YouTube Music phases now use id-cursor pagination so
-    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
-    safety bound.
-  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
-    **all** logging. Unrecognized values now fall back to the environment
-    default (`warn` in production, `debug` otherwise) and emit a one-time
-    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
-    matching is also hardened against prototype keys (`constructor`, `toString`).
-  - The music-library scanner's recursive directory walk was replaced with a
-    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
-    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
-    pathological trees.
-  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
-    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
-    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
-    no longer hang a worker or request indefinitely.
-  - Untracked module-scope cleanup intervals (Soulseek search-session and
-    failed-user pruning) are now `unref()`'d so they never keep the process or a
-    Jest worker alive, and the worker scheduler / discover-processor ioredis
-    lock clients now connect lazily under Jest to stop background reconnect
-    loops from logging after test teardown.
+    - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
+      forever when an album title cannot be resolved. The previous re-query
+      pagination re-fetched the same `albumId: null` rows on every iteration
+      (latching `isRunning` and inflating the processed counter without bound);
+      both the Tidal and YouTube Music phases now use id-cursor pagination so
+      each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
+      safety bound.
+    - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
+      **all** logging. Unrecognized values now fall back to the environment
+      default (`warn` in production, `debug` otherwise) and emit a one-time
+      startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
+      matching is also hardened against prototype keys (`constructor`, `toString`).
+    - The music-library scanner's recursive directory walk was replaced with a
+      bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
+      skips symbolic links, preventing stack overflows and symlink-cycle hangs on
+      pathological trees.
+    - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
+      unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
+      cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
+      no longer hang a worker or request indefinitely.
+    - Untracked module-scope cleanup intervals (Soulseek search-session and
+      failed-user pruning) are now `unref()`'d so they never keep the process or a
+      Jest worker alive, and the worker scheduler / discover-processor ioredis
+      lock clients now connect lazily under Jest to stop background reconnect
+      loops from logging after test teardown.
 - Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
   monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
   `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
@@ -1394,9 +1397,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backend `archiver` bumped 7.x → 8.x with `@types/archiver` ^8 (supersedes Dependabot #179, whose dependency-only bump fails typecheck). v8 ships ESM-only with named class exports — the `archiver("zip", …)` default-export factory is gone — so the share-link zip route now constructs `new ZipArchive({ zlib: { level: 0 } })` from the same dynamic `import("archiver")`, loaded under the Node 24 images' `require(esm)` interop. The archive surface used (`.file`/`.pipe`/`.finalize()`/`on("error" | "warning")`) and the store-only (level 0) zip behavior are unchanged; the typed v8 event overloads also remove two implicitly-`any` error-handler params.
 - Backend TypeScript bumped `^5.3.3` → `^6.0.3`, matching the frontend's existing TS 6 line and staying inside ts-jest's `>=4.3 <7` peer range (TS 7 itself is un-installable until ts-jest supports it — Dependabot #180). One migration was needed: TS 6 no longer auto-includes ambient globals from every `node_modules/@types` package, which silently dropped jest's `describe`/`it`/`expect` globals across all ~300 test suites (`tsc --noEmit` reported ~30k cascade errors, every one in test files); `backend/tsconfig.json` now declares `"types": ["node", "jest"]` explicitly. Import-based `@types` resolution (express, multer, …) is unaffected by the `types` allowlist, and `src/` proper compiled unchanged — `tsc --noEmit` is back to exit 0 with zero source edits.
 - Prisma upgraded 6 → 7 (`@prisma/client` + `prisma` CLI together, both `^7.8.0`), adopting the Rust-free client architecture. The query engine binary is gone — the client now runs a bundled WASM query compiler over a real `pg` connection pool via the new `@prisma/adapter-pg` driver adapter (required in v7: the `datasources`/`datasourceUrl` constructor options were removed). A new `backend/src/utils/prismaClientFactory.ts` is the single construction point for the adapter-backed client (API/worker singleton, scripts, seeds), and the datasource URL moved from `schema.prisma` to the new `backend/prisma.config.ts` (Prisma 7 rejects `url =` in the schema; the config only wires `datasource` when `DATABASE_URL` is set so build-time `prisma generate` works without a database). Operational notes: pool sizing moved from `DATABASE_URL` query params (`connection_limit`/`pool_timeout`, a Rust-engine concept) to pg pool options (`max`/`connectionTimeoutMillis`) fed by the same `DATABASE_POOL_SIZE`/`DATABASE_POOL_TIMEOUT` envs and role-aware defaults; `binaryTargets` was removed from the generator (no engine binaries exist to pin against the container's OpenSSL anymore); Prisma 7 no longer auto-generates the client on `npm install`, so CI typecheck/test jobs gained explicit `npx prisma generate` steps; both Dockerfiles now copy `prisma.config.ts`, and the AIO image keeps a local (not global) `prisma` CLI after prune because `prisma.config.ts`'s `import "prisma/config"` must resolve from the app's `node_modules`. A `backend/package.json` `overrides` entry forces `@hono/node-server` to `^1.19.13` (the Prisma 7 CLI's `@prisma/dev` pins the vulnerable `1.19.11`; GHSA-92pp-h63x-v22m, a moderate serveStatic middleware-bypass) — dev-CLI-only tooling, never in the `@prisma/client` runtime, but pinned patched to keep Dependency Review green.
-- Backend `zod` upgraded 3.25 → 4.4 (#154), migrating all usage: `ZodError.errors` (removed in v4) → `.issues` at every route/config site that serializes validation failures, and `z.record(z.unknown())` → `z.record(z.string(), z.unknown())` (v4 requires an explicit key schema). Validation-error response envelopes are unchanged — still `{ error, details: [...issues] }` with the same status codes, and `details` carries the same issue array (`path`/`code`/`message`) it always did, since v3's `.errors` was already an alias of `.issues`. Only the issue *internals* follow zod 4's format (e.g. default message text like `"Required"` is now `"Invalid input: expected string, received undefined"`, and `invalid_type` issues no longer carry a `received` field) — no consumer in this repo asserts on those internals.
+- Backend `zod` upgraded 3.25 → 4.4 (#154), migrating all usage: `ZodError.errors` (removed in v4) → `.issues` at every route/config site that serializes validation failures, and `z.record(z.unknown())` → `z.record(z.string(), z.unknown())` (v4 requires an explicit key schema). Validation-error response envelopes are unchanged — still `{ error, details: [...issues] }` with the same status codes, and `details` carries the same issue array (`path`/`code`/`message`) it always did, since v3's `.errors` was already an alias of `.issues`. Only the issue _internals_ follow zod 4's format (e.g. default message text like `"Required"` is now `"Invalid input: expected string, received undefined"`, and `invalid_type` issues no longer carry a `received` field) — no consumer in this repo asserts on those internals.
 - Backend session store `connect-redis` bumped 7.x → 9.x (#153), migrating the express-session wiring to the v8+ API: the store is now imported as the named export `RedisStore` instead of the v7 default export (v8 dropped the default export; the constructor and its options — `client`, `ttl` — are unchanged, so the `new RedisStore({...})` call site in `index.ts` is untouched). connect-redis 9's hard peer dependency `redis@>=5` is satisfied by the node-redis 6.x client the backend already ships (#149/#158), so no client change rides along; the store's session get/set/destroy/touch path over that client is unchanged from v7's.
-- Backend `redis` (node-redis) client bumped 4.x → 6.x (#149), migrating the app off APIs the new major changed or deprecated: graceful shutdown now calls `client.close()` instead of the deprecated `quit()`; the social-presence key scan iterates `scanIterator()`'s new per-page key *arrays* (under v6 the old per-key loop would have silently collected zero presence keys, emptying the online roster); `set(..., { EX })` TTL options moved to the v6 `expiration: { type: "EX", value }` form; and the Redis lifecycle logging listens for the `end` event the client actually emits (the previous `"disconnect"` listener matched no node-redis event and never fired). Bull (ioredis) and `connect-redis` session wiring are untouched — connect-redis v7's session get/set/destroy/touch path is compatible with the v6 client, and the app never calls the store's scan-based `all`/`clear`/`length` methods.
+- Backend `redis` (node-redis) client bumped 4.x → 6.x (#149), migrating the app off APIs the new major changed or deprecated: graceful shutdown now calls `client.close()` instead of the deprecated `quit()`; the social-presence key scan iterates `scanIterator()`'s new per-page key _arrays_ (under v6 the old per-key loop would have silently collected zero presence keys, emptying the online roster); `set(..., { EX })` TTL options moved to the v6 `expiration: { type: "EX", value }` form; and the Redis lifecycle logging listens for the `end` event the client actually emits (the previous `"disconnect"` listener matched no node-redis event and never fired). Bull (ioredis) and `connect-redis` session wiring are untouched — connect-redis v7's session get/set/destroy/touch path is compatible with the v6 client, and the app never calls the store's scan-based `all`/`clear`/`length` methods.
 - Backend `@bull-board/api` and `@bull-board/express` upgraded 6.16.4 → 8.1.2 (#151). No code changes required: the v7 basePath/prefix rework and v8 `dateFormats` `Intl.DateTimeFormatOptions` breaking changes don't touch this codebase's usage (`createBullBoard` + `BullAdapter` + `ExpressAdapter.setBasePath` at `/api/admin/queues`), and the adapter import paths are unchanged. The admin queues dashboard renders as before behind `requireAuth`/`requireAdmin`.
 - Frontend toolchain bumps (#148, #99, #98): TypeScript `^5` → `^6.0.3`, ESLint `^9` → `^10.7.0`, and `lucide-react` `^0.577.0` → `^1.24.0`. ESLint 10 removed the deprecated `context.getFilename()` API that `eslint-config-next` 16.2.10's bundled `eslint-plugin-react` 7.37.5 still calls, so `eslint.config.mjs` now wraps the Next configs in `fixupConfigRules` from the official `@eslint/compat` shim (new devDependency, `^2.1.0`) — to be dropped once `eslint-config-next` supports ESLint 10 natively. The install also floated `eslint-plugin-react-hooks` 7.0 → 7.1, whose new `react-hooks/purity` compiler rule joins the existing warn-level debt-control block (one pre-existing `Date.now()`-in-`useMemo` finding in `app/discover/page.tsx`). lucide-react 1.0 removed brand icons, so the YouTube Music settings card's `Youtube` icon is replaced with `SquarePlay`, the closest generic stand-in.
 - The frontend's custom streaming proxy (`frontend/server.js` + `frontend/server-proxy.js`, the path every `/api`, `/rest`, and Listen Together socket request takes in production) now runs `http-proxy-middleware` 4.x (from ^3.0.5, #152). v4 ships as ESM (loaded via Node's `require(esm)` — fine on the Node 24 images/CI) and swaps the underlying proxy from the unmaintained `http-proxy` to `httpxy`; the options surface used here (`target`/`changeOrigin`/`ws`/`xfwd`/`timeout`/`proxyTimeout`, `on.error`, `on.proxyReq`, `.upgrade`) is unchanged, so no code migration was needed — verified by the `serverBackendProxy` unit suite plus a live smoke of plain, chunked-streaming, 503 `API_PROXY_UNAVAILABLE`, and 504 `UPSTREAM_TIMEOUT` responses through the real server. Note: hpm v4's `engines` floor is Node `^22.15 || ^24 || >=26`, so the custom server no longer supports Node 20/21 hosts; the package declarations now require Node `>=24.0.0` to match.
@@ -1450,7 +1453,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The animated player UI (the mini/overlay/full-player shell) no longer
   re-renders 4×/second during playback — smoother UI with less battery drain and
   jank on mobile. The player render root now subscribes to the granular playback
-  *state* context instead of the merged clock hook, and the engine clock is
+  _state_ context instead of the merged clock hook, and the engine clock is
   published to React state at display-second granularity while a full-precision
   clock is preserved for seek-lock and resume/progress persistence (roadmap F12
   items A+B).
@@ -1510,7 +1513,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Queue auto-advance can no longer land on a silently paused next track (#53). Track-end advancement now *declares* play intent — the end handler stamps a bounded (30s) intent that the next load consumes for its autoplay decision — instead of inferring it from transient UI playing state, which raced the element's `pause`→`ended` event pair under the native engine (the element's pause fires before ended, so both the isPlaying mirror and `engine.isPlaying()` could read false by load time). And when autoplay is rejected with `NotAllowedError` in a hidden tab (auto-advance while tabbed away), the native engine now retries `play()` once on the hidden→visible transition instead of sitting silent until a user gesture; the one-shot gesture retry stays armed as the fallback, and a user pause in between is respected.
+- Queue auto-advance can no longer land on a silently paused next track (#53). Track-end advancement now _declares_ play intent — the end handler stamps a bounded (30s) intent that the next load consumes for its autoplay decision — instead of inferring it from transient UI playing state, which raced the element's `pause`→`ended` event pair under the native engine (the element's pause fires before ended, so both the isPlaying mirror and `engine.isPlaying()` could read false by load time). And when autoplay is rejected with `NotAllowedError` in a hidden tab (auto-advance while tabbed away), the native engine now retries `play()` once on the hidden→visible transition instead of sitting silent until a user gesture; the one-shot gesture retry stays armed as the fallback, and a user pause in between is respected.
 - Clearing the queue actually sticks now (#52). `DELETE /api/playback-state` removed only the caller's device row, while `GET /api/playback-state` still fell back to the shared pre-device `legacy` row and opportunistically re-migrated it onto the device — so the next playback-state poll resurrected the entire cleared queue within a minute. An explicit clear now deletes the legacy row along with the device row; the GET fallback's legacy migration for genuinely new devices is unchanged.
 - Repaired the five backend radio test failures that shipped silently with 1.7.0's generation-diversity work (#46): the library route tests' config mock lacked the new `generationDiversity` block, their mock chains didn't account for the diversify stage's artist lookup query, and the vibe random-filler matcher still required the `take` parameter that #46 replaced with uniform sampling. The backend "Tests + Coverage" job is a non-blocking visibility job, so the failures never turned a run red — worth revisiting alongside the CI gating gap tracked in #54.
 
@@ -1542,7 +1545,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The empty-string overwrite hazard is closed for **all** stored secrets, not just TIDAL. `POST /api/system-settings` now treats every encrypted secret field (`lidarrApiKey`, `lidarrWebhookSecret`, `openaiApiKey`, `fanartApiKey`, `lastfmApiKey`, `audiobookshelfApiKey`, `soulseekPassword`, `spotifyClientSecret`, `ytMusicClientSecret`) as write-only with explicit semantics: a non-empty value replaces the secret, an empty string is a no-op (so a settings-form round-trip can never wipe a stored credential), and `null` explicitly clears it. The guard iterates the canonical `ENCRYPTED_SETTINGS_COLUMNS` list, so future secret columns are covered automatically, and the post-save consumers (`.env` file sync, Lidarr webhook auto-configuration) resolve the same effective values — previously the `.env` sync wrote `null` over `LIDARR_API_KEY`/`FANART_API_KEY`/`OPENAI_API_KEY`/`AUDIOBOOKSHELF_API_KEY` on the identical empty-string round-trip. Note: clearing a secret from the settings UI (by emptying the field) is no longer possible — disable the service instead, or send an explicit `null` via the API. The Soulseek connection is also no longer bounced when the settings form round-trips an empty password.
 - Library scans no longer starve the worker's event loop and get the worker killed. The 1.6.0 opus-duration fix made every file pay for a full-file `duration: true` parse; with the scanner's 10-way concurrency a large scan pegged the single Node thread for minutes, so Bull couldn't renew job locks ("Missing lock"/"job stalled" errors, scans endlessly re-queued) and the liveness probe timed out until the kubelet killed the worker — on repeat, on both replicas. The scanner now does a cheap header-only parse first and pays for the full-file parse only when the header lacks a duration (ogg/opus, e.g. YouTube downloads), preserving the 1.6.0 fix at a fraction of the cost.
 - "Remove from playlist" works again (#34). The playlist page reads through the React Query cache, but the remove handler never updated or invalidated it after the DELETE succeeded, so the track stayed visible with no feedback (its sibling pending-track handler invalidated correctly, which is why only regular removals appeared broken). The removed row now disappears from the cache immediately (matching the backend's item-id-first/track-id-fallback semantics), the playlist is refetched for authoritative state, and a failed removal now shows an error toast instead of being logged silently.
-- The "When Primary Source Fails: Skip" setting is now honored when the primary download source is unavailable *before* dispatch. Previously the album download processor silently rerouted to any other available source (which is how downloads configured TIDAL-primary-with-Skip ended up in Lidarr); now an unavailable primary with Skip fails the job with a clear error, an explicitly configured fallback is dispatched only if that fallback service is itself available (failing the job otherwise, even when a third source is up), and only legacy settings rows with no stored fallback preference keep the old auto-detect rerouting. Pre-existing limitation, unchanged by this fix: manual album downloads have two dispatch pipelines (TIDAL, and the Lidarr-backed download manager), so a non-TIDAL selection — including a `soulseek` fallback — is still executed by the Lidarr-backed manager.
+- The "When Primary Source Fails: Skip" setting is now honored when the primary download source is unavailable _before_ dispatch. Previously the album download processor silently rerouted to any other available source (which is how downloads configured TIDAL-primary-with-Skip ended up in Lidarr); now an unavailable primary with Skip fails the job with a clear error, an explicitly configured fallback is dispatched only if that fallback service is itself available (failing the job otherwise, even when a third source is up), and only legacy settings rows with no stored fallback preference keep the old auto-detect rerouting. Pre-existing limitation, unchanged by this fix: manual album downloads have two dispatch pipelines (TIDAL, and the Lidarr-backed download manager), so a non-TIDAL selection — including a `soulseek` fallback — is still executed by the Lidarr-backed manager.
 - Saving system settings can no longer silently wipe the admin TIDAL download connection. `POST /api/system-settings` previously accepted `tidalAccessToken`/`tidalRefreshToken`/`tidalUserId` and wrote whatever the settings form round-tripped — so any Save from a page loaded before (or without) the device auth overwrote the stored tokens with empty values, after which downloads silently rerouted away from TIDAL. These credential fields are now ignored by the general settings save and are managed exclusively by the `/api/system-settings/tidal-auth` device flow.
 
 ### Security
@@ -1599,7 +1602,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The `ALLOWED_ORIGINS` allowlist is now **enforced**. When it is configured, a cross-origin request from an unlisted origin is denied instead of being logged and reflected back anyway (which, combined with `credentials: true`, silently made the knob a no-op). Behavior is unchanged for the self-hosted default: with no `ALLOWED_ORIGINS` set, all origins are still allowed. The origin decision is now a unit-tested `isOriginAllowed` helper.
-  - **Upgrade note:** `docker-compose.yml` ships `ALLOWED_ORIGINS` with a localhost-only default (`http://localhost:3000,http://localhost:3030`). Deployments using the default same-origin `/api` proxy are unaffected, but if your browser talks to the backend on a **different origin** (`NEXT_PUBLIC_API_URL` set, or `NEXT_PUBLIC_API_PATH_MODE=direct`) and you access the app from a LAN IP or reverse-proxy domain, you must set `ALLOWED_ORIGINS` to include that origin or API requests will fail CORS preflight after upgrading.
+    - **Upgrade note:** `docker-compose.yml` ships `ALLOWED_ORIGINS` with a localhost-only default (`http://localhost:3000,http://localhost:3030`). Deployments using the default same-origin `/api` proxy are unaffected, but if your browser talks to the backend on a **different origin** (`NEXT_PUBLIC_API_URL` set, or `NEXT_PUBLIC_API_PATH_MODE=direct`) and you access the app from a LAN IP or reverse-proxy domain, you must set `ALLOWED_ORIGINS` to include that origin or API requests will fail CORS preflight after upgrading.
 - `ALLOWED_ORIGINS` enforcement now also covers the credentialed CORS paths that reflected any request origin: audio stream responses (`audioStreaming`), cover art responses (`/api/library/cover-art`), and the Listen Together socket.io HTTP long-polling transport. Unset-`ALLOWED_ORIGINS` (self-hosted default) behavior is unchanged: all origins allowed. In all three paths, "denied" means the CORS response headers are omitted — the request itself is still served, so same-origin traffic and requests proxied through the frontend server are unaffected by the allowlist; only genuinely cross-origin browser access from an unlisted origin is blocked (by the browser). Note that WebSocket connections are not subject to CORS at all; the Listen Together socket does not rely on origin checks there — its handshake requires a JWT supplied by application JavaScript (`handshake.auth.token`, never a cookie), which cross-site pages cannot obtain.
 - YouTube downloads are now **admin-only, enforced server-side**: `POST /api/youtube/download`, the download status/list endpoints, and cancel all require the admin role (streaming and URL preview remain available to every authenticated user), matching the app's existing downloads model. The download buttons, "Download all", and the YouTube downloads view are hidden for non-admin users, and non-admins no longer poll the downloads endpoints.
 - The ytmusic-streamer sidecar no longer accepts a caller-supplied `output_dir` on `/yt/download`; files are always written under the configured `YT_DOWNLOAD_DIR`. The backend additionally validates the YouTube `videoId` format (`[A-Za-z0-9_-]{11}`) before contacting the sidecar.
@@ -1612,7 +1615,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The outbound-URL (SSRF) guard now **resolves DNS and range-checks every resolved IP** at the points the backend fetches an untrusted URL: podcast/RSS feed fetches (each redirect hop is followed manually and re-validated), the image proxy and its redirect hops, and podcast cover downloads (redirects disabled). The previous check was string-only, so a public-looking hostname whose DNS records point at a private/loopback/link-local address sailed through. The blocked ranges now cover all of `127.0.0.0/8` and `0.0.0.0/8` (previously only the exact literals `127.0.0.1`/`0.0.0.0` were rejected, so e.g. a DNS answer of `127.0.0.53` passed). Admin connection tests (Lidarr, Audiobookshelf, etc.) intentionally keep the string-only check so Docker-network and LAN hostnames keep working — those endpoints are admin-only. Residual: resolution happens at check time (DNS-rebinding window); pinning the resolved IP into the request agent is a tracked follow-up.
 - Session cookies are now **`secure` by default in production**, and the reverse-proxy trust level is configurable. The cookie `secure` flag was opt-in via a raw `process.env.SECURE_COOKIES === "true"` (defaulting off), so a production deploy that forgot the flag silently shipped non-secure cookies; it now defaults to `true` when `NODE_ENV=production` and is resolved through `config.ts` (set `SECURE_COOKIES=false` for an HTTP-only local-network deploy). `trust proxy` was hardcoded to `true` (trust every hop), which let a client spoof `X-Forwarded-For` to evade per-IP rate limits; set `TRUST_PROXY_HOPS` to your real reverse-proxy depth (usually `1`) for spoof-resistant client-IP resolution. The default remains trust-all to preserve existing multi-hop setups. (Helmet already ships CSP and HSTS by default — unchanged.)
 - JWT verification now **pins the algorithm** to `HS256`. All auth-class `jwt.verify` call sites (auth middleware, the `/api/auth/refresh` route, onboarding, and the Listen Together socket) pass `algorithms: ["HS256"]` so a token can never be accepted under a different or `none` algorithm. (The segmented-streaming session-token verifies use a separate `SESSION_TOKEN_SECRET` and are tracked under F37.) The `/refresh` route previously re-read the secret inline as `process.env.JWT_SECRET || process.env.SESSION_SECRET!` and cast the result to `any`; it now goes through a shared `verifyAuthToken` helper that resolves the secret from one validated source and returns a typed payload. Existing tokens (already HS256) are unaffected.
-- API keys are now stored as a **keyed hash (HMAC-SHA256) at rest** instead of verbatim, so a read-only database exposure (a dump, a replica, a raw-query slip) yields only hashes, not working credentials. Validation hashes the presented key and looks it up by hash; **existing device keys keep working with no re-pairing** thanks to a transitional plaintext-lookup fallback. New keys are hashed before insert and the raw value is shown only once at creation. `GET /api/admin/secrets-status` also reports hashed-vs-plaintext key counts, and `scripts/hash-existing-api-keys.ts` migrates legacy rows in bulk (forward-only, dry-run by default). The hash pepper resolves from `API_KEY_PEPPER` → `SETTINGS_ENCRYPTION_KEY` → `ENCRYPTION_KEY` (compat alias) → `SESSION_SECRET`, and `secrets-status` exposes an `apiKeys.pepperFingerprint` (an 8-hex identifier of the pepper *value*) that must match the migration script's logged fingerprint before running it with `--apply`. See `docs/UPGRADING.md`.
+- API keys are now stored as a **keyed hash (HMAC-SHA256) at rest** instead of verbatim, so a read-only database exposure (a dump, a replica, a raw-query slip) yields only hashes, not working credentials. Validation hashes the presented key and looks it up by hash; **existing device keys keep working with no re-pairing** thanks to a transitional plaintext-lookup fallback. New keys are hashed before insert and the raw value is shown only once at creation. `GET /api/admin/secrets-status` also reports hashed-vs-plaintext key counts, and `scripts/hash-existing-api-keys.ts` migrates legacy rows in bulk (forward-only, dry-run by default). The hash pepper resolves from `API_KEY_PEPPER` → `SETTINGS_ENCRYPTION_KEY` → `ENCRYPTION_KEY` (compat alias) → `SESSION_SECRET`, and `secrets-status` exposes an `apiKeys.pepperFingerprint` (an 8-hex identifier of the pepper _value_) that must match the migration script's logged fingerprint before running it with `--apply`. See `docs/UPGRADING.md`.
 
 ## [1.5.0] - 2026-03-27
 

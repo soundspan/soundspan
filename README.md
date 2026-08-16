@@ -16,14 +16,16 @@ soundspan is built for people who want streaming convenience without giving up o
 
 ## Highlights
 
-- Local FLAC, MP3, AAC, and OGG library with automatic MusicBrainz/Last.fm enrichment
+- Local FLAC, MP3, AAC/M4A, OGG/Opus, WAV, WMA, APE, and WavPack library with automatic MusicBrainz/Last.fm enrichment
 - YouTube Music and TIDAL gap-fill streaming with per-user OAuth and quality controls
 - CLAP-powered vibe matching, mood mixer presets, and radar-style analysis views
 - Podcast search/subscribe via RSS with resume, played-state tracking, and mobile skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
 - Synced lyrics, source/quality badges, and overhauled browser/PWA/overlay player flows
-- Multiple users with isolated libraries, admin roles, optional 2FA, and Listen Together group sessions
+- Multiple users with isolated playlists, likes, history, and settings, plus admin roles, optional 2FA, and Listen Together group sessions
+- Federated library sharing between trusted soundspan instances, opt-in and disabled by default
+- OIDC/SSO login with explicit account linking and revocable app passwords for OpenSubsonic clients
 - Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
 
@@ -102,12 +104,12 @@ Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.m
 
 All integration endpoints below require soundspan auth (session or API key where supported) and admin-enabled integrations.
 
-| Area | Endpoints |
-| --- | --- |
-| YouTube Music browse (OAuth-free) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id` |
-| YouTube Music public stream (OAuth-free) | `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
-| YouTube Music search/match (OAuth-free sidecar clients) | `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch` |
-| Mapping/import APIs | `POST /api/browse/playlists/parse`, `GET /api/track-mappings/album/:albumId`, `POST /api/track-mappings/batch`, `POST /api/import/preview`, `POST /api/import/execute` |
+| Area                                                    | Endpoints                                                                                                                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| YouTube Music browse (OAuth-free)                       | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id`                                                         |
+| YouTube Music public stream (OAuth-free)                | `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId`                                                                              |
+| YouTube Music search/match (OAuth-free sidecar clients) | `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch`                                                                                 |
+| Mapping/import APIs                                     | `POST /api/browse/playlists/parse`, `GET /api/track-mappings/album/:albumId`, `POST /api/track-mappings/batch`, `POST /api/import/preview`, `POST /api/import/execute` |
 
 ---
 
@@ -134,6 +136,7 @@ graph TD
     Browser["Your Browser"]
     FE["Frontend<br/>(Next.js :3030)"]
     BE["Backend<br/>(Express.js :3006)"]
+    BW["Backend Worker<br/>(Schedulers/queues)"]
     Music["Music Library<br/>(Your Files)"]
     PG["PostgreSQL"]
     RD["Redis"]
@@ -141,34 +144,41 @@ graph TD
     TD["TIDAL Sidecar<br/>:8585 (Opt.)"]
     Lidarr["Lidarr<br/>(Optional)"]
     ABS["Audiobookshelf<br/>(Optional)"]
+    PEER["Peer soundspan<br/>(Optional)"]
+    IDP["OIDC Identity Provider<br/>(Optional)"]
 
     Browser --> FE
     FE --> BE
     Music <--> BE
+    BW --> PG
+    BW --> RD
     BE <--> YT
     BE <--> TD
     BE <--> Lidarr
     BE <--> ABS
+    BE <-->|HTTPS federation| PEER
+    BE -->|HTTPS OIDC| IDP
     BE --> PG
     BE --> RD
 ```
 
-| Component | Purpose | Default Port |
-| --- | --- | --- |
-| Frontend | Web interface (Next.js) | 3030 |
-| Backend | API server (Express.js) | 3006 |
-| PostgreSQL | Primary database (with pgvector) | 5432 |
-| Redis | Cache and queue backend | 6379 |
-| TIDAL Sidecar | TIDAL streaming/download proxy | 8585 |
-| YT Music Streamer | YouTube Music streaming proxy | 8586 |
-| Audio Analyzer | MusiCNN analyzer service | — |
-| Audio Analyzer CLAP | CLAP embedding service | — |
+| Component           | Purpose                                           | Default Port         |
+| ------------------- | ------------------------------------------------- | -------------------- |
+| Frontend            | Web interface (Next.js)                           | 3030                 |
+| Backend             | API server (Express.js)                           | 3006                 |
+| Backend Worker      | Background queues, processors, and scheduled jobs | 3010 health endpoint |
+| PostgreSQL          | Primary database (with pgvector)                  | 5432                 |
+| Redis               | Cache and queue backend                           | 6379                 |
+| TIDAL Sidecar       | TIDAL streaming/download proxy                    | 8585                 |
+| YT Music Streamer   | YouTube Music streaming proxy                     | 8586                 |
+| Audio Analyzer      | MusiCNN analyzer service                          | —                    |
+| Audio Analyzer CLAP | CLAP embedding service                            | —                    |
 
 ---
 
 ## Roadmap
 
-- Offline playback mode
+- Offline playback in the PWA (offline downloads/cache already shipped)
 
 ---
 

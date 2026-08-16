@@ -28,6 +28,20 @@ This document defines the current `/rest` compatibility contract implemented in 
 
 Create app passwords under **Settings > Sign-in & Security**. Each generated secret starts with `ssap_`, is shown once, is limited to `/rest`, and can be revoked independently. Use the soundspan username with the app password. For token authentication, calculate `t` from the complete `ssap_` secret and the client-provided salt.
 
+## Advertised OpenSubsonic Extensions
+
+`getOpenSubsonicExtensions` advertises these extensions at version 1:
+
+- `apiKeyAuthentication`
+- `formPost`
+- `songLyrics`
+- `transcodeOffset`
+- `songPlayedDate`
+- `albumPlayedDate`
+
+`transcodeOffset` is supported. It is distinct from the missing
+`getTranscodeDecision` and `getTranscodeStream` endpoint extensions.
+
 ## Implemented Endpoint Surface
 
 Tier A foundation and browse/search/media:
@@ -87,19 +101,23 @@ Environment:
 Key outcomes:
 
 1. Auth handshake
+
 - Password mode (`u/p`) succeeded for `/rest/ping.view`.
 - Token mode (`u/t/s`) succeeded for `/rest/ping.view`.
 
 2. Stream seek/range behavior
+
 - `Range: bytes=0-9` on `stream.view` returned `206 Partial Content` with `Content-Range: bytes 0-9/33`.
 - Subsequent seek `Range: bytes=10-20` returned `206 Partial Content` with `Content-Range: bytes 10-20/33`.
 - Full fetch without range returned `200 OK` and full payload length.
 
 3. Cover-art retrieval
+
 - `getCoverArt.view` returned `200 OK`, `Content-Type: image/jpeg`, and cache headers.
 - `size` parameter path executed successfully for the same entity.
 
 4. Tier B mutation/readiness flows
+
 - `createPlaylist` created a playlist with two tracks.
 - `updatePlaylist` renamed playlist, removed one index, and re-added a track (result remained valid with expected song count).
 - `getPlaylist` after delete returned protocol failure with `error.code=70` (not found) as expected.
@@ -123,23 +141,28 @@ Environment:
 Matrix outcomes:
 
 1. `symfonium` profile
+
 - `ping.view` returned `status=ok`.
 - `search3.view` with `query=\"\"`, `artistCount=0`, `albumCount=0`, `songCount=0` returned `status=ok` with bounded full-sync payload (`artist=80`, `album=80`, `song=1200`).
 
 2. `dsub` profile
+
 - `search2.view` with `query=\"\"` + zero-count full-sync pattern returned `status=ok` with populated payload (`artist=80`, `album=80`, `song=1200`).
 - `search2.view` with unsupported `musicFolderId=99` returned `status=ok` with empty payload arrays.
 
 3. `ultrasonic` profile
+
 - `getIndexes.view` returned `status=ok` with `index` groups and a stable `lastModified` value.
 - `getIndexes.view` with `ifModifiedSince=<lastModified>` returned `status=ok` and `index=[]` (no-change semantics).
 - `getIndexes.view` with unsupported `musicFolderId=99` returned `status=ok` and `index=[]`.
 - `startScan.view` and `getScanStatus.view` both returned `status=ok`; scan-state contract was observable (`scanning=true` snapshot during active run).
 
 4. `amperfy` profile
+
 - `getArtists.view` with unsupported `musicFolderId=99` returned `status=ok` and `index=[]`.
 
 5. `substreamer` profile
+
 - `savePlayQueueByIndex.view` persisted indexed queue state (`index=2`, `position=1234`) for a real track.
 - `getPlayQueueByIndex.view` returned matching indexed state (`entries=1`, expected track id, expected `current` and `position`).
 
@@ -166,12 +189,12 @@ Automated run evidence (2026-02-14):
 High-value gaps to revisit first if future compatibility demand appears:
 
 1. Streaming-profile parity gaps:
-   - `hls`
-   - OpenSubsonic transcoding extensions (`getTranscodeDecision`, `getTranscodeStream`)
+    - `hls`
+    - OpenSubsonic transcoding extensions (`getTranscodeDecision`, `getTranscodeStream`)
 2. Sharing feature gaps:
-   - `getShares`, `createShare`, `updateShare`, `deleteShare`
+    - `getShares`, `createShare`, `updateShare`, `deleteShare`
 3. Certification gap:
-   - Full GUI-client validation passes (current matrix is non-GUI request-profile validation)
+    - Full GUI-client validation passes (current matrix is non-GUI request-profile validation)
 
 Current non-goal domains unless product scope changes:
 

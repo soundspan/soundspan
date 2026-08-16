@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (60 models, 1353 lines)
+Schema source: `backend/prisma/schema.prisma` (63 models, 1416 lines)
 
 ## Entity Relationship Overview
 
@@ -19,6 +19,8 @@ erDiagram
     User ||--o{ DiscoveryAlbum : discovers
     User ||--o{ CachedTrack : caches
     User ||--o{ ApiKey : has
+    User ||--o{ ExternalIdentity : links
+    User ||--o{ AppPassword : creates
     User ||--o{ InviteCode : creates
     User ||--o| UserDiscoverConfig : configures
     User ||--o{ FederationPeer : creates
@@ -71,24 +73,25 @@ erDiagram
 
 ### Local and Federated Music Catalog
 
-| Entity | Purpose | Key Fields |
-|--------|---------|------------|
-| `Track` | Local file-backed or peer-mirrored music row | `origin`, nullable unique `filePath`, `peerId`/`remoteId`, `dedupOfTrackId`, `dedupPinned`, durable identity keys, soft-removal and analysis fields |
-| `TranscodedFile` | Cached transcoded variant for locally served content | `trackId`, `quality`, `cachePath` |
-| `TrackEmbedding` | CLAP 512-dim vector; peer embeddings can be imported when scoped | `trackId`, `embedding` (pgvector) |
-| `TrackLyrics` | Synced/plain lyrics for local tracks | `trackId`, `source` (lrclib, embedded, none) |
+| Entity                | Purpose                                                                   | Key Fields                                                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Track`               | Local file-backed or peer-mirrored music row                              | `origin`, nullable unique `filePath`, `peerId`/`remoteId`, `dedupOfTrackId`, `dedupPinned`, durable identity keys, soft-removal and analysis fields |
+| `TranscodedFile`      | Cached transcoded variant for locally served content                      | `trackId`, `quality`, `cachePath`                                                                                                                   |
+| `TrackEmbedding`      | CLAP 512-dim vector; peer embeddings can be imported when scoped          | `trackId`, `embedding` (pgvector)                                                                                                                   |
+| `TrackLyrics`         | Synced/plain lyrics for local tracks                                      | `trackId`, `source` (lrclib, embedded, none)                                                                                                        |
+| `LibraryHealthRecord` | Current missing-file or unreadable-metadata condition for one local track | unique `trackId`, `status`, `filePath`, `detail`, detection/update timestamps                                                                       |
 
 ### Remote-Provider (catalog references)
 
-| Entity | Purpose | Unique Key | Resolved To |
-|--------|---------|------------|-------------|
-| `TrackTidal` | TIDAL track reference | `tidalId` (numeric) | `Artist?`, `Album?` via FK |
-| `TrackYtMusic` | YouTube Music track reference | `videoId` (string) | `Artist?`, `Album?` via FK |
+| Entity         | Purpose                       | Unique Key          | Resolved To                |
+| -------------- | ----------------------------- | ------------------- | -------------------------- |
+| `TrackTidal`   | TIDAL track reference         | `tidalId` (numeric) | `Artist?`, `Album?` via FK |
+| `TrackYtMusic` | YouTube Music track reference | `videoId` (string)  | `Artist?`, `Album?` via FK |
 
 ### Glue Layer (resolution/mapping)
 
-| Entity | Purpose | Links |
-|--------|---------|-------|
+| Entity         | Purpose                               | Links                                                                              |
+| -------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
 | `TrackMapping` | "We believe these are the same track" | `trackId?` → Track, `trackTidalId?` → TrackTidal, `trackYtMusicId?` → TrackYtMusic |
 
 TrackMapping is **advisory, not authoritative**:
@@ -101,10 +104,10 @@ TrackMapping is **advisory, not authoritative**:
 
 ### Universal Entities (cross-provider)
 
-| Entity | Purpose | Notes |
-|--------|---------|-------|
-| `Artist` | Universal artist (MusicBrainz-backed) | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, optional peer identity |
-| `Album` | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`), optional peer identity |
+| Entity   | Purpose                                | Notes                                                                                                                                    |
+| -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `Artist` | Universal artist (MusicBrainz-backed)  | `mbid` (unique), Prisma-maintained `updatedAt`, enrichment fields, `remoteTrackCount`, optional peer identity                            |
+| `Album`  | Universal album (release-group-backed) | `rgMbid` (unique), Prisma-maintained `updatedAt`, `location` enum (`LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`), optional peer identity |
 
 Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entities via `artistResolutionService` and `albumResolutionService`. This enables:
 
@@ -114,12 +117,12 @@ Remote tracks (`TrackTidal`, `TrackYtMusic`) resolve to `Artist`/`Album` entitie
 
 ### Federation
 
-| Entity | Purpose | Key Fields |
-| --- | --- | --- |
-| `FederationPeer` | One host, consumer, or bidirectional instance link | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `showDedupedCopies`, nullable `maxConcurrentStreams`/`maxStreamKbps`, sync cursors, `createdById` |
-| `FederationPairingCode` | Short-lived, single-use admin pairing grant | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById` |
-| `FederationTombstone` | Deleted host catalog identity retained for incremental peer deltas | `entityType`, `entityId`, indexed `deletedAt` |
-| `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl` |
+| Entity                     | Purpose                                                                  | Key Fields                                                                                                                                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FederationPeer`           | One host, consumer, or bidirectional instance link                       | `direction`, `baseUrl`, unique `credentialHash`, encrypted `outboundToken`, `scopes`, nullable `inboundStatus`, nullable `outboundStatus`, `showDedupedCopies`, nullable `maxConcurrentStreams`/`maxStreamKbps`, sync cursors, `createdById` |
+| `FederationPairingCode`    | Short-lived, single-use admin pairing grant                              | unique `code`, `scopes`, `expiresAt`, `usedAt`, `createdById`                                                                                                                                                                                |
+| `FederationTombstone`      | Deleted host catalog identity retained for incremental peer deltas       | `entityType`, `entityId`, indexed `deletedAt`                                                                                                                                                                                                |
+| `FederationPodcastListing` | Lightweight peer podcast catalog row; never a native subscription mirror | `peerId`, `remoteId`, `feedUrl`, `title`, nullable `author`/`imageUrl`, `updatedAt`; unique `(peerId, remoteId)`, indexed `feedUrl`                                                                                                          |
 
 `FederationPeer.createdById` uses a restricted user relation, so an owning
 administrator cannot be deleted while the peer remains. Deleting a peer
@@ -153,66 +156,76 @@ drive native per-user subscription state without violating the global
 
 ### User & Auth
 
-| Entity | Purpose |
-|--------|---------|
-| `User` | Account with role, 2FA, profile |
-| `UserSettings` | Per-user preferences, OAuth tokens (encrypted) for YT Music and TIDAL |
-| `ApiKey` | Subsonic/API key auth |
-| `DeviceLinkCode` | Device pairing codes |
-| `InviteCode` / `InviteCodeUsage` | Invite system |
+| Entity                           | Purpose                                                                                                                              |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `User`                           | Account with role, 2FA, profile                                                                                                      |
+| `ExternalIdentity`               | OIDC link with `userId`, `provider`, and `providerSubject` keys; unique `(provider, providerSubject)` and `(userId, provider)` pairs |
+| `AppPassword`                    | Revocable OpenSubsonic credential with AES-GCM `encryptedSecret`, `revokedAt`, and `lastUsedAt`                                      |
+| `UserSettings`                   | Per-user preferences, OAuth tokens (encrypted) for YT Music and TIDAL                                                                |
+| `ApiKey`                         | Subsonic/API key auth                                                                                                                |
+| `DeviceLinkCode`                 | Device pairing codes                                                                                                                 |
+| `InviteCode` / `InviteCodeUsage` | Invite system                                                                                                                        |
+
+`User.passwordHash` is nullable for OIDC-only accounts. The credential-stranding
+guard blocks unlinking an external identity when the account has no local
+password and no other linked identity.
 
 ### Playback & Social
 
-| Entity | Purpose |
-|--------|---------|
-| `Play` | Play history — links to `Track?`, `TrackTidal?`, `TrackYtMusic?`, `ListenSource` enum |
-| `PlaybackState` | Per-user per-device queue/position state |
-| `SyncGroup` / `SyncGroupMember` | Listen Together sessions |
-| `ListeningState` | Resume position for audiobooks/podcasts |
-| `LikedTrack` | Local track likes |
-| `LikedRemoteTrack` | Remote track likes (Tidal/YT Music) |
-| `DislikedEntity` | Generic dislike tracking |
+| Entity                          | Purpose                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `Play`                          | Play history — links to `Track?`, `TrackTidal?`, `TrackYtMusic?`, `ListenSource` enum             |
+| `PlaybackState`                 | Per-user per-device queue/position state                                                          |
+| `SyncGroup` / `SyncGroupMember` | Listen Together sessions                                                                          |
+| `ListeningState`                | Resume position for audiobooks/podcasts                                                           |
+| `LikedTrack`                    | Local track likes                                                                                 |
+| `LikedRemoteTrack`              | Remote track likes (Tidal/YT Music)                                                               |
+| `DislikedEntity`                | Generic dislike tracking                                                                          |
+| `Bookmark`                      | Per-user track bookmark with resume position and optional comment                                 |
+| `CachedTrack`                   | Per-user offline track cache record keyed by user, track, and quality                             |
+| `ShareLink`                     | Revocable public share token for a playlist, album, or track, with optional expiry and play limit |
 
 ### Playlists
 
-| Entity | Purpose |
-|--------|---------|
-| `Playlist` | User-owned playlist |
-| `PlaylistItem` | Mixed-source items: `trackId?`, `trackTidalId?`, `trackYtMusicId?` |
-| `PlaylistPendingTrack` | **@deprecated** — legacy Spotify import pending tracks |
-| `HiddenPlaylist` | Per-user playlist hiding |
-| `SpotifyImportJob` | Spotify playlist import state |
+| Entity                 | Purpose                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `Playlist`             | User-owned playlist                                                                         |
+| `PlaylistItem`         | Mixed-source items: `trackId?`, `trackTidalId?`, `trackYtMusicId?`                          |
+| `PlaylistPendingTrack` | **@deprecated** — legacy Spotify import pending tracks                                      |
+| `HiddenPlaylist`       | Per-user playlist hiding                                                                    |
+| `SpotifyImportJob`     | Spotify playlist import state                                                               |
+| `ImportJob`            | Provider-neutral playlist import job lifecycle, progress, summary, and resolved-track state |
 
 ### Discovery & Recommendations
 
-| Entity | Purpose |
-|--------|---------|
-| `DiscoveryAlbum` / `DiscoveryTrack` | Weekly discovery albums and their tracks |
-| `DiscoveryBatch` / `DownloadJob` | Download orchestration |
-| `DiscoverExclusion` | Don't-suggest-again tracking |
-| `UserDiscoverConfig` / `UserMoodMix` | Per-user discovery preferences |
-| `UnavailableAlbum` | Albums that couldn't be acquired |
-| `SimilarArtist` | Weighted artist similarity graph |
-| `OwnedAlbum` | Album ownership tracking |
+| Entity                               | Purpose                                  |
+| ------------------------------------ | ---------------------------------------- |
+| `DiscoveryAlbum` / `DiscoveryTrack`  | Weekly discovery albums and their tracks |
+| `DiscoveryBatch` / `DownloadJob`     | Download orchestration                   |
+| `DiscoverExclusion`                  | Don't-suggest-again tracking             |
+| `UserDiscoverConfig` / `UserMoodMix` | Per-user discovery preferences           |
+| `UnavailableAlbum`                   | Albums that couldn't be acquired         |
+| `SimilarArtist`                      | Weighted artist similarity graph         |
+| `OwnedAlbum`                         | Album ownership tracking                 |
 
 ### Content & Media
 
-| Entity | Purpose |
-|--------|---------|
-| `Podcast` / `PodcastEpisode` | Podcast catalog (RSS-backed) |
-| `PodcastSubscription` / `PodcastProgress` / `PodcastDownload` | Per-user podcast state |
-| `PodcastRecommendation` | Cached podcast recommendations |
-| `Audiobook` / `AudiobookProgress` | Local Audiobookshelf rows and peer-mirrored audiobooks with local per-user progress |
-| `Genre` / `TrackGenre` | Genre tagging |
-| `MoodBucket` | ML-derived mood classifications |
+| Entity                                                        | Purpose                                                                             |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `Podcast` / `PodcastEpisode`                                  | Podcast catalog (RSS-backed)                                                        |
+| `PodcastSubscription` / `PodcastProgress` / `PodcastDownload` | Per-user podcast state                                                              |
+| `PodcastRecommendation`                                       | Cached podcast recommendations                                                      |
+| `Audiobook` / `AudiobookProgress`                             | Local Audiobookshelf rows and peer-mirrored audiobooks with local per-user progress |
+| `Genre` / `TrackGenre`                                        | Genre tagging                                                                       |
+| `MoodBucket`                                                  | ML-derived mood classifications                                                     |
 
 ### System
 
-| Entity | Purpose |
-|--------|---------|
-| `SystemSettings` | Singleton admin config, including generated federation instance identity and catalog epoch |
-| `EnrichmentFailure` | Retry tracking for failed enrichment lookups |
-| `Notification` | User notification system |
+| Entity              | Purpose                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `SystemSettings`    | Singleton admin config, including generated federation instance identity and catalog epoch |
+| `EnrichmentFailure` | Retry tracking for failed enrichment lookups                                               |
+| `Notification`      | User notification system                                                                   |
 
 `SystemSettings.federationInstanceId` and `SystemSettings.catalogEpoch` are
 nullable schema fields populated with UUIDs when federation identity is first
@@ -225,13 +238,13 @@ catalog generation and forces consumers to perform a full sync when it changes.
 authoritative for same-path updates, while nullable content and tag keys let the
 scanner preserve that ID when a file moves, is renamed, or is retagged.
 
-| Field | Meaning |
-| --- | --- |
-| `audioHash` | Indexed, non-unique `sha256:<hex>` hash of the primary encoded audio stream. Tag edits do not change it. |
-| `audioHashedAt` | Time when `audioHash` was computed, used to track backfill and hash freshness. |
-| `recordingMbid` | Indexed, non-unique MusicBrainz recording ID read from file tags. |
-| `isrc` | Indexed, non-unique first ISRC read from file tags. |
-| `removedAt` | Indexed soft-removal timestamp. `null` means the track is active. |
+| Field           | Meaning                                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------------------- |
+| `audioHash`     | Indexed, non-unique `sha256:<hex>` hash of the primary encoded audio stream. Tag edits do not change it. |
+| `audioHashedAt` | Time when `audioHash` was computed, used to track backfill and hash freshness.                           |
+| `recordingMbid` | Indexed, non-unique MusicBrainz recording ID read from file tags.                                        |
+| `isrc`          | Indexed, non-unique first ISRC read from file tags.                                                      |
+| `removedAt`     | Indexed soft-removal timestamp. `null` means the track is active.                                        |
 
 Identity keys are deliberately non-unique because the same audio or recording
 can legitimately exist at multiple paths or on multiple releases. Matching
@@ -320,14 +333,15 @@ Album loads → check TrackMapping for existing mappings
 
 ## Enums
 
-| Enum | Values | Used By |
-|------|--------|---------|
-| `ListenSource` | `LIBRARY`, `DISCOVERY`, `DISCOVERY_KEPT`, `TIDAL`, `YOUTUBE_MUSIC` | `Play.source` |
-| `DiscoverStatus` | `ACTIVE`, `LIKED`, `MOVED`, `DELETED` | `DiscoveryAlbum.status` |
-| `AlbumLocation` | `LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED` | `Album.location` |
-| `TrackOrigin` | `LOCAL`, `FEDERATED` | `Track.origin` |
-| `PeerDirection` | `HOST`, `CONSUMER`, `BOTH` | `FederationPeer.direction` |
-| `PeerStatus` | `PENDING`, `ACTIVE`, `OFFLINE`, `REVOKED` | `FederationPeer.inboundStatus`, `FederationPeer.outboundStatus` |
+| Enum                  | Values                                                             | Used By                                                         |
+| --------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `ListenSource`        | `LIBRARY`, `DISCOVERY`, `DISCOVERY_KEPT`, `TIDAL`, `YOUTUBE_MUSIC` | `Play.source`                                                   |
+| `DiscoverStatus`      | `ACTIVE`, `LIKED`, `MOVED`, `DELETED`                              | `DiscoveryAlbum.status`                                         |
+| `AlbumLocation`       | `LIBRARY`, `DISCOVER`, `REMOTE`, `FEDERATED`                       | `Album.location`                                                |
+| `TrackOrigin`         | `LOCAL`, `FEDERATED`                                               | `Track.origin`                                                  |
+| `PeerDirection`       | `HOST`, `CONSUMER`, `BOTH`                                         | `FederationPeer.direction`                                      |
+| `PeerStatus`          | `PENDING`, `ACTIVE`, `OFFLINE`, `REVOKED`                          | `FederationPeer.inboundStatus`, `FederationPeer.outboundStatus` |
+| `LibraryHealthStatus` | `MISSING_FROM_DISK`, `UNREADABLE_METADATA`                         | `LibraryHealthRecord.status`                                    |
 
 ## Migration Conventions
 

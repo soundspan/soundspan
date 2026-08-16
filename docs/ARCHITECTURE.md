@@ -17,6 +17,7 @@ graph TD
     AA["audio-analyzer<br/>Essentia/MusiCNN"]
     AC["audio-analyzer-clap<br/>LAION-CLAP"]
     PEER["peer soundspan instance<br/>/api/federation/v1"]
+    IDP["OIDC identity provider"]
 
     Browser -->|HTTP/WS| FE
     FE -->|"custom-server streaming proxy /api/*, /rest/*, Listen Together WS"| BE
@@ -32,37 +33,41 @@ graph TD
     AC --> RD
     AC -->|HTTP| BE
     BE <-->|"HTTPS catalog, cover, stream"| PEER
+    BE -->|"HTTPS discovery, token, JWKS"| IDP
 ```
 
 ## Service Communication Map
 
-| Source | Target | Protocol | Port | Auth | Purpose |
-|--------|--------|----------|------|------|---------|
-| frontend | backend | HTTP (custom-server streaming proxy `/api/*`; Next route-handler fallback) | 3006 | Bearer JWT (`Authorization` header, token in localStorage), plus `X-API-Key`; `?token=` query JWT only for media-element URLs | All API requests (admin-only surfaces such as Library Health and Bull Board included) |
-| frontend | backend | WebSocket (Socket.IO, proxied by the custom server) | 3006 | JWT (`handshake.auth.token`) | Listen Together real-time sync |
-| backend | PostgreSQL | TCP (Prisma) | 5432 | Connection string | All persistent state |
-| backend | Redis | TCP | 6379 | None | Listen Together presence/state, cache, pub/sub, stream queues |
-| backend | tidal-downloader | HTTP | 8585 | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt | TIDAL OAuth, search, stream extraction, downloads |
-| backend | ytmusic-streamer | HTTP | 8586 | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt | YT Music OAuth, search, stream proxy, browse shelves; `/yt/*` pasted-URL preview/stream/download jobs |
-| backend-worker | PostgreSQL | TCP (Prisma) | 5432 | Connection string | Background job state |
-| backend-worker | Redis | TCP | 6379 | None | Job queues (Bull/streams), scheduler claims |
-| audio-analyzer | PostgreSQL | TCP (direct) | 5432 | Connection string | Analysis results write |
-| audio-analyzer | Redis | TCP | 6379 | None | BRPOP job queue |
-| audio-analyzer-clap | PostgreSQL | TCP (direct) | 5432 | Connection string | Embedding writes |
-| audio-analyzer-clap | Redis | TCP | 6379 | None | BRPOP job queue |
-| audio-analyzer-clap | backend | HTTP | 3006 | `INTERNAL_API_SECRET` | Track metadata lookup |
-| backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`) | 443 | Scoped instance Bearer token | Pairing, catalog sync, health checks, cover art, and audio streaming |
+| Source                   | Target                  | Protocol                                                                   | Port                            | Auth                                                                                                                          | Purpose                                                                                               |
+| ------------------------ | ----------------------- | -------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| frontend                 | backend                 | HTTP (custom-server streaming proxy `/api/*`; Next route-handler fallback) | 3006                            | Bearer JWT (`Authorization` header, token in localStorage), plus `X-API-Key`; `?token=` query JWT only for media-element URLs | All API requests (admin-only surfaces such as Library Health and Bull Board included)                 |
+| frontend                 | backend                 | WebSocket (Socket.IO, proxied by the custom server)                        | 3006                            | JWT (`handshake.auth.token`)                                                                                                  | Listen Together real-time sync                                                                        |
+| backend                  | PostgreSQL              | TCP (Prisma)                                                               | 5432                            | Connection string                                                                                                             | All persistent state                                                                                  |
+| backend                  | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | Listen Together presence/state, OIDC flow state, cache, pub/sub, stream queues                        |
+| backend                  | tidal-downloader        | HTTP                                                                       | 8585                            | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt                                                                 | TIDAL OAuth, search, stream extraction, downloads                                                     |
+| backend                  | ytmusic-streamer        | HTTP                                                                       | 8586                            | `x-internal-secret` (`INTERNAL_API_SECRET`); `/health` exempt                                                                 | YT Music OAuth, search, stream proxy, browse shelves; `/yt/*` pasted-URL preview/stream/download jobs |
+| backend-worker           | PostgreSQL              | TCP (Prisma)                                                               | 5432                            | Connection string                                                                                                             | Background job state                                                                                  |
+| backend-worker           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | Job queues (Bull/streams), scheduler claims                                                           |
+| audio-analyzer           | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Analysis results write                                                                                |
+| audio-analyzer           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
+| audio-analyzer-clap      | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Embedding writes                                                                                      |
+| audio-analyzer-clap      | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
+| audio-analyzer-clap      | backend                 | HTTP                                                                       | 3006                            | `INTERNAL_API_SECRET`                                                                                                         | Track metadata lookup                                                                                 |
+| backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`)                                               | 443                             | Scoped instance Bearer token                                                                                                  | Pairing, catalog sync, health checks, cover art, and audio streaming                                  |
+| backend                  | OIDC identity provider  | HTTPS                                                                      | 443                             | OIDC confidential client credentials                                                                                          | Provider discovery, authorization-code token exchange, and JWKS retrieval                             |
+| OpenSubsonic client      | backend (`/rest`)       | HTTP/HTTPS                                                                 | 3006, or frontend proxy on 3030 | Local password, revocable `ssap_` app password, token digest, or API key                                                      | OpenSubsonic-compatible browse, state, and media operations                                           |
 
 ## Compose File Matrix
 
-| File | Purpose |
-|------|---------|
-| `docker-compose.yml` | Split-stack deployment (canonical ports) |
-| `docker-compose.aio.yml` | All-in-one single container |
-| `docker-compose.local.yml` | Local npm/tsx dev with +1 ports (3031/3007) |
-| `docker-compose.services.yml` | Optional Lidarr service |
-| `docker-compose.override.ha.yml` | HA-focused override |
-| `docker-compose.override.lite-mode.yml` | Analyzer-disabled override |
+| File                                    | Purpose                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `docker-compose.yml`                    | Split-stack deployment (canonical ports)                                              |
+| `docker-compose.aio.yml`                | All-in-one single container                                                           |
+| `docker-compose.local.yml`              | Local npm/tsx dev with +1 ports (3031/3007)                                           |
+| `docker-compose.services.yml`           | Optional Lidarr service                                                               |
+| `docker-compose.override.ha.yml`        | HA-focused override                                                                   |
+| `docker-compose.override.lite-mode.yml` | Analyzer-disabled override                                                            |
+| `docker-compose.dev.yml`                | Deprecated development stack; use `docker-compose.local.yml` for host-run development |
 
 ## Request Flows
 
@@ -213,11 +218,11 @@ Enrichment runs on a configurable schedule. `Artist.enrichmentStatus` tracks pro
 
 The backend supports three runtime roles via `BACKEND_PROCESS_ROLE`:
 
-| Role | Serves API | Runs Workers/Cron | Default |
-|------|-----------|-------------------|---------|
-| `all` | Yes | Yes | Yes |
-| `api` | Yes | No | |
-| `worker` | No (health endpoint only) | Yes | |
+| Role     | Serves API                | Runs Workers/Cron | Default |
+| -------- | ------------------------- | ----------------- | ------- |
+| `all`    | Yes                       | Yes               | Yes     |
+| `api`    | Yes                       | No                |         |
+| `worker` | No (health endpoint only) | Yes               |         |
 
 For small deployments, `all` is fine. For scale-out, run separate `api` and `worker` containers sharing the same DB and Redis.
 
@@ -233,10 +238,17 @@ the docker-compose files.
 
 ### Scheduled Federation Jobs
 
-| Job | Schedule | Purpose |
-| --- | --- | --- |
+| Job                                                                  | Schedule                                                                           | Purpose                                                                                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Federation sync (`federation-sync` queue: `sync-tick` → `peer-sync`) | Startup after 10 seconds and every `FEDERATION_SYNC_INTERVAL_MINUTES` (default 15) | Enqueue one coalesced, bounded catalog sync for each non-revoked consumer peer. The sync processor runs with concurrency 2. |
-| Federation health (`federation-sync` queue: `peer-health`) | Startup and hourly | Ping consumer-peer manifests and update peer `ACTIVE`/`OFFLINE` status. Health work runs with concurrency 1. |
+| Federation health (`federation-sync` queue: `peer-health`)           | Startup and hourly                                                                 | Ping consumer-peer manifests and update peer `ACTIVE`/`OFFLINE` status. Health work runs with concurrency 1.                |
+
+### Scheduled Library Maintenance Jobs
+
+| Job                                         | Schedule                 | Purpose                                                                                      |
+| ------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------- |
+| Audio hash backfill (`audio-hash-backfill`) | Startup one-shot         | Fills missing durable audio hashes in bounded pages without blocking startup.                |
+| Track removal purge (`track-removal-purge`) | Startup and daily repeat | Permanently deletes soft-removed tracks after `TRACK_REMOVAL_RETENTION_DAYS` (default `90`). |
 
 The worker process runs an event-loop stall watchdog (`services/workerEventLoopMonitor.ts`): its `/health/live` endpoint answers unconditionally, so a liveness-probe timeout always means the single-threaded event loop was blocked. Attribution has two paths: stalls the loop recovers from are logged by a `monitorEventLoopDelay` sampler naming the active Bull jobs (threshold `WORKER_EVENT_LOOP_WARN_MS`, default 1s); stalls that end in a kubelet kill can never reach that sampler (a pegged loop runs no timers), so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb whose final occurrence before death names the culprit.
 

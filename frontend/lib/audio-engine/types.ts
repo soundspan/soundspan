@@ -7,7 +7,7 @@ export type StreamingEngineMode =
     | "tauri-native";
 
 // The native element engine is the default direct-playback engine as
-// of 1.7.x; Howler remains the gated fallback (STREAMING_ENGINE_MODE=
+// of 1.8.0; Howler remains the gated fallback (STREAMING_ENGINE_MODE=
 // howler) and the Android WebView platform pin still selects it
 // automatically (see engineSelectionPolicy).
 export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "native";

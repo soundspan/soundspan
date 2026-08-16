@@ -1,6 +1,6 @@
 # Native Audio Element Engine
 
-The native engine is the **default** direct-playback backend (as of the post-1.7.0 flip): it drives a single browser-owned `<audio>` element instead of Howler.js, implements the same `AudioEngine` contract as the other backends, and plugs into the hybrid runtime router — no orchestrator changes. Howler remains the gated fallback: set `STREAMING_ENGINE_MODE=howler` to revert a deployment, and the Android WebView platform pin selects Howler automatically.
+The native engine is the **default** direct-playback backend as of 1.8.0: it drives a single browser-owned `<audio>` element instead of Howler.js, implements the same `AudioEngine` contract as the other backends, and plugs into the hybrid runtime router — no orchestrator changes. Howler remains the gated fallback: set `STREAMING_ENGINE_MODE=howler` to revert a deployment, and the Android WebView platform pin selects Howler automatically.
 
 Tracked in GH issue #42.
 
@@ -43,12 +43,12 @@ Selection is explicit and unit-tested (`frontend/lib/audio-engine/engineSelectio
 
 ## Architecture
 
-| Piece | File | Role |
-| --- | --- | --- |
+| Piece                | File                                                    | Role                                                                                                                                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Policy state machine | `frontend/lib/audio-engine/nativeAudioElementPolicy.ts` | Pure transition function owning every playback decision: lifecycle states, single load path with autoplay captured at load time, queued seeks before readiness, seek-mark suppression of stale `timeupdate` positions, bounded retry exhaustion, autoplay gesture retry, media-error classification. |
-| Controller | `frontend/lib/audio-engine/nativeAudioElementEngine.ts` | Applies transitions and executes effects against the single engine-owned element. No decision logic of its own. |
-| iOS bridge | `frontend/lib/audio-engine/iosStandalonePwaBridge.ts` | The one sanctioned `AudioContext` path (below). |
-| Selection policy | `frontend/lib/audio-engine/engineSelectionPolicy.ts` | Direct-slot selection precedence and Android WebView detection. |
+| Controller           | `frontend/lib/audio-engine/nativeAudioElementEngine.ts` | Applies transitions and executes effects against the single engine-owned element. No decision logic of its own.                                                                                                                                                                                      |
+| iOS bridge           | `frontend/lib/audio-engine/iosStandalonePwaBridge.ts`   | The one sanctioned `AudioContext` path (below).                                                                                                                                                                                                                                                      |
+| Selection policy     | `frontend/lib/audio-engine/engineSelectionPolicy.ts`    | Direct-slot selection precedence and Android WebView detection.                                                                                                                                                                                                                                      |
 
 Key behaviors:
 
@@ -101,4 +101,4 @@ Those were the exit criteria for flipping the default (met during the 1.7.0 soak
 
 ## Rollout
 
-Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` post-1.7.0. Howler remains the gated fallback (not removed). Out of scope: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs).
+Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs).

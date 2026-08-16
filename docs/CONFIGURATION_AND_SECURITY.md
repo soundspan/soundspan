@@ -72,17 +72,20 @@ Redis HA is an operator-managed prerequisite (external managed Redis/Dragonfly, 
 
 Never commit `.env` files or credentials.
 
-| Variable | Purpose | Required |
-| --- | --- | --- |
-| `SESSION_SECRET` | Session encryption (32+ chars) | Yes |
-| `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials | Yes |
-| `OIDC_CLIENT_SECRET` | OIDC confidential client authentication | If using OIDC |
-| `LIDARR_API_KEY` | Lidarr integration | If using Lidarr |
-| `OPENAI_API_KEY` | AI features | Optional |
-| `LASTFM_API_KEY` | Artist recommendations | Optional |
-| `FANART_API_KEY` | Artist images | Optional |
-| `YTMUSIC_STREAMER_URL` | YouTube Music sidecar URL | If using YouTube Music |
-| `TIDAL_SIDECAR_URL` | TIDAL sidecar URL | If using TIDAL |
+| Variable                  | Purpose                                                                         | Required                                           |
+| ------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `SESSION_SECRET`          | Session encryption (32+ chars)                                                  | Yes                                                |
+| `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials (32+ chars, must not be the published default) | Yes                                                |
+| `INTERNAL_API_SECRET`     | Service-to-service authentication (32+ chars)                                   | Yes                                                |
+| `POSTGRES_PASSWORD`       | PostgreSQL authentication                                                       | Yes, production                                    |
+| `API_KEY_PEPPER`          | HMAC pepper for API keys; keep stable or existing hashed keys become invalid    | Optional; falls back to encryption/session secrets |
+| `OIDC_CLIENT_SECRET`      | OIDC confidential client authentication                                         | If using OIDC                                      |
+| `LIDARR_API_KEY`          | Lidarr integration                                                              | If using Lidarr                                    |
+| `OPENAI_API_KEY`          | AI features                                                                     | Optional                                           |
+| `LASTFM_API_KEY`          | Artist recommendations                                                          | Optional                                           |
+| `FANART_API_KEY`          | Artist images                                                                   | Optional                                           |
+| `YTMUSIC_STREAMER_URL`    | YouTube Music sidecar URL                                                       | If using YouTube Music                             |
+| `TIDAL_SIDECAR_URL`       | TIDAL sidecar URL                                                               | If using TIDAL                                     |
 
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
 Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
@@ -92,7 +95,7 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - JWT access tokens expire after 24 hours; refresh tokens after 30 days
 - Token refresh uses `/api/auth/refresh`
 - Password changes invalidate existing sessions
-- Session cookies use `httpOnly`, `sameSite=lax`, and `secure` in production
+- Session cookies use `httpOnly` and `sameSite=lax`. Secure cookies default on when `NODE_ENV=production` and can be overridden with `SECURE_COOKIES`. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
 - Encryption key validity is checked at startup
 
 ## OIDC and App-Password Security

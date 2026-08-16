@@ -9,13 +9,14 @@ It assumes both repositories are side-by-side on disk:
 
 ## Compatibility Status (Read First)
 
-- Database schema compatibility is strong: `backend/prisma/schema.prisma` is byte-identical between `../lidify` and this repo, and migration directories are identical.
+- soundspan's schema is a forward superset of Lidify's schema. After a Lidify database is restored, `prisma migrate deploy` applies soundspan-only migrations additively.
+- This migration path has not been re-verified against the soundspan 2.1.0 migrations. Test the complete procedure on a copy of the database before the production cutover.
 - Runtime compatibility is not automatic. You must migrate runtime identifiers and defaults:
-  - `LIDIFY_CALLBACK_URL` -> `SOUNDSPAN_CALLBACK_URL`
-  - Compose defaults changed for PostgreSQL (from user/database `lidifydb/lidify` to `soundspan/soundspan`)
-  - Compose defaults changed for network/container names (`lidify_*` -> `soundspan_*`)
-  - Frontend local storage keys changed (`lidify_*` -> `soundspan_*`)
-  - For browser-based use, install soundspan as a PWA; for third-party clients, use OpenSubsonic-compatible apps against soundspan `/rest`
+    - `LIDIFY_CALLBACK_URL` -> `SOUNDSPAN_CALLBACK_URL`
+    - Compose defaults changed for PostgreSQL (from user/database `lidifydb/lidify` to `soundspan/soundspan`)
+    - Compose defaults changed for network/container names (`lidify_*` -> `soundspan_*`)
+    - Frontend local storage keys changed (`lidify_*` -> `soundspan_*`)
+    - For browser-based use, install soundspan as a PWA; for third-party clients, use OpenSubsonic-compatible apps against soundspan `/rest`
 
 Because of those required remaps, this is not a zero-touch migration.
 
@@ -84,6 +85,7 @@ fi
 grep -q '^POSTGRES_USER=' .env || echo 'POSTGRES_USER=lidifydb' >> .env
 grep -q '^POSTGRES_DB=' .env || echo 'POSTGRES_DB=lidify' >> .env
 grep -q '^POSTGRES_PASSWORD=' .env || echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> .env
+grep -q '^INTERNAL_API_SECRET=' .env || echo "INTERNAL_API_SECRET=$(openssl rand -base64 32)" >> .env
 
 # AIO image repository changed to GHCR
 if grep -q '^SOUNDSPAN_AIO_IMAGE=' .env; then
@@ -154,16 +156,17 @@ If you intentionally want new resource names, do blue/green instead of in-place.
 2. Re-save Lidarr integration settings in soundspan admin to refresh webhook configuration.
 3. Repoint mobile listening setups to soundspan's OpenSubsonic `/rest` endpoint for third-party clients, or use the soundspan PWA install flow.
 4. Expect browser playback UI state reset unless you manually migrate local storage.
+5. Federation and OIDC/SSO remain disabled by default. Enable and configure them only after the migrated local deployment is verified.
 
 Optional browser local storage key migration (run once in browser devtools on soundspan origin):
 
 ```js
 for (const k of Object.keys(localStorage)) {
-  if (k.startsWith("lidify_") || k.startsWith("lidify.")) {
-    const v = localStorage.getItem(k);
-    const nk = k.replace(/^lidify(?=[_.])/, "soundspan");
-    if (v !== null) localStorage.setItem(nk, v);
-  }
+    if (k.startsWith("lidify_") || k.startsWith("lidify.")) {
+        const v = localStorage.getItem(k);
+        const nk = k.replace(/^lidify(?=[_.])/, "soundspan");
+        if (v !== null) localStorage.setItem(nk, v);
+    }
 }
 ```
 

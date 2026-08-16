@@ -1,429 +1,759 @@
 {
-  "metadata": {
-    "id": "soundspan-feature-index",
-    "version": "2026-08-15.01",
-    "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
-    "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
-  },
-  "sources": {
-    "frontendFeatureRoot": "frontend/features",
-    "frontendRouteRoot": "frontend/app",
-    "backendRouteRoot": "backend/src/routes",
-    "backendServiceRoot": "backend/src/services",
-    "backendWorkerRoot": "backend/src/workers",
-    "backendTestRoot": "backend/src",
-    "frontendTestRoot": "frontend/tests"
-  },
-  "coverage": {
-    "frontend_feature_dirs": [
-      "album",
-      "artist",
-      "audiobook",
-      "discover",
-      "explore",
-      "home",
-      "library",
-      "podcast",
-      "search",
-      "settings"
+    "metadata": {
+        "id": "soundspan-feature-index",
+        "version": "2026-08-16.01",
+        "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
+        "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
+    },
+    "sources": {
+        "frontendFeatureRoot": "frontend/features",
+        "frontendRouteRoot": "frontend/app",
+        "backendRouteRoot": "backend/src/routes",
+        "backendServiceRoot": "backend/src/services",
+        "backendWorkerRoot": "backend/src/workers",
+        "backendTestRoot": "backend/src",
+        "frontendTestRoot": "frontend/tests"
+    },
+    "coverage": {
+        "frontend_feature_dirs": [
+            "album",
+            "artist",
+            "auth",
+            "audiobook",
+            "discover",
+            "explore",
+            "home",
+            "library",
+            "podcast",
+            "search",
+            "settings"
+        ]
+    },
+    "features": [
+        {
+            "id": "auth-sso",
+            "name": "Authentication & SSO",
+            "description": "Local authentication, OIDC login and account linking, and revocable OpenSubsonic app passwords",
+            "frontend": {
+                "feature_dirs": ["auth"],
+                "routes": ["/login"]
+            },
+            "backend": {
+                "routes": ["auth.ts"],
+                "services": ["oidcAuth.ts", "oidcAccountResolution.ts"]
+            },
+            "tests": {
+                "backend_route": [
+                    "authOidcRuntime.test.ts",
+                    "authAdminSsoRuntime.test.ts"
+                ],
+                "backend_contract": [],
+                "frontend": [
+                    "loginOidc.component.test.ts",
+                    "userManagementSso.component.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "library",
+            "name": "Music Library",
+            "description": "Local file-backed music library with scanning, browsing, and playback",
+            "frontend": {
+                "feature_dirs": ["library"],
+                "routes": ["/library"]
+            },
+            "backend": {
+                "routes": [
+                    "library/albums.ts",
+                    "library/artistCounts.ts",
+                    "library/artists.ts",
+                    "library/coverArt.ts",
+                    "library/imageBackfill.ts",
+                    "library/maintenance.ts",
+                    "library/metadataBackfill.ts",
+                    "library/radio.ts",
+                    "library/remoteTracks.ts",
+                    "library/tracks.ts",
+                    "streaming.ts",
+                    "lyrics.ts",
+                    "offline.ts"
+                ],
+                "services": [
+                    "musicScanner.ts",
+                    "audioStreaming.ts",
+                    "coverArt.ts",
+                    "coverArtExtractor.ts",
+                    "fileValidator.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "libraryRuntime.test.ts",
+                    "libraryArtistLookupCompat.test.ts",
+                    "libraryCoverArtCompat.test.ts",
+                    "libraryRemotePreference.test.ts",
+                    "streamingRuntime.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "artists",
+            "name": "Artists & Albums",
+            "description": "Universal artist/album entities with MusicBrainz enrichment and cross-provider resolution",
+            "frontend": {
+                "feature_dirs": ["artist", "album"],
+                "routes": ["/artist/[id]", "/album/[id]"]
+            },
+            "backend": {
+                "routes": ["artists.ts", "enrichment.ts"],
+                "services": [
+                    "artistResolutionService.ts",
+                    "albumResolutionService.ts",
+                    "artistCountsService.ts",
+                    "enrichment.ts",
+                    "enrichmentState.ts",
+                    "enrichmentFailureService.ts",
+                    "musicbrainz.ts",
+                    "lastfm.ts",
+                    "fanart.ts",
+                    "wikidata.ts",
+                    "imageProvider.ts",
+                    "imageProxy.ts",
+                    "imageStorage.ts",
+                    "imageBackfill.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "artistsRuntime.test.ts",
+                    "artistsPreviewYtMusic.test.ts"
+                ],
+                "backend_contract": [
+                    "artistEnrichmentMbidConflict.test.ts",
+                    "enrichmentCycleClaimContract.test.ts",
+                    "enrichmentStateRedisRetryContract.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "explore-browse",
+            "name": "Explore & Browse",
+            "description": "YT Music shelves/charts/moods/genres, TIDAL spotlight, homepage sections",
+            "frontend": {
+                "feature_dirs": ["explore", "home"],
+                "routes": ["/explore", "/", "/browse/playlists"]
+            },
+            "backend": {
+                "routes": ["browse.ts", "homepage.ts"],
+                "services": [
+                    "browseImageCache.ts",
+                    "youtubeMusic.ts",
+                    "tidal.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "browseRuntime.test.ts",
+                    "browseTidal.test.ts",
+                    "browseUrlParse.test.ts",
+                    "browseYtMusicRoutes.integration.test.ts",
+                    "homepageRuntime.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "search",
+            "name": "Search",
+            "description": "Unified search across local library, artists, albums, podcasts",
+            "frontend": {
+                "feature_dirs": ["search"],
+                "routes": ["/search"]
+            },
+            "backend": {
+                "routes": ["search.ts"],
+                "services": ["search.ts"]
+            },
+            "tests": {
+                "backend_route": [
+                    "searchRuntime.test.ts",
+                    "searchDiscoverCompat.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "discover",
+            "name": "Weekly Discovery",
+            "description": "Automated weekly album discovery with download and seeding pipeline",
+            "frontend": {
+                "feature_dirs": ["discover"],
+                "routes": ["/discover", "/mix"]
+            },
+            "backend": {
+                "routes": ["discover.ts", "mixes.ts", "recommendations.ts"],
+                "services": [
+                    "discoverWeekly.ts",
+                    "discovery/index.ts",
+                    "discovery/discoveryAlbumLifecycle.ts",
+                    "discovery/discoveryBatchLogger.ts",
+                    "discovery/discoveryRecommendations.ts",
+                    "discovery/discoverySeeding.ts",
+                    "programmaticPlaylists.ts",
+                    "programmaticPlaylistArtistCap.ts",
+                    "moodBucketService.ts",
+                    "radioVibeEngine.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "discoverRuntime.test.ts",
+                    "discoverLegacyRuntime.test.ts",
+                    "discoverRecommendationCompat.test.ts",
+                    "mixesRuntime.test.ts"
+                ],
+                "backend_contract": [
+                    "discoverProcessorIdempotencyContract.test.ts",
+                    "discoverQueueHandlerContract.test.ts",
+                    "moodBucketPrismaRetryContract.test.ts",
+                    "moodBucketWorkerReconciliationContract.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "listen-together",
+            "name": "Listen Together",
+            "description": "Real-time synchronized playback sessions via Socket.IO and Redis",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["listenTogether.ts", "social.ts"],
+                "services": [
+                    "listenTogether.ts",
+                    "listenTogetherManager.ts",
+                    "listenTogetherSocket.ts",
+                    "listenTogetherClusterSync.ts",
+                    "listenTogetherResolution.ts",
+                    "listenTogetherStateStore.ts",
+                    "socialPresenceEvents.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": ["listenTogetherRuntime.test.ts"],
+                "backend_contract": [
+                    "listenTogetherExternalSnapshotFreshness.test.ts",
+                    "listenTogetherMultiPodContinuity.test.ts",
+                    "listenTogetherMutationLockContract.test.ts",
+                    "listenTogetherObservabilityContract.test.ts",
+                    "listenTogetherReconnectSloContract.test.ts",
+                    "listenTogetherSocketRedisAdapterContract.test.ts",
+                    "listenTogetherStateStoreContract.test.ts",
+                    "listenTogetherStateSyncContract.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "playlists",
+            "name": "Playlists",
+            "description": "User playlists with mixed local/remote track support and playlist import",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": [
+                    "playlists.ts",
+                    "playlistImport.ts",
+                    "shareLinks.ts",
+                    "spotify.ts"
+                ],
+                "services": [
+                    "playlistImportService.ts",
+                    "playlistTrackResolution.ts",
+                    "spotify.ts",
+                    "spotifyImport.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "playlistsRuntime.test.ts",
+                    "importRoutes.integration.test.ts",
+                    "spotifyRuntime.test.ts"
+                ],
+                "backend_contract": ["programmaticPlaylistArtistCap.test.ts"]
+            }
+        },
+        {
+            "id": "tidal-streaming",
+            "name": "TIDAL Streaming",
+            "description": "Per-user TIDAL gap-fill streaming via device-code OAuth and tidal-downloader sidecar",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["tidalStreaming.ts"],
+                "services": ["tidalStreaming.ts", "tidal.ts"]
+            },
+            "tests": {
+                "backend_route": ["tidalStreamingRuntime.test.ts"],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "ytmusic-streaming",
+            "name": "YouTube Music Streaming",
+            "description": "YT Music gap-fill streaming via ytmusic-streamer sidecar with unauthenticated search",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["youtubeMusic.ts"],
+                "services": ["youtubeMusic.ts"]
+            },
+            "tests": {
+                "backend_route": [
+                    "youtubeMusicRuntime.test.ts",
+                    "youtubeMusicPublicRoutes.integration.test.ts",
+                    "youtubeMusicPublicStream.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "track-mapping",
+            "name": "Track Mapping & Resolution",
+            "description": "Cross-provider track identity mapping and playback resolution chain",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["trackMappings.ts"],
+                "services": [
+                    "trackMappingService.ts",
+                    "trackReconciliation.ts",
+                    "unifiedTrackResponse.ts",
+                    "trackPreference.ts",
+                    "remoteTrackBackfillService.ts",
+                    "remoteTrackMetadataRefresh.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "trackMappingsRuntime.test.ts",
+                    "trackMappingsRoutes.integration.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "durable-track-identity",
+            "name": "Durable Track Identity",
+            "description": "Preserves local track identity across moves, retags, replacements, temporary removal, revival, and retention purge, with removed-track visibility in playlists and Library Health",
+            "frontend": {
+                "feature_dirs": ["settings"],
+                "routes": ["/playlist/[id]", "/admin"]
+            },
+            "backend": {
+                "routes": [
+                    "admin.ts",
+                    "playlists.ts",
+                    "library.ts",
+                    "subsonic.ts"
+                ],
+                "services": ["musicScanner.ts", "trackIdentityMatcher.ts"]
+            },
+            "tests": {
+                "backend_route": [
+                    "admin.test.ts",
+                    "adminRuntime.test.ts",
+                    "playlistsRuntime.test.ts"
+                ],
+                "backend_contract": [
+                    "musicScannerService.test.ts",
+                    "trackIdentityMatcher.test.ts",
+                    "trackRemovalPurgeProcessor.test.ts"
+                ],
+                "frontend": [
+                    "playlistDetailProviderPlayability.component.test.ts",
+                    "libraryHealthDetails.component.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "federation",
+            "name": "Federated Library Sharing",
+            "description": "Feature-gated peer music, podcast-listing, and audiobook catalog sharing with consumer synchronization, provenance, and same-origin cover and stream proxying",
+            "frontend": {
+                "feature_dirs": ["settings"],
+                "routes": ["/admin", "/library", "/search"]
+            },
+            "backend": {
+                "routes": [
+                    "federation.ts",
+                    "federationAdmin.ts",
+                    "library.ts",
+                    "search.ts",
+                    "podcasts.ts",
+                    "audiobooks.ts"
+                ],
+                "services": [
+                    "federationPeers.ts",
+                    "federationCatalog.ts",
+                    "federationClient.ts",
+                    "federationStreamProxy.ts",
+                    "federationCoverProxy.ts",
+                    "federationAudiobookProxy.ts"
+                ],
+                "workers": [
+                    "federationJobs.ts",
+                    "processors/federationSyncProcessor.ts",
+                    "processors/federationHealthProcessor.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "federationRoutes.test.ts",
+                    "federationAdminRoutes.test.ts"
+                ],
+                "backend_contract": [
+                    "federationAuth.test.ts",
+                    "federationPeers.test.ts",
+                    "federationCatalog.test.ts",
+                    "federationClient.test.ts",
+                    "federationStreamProxy.test.ts",
+                    "federationAudiobookProxy.test.ts",
+                    "federationJobs.test.ts",
+                    "federationSyncProcessor.test.ts",
+                    "federationHealthProcessor.test.ts"
+                ],
+                "frontend": [
+                    "federationSection.component.test.ts",
+                    "peerBadge.component.test.ts",
+                    "searchFiltersFederation.component.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "podcasts",
+            "name": "Podcasts",
+            "description": "RSS-based podcast catalog with streaming, downloads, discovery, and federation peer listings",
+            "frontend": {
+                "feature_dirs": ["podcast"],
+                "routes": ["/podcasts"]
+            },
+            "backend": {
+                "routes": ["podcasts.ts"],
+                "services": [
+                    "podcastCache.ts",
+                    "podcastDownload.ts",
+                    "rssParser.ts",
+                    "itunes.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "podcastsCoreRuntime.test.ts",
+                    "podcastsDiscoveryRuntime.test.ts",
+                    "podcastsStreamingRuntime.test.ts",
+                    "podcastsDiscoverTopCompat.test.ts",
+                    "podcastsRefreshPrismaRetryCompat.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "audiobooks",
+            "name": "Audiobooks",
+            "description": "Audiobookshelf-synced and federated audiobook library with progress tracking and proxied playback",
+            "frontend": {
+                "feature_dirs": ["audiobook"],
+                "routes": ["/audiobooks/series/[name]"]
+            },
+            "backend": {
+                "routes": ["audiobooks.ts", "listeningState.ts"],
+                "services": [
+                    "audiobookshelf.ts",
+                    "audiobookCache.ts",
+                    "federationAudiobookProxy.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "audiobooksRuntime.test.ts",
+                    "audiobooksAdvancedRuntime.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "subsonic",
+            "name": "Subsonic API Compatibility",
+            "description": "OpenSubsonic /rest endpoint compatibility layer",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["subsonic.ts"],
+                "services": []
+            },
+            "tests": {
+                "backend_route": [
+                    "subsonicCoreCompat.test.ts",
+                    "subsonicBrowseCompat.test.ts",
+                    "subsonicCollectionsCompat.test.ts",
+                    "subsonicEntityCompat.test.ts",
+                    "subsonicLegacyCompat.test.ts",
+                    "subsonicMediaCompat.test.ts",
+                    "subsonicMetadataCompat.test.ts",
+                    "subsonicProfileCompat.test.ts",
+                    "subsonicRuntimeFocused.test.ts",
+                    "subsonicStateCompat.test.ts",
+                    "subsonicStreamCoverArtHandlers.test.ts",
+                    "subsonicTierB.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "audio-analysis",
+            "name": "Audio Analysis",
+            "description": "BPM/key/mood analysis (Essentia/MusiCNN) and CLAP embeddings for vibe similarity",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["analysis.ts", "vibe.ts"],
+                "services": [
+                    "hybridSimilarity.ts",
+                    "vibeVocabulary.ts",
+                    "vibeAnalysisCleanup.ts",
+                    "audioAnalysisCleanup.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "analysisRuntime.test.ts",
+                    "vibeSearchCompat.test.ts",
+                    "vibeJourneyRuntime.test.ts",
+                    "vibeCalibrationRuntime.test.ts"
+                ],
+                "backend_contract": ["clapTextEmbedRecoveryContract.test.ts"],
+                "sidecar_pytest": [
+                    "test_audio_analyzer_class_columns.py",
+                    "test_audio_analyzer_env.py",
+                    "test_batch_timeout_requeue.py",
+                    "test_failure_resolution.py",
+                    "test_pool_crash_recovery.py",
+                    "test_queue_claim_alignment.py"
+                ]
+            }
+        },
+        {
+            "id": "settings",
+            "name": "Settings & Admin",
+            "description": "User settings, system settings, auth, notifications, and admin controls",
+            "frontend": {
+                "feature_dirs": ["settings"],
+                "routes": ["/settings", "/device"]
+            },
+            "backend": {
+                "routes": [
+                    "settings.ts",
+                    "systemSettings.ts",
+                    "auth.ts",
+                    "system.ts",
+                    "notifications.ts",
+                    "onboarding.ts",
+                    "apiKeys.ts",
+                    "deviceLink.ts",
+                    "plays.ts"
+                ],
+                "services": [
+                    "featureDetection.ts",
+                    "rateLimiter.ts",
+                    "notificationService.ts",
+                    "notificationPolicyService.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "settingsDisplayNameCompat.test.ts",
+                    "systemSettingsRuntime.test.ts",
+                    "authRuntime.test.ts",
+                    "systemRuntime.test.ts",
+                    "notificationsRuntime.test.ts",
+                    "onboardingRuntime.test.ts",
+                    "apiKeysRuntime.test.ts",
+                    "deviceLinkRuntime.test.ts"
+                ],
+                "backend_contract": [
+                    "config.test.ts",
+                    "healthEndpointContract.test.ts"
+                ]
+            }
+        },
+        {
+            "id": "downloads",
+            "name": "Downloads & Acquisition",
+            "description": "Soulseek/TIDAL/Lidarr download pipeline and library acquisition",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": [
+                    "downloads.ts",
+                    "soulseek.ts",
+                    "webhooks.ts",
+                    "releases.ts"
+                ],
+                "services": [
+                    "acquisitionService.ts",
+                    "downloadQueue.ts",
+                    "simpleDownloadManager.ts",
+                    "soulseek.ts",
+                    "lidarr.ts",
+                    "staleJobCleanup.ts",
+                    "releaseContracts.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "downloadsRuntime.test.ts",
+                    "downloadsInteractiveCompat.test.ts",
+                    "downloadsReleasesCompat.test.ts",
+                    "soulseekRuntime.test.ts",
+                    "webhooksRuntime.test.ts"
+                ],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "youtube-downloads",
+            "name": "YouTube URL Streaming & Downloads",
+            "description": "Paste any YouTube link on the search page to stream it instantly or download the audio into the library, via the ytmusic-streamer sidecar (frontend/features/search/hooks/useYouTubeUrl.ts, useYouTubePlaylist.ts)",
+            "frontend": {
+                "feature_dirs": ["search"],
+                "routes": ["/search"]
+            },
+            "backend": {
+                "routes": ["youtube.ts"],
+                "services": ["youtubeDownload.ts"]
+            },
+            "tests": {
+                "backend_route": ["youtubeRuntime.test.ts"],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "native-audio-engine",
+            "name": "Native Audio Engine",
+            "description": "Default native <audio>-element playback engine (fourth pluggable backend alongside Howler/Video.js/Tauri) with a pure engine-selection policy (Android WebView pin, Tauri auto-upgrade suppression); implemented entirely under frontend/lib/audio-engine/ (nativeAudioElementEngine.ts, nativeAudioElementPolicy.ts, engineSelectionPolicy.ts, engineMode.ts). See docs/NATIVE_AUDIO_ENGINE.md.",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": [],
+                "services": []
+            },
+            "tests": {
+                "backend_route": [],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "queue-reorder",
+            "name": "Queue Drag-and-Drop Reorder",
+            "description": "Drag-and-drop reordering for the Now Playing queue (upcoming tracks and podcast episodes), sharing drop math (frontend/components/track/reorderDnd.ts) with playlist reordering and routed through a moveQueueItem primitive (frontend/lib/audio-controls-context.tsx) that also fixes shuffle-order remapping",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": ["/queue"]
+            },
+            "backend": {
+                "routes": ["playbackState.ts"],
+                "services": []
+            },
+            "tests": {
+                "backend_route": [],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "playlist-reorder",
+            "name": "Playlist Reordering",
+            "description": "Drag tracks by the grip handle on row hover, or use Move up / Move down / Move to top actions in a playlist row's overflow menu; persists through the existing PUT /api/playlists/:id/items/reorder endpoint",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": ["/playlist/[id]"]
+            },
+            "backend": {
+                "routes": ["playlists.ts"],
+                "services": []
+            },
+            "tests": {
+                "backend_route": ["playlistsRuntime.test.ts"],
+                "backend_contract": []
+            }
+        },
+        {
+            "id": "vibe-map",
+            "name": "Vibe Map Navigator",
+            "description": "Full-bleed interactive map of the library's CLAP-embedding space (frontend/components/vibe: thin VibeMap.tsx container backed by useVibeMapController, focused data/camera/shell hooks, pure vibeMapModel decisions, and separate canvas/control/feedback views; the controller composes useMapLayout/useMapCamera/useMapGestures/useMapSweep/useAuxSurface/useTrailDisplay plus the useVibeMode travel/journey/alchemy orchestrator over the pure vibeModeMachine reducer) with mood filter chips, energy/valence range sliders, a spotlight text search, and four interaction modes - Travel (click-to-explore neighbors with a mood compass), Journey (route to a destination track or mood, POST /api/vibe/journey), Drift (one-click mood-slide preset), and Alchemy (blend 2-10 tracks, POST /api/vibe/alchemy) - plus sweep-to-queue, save-as-playlist, calibrated match percentages (GET /api/vibe/calibration), and a flight-plan queue preview; served at /vibe (frontend/app/vibe/page.tsx)",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": ["/vibe"]
+            },
+            "backend": {
+                "routes": ["vibe.ts"],
+                "services": [
+                    "umapProjection.ts",
+                    "trackEmbeddings.ts",
+                    "vibeCalibration.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": [
+                    "vibeJourneyRuntime.test.ts",
+                    "vibeCalibrationRuntime.test.ts",
+                    "vibeSearchCompat.test.ts"
+                ],
+                "backend_contract": [],
+                "frontend": [
+                    "flightPlan.test.ts",
+                    "journeyQueue.test.ts",
+                    "mapFilters.test.ts",
+                    "mapHints.test.ts",
+                    "mapLayout.test.ts",
+                    "mapSearch.test.ts",
+                    "mapViewport.test.ts",
+                    "sessionTrail.test.ts",
+                    "sweepCollect.test.ts",
+                    "travelCompass.test.ts",
+                    "vibeMatch.test.ts",
+                    "vibeModeMachine.test.ts",
+                    "vibeMapModel.test.ts",
+                    "queuePanelReorder.test.ts",
+                    "useVibeMode.component.test.ts",
+                    "useMapCamera.component.test.ts",
+                    "useMapGestures.component.test.ts",
+                    "useMapSweep.component.test.ts",
+                    "useAuxSurface.component.test.ts",
+                    "savePlaylist.component.test.ts",
+                    "spotlightSearch.component.test.ts",
+                    "mapOverlay.component.test.ts",
+                    "vibeMap.component.test.ts",
+                    "vibePanels.component.test.ts"
+                ]
+            }
+        }
     ]
-  },
-  "features": [
-    {
-      "id": "library",
-      "name": "Music Library",
-      "description": "Local file-backed music library with scanning, browsing, and playback",
-      "frontend": {
-        "feature_dirs": ["library"],
-        "routes": ["/library"]
-      },
-      "backend": {
-        "routes": ["library.ts", "streaming.ts"],
-        "services": ["musicScanner.ts", "audioStreaming.ts", "coverArt.ts", "coverArtExtractor.ts", "fileValidator.ts"]
-      },
-      "tests": {
-        "backend_route": ["libraryRuntime.test.ts", "libraryArtistLookupCompat.test.ts", "libraryCoverArtCompat.test.ts", "libraryRemotePreference.test.ts", "streamingRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "artists",
-      "name": "Artists & Albums",
-      "description": "Universal artist/album entities with MusicBrainz enrichment and cross-provider resolution",
-      "frontend": {
-        "feature_dirs": ["artist", "album"],
-        "routes": ["/artist/[id]", "/album/[id]"]
-      },
-      "backend": {
-        "routes": ["artists.ts"],
-        "services": ["artistResolutionService.ts", "albumResolutionService.ts", "artistCountsService.ts", "enrichment.ts", "enrichmentState.ts", "enrichmentFailureService.ts", "musicbrainz.ts", "lastfm.ts", "fanart.ts", "wikidata.ts", "imageProvider.ts", "imageProxy.ts", "imageStorage.ts", "imageBackfill.ts"]
-      },
-      "tests": {
-        "backend_route": ["artistsRuntime.test.ts", "artistsPreviewYtMusic.test.ts"],
-        "backend_contract": ["artistEnrichmentMbidConflict.test.ts", "enrichmentCycleClaimContract.test.ts", "enrichmentStateRedisRetryContract.test.ts"]
-      }
-    },
-    {
-      "id": "explore-browse",
-      "name": "Explore & Browse",
-      "description": "YT Music shelves/charts/moods/genres, TIDAL spotlight, homepage sections",
-      "frontend": {
-        "feature_dirs": ["explore", "home"],
-        "routes": ["/explore", "/", "/browse/playlists"]
-      },
-      "backend": {
-        "routes": ["browse.ts", "homepage.ts"],
-        "services": ["browseImageCache.ts", "youtubeMusic.ts", "tidal.ts"]
-      },
-      "tests": {
-        "backend_route": ["browseRuntime.test.ts", "browseTidal.test.ts", "browseUrlParse.test.ts", "browseYtMusicRoutes.integration.test.ts", "homepageRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "search",
-      "name": "Search",
-      "description": "Unified search across local library, artists, albums, podcasts",
-      "frontend": {
-        "feature_dirs": ["search"],
-        "routes": ["/search"]
-      },
-      "backend": {
-        "routes": ["search.ts"],
-        "services": ["search.ts"]
-      },
-      "tests": {
-        "backend_route": ["searchRuntime.test.ts", "searchDiscoverCompat.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "discover",
-      "name": "Weekly Discovery",
-      "description": "Automated weekly album discovery with download and seeding pipeline",
-      "frontend": {
-        "feature_dirs": ["discover"],
-        "routes": ["/discover", "/mix"]
-      },
-      "backend": {
-        "routes": ["discover.ts", "mixes.ts"],
-        "services": ["discoverWeekly.ts", "discovery/index.ts", "discovery/discoveryAlbumLifecycle.ts", "discovery/discoveryBatchLogger.ts", "discovery/discoveryRecommendations.ts", "discovery/discoverySeeding.ts", "programmaticPlaylists.ts", "programmaticPlaylistArtistCap.ts", "moodBucketService.ts", "radioVibeEngine.ts"]
-      },
-      "tests": {
-        "backend_route": ["discoverRuntime.test.ts", "discoverLegacyRuntime.test.ts", "discoverRecommendationCompat.test.ts", "mixesRuntime.test.ts"],
-        "backend_contract": ["discoverProcessorIdempotencyContract.test.ts", "discoverQueueHandlerContract.test.ts", "moodBucketPrismaRetryContract.test.ts", "moodBucketWorkerReconciliationContract.test.ts"]
-      }
-    },
-    {
-      "id": "listen-together",
-      "name": "Listen Together",
-      "description": "Real-time synchronized playback sessions via Socket.IO and Redis",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["listenTogether.ts"],
-        "services": ["listenTogether.ts", "listenTogetherManager.ts", "listenTogetherSocket.ts", "listenTogetherClusterSync.ts", "listenTogetherResolution.ts", "listenTogetherStateStore.ts", "socialPresenceEvents.ts"]
-      },
-      "tests": {
-        "backend_route": ["listenTogetherRuntime.test.ts"],
-        "backend_contract": ["listenTogetherExternalSnapshotFreshness.test.ts", "listenTogetherMultiPodContinuity.test.ts", "listenTogetherMutationLockContract.test.ts", "listenTogetherObservabilityContract.test.ts", "listenTogetherReconnectSloContract.test.ts", "listenTogetherSocketRedisAdapterContract.test.ts", "listenTogetherStateStoreContract.test.ts", "listenTogetherStateSyncContract.test.ts"]
-      }
-    },
-    {
-      "id": "playlists",
-      "name": "Playlists",
-      "description": "User playlists with mixed local/remote track support and playlist import",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["playlists.ts", "playlistImport.ts"],
-        "services": ["playlistImportService.ts", "playlistTrackResolution.ts", "spotify.ts", "spotifyImport.ts"]
-      },
-      "tests": {
-        "backend_route": ["playlistsRuntime.test.ts", "importRoutes.integration.test.ts", "spotifyRuntime.test.ts"],
-        "backend_contract": ["programmaticPlaylistArtistCap.test.ts"]
-      }
-    },
-    {
-      "id": "tidal-streaming",
-      "name": "TIDAL Streaming",
-      "description": "Per-user TIDAL gap-fill streaming via device-code OAuth and tidal-downloader sidecar",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["tidalStreaming.ts"],
-        "services": ["tidalStreaming.ts", "tidal.ts"]
-      },
-      "tests": {
-        "backend_route": ["tidalStreamingRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "ytmusic-streaming",
-      "name": "YouTube Music Streaming",
-      "description": "YT Music gap-fill streaming via ytmusic-streamer sidecar with unauthenticated search",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["youtubeMusic.ts"],
-        "services": ["youtubeMusic.ts"]
-      },
-      "tests": {
-        "backend_route": ["youtubeMusicRuntime.test.ts", "youtubeMusicPublicRoutes.integration.test.ts", "youtubeMusicPublicStream.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "track-mapping",
-      "name": "Track Mapping & Resolution",
-      "description": "Cross-provider track identity mapping and playback resolution chain",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["trackMappings.ts"],
-        "services": ["trackMappingService.ts", "trackReconciliation.ts", "unifiedTrackResponse.ts", "trackPreference.ts", "remoteTrackBackfillService.ts", "remoteTrackMetadataRefresh.ts"]
-      },
-      "tests": {
-        "backend_route": ["trackMappingsRuntime.test.ts", "trackMappingsRoutes.integration.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "durable-track-identity",
-      "name": "Durable Track Identity",
-      "description": "Preserves local track identity across moves, retags, replacements, temporary removal, revival, and retention purge, with removed-track visibility in playlists and Library Health",
-      "frontend": {
-        "feature_dirs": ["settings"],
-        "routes": ["/playlist/[id]", "/admin"]
-      },
-      "backend": {
-        "routes": ["admin.ts", "playlists.ts", "library.ts", "subsonic.ts"],
-        "services": ["musicScanner.ts", "trackIdentityMatcher.ts"]
-      },
-      "tests": {
-        "backend_route": ["admin.test.ts", "adminRuntime.test.ts", "playlistsRuntime.test.ts"],
-        "backend_contract": ["musicScannerService.test.ts", "trackIdentityMatcher.test.ts", "trackRemovalPurgeProcessor.test.ts"],
-        "frontend": ["playlistDetailProviderPlayability.component.test.ts", "libraryHealthDetails.component.test.ts"]
-      }
-    },
-    {
-      "id": "federation",
-      "name": "Federated Library Sharing",
-      "description": "Feature-gated peer music, podcast-listing, and audiobook catalog sharing with consumer synchronization, provenance, and same-origin cover and stream proxying",
-      "frontend": {
-        "feature_dirs": ["settings"],
-        "routes": ["/admin", "/library", "/search"]
-      },
-      "backend": {
-        "routes": ["federation.ts", "federationAdmin.ts", "library.ts", "search.ts", "podcasts.ts", "audiobooks.ts"],
-        "services": ["federationPeers.ts", "federationCatalog.ts", "federationClient.ts", "federationStreamProxy.ts", "federationCoverProxy.ts", "federationAudiobookProxy.ts"],
-        "workers": ["federationJobs.ts", "processors/federationSyncProcessor.ts", "processors/federationHealthProcessor.ts"]
-      },
-      "tests": {
-        "backend_route": ["federationRoutes.test.ts", "federationAdminRoutes.test.ts"],
-        "backend_contract": ["federationAuth.test.ts", "federationPeers.test.ts", "federationCatalog.test.ts", "federationClient.test.ts", "federationStreamProxy.test.ts", "federationAudiobookProxy.test.ts", "federationJobs.test.ts", "federationSyncProcessor.test.ts", "federationHealthProcessor.test.ts"],
-        "frontend": ["federationSection.component.test.ts", "peerBadge.component.test.ts", "searchFiltersFederation.component.test.ts"]
-      }
-    },
-    {
-      "id": "podcasts",
-      "name": "Podcasts",
-      "description": "RSS-based podcast catalog with streaming, downloads, discovery, and federation peer listings",
-      "frontend": {
-        "feature_dirs": ["podcast"],
-        "routes": ["/podcasts"]
-      },
-      "backend": {
-        "routes": ["podcasts.ts"],
-        "services": ["podcastCache.ts", "podcastDownload.ts", "rssParser.ts", "itunes.ts"]
-      },
-      "tests": {
-        "backend_route": ["podcastsCoreRuntime.test.ts", "podcastsDiscoveryRuntime.test.ts", "podcastsStreamingRuntime.test.ts", "podcastsDiscoverTopCompat.test.ts", "podcastsRefreshPrismaRetryCompat.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "audiobooks",
-      "name": "Audiobooks",
-      "description": "Audiobookshelf-synced and federated audiobook library with progress tracking and proxied playback",
-      "frontend": {
-        "feature_dirs": ["audiobook"],
-        "routes": ["/audiobooks/series/[name]"]
-      },
-      "backend": {
-        "routes": ["audiobooks.ts"],
-        "services": ["audiobookshelf.ts", "audiobookCache.ts", "federationAudiobookProxy.ts"]
-      },
-      "tests": {
-        "backend_route": ["audiobooksRuntime.test.ts", "audiobooksAdvancedRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "subsonic",
-      "name": "Subsonic API Compatibility",
-      "description": "OpenSubsonic /rest endpoint compatibility layer",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["subsonic.ts"],
-        "services": []
-      },
-      "tests": {
-        "backend_route": ["subsonicCoreCompat.test.ts", "subsonicBrowseCompat.test.ts", "subsonicCollectionsCompat.test.ts", "subsonicEntityCompat.test.ts", "subsonicLegacyCompat.test.ts", "subsonicMediaCompat.test.ts", "subsonicMetadataCompat.test.ts", "subsonicProfileCompat.test.ts", "subsonicRuntimeFocused.test.ts", "subsonicStateCompat.test.ts", "subsonicStreamCoverArtHandlers.test.ts", "subsonicTierB.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "audio-analysis",
-      "name": "Audio Analysis",
-      "description": "BPM/key/mood analysis (Essentia/MusiCNN) and CLAP embeddings for vibe similarity",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["analysis.ts", "vibe.ts"],
-        "services": ["hybridSimilarity.ts", "vibeVocabulary.ts", "vibeAnalysisCleanup.ts", "audioAnalysisCleanup.ts"]
-      },
-      "tests": {
-        "backend_route": ["analysisRuntime.test.ts", "vibeSearchCompat.test.ts", "vibeJourneyRuntime.test.ts", "vibeCalibrationRuntime.test.ts"],
-        "backend_contract": ["clapTextEmbedRecoveryContract.test.ts"],
-        "sidecar_pytest": ["test_audio_analyzer_class_columns.py", "test_audio_analyzer_env.py", "test_batch_timeout_requeue.py", "test_failure_resolution.py", "test_pool_crash_recovery.py", "test_queue_claim_alignment.py"]
-      }
-    },
-    {
-      "id": "settings",
-      "name": "Settings & Admin",
-      "description": "User settings, system settings, auth, notifications, and admin controls",
-      "frontend": {
-        "feature_dirs": ["settings"],
-        "routes": ["/settings", "/device"]
-      },
-      "backend": {
-        "routes": ["settings.ts", "systemSettings.ts", "auth.ts", "system.ts", "notifications.ts", "onboarding.ts", "apiKeys.ts", "deviceLink.ts"],
-        "services": ["featureDetection.ts", "rateLimiter.ts", "notificationService.ts", "notificationPolicyService.ts"]
-      },
-      "tests": {
-        "backend_route": ["settingsDisplayNameCompat.test.ts", "systemSettingsRuntime.test.ts", "authRuntime.test.ts", "systemRuntime.test.ts", "notificationsRuntime.test.ts", "onboardingRuntime.test.ts", "apiKeysRuntime.test.ts", "deviceLinkRuntime.test.ts"],
-        "backend_contract": ["config.test.ts", "healthEndpointContract.test.ts"]
-      }
-    },
-    {
-      "id": "downloads",
-      "name": "Downloads & Acquisition",
-      "description": "Soulseek/TIDAL/Lidarr download pipeline and library acquisition",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": ["downloads.ts", "soulseek.ts", "webhooks.ts", "releases.ts"],
-        "services": ["acquisitionService.ts", "downloadQueue.ts", "simpleDownloadManager.ts", "soulseek.ts", "lidarr.ts", "staleJobCleanup.ts", "releaseContracts.ts"]
-      },
-      "tests": {
-        "backend_route": ["downloadsRuntime.test.ts", "downloadsInteractiveCompat.test.ts", "downloadsReleasesCompat.test.ts", "soulseekRuntime.test.ts", "webhooksRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "youtube-downloads",
-      "name": "YouTube URL Streaming & Downloads",
-      "description": "Paste any YouTube link on the search page to stream it instantly or download the audio into the library, via the ytmusic-streamer sidecar (frontend/features/search/hooks/useYouTubeUrl.ts, useYouTubePlaylist.ts)",
-      "frontend": {
-        "feature_dirs": ["search"],
-        "routes": ["/search"]
-      },
-      "backend": {
-        "routes": ["youtube.ts"],
-        "services": ["youtubeDownload.ts"]
-      },
-      "tests": {
-        "backend_route": ["youtubeRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "native-audio-engine",
-      "name": "Native Audio Engine",
-      "description": "Default native <audio>-element playback engine (fourth pluggable backend alongside Howler/Video.js/Tauri) with a pure engine-selection policy (Android WebView pin, Tauri auto-upgrade suppression); implemented entirely under frontend/lib/audio-engine/ (nativeAudioElementEngine.ts, nativeAudioElementPolicy.ts, engineSelectionPolicy.ts, engineMode.ts). See docs/NATIVE_AUDIO_ENGINE.md.",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": []
-      },
-      "backend": {
-        "routes": [],
-        "services": []
-      },
-      "tests": {
-        "backend_route": [],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "queue-reorder",
-      "name": "Queue Drag-and-Drop Reorder",
-      "description": "Drag-and-drop reordering for the Now Playing queue (upcoming tracks and podcast episodes), sharing drop math (frontend/components/track/reorderDnd.ts) with playlist reordering and routed through a moveQueueItem primitive (frontend/lib/audio-controls-context.tsx) that also fixes shuffle-order remapping",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": ["/queue"]
-      },
-      "backend": {
-        "routes": ["playbackState.ts"],
-        "services": []
-      },
-      "tests": {
-        "backend_route": [],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "playlist-reorder",
-      "name": "Playlist Reordering",
-      "description": "Drag tracks by the grip handle on row hover, or use Move up / Move down / Move to top actions in a playlist row's overflow menu; persists through the existing PUT /api/playlists/:id/items/reorder endpoint",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": ["/playlist/[id]"]
-      },
-      "backend": {
-        "routes": ["playlists.ts"],
-        "services": []
-      },
-      "tests": {
-        "backend_route": ["playlistsRuntime.test.ts"],
-        "backend_contract": []
-      }
-    },
-    {
-      "id": "vibe-map",
-      "name": "Vibe Map Navigator",
-      "description": "Full-bleed interactive map of the library's CLAP-embedding space (frontend/components/vibe: thin VibeMap.tsx container backed by useVibeMapController, focused data/camera/shell hooks, pure vibeMapModel decisions, and separate canvas/control/feedback views; the controller composes useMapLayout/useMapCamera/useMapGestures/useMapSweep/useAuxSurface/useTrailDisplay plus the useVibeMode travel/journey/alchemy orchestrator over the pure vibeModeMachine reducer) with mood filter chips, energy/valence range sliders, a spotlight text search, and four interaction modes - Travel (click-to-explore neighbors with a mood compass), Journey (route to a destination track or mood, POST /api/vibe/journey), Drift (one-click mood-slide preset), and Alchemy (blend 2-10 tracks, POST /api/vibe/alchemy) - plus sweep-to-queue, save-as-playlist, calibrated match percentages (GET /api/vibe/calibration), and a flight-plan queue preview; served at /vibe (frontend/app/vibe/page.tsx)",
-      "frontend": {
-        "feature_dirs": [],
-        "routes": ["/vibe"]
-      },
-      "backend": {
-        "routes": ["vibe.ts"],
-        "services": ["umapProjection.ts", "trackEmbeddings.ts", "vibeCalibration.ts"]
-      },
-      "tests": {
-        "backend_route": ["vibeJourneyRuntime.test.ts", "vibeCalibrationRuntime.test.ts", "vibeSearchCompat.test.ts"],
-        "backend_contract": [],
-        "frontend": ["flightPlan.test.ts", "journeyQueue.test.ts", "mapFilters.test.ts", "mapHints.test.ts", "mapLayout.test.ts", "mapSearch.test.ts", "mapViewport.test.ts", "sessionTrail.test.ts", "sweepCollect.test.ts", "travelCompass.test.ts", "vibeMatch.test.ts", "vibeModeMachine.test.ts", "vibeMapModel.test.ts", "queuePanelReorder.test.ts", "useVibeMode.component.test.ts", "useMapCamera.component.test.ts", "useMapGestures.component.test.ts", "useMapSweep.component.test.ts", "useAuxSurface.component.test.ts", "savePlaylist.component.test.ts", "spotlightSearch.component.test.ts", "mapOverlay.component.test.ts", "vibeMap.component.test.ts", "vibePanels.component.test.ts"]
-      }
-    }
-  ]
 }

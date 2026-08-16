@@ -40,59 +40,66 @@ This index is the central navigation page for all project documentation under `d
 
 ## For Users and Operators
 
-| Document | Audience | Purpose |
-| --- | --- | --- |
-| [`../README.md`](../README.md) | Everyone | Product overview, highlights, and quick start |
-| [`USAGE_GUIDE.md`](USAGE_GUIDE.md) | Users | Navigation, playback behavior, keyboard shortcuts, and administration |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Self-hosters/operators | Docker run/compose deployment modes, release channels, and updates |
-| [`UPGRADING.md`](UPGRADING.md) | Users/operators | Operator-facing notes for upgrades that need action, newest first; unlisted releases are drop-in |
-| [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md) | Operators/admins | External-access config, secret handling, and security hardening |
-| [`OIDC_SSO.md`](OIDC_SSO.md) | Operators/admins | OIDC provider setup, account linking, role management, app passwords, and recovery |
-| [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) | Operators/admins | Complete env var reference by container with defaults and status labels |
-| [`INTEGRATIONS.md`](INTEGRATIONS.md) | Operators/admins | Setup guides for Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, and OpenSubsonic |
-| [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md) | Power users/operators | CLAP analysis service details and optional GPU acceleration |
-| [`KUBERNETES.md`](KUBERNETES.md) | Kubernetes operators | Helm and manual Kubernetes deployment guidance |
-| [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance |
-| [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md) | Operators/maintainers | Step-by-step migration runbook for moving a Lidify deployment to soundspan |
-| [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md) | Users/operators | Native `<audio>`-element playback engine (default as of 1.8.0): selection precedence, platform pins, and how to opt back into the legacy engine |
-| [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) | Operators | Segmented-streaming guidance (experimental feature) |
+| Document                                                                                       | Audience                 | Purpose                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`../README.md`](../README.md)                                                                 | Everyone                 | Product overview, highlights, and quick start                                                                                                   |
+| [`USAGE_GUIDE.md`](USAGE_GUIDE.md)                                                             | Users                    | Navigation, playback behavior, keyboard shortcuts, and administration                                                                           |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md)                                                               | Self-hosters/operators   | Docker run/compose deployment modes, release channels, and updates                                                                              |
+| [`UPGRADING.md`](UPGRADING.md)                                                                 | Users/operators          | Operator-facing notes for upgrades that need action, newest first; unlisted releases are drop-in                                                |
+| [`UPGRADING_TO_2.0.0.md`](UPGRADING_TO_2.0.0.md)                                               | Users/operators          | Focused migration and compatibility notes for the 2.0.0 upgrade                                                                                 |
+| [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md)                               | Operators/admins         | External-access config, secret handling, and security hardening                                                                                 |
+| [`OIDC_SSO.md`](OIDC_SSO.md)                                                                   | Operators/admins         | OIDC provider setup, account linking, role management, app passwords, and recovery                                                              |
+| [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)                                         | Operators/admins         | Complete env var reference by container with defaults and status labels                                                                         |
+| [`INTEGRATIONS.md`](INTEGRATIONS.md)                                                           | Operators/admins         | Setup guides for Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, and OpenSubsonic                                                       |
+| [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md)                                 | Power users/operators    | CLAP analysis service details and optional GPU acceleration                                                                                     |
+| [`KUBERNETES.md`](KUBERNETES.md)                                                               | Kubernetes operators     | Helm and manual Kubernetes deployment guidance                                                                                                  |
+| [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md)                                 | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance                                                                                            |
+| [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md)                                         | Operators/maintainers    | Step-by-step migration runbook for moving a Lidify deployment to soundspan                                                                      |
+| [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md)                                             | Users/operators          | Native `<audio>`-element playback engine (default as of 1.8.0): selection precedence, platform pins, and how to opt back into the legacy engine |
+| [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)                   | Operators                | Segmented-streaming guidance (experimental feature)                                                                                             |
+| [`kima-hub-v1.6.3-to-v1.7.5-adoption-report.md`](kima-hub-v1.6.3-to-v1.7.5-adoption-report.md) | Maintainers              | Archival adoption report; retained for historical reference, not current work tracking                                                          |
 
 ## For Contributors and Maintainers
 
-| Document | Audience | Purpose |
-| --- | --- | --- |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Contributors/agents | Service topology, request flows, service communication map |
-| [`DATA_MODEL.md`](DATA_MODEL.md) | Contributors/agents | Entity relationships (mermaid ERD), classification, resolution chains |
-| [`TEST_MATRIX.md`](TEST_MATRIX.md) | Contributors/agents | Domain-to-test-file mapping for fast targeted verification |
-| [`matrix.md`](matrix.md) | Contributors/agents | Playback-surface button availability matrix, plus enforced hard caps, pagination defaults, and UI display limits, each with file:line pointers |
-| [`FEATURE_INDEX.json`](FEATURE_INDEX.json) | Agents | Machine-readable feature-to-code mapping for navigation and verification |
-| [`TESTING.md`](TESTING.md) | Contributors/operators | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries |
-| [`../AGENTS.md`](../AGENTS.md) | Contributors/agents | Active AWM repo contract and task loop |
-| [`AWM_FEATURE_PLANS.md`](AWM_FEATURE_PLANS.md) | Contributors/agents | Visible repo-local schema for formal feature plans stored in AWM |
-| [`modernization-roadmap.md`](modernization-roadmap.md) | Contributors/maintainers | Canonical index of modernization review findings (F1-F54), grouped into epics, with per-finding status tracking |
-| [`maintainers/README.md`](maintainers/README.md) | Maintainers | Index of retained maintainer-only guidance |
-| [`maintainers/LOGGING_STANDARDS.md`](maintainers/LOGGING_STANDARDS.md) | Maintainers | Current shared logging guidance for runtime code |
-| [`maintainers/RELEASE_NOTES_TEMPLATE.md`](maintainers/RELEASE_NOTES_TEMPLATE.md) | Maintainers | Manual release-notes scaffold for published releases |
+| Document                                                                         | Audience                 | Purpose                                                                                                                                        |
+| -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                                             | Contributors/agents      | Service topology, request flows, service communication map                                                                                     |
+| [`DATA_MODEL.md`](DATA_MODEL.md)                                                 | Contributors/agents      | Entity relationships (mermaid ERD), classification, resolution chains                                                                          |
+| [`TEST_MATRIX.md`](TEST_MATRIX.md)                                               | Contributors/agents      | Domain-to-test-file mapping for fast targeted verification                                                                                     |
+| [`matrix.md`](matrix.md)                                                         | Contributors/agents      | Playback-surface button availability matrix, plus enforced hard caps, pagination defaults, and UI display limits, each with file:line pointers |
+| [`FEATURE_INDEX.json`](FEATURE_INDEX.json)                                       | Agents                   | Machine-readable feature-to-code mapping for navigation and verification                                                                       |
+| [`TESTING.md`](TESTING.md)                                                       | Contributors/operators   | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries                                     |
+| [`SECURITY.md`](SECURITY.md)                                                     | Contributors             | Security reporting, supported versions, and contributor security requirements                                                                  |
+| [`../AGENTS.md`](../AGENTS.md)                                                   | Contributors/agents      | Active AWM repo contract and task loop                                                                                                         |
+| [`AWM_FEATURE_PLANS.md`](AWM_FEATURE_PLANS.md)                                   | Contributors/agents      | Visible repo-local schema for formal feature plans stored in AWM                                                                               |
+| [`modernization-roadmap.md`](modernization-roadmap.md)                           | Contributors/maintainers | Canonical index of modernization review findings (F1-F54), grouped into epics, with per-finding status tracking                                |
+| [`maintainers/README.md`](maintainers/README.md)                                 | Maintainers              | Index of retained maintainer-only guidance                                                                                                     |
+| [`maintainers/LOGGING_STANDARDS.md`](maintainers/LOGGING_STANDARDS.md)           | Maintainers              | Current shared logging guidance for runtime code                                                                                               |
+| [`maintainers/RELEASE_NOTES_TEMPLATE.md`](maintainers/RELEASE_NOTES_TEMPLATE.md) | Maintainers              | Machine-consumed release-notes template used by the guarded generation helper                                                                  |
 
 ## Design Documents
 
-| Document | Status | Purpose |
-| --- | --- | --- |
-| [`designs/provider-strategy-track-mapping.md`](designs/provider-strategy-track-mapping.md) | Design phase | Provider strategy overhaul, browse redesign, TrackMapping data model |
-| [`designs/explore-page-consolidation.md`](designs/explore-page-consolidation.md) | Design phase | Merge Home/Browse/Radio/Discovery into single Explore page |
+| Document                                                                                                     | Status       | Purpose                                                                         |
+| ------------------------------------------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------- |
+| [`designs/provider-strategy-track-mapping.md`](designs/provider-strategy-track-mapping.md)                   | Design phase | Provider strategy overhaul, browse redesign, TrackMapping data model            |
+| [`designs/explore-page-consolidation.md`](designs/explore-page-consolidation.md)                             | Design phase | Merge Home/Browse/Radio/Discovery into single Explore page                      |
+| [`designs/durable-track-identity.md`](designs/durable-track-identity.md)                                     | Shipped      | Durable local track identity, soft removal, revival, and retention purge design |
+| [`designs/federated-library-sharing.md`](designs/federated-library-sharing.md)                               | Shipped      | Federated library-sharing product and protocol design                           |
+| [`designs/federated-library-sharing-implementation.md`](designs/federated-library-sharing-implementation.md) | Implemented  | Delivery plan and implementation record for federated library sharing           |
 
 ## Compatibility and Brand
 
-| Document | Purpose |
-| --- | --- |
-| [`../CHANGELOG.md`](../CHANGELOG.md) | Canonical release and feature change log for this repository |
-| [`release-notes/`](release-notes/) | Per-release human-readable notes (summary, known issues, compatibility notes), generated from the CHANGELOG at release-cut time |
-| [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) | Supported `/rest` compatibility contract, known gaps, and validation evidence |
-| [`BRAND_POLICY.md`](BRAND_POLICY.md) | Brand usage rules, naming constraints, and attribution guidance for soundspan |
+| Document                                                         | Purpose                                                                                                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [`../CHANGELOG.md`](../CHANGELOG.md)                             | Canonical release and feature change log for this repository                                                                    |
+| [`release-notes/`](release-notes/)                               | Per-release human-readable notes (summary, known issues, compatibility notes), generated from the CHANGELOG at release-cut time |
+| [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) | Supported `/rest` compatibility contract, known gaps, and validation evidence                                                   |
+| [`BRAND_POLICY.md`](BRAND_POLICY.md)                             | Brand usage rules, naming constraints, and attribution guidance for soundspan                                                   |
 
 ---
 
 Key AWM helper commands:
+
 - `awm context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
 - `awm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification; backend changes stay receipt-scoped and targeted here.
 - `awm review --run --project soundspan --receipt-id <receipt-id>` satisfies repo-defined workflow gates when `.awm/awm-workflows.yaml` selects the current task.
