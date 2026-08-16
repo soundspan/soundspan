@@ -116,9 +116,7 @@ function resolveRateLimitOptions(
 ): ResolvedRateLimitOptions {
     const providedClient = options.client;
     return {
-        client: providedClient
-            ? () => providedClient
-            : loadDefaultRedisClient,
+        client: providedClient ? () => providedClient : loadDefaultRedisClient,
         commandTimeoutMs: requirePositiveInteger(
             options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
             "commandTimeoutMs",
