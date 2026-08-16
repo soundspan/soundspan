@@ -84,6 +84,18 @@ function describeError(error: unknown): string {
     return String(error);
 }
 
+/**
+ * Scope the store's logger without assuming a full logger shape. Limiters are
+ * created at module load, where test doubles may stub the logger module with a
+ * partial object; falling back to the base logger keeps imports side-effect
+ * safe instead of throwing before any request runs.
+ */
+function scopedLogger(base: Logger): Logger {
+    return typeof base.child === "function"
+        ? base.child("RateLimitStore")
+        : base;
+}
+
 function resolveRateLimitOptions(
     options: RedisRateLimitOptions,
 ): ResolvedRateLimitOptions {
@@ -98,7 +110,7 @@ function resolveRateLimitOptions(
             "warningIntervalMs",
         ),
         now: options.now ?? Date.now,
-        logger: (options.logger ?? rootLogger).child("RateLimitStore"),
+        logger: scopedLogger(options.logger ?? rootLogger),
     };
 }
 
