@@ -45,11 +45,10 @@ jest.mock("../../services/hybridSimilarity", () => ({
     findSimilarTracks: jest.fn(),
 }));
 
-// The vibe ANN sites (findNearestToEmbedding + text-vibe search) route through
-// the F14 helper, which applies ivfflat.probes in a transaction. Mock it at that
-// boundary so these tests still assert route BEHAVIOUR on canned neighbour rows.
-// The plain embedding lookups (fetchTrackEmbedding) and the status count remain
-// on prisma.$queryRaw.
+// The track-embedding service routes its ANN sites through the F14 helper,
+// which applies ivfflat.probes in a transaction. Mock it at that boundary so
+// these tests still assert route BEHAVIOUR on canned neighbour rows. Plain
+// embedding lookups and status counts use the mocked prisma.$queryRaw boundary.
 jest.mock("../../utils/annQuery", () => ({
     runAnnQuery: jest.fn(),
 }));
@@ -58,15 +57,19 @@ jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
 }));
 
-jest.mock("../../utils/embedding", () => ({
-    parseEmbedding: jest.fn((text: string) => {
-        const values = text
-            .replace(/[\[\]]/g, "")
-            .split(",")
-            .map(Number);
-        return values;
-    }),
-}));
+jest.mock("../../utils/embedding", () => {
+    const actual = jest.requireActual("../../utils/embedding");
+    return {
+        ...actual,
+        parseEmbedding: jest.fn((text: string) => {
+            const values = text
+                .replace(/[\[\]]/g, "")
+                .split(",")
+                .map(Number);
+            return values;
+        }),
+    };
+});
 
 jest.mock("../../services/vibeVocabulary", () => ({
     loadVocabulary: jest.fn(),

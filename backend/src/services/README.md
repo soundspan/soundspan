@@ -133,7 +133,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
-| `backend/src/services/trackEmbeddings.ts` | Vibe embedding reads |
+| `backend/src/services/trackEmbeddings.ts` | Vibe pgvector reads, ANN queries, and embedding counts |
 | `backend/src/services/trackIdentityMatcher.ts` | Durable track move identity matching |
 | `backend/src/services/trackPreference.ts` | Core |
 | `backend/src/services/trackReconciliation.ts` | Core |

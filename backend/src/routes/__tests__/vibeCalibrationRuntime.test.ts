@@ -67,15 +67,19 @@ jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
 }));
 
-jest.mock("../../utils/embedding", () => ({
-    parseEmbedding: jest.fn((text: string) => {
-        const values = text
-            .replace(/[\[\]]/g, "")
-            .split(",")
-            .map(Number);
-        return values;
-    }),
-}));
+jest.mock("../../utils/embedding", () => {
+    const actual = jest.requireActual("../../utils/embedding");
+    return {
+        ...actual,
+        parseEmbedding: jest.fn((text: string) => {
+            const values = text
+                .replace(/[\[\]]/g, "")
+                .split(",")
+                .map(Number);
+            return values;
+        }),
+    };
+});
 
 jest.mock("../../services/vibeVocabulary", () => ({
     loadVocabulary: jest.fn(),

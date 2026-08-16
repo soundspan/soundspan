@@ -1,15 +1,13 @@
 import { Request, Response, Router } from "express";
 import { randomUUID } from "crypto";
-import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { runAnnQuery } from "../utils/annQuery";
 import {
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
 import { blockingBlPop, redisClient } from "../utils/redis";
-import { parseEmbedding } from "../utils/embedding";
+import { blendEmbeddings, lerpEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { findSimilarTracks } from "../services/hybridSimilarity";
@@ -40,11 +38,18 @@ import {
     MoodType,
     MOOD_BUCKET_MIN_SCORE,
 } from "../services/moodBucketService";
-import { fetchEmbeddingsByTrackIds } from "../services/trackEmbeddings";
+import {
+    countEmbeddedBrowsableTracks,
+    fetchEmbeddingsByTrackIds,
+    fetchTrackEmbedding,
+    findNearestToEmbedding,
+    findTracksByTextEmbedding,
+    type NearestTrackRow,
+    type TextSearchResult,
+} from "../services/trackEmbeddings";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
-import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
 
 const router = Router();
 
@@ -59,27 +64,6 @@ const MAX_TEXT_SEARCH_QUERY_LENGTH = 512;
 // at most 30 seconds. Retaining 100 entries leaves burst headroom without
 // allowing timed-out request payloads to accumulate indefinitely.
 const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
-
-interface TextSearchResult {
-    id: string;
-    title: string;
-    duration: number;
-    trackNo: number;
-    distance: number;
-    albumId: string;
-    albumTitle: string;
-    albumCoverUrl: string | null;
-    artistId: string;
-    artistName: string;
-    // Audio features for re-ranking
-    energy: number | null;
-    valence: number | null;
-    danceability: number | null;
-    acousticness: number | null;
-    instrumentalness: number | null;
-    arousal: number | null;
-    speechiness: number | null;
-}
 
 async function buildTrackPreferenceScoreMapForUser(
     userId: string | undefined,
@@ -177,102 +161,6 @@ router.get(
         }
     }),
 );
-
-/**
- * Fetch a single track's CLAP embedding from pgvector.
- */
-async function fetchTrackEmbedding(trackId: string): Promise<number[] | null> {
-    const rows = await prisma.$queryRaw<{ embedding: string }[]>`
-        SELECT te.embedding::text
-        FROM track_embeddings te
-        JOIN "Track" t ON te.track_id = t.id
-        WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL} AND te.track_id = ${trackId}
-        LIMIT 1
-    `;
-    if (!rows.length) return null;
-    return parseEmbedding(rows[0].embedding);
-}
-
-/**
- * Linearly interpolate between two embedding vectors.
- */
-function lerpEmbedding(a: number[], b: number[], t: number): number[] {
-    return a.map((v, i) => v * (1 - t) + b[i] * t);
-}
-
-/**
- * Weighted average of multiple embeddings.
- */
-function blendEmbeddings(embeddings: number[][], weights: number[]): number[] {
-    const dim = embeddings[0].length;
-    const totalWeight = weights.reduce((s, w) => s + w, 0);
-    const result = new Array<number>(dim).fill(0);
-    for (let i = 0; i < embeddings.length; i++) {
-        const w = weights[i] / totalWeight;
-        for (let d = 0; d < dim; d++) {
-            result[d] += embeddings[i][d] * w;
-        }
-    }
-    return result;
-}
-
-interface NearestTrackRow {
-    id: string;
-    title: string;
-    distance: number;
-    albumId: string;
-    albumTitle: string;
-    albumCoverUrl: string | null;
-    artistId: string;
-    artistName: string;
-    energy: number | null;
-    valence: number | null;
-    danceability: number | null;
-    arousal: number | null;
-}
-
-async function findNearestToEmbedding(
-    embedding: number[],
-    limit: number,
-    excludeIds: string[] = [],
-): Promise<NearestTrackRow[]> {
-    if (excludeIds.length > 0) {
-        return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
-            SELECT
-                t.id, t.title,
-                te.embedding <=> ${embedding}::vector AS distance,
-                a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-                ar.id AS "artistId", ar.name AS "artistName",
-                t.energy, t.valence, t.danceability, t.arousal
-            FROM track_embeddings te
-            JOIN "Track" t ON te.track_id = t.id
-            JOIN "Album" a ON t."albumId" = a.id
-            JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL}
-              AND te.track_id != ALL(${excludeIds}::text[])
-            ORDER BY te.embedding <=> ${embedding}::vector
-            LIMIT ${limit}
-        `);
-    }
-    return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
-        SELECT
-            t.id, t.title,
-            te.embedding <=> ${embedding}::vector AS distance,
-            a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-            ar.id AS "artistId", ar.name AS "artistName",
-            t.energy, t.valence, t.danceability, t.arousal
-        FROM track_embeddings te
-        JOIN "Track" t ON te.track_id = t.id
-        JOIN "Album" a ON t."albumId" = a.id
-        JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL}
-        ORDER BY te.embedding <=> ${embedding}::vector
-        LIMIT ${limit}
-    `);
-}
 
 function formatNearestTrack(row: NearestTrackRow) {
     return {
@@ -475,7 +363,7 @@ async function resolveTrackDestination(
         include: { album: { include: { artist: true } } },
     });
     if (!destinationTrack) {
-        // TOCTOU: the track_embeddings row fetched above (fetchTrackEmbedding
+        // TOCTOU: the embedding row fetched above (fetchTrackEmbedding
         // succeeded) can outlive its Track row for a moment if the track is
         // deleted between the two queries — TrackEmbedding has onDelete:
         // Cascade, so this is a genuine race window, not a stale-row bug.
@@ -1295,37 +1183,12 @@ router.post(
                 // Query for similar tracks using the (possibly expanded) embedding
                 // Fetch more candidates for re-ranking (3x limit)
                 // Filter by max distance to exclude poor matches
-                const similarTracks = await runAnnQuery<
-                    TextSearchResult[]
-                >(Prisma.sql`
-                SELECT
-                    t.id,
-                    t.title,
-                    t.duration,
-                    t."trackNo",
-                    te.embedding <=> ${searchEmbedding}::vector AS distance,
-                    a.id as "albumId",
-                    a.title as "albumTitle",
-                    a."coverUrl" as "albumCoverUrl",
-                    ar.id as "artistId",
-                    ar.name as "artistName",
-                    t.energy,
-                    t.valence,
-                    t.danceability,
-                    t.acousticness,
-                    t.instrumentalness,
-                    t.arousal,
-                    t.speechiness
-                FROM track_embeddings te
-                JOIN "Track" t ON te.track_id = t.id
-                JOIN "Album" a ON t."albumId" = a.id
-                JOIN "Artist" ar ON a."artistId" = ar.id
-                WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL}
-                  AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
-                ORDER BY te.embedding <=> ${searchEmbedding}::vector
-                LIMIT ${limit * 3}
-            `);
+                const candidateLimit = limit * 3;
+                const similarTracks = await findTracksByTextEmbedding(
+                    searchEmbedding,
+                    maxDistance,
+                    candidateLimit,
+                );
 
                 logger.info(
                     `Vibe search "${normalizedQuery}": found ${similarTracks.length} candidates above ${Math.round(similarityThreshold * 100)}% similarity (max distance: ${maxDistance.toFixed(2)})`,
@@ -1458,15 +1321,7 @@ router.get(
                 where: { ...TRACK_VISIBLE_WHERE, ...TRACK_BROWSE_WHERE },
             });
 
-            const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count
-            FROM track_embeddings te
-            JOIN "Track" t ON te.track_id = t.id
-            WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL}
-        `;
-
-            const embeddedCount = Number(embeddedTracks[0]?.count || 0);
+            const embeddedCount = await countEmbeddedBrowsableTracks();
             const progress =
                 totalTracks > 0
                     ? Math.round((embeddedCount / totalTracks) * 100)

@@ -73,12 +73,17 @@ jest.mock("../../services/enrichmentFailureService", () => ({
     },
 }));
 
+jest.mock("../../services/trackEmbeddings", () => ({
+    countEmbeddedLocalTracks: jest.fn(),
+}));
+
 import router from "../analysis";
 import { requireInternalSecret } from "../../middleware/internalAuth";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { enrichmentFailureService } from "../../services/enrichmentFailureService";
+import { countEmbeddedLocalTracks } from "../../services/trackEmbeddings";
 
 const mockGroupBy = prisma.track.groupBy as jest.Mock;
 const mockTrackFindMany = prisma.track.findMany as jest.Mock;
@@ -107,6 +112,7 @@ const mockResetRetryCount =
     enrichmentFailureService.resetRetryCount as jest.Mock;
 const mockResolveByEntity =
     enrichmentFailureService.resolveByEntity as jest.Mock;
+const mockCountEmbeddedLocalTracks = countEmbeddedLocalTracks as jest.Mock;
 
 function findRouteLayer(
     stack: any[],
@@ -239,6 +245,7 @@ describe("analysis routes runtime", () => {
         mockGetFailures.mockResolvedValue({ failures: [] });
         mockResetRetryCount.mockResolvedValue({});
         mockResolveByEntity.mockResolvedValue({});
+        mockCountEmbeddedLocalTracks.mockResolvedValue(0);
 
         process.env.INTERNAL_API_SECRET = "test-secret";
         jest.spyOn(os, "cpus").mockReturnValue(new Array(8).fill({}) as any);
@@ -256,7 +263,7 @@ describe("analysis routes runtime", () => {
             { analysisStatus: "pending", _count: 5 },
         ]);
         mockRedisLLen.mockResolvedValue(3);
-        mockQueryRaw.mockResolvedValue([{ count: BigInt(4) }]);
+        mockCountEmbeddedLocalTracks.mockResolvedValue(4);
 
         const req = { user: { id: "u1" } } as any;
         const res = createRes();

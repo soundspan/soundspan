@@ -5,6 +5,7 @@ import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { countEmbeddedLocalTracks } from "../services/trackEmbeddings";
 import analysisInternalRoutes from "./analysisInternal";
 import os from "os";
 import {
@@ -74,14 +75,7 @@ router.get("/status", requireAuth, async (req, res) => {
         const queueLength = await redisClient.lLen(ANALYSIS_QUEUE);
 
         // Get CLAP embedding count
-        const embeddingCount = await prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count
-            FROM track_embeddings te
-            INNER JOIN "Track" t ON t.id = te.track_id
-            WHERE t."removedAt" IS NULL
-              AND t.origin = ${"LOCAL"}::"TrackOrigin"
-        `;
-        const withEmbeddings = Number(embeddingCount[0]?.count || 0);
+        const withEmbeddings = await countEmbeddedLocalTracks();
 
         const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
 
