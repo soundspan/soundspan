@@ -86,11 +86,15 @@ export interface ApiKey {
     lastUsedAt?: string | null;
 }
 
+/** Admin-facing user summary returned by the authentication API. */
 export interface User {
     id: string;
     username: string;
+    email: string | null;
     role: "user" | "admin";
     createdAt: string;
+    hasPassword: boolean;
+    linkedProviders: string[];
 }
 
 export interface ConfirmModalConfig {

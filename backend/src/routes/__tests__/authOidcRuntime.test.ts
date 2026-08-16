@@ -496,6 +496,41 @@ describe("OIDC auth routes", () => {
         expect(disabled.body).toEqual({ error: "OIDC is not enabled" });
     });
 
+    it("returns the OIDC provider URL for an authenticated SPA link navigation", async () => {
+        const res = createRes();
+
+        await getHandler("/oidc/link/start", "post")(
+            {
+                user: { id: "initiating-user" },
+                body: { responseMode: "json" },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            redirectUrl:
+                "https://idp.example/authorize?state=state-1&nonce=nonce-1&code_challenge=challenge&code_challenge_method=S256",
+        });
+        expect(res.redirect).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unsupported OIDC link response mode", async () => {
+        const res = createRes();
+
+        await getHandler("/oidc/link/start", "post")(
+            {
+                user: { id: "initiating-user" },
+                body: { responseMode: "redirect" },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Invalid request" });
+        expect(buildAuthorizationRequest).not.toHaveBeenCalled();
+    });
+
     it("links callback claims to the initiating user without logging in", async () => {
         values.set("oidc:pending:state-1", {
             nonce: "nonce-1",

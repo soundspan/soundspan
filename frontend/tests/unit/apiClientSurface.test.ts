@@ -29,6 +29,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "clearToken",
     "clearYtMusicAuth",
     "confirmOidcLink",
+    "createAppPassword",
     "createApiKey",
     "createFederationPairingCode",
     "createFederationPeer",
@@ -93,6 +94,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getDownloads",
     "getEnrichmentProgress",
     "getEnrichmentSettings",
+    "getExternalIdentities",
     "getFeatures",
     "getFederationPeers",
     "getFreshPreviewUrl",
@@ -200,6 +202,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "pairFederationPeer",
     "likeDiscoverAlbum",
     "listApiKeys",
+    "listAppPasswords",
     "listImportJobs",
     "listShareLinks",
     "logPlay",
@@ -243,6 +246,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "retryFailedDownload",
     "retryPendingTrack",
     "revokeFederationPeer",
+    "revokeAppPassword",
     "rotateFederationPeerCredential",
     "revokeApiKey",
     "revokeInviteCode",
@@ -263,6 +267,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "setSubsonicPassword",
     "setToken",
     "setTrackPreference",
+    "startOidcLink",
     "startLibraryEnrichment",
     "submitImportJob",
     "subscribePodcast",
@@ -306,5 +311,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 286);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 291);
 });

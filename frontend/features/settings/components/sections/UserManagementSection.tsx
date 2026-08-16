@@ -8,17 +8,11 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { Badge } from "@/components/ui/Badge";
 import { useAdminConnectedUsers } from "@/hooks/useSocialPresence";
+import type { User } from "../../types";
 
 const logger = createFrontendLogger("Settings.UserManagementSection");
-
-interface User {
-    id: string;
-    username: string;
-    email: string | null;
-    role: "user" | "admin";
-    createdAt: string;
-}
 
 interface InviteCode {
     id: string;
@@ -29,6 +23,28 @@ interface InviteCode {
     expiresAt: string | null;
     createdAt: string;
     createdBy: string;
+}
+
+function UserSsoBadge({ user }: { user: User }) {
+    const label = !user.hasPassword
+        ? "SSO-only"
+        : user.linkedProviders.length > 0
+          ? "SSO"
+          : null;
+    if (!label) return null;
+    return (
+        <Badge
+            variant={user.hasPassword ? "info" : "warning"}
+            title={
+                user.linkedProviders.length > 0
+                    ? user.linkedProviders.join(", ")
+                    : "No local password"
+            }
+            className="ml-2"
+        >
+            {label}
+        </Badge>
+    );
 }
 
 /**
@@ -498,6 +514,7 @@ export function UserManagementSection() {
                                     <div>
                                         <div className="text-sm text-white">
                                             {user.username}
+                                            <UserSsoBadge user={user} />
                                             {currentUser?.id === user.id && (
                                                 <span className="text-xs text-gray-400 ml-2">
                                                     (you)
@@ -564,13 +581,19 @@ export function UserManagementSection() {
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-white/90 mb-1.5">
-                            New Password
+                            {editingUser?.hasPassword
+                                ? "New Password"
+                                : "Set password (enables local login)"}
                         </label>
                         <SettingsInput
                             type="password"
                             value={editPassword}
                             onChange={setEditPassword}
-                            placeholder="Leave blank to keep current"
+                            placeholder={
+                                editingUser?.hasPassword
+                                    ? "Leave blank to keep current"
+                                    : "Leave blank to remain SSO-only"
+                            }
                         />
                     </div>
                     <div className="flex gap-2 justify-end items-center">

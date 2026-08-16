@@ -262,6 +262,9 @@ const inviteEntrySchema = z.object({
 });
 const exchangeEntrySchema = z.object({ userId: z.string().min(1) });
 const exchangeBodySchema = z.object({ code: opaqueValueSchema });
+const linkStartBodySchema = z
+    .object({ responseMode: z.literal("json").optional() })
+    .strict();
 const confirmLinkBodySchema = z.object({
     linkToken: opaqueValueSchema,
     password: z.string().min(1),
@@ -363,6 +366,7 @@ interface OidcFlowBinding {
 async function startOidcFlow(
     res: Response,
     binding: OidcFlowBinding,
+    responseMode: "redirect" | "json" = "redirect",
 ): Promise<Response> {
     const authorization = await buildAuthorizationRequest();
     const pending = {
@@ -376,6 +380,9 @@ async function startOidcFlow(
         OIDC_PENDING_TTL_SECONDS,
     );
     if (!stored) throw new Error("Failed to store OIDC pending state");
+    if (responseMode === "json") {
+        return res.json({ redirectUrl: authorization.redirectUrl });
+    }
     return redirectResponse(res, authorization.redirectUrl);
 }
 
@@ -429,14 +436,24 @@ async function oidcLinkStartHandler(
     if (!config.oidc.enabled) {
         return sendRouteError(res, 404, "OIDC is not enabled");
     }
+    const parsed = linkStartBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return sendRouteError(res, 400, "Invalid request");
+    const responseMode = parsed.data.responseMode ?? "redirect";
     try {
-        return startOidcFlow(res, {
-            returnTo: "/settings",
-            mode: "link",
-            userId: req.user!.id,
-        });
+        return startOidcFlow(
+            res,
+            {
+                returnTo: "/settings",
+                mode: "link",
+                userId: req.user!.id,
+            },
+            responseMode,
+        );
     } catch (error) {
         oidcLog.error("OIDC link start failed", { error });
+        if (responseMode === "json") {
+            return sendRouteError(res, 500, "Failed to start OIDC link");
+        }
         return redirectResponse(res, "/settings?ssoError=oidc_failed");
     }
 }
@@ -894,9 +911,23 @@ router.get("/oidc/login", authLimiter, oidcLoginHandler);
  *       - sessionAuth: []
  *       - bearerAuth: []
  *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               responseMode:
+ *                 type: string
+ *                 enum: [json]
  *     responses:
+ *       200:
+ *         description: OIDC provider URL for an authenticated SPA navigation
  *       302:
  *         description: Redirect to the OIDC provider
+ *       400:
+ *         description: Invalid request
  *       401:
  *         description: Not authenticated
  *       404:
@@ -1483,6 +1514,36 @@ router.post("/change-email", apiLimiter, requireAuth, async (req, res) => {
  *     responses:
  *       200:
  *         description: List of all users
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 required: [id, username, role, createdAt, hasPassword, linkedProviders]
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                   username:
+ *                     type: string
+ *                   email:
+ *                     type: string
+ *                     format: email
+ *                     nullable: true
+ *                   role:
+ *                     type: string
+ *                     enum: [user, admin]
+ *                   onboardingComplete:
+ *                     type: boolean
+ *                   createdAt:
+ *                     type: string
+ *                     format: date-time
+ *                   hasPassword:
+ *                     type: boolean
+ *                   linkedProviders:
+ *                     type: array
+ *                     items:
+ *                       type: string
  *       401:
  *         description: Not authenticated
  *       403:
@@ -1504,11 +1565,22 @@ router.get(
                     role: true,
                     onboardingComplete: true,
                     createdAt: true,
+                    passwordHash: true,
+                    externalIdentities: { select: { provider: true } },
                 },
                 orderBy: { createdAt: "asc" },
             });
 
-            res.json(users);
+            const summaries = users.map(
+                ({ passwordHash, externalIdentities, ...user }) => ({
+                    ...user,
+                    hasPassword: passwordHash !== null,
+                    linkedProviders: externalIdentities.map(
+                        (identity) => identity.provider,
+                    ),
+                }),
+            );
+            res.json(summaries);
         } catch (error) {
             logger.error("Get users error:", error);
             res.status(500).json({ error: "Failed to get users" });

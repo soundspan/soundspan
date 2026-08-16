@@ -7,6 +7,29 @@ export interface AuthConfig {
     oidcProviderName: string;
 }
 
+/** Safe metadata for an OIDC identity linked to the current user. */
+export interface ExternalIdentity {
+    id: string;
+    provider: string;
+    email: string | null;
+    displayName: string | null;
+    subjectHint: string;
+    createdAt: string;
+}
+
+/** Safe metadata for an active OpenSubsonic app password. */
+export interface AppPasswordMetadata {
+    id: string;
+    displayName: string;
+    createdAt: string;
+    lastUsedAt: string | null;
+}
+
+/** A newly created app password whose secret is returned only once. */
+export interface CreatedAppPassword extends AppPasswordMetadata {
+    secret: string;
+}
+
 /** User fields returned after any successful login flow. */
 export interface AuthenticatedUser {
     id: string;
@@ -113,6 +136,64 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
         /** Loads public local-login and OIDC capability flags. */
         async getAuthConfig(): Promise<AuthConfig> {
             return this.request<AuthConfig>("/auth/config");
+        }
+
+        /** Starts an authenticated OIDC link attempt and returns its navigation URL. */
+        async startOidcLink(): Promise<{ redirectUrl: string }> {
+            return this.request<{ redirectUrl: string }>(
+                "/auth/oidc/link/start",
+                {
+                    method: "POST",
+                    body: JSON.stringify({ responseMode: "json" }),
+                },
+            );
+        }
+
+        /** Lists OIDC identities linked to the current account. */
+        async getExternalIdentities(): Promise<{
+            identities: ExternalIdentity[];
+        }> {
+            return this.request<{ identities: ExternalIdentity[] }>(
+                "/auth/identities",
+            );
+        }
+
+        /** Unlinks one identity owned by the current account. */
+        async unlinkExternalIdentity(id: string): Promise<{ message: string }> {
+            return this.request<{ message: string }>(
+                `/auth/identities/${encodeURIComponent(id)}`,
+                { method: "DELETE" },
+            );
+        }
+
+        /** Lists active app-password metadata without secret values. */
+        async listAppPasswords(): Promise<{
+            appPasswords: AppPasswordMetadata[];
+        }> {
+            return this.request<{ appPasswords: AppPasswordMetadata[] }>(
+                "/auth/app-passwords",
+            );
+        }
+
+        /** Creates an app password and returns its one-time plaintext secret. */
+        async createAppPassword(
+            displayName: string,
+        ): Promise<{ appPassword: CreatedAppPassword }> {
+            return this.request<{ appPassword: CreatedAppPassword }>(
+                "/auth/app-passwords",
+                {
+                    method: "POST",
+                    body: JSON.stringify({ displayName }),
+                },
+            );
+        }
+
+        /** Revokes one app password owned by the current account. */
+        async revokeAppPassword(id: string): Promise<{ message: string }> {
+            return this.request<{ message: string }>(
+                `/auth/app-passwords/${encodeURIComponent(id)}`,
+                { method: "DELETE" },
+            );
         }
 
         /** Exchanges a one-time OIDC callback code and stores login tokens. */

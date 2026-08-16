@@ -12,6 +12,7 @@ import { SettingsLayout, SidebarItem } from "@/features/settings/components/ui";
 
 // Section components
 import { AccountSection } from "@/features/settings/components/sections/AccountSection";
+import { SignInSecuritySection } from "@/features/settings/components/sections/SignInSecuritySection";
 import { SocialSection } from "@/features/settings/components/sections/SocialSection";
 import { PlaybackSection } from "@/features/settings/components/sections/PlaybackSection";
 import { IntegrationsSection } from "@/features/settings/components/sections/IntegrationsSection";
@@ -19,6 +20,7 @@ import { IntegrationsSection } from "@/features/settings/components/sections/Int
 // Define sidebar items
 const sidebarItems: SidebarItem[] = [
     { id: "account", label: "Account" },
+    { id: "sign-in-security", label: "Sign-in & Security" },
     { id: "social", label: "Social" },
     { id: "history", label: "History & Personalization" },
     { id: "playback", label: "Playback" },
@@ -132,6 +134,8 @@ export default function SettingsPage() {
                 settings={userSettings}
                 onUpdate={updateUserSettings}
             />
+
+            <SignInSecuritySection />
 
             {/* Social */}
             <SocialSection

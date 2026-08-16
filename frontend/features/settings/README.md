@@ -16,6 +16,7 @@ Start-here guide for `frontend/features/settings`.
 | Path | Kind |
 | --- | --- |
 | `components/sections/AccountSection.tsx` | components |
+| `components/sections/AppPasswordsPanel.tsx` | components |
 | `components/sections/AIServicesSection.tsx` | components |
 | `components/sections/APIKeysSection.tsx` | components |
 | `components/sections/AudiobookshelfSection.tsx` | components |
@@ -29,10 +30,12 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/LibrarySafetySection.tsx` | components |
 | `components/sections/LidarrSection.tsx` | components |
 | `components/sections/LinkDeviceSection.tsx` | components |
+| `components/sections/LinkedIdentitiesPanel.tsx` | components |
 | `components/sections/playbackHistoryConfig.ts` | components |
 | `components/sections/PlaybackHistorySection.tsx` | components |
 | `components/sections/PlaybackSection.tsx` | components |
 | `components/sections/SocialSection.tsx` | components |
+| `components/sections/SignInSecuritySection.tsx` | components |
 | `components/sections/SoulseekSection.tsx` | components |
 | `components/sections/StoragePathsSection.tsx` | components |
 | `components/sections/SubsonicSection.tsx` | components |

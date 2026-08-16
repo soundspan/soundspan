@@ -65,6 +65,66 @@ test("getAuthConfig reads the public authentication capabilities", async (testCo
     );
 });
 
+test("startOidcLink requests a JSON navigation response", async (testContext) => {
+    const fetchMock = mockJsonResponse(testContext, {
+        redirectUrl: "https://idp.example/authorize?state=state-1",
+    });
+    const client = new TestAuthClient("http://soundspan.test");
+
+    const result = await client.startOidcLink();
+
+    assert.equal(
+        result.redirectUrl,
+        "https://idp.example/authorize?state=state-1",
+    );
+    const request = fetchMock.mock.calls[0].arguments[1] as RequestInit;
+    assert.equal(request.method, "POST");
+    assert.equal(request.body, JSON.stringify({ responseMode: "json" }));
+});
+
+test("identity and app-password methods use the authenticated auth routes", async (testContext) => {
+    const responses = [
+        { identities: [] },
+        { message: "Identity unlinked" },
+        { appPasswords: [] },
+        {
+            appPassword: {
+                id: "app-1",
+                displayName: "Phone",
+                createdAt: "2026-08-15T12:00:00.000Z",
+                lastUsedAt: null,
+                secret: "ssap_secret",
+            },
+        },
+        { message: "App password revoked" },
+    ];
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>
+        Response.json(responses.shift()),
+    );
+    const client = new TestAuthClient("http://soundspan.test");
+
+    await client.getExternalIdentities();
+    await client.unlinkExternalIdentity("identity/1");
+    await client.listAppPasswords();
+    const created = await client.createAppPassword("Phone");
+    await client.revokeAppPassword("app/1");
+
+    assert.equal(created.appPassword.secret, "ssap_secret");
+    assert.deepEqual(
+        fetchMock.mock.calls.map((call) => String(call.arguments[0])),
+        [
+            "http://soundspan.test/api/auth/identities",
+            "http://soundspan.test/api/auth/identities/identity%2F1",
+            "http://soundspan.test/api/auth/app-passwords",
+            "http://soundspan.test/api/auth/app-passwords",
+            "http://soundspan.test/api/auth/app-passwords/app%2F1",
+        ],
+    );
+    const createRequest = fetchMock.mock.calls[3].arguments[1] as RequestInit;
+    assert.equal(createRequest.method, "POST");
+    assert.equal(createRequest.body, JSON.stringify({ displayName: "Phone" }));
+});
+
 test("exchangeOidcCode stores both login tokens", async (testContext) => {
     const fetchMock = mockJsonResponse(testContext, loginResponse);
     const client = new TestAuthClient("http://soundspan.test");
