@@ -585,9 +585,7 @@ def test_store_embedding_does_not_retry_unrelated_insert_failures(
     )
     assert database.get_active_space_id() == "space-old"
     connection.insert_errors.append(
-        RuntimeError(
-            'null value in column "analyzed_at" violates not-null constraint'
-        )
+        RuntimeError('null value in column "analyzed_at" violates not-null constraint')
     )
     worker = module.Worker(1, None, threading.Event())
     worker.db = database

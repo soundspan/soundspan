@@ -151,11 +151,7 @@ def resolve_active_space_id(db: "DatabaseConnection") -> str:
 def _is_embedding_space_insert_error(error: Exception) -> bool:
     """Return whether an insert failure can reflect stale space/schema state."""
     message = str(error).lower()
-    return (
-        "foreign key" in message
-        or "space_id" in message
-        or "embedding_spaces" in message
-    )
+    return "foreign key" in message or "space_id" in message or "embedding_spaces" in message
 
 
 def _resolve_music_path(file_path: str) -> str | None:
