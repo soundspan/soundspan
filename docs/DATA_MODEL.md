@@ -154,6 +154,12 @@ use `FederationPodcastListing` instead of `Podcast`; matching `feedUrl` values
 drive native per-user subscription state without violating the global
 `Podcast.feedUrl` uniqueness contract.
 
+`Audiobook.sections` stores sync-time validated navigation as a discriminated
+JSON object with `kind` (`chapters`, `parts`, or `none`) and ordered
+`{ index, title, startSeconds }` entries. Legacy and federated rows may keep this
+column null; API readers map null or invalid JSON to `none`. `numChapters`
+remains temporarily for rollback compatibility but is no longer refreshed.
+
 ### User & Auth
 
 | Entity                           | Purpose                                                                                                                              |

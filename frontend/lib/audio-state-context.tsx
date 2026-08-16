@@ -144,18 +144,19 @@ export interface Track {
     } | null;
 }
 
+/** Minimal audiobook state retained by the shared playback context. */
 export interface Audiobook {
     id: string;
     title: string;
     author: string;
-    narrator?: string;
+    narrator?: string | null;
     coverUrl: string | null;
     duration: number;
     progress?: {
         currentTime: number;
         progress: number;
         isFinished: boolean;
-        lastPlayedAt: Date;
+        lastPlayedAt: Date | string;
     } | null;
 }
 
@@ -346,7 +347,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 currentTime: number;
                                 progress: number;
                                 isFinished: boolean;
-                            };
+                            } | null;
                         }) => {
                             if (audiobook && audiobook.progress) {
                                 setCurrentAudiobook({

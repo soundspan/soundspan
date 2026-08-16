@@ -1,8 +1,10 @@
 import axios, { AxiosInstance } from "axios";
+import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+import { buildSectionsWhenPresent } from "./audiobookSections";
 
 const STREAM_HEADER_TIMEOUT_MS = 30_000;
 const UNSAFE_AUDIO_TRACK_URL_ERROR =
@@ -480,6 +482,11 @@ class AudiobookshelfService {
             for (const item of audiobooks) {
                 try {
                     const metadata = item.media?.metadata || {};
+                    const sections = buildSectionsWhenPresent({
+                        durationSeconds: item.media?.duration,
+                        chapters: item.media?.chapters,
+                        audioFiles: item.media?.audioFiles,
+                    });
 
                     // Extract series information (check both possible formats)
                     let series: string | null = null;
@@ -516,7 +523,7 @@ class AudiobookshelfService {
                             seriesSequence,
                             duration: item.media?.duration || null,
                             numTracks: item.media?.numTracks || null,
-                            numChapters: item.media?.numChapters || null,
+                            ...(sections === null ? {} : { sections }),
                             size: item.media?.size
                                 ? BigInt(item.media.size)
                                 : null,
@@ -550,7 +557,7 @@ class AudiobookshelfService {
                             seriesSequence,
                             duration: item.media?.duration || null,
                             numTracks: item.media?.numTracks || null,
-                            numChapters: item.media?.numChapters || null,
+                            sections: sections ?? Prisma.DbNull,
                             size: item.media?.size
                                 ? BigInt(item.media.size)
                                 : null,

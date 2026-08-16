@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { Prisma } from "@prisma/client";
 
 const logger = {
     debug: jest.fn(),
@@ -628,6 +629,11 @@ describe("audiobookshelf service behavior", () => {
                     duration: 1200,
                     numTracks: 12,
                     numChapters: 30,
+                    chapters: [
+                        { title: "First", start: 0, end: 600 },
+                        { title: "Second", start: 600, end: 1200 },
+                    ],
+                    audioFiles: [{ filename: "Book One.m4b", duration: 1200 }],
                     size: "2048",
                     tags: ["fiction"],
                     metadata: {
@@ -672,9 +678,57 @@ describe("audiobookshelf service behavior", () => {
                     seriesSequence: "1",
                     coverUrl: "http://abs.local/cover/book-1.jpg",
                     audioUrl: "http://abs.local/api/items/book-1/play",
+                    sections: {
+                        kind: "chapters",
+                        sections: [
+                            { index: 0, title: "First", startSeconds: 0 },
+                            {
+                                index: 1,
+                                title: "Second",
+                                startSeconds: 600,
+                            },
+                        ],
+                    },
                 }),
             }),
         );
+        expect(
+            prisma.audiobook.upsert.mock.calls[0][0].create,
+        ).not.toHaveProperty("numChapters");
+        expect(
+            prisma.audiobook.upsert.mock.calls[0][0].update.sections,
+        ).toEqual(prisma.audiobook.upsert.mock.calls[0][0].create.sections);
+    });
+
+    it("preserves stored sections on minified updates and creates them as unknown", async () => {
+        const svc = audiobookshelfService as any;
+        svc.client = createClient();
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+
+        jest.spyOn(
+            audiobookshelfService,
+            "getAllAudiobooks",
+        ).mockResolvedValueOnce([
+            {
+                id: "book-minified",
+                libraryId: "lib-1",
+                media: {
+                    duration: 1200,
+                    numTracks: 1,
+                    metadata: {
+                        title: "Minified Book",
+                        authorName: "Author One",
+                    },
+                },
+            },
+        ] as any);
+
+        await audiobookshelfService.syncAudiobooksToCache();
+
+        const upsert = prisma.audiobook.upsert.mock.calls[0][0];
+        expect(upsert.update).not.toHaveProperty("sections");
+        expect(upsert.create.sections).toBe(Prisma.DbNull);
     });
 
     it("rethrows sync failures when audiobook fetch fails", async () => {

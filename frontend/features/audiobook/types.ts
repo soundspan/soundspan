@@ -2,14 +2,17 @@ export interface AudiobookProgress {
     currentTime: number;
     progress: number;
     isFinished: boolean;
-    lastPlayedAt: Date;
+    lastPlayedAt: Date | string;
 }
 
-export interface AudiobookChapter {
-    id: number;
+/** Source of validated audiobook navigation returned by the detail API. */
+export type AudiobookSectionKind = "chapters" | "parts" | "none";
+
+/** A seek target in seconds from the beginning of an audiobook stream. */
+export interface AudiobookSection {
+    index: number;
     title: string;
-    start: number;
-    end: number;
+    startSeconds: number;
 }
 
 export interface AudiobookSeries {
@@ -17,36 +20,26 @@ export interface AudiobookSeries {
     sequence: string;
 }
 
-export interface AudiobookMetaTags {
-    tagGenre?: string;
-    tagDate?: string;
-    tagComment?: string;
-    tagAlbum?: string;
-}
-
-export interface AudiobookAudioFile {
-    metaTags?: AudiobookMetaTags;
-}
-
 export interface Audiobook {
     id: string;
     title: string;
     author: string;
-    narrator?: string;
-    description?: string;
+    narrator?: string | null;
+    description?: string | null;
     coverUrl: string | null;
     duration: number;
-    libraryId?: string;
-    publisher?: string;
-    publishedYear?: string;
+    libraryId?: string | null;
+    publishedYear?: number | null;
+    publisher?: string | null;
     genres?: string[];
-    series?: AudiobookSeries;
-    isbn?: string;
-    asin?: string;
-    language?: string;
+    series?: AudiobookSeries | null;
+    isbn?: string | null;
+    asin?: string | null;
+    language?: string | null;
     progress?: AudiobookProgress | null;
-    chapters?: AudiobookChapter[];
-    audioFiles?: AudiobookAudioFile[];
+    sectionKind: AudiobookSectionKind;
+    sections: AudiobookSection[];
+    sectionsPlayable: boolean;
 }
 
 export interface AudiobookMetadata {

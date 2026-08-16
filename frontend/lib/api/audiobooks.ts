@@ -1,4 +1,5 @@
 import { type ApiClientConstructor, type ApiData } from "./core";
+import type { Audiobook } from "@/features/audiobook/types";
 
 /** Add audiobook-domain operations to an API client base class. */
 export function WithAudiobooks<TBase extends ApiClientConstructor>(
@@ -11,7 +12,7 @@ export function WithAudiobooks<TBase extends ApiClientConstructor>(
         }
 
         async getAudiobook(id: string) {
-            return this.request<ApiData>(`/audiobooks/${id}`);
+            return this.request<Audiobook>(`/audiobooks/${id}`);
         }
 
         async getAudiobookSeries(seriesName: string) {

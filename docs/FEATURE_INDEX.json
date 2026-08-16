@@ -470,16 +470,17 @@
         {
             "id": "audiobooks",
             "name": "Audiobooks",
-            "description": "Audiobookshelf-synced and federated audiobook library with progress tracking and proxied playback",
+            "description": "Audiobookshelf-synced and federated audiobook library with validated cached section navigation, progress tracking, and proxied playback",
             "frontend": {
                 "feature_dirs": ["audiobook"],
-                "routes": ["/audiobooks/series/[name]"]
+                "routes": ["/audiobooks/[id]", "/audiobooks/series/[name]"]
             },
             "backend": {
                 "routes": ["audiobooks.ts", "listeningState.ts"],
                 "services": [
                     "audiobookshelf.ts",
                     "audiobookCache.ts",
+                    "audiobookSections.ts",
                     "federationAudiobookProxy.ts"
                 ]
             },
@@ -488,7 +489,12 @@
                     "audiobooksRuntime.test.ts",
                     "audiobooksAdvancedRuntime.test.ts"
                 ],
-                "backend_contract": []
+                "backend_contract": [
+                    "audiobookCacheService.test.ts",
+                    "audiobookSections.test.ts",
+                    "audiobookshelfService.test.ts"
+                ],
+                "frontend": ["chapterList.component.test.ts"]
             }
         },
         {

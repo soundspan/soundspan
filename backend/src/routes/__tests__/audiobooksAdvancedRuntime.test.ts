@@ -257,11 +257,18 @@ describe("audiobooks advanced runtime", () => {
             localCoverPath: null,
             coverUrl: "federation",
             duration: 600,
+            numTracks: null,
+            sections: null,
+            publisher: null,
+            publishedYear: null,
+            isbn: null,
+            asin: null,
+            language: null,
             libraryId: null,
             series: null,
             seriesSequence: null,
             genres: [],
-            lastSyncedAt: new Date(),
+            lastSyncedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
             federationPeer: peer,
         };
         prisma.audiobook.findMany.mockResolvedValueOnce([book]);
@@ -285,8 +292,9 @@ describe("audiobooks advanced runtime", () => {
         expect(detailRes.body).toEqual(
             expect.objectContaining({
                 id: "fed:book-1",
-                chapters: [],
-                audioFiles: [],
+                sectionKind: "none",
+                sections: [],
+                sectionsPlayable: false,
                 source: "federated",
                 peer: { id: "peer-1", name: "Peer One", online: true },
             }),
@@ -714,7 +722,56 @@ describe("audiobooks advanced runtime", () => {
         });
     });
 
-    it("serves audiobook details from cache/fallback and handles missing/error states", async () => {
+    it("returns multi-file parts but marks their seek targets non-playable", async () => {
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            id: "book-parts",
+            title: "Parted Book",
+            author: "Author",
+            narrator: null,
+            description: null,
+            localCoverPath: null,
+            coverUrl: null,
+            duration: 1200,
+            numTracks: 2,
+            sections: {
+                kind: "parts",
+                sections: [
+                    { index: 0, title: "Part One", startSeconds: 0 },
+                    { index: 1, title: "Part Two", startSeconds: 600 },
+                ],
+            },
+            publisher: null,
+            publishedYear: null,
+            genres: [],
+            isbn: null,
+            asin: null,
+            language: null,
+            series: null,
+            seriesSequence: null,
+            libraryId: "lib-1",
+            lastSyncedAt: new Date(),
+        });
+
+        const res = createRes();
+        await detailsHandler(
+            { params: { id: "book-parts" }, user: { id: "u1" } } as any,
+            res,
+        );
+
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                sectionKind: "parts",
+                sections: [
+                    { index: 0, title: "Part One", startSeconds: 0 },
+                    { index: 1, title: "Part Two", startSeconds: 600 },
+                ],
+                sectionsPlayable: false,
+            }),
+        );
+        expect(audiobookshelfService.getAudiobook).not.toHaveBeenCalled();
+    });
+
+    it("serves fresh audiobook details only from cache and handles disabled/error states", async () => {
         getSystemSettings.mockResolvedValueOnce({
             audiobookshelfEnabled: false,
         });
@@ -736,14 +793,22 @@ describe("audiobooks advanced runtime", () => {
             localCoverPath: "/cache/book-1.jpg",
             coverUrl: null,
             duration: 200,
+            numTracks: 1,
+            sections: {
+                kind: "chapters",
+                sections: [
+                    { index: 0, title: "Opening", startSeconds: 0 },
+                    { index: 1, title: "Middle", startSeconds: 100 },
+                ],
+            },
+            publisher: "Publisher",
+            publishedYear: 2024,
+            genres: ["Fiction"],
+            isbn: "isbn-1",
+            asin: "asin-1",
+            language: "en",
             libraryId: "lib-1",
             lastSyncedAt: new Date(),
-        });
-        audiobookshelfService.getAudiobook.mockResolvedValueOnce({
-            media: {
-                chapters: [{ id: 1 }],
-                audioFiles: [{ ino: "file-1" }],
-            },
         });
         prisma.audiobookProgress.findUnique.mockResolvedValueOnce({
             currentTime: 50,
@@ -759,14 +824,25 @@ describe("audiobooks advanced runtime", () => {
         );
 
         expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
+        expect(audiobookshelfService.getAudiobook).not.toHaveBeenCalled();
         expect(detailRes.statusCode).toBe(200);
         expect(detailRes.body).toEqual(
             expect.objectContaining({
                 id: "book-1",
                 author: "Unknown Author",
                 coverUrl: "/audiobooks/book-1/cover",
-                chapters: [{ id: 1 }],
-                audioFiles: [{ ino: "file-1" }],
+                sectionKind: "chapters",
+                sections: [
+                    { index: 0, title: "Opening", startSeconds: 0 },
+                    { index: 1, title: "Middle", startSeconds: 100 },
+                ],
+                sectionsPlayable: true,
+                publisher: "Publisher",
+                publishedYear: 2024,
+                genres: ["Fiction"],
+                isbn: "isbn-1",
+                asin: "asin-1",
+                language: "en",
                 progress: {
                     currentTime: 50,
                     progress: 25,
@@ -775,58 +851,6 @@ describe("audiobooks advanced runtime", () => {
                 },
             }),
         );
-
-        prisma.audiobook.findUnique.mockResolvedValueOnce({
-            id: "book-2",
-            title: "Stale",
-            author: "Author",
-            narrator: null,
-            description: null,
-            localCoverPath: null,
-            coverUrl: null,
-            duration: null,
-            libraryId: "lib-2",
-            lastSyncedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
-        });
-        audiobookCacheService.getAudiobook.mockResolvedValueOnce({
-            id: "book-2",
-            title: "Refetched",
-            author: "Author",
-            narrator: null,
-            description: null,
-            localCoverPath: null,
-            coverUrl: null,
-            duration: 0,
-            libraryId: "lib-2",
-        });
-        audiobookshelfService.getAudiobook.mockRejectedValueOnce(
-            new Error("api unavailable"),
-        );
-        prisma.audiobookProgress.findUnique.mockResolvedValueOnce(null);
-
-        const staleRes = createRes();
-        await detailsHandler(
-            { params: { id: "book-2" }, user: { id: "u1" } } as any,
-            staleRes,
-        );
-
-        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith(
-            "book-2",
-        );
-        expect(staleRes.statusCode).toBe(200);
-        expect(staleRes.body.chapters).toEqual([]);
-        expect(staleRes.body.audioFiles).toEqual([]);
-        expect(staleRes.body.progress).toBeNull();
-
-        prisma.audiobook.findUnique.mockResolvedValueOnce(null);
-        audiobookCacheService.getAudiobook.mockResolvedValueOnce(null);
-        const missingRes = createRes();
-        await detailsHandler(
-            { params: { id: "book-404" }, user: { id: "u1" } } as any,
-            missingRes,
-        );
-        expect(missingRes.statusCode).toBe(404);
-        expect(missingRes.body).toEqual({ error: "Audiobook not found" });
 
         prisma.audiobook.findUnique.mockRejectedValueOnce(
             new Error("details exploded"),
@@ -840,6 +864,156 @@ describe("audiobooks advanced runtime", () => {
         expect(errorRes.body).toEqual({
             error: "Failed to fetch audiobook",
         });
+    });
+
+    it("refreshes a fresh local row with unknown sections and serves the backfill", async () => {
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            id: "book-unknown",
+            title: "Before Backfill",
+            peerId: null,
+            sections: null,
+            lastSyncedAt: new Date(),
+        });
+        audiobookCacheService.getAudiobook.mockResolvedValueOnce({
+            id: "book-unknown",
+            title: "After Backfill",
+            author: "Author",
+            narrator: null,
+            description: null,
+            localCoverPath: null,
+            coverUrl: null,
+            duration: 1200,
+            numTracks: 1,
+            sections: {
+                kind: "chapters",
+                sections: [
+                    { index: 0, title: "First", startSeconds: 0 },
+                    { index: 1, title: "Second", startSeconds: 600 },
+                ],
+            },
+            publisher: null,
+            publishedYear: null,
+            genres: [],
+            isbn: null,
+            asin: null,
+            language: null,
+            series: null,
+            seriesSequence: null,
+            libraryId: "lib-1",
+            lastSyncedAt: new Date(),
+        });
+
+        const res = createRes();
+        await detailsHandler(
+            { params: { id: "book-unknown" }, user: { id: "u1" } } as any,
+            res,
+        );
+
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledTimes(1);
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith(
+            "book-unknown",
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                title: "After Backfill",
+                sectionKind: "chapters",
+                sections: [
+                    { index: 0, title: "First", startSeconds: 0 },
+                    { index: 1, title: "Second", startSeconds: 600 },
+                ],
+            }),
+        );
+    });
+
+    it("refreshes stale local rows before serving details", async () => {
+        prisma.audiobook.findUnique.mockResolvedValueOnce({
+            id: "book-stale",
+            title: "Stale",
+            peerId: null,
+            sections: { kind: "none", sections: [] },
+            lastSyncedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+        });
+        audiobookCacheService.getAudiobook.mockResolvedValueOnce({
+            id: "book-stale",
+            title: "Refreshed",
+            author: "Author",
+            narrator: null,
+            description: null,
+            localCoverPath: null,
+            coverUrl: null,
+            duration: 1200,
+            numTracks: 1,
+            sections: { kind: "none", sections: [] },
+            publisher: null,
+            publishedYear: null,
+            genres: [],
+            isbn: null,
+            asin: null,
+            language: null,
+            series: null,
+            seriesSequence: null,
+            libraryId: "lib-1",
+            lastSyncedAt: new Date(),
+        });
+
+        const res = createRes();
+        await detailsHandler(
+            { params: { id: "book-stale" }, user: { id: "u1" } } as any,
+            res,
+        );
+
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(200);
+        expect(res.body.title).toBe("Refreshed");
+    });
+
+    it("backfills a missing local row and preserves 404 when ABS has no result", async () => {
+        prisma.audiobook.findUnique.mockResolvedValueOnce(null);
+        audiobookCacheService.getAudiobook.mockResolvedValueOnce({
+            id: "book-missing",
+            title: "Backfilled",
+            author: "Author",
+            narrator: null,
+            description: null,
+            localCoverPath: null,
+            coverUrl: null,
+            duration: 1200,
+            numTracks: 1,
+            sections: { kind: "none", sections: [] },
+            publisher: null,
+            publishedYear: null,
+            genres: [],
+            isbn: null,
+            asin: null,
+            language: null,
+            series: null,
+            seriesSequence: null,
+            libraryId: "lib-1",
+            lastSyncedAt: new Date(),
+        });
+
+        const backfilledRes = createRes();
+        await detailsHandler(
+            { params: { id: "book-missing" }, user: { id: "u1" } } as any,
+            backfilledRes,
+        );
+
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledTimes(1);
+        expect(backfilledRes.statusCode).toBe(200);
+        expect(backfilledRes.body.title).toBe("Backfilled");
+
+        prisma.audiobook.findUnique.mockResolvedValueOnce(null);
+        audiobookCacheService.getAudiobook.mockResolvedValueOnce(null);
+        const missingRes = createRes();
+        await detailsHandler(
+            { params: { id: "book-404" }, user: { id: "u1" } } as any,
+            missingRes,
+        );
+
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledTimes(2);
+        expect(missingRes.statusCode).toBe(404);
+        expect(missingRes.body).toEqual({ error: "Audiobook not found" });
     });
 
     it("streams audiobook content with headers/defaults and handles failures", async () => {

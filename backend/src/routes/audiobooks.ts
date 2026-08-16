@@ -24,6 +24,10 @@ import {
     proxyFederatedAudiobookCover,
     proxyFederatedAudiobookStream,
 } from "../services/federationAudiobookProxy";
+import {
+    parseStoredSections,
+    type AudiobookSections,
+} from "../services/audiobookSections";
 
 const router = Router();
 
@@ -111,6 +115,15 @@ function audiobookListResponse(
         progress: progressResponse(progress),
         ...federatedSource(book),
     };
+}
+
+function sectionsArePlayable(
+    book: AudiobookRow,
+    cachedSections: AudiobookSections,
+): boolean {
+    // The stream proxy currently serves only media.tracks[0]. Keep all computed
+    // multi-file parts cached, but do not expose unsafe seek navigation for them.
+    return cachedSections.kind === "chapters" && book.numTracks === 1;
 }
 
 /**
@@ -884,7 +897,41 @@ router.get<{ id: string }>(
  *         description: Audiobook ID
  *     responses:
  *       200:
- *         description: Audiobook details with chapters, audio files, and user progress
+ *         description: Cached audiobook details with validated sections and user progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [id, title, author, duration, sectionKind, sections, sectionsPlayable]
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                 title:
+ *                   type: string
+ *                 author:
+ *                   type: string
+ *                 duration:
+ *                   type: number
+ *                 sectionKind:
+ *                   type: string
+ *                   enum: [chapters, parts, none]
+ *                 sectionsPlayable:
+ *                   type: boolean
+ *                   description: Whether section seek targets are safe for the current stream proxy
+ *                 sections:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [index, title, startSeconds]
+ *                     properties:
+ *                       index:
+ *                         type: integer
+ *                         minimum: 0
+ *                       title:
+ *                         type: string
+ *                       startSeconds:
+ *                         type: number
+ *                         minimum: 0
  *       404:
  *         description: Audiobook not found
  *       401:
@@ -892,7 +939,7 @@ router.get<{ id: string }>(
  */
 /**
  * GET /audiobooks/:id
- * Get a specific audiobook with full details (from cache, fallback to API)
+ * Get a specific audiobook with full details from the cache or ABS fallback
  */
 router.get<{ id: string }>(
     "/:id",
@@ -925,12 +972,14 @@ router.get<{ id: string }>(
             }
 
             const staleBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-            const cacheStale =
+            const cacheNeedsRefresh =
                 !isFederated &&
-                (!audiobook || audiobook.lastSyncedAt < staleBefore);
-            if (cacheStale) {
+                (!audiobook ||
+                    audiobook.sections === null ||
+                    audiobook.lastSyncedAt < staleBefore);
+            if (cacheNeedsRefresh) {
                 logger.debug(
-                    `[AUDIOBOOK] Audiobook ${id} not cached or stale, fetching...`,
+                    `[AUDIOBOOK] Audiobook ${id} not cached, stale, or missing sections; syncing...`,
                 );
                 audiobook = await audiobookCacheService.getAudiobook(id);
             }
@@ -939,18 +988,7 @@ router.get<{ id: string }>(
                 return res.status(404).json({ error: "Audiobook not found" });
             }
 
-            // Get chapters and audio files from API (these change less frequently)
-            let absBook = { media: { chapters: [], audioFiles: [] } };
-            if (!isFederated) {
-                try {
-                    absBook = await audiobookshelfService.getAudiobook(id);
-                } catch (apiError: any) {
-                    logger.warn(
-                        `  Failed to fetch live data from Audiobookshelf for ${id}, using cached data only:`,
-                        apiError.message,
-                    );
-                }
-            }
+            const cachedSections = parseStoredSections(audiobook.sections);
 
             // Get user's progress
             const progress = await prisma.audiobookProgress.findUnique({
@@ -973,8 +1011,24 @@ router.get<{ id: string }>(
                         ? `/audiobooks/${audiobook.id}/cover`
                         : null,
                 duration: audiobook.duration || 0,
-                chapters: absBook.media?.chapters || [],
-                audioFiles: absBook.media?.audioFiles || [],
+                publisher: audiobook.publisher,
+                publishedYear: audiobook.publishedYear,
+                genres: audiobook.genres || [],
+                isbn: audiobook.isbn,
+                asin: audiobook.asin,
+                language: audiobook.language,
+                series: audiobook.series
+                    ? {
+                          name: audiobook.series,
+                          sequence: audiobook.seriesSequence || "1",
+                      }
+                    : null,
+                sectionKind: cachedSections.kind,
+                sections: cachedSections.sections,
+                sectionsPlayable: sectionsArePlayable(
+                    audiobook,
+                    cachedSections,
+                ),
                 libraryId: audiobook.libraryId,
                 progress: progress
                     ? {

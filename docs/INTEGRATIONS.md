@@ -23,6 +23,12 @@ Connect soundspan to Lidarr to request/download new music and trigger imports.
 4. Set Lidarr API key (Lidarr → Settings → General)
 5. Test and save
 
+Audiobook detail metadata and section navigation are served from soundspan's
+local cache. Scheduled or manual Audiobookshelf sync validates chapter coverage
+and fills section data for rows created before this model was added. Multi-file
+part boundaries remain visible in the API but are not playable in the UI while
+the stream proxy serves only the first file.
+
 ### Networking note
 
 Lidarr must reach the soundspan callback URL.

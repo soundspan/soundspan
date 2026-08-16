@@ -1,4 +1,5 @@
 import path from "path";
+import { Prisma } from "@prisma/client";
 
 const mockGetAllAudiobooks = jest.fn();
 const mockGetAudiobook = jest.fn();
@@ -62,8 +63,13 @@ function buildBook(overrides: Record<string, any> = {}) {
         title: "The Book",
         media: {
             duration: 3600,
-            numTracks: 10,
+            numTracks: 1,
             numChapters: 20,
+            chapters: [
+                { title: "Opening", start: 0, end: 1800 },
+                { title: "Closing", start: 1800, end: 3600 },
+            ],
+            audioFiles: [{ filename: "The Book.m4b", duration: 3600 }],
             coverPath: "items/book-1/cover",
             metadata: {
                 title: "The Book",
@@ -146,6 +152,7 @@ describe("audiobook cache service behavior", () => {
         expect(prisma.audiobook.upsert).toHaveBeenCalledTimes(2);
 
         const firstUpsertArg = prisma.audiobook.upsert.mock.calls[0][0];
+        expect(firstUpsertArg.create).not.toHaveProperty("numChapters");
         expect(firstUpsertArg.create).toEqual(
             expect.objectContaining({
                 id: "book-1",
@@ -160,7 +167,21 @@ describe("audiobook cache service behavior", () => {
                     "audiobooks",
                     "book-1.jpg",
                 ),
+                sections: {
+                    kind: "chapters",
+                    sections: [
+                        { index: 0, title: "Opening", startSeconds: 0 },
+                        {
+                            index: 1,
+                            title: "Closing",
+                            startSeconds: 1800,
+                        },
+                    ],
+                },
             }),
+        );
+        expect(firstUpsertArg.update.sections).toEqual(
+            firstUpsertArg.create.sections,
         );
 
         expect(fetchMock).toHaveBeenCalledWith(
@@ -172,6 +193,29 @@ describe("audiobook cache service behavior", () => {
                 signal: expect.anything(),
             },
         );
+    });
+
+    it("preserves stored sections on minified updates and creates them as unknown", async () => {
+        const service = new AudiobookCacheService();
+        mockGetAllAudiobooks.mockResolvedValue([
+            buildBook({
+                id: "book-minified",
+                media: {
+                    duration: 3600,
+                    numTracks: 1,
+                    metadata: {
+                        title: "Minified Book",
+                        authorName: "Author A",
+                    },
+                },
+            }),
+        ]);
+
+        await service.syncAll();
+
+        const upsert = prisma.audiobook.upsert.mock.calls[0][0];
+        expect(upsert.update).not.toHaveProperty("sections");
+        expect(upsert.create.sections).toBe(Prisma.DbNull);
     });
 
     it("passes a timeout AbortSignal when downloading a cover", async () => {
@@ -401,6 +445,56 @@ describe("audiobook cache service behavior", () => {
         expect(refreshed).toEqual(
             expect.objectContaining({ title: "Refreshed" }),
         );
+    });
+
+    it("refreshes a fresh cache row whose sections are still unknown", async () => {
+        const service = new AudiobookCacheService();
+        const unknownSectionsRecord = {
+            id: "book-unknown-sections",
+            sections: null,
+            lastSyncedAt: new Date(),
+        };
+        const refreshedRecord = {
+            id: "book-unknown-sections",
+            title: "Refreshed",
+            sections: {
+                kind: "chapters",
+                sections: [
+                    { index: 0, title: "Opening", startSeconds: 0 },
+                    { index: 1, title: "Closing", startSeconds: 1800 },
+                ],
+            },
+            lastSyncedAt: new Date(),
+        };
+        prisma.audiobook.findUnique
+            .mockResolvedValueOnce(unknownSectionsRecord)
+            .mockResolvedValueOnce(refreshedRecord);
+        mockGetAudiobook.mockResolvedValueOnce(
+            buildBook({ id: "book-unknown-sections" }),
+        );
+
+        const result = await service.getAudiobook("book-unknown-sections");
+
+        expect(mockGetAudiobook).toHaveBeenCalledTimes(1);
+        expect(mockGetAudiobook).toHaveBeenCalledWith("book-unknown-sections");
+        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    sections: {
+                        kind: "chapters",
+                        sections: [
+                            { index: 0, title: "Opening", startSeconds: 0 },
+                            {
+                                index: 1,
+                                title: "Closing",
+                                startSeconds: 1800,
+                            },
+                        ],
+                    },
+                }),
+            }),
+        );
+        expect(result).toBe(refreshedRecord);
     });
 
     it("falls back to stale cache when refresh fails and throws when no cache exists", async () => {

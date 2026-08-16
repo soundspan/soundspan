@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documentation drift sweep: corrected environment/deployment/API references across the docs tree and refreshed the route, feature, and test indexes.
+- Audiobook detail loads now serve validated sections and metadata from the local cache instead of fetching Audiobookshelf live. Sections are computed during sync when expanded Audiobookshelf data is available and backfilled lazily on first view for books synced before this change or from minified library listings. The retained `numChapters` column is superseded and no longer refreshed.
 
 ### Fixed
 
+- Fixed broken audiobook navigation for books whose sparse or malformed Audiobookshelf chapter markers do not cover the runtime. Valid multi-file durations now produce named parts, while navigation stays hidden when the current single-file stream proxy cannot play those seek targets. (#487)
 - Reaped dead-peer HTTP connections with TCP keepalive, made origin keep-alive
   timeouts reverse-proxy safe, and kept Node's zero idle timeout so paused or
   backpressured streams remain unaffected. (#487)

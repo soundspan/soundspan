@@ -11,6 +11,7 @@ import { useAudiobookActions } from "@/features/audiobook/hooks/useAudiobookActi
 // Components
 import { AudiobookHero } from "@/features/audiobook/components/AudiobookHero";
 import { AudiobookActionBar } from "@/features/audiobook/components/AudiobookActionBar";
+import { ChapterList } from "@/features/audiobook/components/ChapterList";
 
 /**
  * Renders the AudiobookDetailPage component.
@@ -38,7 +39,8 @@ export default function AudiobookDetailPage() {
         handlePlayPause,
         handleMarkAsCompleted,
         handleResetProgress,
-    } = useAudiobookActions(audiobookId, audiobook, refetch);
+        seekToChapter,
+    } = useAudiobookActions(audiobookId, audiobook ?? null, refetch);
 
     // Loading state
     if (isLoading) {
@@ -103,6 +105,14 @@ export default function AudiobookDetailPage() {
                 />
 
                 <div className="relative px-4 md:px-8 py-8 space-y-6">
+                    <ChapterList
+                        kind={audiobook.sectionKind}
+                        sections={audiobook.sections}
+                        sectionsPlayable={audiobook.sectionsPlayable}
+                        onSeekToSection={seekToChapter}
+                        formatTime={formatTime}
+                    />
+
                     {/* Description / About */}
                     {showDescription && (
                         <section className="hidden md:block">

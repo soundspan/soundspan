@@ -107,6 +107,13 @@ awm health --project soundspan --include-details
 
 ### Backend Contract/Cross-Domain Tests (`backend/src/__tests__/`)
 
+Audiobook service behavior is covered by
+`src/services/__tests__/audiobookSections.test.ts`,
+`src/services/__tests__/audiobookCacheService.test.ts`, and
+`src/services/__tests__/audiobookshelfService.test.ts`. The validated section
+component contract is covered by
+`frontend/tests/component/chapterList.component.test.ts`.
+
 | Domain                   | Test Files                                                                                                                                                                                                                   |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API Entrypoint           | `apiEntrypointRuntime.test.ts`, `apiEntrypointDbResilienceContract.test.ts`                                                                                                                                                  |

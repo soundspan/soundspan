@@ -40,25 +40,13 @@ export function useAudiobookData() {
         ? api.getCoverArtUrl(audiobook.coverUrl, 300, true)
         : null;
 
-    // Extract metadata from audioFiles
+    // Shape cached metadata for the hero without depending on live ABS files.
     const getMetadata = () => {
         if (!audiobook) return null;
 
-        if (!audiobook.audioFiles?.[0]?.metaTags) {
-            return {
-                narrator: audiobook.narrator || null,
-                genre: null,
-                publishedYear: null,
-                description: audiobook.description || null,
-            };
-        }
-
-        const metaTags = audiobook.audioFiles[0].metaTags;
-
-        // Extract narrator from description or tagComment
         let narrator = audiobook.narrator;
         if (!narrator || narrator.trim() === "") {
-            const desc = audiobook.description || metaTags.tagComment || "";
+            const desc = audiobook.description || "";
             const narratorMatch = desc.match(
                 /(?:Read by|Narrated by):\s*(.+)/i,
             );
@@ -69,9 +57,9 @@ export function useAudiobookData() {
 
         return {
             narrator: narrator || null,
-            genre: metaTags.tagGenre || null,
-            publishedYear: metaTags.tagDate || null,
-            description: audiobook.description || metaTags.tagComment || null,
+            genre: audiobook.genres?.[0] || null,
+            publishedYear: audiobook.publishedYear?.toString() || null,
+            description: audiobook.description || null,
         };
     };
 

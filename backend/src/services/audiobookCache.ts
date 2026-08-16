@@ -3,9 +3,11 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
+import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { buildCachePath, isPastStaleWindow } from "./cacheHelpers";
 import { buildSafeAudiobookCoverUrl } from "./audiobookCoverProxy";
+import { buildSectionsWhenPresent } from "./audiobookSections";
 import {
     MAX_EXTERNAL_IMAGE_BYTES,
     readResponseBodyWithByteCap,
@@ -155,7 +157,11 @@ export class AudiobookCacheService {
         const tags = book.tags || [];
         const duration = book.media?.duration || null;
         const numTracks = book.media?.numTracks || null;
-        const numChapters = book.media?.numChapters || null;
+        const sections = buildSectionsWhenPresent({
+            durationSeconds: duration,
+            chapters: book.media?.chapters,
+            audioFiles: book.media?.audioFiles,
+        });
         const size = book.size ? BigInt(book.size) : null;
         const libraryId = book.libraryId || null;
 
@@ -242,7 +248,7 @@ export class AudiobookCacheService {
                 seriesSequence,
                 duration,
                 numTracks,
-                numChapters,
+                sections: sections ?? Prisma.DbNull,
                 size,
                 isbn,
                 asin,
@@ -266,7 +272,7 @@ export class AudiobookCacheService {
                 seriesSequence,
                 duration,
                 numTracks,
-                numChapters,
+                ...(sections === null ? {} : { sections }),
                 size,
                 isbn,
                 asin,
@@ -386,16 +392,17 @@ export class AudiobookCacheService {
             where: { id: audiobookId },
         });
 
-        // If not in cache or stale (> 7 days), try to sync it
+        // If not cached, stale, or missing section data, try to sync it.
         if (
             !audiobook ||
+            audiobook.sections === null ||
             isPastStaleWindow(
                 audiobook.lastSyncedAt,
                 AUDIOBOOK_CACHE_STALE_WINDOW_MS,
             )
         ) {
             logger.debug(
-                `[AUDIOBOOK] Audiobook ${audiobookId} not cached or stale, syncing...`,
+                `[AUDIOBOOK] Audiobook ${audiobookId} not cached, stale, or missing sections; syncing...`,
             );
             try {
                 const book =
