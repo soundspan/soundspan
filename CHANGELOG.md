@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Split the YouTube Music streamer sidecar into focused client, search, auth,
+  streaming, library, download, browse, lifecycle, model, and runtime modules
+  while preserving its `app:app` entrypoint and HTTP behavior. (#485)
 - Documented the npm security-override lifecycle, removed obsolete backend and
   frontend overrides, and added an enforcement gate for dangling overrides with
   non-blocking warnings for shed candidates. (#492)

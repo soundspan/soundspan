@@ -31,9 +31,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY services/ytmusic-streamer/requirements-exempt.txt ./requirements-exempt.txt
 RUN pip install --no-cache-dir -r requirements-exempt.txt
 
-# Copy application code
-COPY services/ytmusic-streamer/app.py ./app.py
-COPY services/ytmusic-streamer/yt_download.py ./yt_download.py
+# Copy the entrypoint and its split sidecar modules.
+COPY services/ytmusic-streamer/*.py ./
 COPY services/common ./common
 COPY services/ytmusic-streamer/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh

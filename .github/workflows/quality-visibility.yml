@@ -231,7 +231,7 @@ jobs:
         run: MYPYPATH=services mypy services/tidal-downloader/app.py services/tidal-downloader/tests
 
       - name: Mypy YouTube Music streamer
-        run: MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/tests
+        run: MYPYPATH=services mypy services/ytmusic-streamer/app.py services/ytmusic-streamer/yt_download.py services/ytmusic-streamer/ytmusic_auth.py services/ytmusic-streamer/ytmusic_browse.py services/ytmusic-streamer/ytmusic_client.py services/ytmusic-streamer/ytmusic_downloads.py services/ytmusic-streamer/ytmusic_library.py services/ytmusic-streamer/ytmusic_lifecycle.py services/ytmusic-streamer/ytmusic_models.py services/ytmusic-streamer/ytmusic_runtime.py services/ytmusic-streamer/ytmusic_search.py services/ytmusic-streamer/ytmusic_stream.py services/ytmusic-streamer/tests
 
       - name: Mypy audio analyzer
         run: MYPYPATH=services mypy services/audio-analyzer/analyzer.py

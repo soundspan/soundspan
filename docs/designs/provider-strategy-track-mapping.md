@@ -24,7 +24,7 @@ Brainstormed 2026-02-28. Status: design phase, no implementation yet.
 - **Universal fallback:** YT Music serves as automatic free-tier resolution for ALL playlist imports, even for users with no connected services
 - Search already works unauthenticated (uses `YTMusic()` with no credentials, avoids polluting user's YT history)
 - Streaming currently gated behind OAuth in sidecar code, but underlying yt-dlp extraction is unauthenticated — small sidecar modification needed to allow unauthenticated streaming path
-- Sidecar details: `_get_ytmusic(user_id)` check at top of `/stream` and `/proxy` endpoints (lines ~1586, ~1613 in app.py) is the only gate; yt-dlp (`_get_stream_url_sync`) doesn't use OAuth
+- Sidecar details: `_get_ytmusic(user_id)` in `services/ytmusic-streamer/ytmusic_client.py` gates authenticated use by the `/stream` and `/proxy` handlers in `ytmusic_stream.py`; yt-dlp (`_get_stream_url_sync`) does not use OAuth
 - `ytmusicapi` = search/matching (unauthenticated), `yt-dlp` = stream URL extraction (unauthenticated)
 
 ### Tidal: Keep as premium gap-fill

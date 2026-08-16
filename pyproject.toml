@@ -56,6 +56,15 @@ ignore = [
   "B904", # Endpoint handlers intentionally translate provider failures into stable HTTP errors.
   "E402", # The shared-service path bootstrap must run before local imports.
 ]
+"services/ytmusic-streamer/ytmusic_*.py" = [
+  "ASYNC240", # Moved credential-path operations retain the app.py exemption.
+  "B008", # Moved FastAPI Depends and Query defaults retain the app.py exemption.
+  "B904", # Moved handlers retain their existing stable HTTP error translations.
+  "E402", # ytmusic_runtime bootstraps the shared-service import path.
+]
+"services/ytmusic-streamer/ytmusic_stream.py" = [
+  "RUF100", # Preserve the verbatim LOG014 rationale on the moved extraction helper.
+]
 
 [tool.mypy]
 # Python 3.11 matches the repo floor (Ruff py311 and audio-analyzer python:3.11-slim),

@@ -17,6 +17,25 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 # that exercise the auth gate itself (test_internal_auth.py) build their own
 # clients and manage this env var directly.
 INTERNAL_API_SECRET = "test-internal-secret-value"
+APP_MODULES = (
+    "app",
+    "ytmusic_auth",
+    "ytmusic_browse",
+    "ytmusic_client",
+    "ytmusic_downloads",
+    "ytmusic_library",
+    "ytmusic_lifecycle",
+    "ytmusic_models",
+    "ytmusic_runtime",
+    "ytmusic_search",
+    "ytmusic_stream",
+)
+
+
+def _clear_app_modules() -> None:
+    """Remove the entrypoint and split modules so each test gets fresh state."""
+    for module_name in APP_MODULES:
+        sys.modules.pop(module_name, None)
 
 
 @pytest.fixture(autouse=True)
@@ -28,12 +47,12 @@ def internal_api_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def local_app_module() -> Iterator[None]:
     """Ensure `import app` resolves to this sidecar during the test."""
-    sys.modules.pop("app", None)
+    _clear_app_modules()
     sys.path.insert(0, str(SERVICE_ROOT))
     try:
         yield
     finally:
-        sys.modules.pop("app", None)
+        _clear_app_modules()
         while str(SERVICE_ROOT) in sys.path:
             sys.path.remove(str(SERVICE_ROOT))
 

@@ -22,7 +22,12 @@ Primary sources:
 - `services/audio-analyzer/analyzer.py`
 - `services/audio-analyzer-clap/analyzer.py`
 - `services/tidal-downloader/app.py`
-- `services/ytmusic-streamer/app.py`
+- `services/ytmusic-streamer/ytmusic_runtime.py`
+- `services/ytmusic-streamer/ytmusic_client.py`
+- `services/ytmusic-streamer/ytmusic_search.py`
+- `services/ytmusic-streamer/ytmusic_stream.py`
+- `services/ytmusic-streamer/ytmusic_downloads.py`
+- `services/ytmusic-streamer/ytmusic_browse.py`
 
 Status labels:
 
