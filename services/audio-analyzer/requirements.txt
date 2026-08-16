@@ -15,7 +15,7 @@ tensorflow>=2.13.0,<2.16.0
 # Essentia publishes only pre-release dev builds, making uv's unpinned selection
 # cache-sensitive across cold builds. Pin the newest CPython 3.11 build for
 # identical model behavior in both analyzers (roadmap F50 reproducible lock).
-essentia-tensorflow==2.1b6.dev1438
+essentia-tensorflow==2.1b6.dev1389
 
 # Queue and database
 redis>=6.4.0

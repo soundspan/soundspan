@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reverted the audio analyzer's essentia-tensorflow pin to dev1389, the newest
+  build publishing CPython 3.11 wheels: the dev1438 bump never took effect
+  because the Docker image installs from the lock, which correctly stayed on
+  dev1389 (dev1438 ships CPython 3.14 wheels only). Dependabot now ignores
+  essentia-tensorflow for this image until a cp311 build appears or the
+  interpreter ceiling moves.
 - Split the YouTube Music streamer sidecar into focused client, search, auth,
   streaming, library, download, browse, lifecycle, model, and runtime modules
   while preserving its `app:app` entrypoint and HTTP behavior. (#485)
