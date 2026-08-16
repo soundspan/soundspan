@@ -1,5 +1,5 @@
 # CLAP Audio Analyzer Service - LAION CLAP embeddings for vibe similarity
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
