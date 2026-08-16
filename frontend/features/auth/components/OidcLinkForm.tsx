@@ -45,9 +45,16 @@ function useOidcLinkForm({ linkToken, onAuthenticated }: OidcLinkFormProps) {
         }
     };
     return {
-        password, setPassword, twoFactorToken, setTwoFactorToken,
-        requires2FA, useRecoveryCode, setUseRecoveryCode,
-        error, isLoading, handleSubmit,
+        password,
+        setPassword,
+        twoFactorToken,
+        setTwoFactorToken,
+        requires2FA,
+        useRecoveryCode,
+        setUseRecoveryCode,
+        error,
+        isLoading,
+        handleSubmit,
     };
 }
 

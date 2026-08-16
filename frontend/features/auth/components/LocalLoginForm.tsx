@@ -35,7 +35,8 @@ function useLocalLoginForm() {
         setError("");
     };
     const handleFailure = (caught: unknown): void => {
-        const message = caught instanceof Error ? caught.message : "Login failed";
+        const message =
+            caught instanceof Error ? caught.message : "Login failed";
         if (isSecondFactorRequired(message)) {
             setRequires2FA(true);
             setError("");
@@ -50,7 +51,11 @@ function useLocalLoginForm() {
         setError("");
         setIsLoading(true);
         try {
-            await login(username, password, requires2FA ? twoFactorToken : undefined);
+            await login(
+                username,
+                password,
+                requires2FA ? twoFactorToken : undefined,
+            );
         } catch (caught) {
             handleFailure(caught);
         } finally {
@@ -58,9 +63,19 @@ function useLocalLoginForm() {
         }
     };
     return {
-        username, password, twoFactorToken, requires2FA, useRecoveryCode,
-        error, isLoading, setUsername, setPassword, setTwoFactorToken,
-        setUseRecoveryCode, resetSecondFactor, handleSubmit,
+        username,
+        password,
+        twoFactorToken,
+        requires2FA,
+        useRecoveryCode,
+        error,
+        isLoading,
+        setUsername,
+        setPassword,
+        setTwoFactorToken,
+        setUseRecoveryCode,
+        resetSecondFactor,
+        handleSubmit,
     };
 }
 
@@ -193,7 +208,10 @@ function SubmitButton({ isLoading }: { isLoading: boolean }) {
         >
             <span className="flex items-center justify-center gap-2">
                 {isLoading ? (
-                    <><Loader2 className="w-5 h-5 animate-spin" />Signing in...</>
+                    <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Signing in...
+                    </>
                 ) : (
                     "Sign In"
                 )}

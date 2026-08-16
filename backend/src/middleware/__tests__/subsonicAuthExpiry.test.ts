@@ -76,11 +76,7 @@ describe("Subsonic API key expiry", () => {
         const res = createResponse();
         const next: NextFunction = jest.fn();
 
-        await requireSubsonicAuth(
-            req,
-            res as unknown as Response,
-            next,
-        );
+        await requireSubsonicAuth(req, res as unknown as Response, next);
 
         expect(res.status).toHaveBeenCalledWith(200);
         expect(JSON.parse(res.body)["subsonic-response"]).toEqual(
@@ -104,11 +100,7 @@ describe("Subsonic API key expiry", () => {
         const res = createResponse();
         const next: NextFunction = jest.fn();
 
-        await requireSubsonicAuth(
-            req,
-            res as unknown as Response,
-            next,
-        );
+        await requireSubsonicAuth(req, res as unknown as Response, next);
 
         expect(next).toHaveBeenCalledTimes(1);
         expect(mockApiKeyUpdate).toHaveBeenCalledWith({
