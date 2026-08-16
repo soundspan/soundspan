@@ -1,4 +1,5 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
+import type { InviteCode, Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
@@ -19,6 +20,28 @@ import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
 import { apiLimiter, authLimiter } from "../middleware/rateLimiter";
+import { config } from "../config";
+import {
+    buildAuthorizationRequest,
+    handleCallback,
+    type OidcClaims,
+} from "../services/oidcAuth";
+import {
+    provisionOidcUser,
+    resolveOidcAccount,
+    syncOidcRole,
+    type LoginUser,
+    type OidcAccountResolution,
+} from "../services/oidcAccountResolution";
+import {
+    InviteCodeExhaustedError,
+    InviteCodeValidationError,
+    claimInviteCode,
+    loadUsableInviteCode,
+    recordInviteCodeUsage,
+} from "../services/inviteCodes";
+import { putOnce, takeOnce } from "../utils/redisKv";
+import { sendRouteError } from "./routeErrorResponse";
 
 async function verifyTotpToken(
     secret: string,
@@ -47,6 +70,7 @@ const router = Router();
 const loginSchema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),
+    token: z.string().min(1).optional(),
 });
 
 const inviteCodeSchema = z.object({
@@ -115,6 +139,538 @@ const subsonicPasswordSchema = z.object({
 const encrypt2FASecret = encrypt;
 const decrypt2FASecret = decrypt;
 
+interface SecondFactorUser {
+    id: string;
+    twoFactorEnabled: boolean;
+    twoFactorSecret: string | null;
+    twoFactorRecoveryCodes: string | null;
+}
+
+type SecondFactorResult =
+    | { kind: "ok" }
+    | { kind: "required" }
+    | { kind: "invalid"; message: string };
+
+async function verifyRecoveryCode(
+    user: SecondFactorUser,
+    token: string,
+): Promise<boolean> {
+    if (!user.twoFactorRecoveryCodes) return false;
+    const hashes = decrypt2FASecret(user.twoFactorRecoveryCodes).split(",");
+    const providedHash = crypto
+        .createHash("sha256")
+        .update(token.toUpperCase())
+        .digest("hex");
+    let matchIndex = -1;
+    for (let index = 0; index < hashes.length; index += 1) {
+        if (timingSafeCompare(hashes[index], providedHash)) matchIndex = index;
+    }
+    if (matchIndex === -1) return false;
+    hashes.splice(matchIndex, 1);
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            twoFactorRecoveryCodes: encrypt2FASecret(hashes.join(",")),
+        },
+    });
+    return true;
+}
+
+async function verifyLoginSecondFactor(
+    user: SecondFactorUser,
+    token?: string,
+): Promise<SecondFactorResult> {
+    if (!user.twoFactorEnabled || !user.twoFactorSecret) return { kind: "ok" };
+    if (!token) return { kind: "required" };
+    if (/^[A-F0-9]{8}$/i.test(token)) {
+        const valid = await verifyRecoveryCode(user, token);
+        return valid
+            ? { kind: "ok" }
+            : { kind: "invalid", message: "Invalid recovery code" };
+    }
+    const secret = decrypt2FASecret(user.twoFactorSecret);
+    const valid = await verifyTotpToken(secret, token);
+    return valid
+        ? { kind: "ok" }
+        : { kind: "invalid", message: "Invalid 2FA token" };
+}
+
+function sendLoginSuccess(res: Response, user: LoginUser): Response {
+    return res.json({
+        token: generateToken(user),
+        refreshToken: generateRefreshToken(user),
+        user: {
+            id: user.id,
+            username: user.username,
+            displayName: user.displayName,
+            role: user.role,
+        },
+    });
+}
+
+const OIDC_PENDING_TTL_SECONDS = 600;
+const OIDC_EXCHANGE_TTL_SECONDS = 60;
+const oidcLog = logger.child("OIDCAuth");
+const opaqueValueSchema = z
+    .string()
+    .min(1)
+    .max(256)
+    .regex(/^[A-Za-z0-9_-]+$/);
+const pendingOidcSchema = z.object({
+    nonce: z.string().min(1),
+    codeVerifier: z.string().min(1),
+    returnTo: z.string().refine((value) => normalizeReturnTo(value) === value),
+});
+const linkEntrySchema = z.object({
+    provider: z.string().min(1),
+    providerSubject: z.string().min(1),
+    email: z.string().email().nullable(),
+    displayName: z.string().nullable(),
+    userId: z.string().min(1),
+    groups: z.array(z.string()).default([]),
+});
+const inviteEntrySchema = z.object({
+    provider: z.string().min(1),
+    providerSubject: z.string().min(1),
+    email: z.string().email().nullable(),
+    displayName: z.string().nullable(),
+    preferredUsername: z.string().nullable().optional(),
+});
+const exchangeEntrySchema = z.object({ userId: z.string().min(1) });
+const exchangeBodySchema = z.object({ code: opaqueValueSchema });
+const confirmLinkBodySchema = z.object({
+    linkToken: opaqueValueSchema,
+    password: z.string().min(1),
+    twoFactorToken: z.string().min(1).optional(),
+});
+const redeemInviteBodySchema = z.object({
+    inviteToken: opaqueValueSchema,
+    inviteCode: z.string().min(1),
+});
+const callbackQuerySchema = z
+    .object({
+        state: opaqueValueSchema,
+        code: z.string().optional(),
+        iss: z.string().optional(),
+        error: z.string().optional(),
+        error_description: z.string().optional(),
+        error_uri: z.string().optional(),
+    })
+    .loose();
+
+function normalizeReturnTo(value: unknown): string {
+    if (typeof value !== "string") return "/";
+    if (!value.startsWith("/") || value.startsWith("//")) return "/";
+    if (value.includes("\\")) return "/";
+    try {
+        const parsed = new URL(value, "https://soundspan.invalid");
+        return parsed.origin === "https://soundspan.invalid" ? value : "/";
+    } catch {
+        return "/";
+    }
+}
+
+function randomOpaqueValue(): string {
+    return crypto.randomBytes(32).toString("base64url");
+}
+
+async function storeOpaqueEntry(
+    prefix: "link" | "invite" | "exchange",
+    entry: unknown,
+    ttlSeconds: number,
+): Promise<string> {
+    const token = randomOpaqueValue();
+    const stored = await putOnce(`oidc:${prefix}:${token}`, entry, ttlSeconds);
+    if (!stored) throw new Error("Failed to allocate one-time OIDC state");
+    return token;
+}
+
+async function takeParsed<T>(
+    key: string,
+    schema: z.ZodType<T>,
+): Promise<T | null> {
+    const value = await takeOnce(key);
+    if (value === null) return null;
+    const parsed = schema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+}
+
+function appendCallbackValue(url: URL, key: string, value: unknown): void {
+    if (typeof value === "string") url.searchParams.set(key, value);
+}
+
+function buildCurrentCallbackUrl(query: z.infer<typeof callbackQuerySchema>) {
+    const url = new URL(config.oidc.redirectUri);
+    appendCallbackValue(url, "state", query.state);
+    appendCallbackValue(url, "code", query.code);
+    appendCallbackValue(url, "iss", query.iss);
+    appendCallbackValue(url, "error", query.error);
+    appendCallbackValue(url, "error_description", query.error_description);
+    appendCallbackValue(url, "error_uri", query.error_uri);
+    return url.toString();
+}
+
+async function regenerateSession(req: Request): Promise<void> {
+    if (!req.session?.regenerate) return;
+    await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((error) => {
+            if (error) reject(error);
+            else resolve();
+        });
+    });
+}
+
+function loginRedirect(parameter: string, value: string, returnTo?: string) {
+    const suffix = returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "";
+    return `/login?${parameter}=${encodeURIComponent(value)}${suffix}`;
+}
+
+function redirectResponse(res: Response, url: string): Response {
+    res.redirect(url);
+    return res;
+}
+
+async function redirectForResolution(
+    res: Response,
+    resolution: OidcAccountResolution,
+    returnTo: string,
+): Promise<Response> {
+    if (resolution.kind === "alreadyLinked") {
+        return redirectResponse(res, "/login?ssoError=account_already_linked");
+    }
+    if (resolution.kind === "authenticated") {
+        const code = await storeOpaqueEntry(
+            "exchange",
+            { userId: resolution.user.id },
+            OIDC_EXCHANGE_TTL_SECONDS,
+        );
+        return redirectResponse(res, loginRedirect("ssoCode", code, returnTo));
+    }
+    const prefix = resolution.kind;
+    const token = await storeOpaqueEntry(
+        prefix,
+        resolution.entry,
+        OIDC_PENDING_TTL_SECONDS,
+    );
+    const parameter = resolution.kind === "link" ? "ssoLink" : "ssoInvite";
+    return redirectResponse(res, loginRedirect(parameter, token, returnTo));
+}
+
+async function oidcLoginHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    if (!config.oidc.enabled) {
+        return sendRouteError(res, 404, "OIDC is not enabled");
+    }
+    try {
+        const authorization = await buildAuthorizationRequest();
+        const pending = {
+            nonce: authorization.nonce,
+            codeVerifier: authorization.codeVerifier,
+            returnTo: normalizeReturnTo(req.query.returnTo),
+        };
+        const stored = await putOnce(
+            `oidc:pending:${authorization.state}`,
+            pending,
+            OIDC_PENDING_TTL_SECONDS,
+        );
+        if (!stored) throw new Error("Failed to store OIDC pending state");
+        return redirectResponse(res, authorization.redirectUrl);
+    } catch (error) {
+        oidcLog.error("OIDC login failed", { error });
+        return redirectResponse(res, "/login?ssoError=oidc_failed");
+    }
+}
+
+async function oidcCallbackHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    if (!config.oidc.enabled) {
+        return sendRouteError(res, 404, "OIDC is not enabled");
+    }
+    const queryResult = callbackQuerySchema.safeParse(req.query);
+    if (!queryResult.success) return rejectInvalidOidcState(res);
+    const pending = await takeParsed(
+        `oidc:pending:${queryResult.data.state}`,
+        pendingOidcSchema,
+    );
+    if (!pending) return rejectInvalidOidcState(res);
+    try {
+        const claims = await handleCallback(
+            buildCurrentCallbackUrl(queryResult.data),
+            { state: queryResult.data.state, ...pending },
+        );
+        await regenerateSession(req);
+        const resolution = await resolveOidcAccount(claims);
+        return redirectForResolution(res, resolution, pending.returnTo);
+    } catch (error) {
+        oidcLog.error("OIDC callback failed", { error });
+        return redirectResponse(res, "/login?ssoError=oidc_failed");
+    }
+}
+
+function rejectInvalidOidcState(res: Response): Response {
+    oidcLog.warn("Rejected OIDC callback with invalid state");
+    return redirectResponse(res, "/login?ssoError=invalid_state");
+}
+
+async function oidcExchangeHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    const parsed = exchangeBodySchema.safeParse(req.body);
+    if (!parsed.success) return sendRouteError(res, 400, "Invalid request");
+    const exchange = await takeParsed(
+        `oidc:exchange:${parsed.data.code}`,
+        exchangeEntrySchema,
+    );
+    if (!exchange) {
+        return sendRouteError(res, 401, "Invalid or expired OIDC code");
+    }
+    const user = await prisma.user.findUnique({
+        where: { id: exchange.userId },
+        select: {
+            id: true,
+            username: true,
+            displayName: true,
+            role: true,
+            tokenVersion: true,
+        },
+    });
+    return user
+        ? sendLoginSuccess(res, user)
+        : sendRouteError(res, 401, "Invalid or expired OIDC code");
+}
+
+async function restoreLinkForChallenge(
+    token: string,
+    entry: z.infer<typeof linkEntrySchema>,
+): Promise<void> {
+    const restored = await putOnce(
+        `oidc:link:${token}`,
+        entry,
+        OIDC_PENDING_TTL_SECONDS,
+    );
+    if (!restored) throw new Error("Failed to restore OIDC link state");
+}
+
+async function oidcConfirmLinkHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    const parsed = confirmLinkBodySchema.safeParse(req.body);
+    if (!parsed.success) return sendRouteError(res, 400, "Invalid request");
+    const entry = await takeParsed(
+        `oidc:link:${parsed.data.linkToken}`,
+        linkEntrySchema,
+    );
+    if (!entry) return sendRouteError(res, 401, "Invalid or expired link");
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: entry.userId },
+        });
+        if (!user) {
+            await runDummyBcrypt();
+            return sendRouteError(res, 401, "Invalid credentials");
+        }
+        if (!user.passwordHash) {
+            return sendRouteError(res, 401, "Invalid credentials");
+        }
+        const valid = await bcrypt.compare(
+            parsed.data.password,
+            user.passwordHash,
+        );
+        if (!valid) return sendRouteError(res, 401, "Invalid credentials");
+        const secondFactor = await verifyLoginSecondFactor(
+            user,
+            parsed.data.twoFactorToken,
+        );
+        if (secondFactor.kind === "required") {
+            await restoreLinkForChallenge(parsed.data.linkToken, entry);
+            return res.json({
+                requires2FA: true,
+                message: "2FA token required",
+            });
+        }
+        if (secondFactor.kind === "invalid") {
+            return sendRouteError(res, 401, secondFactor.message);
+        }
+        return completeOidcLink(res, user, entry);
+    } catch (error) {
+        oidcLog.error("OIDC link confirmation failed", { error });
+        return sendRouteError(res, 500, "Failed to link OIDC account");
+    }
+}
+
+async function completeOidcLink(
+    res: Response,
+    user: LoginUser,
+    entry: z.infer<typeof linkEntrySchema>,
+): Promise<Response> {
+    await prisma.externalIdentity.create({
+        data: {
+            userId: user.id,
+            provider: entry.provider,
+            providerSubject: entry.providerSubject,
+            email: entry.email,
+            displayName: entry.displayName,
+        },
+    });
+    const syncedUser = await syncOidcRole(user, entry.groups);
+    return sendLoginSuccess(res, syncedUser);
+}
+
+async function restoreInviteForRetry(
+    token: string,
+    entry: z.infer<typeof inviteEntrySchema>,
+): Promise<void> {
+    const restored = await putOnce(
+        `oidc:invite:${token}`,
+        entry,
+        OIDC_PENDING_TTL_SECONDS,
+    );
+    if (!restored) throw new Error("Failed to restore OIDC invite state");
+}
+
+function claimsFromInvite(
+    entry: z.infer<typeof inviteEntrySchema>,
+): OidcClaims {
+    return {
+        sub: entry.providerSubject,
+        email: entry.email,
+        emailVerified: entry.email !== null,
+        name: entry.displayName,
+        preferredUsername: entry.preferredUsername ?? null,
+        groups: [],
+    };
+}
+
+async function oidcRedeemInviteHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    const parsed = redeemInviteBodySchema.safeParse(req.body);
+    if (!parsed.success) return sendRouteError(res, 400, "Invalid request");
+    const entry = await takeParsed(
+        `oidc:invite:${parsed.data.inviteToken}`,
+        inviteEntrySchema,
+    );
+    if (!entry) return sendRouteError(res, 401, "Invalid or expired invite");
+    try {
+        const invite = await loadUsableInviteCode(parsed.data.inviteCode);
+        const user = await provisionOidcUser(
+            claimsFromInvite(entry),
+            entry.provider,
+            invite,
+        );
+        return sendLoginSuccess(res, user);
+    } catch (error) {
+        if (
+            error instanceof InviteCodeValidationError ||
+            error instanceof InviteCodeExhaustedError
+        ) {
+            await restoreInviteForRetry(parsed.data.inviteToken, entry);
+            return sendRouteError(res, 400, error.message);
+        }
+        oidcLog.error("OIDC invite redemption failed", { error });
+        return sendRouteError(res, 500, "Failed to redeem OIDC invite");
+    }
+}
+
+/**
+ * @openapi
+ * /api/auth/config:
+ *   get:
+ *     summary: Get public authentication capabilities
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Authentication capabilities
+ */
+router.get("/config", (_req, res) =>
+    res.json({
+        localLoginEnabled: config.localLoginEnabled,
+        oidcEnabled: config.oidc.enabled,
+        oidcProviderName: config.oidc.providerName,
+    }),
+);
+
+/**
+ * @openapi
+ * /api/auth/oidc/login:
+ *   get:
+ *     summary: Start OIDC login
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       302:
+ *         description: Redirect to the OIDC provider
+ *       404:
+ *         description: OIDC is disabled
+ */
+router.get("/oidc/login", authLimiter, oidcLoginHandler);
+
+/**
+ * @openapi
+ * /api/auth/oidc/callback:
+ *   get:
+ *     summary: Complete OIDC login
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       302:
+ *         description: Redirect to the SPA login hand-off
+ */
+router.get("/oidc/callback", authLimiter, oidcCallbackHandler);
+
+/**
+ * @openapi
+ * /api/auth/oidc/exchange:
+ *   post:
+ *     summary: Exchange a one-time OIDC code for login tokens
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Login tokens and user
+ *       401:
+ *         description: Invalid or expired code
+ */
+router.post("/oidc/exchange", authLimiter, oidcExchangeHandler);
+
+/**
+ * @openapi
+ * /api/auth/oidc/confirm-link:
+ *   post:
+ *     summary: Confirm an OIDC account link with local credentials
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Login response or 2FA challenge
+ *       401:
+ *         description: Invalid credentials or link
+ */
+router.post("/oidc/confirm-link", authLimiter, oidcConfirmLinkHandler);
+
+/**
+ * @openapi
+ * /api/auth/oidc/redeem-invite:
+ *   post:
+ *     summary: Redeem an invite for OIDC account provisioning
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Login tokens and provisioned user
+ *       400:
+ *         description: Invalid invite code
+ */
+router.post("/oidc/redeem-invite", authLimiter, oidcRedeemInviteHandler);
+
 /**
  * @openapi
  * /api/auth/login:
@@ -153,111 +709,40 @@ const decrypt2FASecret = decrypt;
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// POST /auth/login
-router.post("/login", async (req, res) => {
+async function findLocalLoginUser(username: string) {
+    return (
+        (await prisma.user.findUnique({ where: { username } })) ??
+        (await prisma.user.findUnique({ where: { email: username } }))
+    );
+}
+
+async function localLoginHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    if (!config.localLoginEnabled) {
+        return sendRouteError(res, 403, "Local login is disabled");
+    }
     try {
-        logger.debug(`[AUTH] Login attempt for user: ${req.body?.username}`);
-        const { username, password } = loginSchema.parse(req.body);
-        const { token } = req.body; // 2FA token if provided
-
-        // Look up by username first, then by email
-        const user =
-            (await prisma.user.findUnique({ where: { username } })) ??
-            (await prisma.user.findUnique({ where: { email: username } }));
-        if (!user) {
-            // Run dummy bcrypt to equalize response timing with the valid-user
-            // path, preventing username enumeration via timing side-channel.
+        const { username, password, token } = loginSchema.parse(req.body);
+        const user = await findLocalLoginUser(username);
+        if (!user || !user.passwordHash) {
             await runDummyBcrypt();
-            logger.debug(`[AUTH] User not found: ${username}`);
-            return res.status(401).json({ error: "Invalid credentials" });
+            return sendRouteError(res, 401, "Invalid credentials");
         }
-
-        logger.debug(`[AUTH] Verifying password for user: ${username}`);
         const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) {
-            logger.debug(`[AUTH] Invalid password for user: ${username}`);
-            return res.status(401).json({ error: "Invalid credentials" });
+        if (!valid) return sendRouteError(res, 401, "Invalid credentials");
+        const secondFactor = await verifyLoginSecondFactor(user, token);
+        if (secondFactor.kind === "required") {
+            return res.json({
+                requires2FA: true,
+                message: "2FA token required",
+            });
         }
-        logger.debug(`[AUTH] Password verified for user: ${username}`);
-
-        // Check if 2FA is enabled
-        if (user.twoFactorEnabled && user.twoFactorSecret) {
-            if (!token) {
-                return res.status(200).json({
-                    requires2FA: true,
-                    message: "2FA token required",
-                });
-            }
-
-            // Check if it's a recovery code
-            const isRecoveryCode = /^[A-F0-9]{8}$/i.test(token);
-
-            if (isRecoveryCode && user.twoFactorRecoveryCodes) {
-                const encryptedCodes = user.twoFactorRecoveryCodes;
-                const decryptedCodes = decrypt2FASecret(encryptedCodes);
-                const hashedCodes = decryptedCodes.split(",");
-
-                const providedHash = crypto
-                    .createHash("sha256")
-                    .update(token.toUpperCase())
-                    .digest("hex");
-
-                // Iterate all codes with constant-time comparison to avoid
-                // timing leaks that reveal which code position matched.
-                let codeIndex = -1;
-                for (let i = 0; i < hashedCodes.length; i++) {
-                    if (timingSafeCompare(hashedCodes[i], providedHash)) {
-                        codeIndex = i;
-                    }
-                }
-                if (codeIndex === -1) {
-                    return res
-                        .status(401)
-                        .json({ error: "Invalid recovery code" });
-                }
-
-                hashedCodes.splice(codeIndex, 1);
-                await prisma.user.update({
-                    where: { id: user.id },
-                    data: {
-                        twoFactorRecoveryCodes: encrypt2FASecret(
-                            hashedCodes.join(","),
-                        ),
-                    },
-                });
-            } else {
-                // Verify TOTP token
-                const secret = decrypt2FASecret(user.twoFactorSecret);
-                const verified = await verifyTotpToken(secret, token);
-
-                if (!verified) {
-                    return res.status(401).json({ error: "Invalid 2FA token" });
-                }
-            }
+        if (secondFactor.kind === "invalid") {
+            return sendRouteError(res, 401, secondFactor.message);
         }
-
-        // Generate JWT tokens
-        const jwtToken = generateToken({
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            tokenVersion: user.tokenVersion,
-        });
-        const refreshToken = generateRefreshToken({
-            id: user.id,
-            tokenVersion: user.tokenVersion,
-        });
-
-        res.json({
-            token: jwtToken,
-            refreshToken: refreshToken,
-            user: {
-                id: user.id,
-                username: user.username,
-                displayName: user.displayName,
-                role: user.role,
-            },
-        });
+        return sendLoginSuccess(res, user);
     } catch (err) {
         if (err instanceof z.ZodError) {
             return res
@@ -265,9 +750,12 @@ router.post("/login", async (req, res) => {
                 .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Login error:", err);
-        res.status(500).json({ error: "Internal error" });
+        return res.status(500).json({ error: "Internal error" });
     }
-});
+}
+
+// POST /auth/login
+router.post("/login", localLoginHandler);
 
 /**
  * @openapi
@@ -466,6 +954,12 @@ router.post("/change-password", authLimiter, requireAuth, async (req, res) => {
 
         if (!user) {
             return res.status(404).json({ error: "User not found" });
+        }
+
+        if (!user.passwordHash) {
+            return res
+                .status(401)
+                .json({ error: "Current password is incorrect" });
         }
 
         const valid = await bcrypt.compare(currentPassword, user.passwordHash);
@@ -1153,130 +1647,65 @@ router.delete<{ id: string }>(
  *       400:
  *         description: Invalid request, invite code, or username/email already taken
  */
-// Thrown inside the registration transaction when the invite code has no
-// remaining uses at consume time, so the whole transaction rolls back (no user
-// is created) and the handler can return a clean 400.
-class InviteCodeExhaustedError extends Error {}
+type RegisterInput = z.infer<typeof registerSchema>;
 
-// POST /auth/register - Public registration with invite code
-router.post("/register", async (req, res) => {
-    try {
-        const data = registerSchema.parse(req.body);
+async function findRegistrationConflict(
+    data: RegisterInput,
+): Promise<string | null> {
+    const existingUser = await prisma.user.findUnique({
+        where: { username: data.username },
+    });
+    if (existingUser) return "Username already taken";
+    const existingEmail = await prisma.user.findFirst({
+        where: { email: data.email },
+    });
+    return existingEmail ? "Email already in use" : null;
+}
 
-        // Validate invite code
-        const invite = await prisma.inviteCode.findUnique({
-            where: { code: data.inviteCode.toUpperCase() },
-        });
-
-        if (!invite) {
-            return res.status(400).json({ error: "Invalid invite code" });
-        }
-        if (invite.revoked) {
-            return res
-                .status(400)
-                .json({ error: "This invite code has been revoked" });
-        }
-        if (invite.useCount >= invite.maxUses) {
-            return res
-                .status(400)
-                .json({ error: "This invite code has been fully used" });
-        }
-        if (invite.expiresAt && invite.expiresAt < new Date()) {
-            return res
-                .status(400)
-                .json({ error: "This invite code has expired" });
-        }
-
-        // Check username uniqueness
-        const existingUser = await prisma.user.findUnique({
-            where: { username: data.username },
-        });
-        if (existingUser) {
-            return res.status(400).json({ error: "Username already taken" });
-        }
-
-        // Check email uniqueness
-        const existingEmail = await prisma.user.findFirst({
-            where: { email: data.email },
-        });
-        if (existingEmail) {
-            return res.status(400).json({ error: "Email already in use" });
-        }
-
-        // Create user, settings, and usage record in a transaction
-        const passwordHash = await bcrypt.hash(data.password, 10);
-
-        const result = await prisma.$transaction(async (tx) => {
-            // Atomically consume one use of the invite code — only if uses remain
-            // and it isn't revoked. This closes the TOCTOU between the useCount
-            // check above (read before the transaction) and the increment below:
-            // two concurrent registrations on a single-use code can no longer
-            // both pass. If nothing was consumed, abort so no user is created.
-            const consumed = await tx.inviteCode.updateMany({
-                where: {
-                    id: invite.id,
-                    revoked: false,
-                    useCount: { lt: invite.maxUses },
-                },
-                data: { useCount: { increment: 1 } },
-            });
-            if (consumed.count === 0) {
-                throw new InviteCodeExhaustedError();
-            }
-
-            const user = await tx.user.create({
-                data: {
-                    username: data.username,
-                    displayName: data.displayName,
-                    email: data.email,
-                    passwordHash,
-                    role: "user",
-                    onboardingComplete: true,
-                },
-            });
-
-            await tx.userSettings.create({
-                data: {
-                    userId: user.id,
-                    playbackQuality: "original",
-                    wifiOnly: false,
-                    offlineEnabled: false,
-                    maxCacheSizeMb: 10240,
-                },
-            });
-
-            await tx.inviteCodeUsage.create({
-                data: {
-                    inviteCodeId: invite.id,
-                    usedBy: user.id,
-                },
-            });
-
-            return user;
-        });
-
-        // Generate JWT tokens
-        const jwtToken = generateToken({
-            id: result.id,
-            username: result.username,
-            role: result.role,
-            tokenVersion: result.tokenVersion,
-        });
-        const refreshToken = generateRefreshToken({
-            id: result.id,
-            tokenVersion: result.tokenVersion,
-        });
-
-        res.json({
-            token: jwtToken,
-            refreshToken,
-            user: {
-                id: result.id,
-                username: result.username,
-                displayName: result.displayName,
-                role: result.role,
+async function createLocalRegisteredUser(
+    data: RegisterInput,
+    invite: InviteCode,
+    passwordHash: string,
+): Promise<LoginUser> {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await claimInviteCode(tx, invite);
+        const user = await tx.user.create({
+            data: {
+                username: data.username,
+                displayName: data.displayName,
+                email: data.email,
+                passwordHash,
+                role: "user",
+                onboardingComplete: true,
             },
         });
+        await tx.userSettings.create({
+            data: {
+                userId: user.id,
+                playbackQuality: "original",
+                wifiOnly: false,
+                offlineEnabled: false,
+                maxCacheSizeMb: 10240,
+            },
+        });
+        await recordInviteCodeUsage(tx, invite, user.id);
+        return user;
+    });
+}
+
+async function registerHandler(req: Request, res: Response): Promise<Response> {
+    try {
+        const data = registerSchema.parse(req.body);
+        const invite = await loadUsableInviteCode(data.inviteCode);
+        const conflict = await findRegistrationConflict(data);
+        if (conflict) return sendRouteError(res, 400, conflict);
+        const passwordHash = await bcrypt.hash(data.password, 10);
+        const user = await createLocalRegisteredUser(
+            data,
+            invite,
+            passwordHash,
+        );
+        return sendLoginSuccess(res, user);
     } catch (err) {
         if (err instanceof z.ZodError) {
             const firstError = err.issues[0];
@@ -1285,15 +1714,19 @@ router.post("/register", async (req, res) => {
                 details: err.issues,
             });
         }
-        if (err instanceof InviteCodeExhaustedError) {
-            return res
-                .status(400)
-                .json({ error: "This invite code has been fully used" });
+        if (
+            err instanceof InviteCodeValidationError ||
+            err instanceof InviteCodeExhaustedError
+        ) {
+            return sendRouteError(res, 400, err.message);
         }
         logger.error("Registration error:", err);
-        res.status(500).json({ error: "Registration failed" });
+        return res.status(500).json({ error: "Registration failed" });
     }
-});
+}
+
+// POST /auth/register - Public registration with invite code
+router.post("/register", registerHandler);
 
 /**
  * @openapi
@@ -1524,6 +1957,10 @@ router.post(
 
             if (!user) {
                 return res.status(404).json({ error: "User not found" });
+            }
+
+            if (!user.passwordHash) {
+                return res.status(401).json({ error: "Invalid password" });
             }
 
             // Verify password

@@ -2,7 +2,28 @@ import crypto from "crypto";
 import express from "express";
 import request, { type Response } from "supertest";
 
-jest.mock("../../config", () => ({ config: { port: 3006 } }));
+jest.mock("../../config", () => ({
+    config: {
+        port: 3006,
+        redisUrl: "redis://localhost:6379",
+        localLoginEnabled: true,
+        oidc: {
+            enabled: false,
+            issuerUrl: "",
+            clientId: "",
+            clientSecret: "",
+            redirectUri: "",
+            scopes: "openid profile email",
+            autoProvision: false,
+            manageRoles: false,
+            groupsClaim: "groups",
+            adminGroup: "",
+            emailClaim: "email",
+            nameClaim: "name",
+            providerName: "SSO",
+        },
+    },
+}));
 
 const mockLogger = {
     debug: jest.fn(),

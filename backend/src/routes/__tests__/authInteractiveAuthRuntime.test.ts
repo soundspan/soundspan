@@ -2,6 +2,28 @@ const originalJwtSecret = process.env.JWT_SECRET;
 process.env.JWT_SECRET =
     process.env.JWT_SECRET || "auth-interactive-route-test-secret";
 
+jest.mock("../../config", () => ({
+    config: {
+        redisUrl: "redis://localhost:6379",
+        localLoginEnabled: true,
+        oidc: {
+            enabled: false,
+            issuerUrl: "",
+            clientId: "",
+            clientSecret: "",
+            redirectUri: "",
+            scopes: "openid profile email",
+            autoProvision: false,
+            manageRoles: false,
+            groupsClaim: "groups",
+            adminGroup: "",
+            emailClaim: "email",
+            nameClaim: "name",
+            providerName: "SSO",
+        },
+    },
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
     requireInteractiveSession: (req: any, res: any, next: () => void) =>
