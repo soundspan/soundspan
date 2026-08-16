@@ -29,7 +29,17 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/curatedVibeMixDefinitions.ts` | Data-driven curated vibe mix catalog |
 | `backend/src/services/dataCache.ts` | Core |
 | `backend/src/services/deezer.ts` | Core |
-| `backend/src/services/discoverWeekly.ts` | Core |
+| `backend/src/services/discoverWeekly.ts` | Discover Weekly compatibility facade |
+| `backend/src/services/discoverWeekly/batchLifecycle.ts` | Discover Weekly batch transitions |
+| `backend/src/services/discoverWeekly/candidateSelection.ts` | Discover Weekly candidate eligibility |
+| `backend/src/services/discoverWeekly/generationService.ts` | Discover Weekly generation orchestration |
+| `backend/src/services/discoverWeekly/helpers.ts` | Discover Weekly pure helpers |
+| `backend/src/services/discoverWeekly/index.ts` | Discover Weekly public service composition |
+| `backend/src/services/discoverWeekly/lidarrCleanup.ts` | Discover Weekly Lidarr cleanup |
+| `backend/src/services/discoverWeekly/playlistPersistence.ts` | Discover Weekly playlist persistence |
+| `backend/src/services/discoverWeekly/recommendationStrategies.ts` | Discover Weekly recommendation strategies |
+| `backend/src/services/discoverWeekly/state.ts` | Discover Weekly Prisma retry state |
+| `backend/src/services/discoverWeekly/types.ts` | Discover Weekly shared types |
 | `backend/src/services/discovery/discoveryAlbumLifecycle.ts` | Discovery |
 | `backend/src/services/discovery/discoveryBatchLogger.ts` | Discovery |
 | `backend/src/services/discovery/discoveryRecommendations.ts` | Discovery |

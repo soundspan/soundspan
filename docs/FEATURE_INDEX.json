@@ -202,6 +202,16 @@
                 "routes": ["discover.ts", "mixes.ts", "recommendations.ts"],
                 "services": [
                     "discoverWeekly.ts",
+                    "discoverWeekly/batchLifecycle.ts",
+                    "discoverWeekly/candidateSelection.ts",
+                    "discoverWeekly/generationService.ts",
+                    "discoverWeekly/helpers.ts",
+                    "discoverWeekly/index.ts",
+                    "discoverWeekly/lidarrCleanup.ts",
+                    "discoverWeekly/playlistPersistence.ts",
+                    "discoverWeekly/recommendationStrategies.ts",
+                    "discoverWeekly/state.ts",
+                    "discoverWeekly/types.ts",
                     "discovery/index.ts",
                     "discovery/discoveryAlbumLifecycle.ts",
                     "discovery/discoveryBatchLogger.ts",
@@ -230,6 +240,10 @@
                     "mixesRuntime.test.ts"
                 ],
                 "backend_contract": [
+                    "discoverWeeklyModuleBoundariesRuntime.test.ts",
+                    "discoverWeeklyPrefilterParity.test.ts",
+                    "discoverWeeklyPrismaRetryRuntime.test.ts",
+                    "discoverWeeklyRuntime.test.ts",
                     "discoverProcessorIdempotencyContract.test.ts",
                     "discoverQueueHandlerContract.test.ts",
                     "programmaticPlaylistsBehavior.test.ts",

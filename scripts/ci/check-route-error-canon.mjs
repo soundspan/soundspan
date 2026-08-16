@@ -102,9 +102,12 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/audioStreaming.ts": 3,
     // audiobookCache.ts remaining 2: sync-failure detail string recorded server-side (~L104) and an internal thrown sync-error message (~L398); frozen under the slice-E scope guard.
     "backend/src/services/audiobookCache.ts": 2,
-    // discoverWeekly.ts remaining 6: error-classification const (~L51), discoveryLogger line (~L564), and internal transaction-failure message (~L1484); server-side generation pipeline, frozen under the slice-E scope guard; plus discoveryLogger/discoveryBatchLogger interpolations (~L481, ~L496) and a stored job error field (~L489) in the server-side generation pipeline; frozen under the slice-J scope guard.
-    // discoverWeekly.ts +1: Redis retry classification's ternary-consequent error.message (~L59); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/discoverWeekly.ts": 7,
+    // discoverWeekly/generationService.ts remaining 4: discoveryLogger and discoveryBatchLogger interpolations plus a stored job error field in the server-side generation pipeline; frozen under the slice-E and slice-J scope guards.
+    "backend/src/services/discoverWeekly/generationService.ts": 4,
+    // discoverWeekly/playlistPersistence.ts remaining 1: internal transaction-failure message; server-side only, frozen under the slice-E scope guard.
+    "backend/src/services/discoverWeekly/playlistPersistence.ts": 1,
+    // discoverWeekly/state.ts remaining 2: Prisma retry classification error.message reads; internal retry decisions only, frozen under the slice-E and slice-X1 scope guards.
+    "backend/src/services/discoverWeekly/state.ts": 2,
     // enrichmentState.ts +1: Redis retry classification's ternary-consequent error.message (~L77); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/enrichmentState.ts": 1,
     // genericImportJobRunner.ts remaining 1: latestJob.error passthrough on user cancel (~L91); import-job state plumbing, frozen under the slice-J scope guard.
