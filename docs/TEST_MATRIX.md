@@ -114,6 +114,13 @@ Audiobook service behavior is covered by
 component contract is covered by
 `frontend/tests/component/chapterList.component.test.ts`.
 
+Programmatic playlist service behavior is covered by
+`src/services/__tests__/programmaticPlaylistsBehavior.test.ts`,
+`src/services/__tests__/programmaticPlaylistsCuratedMixes.test.ts`,
+`src/services/__tests__/programmaticPlaylistsDataDriven.test.ts`,
+`src/services/__tests__/programmaticPlaylistsPriorityMixes.test.ts`, and
+`src/services/__tests__/programmaticPlaylistsModuleBoundariesRuntime.test.ts`.
+
 | Domain                   | Test Files                                                                                                                                                                                                                   |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API Entrypoint           | `apiEntrypointRuntime.test.ts`, `apiEntrypointDbResilienceContract.test.ts`                                                                                                                                                  |

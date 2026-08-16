@@ -82,7 +82,16 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/podcastCache.ts` | Core |
 | `backend/src/services/podcastDownload.ts` | Core |
 | `backend/src/services/programmaticPlaylistArtistCap.ts` | Core |
-| `backend/src/services/programmaticPlaylists.ts` | Core |
+| `backend/src/services/programmaticPlaylists.ts` | Programmatic playlist compatibility façade |
+| `backend/src/services/programmaticPlaylists/activityMixes.ts` | Party, chill, workout, and focus mixes |
+| `backend/src/services/programmaticPlaylists/audioAnalysisMixes.ts` | Audio-analysis energy, mood, dance, and acoustic mixes |
+| `backend/src/services/programmaticPlaylists/contextualMixes.ts` | Tag, road-trip, and day-of-week mixes |
+| `backend/src/services/programmaticPlaylists/curatedMixes.ts` | Data-driven daily curated-vibe mixes |
+| `backend/src/services/programmaticPlaylists/index.ts` | Programmatic playlist public module surface |
+| `backend/src/services/programmaticPlaylists/libraryMixes.ts` | Library-history, genre, era, artist-similarity, and discovery mixes |
+| `backend/src/services/programmaticPlaylists/service.ts` | Mix rotation orchestration and shared service instance |
+| `backend/src/services/programmaticPlaylists/shared.ts` | Shared types, selection helpers, constants, and service state |
+| `backend/src/services/programmaticPlaylists/weeklyAndMoodMixes.ts` | Weekly curated and on-demand mood mixes |
 | `backend/src/services/radioVibeEngine.ts` | Core |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |

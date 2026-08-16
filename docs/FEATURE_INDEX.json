@@ -208,6 +208,15 @@
                     "discovery/discoveryRecommendations.ts",
                     "discovery/discoverySeeding.ts",
                     "programmaticPlaylists.ts",
+                    "programmaticPlaylists/index.ts",
+                    "programmaticPlaylists/service.ts",
+                    "programmaticPlaylists/shared.ts",
+                    "programmaticPlaylists/libraryMixes.ts",
+                    "programmaticPlaylists/activityMixes.ts",
+                    "programmaticPlaylists/audioAnalysisMixes.ts",
+                    "programmaticPlaylists/contextualMixes.ts",
+                    "programmaticPlaylists/curatedMixes.ts",
+                    "programmaticPlaylists/weeklyAndMoodMixes.ts",
                     "programmaticPlaylistArtistCap.ts",
                     "moodBucketService.ts",
                     "radioVibeEngine.ts"
@@ -223,6 +232,11 @@
                 "backend_contract": [
                     "discoverProcessorIdempotencyContract.test.ts",
                     "discoverQueueHandlerContract.test.ts",
+                    "programmaticPlaylistsBehavior.test.ts",
+                    "programmaticPlaylistsCuratedMixes.test.ts",
+                    "programmaticPlaylistsDataDriven.test.ts",
+                    "programmaticPlaylistsModuleBoundariesRuntime.test.ts",
+                    "programmaticPlaylistsPriorityMixes.test.ts",
                     "moodBucketPrismaRetryContract.test.ts",
                     "moodBucketWorkerReconciliationContract.test.ts"
                 ]

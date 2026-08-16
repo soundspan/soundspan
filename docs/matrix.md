@@ -118,11 +118,11 @@ Radio / Generated Content
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
 │ Radio tracks (liked type) │ 10,000 max              │ backend/src/routes/library/radio.ts           │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
-│ Programmatic playlists    │ 20 tracks               │ backend/src/services/programmaticPlaylists.ts │
+│ Programmatic playlists    │ 20 tracks               │ backend/src/services/programmaticPlaylists/   │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
-│ Daily mixes               │ 10 tracks               │ backend/src/services/programmaticPlaylists.ts │
+│ Daily mixes               │ 10 tracks               │ backend/src/services/programmaticPlaylists/   │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
-│ Weekly mixes              │ 20 tracks               │ backend/src/services/programmaticPlaylists.ts │
+│ Weekly mixes              │ 20 tracks               │ backend/src/services/programmaticPlaylists/   │
 ├───────────────────────────┼─────────────────────────┼───────────────────────────────────────────────┤
 │ Mood mix                  │ 15 default, pool of 100 │ backend/src/services/moodBucketService.ts     │
 └───────────────────────────┴─────────────────────────┴───────────────────────────────────────────────┘
