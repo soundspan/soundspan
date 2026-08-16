@@ -124,6 +124,7 @@ model ExternalIdentity {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerSubject])
+  @@unique([userId, provider])
   @@index([userId])
   @@index([provider])
 }

@@ -2,8 +2,7 @@ process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY ||
     "subsonic-expiry-test-pepper-1234567890123456";
 
-import express from "express";
-import request from "supertest";
+import type { NextFunction, Request, Response } from "express";
 
 const mockApiKeyFindUnique = jest.fn();
 const mockApiKeyUpdate = jest.fn();
@@ -20,19 +19,34 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
-        debug: jest.fn(),
-        error: jest.fn(),
-    },
-}));
+const testLogger = {
+    debug: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+};
+testLogger.child.mockReturnValue(testLogger);
+jest.mock("../../utils/logger", () => ({ logger: testLogger }));
 
 import { requireSubsonicAuth } from "../subsonicAuth";
 
-const app = express();
-app.get("/rest/ping.view", requireSubsonicAuth, (_req, res) => {
-    res.json({ authenticated: true });
-});
+function createRequest(apiKey: string): Request {
+    return {
+        query: { v: "1.16.1", c: "test-client", f: "json", apiKey },
+    } as unknown as Request;
+}
+
+function createResponse() {
+    const response = {
+        body: "",
+        locals: {},
+        status: jest.fn(),
+        type: jest.fn(),
+        send: jest.fn((body: string) => {
+            response.body = body;
+        }),
+    };
+    return response;
+}
 
 function buildApiKeyRecord(createdAt: unknown) {
     return {
@@ -58,16 +72,18 @@ describe("Subsonic API key expiry", () => {
         ["invalid", new Date(Number.NaN)],
     ])("rejects a %s API key at a /rest endpoint", async (_case, createdAt) => {
         mockApiKeyFindUnique.mockResolvedValue(buildApiKeyRecord(createdAt));
+        const req = createRequest("expired-key");
+        const res = createResponse();
+        const next: NextFunction = jest.fn();
 
-        const response = await request(app).get("/rest/ping.view").query({
-            v: "1.16.1",
-            c: "test-client",
-            f: "json",
-            apiKey: "expired-key",
-        });
+        await requireSubsonicAuth(
+            req,
+            res as unknown as Response,
+            next,
+        );
 
-        expect(response.status).toBe(200);
-        expect(response.body["subsonic-response"]).toEqual(
+        expect(res.status).toHaveBeenCalledWith(200);
+        expect(JSON.parse(res.body)["subsonic-response"]).toEqual(
             expect.objectContaining({
                 status: "failed",
                 error: {
@@ -77,22 +93,24 @@ describe("Subsonic API key expiry", () => {
             }),
         );
         expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
     });
 
     it("allows a fresh API key through a /rest endpoint", async () => {
         mockApiKeyFindUnique.mockResolvedValue(
             buildApiKeyRecord(new Date(Date.now() - 24 * 60 * 60 * 1000)),
         );
+        const req = createRequest("fresh-key");
+        const res = createResponse();
+        const next: NextFunction = jest.fn();
 
-        const response = await request(app).get("/rest/ping.view").query({
-            v: "1.16.1",
-            c: "test-client",
-            f: "json",
-            apiKey: "fresh-key",
-        });
+        await requireSubsonicAuth(
+            req,
+            res as unknown as Response,
+            next,
+        );
 
-        expect(response.status).toBe(200);
-        expect(response.body).toEqual({ authenticated: true });
+        expect(next).toHaveBeenCalledTimes(1);
         expect(mockApiKeyUpdate).toHaveBeenCalledWith({
             where: { id: "key-1" },
             data: { lastUsed: expect.any(Date) },

@@ -32,6 +32,9 @@ CREATE TABLE "AppPassword" (
 CREATE UNIQUE INDEX "ExternalIdentity_provider_providerSubject_key" ON "ExternalIdentity"("provider", "providerSubject");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "ExternalIdentity_userId_provider_key" ON "ExternalIdentity"("userId", "provider");
+
+-- CreateIndex
 CREATE INDEX "ExternalIdentity_userId_idx" ON "ExternalIdentity"("userId");
 
 -- CreateIndex

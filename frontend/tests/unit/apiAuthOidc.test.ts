@@ -136,6 +136,7 @@ test("exchangeOidcCode stores both login tokens", async (testContext) => {
     assert.equal(localStorage.getItem("refresh_token"), "refresh-token");
     const request = fetchMock.mock.calls[0].arguments[1] as RequestInit;
     assert.equal(request.method, "POST");
+    assert.equal(request.credentials, "include");
     assert.equal(request.body, JSON.stringify({ code: "exchange-code" }));
 });
 
@@ -153,6 +154,7 @@ test("confirmOidcLink stores tokens after credential confirmation", async (testC
     assert.equal(localStorage.getItem("auth_token"), "access-token");
     assert.equal(localStorage.getItem("refresh_token"), "refresh-token");
     const request = fetchMock.mock.calls[0].arguments[1] as RequestInit;
+    assert.equal(request.credentials, "include");
     assert.equal(
         request.body,
         JSON.stringify({
@@ -196,6 +198,7 @@ test("redeemOidcInvite stores tokens after successful provisioning", async (test
     assert.equal(localStorage.getItem("auth_token"), "access-token");
     assert.equal(localStorage.getItem("refresh_token"), "refresh-token");
     const request = fetchMock.mock.calls[0].arguments[1] as RequestInit;
+    assert.equal(request.credentials, "include");
     assert.equal(
         request.body,
         JSON.stringify({

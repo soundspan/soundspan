@@ -1,4 +1,10 @@
-import { Router, type Request, type Response } from "express";
+import {
+    Router,
+    type CookieOptions,
+    type Request,
+    type RequestHandler,
+    type Response,
+} from "express";
 import type { InviteCode, Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
@@ -23,7 +29,11 @@ import {
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
-import { apiLimiter, authLimiter } from "../middleware/rateLimiter";
+import {
+    apiLimiter,
+    authLimiter,
+    oidcFlowLimiter,
+} from "../middleware/rateLimiter";
 import { config } from "../config";
 import {
     buildAuthorizationRequest,
@@ -221,6 +231,9 @@ function sendLoginSuccess(res: Response, user: LoginUser): Response {
 
 const OIDC_PENDING_TTL_SECONDS = 600;
 const OIDC_EXCHANGE_TTL_SECONDS = 60;
+const OIDC_FLOW_COOKIE_NAME = "soundspan_oidc_flow";
+const MAX_COOKIE_HEADER_LENGTH = 4096;
+const MAX_COOKIE_COUNT = 64;
 const oidcLog = logger.child("OIDCAuth");
 const credentialLog = logger.child("AuthCredentials");
 const opaqueValueSchema = z
@@ -228,6 +241,7 @@ const opaqueValueSchema = z
     .min(1)
     .max(256)
     .regex(/^[A-Za-z0-9_-]+$/);
+const bindingHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const pendingOidcSchema = z
     .object({
         nonce: z.string().min(1),
@@ -237,6 +251,7 @@ const pendingOidcSchema = z
             .refine((value) => normalizeReturnTo(value) === value),
         mode: z.literal("link").optional(),
         userId: z.string().min(1).optional(),
+        bindingHash: bindingHashSchema,
     })
     .refine(
         (pending) =>
@@ -252,6 +267,7 @@ const linkEntrySchema = z.object({
     displayName: z.string().nullable(),
     userId: z.string().min(1),
     groups: z.array(z.string()).default([]),
+    bindingHash: bindingHashSchema,
 });
 const inviteEntrySchema = z.object({
     provider: z.string().min(1),
@@ -259,8 +275,12 @@ const inviteEntrySchema = z.object({
     email: z.string().email().nullable(),
     displayName: z.string().nullable(),
     preferredUsername: z.string().nullable().optional(),
+    bindingHash: bindingHashSchema,
 });
-const exchangeEntrySchema = z.object({ userId: z.string().min(1) });
+const exchangeEntrySchema = z.object({
+    userId: z.string().min(1),
+    bindingHash: bindingHashSchema,
+});
 const exchangeBodySchema = z.object({ code: opaqueValueSchema });
 const linkStartBodySchema = z
     .object({ responseMode: z.literal("json").optional() })
@@ -274,6 +294,9 @@ const redeemInviteBodySchema = z.object({
     inviteToken: opaqueValueSchema,
     inviteCode: z.string().min(1),
 });
+const resourceIdParamsSchema = z
+    .object({ id: z.string().min(1).max(64).regex(/^[a-z0-9]+$/) })
+    .strict();
 const callbackQuerySchema = z
     .object({
         state: opaqueValueSchema,
@@ -299,6 +322,47 @@ function normalizeReturnTo(value: unknown): string {
 
 function randomOpaqueValue(): string {
     return crypto.randomBytes(32).toString("base64url");
+}
+
+function hashOpaqueValue(value: string): string {
+    return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function flowCookieOptions(): CookieOptions {
+    return {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: config.secureCookies,
+        path: "/",
+    };
+}
+
+function setFlowBindingCookie(res: Response, binding: string): void {
+    res.cookie(OIDC_FLOW_COOKIE_NAME, binding, {
+        ...flowCookieOptions(),
+        maxAge: OIDC_PENDING_TTL_SECONDS * 1000,
+    });
+}
+
+function clearFlowBindingCookie(res: Response): void {
+    res.clearCookie(OIDC_FLOW_COOKIE_NAME, flowCookieOptions());
+}
+
+function readFlowBindingCookie(req: Request): string | null {
+    const header = req.headers.cookie;
+    if (!header || header.length > MAX_COOKIE_HEADER_LENGTH) return null;
+    const cookies = header.split(";").slice(0, MAX_COOKIE_COUNT);
+    for (const cookie of cookies) {
+        const [name, value] = cookie.trim().split("=", 2);
+        if (name === OIDC_FLOW_COOKIE_NAME && value) return value;
+    }
+    return null;
+}
+
+function hasMatchingFlowBinding(req: Request, bindingHash: string): boolean {
+    const binding = readFlowBindingCookie(req);
+    if (!binding) return false;
+    return timingSafeCompare(hashOpaqueValue(binding), bindingHash);
 }
 
 async function storeOpaqueEntry(
@@ -369,9 +433,11 @@ async function startOidcFlow(
     responseMode: "redirect" | "json" = "redirect",
 ): Promise<Response> {
     const authorization = await buildAuthorizationRequest();
+    const flowBinding = randomOpaqueValue();
     const pending = {
         nonce: authorization.nonce,
         codeVerifier: authorization.codeVerifier,
+        bindingHash: hashOpaqueValue(flowBinding),
         ...binding,
     };
     const stored = await putOnce(
@@ -380,6 +446,7 @@ async function startOidcFlow(
         OIDC_PENDING_TTL_SECONDS,
     );
     if (!stored) throw new Error("Failed to store OIDC pending state");
+    setFlowBindingCookie(res, flowBinding);
     if (responseMode === "json") {
         return res.json({ redirectUrl: authorization.redirectUrl });
     }
@@ -390,6 +457,7 @@ async function redirectForResolution(
     res: Response,
     resolution: OidcAccountResolution,
     returnTo: string,
+    bindingHash: string,
 ): Promise<Response> {
     if (resolution.kind === "alreadyLinked") {
         return redirectResponse(res, "/login?ssoError=account_already_linked");
@@ -397,7 +465,7 @@ async function redirectForResolution(
     if (resolution.kind === "authenticated") {
         const code = await storeOpaqueEntry(
             "exchange",
-            { userId: resolution.user.id },
+            { userId: resolution.user.id, bindingHash },
             OIDC_EXCHANGE_TTL_SECONDS,
         );
         return redirectResponse(res, loginRedirect("ssoCode", code, returnTo));
@@ -405,7 +473,7 @@ async function redirectForResolution(
     const prefix = resolution.kind;
     const token = await storeOpaqueEntry(
         prefix,
-        resolution.entry,
+        { ...resolution.entry, bindingHash },
         OIDC_PENDING_TTL_SECONDS,
     );
     const parameter = resolution.kind === "link" ? "ssoLink" : "ssoInvite";
@@ -420,7 +488,7 @@ async function oidcLoginHandler(
         return sendRouteError(res, 404, "OIDC is not enabled");
     }
     try {
-        return startOidcFlow(res, {
+        return await startOidcFlow(res, {
             returnTo: normalizeReturnTo(req.query.returnTo),
         });
     } catch (error) {
@@ -440,7 +508,7 @@ async function oidcLinkStartHandler(
     if (!parsed.success) return sendRouteError(res, 400, "Invalid request");
     const responseMode = parsed.data.responseMode ?? "redirect";
     try {
-        return startOidcFlow(
+        return await startOidcFlow(
             res,
             {
                 returnTo: "/settings",
@@ -501,6 +569,7 @@ async function completeManualOidcLink(
     claims: OidcClaims,
 ): Promise<Response> {
     const linked = await createManualOidcLink(userId, claims);
+    if (linked) clearFlowBindingCookie(res);
     const target = linked
         ? "/settings?ssoLinked=1"
         : "/settings?ssoError=identity_already_linked";
@@ -521,17 +590,25 @@ async function oidcCallbackHandler(
         pendingOidcSchema,
     );
     if (!pending) return rejectInvalidOidcState(res);
+    if (!hasMatchingFlowBinding(req, pending.bindingHash)) {
+        return rejectInvalidOidcState(res);
+    }
     try {
         const claims = await handleCallback(
             buildCurrentCallbackUrl(queryResult.data),
             { state: queryResult.data.state, ...pending },
         );
-        if (pending.mode === "link" && pending.userId) {
-            return completeManualOidcLink(res, pending.userId, claims);
-        }
         await regenerateSession(req);
+        if (pending.mode === "link" && pending.userId) {
+            return await completeManualOidcLink(res, pending.userId, claims);
+        }
         const resolution = await resolveOidcAccount(claims);
-        return redirectForResolution(res, resolution, pending.returnTo);
+        return redirectForResolution(
+            res,
+            resolution,
+            pending.returnTo,
+            pending.bindingHash,
+        );
     } catch (error) {
         oidcLog.error("OIDC callback failed", { error });
         const failureTarget =
@@ -614,10 +691,14 @@ async function revokeAppPasswordHandler(
     req: Request<{ id: string }>,
     res: Response,
 ): Promise<Response> {
+    const params = resourceIdParamsSchema.safeParse(req.params);
+    if (!params.success) {
+        return sendRouteError(res, 404, "App password not found");
+    }
     try {
         const revoked = await prisma.appPassword.updateMany({
             where: {
-                id: req.params.id,
+                id: params.data.id,
                 userId: req.user!.id,
                 revokedAt: null,
             },
@@ -631,6 +712,39 @@ async function revokeAppPasswordHandler(
         credentialLog.error("Revoke app password failed", { error });
         return sendRouteError(res, 500, "Failed to revoke app password");
     }
+}
+
+type UnlinkIdentityResult = "notFound" | "lastCredential" | "unlinked";
+
+function userAdvisoryLockKey(userId: string): bigint {
+    return crypto.createHash("sha256").update(userId).digest().readBigInt64BE(0);
+}
+
+async function unlinkIdentityInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    identityId: string,
+): Promise<UnlinkIdentityResult> {
+    const lockKey = userAdvisoryLockKey(userId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+    const identity = await tx.externalIdentity.findFirst({
+        where: { id: identityId, userId },
+        select: { id: true },
+    });
+    if (!identity) return "notFound";
+    const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { passwordHash: true },
+    });
+    if (!user) return "notFound";
+    const identityCount = await tx.externalIdentity.count({
+        where: { userId },
+    });
+    if (user.passwordHash === null && identityCount <= 1) {
+        return "lastCredential";
+    }
+    await tx.externalIdentity.delete({ where: { id: identity.id } });
+    return "unlinked";
 }
 
 async function listIdentitiesHandler(
@@ -665,30 +779,22 @@ async function unlinkIdentityHandler(
     req: Request<{ id: string }>,
     res: Response,
 ): Promise<Response> {
+    const params = resourceIdParamsSchema.safeParse(req.params);
+    if (!params.success) return sendRouteError(res, 404, "Identity not found");
     try {
-        const identity = await prisma.externalIdentity.findFirst({
-            where: { id: req.params.id, userId: req.user!.id },
-            select: { id: true },
-        });
-        if (!identity) return sendRouteError(res, 404, "Identity not found");
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-            select: { passwordHash: true },
-        });
-        if (!user) return sendRouteError(res, 404, "Identity not found");
-        if (user.passwordHash === null) {
-            const identityCount = await prisma.externalIdentity.count({
-                where: { userId: req.user!.id },
-            });
-            if (identityCount <= 1) {
-                return sendRouteError(
-                    res,
-                    400,
-                    "Cannot unlink the last sign-in method",
-                );
-            }
+        const result = await prisma.$transaction((tx) =>
+            unlinkIdentityInTransaction(tx, req.user!.id, params.data.id),
+        );
+        if (result === "notFound") {
+            return sendRouteError(res, 404, "Identity not found");
         }
-        await prisma.externalIdentity.delete({ where: { id: identity.id } });
+        if (result === "lastCredential") {
+            return sendRouteError(
+                res,
+                400,
+                "Cannot unlink the last sign-in method",
+            );
+        }
         return res.json({ message: "Identity unlinked" });
     } catch (error) {
         if (hasErrorCode(error, "P2025")) {
@@ -704,6 +810,35 @@ function rejectInvalidOidcState(res: Response): Response {
     return redirectResponse(res, "/login?ssoError=invalid_state");
 }
 
+function queryStrippedLimiter(limiter: RequestHandler): RequestHandler {
+    return (req, res, next): void => {
+        const originalDescriptor = Object.getOwnPropertyDescriptor(
+            req,
+            "originalUrl",
+        );
+        const fullOriginalUrl = req.originalUrl;
+        const pathOnly = req.path;
+        const restore = (): void => {
+            if (originalDescriptor) {
+                Object.defineProperty(req, "originalUrl", originalDescriptor);
+            } else {
+                Reflect.deleteProperty(req, "originalUrl");
+                req.originalUrl = fullOriginalUrl;
+            }
+        };
+        // express-rate-limit can include originalUrl in debug output; hide the
+        // OIDC callback query only while its middleware is executing.
+        Object.defineProperty(req, "originalUrl", {
+            configurable: true,
+            value: pathOnly,
+        });
+        limiter(req, res, (error?: unknown) => {
+            restore();
+            next(error);
+        });
+    };
+}
+
 async function oidcExchangeHandler(
     req: Request,
     res: Response,
@@ -714,7 +849,7 @@ async function oidcExchangeHandler(
         `oidc:exchange:${parsed.data.code}`,
         exchangeEntrySchema,
     );
-    if (!exchange) {
+    if (!exchange || !hasMatchingFlowBinding(req, exchange.bindingHash)) {
         return sendRouteError(res, 401, "Invalid or expired OIDC code");
     }
     const user = await prisma.user.findUnique({
@@ -727,9 +862,11 @@ async function oidcExchangeHandler(
             tokenVersion: true,
         },
     });
-    return user
-        ? sendLoginSuccess(res, user)
-        : sendRouteError(res, 401, "Invalid or expired OIDC code");
+    if (!user) {
+        return sendRouteError(res, 401, "Invalid or expired OIDC code");
+    }
+    clearFlowBindingCookie(res);
+    return sendLoginSuccess(res, user);
 }
 
 async function restoreLinkForChallenge(
@@ -754,7 +891,9 @@ async function oidcConfirmLinkHandler(
         `oidc:link:${parsed.data.linkToken}`,
         linkEntrySchema,
     );
-    if (!entry) return sendRouteError(res, 401, "Invalid or expired link");
+    if (!entry || !hasMatchingFlowBinding(req, entry.bindingHash)) {
+        return sendRouteError(res, 401, "Invalid or expired link");
+    }
     try {
         const user = await prisma.user.findUnique({
             where: { id: entry.userId },
@@ -764,6 +903,7 @@ async function oidcConfirmLinkHandler(
             return sendRouteError(res, 401, "Invalid credentials");
         }
         if (!user.passwordHash) {
+            await runDummyBcrypt();
             return sendRouteError(res, 401, "Invalid credentials");
         }
         const valid = await bcrypt.compare(
@@ -807,6 +947,7 @@ async function completeOidcLink(
         },
     });
     const syncedUser = await syncOidcRole(user, entry.groups);
+    clearFlowBindingCookie(res);
     return sendLoginSuccess(res, syncedUser);
 }
 
@@ -845,7 +986,9 @@ async function oidcRedeemInviteHandler(
         `oidc:invite:${parsed.data.inviteToken}`,
         inviteEntrySchema,
     );
-    if (!entry) return sendRouteError(res, 401, "Invalid or expired invite");
+    if (!entry || !hasMatchingFlowBinding(req, entry.bindingHash)) {
+        return sendRouteError(res, 401, "Invalid or expired invite");
+    }
     try {
         const invite = await loadUsableInviteCode(parsed.data.inviteCode);
         const user = await provisionOidcUser(
@@ -853,6 +996,7 @@ async function oidcRedeemInviteHandler(
             entry.provider,
             invite,
         );
+        clearFlowBindingCookie(res);
         return sendLoginSuccess(res, user);
     } catch (error) {
         if (
@@ -899,7 +1043,7 @@ router.get("/config", (_req, res) =>
  *       404:
  *         description: OIDC is disabled
  */
-router.get("/oidc/login", authLimiter, oidcLoginHandler);
+router.get("/oidc/login", oidcFlowLimiter, oidcLoginHandler);
 
 /**
  * @openapi
@@ -946,7 +1090,11 @@ router.post("/oidc/link/start", authLimiter, requireAuth, oidcLinkStartHandler);
  *       302:
  *         description: Redirect to the SPA login hand-off
  */
-router.get("/oidc/callback", authLimiter, oidcCallbackHandler);
+router.get(
+    "/oidc/callback",
+    queryStrippedLimiter(oidcFlowLimiter),
+    oidcCallbackHandler,
+);
 
 /**
  * @openapi

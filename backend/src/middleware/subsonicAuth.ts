@@ -19,6 +19,8 @@ import {
     SubsonicErrorCode,
 } from "../utils/subsonicResponse";
 
+const subsonicAuthLog = logger.child("SubsonicAuth");
+
 declare global {
     namespace Express {
         interface Request {
@@ -62,10 +64,13 @@ function decryptAppPasswordSecret(
     try {
         return decrypt(appPassword.encryptedSecret);
     } catch (error) {
-        logger.debug("Failed to decrypt app password during Subsonic auth", {
-            appPasswordId: appPassword.id,
-            error,
-        });
+        subsonicAuthLog.debug(
+            "Failed to decrypt app password during Subsonic auth",
+            {
+                appPasswordId: appPassword.id,
+                error,
+            },
+        );
         return null;
     }
 }
@@ -114,7 +119,10 @@ function touchAppPassword(appPasswordId: string): void {
             data: { lastUsedAt: new Date() },
         })
         .catch((error: unknown) => {
-            logger.debug("Failed to update app password lastUsedAt", error);
+            subsonicAuthLog.debug(
+                "Failed to update app password lastUsedAt",
+                error,
+            );
         });
 }
 
@@ -157,7 +165,10 @@ async function authenticateTokenCredential(
             appPasswords,
         };
     } catch (error) {
-        logger.debug("Subsonic token auth failed, trying password auth", error);
+        subsonicAuthLog.debug(
+            "Subsonic token auth failed, trying password auth",
+            error,
+        );
         return { authenticated: false, appPasswords };
     }
 }

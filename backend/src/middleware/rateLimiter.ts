@@ -70,6 +70,20 @@ export const authLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
+/** Counts every OIDC browser-flow request, including redirect responses. */
+export const oidcFlowLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    message: "Too many login attempts, please try again in 15 minutes.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, next, options) => {
+        logger.warn(`OIDC flow rate limit exceeded: ${req.ip}`);
+        res.status(options.statusCode).send(options.message);
+    },
+    ...trustProxyValidation,
+});
+
 // Image/Cover art limiter (very high limit: 500 req/minute)
 // This is for image proxying - not a security risk, just bandwidth
 export const imageLimiter = rateLimit({

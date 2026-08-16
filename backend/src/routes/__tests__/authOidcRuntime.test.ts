@@ -1,5 +1,8 @@
+import { createHash } from "crypto";
+
 const mockConfig = {
     localLoginEnabled: true,
+    secureCookies: false,
     oidc: {
         enabled: true,
         issuerUrl: "https://idp.example",
@@ -31,12 +34,16 @@ jest.mock("../../utils/logger", () => ({ logger: scopedLogger }));
 const authLimiter = jest.fn((_req: unknown, _res: unknown, next: () => void) =>
     next(),
 );
+const oidcFlowLimiter = jest.fn(
+    (_req: unknown, _res: unknown, next: () => void) => next(),
+);
 const apiLimiter = jest.fn((_req: unknown, _res: unknown, next: () => void) =>
     next(),
 );
 jest.mock("../../middleware/rateLimiter", () => ({
     authLimiter,
     apiLimiter,
+    oidcFlowLimiter,
 }));
 
 const generateToken = jest.fn(() => "jwt-access");
@@ -130,6 +137,7 @@ const prisma = {
         update: jest.fn(),
     },
     inviteCodeUsage: { create: jest.fn() },
+    $executeRaw: jest.fn(),
     $transaction: jest.fn(),
 };
 jest.mock("../../utils/db", () => ({ prisma }));
@@ -186,6 +194,8 @@ function createRes() {
         status: jest.Mock;
         json: jest.Mock;
         redirect: jest.Mock;
+        cookie: jest.Mock;
+        clearCookie: jest.Mock;
     } = {
         statusCode: 200,
         body: undefined as unknown,
@@ -203,6 +213,8 @@ function createRes() {
             res.redirectUrl = url;
             return res;
         }),
+        cookie: jest.fn(() => res),
+        clearCookie: jest.fn(() => res),
     };
     return res;
 }
@@ -215,9 +227,22 @@ const loginUser = {
     tokenVersion: 1,
 };
 
-function callbackRequest(state = "state-1") {
+const FLOW_BINDING = "browser-flow-binding";
+const FLOW_BINDING_HASH = createHash("sha256")
+    .update(FLOW_BINDING)
+    .digest("hex");
+
+function callbackRequest(
+    state = "state-1",
+    flowBinding: string | null = FLOW_BINDING,
+) {
     return {
         query: { state, code: "authorization-code" },
+        headers: flowBinding
+            ? { cookie: `soundspan_oidc_flow=${flowBinding}` }
+            : {},
+        originalUrl: `/api/auth/oidc/callback?state=${state}&code=authorization-code`,
+        path: "/api/auth/oidc/callback",
         session: {
             regenerate: jest.fn((done: (error?: Error) => void) => done()),
         },
@@ -278,6 +303,8 @@ describe("OIDC auth routes", () => {
         });
         prisma.appPassword.updateMany.mockResolvedValue({ count: 1 });
         loadUsableInviteCode.mockResolvedValue({ id: "invite-1" });
+        prisma.$executeRaw.mockResolvedValue(0);
+        prisma.$transaction.mockImplementation(async (run) => run(prisma));
     });
 
     it("returns public login capabilities", async () => {
@@ -292,14 +319,42 @@ describe("OIDC auth routes", () => {
     });
 
     it.each([
-        ["get", "/oidc/login"],
-        ["get", "/oidc/callback"],
         ["post", "/oidc/exchange"],
         ["post", "/oidc/confirm-link"],
         ["post", "/oidc/redeem-invite"],
         ["post", "/oidc/link/start"],
     ] as const)("attaches authLimiter first on %s %s", (method, path) => {
         expect(getLayer(path, method).route.stack[0].handle).toBe(authLimiter);
+    });
+
+    it("uses the flow limiter on OIDC redirect endpoints", () => {
+        expect(getLayer("/oidc/login", "get").route.stack[0].handle).toBe(
+            oidcFlowLimiter,
+        );
+        expect(getLayer("/oidc/callback", "get").route.stack[0].handle).not.toBe(
+            authLimiter,
+        );
+    });
+
+    it("strips callback query data only while the flow limiter runs", async () => {
+        const middleware = getLayer("/oidc/callback", "get").route.stack[0]
+            .handle;
+        const req = callbackRequest();
+        let downstreamUrl = "";
+        oidcFlowLimiter.mockImplementationOnce((limitedReq, _res, next) => {
+            expect((limitedReq as typeof req).originalUrl).toBe(
+                "/api/auth/oidc/callback",
+            );
+            next();
+        });
+
+        await middleware(req, createRes(), () => {
+            downstreamUrl = req.originalUrl;
+        });
+
+        expect(downstreamUrl).toBe(
+            "/api/auth/oidc/callback?state=state-1&code=authorization-code",
+        );
     });
 
     it("protects the manual link start route with requireAuth", () => {
@@ -332,12 +387,24 @@ describe("OIDC auth routes", () => {
 
         expect(putOnce).toHaveBeenCalledWith(
             "oidc:pending:state-1",
-            {
+            expect.objectContaining({
                 nonce: "nonce-1",
                 codeVerifier: "verifier-1",
                 returnTo: "/settings",
-            },
+                bindingHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+            }),
             600,
+        );
+        expect(res.cookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            expect.stringMatching(/^[A-Za-z0-9_-]+$/),
+            {
+                httpOnly: true,
+                sameSite: "lax",
+                secure: false,
+                path: "/",
+                maxAge: 600_000,
+            },
         );
         expect(res.redirectUrl).toContain("state=state-1");
         expect(res.redirectUrl).toContain("nonce=nonce-1");
@@ -371,6 +438,7 @@ describe("OIDC auth routes", () => {
             nonce: "nonce-1",
             codeVerifier: "verifier-1",
             returnTo: "/library",
+            bindingHash: FLOW_BINDING_HASH,
         });
         await callback(callbackRequest(), createRes());
         const replayRes = createRes();
@@ -379,11 +447,36 @@ describe("OIDC auth routes", () => {
         expect(handleCallback).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        ["missing", null],
+        ["mismatched", "different-browser-binding"],
+    ] as const)(
+        "rejects a callback with a %s flow-binding cookie",
+        async (_case, flowBinding) => {
+            values.set("oidc:pending:state-1", {
+                nonce: "nonce-1",
+                codeVerifier: "verifier-1",
+                returnTo: "/library",
+                bindingHash: FLOW_BINDING_HASH,
+            });
+            const res = createRes();
+
+            await getHandler("/oidc/callback", "get")(
+                callbackRequest("state-1", flowBinding),
+                res,
+            );
+
+            expect(res.redirectUrl).toBe("/login?ssoError=invalid_state");
+            expect(handleCallback).not.toHaveBeenCalled();
+        },
+    );
+
     it("hands a linked identity to the SPA through a single-use exchange code", async () => {
         values.set("oidc:pending:state-1", {
             nonce: "nonce-1",
             codeVerifier: "verifier-1",
             returnTo: "/library",
+            bindingHash: FLOW_BINDING_HASH,
         });
         const callbackRes = createRes();
         const callbackReq = callbackRequest();
@@ -397,10 +490,20 @@ describe("OIDC auth routes", () => {
             "https://music.example",
         ).searchParams.get("ssoCode");
         expect(code).not.toBeNull();
+        expect(values.get(`oidc:exchange:${code}`)).toEqual({
+            userId: "u1",
+            bindingHash: FLOW_BINDING_HASH,
+        });
 
         const exchange = getHandler("/oidc/exchange", "post");
         const first = createRes();
-        await exchange({ body: { code } }, first);
+        await exchange(
+            {
+                body: { code },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            first,
+        );
         expect(first.body).toEqual({
             token: "jwt-access",
             refreshToken: "jwt-refresh",
@@ -411,9 +514,24 @@ describe("OIDC auth routes", () => {
                 role: "user",
             },
         });
+        expect(first.clearCookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            {
+                httpOnly: true,
+                sameSite: "lax",
+                secure: false,
+                path: "/",
+            },
+        );
 
         const replay = createRes();
-        await exchange({ body: { code } }, replay);
+        await exchange(
+            {
+                body: { code },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            replay,
+        );
         expect(replay.statusCode).toBe(401);
     });
 
@@ -427,6 +545,7 @@ describe("OIDC auth routes", () => {
                 nonce: "nonce-1",
                 codeVerifier: "verifier-1",
                 returnTo: "/",
+                bindingHash: FLOW_BINDING_HASH,
             });
             resolveOidcAccount.mockResolvedValueOnce({
                 kind,
@@ -454,6 +573,13 @@ describe("OIDC auth routes", () => {
             expect(res.redirectUrl).toMatch(
                 new RegExp(`^/login\\?${key}=[A-Za-z0-9_-]+&returnTo=%2F$`),
             );
+            const token = new URL(
+                res.redirectUrl!,
+                "https://music.example",
+            ).searchParams.get(key);
+            expect(values.get(`oidc:${kind}:${token}`)).toEqual(
+                expect.objectContaining({ bindingHash: FLOW_BINDING_HASH }),
+            );
         },
     );
 
@@ -462,6 +588,7 @@ describe("OIDC auth routes", () => {
             nonce: "nonce-1",
             codeVerifier: "verifier-1",
             returnTo: "/",
+            bindingHash: FLOW_BINDING_HASH,
         });
         resolveOidcAccount.mockResolvedValueOnce({ kind: "alreadyLinked" });
         const res = createRes();
@@ -478,15 +605,17 @@ describe("OIDC auth routes", () => {
 
         expect(putOnce).toHaveBeenCalledWith(
             "oidc:pending:state-1",
-            {
+            expect.objectContaining({
                 nonce: "nonce-1",
                 codeVerifier: "verifier-1",
                 returnTo: "/settings",
                 mode: "link",
                 userId: "initiating-user",
-            },
+                bindingHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+            }),
             600,
         );
+        expect(enabled.cookie).toHaveBeenCalled();
         expect(enabled.redirectUrl).toContain("state=state-1");
 
         mockConfig.oidc.enabled = false;
@@ -512,6 +641,11 @@ describe("OIDC auth routes", () => {
             redirectUrl:
                 "https://idp.example/authorize?state=state-1&nonce=nonce-1&code_challenge=challenge&code_challenge_method=S256",
         });
+        expect(res.cookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            expect.any(String),
+            expect.objectContaining({ maxAge: 600_000 }),
+        );
         expect(res.redirect).not.toHaveBeenCalled();
     });
 
@@ -538,10 +672,23 @@ describe("OIDC auth routes", () => {
             returnTo: "/settings",
             mode: "link",
             userId: "initiating-user",
+            bindingHash: FLOW_BINDING_HASH,
         });
         const res = createRes();
+        const req = callbackRequest();
+        const order: string[] = [];
+        req.session.regenerate.mockImplementationOnce(
+            (done: (error?: Error) => void) => {
+                order.push("regenerate");
+                done();
+            },
+        );
+        prisma.externalIdentity.create.mockImplementationOnce(async () => {
+            order.push("link");
+            return {};
+        });
 
-        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+        await getHandler("/oidc/callback", "get")(req, res);
 
         expect(prisma.externalIdentity.create).toHaveBeenCalledWith({
             data: {
@@ -553,6 +700,12 @@ describe("OIDC auth routes", () => {
             },
         });
         expect(res.redirectUrl).toBe("/settings?ssoLinked=1");
+        expect(req.session.regenerate).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["regenerate", "link"]);
+        expect(res.clearCookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            expect.objectContaining({ path: "/" }),
+        );
         expect(resolveOidcAccount).not.toHaveBeenCalled();
         expect(generateToken).not.toHaveBeenCalled();
         expect(generateRefreshToken).not.toHaveBeenCalled();
@@ -567,6 +720,7 @@ describe("OIDC auth routes", () => {
             codeVerifier: "verifier-1",
             returnTo: "/settings",
             mode: "link",
+            bindingHash: FLOW_BINDING_HASH,
         });
         const res = createRes();
 
@@ -584,6 +738,7 @@ describe("OIDC auth routes", () => {
             returnTo: "/settings",
             mode: "link",
             userId: "initiating-user",
+            bindingHash: FLOW_BINDING_HASH,
         });
         prisma.externalIdentity.findUnique.mockResolvedValueOnce({
             id: "existing-link",
@@ -597,6 +752,30 @@ describe("OIDC auth routes", () => {
         );
         expect(prisma.externalIdentity.create).not.toHaveBeenCalled();
         expect(resolveOidcAccount).not.toHaveBeenCalled();
+        expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+
+    it("maps a database user-provider uniqueness conflict to already linked", async () => {
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/settings",
+            mode: "link",
+            userId: "initiating-user",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        prisma.externalIdentity.create.mockRejectedValueOnce({
+            code: "P2002",
+            meta: { target: ["userId", "provider"] },
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe(
+            "/settings?ssoError=identity_already_linked",
+        );
+        expect(res.clearCookie).not.toHaveBeenCalled();
     });
 
     it("creates an encrypted app password once and lists only safe active metadata", async () => {
@@ -678,11 +857,11 @@ describe("OIDC auth routes", () => {
 
         const revoked = createRes();
         await getHandler("/app-passwords/:id", "delete")(
-            { user: { id: "u1" }, params: { id: "app-1" } },
+            { user: { id: "u1" }, params: { id: "app1" } },
             revoked,
         );
         expect(prisma.appPassword.updateMany).toHaveBeenCalledWith({
-            where: { id: "app-1", userId: "u1", revokedAt: null },
+            where: { id: "app1", userId: "u1", revokedAt: null },
             data: { revokedAt: expect.any(Date) },
         });
         expect(revoked.body).toEqual({ message: "App password revoked" });
@@ -716,16 +895,16 @@ describe("OIDC auth routes", () => {
         expect(JSON.stringify(listed.body)).not.toContain("123456789");
 
         prisma.externalIdentity.findFirst.mockResolvedValueOnce({
-            id: "identity-1",
+            id: "identity1",
         });
         prisma.user.findUnique.mockResolvedValueOnce({ passwordHash: "hash" });
         const unlinked = createRes();
         await getHandler("/identities/:id", "delete")(
-            { user: { id: "u1" }, params: { id: "identity-1" } },
+            { user: { id: "u1" }, params: { id: "identity1" } },
             unlinked,
         );
         expect(prisma.externalIdentity.delete).toHaveBeenCalledWith({
-            where: { id: "identity-1" },
+            where: { id: "identity1" },
         });
         expect(unlinked.body).toEqual({ message: "Identity unlinked" });
     });
@@ -734,7 +913,7 @@ describe("OIDC auth routes", () => {
         prisma.appPassword.updateMany.mockResolvedValueOnce({ count: 0 });
         const appPassword = createRes();
         await getHandler("/app-passwords/:id", "delete")(
-            { user: { id: "u1" }, params: { id: "other-app" } },
+            { user: { id: "u1" }, params: { id: "otherapp" } },
             appPassword,
         );
         expect(appPassword.statusCode).toBe(404);
@@ -743,7 +922,7 @@ describe("OIDC auth routes", () => {
         prisma.externalIdentity.findFirst.mockResolvedValueOnce(null);
         const identity = createRes();
         await getHandler("/identities/:id", "delete")(
-            { user: { id: "u1" }, params: { id: "other-identity" } },
+            { user: { id: "u1" }, params: { id: "otheridentity" } },
             identity,
         );
         expect(identity.statusCode).toBe(404);
@@ -752,14 +931,14 @@ describe("OIDC auth routes", () => {
 
     it("blocks unlinking the last credential for a null-hash user", async () => {
         prisma.externalIdentity.findFirst.mockResolvedValueOnce({
-            id: "identity-1",
+            id: "identity1",
         });
         prisma.user.findUnique.mockResolvedValueOnce({ passwordHash: null });
         prisma.externalIdentity.count.mockResolvedValueOnce(1);
         const res = createRes();
 
         await getHandler("/identities/:id", "delete")(
-            { user: { id: "u1" }, params: { id: "identity-1" } },
+            { user: { id: "u1" }, params: { id: "identity1" } },
             res,
         );
 
@@ -770,6 +949,91 @@ describe("OIDC auth routes", () => {
         expect(prisma.externalIdentity.delete).not.toHaveBeenCalled();
     });
 
+    it.each(["/app-passwords/:id", "/identities/:id"] as const)(
+        "returns the canonical 404 for malformed %s path parameters",
+        async (path) => {
+            const res = createRes();
+
+            await getHandler(path, "delete")(
+                { user: { id: "u1" }, params: { id: "bad-id!" } },
+                res,
+            );
+
+            expect(res.statusCode).toBe(404);
+            expect(prisma.appPassword.updateMany).not.toHaveBeenCalled();
+            expect(prisma.$transaction).not.toHaveBeenCalled();
+        },
+    );
+
+    it("serializes the unlink strand guard and rechecks inside the transaction", async () => {
+        const order: string[] = [];
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.externalIdentity.findFirst.mockImplementationOnce(async () => {
+            order.push("identity");
+            return { id: "identity1" };
+        });
+        prisma.user.findUnique.mockImplementationOnce(async () => {
+            order.push("user");
+            return { passwordHash: null };
+        });
+        prisma.externalIdentity.count.mockImplementationOnce(async () => {
+            order.push("count");
+            return 1;
+        });
+        const res = createRes();
+
+        await getHandler("/identities/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "identity1" } },
+            res,
+        );
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["lock", "identity", "user", "count"]);
+        expect(res.statusCode).toBe(400);
+        expect(prisma.externalIdentity.delete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["exchange", "/oidc/exchange", "code", "exchange-token", "Invalid or expired OIDC code"],
+        ["link", "/oidc/confirm-link", "linkToken", "link-token-value", "Invalid or expired link"],
+        ["invite", "/oidc/redeem-invite", "inviteToken", "invite-token-value", "Invalid or expired invite"],
+    ] as const)(
+        "rejects missing and mismatched binding cookies for %s tokens",
+        async (prefix, path, field, token, error) => {
+            const entry =
+                prefix === "exchange"
+                    ? { userId: "u1", bindingHash: FLOW_BINDING_HASH }
+                    : {
+                          provider: "oidc:https://idp.example",
+                          providerSubject: "subject-1",
+                          email: "alice@example.com",
+                          displayName: "Alice",
+                          ...(prefix === "link"
+                              ? { userId: "u1", groups: [] }
+                              : {}),
+                          bindingHash: FLOW_BINDING_HASH,
+                      };
+            const body = {
+                [field]: token,
+                ...(prefix === "link" ? { password: "correct" } : {}),
+                ...(prefix === "invite" ? { inviteCode: "INVITE" } : {}),
+            };
+            for (const headers of [
+                {},
+                { cookie: "soundspan_oidc_flow=wrong-browser" },
+            ]) {
+                values.set(`oidc:${prefix}:${token}`, entry);
+                const res = createRes();
+                await getHandler(path, "post")({ body, headers }, res);
+                expect(res.statusCode).toBe(401);
+                expect(res.body).toEqual({ error });
+            }
+        },
+    );
+
     it("rejects wrong and null local passwords during link confirmation", async () => {
         const confirm = getHandler("/oidc/confirm-link", "post");
         const entry = {
@@ -779,12 +1043,16 @@ describe("OIDC auth routes", () => {
             displayName: "Alice",
             userId: "u1",
             groups: [],
+            bindingHash: FLOW_BINDING_HASH,
         };
         values.set("oidc:link:wrong-token-value", entry);
         bcryptCompare.mockResolvedValueOnce(false);
         const wrong = createRes();
         await confirm(
-            { body: { linkToken: "wrong-token-value", password: "bad" } },
+            {
+                body: { linkToken: "wrong-token-value", password: "bad" },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
             wrong,
         );
         expect(wrong.statusCode).toBe(401);
@@ -804,11 +1072,13 @@ describe("OIDC auth routes", () => {
                     linkToken: "null-password-token",
                     password: "bad",
                 },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
             },
             nullPassword,
         );
         expect(nullPassword.statusCode).toBe(401);
         expect(bcryptCompare).toHaveBeenCalledTimes(1);
+        expect(runDummyBcrypt).toHaveBeenCalledTimes(1);
     });
 
     it("restores the same link token for the two-step 2FA challenge", async () => {
@@ -819,6 +1089,7 @@ describe("OIDC auth routes", () => {
             displayName: "Alice",
             userId: "u1",
             groups: [],
+            bindingHash: FLOW_BINDING_HASH,
         };
         values.set("oidc:link:two-factor-token", entry);
         prisma.user.findUnique.mockResolvedValueOnce({
@@ -836,6 +1107,7 @@ describe("OIDC auth routes", () => {
                     linkToken: "two-factor-token",
                     password: "correct",
                 },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
             },
             res,
         );
@@ -859,6 +1131,7 @@ describe("OIDC auth routes", () => {
             displayName: "Alice",
             userId: "u1",
             groups: ["admins"],
+            bindingHash: FLOW_BINDING_HASH,
         };
         values.set("oidc:link:successful-link-token", entry);
         const res = createRes();
@@ -869,6 +1142,7 @@ describe("OIDC auth routes", () => {
                     linkToken: "successful-link-token",
                     password: "correct",
                 },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
             },
             res,
         );
@@ -892,6 +1166,10 @@ describe("OIDC auth routes", () => {
                 refreshToken: "jwt-refresh",
             }),
         );
+        expect(res.clearCookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            expect.objectContaining({ path: "/" }),
+        );
     });
 
     it("keeps an invalid invite token retryable and provisions a valid one", async () => {
@@ -901,6 +1179,7 @@ describe("OIDC auth routes", () => {
             providerSubject: "subject-1",
             email: "alice@example.com",
             displayName: "Alice",
+            bindingHash: FLOW_BINDING_HASH,
         };
         values.set("oidc:invite:invite-token-value", entry);
         loadUsableInviteCode.mockRejectedValueOnce(
@@ -913,6 +1192,7 @@ describe("OIDC auth routes", () => {
                     inviteToken: "invite-token-value",
                     inviteCode: "BAD",
                 },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
             },
             invalid,
         );
@@ -926,6 +1206,7 @@ describe("OIDC auth routes", () => {
                     inviteToken: "invite-token-value",
                     inviteCode: "GOOD",
                 },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
             },
             valid,
         );
@@ -939,6 +1220,10 @@ describe("OIDC auth routes", () => {
                 token: "jwt-access",
                 refreshToken: "jwt-refresh",
             }),
+        );
+        expect(valid.clearCookie).toHaveBeenCalledWith(
+            "soundspan_oidc_flow",
+            expect.objectContaining({ path: "/" }),
         );
     });
 

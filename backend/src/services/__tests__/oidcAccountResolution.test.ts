@@ -28,6 +28,7 @@ const prisma = {
         count: jest.fn(),
         update: jest.fn(),
     },
+    $executeRaw: jest.fn(),
     $transaction: jest.fn(),
 };
 jest.mock("../../utils/db", () => ({ prisma }));
@@ -69,6 +70,8 @@ describe("oidcAccountResolution", () => {
         prisma.externalIdentity.findFirst.mockResolvedValue(null);
         prisma.user.findUnique.mockResolvedValue(null);
         prisma.user.count.mockResolvedValue(1);
+        prisma.$executeRaw.mockResolvedValue(0);
+        prisma.$transaction.mockImplementation(async (run) => run(prisma));
         prisma.user.update.mockImplementation(async ({ data }) => ({
             ...linkedUser,
             role: data.role,
@@ -240,9 +243,25 @@ describe("oidcAccountResolution", () => {
         );
 
         const adminUser = { ...linkedUser, role: "admin" };
+        const order: string[] = [];
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.user.count.mockImplementationOnce(async () => {
+            order.push("count");
+            return 1;
+        });
+        prisma.user.update.mockImplementationOnce(async ({ data }) => {
+            order.push("update");
+            return { ...linkedUser, role: data.role };
+        });
         await expect(syncOidcRole(adminUser, [])).resolves.toEqual(
             expect.objectContaining({ role: "user" }),
         );
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["lock", "count", "update"]);
         expect(prisma.user.update).toHaveBeenLastCalledWith(
             expect.objectContaining({ data: { role: "user" } }),
         );
@@ -254,6 +273,8 @@ describe("oidcAccountResolution", () => {
         const adminUser = { ...linkedUser, role: "admin" };
 
         await expect(syncOidcRole(adminUser, [])).resolves.toEqual(adminUser);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
         expect(prisma.user.update).not.toHaveBeenCalled();
         expect(oidcLogger.warn).toHaveBeenCalledWith(
             "Skipped OIDC role demotion for the last admin",

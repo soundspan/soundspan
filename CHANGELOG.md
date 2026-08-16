@@ -115,6 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OIDC browser flows now bind callback and one-time hand-off tokens to the
+  initiating browser, count redirect responses against rate limits, serialize
+  role demotion and identity unlink guards, and enforce one identity per
+  provider for each user.
 - Federation pairing now denies reciprocal library sharing by default. The
   consumer sends callback credentials and upgrades to `BOTH` only when an
   administrator explicitly selects bidirectional sharing.

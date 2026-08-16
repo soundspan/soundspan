@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import type { NextFunction, Request, Response } from "express";
 
 type RateLimitOptions = {
     windowMs: number;
@@ -58,10 +59,11 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(12);
+        expect(mockRateLimit).toHaveBeenCalledTimes(13);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.playbackStateLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
+        expect(mod.oidcFlowLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
         expect(mod.downloadLimiter).toBeDefined();
         expect(mod.lyricsLimiter).toBeDefined();
@@ -76,15 +78,16 @@ describe("rateLimiter middleware config", () => {
             { index: 0, windowMs: 60_000, max: 5000 },
             { index: 1, windowMs: 60_000, max: 600 },
             { index: 2, windowMs: 900_000, max: 40 },
-            { index: 3, windowMs: 60_000, max: 500 },
-            { index: 4, windowMs: 60_000, max: 100 },
-            { index: 5, windowMs: 60_000, max: 120 },
-            { index: 6, windowMs: 900_000, max: 20 },
-            { index: 7, windowMs: 60_000, max: 30 },
-            { index: 8, windowMs: 60_000, max: 20 },
-            { index: 9, windowMs: 60_000, max: 60 },
-            { index: 10, windowMs: 60_000, max: 1000 },
-            { index: 11, windowMs: 900_000, max: 20 },
+            { index: 3, windowMs: 900_000, max: 40 },
+            { index: 4, windowMs: 60_000, max: 500 },
+            { index: 5, windowMs: 60_000, max: 100 },
+            { index: 6, windowMs: 60_000, max: 120 },
+            { index: 7, windowMs: 900_000, max: 20 },
+            { index: 8, windowMs: 60_000, max: 30 },
+            { index: 9, windowMs: 60_000, max: 20 },
+            { index: 10, windowMs: 60_000, max: 60 },
+            { index: 11, windowMs: 60_000, max: 1000 },
+            { index: 12, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -97,11 +100,12 @@ describe("rateLimiter middleware config", () => {
         }
 
         expect(getOptions(2).skipSuccessfulRequests).toBe(true);
+        expect(getOptions(3).skipSuccessfulRequests).not.toBe(true);
     });
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(10).keyGenerator!;
+        const keyGenerator = getOptions(11).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
@@ -212,5 +216,40 @@ describe("rateLimiter middleware config", () => {
         expect(res.send).toHaveBeenCalledWith(
             "Too many login attempts, please try again in 15 minutes.",
         );
+    });
+
+    it("counts redirect responses against the OIDC flow limit", async () => {
+        jest.resetModules();
+        jest.dontMock("express-rate-limit");
+        const { oidcFlowLimiter } = await import("../rateLimiter");
+        const runRedirect = async (): Promise<number> => {
+            const req = {
+                app: { get: () => false },
+                headers: {},
+                ip: "127.0.0.1",
+                originalUrl: "/oidc",
+                socket: { remoteAddress: "127.0.0.1" },
+            } as unknown as Request & {
+                rateLimit?: { remaining: number };
+            };
+            const res = {
+                headersSent: false,
+                statusCode: 302,
+                setHeader: jest.fn(),
+            } as unknown as Response;
+            await new Promise<void>((resolve, reject) => {
+                const next: NextFunction = (error?: unknown) => {
+                    if (error) reject(error);
+                    else resolve();
+                };
+                oidcFlowLimiter(req, res, next);
+            });
+            return req.rateLimit!.remaining;
+        };
+
+        const firstRemaining = await runRedirect();
+        const secondRemaining = await runRedirect();
+
+        expect(secondRemaining).toBe(firstRemaining - 1);
     });
 });
