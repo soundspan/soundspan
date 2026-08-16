@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a blocking CI source-file-size guardrail with a 3,000-line hard cap,
+  a frozen per-file baseline above 1,500 lines, and ratchet-down guidance after
+  intentional splits. (#485)
 - Added bearer-protected Prometheus metrics for backend HTTP traffic, Bull queue state, process resources, cache results, and federation sync outcomes, plus optional Helm ServiceMonitors and a starter Grafana dashboard. (#490)
 
 ### Changed

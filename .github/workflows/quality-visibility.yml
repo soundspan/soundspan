@@ -266,6 +266,12 @@ jobs:
       - name: Test route error canonicalization gate
         run: npm run check:error-canon:test
 
+      - name: Check source file sizes
+        run: node scripts/ci/check-file-size.mjs
+
+      - name: Test source file-size gate
+        run: npm run check:file-size:test
+
       - name: Check npm override staleness
         run: npm run check:override-staleness
 
