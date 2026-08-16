@@ -444,10 +444,13 @@ export const config = {
     // DATABASE_URL and REDIS_URL are validated by envSchema above, so they're guaranteed to exist
     databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
+
+    // Required stable deployment secret retained as the JWT signing fallback
+    // and final API-key pepper fallback. It no longer configures sessions.
     sessionSecret: process.env.SESSION_SECRET!,
 
-    // Canonical JWT/session signing secret (single derivation shared by token
-    // signers). SESSION_SECRET is validated required above, so this is always a string.
+    // Canonical JWT signing secret (single derivation shared by token signers).
+    // SESSION_SECRET is validated required above, so this is always a string.
     jwtSecret: process.env.JWT_SECRET || process.env.SESSION_SECRET!,
 
     // One-shot admin password reset via env (consumed once at startup).

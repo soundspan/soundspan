@@ -47,7 +47,6 @@ async function filterVisibleTrackStates<
  *     summary: Create or update a listening state for an entity
  *     tags: [Listening State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -122,7 +121,6 @@ router.post("/", async (req, res) => {
  *     summary: Get listening state for a specific entity
  *     tags: [Listening State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -186,7 +184,6 @@ router.get("/", async (req, res) => {
  *     summary: Get recent listening states for "Continue Listening"
  *     tags: [Listening State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

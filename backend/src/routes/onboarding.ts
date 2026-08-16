@@ -161,7 +161,6 @@ router.post("/register", async (req, res) => {
  *     summary: Configure Lidarr integration during onboarding
  *     tags: [Onboarding]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -271,7 +270,6 @@ router.post("/lidarr", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Configure Audiobookshelf integration during onboarding
  *     tags: [Onboarding]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -378,7 +376,6 @@ router.post("/audiobookshelf", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Configure Soulseek integration during onboarding
  *     tags: [Onboarding]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -467,7 +464,6 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Configure metadata enrichment during onboarding
  *     tags: [Onboarding]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -524,7 +520,6 @@ router.post("/enrichment", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Mark onboarding as complete for the current user
  *     tags: [Onboarding]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

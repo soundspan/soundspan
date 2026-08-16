@@ -18,7 +18,6 @@ export const imageBackfillRouter = Router();
  *     summary: Check image backfill status
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -61,7 +60,6 @@ imageBackfillRouter.get(
  *     summary: Trigger image backfill for artists and albums
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

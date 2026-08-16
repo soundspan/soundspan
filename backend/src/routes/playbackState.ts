@@ -141,7 +141,6 @@ function sanitizeTrackQueueItem(item: any): Record<string, unknown> {
  *     summary: Get current playback state for the authenticated user
  *     tags: [Playback State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: header
@@ -224,7 +223,6 @@ router.get("/", playbackStateLimiter, requireAuth, async (req, res) => {
  *     summary: Update current playback state for the authenticated user
  *     tags: [Playback State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: header
@@ -449,7 +447,6 @@ router.post("/", playbackStateLimiter, requireAuth, async (req, res) => {
  *     summary: Clear playback state when the user stops playback
  *     tags: [Playback State]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: header

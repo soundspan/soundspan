@@ -523,7 +523,6 @@ async function resolveSharedResource(resourceType: string, resourceId: string) {
  *     summary: Create a share link for a playlist, album, or track
  *     tags: [Share Links]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -633,7 +632,6 @@ router.post("/", requireAuth, async (req, res) => {
  *     summary: List non-revoked share links for the current user
  *     tags: [Share Links]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -674,7 +672,6 @@ router.get("/", requireAuth, async (req, res) => {
  *     summary: Revoke a share link owned by the current user
  *     tags: [Share Links]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

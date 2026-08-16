@@ -80,7 +80,6 @@ const getHistoryRangeStart = (
  *     summary: Get play count summaries across time ranges
  *     tags: [Plays]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -155,7 +154,6 @@ router.get("/summary", async (req, res) => {
  *     summary: Clear play history for a given time range
  *     tags: [Plays]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -229,7 +227,6 @@ router.delete("/history", async (req, res) => {
  *     summary: Log a new play for a track
  *     tags: [Plays]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -419,7 +416,6 @@ router.post("/", async (req, res) => {
  *     summary: Get recent plays for the authenticated user
  *     tags: [Plays]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

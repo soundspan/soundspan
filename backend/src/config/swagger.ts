@@ -74,12 +74,6 @@ const options: swaggerJsdoc.Options = {
         ],
         components: {
             securitySchemes: {
-                sessionAuth: {
-                    type: "apiKey",
-                    in: "cookie",
-                    name: "connect.sid",
-                    description: "Session cookie authentication (web UI)",
-                },
                 apiKeyAuth: {
                     type: "apiKey",
                     in: "header",
@@ -191,7 +185,7 @@ const options: swaggerJsdoc.Options = {
                 },
             },
         },
-        security: [{ sessionAuth: [] }, { bearerAuth: [] }, { apiKeyAuth: [] }],
+        security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
     },
     apis: [
         "./src/routes/*.ts",

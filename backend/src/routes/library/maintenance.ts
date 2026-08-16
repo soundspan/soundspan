@@ -44,7 +44,6 @@ export const maintenanceRouter = Router();
  *     summary: Get library deletion policy for the current user
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -96,7 +95,6 @@ maintenanceRouter.get("/delete-policy", asyncHandler(handleGetDeletePolicy));
  *     description: Initiates a background job to scan the music directory and index all audio files
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -177,7 +175,6 @@ maintenanceRouter.post("/scan", asyncHandler(handleStartLibraryScan));
  *     summary: Check the status of a library scan job
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -274,7 +271,6 @@ maintenanceRouter.get<{ jobId: string }>(
  *     summary: Manually trigger file organization script
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -340,7 +336,6 @@ maintenanceRouter.post("/organize", asyncHandler(handleOrganizeLibrary));
  *     summary: Get recently listened artists, audiobooks, and podcasts
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -566,7 +561,6 @@ maintenanceRouter.get(
  *     summary: Get recently added artists to the library
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

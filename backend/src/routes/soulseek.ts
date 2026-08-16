@@ -308,8 +308,6 @@ async function requireSoulseekConfigured(req: any, res: any, next: any) {
  *   get:
  *     summary: Check Soulseek connection status
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Soulseek connection status including enabled, connected, and username
@@ -353,8 +351,6 @@ router.get("/status", requireAuth, async (req, res) => {
  *   post:
  *     summary: Manually trigger connection to the Soulseek network
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Successfully connected to Soulseek network
@@ -394,8 +390,6 @@ router.post(
  *   post:
  *     summary: Start an async Soulseek search for files
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -498,8 +492,6 @@ router.post(
  *   get:
  *     summary: Get results for an ongoing Soulseek search
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: searchId
@@ -601,8 +593,6 @@ router.get<{ searchId: string }>(
  *   post:
  *     summary: Download a track from Soulseek (admin only)
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -706,8 +696,6 @@ router.post(
  *   post:
  *     summary: Disconnect from the Soulseek network
  *     tags: [Soulseek]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Successfully disconnected from Soulseek

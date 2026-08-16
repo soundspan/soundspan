@@ -225,7 +225,6 @@ router.use(requireAuth);
  *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search
  *     tags: [Search]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -354,7 +353,6 @@ router.get("/", async (req, res) => {
  *     summary: Get all genres with track counts
  *     tags: [Search]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -421,7 +419,6 @@ router.get("/genres", async (req, res) => {
  *     summary: Search for new content to discover (not in your library)
  *     tags: [Search]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -633,7 +630,6 @@ router.get("/discover", async (req, res) => {
  *     summary: Fetch musically similar artists via Last.fm
  *     tags: [Search]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

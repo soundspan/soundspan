@@ -65,7 +65,6 @@ export const radioRouter = Router();
  *     summary: Get list of genres in the library with track counts
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -145,7 +144,6 @@ radioRouter.get("/genres", asyncHandler(handleGetGenres));
  *     summary: Get available decades in the library with track counts
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -223,7 +221,6 @@ radioRouter.get("/decades", asyncHandler(handleGetDecades));
  *     summary: Get tracks for a library-based radio station
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

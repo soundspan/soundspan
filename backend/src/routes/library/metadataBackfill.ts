@@ -18,7 +18,6 @@ export const metadataBackfillRouter = Router();
  *     summary: Backfill genres for artists missing genre data
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -98,7 +97,6 @@ metadataBackfillRouter.post(
  *     summary: Backfill artist/album entity links for existing remote tracks
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

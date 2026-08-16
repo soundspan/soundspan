@@ -127,7 +127,6 @@ function scoreTrackCandidate(
  *     summary: Get personalized artist recommendations based on listening history
  *     tags: [Recommendations]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -326,7 +325,6 @@ router.get("/for-you", async (req, res) => {
  *     summary: Get similar artist recommendations for a seed artist
  *     tags: [Recommendations]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -445,7 +443,6 @@ router.get("/", async (req, res) => {
  *     summary: Get album recommendations based on a seed album
  *     tags: [Recommendations]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -591,7 +588,6 @@ router.get("/albums", async (req, res) => {
  *     summary: Get track recommendations using Last.fm similarity
  *     tags: [Recommendations]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

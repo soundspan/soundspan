@@ -113,7 +113,7 @@ router.use(requireAuth, requireAdmin);
  *   get:
  *     summary: List federation peers with independent inbound and outbound statuses
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Federation peer list }
  *       403: { description: Administrator access required }
@@ -131,7 +131,7 @@ router.get(
  *   patch:
  *     summary: Update per-peer duplicate visibility and host stream caps
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -170,7 +170,7 @@ router.patch(
  *   get:
  *     summary: List linked or pinned federated tracks for one peer
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: query, name: cursor, schema: { type: string } }
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
@@ -202,7 +202,7 @@ router.get(
  *   post:
  *     summary: Pin, unlink, or reset one federated track dedup decision
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -242,7 +242,7 @@ router.post(
  *   post:
  *     summary: Create a host or bidirectional federation peer
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       201: { description: Peer and one-time credential }
  *       400: { description: Invalid peer input }
@@ -279,7 +279,7 @@ router.post(
  *   post:
  *     summary: Validate and link a consumer or bidirectional federation peer
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -358,7 +358,7 @@ router.post(
  *   post:
  *     summary: Pair a consumer peer with optional reciprocal sharing
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -419,7 +419,7 @@ router.post(
  *   post:
  *     summary: Rotate a federation peer credential
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Peer and replacement one-time credential }
  *       404: { description: Federation peer not found }
@@ -442,7 +442,7 @@ router.post(
  *   post:
  *     summary: Revoke a federation peer while retaining its audit row
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: Federation peer revoked }
  *       404: { description: Federation peer not found }
@@ -465,7 +465,7 @@ router.post(
  *   post:
  *     summary: Enqueue an immediate consumer catalog sync
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       202: { description: Sync job queued or coalesced }
  *       400: { description: Invalid peer id }
@@ -486,7 +486,7 @@ router.post(
  *   delete:
  *     summary: Permanently delete a federation peer
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       204: { description: Federation peer deleted }
  *       404: { description: Federation peer not found }
@@ -509,7 +509,7 @@ router.delete(
  *   post:
  *     summary: Create a short-lived federation pairing code
  *     tags: [Federation Admin]
- *     security: [{ sessionAuth: [] }, { bearerAuth: [] }]
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       201: { description: Eight-character pairing code and expiry }
  *       400: { description: Invalid scope input }

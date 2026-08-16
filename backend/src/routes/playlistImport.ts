@@ -80,8 +80,6 @@ function toDefaultPlaylistName(sourceType: string): string {
  *   post:
  *     summary: Preview playlist import — resolve all tracks without creating playlist
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -106,8 +104,6 @@ function toDefaultPlaylistName(sourceType: string): string {
  *   post:
  *     summary: Submit a background generic import job for a provider URL
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Existing active job returned for duplicate source submissions
@@ -183,8 +179,6 @@ router.post("/jobs", requireAuth, async (req: Request, res: Response) => {
  *   get:
  *     summary: List generic import jobs for the current user
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: User-scoped import jobs
@@ -205,8 +199,6 @@ router.get("/jobs", requireAuth, async (req: Request, res: Response) => {
  *   get:
  *     summary: Get a generic import job by id
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Job status payload
@@ -244,8 +236,6 @@ router.get(
  *   post:
  *     summary: Reconnect to an active generic import job by source URL
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Active generic import job
@@ -302,8 +292,6 @@ router.post(
  *   post:
  *     summary: Cancel an active generic import job
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Cancelled job payload
@@ -359,8 +347,6 @@ const M3U_CONTENT_MAX_BYTES = 2_000_000;
  *   post:
  *     summary: Preview an M3U/M3U8 playlist file import against the local library
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -461,8 +447,6 @@ router.post("/preview", requireAuth, async (req: Request, res: Response) => {
  *   post:
  *     summary: Execute playlist import — create playlist from preview data
  *     tags: [Import]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:

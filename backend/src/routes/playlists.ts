@@ -592,7 +592,6 @@ function formatPendingPlaylistItems(
  *     summary: Get all playlists for the current user (owned and public)
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -751,7 +750,6 @@ router.get("/", async (req, res) => {
  *     summary: Create a new playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -813,7 +811,6 @@ router.post("/", async (req, res) => {
  *     summary: Get a single playlist with tracks and pending tracks
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -929,7 +926,6 @@ router.get("/:id", async (req, res) => {
  *     summary: Update a playlist name and visibility
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1014,7 +1010,6 @@ router.put("/:id", async (req, res) => {
  *     summary: Hide a playlist from your view
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1088,7 +1083,6 @@ router.post("/:id/hide", async (req, res) => {
  *     summary: Unhide a previously hidden playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1140,7 +1134,6 @@ router.delete("/:id/hide", async (req, res) => {
  *     summary: Delete a playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1198,7 +1191,6 @@ router.delete("/:id", async (req, res) => {
  *     summary: Add a track to a playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1458,7 +1450,6 @@ router.post("/:id/items", async (req, res) => {
  *     summary: Remove a playlist item
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1552,7 +1543,6 @@ router.delete("/:id/items/:trackId", async (req, res) => {
  *     summary: Reorder tracks in a playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1669,7 +1659,6 @@ router.put("/:id/items/reorder", async (req, res) => {
  *     summary: Get pending tracks for a playlist (unmatched Spotify imports)
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1750,7 +1739,6 @@ router.get("/:id/pending", async (req, res) => {
  *     summary: Remove a pending track from a playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1814,7 +1802,6 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
  *     summary: Get a fresh Deezer preview URL for a pending track
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1907,7 +1894,6 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
  *     description: Returns immediately and downloads in background. Triggers a library scan after download.
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2254,7 +2240,6 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
  *     summary: Manually trigger reconciliation of pending tracks for a playlist
  *     tags: [Playlists]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

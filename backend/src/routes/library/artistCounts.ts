@@ -19,7 +19,6 @@ export const artistCountsRouter = Router();
  *     summary: Check artist counts backfill status
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -62,7 +61,6 @@ artistCountsRouter.get(
  *     summary: Trigger artist counts backfill
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

@@ -52,7 +52,7 @@ let requireAdmin: typeof import("../auth").requireAdmin;
 let requireAuthOrToken: typeof import("../auth").requireAuthOrToken;
 
 type TestRequest = {
-    session: Record<string, unknown>;
+    session?: Record<string, unknown>;
     headers: Record<string, unknown>;
     query: Record<string, unknown>;
     user?: { id: string; username: string; role: string };
@@ -60,7 +60,6 @@ type TestRequest = {
 
 function createReq(overrides: Record<string, unknown> = {}) {
     return {
-        session: {},
         headers: {},
         query: {},
         ...overrides,
@@ -219,29 +218,30 @@ describe("auth middleware", () => {
     });
 
     describe("requireAuth", () => {
-        it("authenticates via session", async () => {
+        it("ignores a forged session cookie and injected session-shaped state", async () => {
             mockUserFindUnique.mockResolvedValue({
                 id: "u1",
                 username: "session-user",
                 role: "user",
             });
 
-            const req = createReq({ session: { userId: "u1" } });
+            const req = createReq({
+                session: { userId: "u1" },
+                headers: { cookie: "connect.sid=forged" },
+            });
             const res = createRes();
             const next = jest.fn();
 
             await requireAuth(asRequest(req), asResponse(res), asNext(next));
 
-            expect(mockUserFindUnique).toHaveBeenCalledWith({
-                where: { id: "u1" },
-                select: { id: true, username: true, role: true },
+            expect(mockUserFindUnique).not.toHaveBeenCalled();
+            expect(req.user).toBeUndefined();
+            expect(next).not.toHaveBeenCalled();
+            expect(res.statusCode).toBe(401);
+            expect(res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
             });
-            expect(req.user).toEqual({
-                id: "u1",
-                username: "session-user",
-                role: "user",
-            });
-            expect(next).toHaveBeenCalledTimes(1);
         });
 
         it("authenticates via API key and updates lastUsed", async () => {

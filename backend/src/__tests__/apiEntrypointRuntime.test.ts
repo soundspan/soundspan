@@ -250,8 +250,12 @@ describe("api entrypoint runtime behavior", () => {
         );
 
         jest.doMock("express", () => expressFn);
-        jest.doMock("express-session", () => sessionMiddleware);
-        jest.doMock("connect-redis", () => ({ RedisStore: redisStoreCtor }));
+        jest.doMock("express-session", () => sessionMiddleware, {
+            virtual: true,
+        });
+        jest.doMock("connect-redis", () => ({ RedisStore: redisStoreCtor }), {
+            virtual: true,
+        });
         jest.doMock("cors", () => corsMiddleware);
         jest.doMock("helmet", () => helmetMiddleware);
         jest.doMock("compression", () => compressionMiddleware);
@@ -345,6 +349,7 @@ describe("api entrypoint runtime behavior", () => {
             compressionMiddleware,
             compressionFilter,
             sessionMiddleware,
+            redisStoreCtor,
         };
     }
 
@@ -471,7 +476,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(setIntervalSpy).toHaveBeenCalled();
     });
 
-    it("configures the session cookie with explicit SameSite=Lax protection", async () => {
+    it("does not mount cookie-session middleware", async () => {
         process.env = {
             ...originalEnv,
             BACKEND_PROCESS_ROLE: "api",
@@ -489,14 +494,9 @@ describe("api entrypoint runtime behavior", () => {
         require("../index");
         await flushPromises();
 
-        expect(mocks.sessionMiddleware).toHaveBeenCalledWith(
-            expect.objectContaining({
-                cookie: expect.objectContaining({
-                    httpOnly: true,
-                    sameSite: "lax",
-                }),
-            }),
-        );
+        expect(mocks.sessionMiddleware).not.toHaveBeenCalled();
+        expect(mocks.redisStoreCtor).not.toHaveBeenCalled();
+        expect(mocks.app.use).not.toHaveBeenCalledWith("session-middleware");
     });
 
     it("mounts FEATURE_DISABLED 404 handlers for gated prefixes when flags are off", async () => {
@@ -1427,7 +1427,11 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.prisma.user.update).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { id: "admin-id" },
-                data: { passwordHash: "hashed-admin-pass" },
+                data: {
+                    passwordHash: "hashed-admin-pass",
+                    tokenVersion: { increment: 1 },
+                    subsonicPassword: null,
+                },
             }),
         );
         expect(mocks.logger.warn).toHaveBeenCalledWith(

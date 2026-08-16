@@ -50,7 +50,6 @@ function parseRemoteTrackId(
  *     summary: Get preference for a remote (YT/TIDAL) track
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -150,7 +149,6 @@ remoteTracksRouter.get(
  *     summary: Set preference for a remote (YT/TIDAL) track
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

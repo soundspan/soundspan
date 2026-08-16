@@ -21,7 +21,6 @@ const router = express.Router();
  *     description: Serves the profile picture as JPEG. Uses query token auth since img tags cannot send Authorization headers.
  *     tags: [Social]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -297,7 +296,6 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
  *     description: Updates the user's online presence timestamp in Redis with a TTL. Called periodically by the client to indicate the user is online.
  *     tags: [Social]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -350,7 +348,6 @@ router.post("/presence/heartbeat", async (req, res) => {
  *     description: Returns a list of users who are currently online and have opted to share their online presence. Includes listening status and track info for users who share that.
  *     tags: [Social]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -496,7 +493,6 @@ router.get("/online", async (_req, res) => {
  *     description: Returns all users with active presence heartbeats regardless of their sharing preferences. Admin-only endpoint for monitoring connected sessions.
  *     tags: [Social]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

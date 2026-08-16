@@ -243,9 +243,6 @@ function callbackRequest(
             : {},
         originalUrl: `/api/auth/oidc/callback?state=${state}&code=authorization-code`,
         path: "/api/auth/oidc/callback",
-        session: {
-            regenerate: jest.fn((done: (error?: Error) => void) => done()),
-        },
     };
 }
 
@@ -550,7 +547,6 @@ describe("OIDC auth routes", () => {
         const callbackRes = createRes();
         const callbackReq = callbackRequest();
         await getHandler("/oidc/callback", "get")(callbackReq, callbackRes);
-        expect(callbackReq.session.regenerate).toHaveBeenCalledTimes(1);
         expect(callbackRes.redirectUrl).toMatch(
             /^\/login\?ssoCode=[A-Za-z0-9_-]+&returnTo=%2Flibrary$/,
         );
@@ -618,7 +614,7 @@ describe("OIDC auth routes", () => {
         );
     });
 
-    it("rejects a nonce mismatch without regenerating a session or creating an exchange code", async () => {
+    it("rejects a nonce mismatch without creating an exchange code", async () => {
         values.set("oidc:pending:state-1", {
             nonce: "nonce-1",
             codeVerifier: "verifier-1",
@@ -634,7 +630,6 @@ describe("OIDC auth routes", () => {
         await getHandler("/oidc/callback", "get")(req, res);
 
         expect(res.redirectUrl).toBe("/login?ssoError=oidc_failed");
-        expect(req.session.regenerate).not.toHaveBeenCalled();
         expect(resolveOidcAccount).not.toHaveBeenCalled();
         expect(
             [...values.keys()].some((key) => key.startsWith("oidc:exchange:")),
@@ -882,12 +877,6 @@ describe("OIDC auth routes", () => {
         const res = createRes();
         const req = callbackRequest();
         const order: string[] = [];
-        req.session.regenerate.mockImplementationOnce(
-            (done: (error?: Error) => void) => {
-                order.push("regenerate");
-                done();
-            },
-        );
         prisma.externalIdentity.create.mockImplementationOnce(async () => {
             order.push("link");
             return {};
@@ -905,8 +894,7 @@ describe("OIDC auth routes", () => {
             },
         });
         expect(res.redirectUrl).toBe("/settings?ssoLinked=1");
-        expect(req.session.regenerate).toHaveBeenCalledTimes(1);
-        expect(order).toEqual(["regenerate", "link"]);
+        expect(order).toEqual(["link"]);
         expect(res.clearCookie).toHaveBeenCalledWith(
             "soundspan_oidc_flow",
             expect.objectContaining({ path: "/" }),

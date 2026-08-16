@@ -26,7 +26,6 @@ router.use(requireAuthOrToken);
  *     summary: Check whether any download service is configured and enabled
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -139,7 +138,6 @@ async function verifyArtistName(
  *     summary: Create a new download job for an artist or album
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -958,7 +956,6 @@ async function processTidalDownload(
  *     summary: Clear all download jobs for the current user
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1003,7 +1000,6 @@ router.delete("/clear-all", async (req, res) => {
  *     summary: Clear stuck or failed items from Lidarr's download queue
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1041,7 +1037,6 @@ router.post("/clear-lidarr-queue", requireAdmin, async (req, res) => {
  *     summary: List failed or unavailable album downloads for the current user
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1074,7 +1069,6 @@ router.get("/failed", async (req, res) => {
  *     summary: Dismiss a failed album notification
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1123,7 +1117,6 @@ router.delete("/failed/:id", async (req, res) => {
  *     summary: Get available Lidarr releases for an album (interactive search)
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1272,7 +1265,6 @@ router.get("/releases/:albumMbid", requireAdmin, async (req, res) => {
  *     summary: Grab a specific release from Lidarr interactive search
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1425,7 +1417,6 @@ router.post("/grab", requireAdmin, async (req, res) => {
  *     summary: Get download job status by ID
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1472,7 +1463,6 @@ router.get("/:id", async (req, res) => {
  *     summary: Update a download job status
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1537,7 +1527,6 @@ router.patch("/:id", async (req, res) => {
  *     summary: Delete a download job
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1584,7 +1573,6 @@ router.delete("/:id", async (req, res) => {
  *     summary: List download jobs for the current user
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1711,7 +1699,6 @@ async function keepDiscoveryTrack(
  *     summary: Keep a discovery track by moving it to the permanent library
  *     tags: [Downloads]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true

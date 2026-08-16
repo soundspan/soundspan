@@ -117,10 +117,10 @@ describe("apiKeys routes runtime", () => {
         expect(unauthRes.body).toEqual({ error: "Not authenticated" });
     });
 
-    it("creates a key using session fallback and trims device name", async () => {
+    it("creates a key for the authenticated user and trims device name", async () => {
         const req = {
             body: { deviceName: "  Tablet  " },
-            session: { userId: "session-user" },
+            user: { id: "authenticated-user" },
         } as any;
         const res = createRes();
 
@@ -130,7 +130,7 @@ describe("apiKeys routes runtime", () => {
         // response only.
         expect(mockCreateApiKey).toHaveBeenCalledWith({
             data: {
-                userId: "session-user",
+                userId: "authenticated-user",
                 name: "Tablet",
                 key: expect.stringMatching(/^hmac:[0-9a-f]{64}$/),
             },
@@ -165,13 +165,13 @@ describe("apiKeys routes runtime", () => {
     });
 
     it("lists keys for the authenticated user and handles failures", async () => {
-        const req = { session: { userId: "session-user" } } as any;
+        const req = { user: { id: "authenticated-user" } } as any;
         const res = createRes();
 
         await getList(req, res);
 
         expect(mockFindManyApiKeys).toHaveBeenCalledWith({
-            where: { userId: "session-user" },
+            where: { userId: "authenticated-user" },
             select: {
                 id: true,
                 name: true,

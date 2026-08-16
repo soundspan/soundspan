@@ -223,7 +223,6 @@ function buildEnvironmentUpdate(
  *     summary: Get all system settings
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -308,7 +307,6 @@ router.get("/", async (req, res) => {
  *     summary: Update system settings
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -630,7 +628,6 @@ router.post("/", async (req, res) => {
  *     summary: Test Lidarr connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -724,7 +721,6 @@ router.post("/test-lidarr", async (req, res) => {
  *     summary: Test OpenAI connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -793,7 +789,6 @@ router.post("/test-openai", async (req, res) => {
  *     summary: Test Fanart.tv connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -867,7 +862,6 @@ router.post("/test-fanart", async (req, res) => {
  *     summary: Test Last.fm connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -952,7 +946,6 @@ router.post("/test-lastfm", async (req, res) => {
  *     summary: Test Audiobookshelf connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1031,7 +1024,6 @@ router.post("/test-audiobookshelf", async (req, res) => {
  *     summary: Test Soulseek connection
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1125,7 +1117,6 @@ router.post("/test-soulseek", async (req, res) => {
  *     summary: Test Spotify credentials
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1211,7 +1202,6 @@ router.post("/test-spotify", async (req, res) => {
  *     summary: Test TIDAL connection or verify existing session
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1270,7 +1260,6 @@ router.post("/test-tidal", async (req, res) => {
  *     summary: Initiate TIDAL device authorization (step 1)
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1309,7 +1298,6 @@ router.post("/tidal-auth/device", async (req, res) => {
  *     summary: Poll for TIDAL device authorization token (step 2)
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1378,7 +1366,6 @@ router.post("/tidal-auth/token", async (req, res) => {
  *     summary: Get cluster-wide queue cleaner worker-job status
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1409,7 +1396,6 @@ router.get("/queue-cleaner-status", async (req, res) => {
  *     summary: Enqueue a claimed queue cleaner worker job
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1446,7 +1432,6 @@ router.post("/queue-cleaner/start", async (req, res) => {
  *     summary: Cancel a queued queue cleaner worker job
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1496,7 +1481,6 @@ router.post("/queue-cleaner/stop", async (req, res) => {
  *     summary: Clear all Redis caches (excluding sessions)
  *     tags: [System Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

@@ -86,7 +86,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: List all users (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     responses:
      *       200:
@@ -265,7 +264,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: Create a new user account (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     requestBody:
      *       required: true
@@ -374,7 +372,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: Update a user's username, email, password, or role (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     parameters:
      *       - in: path
@@ -516,7 +513,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: Delete a user account (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     parameters:
      *       - in: path
@@ -582,7 +578,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: Generate a new invite code (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     requestBody:
      *       required: true
@@ -676,7 +671,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: List all invite codes (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     responses:
      *       200:
@@ -742,7 +736,6 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *     summary: Revoke an invite code (admin only)
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     parameters:
      *       - in: path

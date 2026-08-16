@@ -50,7 +50,6 @@ export const coverArtRouter = Router();
  *     summary: Proxy and cache album cover art images
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -570,7 +569,6 @@ coverArtRouter.get<{ id?: string }>(
  *     summary: Fetch and cache album cover art by MusicBrainz release group ID
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -636,7 +634,6 @@ coverArtRouter.get<{ mbid: string }>(
  *     summary: Extract dominant colors from a cover art image
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

@@ -72,7 +72,6 @@ export const albumsDeletionRouter = Router();
  *     summary: List albums in the library with pagination and filtering
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -276,7 +275,6 @@ albumsBrowseRouter.get("/albums", handleGetAlbums);
  *     summary: Get album details with tracks
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -424,7 +422,6 @@ albumsBrowseRouter.get("/albums/:id", asyncHandler(handleGetAlbum));
  *     summary: Set preference (like/dislike) for all tracks in an album
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -539,7 +536,6 @@ albumsPreferenceRouter.post(
  *     summary: Delete an album and its tracks from the library and filesystem
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

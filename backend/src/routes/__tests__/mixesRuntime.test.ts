@@ -173,7 +173,7 @@ describe("mixes route runtime", () => {
         expect(cachedRes.body[0].id).toBe("cached");
 
         redisClient.get.mockResolvedValueOnce(null);
-        const generatedReq = { session: { userId: "u1" } } as any;
+        const generatedReq = { user: { id: "u1" } } as any;
         const generatedRes = createRes();
         await getMixes(generatedReq, generatedRes);
         expect(generatedRes.statusCode).toBe(200);

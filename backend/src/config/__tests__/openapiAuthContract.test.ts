@@ -289,7 +289,6 @@ describe("OpenAPI authentication contract", () => {
 
         for (const [method, path] of INTERACTIVE_MANAGEMENT_OPERATIONS) {
             expect(swaggerSpec.paths[path][method].security).toEqual([
-                { sessionAuth: [] },
                 { bearerAuth: [] },
             ]);
         }

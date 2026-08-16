@@ -17,7 +17,6 @@ router.use(requireAuthOrToken);
  *     summary: Get top genres from user's library with sample albums
  *     tags: [Homepage]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -151,7 +150,6 @@ router.get("/genres", async (req, res) => {
  *     summary: Get top podcasts (most recently added)
  *     tags: [Homepage]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query

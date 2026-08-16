@@ -133,7 +133,6 @@ function sectionsArePlayable(
  *     summary: Get audiobooks the user is currently listening to
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -205,7 +204,6 @@ router.get(
  *     summary: Manually trigger audiobook sync from Audiobookshelf
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -272,7 +270,6 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
  *     summary: Debug endpoint to see raw series data from Audiobookshelf
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -357,7 +354,6 @@ router.get("/debug-series", requireAuthOrToken, async (req, res) => {
  *     summary: Search audiobooks
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -430,7 +426,6 @@ router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
  *     summary: Get all audiobooks from cached database
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -539,7 +534,6 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
  *     summary: Get all books in a series
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -658,7 +652,6 @@ router.get<{ seriesName: string }>(
  *     summary: Serve audiobook cover image
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -886,7 +879,6 @@ router.get<{ id: string }>(
  *     summary: Get a specific audiobook with full details
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1062,7 +1054,6 @@ router.get<{ id: string }>(
  *     summary: Stream an audiobook with authentication proxy
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1254,7 +1245,6 @@ router.get<{ id: string }>(
  *     summary: Update playback progress for an audiobook
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1466,7 +1456,6 @@ router.post<{ id: string }>(
  *     summary: Remove playback progress for an audiobook
  *     tags: [Audiobooks]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

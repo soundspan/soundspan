@@ -43,7 +43,6 @@ function isPrismaRecordNotFound(error: unknown): error is { code: string } {
  *     summary: List library health records
  *     tags: [Admin]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -159,7 +158,6 @@ router.get("/library-health", async (_req, res) => {
  *     summary: Dismiss a library health record
  *     tags: [Admin]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -207,7 +205,6 @@ router.delete("/library-health/:recordId", async (req, res) => {
  *     summary: Report settings-cipher migration progress (legacy v1 vs authenticated v2)
  *     tags: [Admin]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

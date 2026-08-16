@@ -31,7 +31,6 @@ router.use(requireAuthOrToken);
  *     summary: Check if there is an active batch being processed
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -136,7 +135,6 @@ router.get("/batch-status", async (req, res) => {
  *     summary: Generate new Discover Weekly playlist
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -235,7 +233,6 @@ router.post("/generate", async (req, res) => {
  *     summary: Check generation job status
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -282,7 +279,6 @@ router.get("/generate/status/:jobId", async (req, res) => {
  *     summary: Get current week's Discover Weekly playlist
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -548,7 +544,6 @@ router.get("/current", async (req, res) => {
  *     summary: Like a discovery album (marks entire album for keeping)
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -750,7 +745,6 @@ router.post("/like", async (req, res) => {
  *     summary: Unlike a previously liked discovery album
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -855,7 +849,6 @@ router.delete("/unlike", async (req, res) => {
  *     summary: Get user's Discover Weekly configuration
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -899,7 +892,6 @@ router.get("/config", async (req, res) => {
  *     summary: Update user's Discover Weekly configuration
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1027,7 +1019,6 @@ router.patch("/config", async (req, res) => {
  *     summary: Get popular artists from Last.fm charts
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1066,7 +1057,6 @@ router.get("/popular-artists", async (req, res) => {
  *     summary: Clear the discovery playlist (move liked to library, delete the rest)
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -2017,7 +2007,6 @@ router.delete("/clear", async (req, res) => {
  *     summary: Get all active discovery exclusions for the current user
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -2067,7 +2056,6 @@ router.get("/exclusions", async (req, res) => {
  *     summary: Clear all discovery exclusions for the current user
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -2105,7 +2093,6 @@ router.delete("/exclusions", async (req, res) => {
  *     summary: Remove a specific discovery exclusion
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2156,7 +2143,6 @@ router.delete("/exclusions/:id", async (req, res) => {
  *     summary: Remove discovery-only artists from Lidarr
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -2319,7 +2305,6 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
  *     summary: Fix albums incorrectly tagged as LIBRARY that should be DISCOVER
  *     tags: [Discover]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

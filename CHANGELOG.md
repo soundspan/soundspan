@@ -25,9 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Retired cookie-session authentication and its Redis store. JWT, API-key,
+  Subsonic, and federation transports are unchanged; `SESSION_SECRET` remains
+  required as the JWT signing fallback. (#491)
 - Removed the never-documented `/api/spotify` endpoints, unused Spotify
   credential settings fields, and unused Link Device settings section. Spotify
   playlist imports through the generic `/api/import` flow are unaffected. (#484)
+
+### Security
+
+- Removed the ambient cookie credential surface from backend API
+  authentication. (#491)
+- Startup administrator password resets now invalidate outstanding access and
+  refresh JWTs and clear the dedicated Subsonic password. (#491)
 
 ## [2.1.0] - 2026-08-16
 

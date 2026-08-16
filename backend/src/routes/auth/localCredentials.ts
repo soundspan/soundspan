@@ -208,8 +208,6 @@ export default function registerLocalCredentialRoutes(router: Router): void {
      *   get:
      *     summary: Get current authenticated user
      *     tags: [Authentication]
-     *     security:
-     *       - sessionAuth: []
      *     responses:
      *       200:
      *         description: Current user information

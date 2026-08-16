@@ -16,7 +16,7 @@ const router = Router();
 router.use(requireAuthOrToken);
 
 const getRequestUserId = (req: any): string | null => {
-    return req.user?.id || req.session?.userId || null;
+    return req.user?.id || null;
 };
 
 /**
@@ -27,7 +27,6 @@ const getRequestUserId = (req: any): string | null => {
  *     description: Returns all auto-generated mixes (era-based, genre-based, top tracks, rediscover, artist similar, random discovery)
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -107,7 +106,6 @@ router.get("/", async (req, res) => {
  *     description: Creates a personalized mix based on audio features like valence, energy, tempo, etc.
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -276,7 +274,6 @@ router.post("/mood", async (req, res) => {
  *     description: Returns a list of mood presets for the UI, each with a name, color gradient, and mood filter parameters
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -446,7 +443,6 @@ router.get("/mood/presets", async (req, res) => {
  *     description: Saves the user's mood mix parameters, used to generate "Your Mood Mix" in the mix rotation. Invalidates the mix cache so changes take effect immediately.
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -515,7 +511,6 @@ router.post("/mood/save-preferences", async (req, res) => {
  *     description: Returns available mood categories with how many tracks are available for each
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -539,7 +534,6 @@ router.get("/mood/buckets/presets", async (req, res) => {
  *     description: Fast lookup from pre-computed mood bucket table
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -612,7 +606,6 @@ router.get("/mood/buckets/:mood", async (req, res) => {
  *     description: Generates a mix for the mood and saves it as the user's "Your X Mix" on the home page
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -703,7 +696,6 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
  *     description: Admin endpoint to populate mood buckets for existing tracks
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -741,7 +733,6 @@ router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
  *     description: Clears cache and regenerates all programmatic mixes
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -800,7 +791,6 @@ router.post("/refresh", async (req, res) => {
  *     description: Creates a new playlist with all tracks from the specified mix
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -937,7 +927,6 @@ router.post("/:id/save", async (req, res) => {
  *     summary: Get a specific mix with full track details
  *     tags: [Mixes]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

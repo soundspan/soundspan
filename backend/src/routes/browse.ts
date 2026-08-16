@@ -142,7 +142,6 @@ function isBrowseImageHostAllowed(hostname: string): boolean {
  *     summary: Proxy and cache a YouTube Music thumbnail image
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -226,7 +225,6 @@ const GONE_MSG =
  *     summary: Deprecated Deezer featured playlists endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -244,7 +242,6 @@ router.get("/playlists/featured", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer playlist search endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -262,7 +259,6 @@ router.get("/playlists/search", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer playlist details endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -286,7 +282,6 @@ router.get("/playlists/:id", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer radio list endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -304,7 +299,6 @@ router.get("/radios", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer radios-by-genre endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -322,7 +316,6 @@ router.get("/radios/by-genre", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer radio details endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -346,7 +339,6 @@ router.get("/radios/:id", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer genre list endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -364,7 +356,6 @@ router.get("/genres", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer playlists-by-genre endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -388,7 +379,6 @@ router.get("/genres/:id/playlists", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer genre details endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -412,7 +402,6 @@ router.get("/genres/:id", (_req: Request, res: Response) =>
  *     summary: Deprecated Deezer aggregate browse endpoint
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       410:
@@ -433,7 +422,6 @@ router.get("/all", (_req: Request, res: Response) =>
  *     summary: Parse a playlist URL from Spotify, Deezer, YouTube, or TIDAL
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -567,7 +555,6 @@ router.post("/playlists/parse", async (req: Request, res: Response) => {
  *     summary: Get YT Music charts (top songs, trending, etc.)
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -614,7 +601,6 @@ router.get("/ytmusic/charts", async (req: Request, res: Response) => {
  *     summary: Get YT Music mood and genre categories
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -652,7 +638,6 @@ router.get("/ytmusic/categories", async (req: Request, res: Response) => {
  *     summary: Get YT Music home shelves (featured/curated content)
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -714,7 +699,6 @@ router.get("/ytmusic/home", async (req: Request, res: Response) => {
  *     summary: Get playlists for a specific mood/genre category
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -779,7 +763,6 @@ router.get("/ytmusic/mood-playlists", async (req: Request, res: Response) => {
  *     summary: Get a YT Music album by browse ID
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -857,7 +840,6 @@ router.get(
  *     summary: Get a YT Music public playlist with track details
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -924,7 +906,6 @@ router.get(
  *     summary: Get personalized YT Music mixes for the current user
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1067,7 +1048,6 @@ function isTidalImageHostAllowed(hostname: string): boolean {
  *     summary: Proxy and cache a TIDAL thumbnail image
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1146,7 +1126,6 @@ router.get(
  *     summary: Get TIDAL personalized home shelves
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1192,7 +1171,6 @@ router.get("/tidal/home", async (req: Request, res: Response) => {
  *     summary: Get TIDAL editorial/explore shelves
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1243,7 +1221,6 @@ router.get("/tidal/explore", async (req: Request, res: Response) => {
  *     summary: Get TIDAL genre categories
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1289,7 +1266,6 @@ router.get("/tidal/genres", async (req: Request, res: Response) => {
  *     summary: Get TIDAL mood categories
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1335,7 +1311,6 @@ router.get("/tidal/moods", async (req: Request, res: Response) => {
  *     summary: Get TIDAL personal mixes (daily discovery, etc.)
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1381,7 +1356,6 @@ router.get("/tidal/mixes", async (req: Request, res: Response) => {
  *     summary: Get TIDAL playlists for a specific genre/mood path
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1452,7 +1426,6 @@ router.get("/tidal/genre-playlists", async (req: Request, res: Response) => {
  *     summary: Get a TIDAL browse playlist with tracks
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1528,7 +1501,6 @@ router.get(
  *     summary: Get a TIDAL browse mix with tracks
  *     tags: [Browse]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

@@ -66,7 +66,6 @@ export const artistsDeletionRouter = Router();
  *     summary: List artists in the library with pagination and filtering
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -392,7 +391,6 @@ artistsListRouter.get("/artists", handleGetArtists);
  *     summary: Get detailed artist information including discography and similar artists
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1274,7 +1272,6 @@ artistsDetailRouter.get("/artists/:id", asyncHandler(handleGetArtist));
  *     summary: Delete an artist and all their albums/tracks from the library and filesystem
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

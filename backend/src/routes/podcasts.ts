@@ -148,7 +148,7 @@ const subscribeSchema = z
  *   get:
  *     summary: List podcast catalogs shared by federation peers
  *     tags: [Podcasts]
- *     security: [{ sessionAuth: [] }]
+ *     security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
  *     responses:
  *       200: { description: Peer podcast listings with subscription state }
  *       401: { description: Not authenticated }
@@ -344,8 +344,6 @@ function resolveParsedFeedMetadata(feedData: {
  *   post:
  *     summary: Manually trigger podcast cover caching
  *     tags: [Podcasts]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Cover sync completed successfully
@@ -397,7 +395,6 @@ router.use(requireAuthOrToken);
  *     summary: Get all podcasts the user is subscribed to
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -485,7 +482,6 @@ router.get("/", async (req, res) => {
  *     summary: Get top podcasts from iTunes
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -557,7 +553,6 @@ router.get("/discover/top", requireAuthOrToken, async (req, res) => {
  *     summary: Get podcasts by genre from iTunes
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -630,7 +625,6 @@ router.get("/discover/genres", async (req, res) => {
  *     summary: Get paginated podcasts for a specific genre
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -747,7 +741,6 @@ router.get("/discover/genre/:genreId", async (req, res) => {
  *     summary: Preview a podcast before subscribing
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -872,7 +865,6 @@ router.get("/preview/:itunesId", async (req, res) => {
  *     summary: Get a specific podcast with full details and episodes
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -987,7 +979,6 @@ router.get("/:id", async (req, res) => {
  *     summary: Subscribe to a podcast by RSS feed URL or iTunes ID
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1208,7 +1199,6 @@ router.post("/subscribe", async (req, res) => {
  *     summary: Unsubscribe from a podcast
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1292,7 +1282,6 @@ router.delete("/:id/unsubscribe", async (req, res) => {
  *     summary: Refresh podcast feed to check for new episodes
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1350,7 +1339,6 @@ router.get("/:id/refresh", async (req, res) => {
  *     summary: Check if a podcast episode is cached locally
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1408,7 +1396,6 @@ router.get("/:podcastId/episodes/:episodeId/cache-status", async (req, res) => {
  *     summary: Stream a podcast episode
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1848,7 +1835,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
  *     summary: Update playback progress for a podcast episode
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1951,7 +1937,6 @@ router.post("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
  *     summary: Remove playback progress for a podcast episode
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2012,7 +1997,6 @@ router.delete("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
  *     summary: Get similar podcasts via iTunes Search API
  *     tags: [Podcasts]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2526,8 +2510,6 @@ export async function refreshAllPodcastFeeds(
  *     summary: Refresh all subscribed podcast feeds
  *     description: Processes all feeds the user is subscribed to through the conditional-GET refresh path. Per-feed failures are reported individually.
  *     tags: [Podcasts]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Per-feed refresh results

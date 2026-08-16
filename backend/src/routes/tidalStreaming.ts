@@ -357,7 +357,6 @@ async function pollTidalOAuthCredential(
  *     summary: Check TIDAL streaming availability for the current user
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -412,7 +411,6 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
  *     summary: Initiate TIDAL device-code OAuth flow
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -474,7 +472,6 @@ router.post(
  *     summary: Poll for TIDAL device-code auth completion
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -547,7 +544,6 @@ router.post(
  *     summary: Save a TIDAL OAuth token manually
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -614,7 +610,6 @@ router.post(
  *     summary: Clear the user's TIDAL auth credentials
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -646,7 +641,6 @@ router.post("/auth/clear", requireAuth, async (req: Request, res: Response) => {
  *     summary: Search TIDAL catalog using the user's credentials
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -719,7 +713,6 @@ router.post(
  *     summary: Match a single track against the TIDAL catalog
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -808,7 +801,6 @@ router.post(
  *     summary: Batch match tracks against TIDAL for album gap-fill
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -930,7 +922,6 @@ router.post(
  *     summary: Get TIDAL stream metadata (quality, codec, etc.)
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1009,7 +1000,6 @@ router.get(
  *     summary: Proxy audio stream from TIDAL to the browser
  *     tags: [TIDAL Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

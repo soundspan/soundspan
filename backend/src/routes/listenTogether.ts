@@ -106,7 +106,6 @@ function handleError(label: string, error: unknown, res: Response) {
  *     summary: Create a new Listen Together group
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       201:
@@ -130,7 +129,6 @@ router.post("/", async (req, res) => {
  *     summary: Join a Listen Together group by code
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -158,7 +156,6 @@ router.post("/join", async (req, res) => {
  *     summary: Discover public Listen Together groups
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -180,7 +177,6 @@ router.get("/discover", async (req, res) => {
  *     summary: Get the count of active Listen Together groups
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -202,7 +198,6 @@ router.get("/active-count", async (_req, res) => {
  *     summary: Get the current user's active Listen Together group
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -224,7 +219,6 @@ router.get("/mine", async (req, res) => {
  *     summary: Leave a Listen Together group
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -246,7 +240,6 @@ router.post("/:groupId/leave", async (req, res) => {
  *     summary: End a Listen Together group (host only)
  *     tags: [Listen Together]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

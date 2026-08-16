@@ -22,7 +22,7 @@ import {
 
 const router = Router();
 
-// Every @openapi block below already documents sessionAuth/apiKeyAuth + a 401
+// Every @openapi block below already documents authenticated access + a 401
 // response, but nothing enforced it (roadmap 1.9.0 plan / #59 WS4 item 2).
 // Router-wide guard, matching the apiKeys.ts:11 precedent: every route here
 // needs the same tier (authenticated user), so mount once rather than per-route.
@@ -42,7 +42,6 @@ interface ReleaseRadarResponse {
  *     summary: Get upcoming and recent releases for monitored and similar artists
  *     tags: [Releases]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -173,7 +172,6 @@ router.get("/radar", async (req, res) => {
  *     summary: Get only upcoming releases
  *     tags: [Releases]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -219,7 +217,6 @@ router.get("/upcoming", async (req, res) => {
  *     summary: Get recently released albums not yet in the user's library
  *     tags: [Releases]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -279,7 +276,6 @@ router.get("/recent", async (req, res) => {
  *     summary: Download a release from the radar
  *     tags: [Releases]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

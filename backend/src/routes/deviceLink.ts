@@ -32,7 +32,6 @@ function generateApiKey(): string {
  *     summary: Generate a new device link code
  *     tags: [Device Link]
  *     security:
- *       - sessionAuth: []
  *       - bearerAuth: []
  *     responses:
  *       200:
@@ -281,7 +280,6 @@ router.get("/status/:code", async (req, res) => {
  *     summary: List all linked devices for the current user
  *     tags: [Device Link]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -318,8 +316,6 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
  *   delete:
  *     summary: Revoke a linked device
  *     tags: [Device Link]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: id

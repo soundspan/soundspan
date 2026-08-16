@@ -216,16 +216,6 @@ function buildCurrentCallbackUrl(query: z.infer<typeof callbackQuerySchema>) {
     return url.toString();
 }
 
-async function regenerateSession(req: Request): Promise<void> {
-    if (!req.session?.regenerate) return;
-    await new Promise<void>((resolve, reject) => {
-        req.session.regenerate((error) => {
-            if (error) reject(error);
-            else resolve();
-        });
-    });
-}
-
 function loginRedirect(parameter: string, value: string, returnTo?: string) {
     const suffix = returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "";
     return webRedirectTarget(
@@ -424,7 +414,6 @@ async function oidcCallbackHandler(
             buildCurrentCallbackUrl(queryResult.data),
             { state: queryResult.data.state, ...pending },
         );
-        await regenerateSession(req);
         if (pending.mode === "link" && pending.userId) {
             return await completeManualOidcLink(res, pending.userId, claims);
         }
@@ -704,7 +693,6 @@ export default function registerOidcRoutes(router: Router): void {
      *     summary: Start linking an OIDC identity to the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     requestBody:
      *       required: false

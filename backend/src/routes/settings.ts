@@ -53,7 +53,6 @@ const settingsSchema = z.object({
  *     summary: Get the current user's settings
  *     tags: [User Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -119,7 +118,6 @@ router.get("/", async (req, res) => {
  *     summary: Update the current user's settings
  *     tags: [User Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -225,7 +223,6 @@ router.post("/", async (req, res) => {
  *     summary: Clean up stale background jobs (admin only)
  *     tags: [User Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -263,7 +260,6 @@ router.post("/cleanup-stale-jobs", requireAdmin, async (req, res) => {
  *     summary: Upload or update the user's profile picture
  *     tags: [User Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -355,7 +351,6 @@ router.post(
  *     summary: Delete the user's profile picture
  *     tags: [User Settings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

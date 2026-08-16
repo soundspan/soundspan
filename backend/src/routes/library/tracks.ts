@@ -109,7 +109,6 @@ export const tracksDeletionRouter = Router();
  *     summary: List tracks with optional album filter and pagination
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -259,7 +258,6 @@ tracksBrowseRouter.get("/tracks", asyncHandler(handleGetTracks));
  *     summary: Get the user's liked tracks playlist with cursor-based pagination
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -746,7 +744,6 @@ tracksBrowseRouter.get("/liked", asyncHandler(handleGetLikedTracks));
  *     summary: Get random tracks for shuffle play
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -904,7 +901,6 @@ tracksBrowseRouter.get(
  *     summary: Stream an audio track with optional quality transcoding
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1206,7 +1202,6 @@ tracksStreamRouter.get("/tracks/:id/stream", handleStreamTrack);
  *     summary: Get the current user's preference (like/dislike) for a track
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1310,7 +1305,6 @@ tracksPreferenceReadRouter.get(
  *     summary: Set preference (like/dislike/clear) for a track
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1458,7 +1452,6 @@ tracksPreferenceWriteRouter.post(
  *     summary: Get a single track by ID
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1531,7 +1524,6 @@ tracksDetailRouter.get("/tracks/:id", asyncHandler(handleGetTrack));
  *     summary: Get audio quality metadata for a track (codec, bitrate, sample rate, etc.)
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1708,7 +1700,6 @@ tracksDetailRouter.get<{ id: string }>(
  *     summary: Delete a track from the library and filesystem
  *     tags: [Library]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

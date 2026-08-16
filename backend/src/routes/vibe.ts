@@ -157,7 +157,6 @@ async function buildTrackPreferenceScoreMapForUser(
  *     description: Returns cached or computed 2D projection data for tracks with CLAP embeddings.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -345,7 +344,6 @@ async function walkEmbeddingSteps(
  *     description: Interpolates through CLAP embedding space to find intermediate tracks forming a smooth journey from one track to another.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -689,7 +687,6 @@ async function handleJourney(req: Request, res: Response) {
  *     description: Interpolates through CLAP embedding space from a starting track toward either a destination track or the centroid of a mood bucket, returning an ordered list of waypoint tracks.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -742,7 +739,6 @@ router.post("/journey", requireAuth, asyncHandler(handleJourney));
  *     description: Returns each canonical mood with the count of qualifying bucket tracks that also have a CLAP embedding, so the UI can enable/disable mood-based journey targets.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -804,7 +800,6 @@ router.get(
  *     description: Combines CLAP embeddings from multiple ingredient tracks with optional weights to find tracks matching the blended vibe.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -981,7 +976,6 @@ function formatSimilarTrack(track: SimilarTrack) {
  *     description: Returns tracks similar to the given track using hybrid similarity (CLAP embeddings + audio features). Results are weighted by user track preferences (likes/dislikes).
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1128,7 +1122,6 @@ interface TextEmbedResponsePayload {
  *     description: Searches for tracks using natural language text via CLAP text embeddings. Queries are expanded with a vocabulary of genre/mood terms and results are re-ranked using audio features.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1435,7 +1428,6 @@ router.post(
  *     description: Returns statistics on how many tracks have been analyzed with CLAP embeddings, including total track count, embedded count, and completion percentage
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1547,7 +1539,6 @@ async function getCalibrationResponse() {
  *     description: Returns the p0-p100 percentiles of pairwise CLAP cosine distance over a bounded random sample of embedded tracks in this library, so the UI can express match strength as "closer than N% of random pairs in your library" instead of a fixed linear mapping that reads as inflated on libraries where unrelated tracks rarely exceed distance ~1.0. The sample is drawn via an id-only indexed scan plus a primary-key fetch (never a full-table random sort), cached for 24h keyed on the embedded-track count, and concurrent cold-cache requests collapse into a single compute.
  *     tags: [Vibe]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

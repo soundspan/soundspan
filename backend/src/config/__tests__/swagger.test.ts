@@ -5,7 +5,7 @@ describe("config/swagger", () => {
 
     test("builds swagger options from config and exports generated spec", () => {
         const mockedSpec = { mocked: "swagger-spec" };
-        const swaggerJsdoc = jest.fn(() => mockedSpec);
+        const swaggerJsdoc = jest.fn((_options: unknown) => mockedSpec);
 
         jest.doMock("swagger-jsdoc", () => swaggerJsdoc);
         jest.doMock("../../config", () => ({
@@ -15,6 +15,11 @@ describe("config/swagger", () => {
         }));
 
         const { swaggerSpec } = require("../swagger");
+        const generatedOptions = swaggerJsdoc.mock.calls[0]?.[0] as {
+            definition: {
+                components: { securitySchemes: Record<string, unknown> };
+            };
+        };
 
         expect(swaggerJsdoc).toHaveBeenCalledTimes(1);
         expect(swaggerJsdoc).toHaveBeenCalledWith(
@@ -28,11 +33,6 @@ describe("config/swagger", () => {
                     ],
                     components: expect.objectContaining({
                         securitySchemes: expect.objectContaining({
-                            sessionAuth: expect.objectContaining({
-                                type: "apiKey",
-                                in: "cookie",
-                                name: "connect.sid",
-                            }),
                             apiKeyAuth: expect.objectContaining({
                                 type: "apiKey",
                                 in: "header",
@@ -40,6 +40,7 @@ describe("config/swagger", () => {
                             }),
                         }),
                     }),
+                    security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
                 }),
                 apis: [
                     "./src/routes/*.ts",
@@ -48,6 +49,9 @@ describe("config/swagger", () => {
                 ],
             }),
         );
+        expect(
+            generatedOptions.definition.components.securitySchemes,
+        ).not.toHaveProperty("sessionAuth");
         expect(swaggerSpec).toBe(mockedSpec);
     });
 });

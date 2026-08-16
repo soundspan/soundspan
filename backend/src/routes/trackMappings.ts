@@ -13,7 +13,6 @@ const router = Router();
  *     summary: Get all track mappings for an album
  *     tags: [Track Mappings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -87,7 +86,6 @@ function buildLinkageKey(mapping: {
  *     summary: Batch create track mappings
  *     tags: [Track Mappings]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true

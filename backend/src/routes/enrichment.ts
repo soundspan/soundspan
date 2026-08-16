@@ -77,7 +77,6 @@ function toClientSafeEnrichmentFailure(
  *     summary: Get comprehensive enrichment progress
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -106,7 +105,6 @@ router.get("/progress", async (req, res) => {
  *     summary: Get detailed enrichment state
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -143,7 +141,6 @@ router.get("/status", async (req, res) => {
  *     summary: Pause the enrichment process
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -181,7 +178,6 @@ router.post("/pause", requireAdmin, async (req, res) => {
  *     summary: Resume a paused enrichment process
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -219,7 +215,6 @@ router.post("/resume", requireAdmin, async (req, res) => {
  *     summary: Stop the enrichment process
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -257,7 +252,6 @@ router.post("/stop", requireAdmin, async (req, res) => {
  *     summary: Trigger full enrichment of all content
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       content:
@@ -319,7 +313,6 @@ router.post("/full", requireAdmin, async (req, res) => {
  *     summary: Reset and re-run artist enrichment only
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -356,7 +349,6 @@ router.post("/reset-artists", requireAdmin, async (req, res) => {
  *     summary: Reset and re-run mood tag enrichment only
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -393,7 +385,6 @@ router.post("/reset-mood-tags", requireAdmin, async (req, res) => {
  *     summary: Reset and re-run audio analysis only
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -438,7 +429,6 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
  *     summary: Reset and re-run vibe embedding generation only
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -483,7 +473,6 @@ router.post("/reset-vibe-embeddings", requireAdmin, async (req, res) => {
  *     summary: Repair missing cover art by clearing stale cache and re-triggering lookups
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -529,7 +518,6 @@ router.post("/repair-covers", requireAdmin, async (req, res) => {
  *     summary: Trigger incremental enrichment sync
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -568,7 +556,6 @@ router.post("/sync", requireAdmin, async (req, res) => {
  *     summary: Get enrichment settings for the current user
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -598,7 +585,6 @@ router.get("/settings", async (req, res) => {
  *     summary: Update enrichment settings for the current user
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -638,7 +624,6 @@ router.put("/settings", async (req, res) => {
  *     summary: Enrich a single artist
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -709,7 +694,6 @@ router.post<{ id: string }>("/artist/:id", requireAdmin, async (req, res) => {
  *     summary: Enrich a single album
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -780,7 +764,6 @@ router.post<{ id: string }>("/album/:id", requireAdmin, async (req, res) => {
  *     summary: Start library-wide enrichment in background
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -836,7 +819,6 @@ router.post("/start", requireAdmin, async (req, res) => {
  *     summary: Search MusicBrainz for artists by name
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -897,7 +879,6 @@ router.get("/search/musicbrainz/artists", async (req, res) => {
  *     summary: Search MusicBrainz for release groups by title
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -975,7 +956,6 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
  *     summary: Get all enrichment failures with filtering (admin only)
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1052,7 +1032,6 @@ router.get("/failures", requireAdmin, async (req, res) => {
  *     summary: Get enrichment failure counts by type (admin only)
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -1083,7 +1062,6 @@ router.get("/failures/counts", requireAdmin, async (req, res) => {
  *     summary: Retry specific failed enrichment items
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1265,7 +1243,6 @@ router.post("/retry", requireAdmin, async (req, res) => {
  *     summary: Skip specific enrichment failures
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -1324,7 +1301,6 @@ router.post("/skip", requireAdmin, async (req, res) => {
  *     summary: Clear all unresolved enrichment failures
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: query
@@ -1381,7 +1357,6 @@ router.delete("/failures", requireAdmin, async (req, res) => {
  *     summary: Delete a specific enrichment failure record
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1430,7 +1405,6 @@ router.delete<{ id: string }>(
  *     summary: Update artist metadata manually (non-destructive overrides)
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1616,7 +1590,6 @@ router.put("/artists/:id/metadata", async (req, res) => {
  *     summary: Update album metadata manually (non-destructive overrides)
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1811,7 +1784,6 @@ router.put("/albums/:id/metadata", async (req, res) => {
  *     summary: Update track metadata manually (non-destructive overrides)
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1900,7 +1872,6 @@ router.put("/tracks/:id/metadata", async (req, res) => {
  *     summary: Reset artist metadata to canonical values
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1994,7 +1965,6 @@ router.post("/artists/:id/reset", async (req, res) => {
  *     summary: Reset album metadata to canonical values
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2095,7 +2065,6 @@ router.post("/albums/:id/reset", async (req, res) => {
  *       in this router.
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -2184,7 +2153,6 @@ router.post("/tracks/:id/reset", async (req, res) => {
  *     summary: Get enrichment concurrency configuration
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -2224,7 +2192,6 @@ router.get("/concurrency", async (req, res) => {
  *     summary: Update enrichment concurrency configuration
  *     tags: [Enrichment]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true

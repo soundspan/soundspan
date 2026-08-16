@@ -66,7 +66,7 @@ For pre-published frontend images, browser polling fallback also requires rebuil
 
 For multi-replica backend/frontend deployments, configure Redis as a highly available endpoint.
 A single Redis pod is a runtime SPOF for sessions, queues, and realtime coordination.
-Redis HA is an operator-managed prerequisite (external managed Redis/Dragonfly, Sentinel, or equivalent); soundspan consumes the configured endpoint and does not manage Redis HA topology itself.
+Redis HA is an operator-managed prerequisite (external managed Redis/Dragonfly, Sentinel, or equivalent); soundspan consumes the configured endpoint for queues, claims, and realtime coordination and does not manage Redis HA topology itself.
 
 ## Sensitive Variables
 
@@ -74,11 +74,11 @@ Never commit `.env` files or credentials.
 
 | Variable                  | Purpose                                                                         | Required                                           |
 | ------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `SESSION_SECRET`          | Session encryption (32+ chars)                                                  | Yes                                                |
+| `SESSION_SECRET`          | Required JWT signing fallback (32+ chars)                                       | Yes                                                |
 | `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials (32+ chars, must not be the published default) | Yes                                                |
 | `INTERNAL_API_SECRET`     | Service-to-service authentication (32+ chars)                                   | Yes                                                |
 | `POSTGRES_PASSWORD`       | PostgreSQL authentication                                                       | Yes, production                                    |
-| `API_KEY_PEPPER`          | HMAC pepper for API keys; keep stable or existing hashed keys become invalid    | Optional; falls back to encryption/session secrets |
+| `API_KEY_PEPPER`          | HMAC pepper for API keys; keep stable or existing hashed keys become invalid    | Optional; falls back to encryption/JWT secrets     |
 | `OIDC_CLIENT_SECRET`      | OIDC confidential client authentication                                         | If using OIDC                                      |
 | `LIDARR_API_KEY`          | Lidarr integration                                                              | If using Lidarr                                    |
 | `OPENAI_API_KEY`          | AI features                                                                     | Optional                                           |
@@ -90,13 +90,22 @@ Never commit `.env` files or credentials.
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
 Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
 
-## Authentication and Session Security
+## Authentication and Credential Security
 
-- JWT access tokens expire after 24 hours; refresh tokens after 30 days
-- Token refresh uses `/api/auth/refresh`
-- Password changes invalidate existing sessions
-- Session cookies use `httpOnly` and `sameSite=lax`. Secure cookies default on when `NODE_ENV=production` and can be overridden with `SECURE_COOKIES`. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
-- Encryption key validity is checked at startup
+Cookie-session authentication has been removed. Each authenticated request now uses an explicit credential transport, so an ambient cookie cannot silently take precedence over a bearer token or API key and the API has no ambient-cookie CSRF credential surface. The HTTP-only OIDC flow-binding cookie remains; it binds a login transaction to its initiating browser and does not authenticate API requests.
+
+| Surface | Credential transport | Lifetime | Revocation path |
+| ------- | -------------------- | -------- | --------------- |
+| Web UI and first-party API | `Authorization: Bearer` JWT access token plus refresh token in the refresh request body | Access: 24 hours. Refresh: 30 days. | A self-service password change or administrator-set password increments `tokenVersion`, invalidating outstanding access and refresh JWTs. Ordinary logout removes the current browser's tokens only; there is no separate logout-all-devices endpoint. |
+| OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. Dedicated Subsonic and app-password credentials remain valid until changed, cleared, or revoked. | Change or clear the dedicated Subsonic password. Revoke an app password individually. Account password changes and administrator-set passwords clear the dedicated Subsonic password. |
+| External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
+| Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
+| Internal analyzer callbacks | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
+
+- Token refresh uses `/api/auth/refresh`.
+- `SESSION_SECRET` remains required as the JWT signing fallback when `JWT_SECRET` is unset.
+- Encryption key validity is checked at startup.
+- Secure OIDC flow cookies default on when `NODE_ENV=production` and can be overridden with `SECURE_COOKIES`. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
 
 ## OIDC and App-Password Security
 
@@ -150,7 +159,7 @@ If using Mullvad VPN for Soulseek:
 ## Generating Secrets
 
 ```bash
-# Session secret
+# Required JWT signing fallback
 openssl rand -base64 32
 
 # Settings encryption key

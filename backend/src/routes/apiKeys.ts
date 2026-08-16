@@ -9,7 +9,7 @@ import { sendRouteError } from "./routeErrorResponse";
 const router = Router();
 const routeLogger = logger.child("ApiKeys");
 
-// All API key routes require authentication (session-based)
+// All API key routes require authentication.
 router.use(requireAuth);
 
 /**
@@ -19,7 +19,6 @@ router.use(requireAuth);
  *     summary: Create a new API key for mobile/external authentication
  *     tags: [API Keys]
  *     security:
- *       - sessionAuth: []
  *       - bearerAuth: []
  *     requestBody:
  *       required: true
@@ -79,8 +78,7 @@ router.post("/", requireInteractiveSession, async (req, res) => {
             return res.status(400).json({ error: "Device name is required" });
         }
 
-        // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth
-        const userId = req.user?.id || req.session?.userId;
+        const userId = req.user?.id;
         if (!userId) {
             return res.status(401).json({ error: "Not authenticated" });
         }
@@ -122,7 +120,6 @@ router.post("/", requireInteractiveSession, async (req, res) => {
  *     summary: List all API keys for the current user
  *     tags: [API Keys]
  *     security:
- *       - sessionAuth: []
  *       - bearerAuth: []
  *       - apiKeyAuth: []
  *     responses:
@@ -146,8 +143,7 @@ router.post("/", requireInteractiveSession, async (req, res) => {
  */
 router.get("/", async (req, res) => {
     try {
-        // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth
-        const userId = req.user?.id || req.session?.userId;
+        const userId = req.user?.id;
         if (!userId) {
             return res.status(401).json({ error: "Not authenticated" });
         }
@@ -183,7 +179,6 @@ router.get("/", async (req, res) => {
  *     summary: Revoke an API key
  *     tags: [API Keys]
  *     security:
- *       - sessionAuth: []
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
@@ -218,8 +213,7 @@ router.get("/", async (req, res) => {
  */
 router.delete("/:id", requireInteractiveSession, async (req, res) => {
     try {
-        // Use req.user.id (set by requireAuth middleware) - supports both session and JWT auth
-        const userId = req.user?.id || req.session?.userId;
+        const userId = req.user?.id;
         if (!userId) {
             return res.status(401).json({ error: "Not authenticated" });
         }

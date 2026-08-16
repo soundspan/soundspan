@@ -34,7 +34,6 @@ function buildVibePendingReset() {
  *     summary: Get audio analysis status and progress
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -114,7 +113,6 @@ router.get("/status", requireAuth, async (req, res) => {
  *     summary: Start audio analysis for pending tracks
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       content:
@@ -204,7 +202,6 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Retry all failed audio analysis jobs
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -251,7 +248,6 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Queue a specific track for audio analysis
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -338,7 +334,6 @@ router.post<{ trackId: string }>(
  *     summary: Get analysis data for a specific track
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -428,7 +423,6 @@ router.get<{ trackId: string }>(
  *     summary: Get aggregated audio feature statistics for the library
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -529,7 +523,6 @@ router.get("/features", requireAuth, async (req, res) => {
  *     summary: Get audio analyzer worker configuration
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -571,7 +564,6 @@ router.get("/workers", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Update audio analyzer worker count
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -647,7 +639,6 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Get CLAP analyzer worker configuration
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -690,7 +681,6 @@ router.get("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Update CLAP analyzer worker count
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -766,7 +756,6 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Queue tracks for vibe embedding generation
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       content:
@@ -893,7 +882,6 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
  *     summary: Reset all failed vibe embeddings for bounded retry
  *     tags: [Analysis]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

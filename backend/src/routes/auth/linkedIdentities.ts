@@ -109,7 +109,6 @@ export default function registerLinkedIdentityRoutes(router: Router): void {
      *     summary: List external identities for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *       - apiKeyAuth: []
      *     responses:
@@ -127,7 +126,6 @@ export default function registerLinkedIdentityRoutes(router: Router): void {
      *     summary: Unlink an owned external identity
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     parameters:
      *       - in: path

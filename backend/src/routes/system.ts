@@ -14,7 +14,6 @@ const router = Router();
  *     summary: Get available system features based on running services and configured feature flags
  *     tags: [System]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -45,7 +44,6 @@ router.get("/features", requireAuth, async (req, res) => {
  *     summary: Get public-facing UI settings
  *     tags: [System]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:

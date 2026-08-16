@@ -55,7 +55,7 @@ function isJwtPayloadShape(value: unknown): value is { userId: string } {
     );
 }
 
-/** Creates a short-lived access token for authenticated API/session flows. */
+/** Creates a short-lived access token for authenticated API flows. */
 export function generateToken(user: {
     id: string;
     username: string;
@@ -152,7 +152,7 @@ async function resolveAccessTokenUser(
 }
 
 /**
- * Helper function to authenticate a request using session, API key, or JWT
+ * Helper function to authenticate a request using an API key or JWT
  * @param req Express request object
  * @param checkQueryToken Whether to check for token in query params (for streaming)
  * @returns User object if authenticated, null otherwise
@@ -161,19 +161,6 @@ async function authenticateRequest(
     req: Request,
     checkQueryToken: boolean = false,
 ): Promise<{ id: string; username: string; role: string } | null> {
-    // Check session-based auth
-    if (req.session?.userId) {
-        try {
-            const user = await prisma.user.findUnique({
-                where: { id: req.session.userId },
-                select: { id: true, username: true, role: true },
-            });
-            if (user) return user;
-        } catch (error) {
-            logger.error("Session auth error:", error);
-        }
-    }
-
     // Check for API key in X-API-Key header
     const apiKey = req.headers["x-api-key"] as string;
     if (apiKey) {
@@ -258,7 +245,7 @@ export async function requireAuth(
         .json({ error: "Not authenticated", code: "AUTH_REQUIRED" });
 }
 
-/** Requires an interactive session or bearer-authenticated request. */
+/** Rejects API-key transport for operations that require an interactive user. */
 export function requireInteractiveSession(
     req: Request,
     res: Response,
@@ -288,29 +275,12 @@ export async function requireAdmin(
 }
 
 // For streaming URLs that may use query params or need special handling
-/** Authenticates via session, API key, query token, or bearer token for media routes. */
+/** Authenticates via API key, query token, or bearer token for media routes. */
 export async function requireAuthOrToken(
     req: Request,
     res: Response,
     next: NextFunction,
 ) {
-    // First, check session-based auth (primary method for web)
-    if (req.session?.userId) {
-        try {
-            const user = await prisma.user.findUnique({
-                where: { id: req.session.userId },
-                select: { id: true, username: true, role: true },
-            });
-
-            if (user) {
-                req.user = user;
-                return next();
-            }
-        } catch (error) {
-            logger.error("Session auth error:", error);
-        }
-    }
-
     // Check for API key in X-API-Key header (for mobile/external apps)
     const apiKey = req.headers["x-api-key"] as string;
     if (apiKey) {

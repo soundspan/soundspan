@@ -154,7 +154,6 @@ export default function registerAppPasswordRoutes(router: Router): void {
      *     summary: List active app passwords for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *       - apiKeyAuth: []
      *     responses:
@@ -177,7 +176,6 @@ export default function registerAppPasswordRoutes(router: Router): void {
      *     summary: Create an app password for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     requestBody:
      *       required: true
@@ -216,7 +214,6 @@ export default function registerAppPasswordRoutes(router: Router): void {
      *     summary: Revoke an owned app password
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     parameters:
      *       - in: path

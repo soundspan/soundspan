@@ -67,14 +67,13 @@ function makeAlgNoneToken(payload: object): string {
 }
 
 type TestRequest = {
-    session: Record<string, unknown>;
     headers: Record<string, unknown>;
     query: Record<string, unknown>;
     user?: { id: string; username: string; role: string };
 };
 
 function createReq(overrides: Partial<TestRequest> = {}): TestRequest {
-    return { session: {}, headers: {}, query: {}, ...overrides };
+    return { headers: {}, query: {}, ...overrides };
 }
 
 type TestResponse = {

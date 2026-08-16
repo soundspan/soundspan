@@ -71,7 +71,6 @@ async function getLyricsWithRouteTimeout(
  *       Results are cached in the database for subsequent requests.
  *     tags: [Lyrics]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -187,7 +186,6 @@ router.get("/:trackId", async (req, res) => {
  *     description: Removes cached lyrics so they are re-fetched on next request
  *     tags: [Lyrics]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

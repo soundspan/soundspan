@@ -25,7 +25,6 @@ export function registerAccountProfileRoutes(router: Router): void {
      *     summary: Change the current user's password
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     requestBody:
      *       required: true
@@ -125,7 +124,6 @@ export function registerAccountProfileRoutes(router: Router): void {
      *     summary: Change the current user's email address
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     requestBody:
      *       required: true
@@ -184,7 +182,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Generate a 2FA secret and QR code for setup
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     responses:
      *       200:
@@ -248,7 +245,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Verify token and enable 2FA for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     requestBody:
      *       required: true
@@ -356,7 +352,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Disable 2FA for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     requestBody:
      *       required: true
@@ -458,7 +453,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Check if 2FA is enabled for the current user
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     responses:
      *       200:
@@ -494,7 +488,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Check if a Subsonic password is configured
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - apiKeyAuth: []
      *     responses:
      *       200:
@@ -539,7 +532,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Set or update the Subsonic password
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     requestBody:
      *       required: true
@@ -604,7 +596,6 @@ export function registerSecondFactorAndSubsonicRoutes(router: Router): void {
      *     summary: Clear the Subsonic password
      *     tags: [Authentication]
      *     security:
-     *       - sessionAuth: []
      *       - bearerAuth: []
      *     responses:
      *       200:

@@ -1,6 +1,4 @@
 import express from "express";
-import session from "express-session";
-import { RedisStore } from "connect-redis";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
@@ -205,34 +203,10 @@ app.use((req, res, next) => {
     next();
 });
 
-// Session
 // Trust proxy for reverse proxy setups (nginx, traefik, etc.). Defaults to
 // trusting all hops; set TRUST_PROXY_HOPS to a numeric depth (usually 1) so a
 // client can't spoof X-Forwarded-For to evade per-IP rate limits.
 app.set("trust proxy", config.trustProxy);
-
-// codeql[js/missing-token-validation] Session cookies are SameSite=Lax, while API-key and bearer alternatives require explicit headers, blocking classic cross-site unsafe requests.
-app.use(
-    session({
-        store: new RedisStore({
-            client: redisClient,
-            ttl: 7 * 24 * 60 * 60, // 7 days in seconds - must match cookie maxAge
-        }),
-        secret: config.sessionSecret,
-        resave: false,
-        saveUninitialized: false,
-        proxy: true, // Trust the reverse proxy
-        cookie: {
-            httpOnly: true,
-            // Secure by default in production (HTTPS-only cookies). HTTP-only
-            // local-network deploys must set SECURE_COOKIES=false. Resolved in
-            // config.ts so the env boundary stays in one place.
-            secure: config.secureCookies,
-            sameSite: "lax",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        },
-    }),
-);
 
 // Routes - All API routes prefixed with /api for clear separation from frontend
 // Apply rate limiting to auth routes
@@ -523,7 +497,11 @@ async function checkPasswordReset() {
     const hashedPassword = await bcrypt.hash(resetPassword, 10);
     await prisma.user.update({
         where: { id: adminUser.id },
-        data: { passwordHash: hashedPassword },
+        data: {
+            passwordHash: hashedPassword,
+            tokenVersion: { increment: 1 },
+            subsonicPassword: null,
+        },
     });
     logger.warn(
         "[Password Reset] Admin password has been reset via ADMIN_RESET_PASSWORD env var. Remove this env var and restart.",

@@ -30,8 +30,6 @@ const completeTrackSchema = z.object({
  *   post:
  *     summary: Create a download job for an album's tracks
  *     tags: [Offline]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -169,8 +167,6 @@ router.post("/albums/:id/download", async (req, res) => {
  *   post:
  *     summary: Mark a track download as complete
  *     tags: [Offline]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -271,8 +267,6 @@ router.post("/tracks/:id/complete", async (req, res) => {
  *   get:
  *     summary: Get all offline-cached albums for the current user
  *     tags: [Offline]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: List of cached albums with track details and sizes
@@ -364,8 +358,6 @@ router.get("/albums", async (req, res) => {
  *   delete:
  *     summary: Remove a cached album from offline storage
  *     tags: [Offline]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -421,8 +413,6 @@ router.delete("/albums/:id", async (req, res) => {
  *   get:
  *     summary: Get offline cache usage statistics
  *     tags: [Offline]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Cache usage stats including size and track count

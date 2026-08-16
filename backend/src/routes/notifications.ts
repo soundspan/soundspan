@@ -16,7 +16,6 @@ const router = Router();
  *     description: Returns all uncleared notifications for the current user
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -62,7 +61,6 @@ router.get(
  *     description: Returns the count of unread notifications for the current user
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -100,7 +98,6 @@ router.get(
  *     summary: Mark a notification as read
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -143,7 +140,6 @@ router.post(
  *     summary: Mark all notifications as read
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -183,7 +179,6 @@ router.post(
  *     description: Dismiss a single notification by ID
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -227,7 +222,6 @@ router.post(
  *     description: Dismiss all notifications for the current user
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -264,7 +258,6 @@ router.post(
  *     description: Returns completed/failed downloads that haven't been cleared, deduplicated by album subject (most recent entry per album). Limited to 50 results.
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -320,7 +313,6 @@ router.get(
  *     description: Returns downloads that are currently pending or processing
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -362,7 +354,6 @@ router.get(
  *     description: Marks a specific download job as cleared so it no longer appears in history
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -412,7 +403,6 @@ router.post(
  *     description: Marks all completed/failed/exhausted download jobs as cleared
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
@@ -456,7 +446,6 @@ router.post(
  *     description: Retries a failed or exhausted download job. Supports pending-track-retry (Soulseek), spotify_import (Soulseek then Lidarr fallback), and generic album retry via Lidarr.
  *     tags: [Notifications]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

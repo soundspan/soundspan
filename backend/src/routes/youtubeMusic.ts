@@ -487,8 +487,6 @@ async function resolveYtMusicStreamQuality(
  *   get:
  *     summary: Check YouTube Music integration and authentication status
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: YouTube Music status including enabled, available, and authentication state
@@ -540,8 +538,6 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
  *   post:
  *     summary: Initiate OAuth device code flow for YouTube Music authentication
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: Device code and verification URL for user authorization
@@ -588,8 +584,6 @@ router.post(
  *   post:
  *     summary: Poll device code authorization status for YouTube Music OAuth
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -652,8 +646,6 @@ router.post(
  *   post:
  *     summary: Save OAuth token JSON for YouTube Music authentication
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -728,8 +720,6 @@ router.post(
  *   post:
  *     summary: Clear YouTube Music OAuth credentials for the current user
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     responses:
  *       200:
  *         description: OAuth credentials cleared successfully
@@ -772,8 +762,6 @@ router.post(
  *   post:
  *     summary: Search YouTube Music catalog
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -833,8 +821,6 @@ router.post(
  *   get:
  *     summary: Get YouTube Music album details by browse ID
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: browseId
@@ -877,8 +863,6 @@ router.get(
  *   get:
  *     summary: Get YouTube Music artist details by channel ID
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: channelId
@@ -921,8 +905,6 @@ router.get(
  *   get:
  *     summary: Get YouTube Music song details by video ID
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: path
  *         name: videoId
@@ -971,7 +953,6 @@ router.get(
  *     summary: Get stream metadata (bitrate, codec, duration) for a YouTube Music track
  *     tags: [YouTube Music]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1057,7 +1038,6 @@ router.get(
  *     summary: Proxy audio stream from YouTube Music sidecar
  *     tags: [YouTube Music]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1179,8 +1159,6 @@ router.get(
  *   get:
  *     summary: Get songs from the user's YouTube Music library
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: query
  *         name: limit
@@ -1226,8 +1204,6 @@ router.get(
  *   get:
  *     summary: Get albums from the user's YouTube Music library
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     parameters:
  *       - in: query
  *         name: limit
@@ -1276,8 +1252,6 @@ router.get(
  *   post:
  *     summary: Find the best YouTube Music match for a given track
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1355,8 +1329,6 @@ router.post(
  *   post:
  *     summary: Batch-match multiple tracks against YouTube Music catalog
  *     tags: [YouTube Music]
- *     security:
- *       - sessionAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1477,7 +1449,6 @@ router.post(
  *     summary: Get stream metadata without YT Music OAuth
  *     tags: [YouTube Music]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1544,7 +1515,6 @@ router.get(
  *     summary: Proxy audio stream without YT Music OAuth
  *     tags: [YouTube Music]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path

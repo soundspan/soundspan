@@ -793,7 +793,6 @@ const handleSegmentFetch = async (
  *     summary: Create a new segmented streaming session
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
@@ -947,7 +946,6 @@ router.post("/v1/sessions", requireAuth, async (req, res) => {
  *     summary: Fetch the DASH manifest for a streaming session
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1125,7 +1123,6 @@ router.get(
  *     summary: Fetch a media segment by name from a streaming session
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1168,7 +1165,6 @@ router.get(
  *     summary: Fetch a media segment via shorthand path (m4s/webm)
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1225,7 +1221,6 @@ router.get(
  *     summary: Send a heartbeat to keep a streaming session alive
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1348,7 +1343,6 @@ router.post(
  *     summary: Hand off a streaming session for seamless continuity
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
@@ -1479,7 +1473,6 @@ router.post(
  *     summary: Ingest client-side playback metrics and signals
  *     tags: [Streaming]
  *     security:
- *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
