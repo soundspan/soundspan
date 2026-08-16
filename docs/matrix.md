@@ -156,7 +156,7 @@ Other
 ├───────────────────────┼───────────────────────────────┼────────────────────────────────────────┤
 │ Like All concurrency  │ 8 parallel requests           │ frontend/hooks/useCollectionLikeAll.ts │
 ├───────────────────────┼───────────────────────────────┼────────────────────────────────────────┤
-│ Subsonic random songs │ 500 max, 5,000 candidate pool │ backend/src/routes/subsonic.ts         │
+│ Subsonic random songs │ 500 max, 5,000 candidate pool │ routes/subsonic/albumSongLists.ts       │
 └───────────────────────┴───────────────────────────────┴────────────────────────────────────────┘
 ```
 

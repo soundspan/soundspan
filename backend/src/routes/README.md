@@ -105,7 +105,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/social.ts`             | `/api/social`                                                                                         |
 | `backend/src/routes/soulseek.ts`           | `/api/soulseek`                                                                                       |
 | `backend/src/routes/streaming.ts`          | `/api/streaming`                                                                                      |
-| `backend/src/routes/subsonic.ts`           | `/rest`                                                                                               |
+| `backend/src/routes/subsonic.ts`           | `/rest` (compatibility re-export of `subsonic/index.ts`)                                              |
 | `backend/src/routes/system.ts`             | `/api/system`                                                                                         |
 | `backend/src/routes/systemSettings.ts`     | `/api/system-settings`                                                                                |
 | `backend/src/routes/tidalStreaming.ts`     | `/api/tidal-streaming`                                                                                |
@@ -151,6 +151,26 @@ single top-level route stack composed from these concern modules:
 | `auth/adminUserInvites.ts` | User administration, invite administration, and registration      |
 | `auth/shared.ts`           | Shared auth schemas and credential-verification helpers            |
 
+### Subsonic Submodules
+
+`backend/src/routes/subsonic.ts` is a compatibility re-export of
+`backend/src/routes/subsonic/index.ts`. The mounted `/rest` router preserves a
+single middleware and endpoint stack composed from these domain modules:
+
+| Module                           | Responsibility                                                        |
+| -------------------------------- | --------------------------------------------------------------------- |
+| `subsonic/system.ts`             | Protocol capability, license, token-info, and library-scan endpoints  |
+| `subsonic/browsing.ts`           | Music folders, directories, artists, albums, songs, and genres        |
+| `subsonic/discovery.ts`          | Similar-song and top-song discovery                                   |
+| `subsonic/albumSongLists.ts`     | Album/song lists, random songs, genre songs, and starred collections  |
+| `subsonic/searching.ts`          | Legacy and current search endpoints                                   |
+| `subsonic/playlists.ts`          | Playlist reads and mutations                                          |
+| `subsonic/mediaRetrieval.ts`     | Audio, cover art, lyrics, and avatar retrieval                        |
+| `subsonic/mediaAnnotation.ts`    | Ratings, scrobbles, stars, and unstars                                |
+| `subsonic/bookmarksQueue.ts`     | Bookmarks and play-queue state                                        |
+| `subsonic/usersMisc.ts`          | User profile and now-playing endpoints                                |
+| `subsonic/shared.ts`             | Shared predicates, parsers, ID mapping, and response-formatting input |
+
 ## Feature-Gated Prefixes
 
 Some prefixes are mounted only when their coarse feature flag (see
@@ -174,7 +194,7 @@ report results.
 - **One module per mounted prefix.** Each file here owns a single `/api/*` (or `/rest`) prefix listed above; add a new prefix as a new `camelCase` module and register it in `backend/src/index.ts` and in the table above.
 - **Routes orchestrate; services decide.** Keep parsing, validation, authorization decisions, and data access in `backend/src/services/` (and background processors in `backend/src/workers/`); route handlers coordinate and stay within the repository function-size gate.
 - **Data access.** Use Prisma. Raw SQL is limited to the pgvector / full-text-search / row-locking exceptions defined in [`AGENTS.md`](../../../AGENTS.md) and must use parameterized tagged templates.
-- **`/rest` OpenAPI exemption.** `subsonic.ts` implements the Subsonic-compatible `/rest` surface, which is contract-documented in [`docs/OPENSUBSONIC_COMPATIBILITY.md`](../../../docs/OPENSUBSONIC_COMPATIBILITY.md) rather than per-endpoint `@openapi` annotations (see `AGENTS.md`). Update that document when `/rest` behavior changes.
+- **`/rest` OpenAPI exemption.** `subsonic/index.ts` composes the Subsonic-compatible `/rest` surface, which is contract-documented in [`docs/OPENSUBSONIC_COMPATIBILITY.md`](../../../docs/OPENSUBSONIC_COMPATIBILITY.md) rather than per-endpoint `@openapi` annotations (see `AGENTS.md`). Update that document when `/rest` behavior changes.
 - **Tests assert behavior.** Prefer runtime tests in `backend/src/routes/__tests__/`; do not add source-scraping `*Contract` tests that `readFileSync` a module and assert on its text (deprecated pattern — see `AGENTS.md`).
 
 ## Update Rule

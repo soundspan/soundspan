@@ -1,0 +1,229 @@
+import { Router } from "express";
+import { config } from "../../config";
+import {
+    requireSubsonicAuth,
+    subsonicRateLimiter,
+} from "../../middleware/subsonicAuth";
+import { logger } from "../../utils/logger";
+import {
+    sendSubsonicError,
+    SubsonicErrorCode,
+} from "../../utils/subsonicResponse";
+import {
+    handleGetOpenSubsonicExtensions,
+    handleGetLicense,
+    handleGetScanStatus,
+    handlePing,
+    handleStartScan,
+    handleTokenInfo,
+} from "./system";
+import {
+    handleGetAlbum,
+    handleGetAlbumInfo2,
+    handleGetArtist,
+    handleGetArtistInfo2,
+    handleGetArtists,
+    handleGetGenres,
+    handleGetIndexes,
+    handleGetMusicDirectory,
+    handleGetMusicFolders,
+    handleGetSong,
+} from "./browsing";
+import {
+    handleGetSimilarSongs,
+    handleGetSimilarSongs2,
+    handleGetTopSongs,
+} from "./discovery";
+import {
+    handleGetAlbumList,
+    handleGetAlbumList2,
+    handleGetRandomSongs,
+    handleGetSongsByGenre,
+    handleGetStarred,
+    handleGetStarred2,
+} from "./albumSongLists";
+import { handleSearch, handleSearch2, handleSearch3 } from "./searching";
+import {
+    handleCreatePlaylist,
+    handleDeletePlaylist,
+    handleGetPlaylist,
+    handleGetPlaylists,
+    handleUpdatePlaylist,
+} from "./playlists";
+import {
+    handleDownload,
+    handleGetAvatar,
+    handleGetCoverArt,
+    handleGetLyrics,
+    handleGetLyricsBySongId,
+    handleStream,
+} from "./mediaRetrieval";
+import {
+    handleScrobble,
+    handleSetRating,
+    handleStar,
+    handleUnstar,
+} from "./mediaAnnotation";
+import {
+    handleCreateBookmark,
+    handleDeleteBookmark,
+    handleGetBookmarks,
+    handleGetPlayQueue,
+    handleGetPlayQueueByIndex,
+    handleSavePlayQueue,
+    handleSavePlayQueueByIndex,
+} from "./bookmarksQueue";
+import { handleGetNowPlaying, handleGetUser } from "./usersMisc";
+import { getRequestContext } from "./shared";
+
+const router = Router();
+const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
+
+if (SUBSONIC_TRACE_LOGS) {
+    router.use((req, res, next) => {
+        const startMs = Date.now();
+        const client =
+            typeof req.query.c === "string" && req.query.c.trim().length > 0
+                ? req.query.c
+                : "-";
+        const version =
+            typeof req.query.v === "string" && req.query.v.trim().length > 0
+                ? req.query.v
+                : "-";
+        const format =
+            typeof req.query.f === "string" && req.query.f.trim().length > 0
+                ? req.query.f
+                : typeof req.query.format === "string" &&
+                    req.query.format.trim().length > 0
+                  ? req.query.format
+                  : "-";
+
+        res.on("finish", () => {
+            const endpoint = req.path.startsWith("/")
+                ? req.path.slice(1)
+                : req.path;
+            const protocolStatus =
+                typeof res.locals?.subsonicProtocolStatus === "string"
+                    ? res.locals.subsonicProtocolStatus
+                    : "unknown";
+            const errorCode =
+                typeof res.locals?.subsonicErrorCode === "number"
+                    ? ` code=${res.locals.subsonicErrorCode}`
+                    : "";
+
+            logger.warn(
+                `[SubsonicTrace] ${req.method} ${endpoint || "(root)"} c=${client} v=${version} f=${format} http=${res.statusCode} proto=${protocolStatus}${errorCode} ${Date.now() - startMs}ms`,
+            );
+        });
+
+        next();
+    });
+}
+
+router.use(subsonicRateLimiter);
+router.use(requireSubsonicAuth);
+function endpointAliases(endpoint: string): string[] {
+    return [
+        `/${endpoint}`,
+        `/${endpoint}.view`,
+        `/rest/${endpoint}`,
+        `/rest/${endpoint}.view`,
+    ];
+}
+
+router.get(endpointAliases("ping"), handlePing);
+router.post(endpointAliases("ping"), handlePing);
+router.get(endpointAliases("getLicense"), handleGetLicense);
+router.get(
+    endpointAliases("getOpenSubsonicExtensions"),
+    handleGetOpenSubsonicExtensions,
+);
+router.get(endpointAliases("tokenInfo"), handleTokenInfo);
+router.get(endpointAliases("getMusicFolders"), handleGetMusicFolders);
+router.get(endpointAliases("getMusicDirectory"), handleGetMusicDirectory);
+router.get(endpointAliases("getIndexes"), handleGetIndexes);
+router.get(endpointAliases("getArtists"), handleGetArtists);
+router.get(endpointAliases("getArtist"), handleGetArtist);
+router.get(endpointAliases("getArtistInfo2"), handleGetArtistInfo2);
+router.get(endpointAliases("getAlbum"), handleGetAlbum);
+router.get(endpointAliases("getAlbumInfo2"), handleGetAlbumInfo2);
+router.get(endpointAliases("getSong"), handleGetSong);
+router.get(endpointAliases("getTopSongs"), handleGetTopSongs);
+router.get(endpointAliases("getSimilarSongs"), handleGetSimilarSongs);
+router.get(endpointAliases("getSimilarSongs2"), handleGetSimilarSongs2);
+router.get(endpointAliases("getAlbumList"), handleGetAlbumList);
+router.get(endpointAliases("getAlbumList2"), handleGetAlbumList2);
+router.get(endpointAliases("getGenres"), handleGetGenres);
+router.get(endpointAliases("getSongsByGenre"), handleGetSongsByGenre);
+router.get(endpointAliases("getRandomSongs"), handleGetRandomSongs);
+router.get(endpointAliases("stream"), handleStream);
+router.get(endpointAliases("download"), handleDownload);
+router.get(endpointAliases("getCoverArt"), handleGetCoverArt);
+router.get(endpointAliases("getLyrics"), handleGetLyrics);
+router.get(endpointAliases("getLyricsBySongId"), handleGetLyricsBySongId);
+router.get(endpointAliases("search"), handleSearch);
+router.get(endpointAliases("search2"), handleSearch2);
+router.get(endpointAliases("search3"), handleSearch3);
+router.get(endpointAliases("getPlaylists"), handleGetPlaylists);
+router.get(endpointAliases("getPlaylist"), handleGetPlaylist);
+router.get(endpointAliases("getPlayQueue"), handleGetPlayQueue);
+router.post(endpointAliases("savePlayQueue"), handleSavePlayQueue);
+router.get(endpointAliases("savePlayQueue"), handleSavePlayQueue);
+router.get(endpointAliases("getPlayQueueByIndex"), handleGetPlayQueueByIndex);
+router.post(
+    endpointAliases("savePlayQueueByIndex"),
+    handleSavePlayQueueByIndex,
+);
+router.get(endpointAliases("savePlayQueueByIndex"), handleSavePlayQueueByIndex);
+router.get(endpointAliases("getBookmarks"), handleGetBookmarks);
+router.get(endpointAliases("createBookmark"), handleCreateBookmark);
+router.post(endpointAliases("createBookmark"), handleCreateBookmark);
+router.get(endpointAliases("deleteBookmark"), handleDeleteBookmark);
+router.post(endpointAliases("deleteBookmark"), handleDeleteBookmark);
+router.get(endpointAliases("setRating"), handleSetRating);
+router.post(endpointAliases("setRating"), handleSetRating);
+router.get(endpointAliases("createPlaylist"), handleCreatePlaylist);
+router.post(endpointAliases("createPlaylist"), handleCreatePlaylist);
+router.get(endpointAliases("updatePlaylist"), handleUpdatePlaylist);
+router.post(endpointAliases("updatePlaylist"), handleUpdatePlaylist);
+router.get(endpointAliases("deletePlaylist"), handleDeletePlaylist);
+router.post(endpointAliases("deletePlaylist"), handleDeletePlaylist);
+router.get(endpointAliases("scrobble"), handleScrobble);
+router.post(endpointAliases("scrobble"), handleScrobble);
+router.get(endpointAliases("getNowPlaying"), handleGetNowPlaying);
+router.get(endpointAliases("getUser"), handleGetUser);
+router.get(endpointAliases("getAvatar"), handleGetAvatar);
+router.get(endpointAliases("getStarred"), handleGetStarred);
+router.get(endpointAliases("getStarred2"), handleGetStarred2);
+router.get(endpointAliases("getScanStatus"), handleGetScanStatus);
+router.get(endpointAliases("startScan"), handleStartScan);
+router.post(endpointAliases("startScan"), handleStartScan);
+router.get(endpointAliases("star"), handleStar);
+router.post(endpointAliases("star"), handleStar);
+router.get(endpointAliases("unstar"), handleUnstar);
+router.post(endpointAliases("unstar"), handleUnstar);
+// Express 5 (path-to-regexp v8) requires named wildcards; "/{*splat}" keeps
+// the Express 4 "*" behavior of also matching the router root path.
+router.all("/{*splat}", (req, res) => {
+    const { format, callback } = getRequestContext(req);
+    sendSubsonicError(
+        res,
+        SubsonicErrorCode.NOT_FOUND,
+        "Endpoint not supported",
+        format,
+        callback,
+    );
+});
+
+export * from "./system";
+export * from "./browsing";
+export * from "./discovery";
+export * from "./albumSongLists";
+export * from "./searching";
+export * from "./playlists";
+export * from "./mediaRetrieval";
+export * from "./mediaAnnotation";
+export * from "./bookmarksQueue";
+export * from "./usersMisc";
+
+export default router;

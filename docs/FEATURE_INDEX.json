@@ -371,7 +371,18 @@
                     "admin.ts",
                     "playlists.ts",
                     "library.ts",
-                    "subsonic.ts"
+                    "subsonic/index.ts",
+                    "subsonic/shared.ts",
+                    "subsonic/system.ts",
+                    "subsonic/albumSongLists.ts",
+                    "subsonic/bookmarksQueue.ts",
+                    "subsonic/browsing.ts",
+                    "subsonic/discovery.ts",
+                    "subsonic/mediaAnnotation.ts",
+                    "subsonic/mediaRetrieval.ts",
+                    "subsonic/playlists.ts",
+                    "subsonic/searching.ts",
+                    "subsonic/usersMisc.ts"
                 ],
                 "services": ["musicScanner.ts", "trackIdentityMatcher.ts"]
             },
@@ -507,7 +518,20 @@
                 "routes": []
             },
             "backend": {
-                "routes": ["subsonic.ts"],
+                "routes": [
+                    "subsonic/index.ts",
+                    "subsonic/shared.ts",
+                    "subsonic/system.ts",
+                    "subsonic/albumSongLists.ts",
+                    "subsonic/bookmarksQueue.ts",
+                    "subsonic/browsing.ts",
+                    "subsonic/discovery.ts",
+                    "subsonic/mediaAnnotation.ts",
+                    "subsonic/mediaRetrieval.ts",
+                    "subsonic/playlists.ts",
+                    "subsonic/searching.ts",
+                    "subsonic/usersMisc.ts"
+                ],
                 "services": []
             },
             "tests": {
@@ -523,7 +547,10 @@
                     "subsonicRuntimeFocused.test.ts",
                     "subsonicStateCompat.test.ts",
                     "subsonicStreamCoverArtHandlers.test.ts",
-                    "subsonicTierB.test.ts"
+                    "subsonicTierB.test.ts",
+                    "subsonicBranchCoverage.test.ts",
+                    "subsonicCoverArtResizeDedup.test.ts",
+                    "subsonicModuleBoundariesRuntime.test.ts"
                 ],
                 "backend_contract": []
             }

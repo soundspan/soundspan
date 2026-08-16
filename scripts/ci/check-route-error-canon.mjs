@@ -88,8 +88,8 @@ const LEAK_BASELINE = Object.freeze({
     // streaming.ts remaining 7: forwards typed SegmentedSessionError messages that are static code-owned text; segmented build-failure detail is logged server-side in sessionService.
     // streaming.ts +1: segmented route trace normalization's ternary-consequent error.message (~L518); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/routes/streaming.ts": 8,
-    // subsonic.ts +1: cover-fetch failure classification's ternary-consequent error.message (~L5015); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/routes/subsonic.ts": 1,
+    // subsonic/mediaRetrieval.ts +1: cover-fetch failure classification's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
+    "backend/src/routes/subsonic/mediaRetrieval.ts": 1,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
     "backend/src/routes/youtube.ts": 4,
     // youtubeMusic.ts remaining 11: ytmusic sidecar err.response?.data?.detail echoes (10x) plus one result.error response (~L434); same sidecar-detail class as youtube.ts, frozen under the slice-J scope guard, flagged for follow-up.
