@@ -32,6 +32,15 @@ Blend tracks resolve per listener: local copy if the listener's library (or dedu
 
 ## Federated discovery
 
+### Phase 0 — federated public playlists and presence (maintainer-directed first increment)
+
+Ships before any taste-vector work; requires none of the embedding-space machinery — only surfaces that already exist (catalog sync, federation auth, the stream proxy, the social/activity feed).
+
+- **Public playlists across peers**: playlists a user marks public become visible to trusted peers with discovery opt-in — browsable in a "From PeerName" shelf, loadable, and playable. Playlist metadata (name, owner display name, track references, cover) exchanges over a new authenticated federation endpoint; track rows resolve per listener local-first via durable identity/dedup, then peer stream proxy, with the standard offline row states. A peer playlist can be followed (live reference, updates with the source) or copied (snapshot into the local library); acquisition affordances apply to peer-only tracks.
+- **User status across peers**: presence (online/listening state) and now-playing/recently-played activity from federated friends appear in the existing social/activity surface, badged with their home peer. Exchange is lightweight polling or piggybacked on existing peer sync heartbeats — no new realtime channel in phase 0; freshness is minutes, not seconds, and the UI says so.
+- **Privacy model**: two gates compose — the operator-level federation discovery opt-in (per peer, both directions), and a **per-user visibility setting** controlling whether that user's public playlists and presence federate at all (playlist publicness alone does not imply federation). Presence sharing is per-user opt-out within an enabled peering, playlist federation per-user opt-in-by-public-flag; both documented in the federation privacy contract alongside the taste-vector rules.
+- **Telemetry**: peer playlist follows/copies/plays and presence-fetch health join the per-peer counters (issue #531).
+
 ### Candidate sourcing
 
 - Peer catalogs (already synced) join the Discover Weekly/radio candidate pool when the peer relationship has **discovery opt-in** (new flag, both directions, default off).
@@ -53,6 +62,7 @@ Per-peer counters (bounded labels, extending #531): candidates offered/accepted 
 
 ## Rollout and testing
 
+0. **Federated public playlists + presence** (no vector dependency; first social increment) →
 1. Taste vectors + local 2-user Blend (fairness + attribution + refresh) →
 2. Cross-peer blend membership (vector sharing contract + revocation) →
 3. Federated discovery candidates behind opt-in + ratio cap →

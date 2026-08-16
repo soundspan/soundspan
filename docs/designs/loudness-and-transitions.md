@@ -18,7 +18,7 @@ Playback volume varies wildly across a mixed library (quiet 90s masters next to 
 
 - Gain = `target − measured`, target default **−18 LUFS** (ReplayGain 2 reference; commercial streamers use −14 to −16, but self-hosted libraries skew dynamic — default documented and configurable per server, `LOUDNESS_TARGET_LUFS`).
 - **Positive gain clamp:** limit boost to `min(+3 dB, headroom to 0 dBTP)` using true peak — never introduce clipping to normalize a quiet track.
-- Modes per user: `off | track | album | auto` (auto = album gain inside album context, track gain in shuffle/radio/mix). Default: `auto` once shipped, `off` during rollout release.
+- Modes per user: `off | track | album | auto` (auto = album gain inside album context, track gain in shuffle/radio/mix). **Default: `auto` at ship** (maintainer decision 2026-08-16): the true-peak boost clamp is the safety mechanism, cut-only attenuation cannot clip, and `off` stays one toggle away. Release notes call out the behavior change prominently.
 - Engine application: both direct engines composite a gain factor into their volume pipeline (multiplicative with user volume). No new AudioContext requirement on the default path — element volume compositing suffices; where a context already exists (iOS-standalone bridge), a GainNode is acceptable but not required. Missing measurement ⇒ gain 0 for that track; **no mid-queue jump handling beyond that** (a measured→unmeasured boundary plays both at their natural relationship, same as today).
 - Transcoding/offline: measurement reflects the source file; client-side gain is codec-independent, so transcoded streams inherit correct leveling. Offline downloads play through the same player pipeline and use the same stored values.
 
@@ -62,5 +62,4 @@ Requires beat-grid phase data the analyzer does not store; explicitly out of sco
 
 ## Open questions
 
-- Whether `auto` should become default at ship or one release later (proposal: one release later, after gain-histogram data).
 - Genre-exclusion list for smart fades (classical/spoken/live) — tag-based heuristic vs user-managed list.
