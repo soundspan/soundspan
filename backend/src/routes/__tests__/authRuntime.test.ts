@@ -63,6 +63,7 @@ const prisma = {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
+        count: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
         delete: jest.fn(),
@@ -70,6 +71,8 @@ const prisma = {
     userSettings: {
         create: jest.fn(),
     },
+    $executeRaw: jest.fn(),
+    $transaction: jest.fn(),
 };
 
 jest.mock("../../utils/db", () => ({
@@ -274,8 +277,11 @@ describe("auth routes runtime", () => {
         });
         prisma.user.update.mockResolvedValue({});
         prisma.user.updateMany.mockResolvedValue({ count: 1 });
+        prisma.user.count.mockResolvedValue(1);
         prisma.user.delete.mockResolvedValue({});
         prisma.userSettings.create.mockResolvedValue({});
+        prisma.$executeRaw.mockResolvedValue(0);
+        prisma.$transaction.mockImplementation(async (run) => run(prisma));
 
         mockBcryptCompare.mockResolvedValue(true);
         mockBcryptHash.mockResolvedValue("new-hash");

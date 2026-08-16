@@ -249,6 +249,21 @@ function useAppPasswordData() {
     return { credentials, setCredentials, loading, loadError };
 }
 
+function appPasswordMetadata(
+    credential: CreatedAppPassword,
+): AppPasswordMetadata {
+    return {
+        id: credential.id,
+        displayName: credential.displayName,
+        createdAt: credential.createdAt,
+        lastUsedAt: credential.lastUsedAt,
+    };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+}
+
 function useAppPasswordCreation(
     addCredential: (credential: AppPasswordMetadata) => void,
 ) {
@@ -266,19 +281,12 @@ function useAppPasswordCreation(
         try {
             const result = await api.createAppPassword(name);
             setCreated(result.appPassword);
-            addCredential({
-                id: result.appPassword.id,
-                displayName: result.appPassword.displayName,
-                createdAt: result.appPassword.createdAt,
-                lastUsedAt: result.appPassword.lastUsedAt,
-            });
+            addCredential(appPasswordMetadata(result.appPassword));
             setDisplayName("");
             setCopied(false);
         } catch (createError) {
             setError(
-                createError instanceof Error
-                    ? createError.message
-                    : "Failed to create app password",
+                errorMessage(createError, "Failed to create app password"),
             );
         } finally {
             setCreating(false);

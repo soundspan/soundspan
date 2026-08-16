@@ -2,14 +2,13 @@ import type { InviteCode, Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { acquireRoleGuardLock } from "../utils/advisoryLocks";
 import { claimInviteCode, recordInviteCodeUsage } from "./inviteCodes";
 import { getOidcProviderId, type OidcClaims } from "./oidcAuth";
 
 const oidcLog = logger.child("OIDCAuth");
 const MAX_USERNAME_ATTEMPTS = 50;
 const MAX_USERNAME_LENGTH = 32;
-// First signed 64 bits of SHA-256("oidc-role-sync").
-const OIDC_ROLE_SYNC_LOCK_KEY = 8_025_773_003_692_380_079n;
 
 /** User fields shared by local and OIDC login success responses. */
 export interface LoginUser {
@@ -60,7 +59,7 @@ function desiredRole(groups: string[]): "admin" | "user" {
 
 async function demoteOidcAdmin(user: LoginUser): Promise<LoginUser> {
     return prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OIDC_ROLE_SYNC_LOCK_KEY})`;
+        await acquireRoleGuardLock(tx);
         const otherAdmins = await tx.user.count({
             where: { role: "admin", id: { not: user.id } },
         });

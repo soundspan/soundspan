@@ -1,6 +1,7 @@
 jest.mock("../../config", () => ({
     config: {
         localLoginEnabled: true,
+        secureCookies: false,
         oidc: {
             enabled: false,
             redirectUri: "",
@@ -31,14 +32,19 @@ jest.mock("../../middleware/auth", () => ({
 jest.mock("../../middleware/rateLimiter", () => ({
     apiLimiter: passThrough,
     authLimiter: passThrough,
+    oidcFlowLimiter: passThrough,
 }));
 
 const prisma = {
     user: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        count: jest.fn(),
         update: jest.fn(),
+        delete: jest.fn(),
     },
+    $executeRaw: jest.fn(),
+    $transaction: jest.fn(),
 };
 jest.mock("../../utils/db", () => ({ prisma }));
 
@@ -75,7 +81,7 @@ jest.mock("../../utils/redisKv", () => ({
 
 import router from "../auth";
 
-type HttpMethod = "get" | "patch";
+type HttpMethod = "get" | "patch" | "delete";
 
 function getHandler(path: string, method: HttpMethod) {
     const layer = (router as any).stack.find(
@@ -106,6 +112,10 @@ describe("admin SSO user contracts", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         bcryptHash.mockResolvedValue("new-hash");
+        prisma.user.count.mockResolvedValue(1);
+        prisma.user.delete.mockResolvedValue({});
+        prisma.$executeRaw.mockResolvedValue(0);
+        prisma.$transaction.mockImplementation(async (run) => run(prisma));
     });
 
     it("summarizes local passwords and linked providers in the user list", async () => {
@@ -199,5 +209,108 @@ describe("admin SSO user contracts", () => {
                 },
             }),
         );
+    });
+
+    it("takes the role guard lock before admin demotion", async () => {
+        const order: string[] = [];
+        prisma.user.findUnique.mockResolvedValue({
+            id: "admin-2",
+            username: "second-admin",
+            email: "admin@example.com",
+            role: "admin",
+        });
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.user.count.mockImplementationOnce(async () => {
+            order.push("count");
+            return 1;
+        });
+        prisma.user.update.mockImplementationOnce(async () => {
+            order.push("update");
+            return {
+                id: "admin-2",
+                username: "second-admin",
+                email: "admin@example.com",
+                role: "user",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            };
+        });
+        const res = createRes();
+
+        await getHandler("/users/:id", "patch")(
+            { params: { id: "admin-2" }, body: { role: "user" } },
+            res,
+        );
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["lock", "count", "update"]);
+        expect(prisma.user.update).toHaveBeenCalledWith(
+            expect.objectContaining({ data: { role: "user" } }),
+        );
+        expect(res.statusCode).toBe(200);
+    });
+
+    it("takes the role guard lock before admin deletion", async () => {
+        const order: string[] = [];
+        prisma.user.findUnique.mockResolvedValue({
+            id: "admin-2",
+            role: "admin",
+        });
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.user.count.mockImplementationOnce(async () => {
+            order.push("count");
+            return 1;
+        });
+        prisma.user.delete.mockImplementationOnce(async () => {
+            order.push("delete");
+            return {};
+        });
+        const res = createRes();
+
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-1" }, params: { id: "admin-2" } },
+            res,
+        );
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["lock", "count", "delete"]);
+        expect(res.body).toEqual({ message: "User deleted successfully" });
+    });
+
+    it("keeps the final admin when deletion or demotion is requested", async () => {
+        prisma.user.findUnique.mockResolvedValue({
+            id: "admin-2",
+            username: "second-admin",
+            email: "admin@example.com",
+            role: "admin",
+        });
+        prisma.user.count.mockResolvedValue(0);
+
+        const demotion = createRes();
+        await getHandler("/users/:id", "patch")(
+            { params: { id: "admin-2" }, body: { role: "user" } },
+            demotion,
+        );
+        expect(demotion.statusCode).toBe(400);
+        expect(demotion.body).toEqual({
+            error: "Cannot demote the last admin",
+        });
+
+        const deletion = createRes();
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-1" }, params: { id: "admin-2" } },
+            deletion,
+        );
+        expect(deletion.statusCode).toBe(400);
+        expect(deletion.body).toEqual({
+            error: "Cannot delete the last admin",
+        });
+        expect(prisma.user.update).not.toHaveBeenCalled();
+        expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 });

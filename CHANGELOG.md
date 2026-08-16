@@ -81,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hardened OIDC and app-password credential mutations with interactive-auth
+  checks, race-safe PostgreSQL advisory locks, secure `__Host-` flow cookies,
+  and complete bounded app-password authentication scans.
 - Discover Weekly now rotates play-weighted seed artists deterministically each
   user-week and decays scores for artists featured in up to three of the prior
   six weeks.

@@ -6,8 +6,9 @@ jest.mock("../../config", () => ({
     config: {
         redisUrl: "redis://localhost:6379",
         localLoginEnabled: true,
+        secureCookies: false,
         oidc: {
-            enabled: false,
+            enabled: true,
             issuerUrl: "",
             clientId: "",
             clientSecret: "",
@@ -70,6 +71,18 @@ const prisma = {
         update: jest.fn(),
         updateMany: jest.fn(),
     },
+    appPassword: {
+        count: jest.fn(),
+        create: jest.fn(),
+        updateMany: jest.fn(),
+    },
+    externalIdentity: {
+        findFirst: jest.fn(),
+        count: jest.fn(),
+        delete: jest.fn(),
+    },
+    $executeRaw: jest.fn(),
+    $transaction: jest.fn(),
 };
 jest.mock("../../utils/db", () => ({ prisma }));
 
@@ -86,6 +99,31 @@ jest.mock("../../utils/logger", () => ({ logger: scopedLogger }));
 jest.mock("../../middleware/rateLimiter", () => ({
     authLimiter: (_req: any, _res: any, next: () => void) => next(),
     apiLimiter: (_req: any, _res: any, next: () => void) => next(),
+    oidcFlowLimiter: (_req: any, _res: any, next: () => void) => next(),
+}));
+
+const buildAuthorizationRequest = jest.fn();
+jest.mock("../../services/oidcAuth", () => ({
+    buildAuthorizationRequest,
+    getOidcProviderId: jest.fn(),
+    handleCallback: jest.fn(),
+}));
+jest.mock("../../services/oidcAccountResolution", () => ({
+    provisionOidcUser: jest.fn(),
+    resolveOidcAccount: jest.fn(),
+    syncOidcRole: jest.fn(),
+}));
+jest.mock("../../services/inviteCodes", () => ({
+    InviteCodeExhaustedError: class extends Error {},
+    InviteCodeValidationError: class extends Error {},
+    claimInviteCode: jest.fn(),
+    loadUsableInviteCode: jest.fn(),
+    recordInviteCodeUsage: jest.fn(),
+}));
+const putOnce = jest.fn();
+jest.mock("../../utils/redisKv", () => ({
+    putOnce,
+    takeOnce: jest.fn(),
 }));
 
 import router from "../auth";
@@ -100,6 +138,13 @@ function createRes() {
         }),
         json: jest.fn((body: unknown) => {
             res.body = body;
+            return res;
+        }),
+        cookie: jest.fn(() => res),
+        clearCookie: jest.fn(() => res),
+        redirect: jest.fn((url: string) => {
+            res.statusCode = 302;
+            res.redirectUrl = url;
             return res;
         }),
     };
@@ -136,6 +181,16 @@ function interactiveRequest(body: Record<string, unknown>): any {
         headers: {},
         session: { userId: "u1" },
         user: { id: "u1", username: "alice", role: "user" },
+        params: { id: "credential1" },
+    };
+}
+
+function bearerRequest(body: Record<string, unknown>): any {
+    return {
+        body,
+        headers: { authorization: "Bearer access-token" },
+        user: { id: "u1", username: "alice", role: "user" },
+        params: { id: "credential1" },
     };
 }
 
@@ -144,6 +199,7 @@ function apiKeyRequest(body: Record<string, unknown>): any {
         body,
         headers: { "x-api-key": "stolen-key" },
         user: { id: "u1", username: "alice", role: "user" },
+        params: { id: "credential1" },
     };
 }
 
@@ -169,6 +225,28 @@ describe("interactive authentication for sensitive credential management", () =>
         });
         prisma.user.update.mockResolvedValue({});
         prisma.user.updateMany.mockResolvedValue({ count: 1 });
+        prisma.appPassword.count.mockResolvedValue(0);
+        prisma.appPassword.create.mockResolvedValue({
+            id: "credential1",
+            displayName: "Phone",
+            createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            lastUsedAt: null,
+        });
+        prisma.appPassword.updateMany.mockResolvedValue({ count: 1 });
+        prisma.externalIdentity.findFirst.mockResolvedValue({
+            id: "credential1",
+        });
+        prisma.externalIdentity.count.mockResolvedValue(2);
+        prisma.externalIdentity.delete.mockResolvedValue({});
+        prisma.$executeRaw.mockResolvedValue(0);
+        prisma.$transaction.mockImplementation(async (run) => run(prisma));
+        buildAuthorizationRequest.mockResolvedValue({
+            redirectUrl: "https://idp.example/authorize",
+            state: "state-1",
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+        });
+        putOnce.mockResolvedValue(true);
     });
 
     test.each([
@@ -211,6 +289,61 @@ describe("interactive authentication for sensitive credential management", () =>
             expect(prisma.user.update).not.toHaveBeenCalled();
         },
     );
+
+    test.each([
+        ["post", "/oidc/link/start", { responseMode: "json" }],
+        ["post", "/app-passwords", { displayName: "Phone" }],
+        ["delete", "/app-passwords/:id", {}],
+        ["delete", "/identities/:id", {}],
+    ] as const)(
+        "rejects API-key authentication on %s %s",
+        async (method, path, body) => {
+            const res = createRes();
+
+            await executeRoute(path, apiKeyRequest(body), res, method);
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body).toEqual({
+                error: "Interactive session authentication required",
+            });
+        },
+    );
+
+    it("allows bearer authentication on OIDC and app-password mutations", async () => {
+        const link = createRes();
+        await executeRoute(
+            "/oidc/link/start",
+            bearerRequest({ responseMode: "json" }),
+            link,
+        );
+        expect(link.statusCode).toBe(200);
+
+        const create = createRes();
+        await executeRoute(
+            "/app-passwords",
+            bearerRequest({ displayName: "Phone" }),
+            create,
+        );
+        expect(create.statusCode).toBe(201);
+
+        const revoke = createRes();
+        await executeRoute(
+            "/app-passwords/:id",
+            bearerRequest({}),
+            revoke,
+            "delete",
+        );
+        expect(revoke.statusCode).toBe(200);
+
+        const unlink = createRes();
+        await executeRoute(
+            "/identities/:id",
+            bearerRequest({}),
+            unlink,
+            "delete",
+        );
+        expect(unlink.statusCode).toBe(200);
+    });
 
     it("allows an interactive session to create a Subsonic credential", async () => {
         const res = createRes();

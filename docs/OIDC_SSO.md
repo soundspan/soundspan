@@ -10,6 +10,8 @@ https://<host>/api/auth/oidc/callback
 
 The value must be public and must match `OIDC_REDIRECT_URI` exactly. See [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) before you enable OIDC behind a proxy or tunnel.
 
+OIDC requires the web app and API to be served same-site. Use a standard reverse-proxy layout from [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) or same-host direct mode. Cross-site direct deployments with a separate API hostname are not supported because the flow-binding cookie is `SameSite=Lax` and callback redirects are same-origin relative paths.
+
 ## Basic soundspan configuration
 
 Start with local login enabled:
@@ -143,6 +145,8 @@ See [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) for the com
 The IdP owns MFA for SSO logins. soundspan does not request local TOTP after a successful OIDC login.
 
 Local TOTP still applies to local password login. It also applies when an email-hinted account link requires local credential confirmation.
+
+Secure deployments use the `__Host-soundspan_oidc_flow` flow-binding cookie. Insecure HTTP deployments use the unprefixed `soundspan_oidc_flow` name because browsers reject `__Host-` cookies without the `Secure` attribute.
 
 ## Break-glass recovery
 

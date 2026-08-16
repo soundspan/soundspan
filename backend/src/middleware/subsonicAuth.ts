@@ -6,10 +6,7 @@ import { runDummyBcrypt } from "../utils/dummyCredential";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { prisma } from "../utils/db";
 import { decrypt } from "../utils/encryption";
-import {
-    APP_PASSWORD_SECRET_PREFIX,
-    MAX_ACTIVE_APP_PASSWORDS,
-} from "../utils/appPasswords";
+import { APP_PASSWORD_SECRET_PREFIX } from "../utils/appPasswords";
 import { findApiKeyRecord, isApiKeyExpired } from "../utils/apiKeyHash";
 import { logger } from "../utils/logger";
 import {
@@ -54,7 +51,6 @@ async function loadActiveAppPasswords(
         where: { userId, revokedAt: null },
         select: { id: true, encryptedSecret: true },
         orderBy: { createdAt: "desc" },
-        take: MAX_ACTIVE_APP_PASSWORDS,
     });
 }
 
@@ -81,9 +77,7 @@ function matchAppPasswordToken(
     salt: string,
 ): string | null {
     let matchingId: string | null = null;
-    for (let index = 0; index < MAX_ACTIVE_APP_PASSWORDS; index += 1) {
-        const appPassword = appPasswords[index];
-        if (!appPassword) break;
+    for (const appPassword of appPasswords) {
         const secret = decryptAppPasswordSecret(appPassword);
         if (!secret?.startsWith(APP_PASSWORD_SECRET_PREFIX)) continue;
         const expected = createHash("md5")
@@ -101,9 +95,7 @@ function matchPlainAppPassword(
     providedSecret: string,
 ): string | null {
     let matchingId: string | null = null;
-    for (let index = 0; index < MAX_ACTIVE_APP_PASSWORDS; index += 1) {
-        const appPassword = appPasswords[index];
-        if (!appPassword) break;
+    for (const appPassword of appPasswords) {
         const secret = decryptAppPasswordSecret(appPassword);
         if (secret && timingSafeCompare(secret, providedSecret)) {
             matchingId ??= appPassword.id;
@@ -190,12 +182,14 @@ async function authenticatePasswordCredential(
         const appPasswords =
             loadedAppPasswords ?? (await loadActiveAppPasswords(user.id));
         const appPasswordId = matchPlainAppPassword(appPasswords, decoded);
-        if (appPasswordId) touchAppPassword(appPasswordId);
-        return {
-            authenticated: appPasswordId !== null,
-            bcryptWorkPerformed: false,
-            invalidEncoding: false,
-        };
+        if (appPasswordId) {
+            touchAppPassword(appPasswordId);
+            return {
+                authenticated: true,
+                bcryptWorkPerformed: false,
+                invalidEncoding: false,
+            };
+        }
     }
     if (user.passwordHash) {
         return {
@@ -316,7 +310,10 @@ function touchApiKey(apiKeyId: string): void {
             data: { lastUsed: new Date() },
         })
         .catch((error: unknown) => {
-            logger.debug("Failed to update API key lastUsed (subsonic)", error);
+            subsonicAuthLog.debug(
+                "Failed to update API key lastUsed (subsonic)",
+                error,
+            );
         });
 }
 

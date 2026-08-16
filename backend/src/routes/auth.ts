@@ -57,6 +57,11 @@ import {
 } from "../services/inviteCodes";
 import { putOnce, takeOnce } from "../utils/redisKv";
 import { sendRouteError } from "./routeErrorResponse";
+import {
+    acquireRoleGuardLock,
+    acquireUserScopedLock,
+    USER_LOCK_NAMESPACES,
+} from "../utils/advisoryLocks";
 
 async function verifyTotpToken(
     secret: string,
@@ -231,7 +236,7 @@ function sendLoginSuccess(res: Response, user: LoginUser): Response {
 
 const OIDC_PENDING_TTL_SECONDS = 600;
 const OIDC_EXCHANGE_TTL_SECONDS = 60;
-const OIDC_FLOW_COOKIE_NAME = "soundspan_oidc_flow";
+const OIDC_FLOW_COOKIE_BASE_NAME = "soundspan_oidc_flow";
 const MAX_COOKIE_HEADER_LENGTH = 4096;
 const MAX_COOKIE_COUNT = 64;
 const oidcLog = logger.child("OIDCAuth");
@@ -295,7 +300,13 @@ const redeemInviteBodySchema = z.object({
     inviteCode: z.string().min(1),
 });
 const resourceIdParamsSchema = z
-    .object({ id: z.string().min(1).max(64).regex(/^[a-z0-9]+$/) })
+    .object({
+        id: z
+            .string()
+            .min(1)
+            .max(64)
+            .regex(/^[a-z0-9]+$/),
+    })
     .strict();
 const callbackQuerySchema = z
     .object({
@@ -337,15 +348,21 @@ function flowCookieOptions(): CookieOptions {
     };
 }
 
+function flowCookieName(): string {
+    return config.secureCookies
+        ? `__Host-${OIDC_FLOW_COOKIE_BASE_NAME}`
+        : OIDC_FLOW_COOKIE_BASE_NAME;
+}
+
 function setFlowBindingCookie(res: Response, binding: string): void {
-    res.cookie(OIDC_FLOW_COOKIE_NAME, binding, {
+    res.cookie(flowCookieName(), binding, {
         ...flowCookieOptions(),
         maxAge: OIDC_PENDING_TTL_SECONDS * 1000,
     });
 }
 
 function clearFlowBindingCookie(res: Response): void {
-    res.clearCookie(OIDC_FLOW_COOKIE_NAME, flowCookieOptions());
+    res.clearCookie(flowCookieName(), flowCookieOptions());
 }
 
 function readFlowBindingCookie(req: Request): string | null {
@@ -354,7 +371,7 @@ function readFlowBindingCookie(req: Request): string | null {
     const cookies = header.split(";").slice(0, MAX_COOKIE_COUNT);
     for (const cookie of cookies) {
         const [name, value] = cookie.trim().split("=", 2);
-        if (name === OIDC_FLOW_COOKIE_NAME && value) return value;
+        if (name === flowCookieName() && value) return value;
     }
     return null;
 }
@@ -654,37 +671,65 @@ async function createAppPasswordHandler(
         );
     }
     try {
-        const activeCount = await prisma.appPassword.count({
-            where: { userId: req.user!.id, revokedAt: null },
-        });
-        if (activeCount >= MAX_ACTIVE_APP_PASSWORDS) {
+        const result = await prisma.$transaction((tx) =>
+            createAppPasswordInTransaction(
+                tx,
+                req.user!.id,
+                parsed.data.displayName,
+            ),
+        );
+        if (result.kind === "capReached") {
             return sendRouteError(
                 res,
                 400,
                 `A maximum of ${MAX_ACTIVE_APP_PASSWORDS} active app passwords is allowed`,
             );
         }
-        const secret = generateAppPasswordSecret();
-        const appPassword = await prisma.appPassword.create({
-            data: {
-                userId: req.user!.id,
-                displayName: parsed.data.displayName,
-                encryptedSecret: encrypt(secret),
-            },
-            select: {
-                id: true,
-                displayName: true,
-                createdAt: true,
-                lastUsedAt: true,
-            },
-        });
-        return res
-            .status(201)
-            .json({ appPassword: { ...appPassword, secret } });
+        return res.status(201).json({ appPassword: result.appPassword });
     } catch (error) {
         credentialLog.error("Create app password failed", { error });
         return sendRouteError(res, 500, "Failed to create app password");
     }
+}
+
+type AppPasswordCreationResult =
+    | { kind: "capReached" }
+    | {
+          kind: "created";
+          appPassword: {
+              id: string;
+              displayName: string;
+              createdAt: Date;
+              lastUsedAt: Date | null;
+              secret: string;
+          };
+      };
+
+async function createAppPasswordInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    displayName: string,
+): Promise<AppPasswordCreationResult> {
+    await acquireUserScopedLock(
+        tx,
+        USER_LOCK_NAMESPACES.appPasswordCreate,
+        userId,
+    );
+    const activeCount = await tx.appPassword.count({
+        where: { userId, revokedAt: null },
+    });
+    if (activeCount >= MAX_ACTIVE_APP_PASSWORDS) return { kind: "capReached" };
+    const secret = generateAppPasswordSecret();
+    const appPassword = await tx.appPassword.create({
+        data: { userId, displayName, encryptedSecret: encrypt(secret) },
+        select: {
+            id: true,
+            displayName: true,
+            createdAt: true,
+            lastUsedAt: true,
+        },
+    });
+    return { kind: "created", appPassword: { ...appPassword, secret } };
 }
 
 async function revokeAppPasswordHandler(
@@ -716,17 +761,16 @@ async function revokeAppPasswordHandler(
 
 type UnlinkIdentityResult = "notFound" | "lastCredential" | "unlinked";
 
-function userAdvisoryLockKey(userId: string): bigint {
-    return crypto.createHash("sha256").update(userId).digest().readBigInt64BE(0);
-}
-
 async function unlinkIdentityInTransaction(
     tx: Prisma.TransactionClient,
     userId: string,
     identityId: string,
 ): Promise<UnlinkIdentityResult> {
-    const lockKey = userAdvisoryLockKey(userId);
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+    await acquireUserScopedLock(
+        tx,
+        USER_LOCK_NAMESPACES.identityUnlink,
+        userId,
+    );
     const identity = await tx.externalIdentity.findFirst({
         where: { id: identityId, userId },
         select: { id: true },
@@ -892,6 +936,7 @@ async function oidcConfirmLinkHandler(
         linkEntrySchema,
     );
     if (!entry || !hasMatchingFlowBinding(req, entry.bindingHash)) {
+        await runDummyBcrypt();
         return sendRouteError(res, 401, "Invalid or expired link");
     }
     try {
@@ -1054,7 +1099,6 @@ router.get("/oidc/login", oidcFlowLimiter, oidcLoginHandler);
  *     security:
  *       - sessionAuth: []
  *       - bearerAuth: []
- *       - apiKeyAuth: []
  *     requestBody:
  *       required: false
  *       content:
@@ -1074,10 +1118,18 @@ router.get("/oidc/login", oidcFlowLimiter, oidcLoginHandler);
  *         description: Invalid request
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  *       404:
  *         description: OIDC is disabled
  */
-router.post("/oidc/link/start", authLimiter, requireAuth, oidcLinkStartHandler);
+router.post(
+    "/oidc/link/start",
+    authLimiter,
+    requireAuth,
+    requireInteractiveSession,
+    oidcLinkStartHandler,
+);
 
 /**
  * @openapi
@@ -1168,7 +1220,6 @@ router.get("/app-passwords", apiLimiter, requireAuth, listAppPasswordsHandler);
  *     security:
  *       - sessionAuth: []
  *       - bearerAuth: []
- *       - apiKeyAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1188,11 +1239,14 @@ router.get("/app-passwords", apiLimiter, requireAuth, listAppPasswordsHandler);
  *         description: Invalid request or active app-password cap reached
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  */
 router.post(
     "/app-passwords",
     authLimiter,
     requireAuth,
+    requireInteractiveSession,
     createAppPasswordHandler,
 );
 
@@ -1205,7 +1259,6 @@ router.post(
  *     security:
  *       - sessionAuth: []
  *       - bearerAuth: []
- *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1217,6 +1270,8 @@ router.post(
  *         description: App password revoked
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  *       404:
  *         description: App password not found
  */
@@ -1224,6 +1279,7 @@ router.delete(
     "/app-passwords/:id",
     authLimiter,
     requireAuth,
+    requireInteractiveSession,
     revokeAppPasswordHandler,
 );
 
@@ -1254,7 +1310,6 @@ router.get("/identities", apiLimiter, requireAuth, listIdentitiesHandler);
  *     security:
  *       - sessionAuth: []
  *       - bearerAuth: []
- *       - apiKeyAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1268,6 +1323,8 @@ router.get("/identities", apiLimiter, requireAuth, listIdentitiesHandler);
  *         description: Unlink would leave the account without a sign-in method
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Interactive session authentication required
  *       404:
  *         description: Identity not found
  */
@@ -1275,6 +1332,7 @@ router.delete(
     "/identities/:id",
     authLimiter,
     requireAuth,
+    requireInteractiveSession,
     unlinkIdentityHandler,
 );
 
@@ -1736,6 +1794,99 @@ router.get(
     },
 );
 
+const adminUserUpdateSchema = z.object({
+    username: z
+        .string()
+        .min(3)
+        .max(32)
+        .regex(
+            /^[a-zA-Z0-9_]+$/,
+            "Username must be alphanumeric (underscores allowed)",
+        )
+        .optional(),
+    email: z.string().email().optional().nullable(),
+    password: z.string().min(6).max(128).optional(),
+    role: z.enum(["user", "admin"]).optional(),
+});
+
+type AdminUserUpdateData = {
+    username?: string;
+    email?: string | null;
+    passwordHash?: string;
+    tokenVersion?: { increment: number };
+    subsonicPassword?: null;
+    role?: "user" | "admin";
+};
+
+const adminUserSelect = {
+    id: true,
+    username: true,
+    email: true,
+    role: true,
+    createdAt: true,
+} as const;
+
+type GuardedUserUpdateResult =
+    | { kind: "lastAdmin" }
+    | { kind: "notFound" }
+    | { kind: "updated"; user: unknown };
+
+async function buildAdminUserUpdateData(
+    data: z.infer<typeof adminUserUpdateSchema>,
+): Promise<AdminUserUpdateData> {
+    const updateData: AdminUserUpdateData = {};
+    if (data.username) updateData.username = data.username;
+    if (data.email !== undefined) updateData.email = data.email;
+    if (data.role) updateData.role = data.role;
+    if (data.password) {
+        updateData.passwordHash = await bcrypt.hash(data.password, 10);
+        updateData.tokenVersion = { increment: 1 };
+        updateData.subsonicPassword = null;
+    }
+    return updateData;
+}
+
+async function updateUserWithRoleGuard(
+    userId: string,
+    updateData: AdminUserUpdateData,
+): Promise<GuardedUserUpdateResult> {
+    return prisma.$transaction(async (tx) => {
+        await acquireRoleGuardLock(tx);
+        const target = await tx.user.findUnique({
+            where: { id: userId },
+            select: { role: true },
+        });
+        if (!target) return { kind: "notFound" };
+        if (target.role === "admin") {
+            const otherAdmins = await tx.user.count({
+                where: { role: "admin", id: { not: userId } },
+            });
+            if (otherAdmins === 0) return { kind: "lastAdmin" };
+        }
+        const user = await tx.user.update({
+            where: { id: userId },
+            data: updateData,
+            select: adminUserSelect,
+        });
+        return { kind: "updated", user };
+    });
+}
+
+async function persistAdminUserUpdate(
+    userId: string,
+    updateData: AdminUserUpdateData,
+): Promise<GuardedUserUpdateResult> {
+    if (updateData.role === "user") {
+        return updateUserWithRoleGuard(userId, updateData);
+    }
+    const user = await prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: adminUserSelect,
+    });
+    return { kind: "updated", user };
+}
+
 /**
  * @openapi
  * /api/auth/create-user:
@@ -1849,7 +2000,7 @@ router.post(
  * @openapi
  * /api/auth/users/{id}:
  *   patch:
- *     summary: Update a user's username, email, or password (admin only)
+ *     summary: Update a user's username, email, password, or role (admin only)
  *     tags: [Authentication]
  *     security:
  *       - sessionAuth: []
@@ -1876,6 +2027,9 @@ router.post(
  *               password:
  *                 type: string
  *                 format: password
+ *               role:
+ *                 type: string
+ *                 enum: [user, admin]
  *     responses:
  *       200:
  *         description: User updated successfully
@@ -1897,21 +2051,7 @@ router.patch<{ id: string }>(
     async (req, res) => {
         try {
             const { id } = req.params;
-            const updateSchema = z.object({
-                username: z
-                    .string()
-                    .min(3)
-                    .max(32)
-                    .regex(
-                        /^[a-zA-Z0-9_]+$/,
-                        "Username must be alphanumeric (underscores allowed)",
-                    )
-                    .optional(),
-                email: z.string().email().optional().nullable(),
-                password: z.string().min(6).max(128).optional(),
-            });
-
-            const data = updateSchema.parse(req.body);
+            const data = adminUserUpdateSchema.parse(req.body);
 
             // Check the target user exists
             const targetUser = await prisma.user.findUnique({ where: { id } });
@@ -1943,33 +2083,20 @@ router.patch<{ id: string }>(
                 }
             }
 
-            // Build update payload
-            const updateData: Record<string, unknown> = {};
-            if (data.username) updateData.username = data.username;
-            if (data.email !== undefined) updateData.email = data.email;
-            if (data.password) {
-                updateData.passwordHash = await bcrypt.hash(data.password, 10);
-                updateData.tokenVersion = { increment: 1 };
-                updateData.subsonicPassword = null;
-            }
-
+            const updateData = await buildAdminUserUpdateData(data);
             if (Object.keys(updateData).length === 0) {
                 return res.status(400).json({ error: "No fields to update" });
             }
-
-            const updated = await prisma.user.update({
-                where: { id },
-                data: updateData,
-                select: {
-                    id: true,
-                    username: true,
-                    email: true,
-                    role: true,
-                    createdAt: true,
-                },
-            });
-
-            res.json(updated);
+            const result = await persistAdminUserUpdate(id, updateData);
+            if (result.kind === "notFound") {
+                return res.status(404).json({ error: "User not found" });
+            }
+            if (result.kind === "lastAdmin") {
+                return res
+                    .status(400)
+                    .json({ error: "Cannot demote the last admin" });
+            }
+            return res.json(result.user);
         } catch (err) {
             if (err instanceof z.ZodError) {
                 const firstError = err.issues[0];
@@ -1983,6 +2110,29 @@ router.patch<{ id: string }>(
         }
     },
 );
+
+type DeleteUserResult = "deleted" | "lastAdmin" | "notFound";
+
+async function deleteUserWithRoleGuard(
+    userId: string,
+): Promise<DeleteUserResult> {
+    return prisma.$transaction(async (tx) => {
+        await acquireRoleGuardLock(tx);
+        const target = await tx.user.findUnique({
+            where: { id: userId },
+            select: { role: true },
+        });
+        if (!target) return "notFound";
+        if (target.role === "admin") {
+            const otherAdmins = await tx.user.count({
+                where: { role: "admin", id: { not: userId } },
+            });
+            if (otherAdmins === 0) return "lastAdmin";
+        }
+        await tx.user.delete({ where: { id: userId } });
+        return "deleted";
+    });
+}
 
 /**
  * @openapi
@@ -2029,18 +2179,23 @@ router.delete<{ id: string }>(
                     .json({ error: "Cannot delete your own account" });
             }
 
-            // Delete user (cascade will handle related data)
-            await prisma.user.delete({
-                where: { id },
-            });
-
-            res.json({ message: "User deleted successfully" });
-        } catch (error: any) {
-            logger.error("Delete user error:", error);
-            if (error.code === "P2025") {
+            const result = await deleteUserWithRoleGuard(id);
+            if (result === "notFound") {
                 return res.status(404).json({ error: "User not found" });
             }
-            res.status(500).json({ error: "Failed to delete user" });
+            if (result === "lastAdmin") {
+                return res
+                    .status(400)
+                    .json({ error: "Cannot delete the last admin" });
+            }
+
+            return res.json({ message: "User deleted successfully" });
+        } catch (error: unknown) {
+            logger.error("Delete user error:", error);
+            if (hasErrorCode(error, "P2025")) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            return res.status(500).json({ error: "Failed to delete user" });
         }
     },
 );

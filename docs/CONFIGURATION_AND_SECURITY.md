@@ -99,6 +99,8 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 
 soundspan uses the OIDC Authorization Code flow with `state`, `nonce`, and S256 PKCE. Login and account-link attempts keep their pending state on the server. The callback sends the browser a short-lived, single-use exchange code. It never puts access or refresh tokens in a redirect URL.
 
+OIDC requires the web app and API to be served same-site through a documented reverse-proxy layout or same-host direct mode. Cross-site direct deployments with a separate API hostname are not supported because the flow-binding cookie is `SameSite=Lax` and callback redirects are same-origin relative paths.
+
 OpenSubsonic app passwords are restricted to `/rest`. Their `ssap_` secrets are encrypted at rest with authenticated encryption under `SETTINGS_ENCRYPTION_KEY`. Users can revoke each app password independently.
 
 See [`OIDC_SSO.md`](OIDC_SSO.md) for provider setup, account linking, provisioning, role ownership, app passwords, MFA, and break-glass recovery.

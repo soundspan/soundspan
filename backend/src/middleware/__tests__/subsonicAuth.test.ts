@@ -334,7 +334,6 @@ describe("requireSubsonicAuth", () => {
             where: { userId: "u1", revokedAt: null },
             select: { id: true, encryptedSecret: true },
             orderBy: { createdAt: "desc" },
-            take: 20,
         });
         expect(mockAppPasswordUpdate).toHaveBeenCalledWith({
             where: { id: "app-1" },
@@ -558,6 +557,76 @@ describe("requireSubsonicAuth", () => {
             where: { id: "app-1" },
             data: { lastUsedAt: expect.any(Date) },
         });
+        expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls through to the local password when an ssap_ value is not an app password", async () => {
+        const localPassword = "ssap_this-is-a-real-local-password";
+        mockFindUnique.mockResolvedValue({
+            id: "u1",
+            username: "alice",
+            role: "user",
+            passwordHash: "local-hash",
+            subsonicPassword: null,
+        });
+        mockAppPasswordFindMany.mockResolvedValue([
+            { id: "app-1", encryptedSecret: "app-cipher" },
+        ]);
+        mockDecrypt.mockReturnValue("ssap_0123456789abcdefghijklmnopqrstuv");
+        mockCompare.mockResolvedValue(true);
+
+        await requireSubsonicAuth(
+            buildReq({
+                u: "alice",
+                v: "1.16.1",
+                c: "client",
+                p: localPassword,
+            }),
+            buildRes(),
+            next,
+        );
+
+        expect(mockCompare).toHaveBeenCalledWith(localPassword, "local-hash");
+        expect(mockAppPasswordUpdate).not.toHaveBeenCalled();
+        expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it("checks an active app password beyond position twenty", async () => {
+        const matchingSecret = "ssap_credential-beyond-position-twenty";
+        const appPasswords = Array.from({ length: 21 }, (_, index) => ({
+            id: `app-${index + 1}`,
+            encryptedSecret: `cipher-${index + 1}`,
+        }));
+        mockFindUnique.mockResolvedValue({
+            id: "u1",
+            username: "alice",
+            role: "user",
+            passwordHash: "local-hash",
+            subsonicPassword: null,
+        });
+        mockAppPasswordFindMany.mockResolvedValue(appPasswords);
+        mockDecrypt.mockImplementation((ciphertext: string) =>
+            ciphertext === "cipher-21"
+                ? matchingSecret
+                : `ssap_non-match-${ciphertext}`,
+        );
+
+        await requireSubsonicAuth(
+            buildReq({
+                u: "alice",
+                v: "1.16.1",
+                c: "client",
+                p: matchingSecret,
+            }),
+            buildRes(),
+            next,
+        );
+
+        expect(mockAppPasswordUpdate).toHaveBeenCalledWith({
+            where: { id: "app-21" },
+            data: { lastUsedAt: expect.any(Date) },
+        });
+        expect(mockCompare).not.toHaveBeenCalled();
         expect(next).toHaveBeenCalledTimes(1);
     });
 

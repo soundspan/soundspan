@@ -51,13 +51,12 @@ const generateRefreshToken = jest.fn(() => "jwt-refresh");
 const requireAuth = jest.fn((_req: unknown, _res: unknown, next: () => void) =>
     next(),
 );
+const requireInteractiveSession = jest.fn(
+    (_req: unknown, _res: unknown, next: () => void) => next(),
+);
 jest.mock("../../middleware/auth", () => ({
     requireAuth,
-    requireInteractiveSession: (
-        _req: unknown,
-        _res: unknown,
-        next: () => void,
-    ) => next(),
+    requireInteractiveSession,
     requireAdmin: (_req: unknown, _res: unknown, next: () => void) => next(),
     generateToken,
     generateRefreshToken,
@@ -254,6 +253,7 @@ describe("OIDC auth routes", () => {
         jest.clearAllMocks();
         values.clear();
         mockConfig.localLoginEnabled = true;
+        mockConfig.secureCookies = false;
         mockConfig.oidc.enabled = true;
         buildAuthorizationRequest.mockResolvedValue({
             redirectUrl:
@@ -331,9 +331,9 @@ describe("OIDC auth routes", () => {
         expect(getLayer("/oidc/login", "get").route.stack[0].handle).toBe(
             oidcFlowLimiter,
         );
-        expect(getLayer("/oidc/callback", "get").route.stack[0].handle).not.toBe(
-            authLimiter,
-        );
+        expect(
+            getLayer("/oidc/callback", "get").route.stack[0].handle,
+        ).not.toBe(authLimiter);
     });
 
     it("strips callback query data only while the flow limiter runs", async () => {
@@ -357,10 +357,10 @@ describe("OIDC auth routes", () => {
         );
     });
 
-    it("protects the manual link start route with requireAuth", () => {
-        expect(getLayer("/oidc/link/start", "post").route.stack[1].handle).toBe(
-            requireAuth,
-        );
+    it("protects the manual link start route with interactive authentication", () => {
+        const stack = getLayer("/oidc/link/start", "post").route.stack;
+        expect(stack[1].handle).toBe(requireAuth);
+        expect(stack[2].handle).toBe(requireInteractiveSession);
     });
 
     it.each([
@@ -375,6 +375,18 @@ describe("OIDC auth routes", () => {
             const stack = getLayer(path, method).route.stack;
             expect(stack[0].handle).toBe(limiter);
             expect(stack[1].handle).toBe(requireAuth);
+        },
+    );
+
+    it.each([
+        ["post", "/app-passwords"],
+        ["delete", "/app-passwords/:id"],
+        ["delete", "/identities/:id"],
+    ] as const)(
+        "requires interactive authentication on %s %s",
+        (method, path) => {
+            const stack = getLayer(path, method).route.stack;
+            expect(stack[2].handle).toBe(requireInteractiveSession);
         },
     );
 
@@ -409,6 +421,43 @@ describe("OIDC auth routes", () => {
         expect(res.redirectUrl).toContain("state=state-1");
         expect(res.redirectUrl).toContain("nonce=nonce-1");
         expect(res.redirectUrl).toContain("code_challenge=");
+    });
+
+    it("uses a __Host- flow cookie on secure deployments", async () => {
+        mockConfig.secureCookies = true;
+        const loginRes = createRes();
+
+        await getHandler("/oidc/login", "get")(
+            { query: { returnTo: "/" } },
+            loginRes,
+        );
+
+        expect(loginRes.cookie).toHaveBeenCalledWith(
+            "__Host-soundspan_oidc_flow",
+            expect.any(String),
+            expect.objectContaining({ secure: true, path: "/" }),
+        );
+
+        values.set("oidc:exchange:secure-exchange", {
+            userId: "u1",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        const exchangeRes = createRes();
+        await getHandler("/oidc/exchange", "post")(
+            {
+                body: { code: "secure-exchange" },
+                headers: {
+                    cookie: `__Host-soundspan_oidc_flow=${FLOW_BINDING}`,
+                },
+            },
+            exchangeRes,
+        );
+
+        expect(exchangeRes.statusCode).toBe(200);
+        expect(exchangeRes.clearCookie).toHaveBeenCalledWith(
+            "__Host-soundspan_oidc_flow",
+            expect.objectContaining({ secure: true, path: "/" }),
+        );
     });
 
     it.each(["//evil.test", "https://evil.test", "\\evil", "/\\evil"])(
@@ -514,15 +563,12 @@ describe("OIDC auth routes", () => {
                 role: "user",
             },
         });
-        expect(first.clearCookie).toHaveBeenCalledWith(
-            "soundspan_oidc_flow",
-            {
-                httpOnly: true,
-                sameSite: "lax",
-                secure: false,
-                path: "/",
-            },
-        );
+        expect(first.clearCookie).toHaveBeenCalledWith("soundspan_oidc_flow", {
+            httpOnly: true,
+            sameSite: "lax",
+            secure: false,
+            path: "/",
+        });
 
         const replay = createRes();
         await exchange(
@@ -842,6 +888,37 @@ describe("OIDC auth routes", () => {
         expect(JSON.stringify(listed.body)).not.toContain("secret");
     });
 
+    it("serializes app-password count and creation inside the transaction", async () => {
+        const order: string[] = [];
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.appPassword.count.mockImplementationOnce(async () => {
+            order.push("count");
+            return 0;
+        });
+        prisma.appPassword.create.mockImplementationOnce(async () => {
+            order.push("create");
+            return {
+                id: "app-1",
+                displayName: "Phone",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                lastUsedAt: null,
+            };
+        });
+        const res = createRes();
+
+        await getHandler("/app-passwords", "post")(
+            { user: { id: "u1" }, body: { displayName: "Phone" } },
+            res,
+        );
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(order).toEqual(["lock", "count", "create"]);
+        expect(res.statusCode).toBe(201);
+    });
+
     it("caps active app passwords at twenty and soft-revokes owned credentials", async () => {
         prisma.appPassword.count.mockResolvedValueOnce(20);
         const capped = createRes();
@@ -997,9 +1074,27 @@ describe("OIDC auth routes", () => {
     });
 
     it.each([
-        ["exchange", "/oidc/exchange", "code", "exchange-token", "Invalid or expired OIDC code"],
-        ["link", "/oidc/confirm-link", "linkToken", "link-token-value", "Invalid or expired link"],
-        ["invite", "/oidc/redeem-invite", "inviteToken", "invite-token-value", "Invalid or expired invite"],
+        [
+            "exchange",
+            "/oidc/exchange",
+            "code",
+            "exchange-token",
+            "Invalid or expired OIDC code",
+        ],
+        [
+            "link",
+            "/oidc/confirm-link",
+            "linkToken",
+            "link-token-value",
+            "Invalid or expired link",
+        ],
+        [
+            "invite",
+            "/oidc/redeem-invite",
+            "inviteToken",
+            "invite-token-value",
+            "Invalid or expired invite",
+        ],
     ] as const)(
         "rejects missing and mismatched binding cookies for %s tokens",
         async (prefix, path, field, token, error) => {
@@ -1078,6 +1173,25 @@ describe("OIDC auth routes", () => {
         );
         expect(nullPassword.statusCode).toBe(401);
         expect(bcryptCompare).toHaveBeenCalledTimes(1);
+        expect(runDummyBcrypt).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs dummy bcrypt work for a missing link token", async () => {
+        const res = createRes();
+
+        await getHandler("/oidc/confirm-link", "post")(
+            {
+                body: {
+                    linkToken: "missing-link-token",
+                    password: "password",
+                },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({ error: "Invalid or expired link" });
         expect(runDummyBcrypt).toHaveBeenCalledTimes(1);
     });
 
