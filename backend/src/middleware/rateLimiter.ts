@@ -35,9 +35,7 @@ export const apiLimiter = rateLimit({
             // Podcast streaming: /api/podcasts/:podcastId/episodes/:episodeId/stream
             (path.startsWith("/api/podcasts/") && path.endsWith("/stream")) ||
             // Soulseek search polling: /api/soulseek/search/:searchId (no /status suffix)
-            /^\/api\/soulseek\/search\/[a-f0-9-]+$/.test(path) ||
-            // Spotify import status: /api/spotify/import/:jobId/status
-            /^\/api\/spotify\/import\/[a-zA-Z0-9_-]+\/status$/.test(path)
+            /^\/api\/soulseek\/search\/[a-f0-9-]+$/.test(path)
         );
     },
     ...trustProxyValidation,

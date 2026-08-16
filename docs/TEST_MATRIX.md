@@ -88,7 +88,6 @@ awm health --project soundspan --include-details
 | Settings | `settingsDisplayNameCompat.test.ts` | `settings.ts` |
 | Social | `socialCompat.test.ts` | `social.ts` |
 | Soulseek | `soulseekRuntime.test.ts` | `soulseek.ts` |
-| Spotify | `spotifyRuntime.test.ts` | `spotify.ts` |
 | Streaming | `streamingRuntime.test.ts` | `streaming.ts` |
 | Subsonic | `subsonicCoreCompat.test.ts`, `subsonicBrowseCompat.test.ts`, `subsonicCollectionsCompat.test.ts`, `subsonicEntityCompat.test.ts`, `subsonicLegacyCompat.test.ts`, `subsonicMediaCompat.test.ts`, `subsonicMetadataCompat.test.ts`, `subsonicProfileCompat.test.ts`, `subsonicRuntimeFocused.test.ts`, `subsonicStateCompat.test.ts`, `subsonicStreamCoverArtHandlers.test.ts`, `subsonicTierB.test.ts` | `subsonic.ts` |
 | System | `systemRuntime.test.ts` | `system.ts` |

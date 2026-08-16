@@ -258,6 +258,7 @@ describe("systemSettings runtime routes", () => {
             lastfmApiKey: "lastfm-api",
             audiobookshelfApiKey: "abs-api",
             soulseekPassword: "slsk-pass",
+            spotifyClientId: "spotify-client",
             spotifyClientSecret: "spotify-secret",
             tidalAccessToken: "tidal-access",
             tidalRefreshToken: "tidal-refresh",
@@ -351,6 +352,16 @@ describe("systemSettings runtime routes", () => {
         expect(res.body.tidalConnected).toBe(true);
     });
 
+    it("never returns stored Spotify credential fields", async () => {
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+        await getSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).not.toHaveProperty("spotifyClientId");
+        expect(res.body).not.toHaveProperty("spotifyClientSecret");
+    });
+
     it("reports tidalConnected=false when stored tokens are missing", async () => {
         mockSystemSettingsFindUnique.mockResolvedValueOnce({
             id: "default",
@@ -381,7 +392,6 @@ describe("systemSettings runtime routes", () => {
                 lastfmApiKey: "",
                 audiobookshelfApiKey: "",
                 soulseekPassword: "",
-                spotifyClientSecret: "",
                 ytMusicClientSecret: "",
                 transcodeCacheMaxGb: 12,
             },
@@ -400,7 +410,6 @@ describe("systemSettings runtime routes", () => {
             "lastfmApiKey",
             "audiobookshelfApiKey",
             "soulseekPassword",
-            "spotifyClientSecret",
             "ytMusicClientSecret",
         ]) {
             expect(upsertArg.update).not.toHaveProperty(field);
@@ -574,6 +583,26 @@ describe("systemSettings runtime routes", () => {
         expect(upsertArg.update.tidalCountryCode).toBe("US");
     });
 
+    it("strips obsolete Spotify credential fields from settings updates", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                spotifyClientId: "obsolete-client",
+                spotifyClientSecret: "obsolete-secret",
+                showVersion: true,
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const upsertArg = mockSystemSettingsUpsert.mock.calls[0][0];
+        expect(upsertArg.update).not.toHaveProperty("spotifyClientId");
+        expect(upsertArg.update).not.toHaveProperty("spotifyClientSecret");
+        expect(upsertArg.update.showVersion).toBe(true);
+    });
+
     it("creates defaults when settings do not exist", async () => {
         mockSystemSettingsFindUnique.mockResolvedValueOnce(null);
 
@@ -608,7 +637,6 @@ describe("systemSettings runtime routes", () => {
                 openaiApiKey: "openai-key",
                 lastfmApiKey: "lastfm-key",
                 audiobookshelfApiKey: "audiobookshelf-key",
-                spotifyClientSecret: "spotify-secret",
                 tidalAccessToken: "tidal-access-token",
                 tidalRefreshToken: "tidal-refresh-token",
                 soulseekUsername: "slsk-user",
@@ -631,7 +659,6 @@ describe("systemSettings runtime routes", () => {
                     openaiApiKey: "enc:openai-key",
                     lastfmApiKey: "enc:lastfm-key",
                     audiobookshelfApiKey: "enc:audiobookshelf-key",
-                    spotifyClientSecret: "enc:spotify-secret",
                     soulseekPassword: "enc:slsk-pass",
                     fanartApiKey: "enc:fanart-key",
                     ytMusicClientSecret: "enc:yt-secret",

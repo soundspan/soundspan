@@ -43,7 +43,6 @@ import apiKeysRoutes from "./routes/apiKeys";
 import enrichmentRoutes from "./routes/enrichment";
 import homepageRoutes from "./routes/homepage";
 import deviceLinkRoutes from "./routes/deviceLink";
-import spotifyRoutes from "./routes/spotify";
 import notificationsRoutes from "./routes/notifications";
 import browseRoutes from "./routes/browse";
 import adminRoutes from "./routes/admin";
@@ -302,7 +301,6 @@ if (config.features.autoPlaylists) {
 }
 app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
 app.use("/api/homepage", apiLimiter, homepageRoutes);
-app.use("/api/spotify", apiLimiter, spotifyRoutes);
 app.use("/api/browse", apiLimiter, browseRoutes);
 if (config.features.federation) {
     app.use(

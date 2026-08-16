@@ -22,8 +22,6 @@ const defaultSystemSettings: SystemSettings = {
     audiobookshelfApiKey: "",
     soulseekUsername: "",
     soulseekPassword: "",
-    spotifyClientId: "",
-    spotifyClientSecret: "",
     tidalEnabled: false,
     tidalConnected: false,
     tidalUserId: "",
@@ -281,12 +279,6 @@ export function useSystemSettings() {
                     result = await api.testSoulseek(
                         systemSettings.soulseekUsername,
                         systemSettings.soulseekPassword,
-                    );
-                    break;
-                case "spotify":
-                    result = await api.testSpotify(
-                        systemSettings.spotifyClientId,
-                        systemSettings.spotifyClientSecret,
                     );
                     break;
                 case "tidal":

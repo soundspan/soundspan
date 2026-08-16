@@ -142,7 +142,9 @@ describe("rateLimiter middleware config", () => {
                 path: "/api/soulseek/search/abc123de-adbe-4cab-9fed-1234567890ab",
             }),
         ).toBe(true);
-        expect(skip({ path: "/api/spotify/import/job_123/status" })).toBe(true);
+        expect(skip({ path: "/api/spotify/import/job_123/status" })).toBe(
+            false,
+        );
 
         expect(skip({ path: "/health/check" })).toBe(false);
         expect(skip({ path: "/api/library/tracks/track-1/stream/extra" })).toBe(

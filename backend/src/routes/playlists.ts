@@ -2187,7 +2187,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                             `[Retry] Failed to queue scan:`,
                             scanError,
                         );
-                        // The session log is returned verbatim to any authenticated caller via GET /api/spotify/import/session-log, so raw error text must not be written to it.
+                        // Keep raw exception detail out of the persistent session log.
                         sessionLog(
                             "PENDING-RETRY",
                             "Failed to queue scan (raw detail in server log)",
@@ -2196,7 +2196,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
                     }
                 } else {
                     logger.debug(`[Retry] Download failed: ${result.error}`);
-                    // The session log is returned verbatim to any authenticated caller via GET /api/spotify/import/session-log, so raw error text must not be written to it.
+                    // Keep raw exception detail out of the persistent session log.
                     sessionLog(
                         "PENDING-RETRY",
                         "Download failed (raw detail in server log)",
@@ -2215,7 +2215,7 @@ router.post(pendingRetryPath, requireAdmin, async (req: RetryRequest, res) => {
             })
             .catch((error) => {
                 logger.error(`[Retry] Download error:`, error);
-                // The session log is returned verbatim to any authenticated caller via GET /api/spotify/import/session-log, so raw error text must not be written to it.
+                // Keep raw exception detail out of the persistent session log.
                 sessionLog(
                     "PENDING-RETRY",
                     "Download exception (raw detail in server log)",

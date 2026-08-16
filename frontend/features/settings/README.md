@@ -29,7 +29,6 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/libraryHealthDetails.tsx` | components |
 | `components/sections/LibrarySafetySection.tsx` | components |
 | `components/sections/LidarrSection.tsx` | components |
-| `components/sections/LinkDeviceSection.tsx` | components |
 | `components/sections/LinkedIdentitiesPanel.tsx` | components |
 | `components/sections/playbackHistoryConfig.ts` | components |
 | `components/sections/PlaybackHistorySection.tsx` | components |

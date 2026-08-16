@@ -135,10 +135,6 @@ const systemSettingsSchema = z.object({
     soulseekUsername: z.string().nullable().optional(),
     soulseekPassword: z.string().nullable().optional(),
 
-    // Spotify (for playlist import)
-    spotifyClientId: z.string().nullable().optional(),
-    spotifyClientSecret: z.string().nullable().optional(),
-
     // Storage Paths
     musicPath: z.string().optional(),
     downloadPath: z.string().optional(),
@@ -279,6 +275,8 @@ router.get("/", async (req, res) => {
         const {
             tidalAccessToken: storedTidalAccessToken,
             tidalRefreshToken: storedTidalRefreshToken,
+            spotifyClientId: _storedSpotifyClientId,
+            spotifyClientSecret: _storedSpotifyClientSecret,
             ...clientSafeSettings
         } = settings;
         const decryptedSettings = {
@@ -290,7 +288,6 @@ router.get("/", async (req, res) => {
             lastfmApiKey: safeDecrypt(settings.lastfmApiKey),
             audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
             soulseekPassword: safeDecrypt(settings.soulseekPassword),
-            spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
             ytMusicClientSecret: safeDecrypt(settings.ytMusicClientSecret),
             tidalConnected: !!(
                 storedTidalAccessToken && storedTidalRefreshToken
@@ -321,7 +318,7 @@ router.get("/", async (req, res) => {
  *             type: object
  *             description: >
  *               Partial system settings to update (Lidarr, OpenAI, Fanart,
- *               Last.fm, Audiobookshelf, Soulseek, Spotify, TIDAL, paths,
+ *               Last.fm, Audiobookshelf, Soulseek, TIDAL, paths,
  *               feature flags, etc.). Secret fields (API keys, passwords,
  *               client secrets) are write-only with explicit semantics:
  *               a non-empty string replaces the stored secret, an empty

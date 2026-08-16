@@ -28,7 +28,6 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/enrichment",
         "../routes/homepage",
         "../routes/deviceLink",
-        "../routes/spotify",
         "../routes/notifications",
         "../routes/browse",
         "../routes/analysis",
@@ -660,7 +659,6 @@ describe("api entrypoint runtime behavior", () => {
             "/api/mixes": ["api-limiter", route("../routes/mixes")],
             "/api/enrichment": ["api-limiter", route("../routes/enrichment")],
             "/api/homepage": ["api-limiter", route("../routes/homepage")],
-            "/api/spotify": ["api-limiter", route("../routes/spotify")],
             "/api/browse": ["api-limiter", route("../routes/browse")],
             "/api/analysis": ["api-limiter", route("../routes/analysis")],
             "/api/admin": ["api-limiter", route("../routes/admin")],
@@ -712,6 +710,10 @@ describe("api entrypoint runtime behavior", () => {
                 );
             }
         }
+
+        expect(
+            mocks.app.use.mock.calls.map((args: unknown[]) => args[0]),
+        ).not.toContain("/api/spotify");
 
         // Completeness: any new path-prefixed mount must be added to the
         // contract table above so its auth/limiter posture is reviewed.

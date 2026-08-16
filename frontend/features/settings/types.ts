@@ -43,9 +43,6 @@ export interface SystemSettings {
     // Soulseek (direct connection via slsk-client)
     soulseekUsername: string;
     soulseekPassword: string;
-    // Spotify (for playlist import)
-    spotifyClientId: string;
-    spotifyClientSecret: string;
     // TIDAL — token material never leaves the backend; tidalConnected
     // reports whether the admin download connection is established.
     tidalEnabled: boolean;
