@@ -4,6 +4,14 @@
 
 {{RELEASE_SUMMARY}}
 
+## Before you upgrade
+
+**Warning:** If you run a version earlier than 2.0.0, do not upgrade directly
+to {{VERSION}}. Complete the 2.0.0 breaking changes first. See
+[Upgrading from an earlier version](#upgrading-from-an-earlier-version).
+
+{{UPGRADE_NOTES}}
+
 ## Fixed
 
 {{FIXED_ITEMS}}
@@ -52,6 +60,15 @@ helm upgrade --install soundspan soundspan/soundspan --version {{VERSION}}
 ## Compatibility and Migration
 
 {{COMPATIBILITY_AND_MIGRATION}}
+
+## Upgrading from an earlier version
+
+If you are upgrading from a version earlier than 2.0.0, you must complete the
+2.0.0 upgrade before you install {{VERSION}}. The 2.0.0 release contains breaking
+changes that later releases depend on. Read the
+[2.0.0 release notes](https://github.com/soundspan/soundspan/blob/2.0.0/docs/release-notes/RELEASE_NOTES_2.0.0.md)
+and complete the
+[2.0.0 upgrade guide](https://github.com/soundspan/soundspan/blob/2.0.0/docs/UPGRADING_TO_2.0.0.md).
 
 ## Full Changelog
 

@@ -14,7 +14,11 @@ import {
 
 const TEMPLATE_PATH = "docs/maintainers/RELEASE_NOTES_TEMPLATE.md";
 const DEFAULT_REPO_WEB_URL_FALLBACK = "https://github.com/soundspan/soundspan";
-const REPEATABLE_FLAGS = new Set(["known-issue", "compat-note"]);
+const REPEATABLE_FLAGS = new Set([
+    "known-issue",
+    "compat-note",
+    "upgrade-note",
+]);
 const SINGLE_VALUE_FLAGS = new Set([
     "version",
     "from",
@@ -64,6 +68,7 @@ function parseArgs(argv) {
     const options = {
         knownIssues: [],
         compatibilityNotes: [],
+        upgradeNotes: [],
     };
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -92,6 +97,8 @@ function parseArgs(argv) {
                 options.knownIssues.push(value.trim());
             } else if (key === "compat-note") {
                 options.compatibilityNotes.push(value.trim());
+            } else if (key === "upgrade-note") {
+                options.upgradeNotes.push(value.trim());
             }
             continue;
         }
@@ -230,6 +237,13 @@ function formatBulletBlock(items, emptyLabel) {
         return `- ${emptyLabel}`;
     }
     return items.join("\n");
+}
+
+function formatArgumentBulletBlock(items, emptyLabel) {
+    return formatBulletBlock(
+        items.map((item) => `- ${item}`),
+        emptyLabel,
+    );
 }
 
 function normalizeSecurityBullets(items) {
@@ -371,6 +385,10 @@ function main() {
         options.compatibilityNotes,
         "No manual migration steps required for standard Docker and Helm deployments.",
     );
+    const upgradeNotes = formatArgumentBulletBlock(
+        options.upgradeNotes,
+        "If you already run 2.0.x or later, no manual steps are required.",
+    );
 
     const templateText = fs.readFileSync(TEMPLATE_PATH, "utf8");
     const rendered = renderTemplate(templateText, {
@@ -378,6 +396,7 @@ function main() {
         "{{RELEASE_DATE}}": releaseDate,
         "{{COMPARE_URL}}": `[${fromRef}...${toRef}](${compareUrl})`,
         "{{RELEASE_SUMMARY}}": summary,
+        "{{UPGRADE_NOTES}}": upgradeNotes,
         "{{FIXED_ITEMS}}": formatBulletBlock(
             fixedItems,
             "No bug fixes documented in this release.",
