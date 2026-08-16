@@ -78,6 +78,17 @@ Kubernetes probes:
 - Liveness: `GET /health/live`
 - Readiness: `GET /health/ready`
 
+### Prometheus metrics
+
+Set `metrics.serviceMonitor.enabled=true` to create Prometheus Operator
+ServiceMonitors for backend and enabled backend-worker pods. The default is
+disabled. Scrapes use the `METRICS_TOKEN` bearer credential from the chart
+Secret. Set `secrets.metricsToken` or provide a `METRICS_TOKEN` key through
+`secrets.existingSecret`.
+
+`metrics.public=true` disables scrape authentication. Use it only on an
+isolated private network.
+
 For Listen Together in multi-replica backend deployments, `haMode.enabled=true`
 is recommended because it auto-applies the required cross-pod guardrails.
 If you keep `haMode.enabled=false`, ensure these remain set manually:

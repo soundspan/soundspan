@@ -5,6 +5,9 @@ import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
+import { metricsRegistry } from "./metrics";
+import { isMetricsRequestAuthorized } from "./metrics/endpoint";
+import { registerQueueMetrics } from "./metrics/queueMetrics";
 
 const log = logger.child("WorkerStartup");
 
@@ -81,6 +84,29 @@ function sendHealth(
     res.end(JSON.stringify(buildHealthPayload()));
 }
 
+async function sendMetrics(
+    authorization: string | undefined,
+    res: Parameters<typeof sendHealth>[0],
+): Promise<void> {
+    if (!isMetricsRequestAuthorized(authorization, config.metrics)) {
+        res.writeHead(401, {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": 'Bearer realm="metrics"',
+        });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+    }
+    try {
+        const body = await metricsRegistry.metrics();
+        res.writeHead(200, { "Content-Type": metricsRegistry.contentType });
+        res.end(body);
+    } catch (error) {
+        log.error("metrics collection failed", error);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Metrics collection failed" }));
+    }
+}
+
 function startHealthServer() {
     healthServer = createServer((req, res) => {
         const handleReady = async () => {
@@ -109,6 +135,11 @@ function startHealthServer() {
 
         if (path === "/health/ready" || path === "/health") {
             void handleReady();
+            return;
+        }
+
+        if (path === "/metrics") {
+            void sendMetrics(req.headers.authorization, res);
             return;
         }
 
@@ -225,6 +256,8 @@ async function startWorkerRuntime() {
 
     await import("./workers");
     workersInitialized = true;
+    const { queues } = await import("./workers/queues");
+    registerQueueMetrics(metricsRegistry, queues);
 
     // Event-loop stall watchdog: attributes liveness-probe-visible stalls
     // to the Bull jobs running at the time (issue #43)

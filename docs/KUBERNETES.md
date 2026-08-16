@@ -126,6 +126,38 @@ non-root.
 | Audio Analyzer CLAP              | No           | Import check                                                                       |
 | AIO                              | Yes          | `GET /` on `:3030`                                                                 |
 
+## Prometheus Scraping
+
+The backend and the dedicated worker expose process-local Prometheus data at
+`GET /metrics`. The endpoint requires `Authorization: Bearer <METRICS_TOKEN>`
+and returns `401` when the token is missing, invalid, or unset. Each process has
+its own registry. Prometheus must scrape every backend and worker pod.
+
+The chart can create Prometheus Operator `ServiceMonitor` resources:
+
+```yaml
+metrics:
+    serviceMonitor:
+        enabled: true
+        interval: 30s
+        scrapeTimeout: 10s
+
+secrets:
+    # Prefer an externally managed Secret in production.
+    metricsToken: "replace-with-a-long-random-token"
+```
+
+`metrics.serviceMonitor.enabled` defaults to `false`. With
+`secrets.existingSecret`, add a `METRICS_TOKEN` key to that Secret before
+enabling the ServiceMonitor. The chart-generated Secret creates and preserves
+the token automatically.
+
+Do not set `metrics.public=true` or `METRICS_PUBLIC=true` on an internet-routed
+service. That opt-out is intended only for isolated private networks. The
+starter [Grafana dashboard](observability/grafana-soundspan-prometheus.json)
+covers request latency and errors, queue state, cache results, federation syncs,
+and process resources.
+
 ## Resource Starting Point
 
 | Service             | CPU request (suggested) | CPU limit (suggested) | Memory request | Memory limit |

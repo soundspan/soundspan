@@ -15,6 +15,7 @@ const mockLogger = {
     child: jest.fn(() => mockScopedLogger),
 };
 let mockTranscodeCachePath = "";
+const mockRecordBrowseImageCacheResult = jest.fn();
 
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
 
@@ -32,6 +33,9 @@ jest.mock("../../config", () => ({
 
 jest.mock("../imageProxy", () => ({
     fetchExternalImage: jest.fn(),
+}));
+jest.mock("../../metrics", () => ({
+    recordBrowseImageCacheResult: mockRecordBrowseImageCacheResult,
 }));
 
 type FetchExternalImageFn = typeof import("../imageProxy").fetchExternalImage;
@@ -91,6 +95,7 @@ describe("browseImageCache", () => {
         const key = crypto.createHash("sha256").update("missing").digest("hex");
 
         await expect(getBrowseImageFromCache(key)).resolves.toBeNull();
+        expect(mockRecordBrowseImageCacheResult).toHaveBeenCalledWith("miss");
         await expect(fs.stat(cacheDir)).resolves.toMatchObject({});
     });
 
@@ -104,6 +109,7 @@ describe("browseImageCache", () => {
             filePath: path.join(cacheDir, `${key}.img`),
             contentType: "image/webp",
         });
+        expect(mockRecordBrowseImageCacheResult).toHaveBeenCalledWith("hit");
     });
 
     it.each([undefined, "   "])(

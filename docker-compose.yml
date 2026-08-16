@@ -76,6 +76,8 @@ services:
 
             # Internal API secret for service-to-service auth
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
+            METRICS_TOKEN: "${METRICS_TOKEN:-}"
+            METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
 
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
@@ -207,6 +209,8 @@ services:
             LOG_LEVEL: ${LOG_LEVEL:-warn}
             MUSIC_PATH: /music
             INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
+            METRICS_TOKEN: "${METRICS_TOKEN:-}"
+            METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
             DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}

@@ -304,6 +304,8 @@ const envSchema = z
         SETTINGS_ENCRYPTION_KEY: z.string().optional(),
         ENCRYPTION_KEY: z.string().optional(),
         INTERNAL_API_SECRET: z.string().optional(),
+        METRICS_TOKEN: z.string().optional(),
+        METRICS_PUBLIC: z.string().optional(),
         PORT: z.string().optional(),
         NODE_ENV: z.enum(["development", "production", "test"]).optional(),
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
@@ -478,6 +480,13 @@ export const config = {
 
     // Raw OpenAPI JSON spec is public in production only when DOCS_PUBLIC=true.
     docsPublic: isEnvFlagEnabled(process.env.DOCS_PUBLIC),
+
+    // Prometheus metrics fail closed unless a bearer token is configured.
+    // Public exposure is an explicit unsafe opt-out for private networks only.
+    metrics: {
+        token: process.env.METRICS_TOKEN?.trim() || undefined,
+        publicAccess: parseEnvBool(process.env.METRICS_PUBLIC, false),
+    },
 
     // Legacy (pre-GCM) at-rest decryption fails closed when true.
     settingsDecryptFailClosed: isEnvFlagEnabled(

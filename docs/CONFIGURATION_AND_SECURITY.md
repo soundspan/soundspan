@@ -111,6 +111,7 @@ Never commit `.env` files or credentials.
 | `SESSION_SECRET`          | Required JWT signing fallback (32+ chars)                                       | Yes                                                |
 | `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials (32+ chars, must not be the published default) | Yes                                                |
 | `INTERNAL_API_SECRET`     | Service-to-service authentication (32+ chars)                                   | Yes                                                |
+| `METRICS_TOKEN`           | Bearer authentication for backend and worker Prometheus scrapes                 | Required to scrape unless metrics are explicitly public |
 | `POSTGRES_PASSWORD`       | PostgreSQL authentication                                                       | Yes, production                                    |
 | `API_KEY_PEPPER`          | HMAC pepper for API keys; keep stable or existing hashed keys become invalid    | Optional; falls back to encryption/JWT secrets     |
 | `OIDC_CLIENT_SECRET`      | OIDC confidential client authentication                                         | If using OIDC                                      |
@@ -123,6 +124,19 @@ Never commit `.env` files or credentials.
 
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
 Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
+
+### Metrics exposure
+
+`GET /metrics` is private by default. It accepts only a bearer token matching
+`METRICS_TOKEN` and fails closed when that value is absent. Keep the endpoint on
+an internal network, store the token as a runtime secret, and configure the
+scraper to send it in the `Authorization` header.
+
+`METRICS_PUBLIC=true` removes this gate. Treat that setting as unsafe outside an
+isolated private network. The exposition includes process health, route classes,
+queue names and state, cache behavior, and federation sync outcomes. It never
+uses user IDs, media IDs, raw URLs, cache keys, peer IDs, or error text as
+labels.
 
 ## Authentication and Credential Security
 

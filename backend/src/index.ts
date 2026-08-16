@@ -83,6 +83,9 @@ import {
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger";
 import { BRAND_API_DOCS_TITLE, BRAND_NAME } from "./config/brand";
+import { httpMetricsMiddleware, metricsRegistry } from "./metrics";
+import { createMetricsRouter } from "./metrics/endpoint";
+import { registerQueueMetrics } from "./metrics/queueMetrics";
 
 const app = express();
 
@@ -185,6 +188,14 @@ app.use(
     }),
 );
 app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to support large queue payloads
+app.use(httpMetricsMiddleware);
+app.use(
+    createMetricsRouter({
+        registry: metricsRegistry,
+        token: config.metrics.token,
+        publicAccess: config.metrics.publicAccess,
+    }),
+);
 
 // Express 5 leaves req.body undefined when no body parser matched (e.g. GET
 // requests or non-JSON content types); Express 4's body-parser set {} instead.
@@ -605,8 +616,10 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
         const { createBullBoard } = await import("@bull-board/api");
         const { BullAdapter } = await import("@bull-board/api/bullAdapter");
         const { ExpressAdapter } = await import("@bull-board/express");
-        const { scanQueue, discoverQueue, imageQueue } =
+        const { scanQueue, discoverQueue, imageQueue, queues } =
             await import("./workers/queues");
+
+        registerQueueMetrics(metricsRegistry, queues);
 
         const serverAdapter = new ExpressAdapter();
         serverAdapter.setBasePath("/api/admin/queues");

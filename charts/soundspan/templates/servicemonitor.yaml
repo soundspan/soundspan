@@ -1,0 +1,76 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend
+  labels:
+    {{- include "soundspan.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [{{ include "soundspan.name" . }}]
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name }}]
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - aio
+          - backend
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval | quote }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | quote }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "soundspan.secretName" . }}
+          key: METRICS_TOKEN
+{{- if and (eq .Values.deploymentMode "individual") (eq (include "soundspan.backendWorkerEnabled" .) "true") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-worker-metrics
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend-worker") | nindent 4 }}
+spec:
+  ports:
+    - name: metrics
+      port: {{ .Values.backendWorker.health.port }}
+      targetPort: health
+      protocol: TCP
+  selector:
+    {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend-worker") | nindent 4 }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-worker
+  labels:
+    {{- include "soundspan.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend-worker") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval | quote }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | quote }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "soundspan.secretName" . }}
+          key: METRICS_TOKEN
+{{- end }}
+{{- end }}

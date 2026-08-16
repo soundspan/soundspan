@@ -9,6 +9,7 @@ const prisma = {
 };
 const processFederationSync = jest.fn();
 const processFederationHealth = jest.fn();
+const recordFederationSyncOutcome = jest.fn();
 
 jest.mock("../queues", () => ({ federationQueue }));
 jest.mock("../../utils/db", () => ({ prisma }));
@@ -21,6 +22,7 @@ jest.mock("../processors/federationSyncProcessor", () => ({
 jest.mock("../processors/federationHealthProcessor", () => ({
     processFederationHealth,
 }));
+jest.mock("../../metrics", () => ({ recordFederationSyncOutcome }));
 
 import {
     enqueueFederationSyncNow,
@@ -41,6 +43,7 @@ describe("federation queue registration", () => {
             { id: "peer-1" },
             { id: "peer-2" },
         ]);
+        processFederationSync.mockResolvedValue({ mode: "incremental" });
     });
 
     it("registers bounded sync, health, and tick processors", () => {
@@ -49,7 +52,7 @@ describe("federation queue registration", () => {
         expect(federationQueue.process).toHaveBeenCalledWith(
             FEDERATION_SYNC_JOB_NAME,
             2,
-            processFederationSync,
+            expect.any(Function),
         );
         expect(federationQueue.process).toHaveBeenCalledWith(
             FEDERATION_HEALTH_JOB_NAME,
@@ -61,6 +64,24 @@ describe("federation queue registration", () => {
             1,
             expect.any(Function),
         );
+    });
+
+    it("records the final sync outcome and preserves failures", async () => {
+        registerFederationProcessors();
+        const syncHandler = federationQueue.process.mock.calls.find(
+            (call) => call[0] === FEDERATION_SYNC_JOB_NAME,
+        )?.[2];
+
+        await expect(
+            syncHandler({ data: { peerId: "peer-1" } }),
+        ).resolves.toEqual({ mode: "incremental" });
+        expect(recordFederationSyncOutcome).toHaveBeenCalledWith("success");
+
+        processFederationSync.mockRejectedValueOnce(new Error("sync failed"));
+        await expect(
+            syncHandler({ data: { peerId: "peer-1" } }),
+        ).rejects.toThrow("sync failed");
+        expect(recordFederationSyncOutcome).toHaveBeenCalledWith("failure");
     });
 
     it("registers startup plus hourly health and configured sync repeats", async () => {

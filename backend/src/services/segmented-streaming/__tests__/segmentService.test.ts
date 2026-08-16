@@ -46,6 +46,7 @@ const resolveSegmentService = async () => {
     const mockInspectFfmpegVersion = jest.fn(
         (_binaryPath: string) => "ffmpeg version 7.0",
     );
+    const mockRecordTranscodeCacheResult = jest.fn();
     const heldBuildLocks = new Map<string, string>();
     const mockBuildLockSet = jest.fn(
         async (
@@ -126,6 +127,9 @@ const resolveSegmentService = async () => {
     jest.doMock("../../../utils/ioredis", () => ({
         createIORedisClient: mockCreateIORedisClient,
     }));
+    jest.doMock("../../../metrics", () => ({
+        recordTranscodeCacheResult: mockRecordTranscodeCacheResult,
+    }));
 
     const module = await import("../segmentService");
 
@@ -146,6 +150,7 @@ const resolveSegmentService = async () => {
             mockBuildLockExists,
             mockBuildLockEval,
             mockCreateIORedisClient,
+            mockRecordTranscodeCacheResult,
         },
     };
 };
@@ -167,6 +172,7 @@ describe("segmentedSegmentService", () => {
         jest.dontMock("child_process");
         jest.dontMock("../cacheService");
         jest.dontMock("../../../utils/ioredis");
+        jest.dontMock("../../../metrics");
         jest.restoreAllMocks();
     });
 
@@ -221,6 +227,9 @@ describe("segmentedSegmentService", () => {
             "/tmp/system-ffmpeg",
             expect.any(Array),
             expect.any(Object),
+        );
+        expect(mocks.mockRecordTranscodeCacheResult).toHaveBeenCalledWith(
+            "miss",
         );
 
         ffmpegProcess.emit("close", 0);
@@ -509,6 +518,9 @@ describe("segmentedSegmentService", () => {
         });
         expect(mocks.mockScheduleDashCachePrune).toHaveBeenCalledTimes(1);
         expect(mocks.mockSpawn).not.toHaveBeenCalled();
+        expect(mocks.mockRecordTranscodeCacheResult).toHaveBeenCalledWith(
+            "hit",
+        );
     });
 
     it("queues async repair when cache validation is degraded but still usable", async () => {

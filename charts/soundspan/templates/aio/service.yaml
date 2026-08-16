@@ -4,7 +4,7 @@ kind: Service
 metadata:
   name: {{ include "soundspan.fullname" . }}
   labels:
-    {{- include "soundspan.labels" . | nindent 4 }}
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "aio") | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -12,6 +12,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.metrics.serviceMonitor.enabled }}
+    - port: 3006
+      targetPort: backend-metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "aio") | nindent 4 }}
 {{- end }}

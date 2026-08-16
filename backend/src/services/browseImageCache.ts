@@ -5,6 +5,7 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import { fetchExternalImage } from "./imageProxy";
+import { recordBrowseImageCacheResult } from "../metrics";
 
 const MIN_IMAGE_BYTES = 500;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB — YouTube thumbnails are typically 20-100 KB
@@ -112,7 +113,9 @@ export async function getBrowseImageFromCache(
 ): Promise<BrowseImageCacheEntry | null> {
     return runCacheMutation(async () => {
         const dir = await ensureCacheDir();
-        return readCachedEntry(dir, key, true);
+        const entry = await readCachedEntry(dir, key, true);
+        recordBrowseImageCacheResult(entry ? "hit" : "miss");
+        return entry;
     });
 }
 

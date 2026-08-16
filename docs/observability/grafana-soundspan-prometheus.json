@@ -1,0 +1,216 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "editable": true,
+    "graphTooltip": 1,
+    "panels": [
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "sum(rate(soundspan_http_request_duration_seconds_count[$__rate_interval])) by (route_class)",
+                    "legendFormat": "{{route_class}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "HTTP request rate",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum(rate(soundspan_http_request_duration_seconds_bucket[$__rate_interval])) by (le, route_class))",
+                    "legendFormat": "{{route_class}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "HTTP p95 latency",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 8
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "sum(rate(soundspan_http_request_duration_seconds_count{status_class=\"5xx\"}[$__rate_interval])) by (route_class)",
+                    "legendFormat": "{{route_class}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "HTTP 5xx rate",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 8
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "max(soundspan_queue_jobs{state=\"depth\"}) by (queue)",
+                    "legendFormat": "{{queue}}",
+                    "refId": "A"
+                },
+                {
+                    "expr": "max(soundspan_queue_jobs{state=\"active\"}) by (queue)",
+                    "legendFormat": "{{queue}} active",
+                    "refId": "B"
+                }
+            ],
+            "title": "Bull queue jobs",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 8
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "sum(rate(soundspan_transcode_cache_requests_total{result=\"hit\"}[$__rate_interval])) / clamp_min(sum(rate(soundspan_transcode_cache_requests_total[$__rate_interval])), 1e-9)",
+                    "legendFormat": "transcode",
+                    "refId": "A"
+                },
+                {
+                    "expr": "sum(rate(soundspan_browse_image_cache_requests_total{result=\"hit\"}[$__rate_interval])) / clamp_min(sum(rate(soundspan_browse_image_cache_requests_total[$__rate_interval])), 1e-9)",
+                    "legendFormat": "browse image",
+                    "refId": "B"
+                }
+            ],
+            "title": "Cache hit ratio",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "sum(increase(soundspan_federation_syncs_total[$__rate_interval])) by (outcome)",
+                    "legendFormat": "{{outcome}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation sync outcomes",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "bytes"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "id": 7,
+            "targets": [
+                {
+                    "expr": "soundspan_process_resident_memory_bytes",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Process resident memory",
+            "type": "timeseries"
+        }
+    ],
+    "schemaVersion": 41,
+    "tags": ["soundspan", "prometheus"],
+    "templating": {
+        "list": [
+            {
+                "name": "DS_PROMETHEUS",
+                "query": "prometheus",
+                "type": "datasource"
+            }
+        ]
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timezone": "browser",
+    "title": "soundspan Prometheus Overview",
+    "uid": "soundspan-prometheus",
+    "version": 1
+}

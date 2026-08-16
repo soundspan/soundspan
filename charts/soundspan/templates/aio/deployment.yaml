@@ -51,12 +51,17 @@ spec:
             - name: http
               containerPort: 3030
               protocol: TCP
+            - name: backend-metrics
+              containerPort: 3006
+              protocol: TCP
           {{- $aioEnv := .Values.aio.env | default (dict) }}
           {{- $aioExplicitEnvKeys := dict
             "TZ" true
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
             "INTERNAL_API_SECRET" true
+            "METRICS_TOKEN" true
+            "METRICS_PUBLIC" true
             "LOCAL_LOGIN_ENABLED" true
             "OIDC_ENABLED" true
             "OIDC_ISSUER_URL" true
@@ -130,6 +135,24 @@ spec:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
+            {{- end }}
+            {{- if hasKey $aioEnv "METRICS_TOKEN" }}
+            - name: METRICS_TOKEN
+              value: {{ index $aioEnv "METRICS_TOKEN" | quote }}
+            {{- else }}
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: METRICS_TOKEN
+                  optional: true
+            {{- end }}
+            {{- if hasKey $aioEnv "METRICS_PUBLIC" }}
+            - name: METRICS_PUBLIC
+              value: {{ index $aioEnv "METRICS_PUBLIC" | quote }}
+            {{- else if .Values.metrics.public }}
+            - name: METRICS_PUBLIC
+              value: "true"
             {{- end }}
             {{- include "soundspan.oidcEnv" (dict "ctx" . "envMap" $aioEnv) | nindent 12 }}
             {{- if hasKey $aioEnv "POSTGRES_PASSWORD" }}

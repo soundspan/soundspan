@@ -4,12 +4,24 @@ import { prisma } from "../utils/db";
 import { federationQueue } from "./queues";
 import { processFederationHealth } from "./processors/federationHealthProcessor";
 import { processFederationSync } from "./processors/federationSyncProcessor";
+import { recordFederationSyncOutcome } from "../metrics";
 
 export const FEDERATION_SYNC_JOB_NAME = "peer-sync";
 export const FEDERATION_SYNC_TICK_JOB_NAME = "sync-tick";
 export const FEDERATION_HEALTH_JOB_NAME = "peer-health";
 const ONE_HOUR_MS = 60 * 60 * 1_000;
 const MAX_CONSUMER_PEERS = 500;
+
+async function processFederationSyncWithMetrics(job: Job<{ peerId: string }>) {
+    try {
+        const result = await processFederationSync(job);
+        recordFederationSyncOutcome("success");
+        return result;
+    } catch (error) {
+        recordFederationSyncOutcome("failure");
+        throw error;
+    }
+}
 
 async function removeTerminalJob(jobId: string): Promise<string | null> {
     const job = await federationQueue.getJob(jobId);
@@ -60,7 +72,11 @@ async function enqueueConsumerPeerSyncs(): Promise<void> {
 
 /** Registers bounded federation queue processors when the feature is enabled. */
 export function registerFederationProcessors(): void {
-    federationQueue.process(FEDERATION_SYNC_JOB_NAME, 2, processFederationSync);
+    federationQueue.process(
+        FEDERATION_SYNC_JOB_NAME,
+        2,
+        processFederationSyncWithMetrics,
+    );
     federationQueue.process(FEDERATION_HEALTH_JOB_NAME, 1, async () =>
         processFederationHealth(),
     );

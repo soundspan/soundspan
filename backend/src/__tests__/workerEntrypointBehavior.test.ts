@@ -67,8 +67,12 @@ describe("worker entrypoint behavior", () => {
             })),
         };
 
-        let requestHandler: ((req: { url?: string }, res: any) => void) | null =
-            null;
+        let requestHandler:
+            | ((
+                  req: { url?: string; headers?: { authorization?: string } },
+                  res: any,
+              ) => void)
+            | null = null;
         const server = {
             on: jest.fn(),
             listen: jest.fn((_port, _host, cb?: () => void) => cb?.()),
@@ -124,6 +128,7 @@ describe("worker entrypoint behavior", () => {
                     warnThresholdMs: 1000,
                     sampleIntervalMs: 5000,
                 },
+                metrics: { token: "metrics-token", publicAccess: false },
             },
             initializeMusicConfig: jest.fn(
                 initializeMusicConfigImpl || (async () => undefined),
@@ -138,6 +143,20 @@ describe("worker entrypoint behavior", () => {
         jest.doMock("../workers", () => ({
             shutdownWorkers,
         }));
+        const metricsRegistry = {
+            contentType: "text/plain; version=0.0.4; charset=utf-8",
+            metrics: jest.fn(async () => "soundspan_test_metric 1\n"),
+        };
+        const registerQueueMetrics = jest.fn();
+        jest.doMock("../metrics", () => ({ metricsRegistry }));
+        jest.doMock("../metrics/endpoint", () => ({
+            isMetricsRequestAuthorized: (authorization: string | undefined) =>
+                authorization === "Bearer metrics-token",
+        }));
+        jest.doMock("../metrics/queueMetrics", () => ({
+            registerQueueMetrics,
+        }));
+        jest.doMock("../workers/queues", () => ({ queues: [] }));
 
         return {
             requestHandler: () => requestHandler,
@@ -150,6 +169,8 @@ describe("worker entrypoint behavior", () => {
             shutdownWorkers,
             exitMock,
             createDependencyReadinessTracker,
+            metricsRegistry,
+            registerQueueMetrics,
         };
     }
 
@@ -273,7 +294,7 @@ describe("worker entrypoint behavior", () => {
             writeHead: jest.fn(),
             end: jest.fn(),
         };
-        handler!({ url: "/health/live" }, liveRes);
+        handler!({ url: "/health/live", headers: {} }, liveRes);
         expect(liveRes.writeHead).toHaveBeenCalledWith(200, {
             "Content-Type": "application/json",
         });
@@ -282,7 +303,7 @@ describe("worker entrypoint behavior", () => {
             writeHead: jest.fn(),
             end: jest.fn(),
         };
-        handler!({ url: "/health/ready" }, readyRes);
+        handler!({ url: "/health/ready", headers: {} }, readyRes);
         await Promise.resolve();
         await Promise.resolve();
         expect([200, 503]).toContain(readyRes.writeHead.mock.calls[0]?.[0]);
@@ -294,12 +315,48 @@ describe("worker entrypoint behavior", () => {
             writeHead: jest.fn(),
             end: jest.fn(),
         };
-        handler!({ url: "/unknown" }, missingRes);
+        handler!({ url: "/unknown", headers: {} }, missingRes);
         expect(missingRes.writeHead).toHaveBeenCalledWith(404, {
             "Content-Type": "application/json",
         });
         expect(missingRes.end).toHaveBeenCalledWith(
             JSON.stringify({ error: "Not found" }),
+        );
+    });
+
+    it("serves worker metrics only with the configured bearer token", async () => {
+        const { requestHandler, metricsRegistry } = setupWorkerRuntime();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../worker");
+        await flushWorkerTicks();
+
+        const handler = requestHandler();
+        const unauthorized = createHealthRes();
+        handler!({ url: "/metrics", headers: {} }, unauthorized);
+        await flushWorkerTicks();
+        expect(unauthorized.writeHead).toHaveBeenCalledWith(
+            401,
+            expect.objectContaining({
+                "WWW-Authenticate": 'Bearer realm="metrics"',
+            }),
+        );
+
+        const authorized = createHealthRes();
+        handler!(
+            {
+                url: "/metrics",
+                headers: { authorization: "Bearer metrics-token" },
+            },
+            authorized,
+        );
+        await flushWorkerTicks();
+        expect(metricsRegistry.metrics).toHaveBeenCalledTimes(1);
+        expect(authorized.writeHead).toHaveBeenCalledWith(200, {
+            "Content-Type": metricsRegistry.contentType,
+        });
+        expect(authorized.end).toHaveBeenCalledWith(
+            "soundspan_test_metric 1\n",
         );
     });
 

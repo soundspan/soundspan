@@ -8,6 +8,7 @@ import {
     resolveFfmpegBinaryPath,
 } from "../../utils/configValidator";
 import { createIORedisClient } from "../../utils/ioredis";
+import { recordTranscodeCacheResult } from "../../metrics";
 import {
     segmentedStreamingCacheService,
     type SegmentedDashQuality,
@@ -441,6 +442,7 @@ export class SegmentedSegmentService {
             const recoverableValidationFailure =
                 this.recoverableValidationFailures.get(cacheKey);
             if (cacheValidationPassed) {
+                recordTranscodeCacheResult("hit");
                 this.failedBuilds.delete(cacheKey);
                 this.queueBackgroundCacheValidation({
                     input: normalizedInput,
@@ -482,6 +484,8 @@ export class SegmentedSegmentService {
                 };
             }
         }
+
+        recordTranscodeCacheResult("miss");
 
         let acquiredBuildLock: DashBuildLock | null = null;
         let releaseBuildLockWithTrackedPromise = false;

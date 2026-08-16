@@ -106,6 +106,8 @@ spec:
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
             "INTERNAL_API_SECRET" true
+            "METRICS_TOKEN" true
+            "METRICS_PUBLIC" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
             "ALLOWED_ORIGINS" true
@@ -291,6 +293,24 @@ spec:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "METRICS_TOKEN" }}
+            - name: METRICS_TOKEN
+              value: {{ index $backendWorkerEnv "METRICS_TOKEN" | quote }}
+            {{- else }}
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: METRICS_TOKEN
+                  optional: true
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "METRICS_PUBLIC" }}
+            - name: METRICS_PUBLIC
+              value: {{ index $backendWorkerEnv "METRICS_PUBLIC" | quote }}
+            {{- else if .Values.metrics.public }}
+            - name: METRICS_PUBLIC
+              value: "true"
             {{- end }}
             {{- if hasKey $backendWorkerEnv "TIDAL_SIDECAR_URL" }}
             - name: TIDAL_SIDECAR_URL

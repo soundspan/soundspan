@@ -128,7 +128,8 @@ tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+tmp_metrics="$(mktemp)"
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -144,6 +145,38 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   exit 1
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
+if line_match '^kind: ServiceMonitor$' "$tmp_aio"; then
+  echo "[ERROR] ServiceMonitor must be disabled by default" >&2
+  exit 1
+fi
+
+echo "[CHECK] render AIO metrics ServiceMonitor with bearer credentials"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set metrics.serviceMonitor.enabled=true \
+  >"$tmp_metrics"
+if [ "$(rg -c '^kind: ServiceMonitor$' "$tmp_metrics")" -ne 1 ]; then
+  echo "[ERROR] AIO metrics render must include one ServiceMonitor" >&2
+  exit 1
+fi
+if ! line_match '^    - port: metrics$' "$tmp_metrics"; then
+  echo "[ERROR] AIO metrics render missing the named Service port" >&2
+  exit 1
+fi
+
+echo "[CHECK] render individual metrics ServiceMonitors with bearer credentials"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set metrics.serviceMonitor.enabled=true \
+  >"$tmp_metrics"
+if [ "$(rg -c '^kind: ServiceMonitor$' "$tmp_metrics")" -ne 2 ]; then
+  echo "[ERROR] metrics render must include backend and worker ServiceMonitors" >&2
+  exit 1
+fi
+if ! perl -0777 -ne 'exit((/authorization:\s+type:\s+Bearer\s+credentials:\s+name:\s+soundspan\s+key:\s+METRICS_TOKEN/s) ? 0 : 1)' "$tmp_metrics"; then
+  echo "[ERROR] ServiceMonitor missing METRICS_TOKEN bearer credentials" >&2
+  exit 1
+fi
 
 echo "[CHECK] render OIDC configuration in AIO and individual backend modes"
 for oidc_mode in aio individual; do
@@ -455,7 +488,7 @@ assert_service_selectors_isolated "individual with HTTP sidecars" "$tmp_sidecars
 # out-of-band per docs/UPGRADING.md; here we guard the client-renderable paths.
 echo "[CHECK] render default Secret has all generated keys"
 helm template "$RELEASE_NAME" "$CHART_PATH" >"$tmp_secret"
-for key in SESSION_SECRET SETTINGS_ENCRYPTION_KEY INTERNAL_API_SECRET POSTGRES_PASSWORD; do
+for key in SESSION_SECRET SETTINGS_ENCRYPTION_KEY INTERNAL_API_SECRET METRICS_TOKEN POSTGRES_PASSWORD; do
   if ! perl -0777 -ne 'exit((/'"$key"':\s+"[^"]+"/s) ? 0 : 1)' "$tmp_secret"; then
     echo "[ERROR] default Secret render missing non-empty ${key}" >&2
     exit 1

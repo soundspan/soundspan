@@ -661,7 +661,7 @@ music:
 #   1. existingSecret — reference a Secret you manage externally (recommended)
 #        secrets.existingSecret: my-soundspan-secrets
 #      Expected keys in that Secret:
-#        SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET
+#        SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET, METRICS_TOKEN
 #      Add OIDC_CLIENT_SECRET when config.oidc.enabled=true.
 #      Add these when using chart-managed PostgreSQL or host/port external PostgreSQL:
 #        POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
@@ -683,6 +683,7 @@ secrets:
   sessionSecret: "" # Session encryption key (auto: 64 char random)
   settingsEncryptionKey: "" # Credential encryption key (auto: 64 char random)
   internalApiSecret: "" # Service-to-service auth (auto: 64 char random)
+  metricsToken: "" # Prometheus bearer token (auto: 64 char random)
   oidcClientSecret: "" # OIDC confidential client secret (required when OIDC is enabled)
   postgresUser: soundspan
   postgresPassword: "" # (auto: 32 char random)
@@ -692,6 +693,17 @@ secrets:
   #    LASTFM_API_KEY, FANART_API_KEY, OPENAI_API_KEY). Default false keeps the
   #    legacy behavior of injecting config.* API keys as plaintext env.
   apiKeysInExistingSecret: false
+
+# -- Prometheus metrics exposure and Prometheus Operator integration.
+metrics:
+  # -- Unsafe opt-out from bearer authentication. Use only on private networks.
+  public: false
+  serviceMonitor:
+    # -- Create Prometheus Operator ServiceMonitor resources.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
 
 # -- Common environment variables applied to backend (both modes)
 config:
@@ -843,4 +855,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-

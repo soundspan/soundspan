@@ -126,6 +126,8 @@ spec:
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
             "INTERNAL_API_SECRET" true
+            "METRICS_TOKEN" true
+            "METRICS_PUBLIC" true
             "LOCAL_LOGIN_ENABLED" true
             "OIDC_ENABLED" true
             "OIDC_ISSUER_URL" true
@@ -390,6 +392,24 @@ spec:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
             {{- end }}
+            {{- if hasKey $backendEnv "METRICS_TOKEN" }}
+            - name: METRICS_TOKEN
+              value: {{ index $backendEnv "METRICS_TOKEN" | quote }}
+            {{- else }}
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: METRICS_TOKEN
+                  optional: true
+            {{- end }}
+            {{- if hasKey $backendEnv "METRICS_PUBLIC" }}
+            - name: METRICS_PUBLIC
+              value: {{ index $backendEnv "METRICS_PUBLIC" | quote }}
+            {{- else if .Values.metrics.public }}
+            - name: METRICS_PUBLIC
+              value: "true"
+            {{- end }}
             {{- include "soundspan.oidcEnv" (dict "ctx" . "envMap" $backendEnv) | nindent 12 }}
             {{- if hasKey $backendEnv "TIDAL_SIDECAR_URL" }}
             - name: TIDAL_SIDECAR_URL
@@ -629,6 +649,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.metrics.serviceMonitor.enabled }}
+    - port: {{ .Values.backend.port }}
+      targetPort: http
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 4 }}
 {{- if $backendPdbEnabled }}

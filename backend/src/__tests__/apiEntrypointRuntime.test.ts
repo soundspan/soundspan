@@ -222,6 +222,7 @@ describe("api entrypoint runtime behavior", () => {
             databaseUrl: "postgresql://user:secret@db:5432/soundspan",
             redisUrl: "redis://redis:6379/0",
             docsPublic: false,
+            metrics: { token: "metrics-token", publicAccess: false },
             adminResetPassword: undefined,
             ...(configOverrides || {}),
             features: {
@@ -247,6 +248,12 @@ describe("api entrypoint runtime behavior", () => {
             discoverQueue: { name: "discover" },
             imageQueue: { name: "image" },
         };
+        const queueRegistry = Object.values(workersQueues);
+        const registerQueueMetrics = jest.fn();
+        const metricsRouter = "metrics-router";
+        const createMetricsRouter = jest.fn(() => metricsRouter);
+        const metricsRegistry = { contentType: "text/plain" };
+        const httpMetricsMiddleware = "http-metrics-middleware";
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
@@ -315,7 +322,18 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("@bull-board/api", () => ({ createBullBoard }));
         jest.doMock("@bull-board/api/bullAdapter", () => ({ BullAdapter }));
         jest.doMock("@bull-board/express", () => ({ ExpressAdapter }));
-        jest.doMock("../workers/queues", () => workersQueues);
+        jest.doMock("../workers/queues", () => ({
+            ...workersQueues,
+            queues: queueRegistry,
+        }));
+        jest.doMock("../metrics", () => ({
+            httpMetricsMiddleware,
+            metricsRegistry,
+        }));
+        jest.doMock("../metrics/endpoint", () => ({ createMetricsRouter }));
+        jest.doMock("../metrics/queueMetrics", () => ({
+            registerQueueMetrics,
+        }));
         jest.doMock("../workers", () => ({
             shutdownWorkers,
         }));
@@ -352,6 +370,11 @@ describe("api entrypoint runtime behavior", () => {
             shutdownWorkers,
             compressionMiddleware,
             compressionFilter,
+            createMetricsRouter,
+            registerQueueMetrics,
+            metricsRegistry,
+            metricsRouter,
+            httpMetricsMiddleware,
             sessionMiddleware,
             redisStoreCtor,
         };
@@ -443,6 +466,14 @@ describe("api entrypoint runtime behavior", () => {
             }),
         );
         expect(mocks.app.use).toHaveBeenCalledWith("compression-middleware");
+        expect(mocks.app.use).toHaveBeenCalledWith(mocks.httpMetricsMiddleware);
+        expect(mocks.app.use).toHaveBeenCalledWith(mocks.metricsRouter);
+        expect(mocks.createMetricsRouter).toHaveBeenCalledWith({
+            registry: mocks.metricsRegistry,
+            token: "metrics-token",
+            publicAccess: false,
+        });
+        expect(mocks.registerQueueMetrics).toHaveBeenCalled();
         expect(mocks.server.listen).toHaveBeenCalledWith(
             3006,
             "0.0.0.0",

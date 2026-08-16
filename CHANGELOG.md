@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added bearer-protected Prometheus metrics for backend HTTP traffic, Bull queue state, process resources, cache results, and federation sync outcomes, plus optional Helm ServiceMonitors and a starter Grafana dashboard. (#490)
+
 ### Changed
 
 - Documented the npm security-override lifecycle, removed obsolete backend and

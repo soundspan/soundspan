@@ -669,6 +669,26 @@ describe("config module", () => {
         expect(disabled.config.settingsDecryptFailClosed).toBe(false);
     });
 
+    it("parses metrics access settings with private defaults", async () => {
+        const defaults = await loadConfigModule({
+            METRICS_TOKEN: undefined,
+            METRICS_PUBLIC: undefined,
+        });
+        expect(defaults.config.metrics).toEqual({
+            token: undefined,
+            publicAccess: false,
+        });
+
+        const configured = await loadConfigModule({
+            METRICS_TOKEN: "  scrape-token  ",
+            METRICS_PUBLIC: "true",
+        });
+        expect(configured.config.metrics).toEqual({
+            token: "scrape-token",
+            publicAccess: true,
+        });
+    });
+
     it("configures the YouTube Music region and TIDAL sidecar URL", async () => {
         const defaults = await loadConfigModule({
             YTMUSIC_REGION: undefined,
