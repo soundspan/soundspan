@@ -1,11 +1,14 @@
 import { EventEmitter } from "events";
+import { PassThrough, Readable } from "stream";
 import { Prisma } from "@prisma/client";
 
 const logger = {
     debug: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+logger.child.mockReturnValue(logger);
 jest.mock("../../utils/logger", () => ({
     logger,
 }));
@@ -48,8 +51,17 @@ import { audiobookshelfService } from "../audiobookshelf";
 function createClient() {
     return {
         get: jest.fn(),
+        head: jest.fn(),
         patch: jest.fn(),
     };
+}
+
+async function readStream(stream: Readable): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
 }
 
 function createStreamLifecycle() {
@@ -86,6 +98,7 @@ describe("audiobookshelf service behavior", () => {
         svc.apiKey = null;
         svc.initialized = false;
         svc.podcastCache = null;
+        svc.audiobookStreamMapCache?.clear();
 
         mockGetSystemSettings.mockResolvedValue(null);
         prisma.audiobook.upsert.mockResolvedValue({});
@@ -334,12 +347,14 @@ describe("audiobookshelf service behavior", () => {
                 tracks: [
                     {
                         contentUrl: "/api/items/book-1/file/123",
+                        mimeType: "audio/mpeg",
+                        metadata: { size: 1000 },
                     },
                 ],
             },
         } as any);
         client.get.mockResolvedValueOnce({
-            data: { pipe: jest.fn() },
+            data: Readable.from([Buffer.alloc(100)]),
             headers: { "content-type": "audio/mpeg" },
             status: 206,
         });
@@ -352,7 +367,7 @@ describe("audiobookshelf service behavior", () => {
         expect(client.get).toHaveBeenCalledWith("/api/items/book-1/file/123", {
             allowAbsoluteUrls: false,
             responseType: "stream",
-            timeout: 0,
+            timeout: 30000,
             signal: expect.any(AbortSignal),
             headers: {
                 Range: "bytes=0-99",
@@ -364,6 +379,309 @@ describe("audiobookshelf service behavior", () => {
         await expect(
             audiobookshelfService.streamAudiobook("book-2"),
         ).rejects.toThrow("No audio track found for this audiobook");
+    });
+
+    it("streams every audiobook file in order with exact full-response headers", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book/file/1",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 5 },
+                        },
+                        {
+                            contentUrl: "/api/items/book/file/2",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 4 },
+                        },
+                        {
+                            contentUrl: "/api/items/book/file/3",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 5 },
+                        },
+                    ],
+                },
+            } as any,
+        );
+        const bodies = new Map([
+            ["/api/items/book/file/1", "alpha"],
+            ["/api/items/book/file/2", "beta"],
+            ["/api/items/book/file/3", "gamma"],
+        ]);
+        client.get.mockImplementation(async (path: string) => ({
+            data: Readable.from([Buffer.from(bodies.get(path) ?? "")]),
+            headers: { "content-type": "audio/mpeg" },
+            status: 200,
+        }));
+
+        const result = await audiobookshelfService.streamAudiobook("book-1");
+
+        await expect(readStream(result.stream)).resolves.toEqual(
+            Buffer.from("alphabetagamma"),
+        );
+        expect(result).toEqual(
+            expect.objectContaining({
+                status: 200,
+                headers: expect.objectContaining({
+                    "content-type": "audio/mpeg",
+                    "content-length": "14",
+                    "accept-ranges": "bytes",
+                }),
+            }),
+        );
+        expect(client.head).not.toHaveBeenCalled();
+        expect(client.get).toHaveBeenCalledTimes(3);
+    });
+
+    it("streams a cross-file range byte-exact with concatenated range headers", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: ["abcde", "fghij", "klmno"].map((_, index) => ({
+                        contentUrl: `/api/items/book/file/${index + 1}`,
+                        mimeType: "audio/mpeg",
+                        metadata: { size: 5 },
+                    })),
+                },
+            } as any,
+        );
+        const bodies = ["abcde", "fghij", "klmno"];
+        client.get.mockImplementation(
+            async (
+                path: string,
+                options: { headers?: Record<string, string> },
+            ) => {
+                const fileIndex = Number(path.at(-1)) - 1;
+                const body = bodies[fileIndex] ?? "";
+                const range = options.headers?.Range;
+                const match = range ? /^bytes=(\d+)-(\d+)$/.exec(range) : null;
+                const selected = match
+                    ? body.slice(Number(match[1]), Number(match[2]) + 1)
+                    : body;
+                return {
+                    data: Readable.from([Buffer.from(selected)]),
+                    headers: { "content-type": "audio/mpeg" },
+                    status: range ? 206 : 200,
+                };
+            },
+        );
+
+        const result = await audiobookshelfService.streamAudiobook(
+            "book-1",
+            "bytes=3-11",
+        );
+
+        await expect(readStream(result.stream)).resolves.toEqual(
+            Buffer.from("defghijkl"),
+        );
+        expect(result.status).toBe(206);
+        expect(result.headers).toEqual(
+            expect.objectContaining({
+                "content-range": "bytes 3-11/15",
+                "content-length": "9",
+                "accept-ranges": "bytes",
+            }),
+        );
+        expect(
+            client.get.mock.calls.map(([, options]) => options.headers),
+        ).toEqual([{ Range: "bytes=3-4" }, {}, { Range: "bytes=0-1" }]);
+    });
+
+    it("keeps the first file content type and warns about a mixed container", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: ["audio/mpeg", "audio/flac"].map(
+                        (mimeType, index) => ({
+                            contentUrl: `/api/items/book/file/${index + 1}`,
+                            mimeType,
+                            metadata: { size: 1 },
+                        }),
+                    ),
+                },
+            } as any,
+        );
+        client.get.mockImplementation(async (path: string) => ({
+            data: Readable.from([Buffer.from("x")]),
+            headers: {
+                "content-type": path.endsWith("/1")
+                    ? "audio/mpeg"
+                    : "audio/flac",
+            },
+            status: 200,
+        }));
+
+        const result = await audiobookshelfService.streamAudiobook("book-1");
+        await readStream(result.stream);
+
+        expect(result.headers["content-type"]).toBe("audio/mpeg");
+        expect(logger.child).toHaveBeenCalledWith("AudiobookStream");
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Audiobook track content type differs from the first file",
+            expect.objectContaining({
+                firstContentType: "audio/mpeg",
+                trackContentType: "audio/flac",
+                fileIndex: 1,
+            }),
+        );
+    });
+
+    it("returns 416 without opening a file when a range is out of bounds", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book/file/1",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 5 },
+                        },
+                    ],
+                },
+            } as any,
+        );
+
+        const result = await audiobookshelfService.streamAudiobook(
+            "book-1",
+            "bytes=5-",
+        );
+
+        await expect(readStream(result.stream)).resolves.toEqual(
+            Buffer.alloc(0),
+        );
+        expect(result.status).toBe(416);
+        expect(result.headers).toEqual(
+            expect.objectContaining({
+                "content-range": "bytes */5",
+                "content-length": "0",
+                "accept-ranges": "bytes",
+            }),
+        );
+        expect(client.get).not.toHaveBeenCalled();
+    });
+
+    it("aborts the active upstream file when the client disconnects", async () => {
+        const client = createClient();
+        const lifecycle = createStreamLifecycle();
+        const upstream = new PassThrough();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
+            {
+                media: {
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book/file/1",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 5 },
+                        },
+                    ],
+                },
+            } as any,
+        );
+        let upstreamSignal: AbortSignal | undefined;
+        client.get.mockImplementationOnce(
+            async (_path: string, options: { signal: AbortSignal }) => {
+                upstreamSignal = options.signal;
+                return {
+                    data: upstream,
+                    headers: { "content-type": "audio/mpeg" },
+                    status: 200,
+                };
+            },
+        );
+        const abortSpy = jest.spyOn(AbortController.prototype, "abort");
+
+        const result = await audiobookshelfService.streamAudiobook(
+            "book-1",
+            undefined,
+            lifecycle,
+        );
+        const reading = readStream(result.stream).catch(() => Buffer.alloc(0));
+        lifecycle.response.emit("close");
+        await reading;
+
+        expect(upstreamSignal?.aborted).toBe(true);
+        expect(abortSpy).toHaveBeenCalled();
+        expect(upstream.destroyed).toBe(true);
+    });
+
+    it("caches HEAD-derived track sizes per book and invalidates on file-list change", async () => {
+        const client = createClient();
+        const svc = audiobookshelfService as any;
+        svc.client = client;
+        svc.baseUrl = "http://abs.local";
+        svc.initialized = true;
+        const firstPayload = {
+            media: {
+                tracks: [1, 2].map((index) => ({
+                    contentUrl: `/api/items/book/file/${index}`,
+                    mimeType: "audio/mpeg",
+                })),
+            },
+        };
+        jest.spyOn(audiobookshelfService, "getAudiobook")
+            .mockResolvedValueOnce(firstPayload as any)
+            .mockResolvedValueOnce(firstPayload as any)
+            .mockResolvedValueOnce({
+                media: {
+                    tracks: [
+                        ...firstPayload.media.tracks,
+                        {
+                            contentUrl: "/api/items/book/file/3",
+                            mimeType: "audio/mpeg",
+                        },
+                    ],
+                },
+            } as any);
+        client.head.mockResolvedValue({
+            headers: {
+                "content-length": "5",
+                "content-type": "audio/mpeg",
+            },
+        });
+        client.get.mockImplementation(async () => ({
+            data: Readable.from([Buffer.from("12345")]),
+            headers: { "content-type": "audio/mpeg" },
+            status: 200,
+        }));
+
+        await readStream(
+            (await audiobookshelfService.streamAudiobook("book-1")).stream,
+        );
+        await readStream(
+            (await audiobookshelfService.streamAudiobook("book-1")).stream,
+        );
+        expect(client.head).toHaveBeenCalledTimes(2);
+
+        await readStream(
+            (await audiobookshelfService.streamAudiobook("book-1")).stream,
+        );
+        expect(client.head).toHaveBeenCalledTimes(5);
     });
 
     it.each(["close", "aborted"] as const)(
@@ -381,7 +699,13 @@ describe("audiobookshelf service behavior", () => {
                 "getAudiobook",
             ).mockResolvedValueOnce({
                 media: {
-                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book-1/file/123",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 100 },
+                        },
+                    ],
                 },
             } as any);
             client.get.mockImplementationOnce(
@@ -414,7 +738,7 @@ describe("audiobookshelf service behavior", () => {
             lifecycle.request.emit(disconnectEvent);
 
             await rejectedAcquisition;
-            expect(abortSpy).toHaveBeenCalledTimes(1);
+            expect(abortSpy).toHaveBeenCalled();
             expectStreamListeners(lifecycle, 0);
         },
     );
@@ -434,7 +758,13 @@ describe("audiobookshelf service behavior", () => {
         jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
             {
                 media: {
-                    tracks: [{ contentUrl }],
+                    tracks: [
+                        {
+                            contentUrl,
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 100 },
+                        },
+                    ],
                 },
             } as any,
         );
@@ -459,13 +789,15 @@ describe("audiobookshelf service behavior", () => {
                         {
                             contentUrl:
                                 "http://abs.local/api/items/book-1/file/123?token=track",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 100 },
                         },
                     ],
                 },
             } as any,
         );
         client.get.mockResolvedValueOnce({
-            data: { pipe: jest.fn() },
+            data: Readable.from([Buffer.alloc(100)]),
             headers: { "content-type": "audio/mpeg" },
             status: 200,
         });
@@ -491,7 +823,13 @@ describe("audiobookshelf service behavior", () => {
         jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
             {
                 media: {
-                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book-1/file/123",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 100 },
+                        },
+                    ],
                 },
             } as any,
         );
@@ -527,7 +865,7 @@ describe("audiobookshelf service behavior", () => {
         expectStreamListeners(lifecycle, 0);
     });
 
-    it("hands off a connected stream and detaches acquisition listeners", async () => {
+    it("keeps disconnect listeners until the connected stream finishes", async () => {
         const client = createClient();
         const lifecycle = createStreamLifecycle();
         const svc = audiobookshelfService as any;
@@ -538,13 +876,19 @@ describe("audiobookshelf service behavior", () => {
         jest.spyOn(audiobookshelfService, "getAudiobook").mockResolvedValueOnce(
             {
                 media: {
-                    tracks: [{ contentUrl: "/api/items/book-1/file/123" }],
+                    tracks: [
+                        {
+                            contentUrl: "/api/items/book-1/file/123",
+                            mimeType: "audio/mpeg",
+                            metadata: { size: 4 },
+                        },
+                    ],
                 },
             } as any,
         );
-        const stream = { pipe: jest.fn() };
+        const upstream = Readable.from([Buffer.from("book")]);
         client.get.mockResolvedValueOnce({
-            data: stream,
+            data: upstream,
             headers: { "content-type": "audio/mpeg" },
             status: 200,
         });
@@ -556,11 +900,11 @@ describe("audiobookshelf service behavior", () => {
             lifecycle,
         );
 
-        expect(result).toEqual({
-            stream,
-            headers: { "content-type": "audio/mpeg" },
-            status: 200,
-        });
+        expect(result.status).toBe(200);
+        expectStreamListeners(lifecycle, 1);
+        await expect(readStream(result.stream)).resolves.toEqual(
+            Buffer.from("book"),
+        );
         expect(abortSpy).not.toHaveBeenCalled();
         expectStreamListeners(lifecycle, 0);
     });

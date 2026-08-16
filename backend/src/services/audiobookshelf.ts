@@ -1,14 +1,107 @@
 import axios, { AxiosInstance } from "axios";
 import { Prisma } from "@prisma/client";
+import { Readable } from "stream";
+import { z } from "zod";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { buildSectionsWhenPresent } from "./audiobookSections";
+import {
+    buildAudiobookStreamMap,
+    resolveAudiobookRange,
+    type AudiobookFileSlice,
+    type AudiobookStreamMap,
+} from "./audiobookStreamMap";
 
 const STREAM_HEADER_TIMEOUT_MS = 30_000;
+const AUDIOBOOK_STREAM_MAP_CACHE_TTL_MS = 15 * 60 * 1000;
+const AUDIOBOOK_STREAM_MAP_CACHE_MAX_ITEMS = 256;
+const MAX_AUDIOBOOK_TRACKS = 10_000;
 const UNSAFE_AUDIO_TRACK_URL_ERROR =
     "Audiobookshelf returned an unsafe audio track URL";
+
+const audiobookTrackSchema = z.looseObject({
+    contentUrl: z.string().min(1).max(8192),
+    mimeType: z.string().min(1).max(255).nullish(),
+    metadata: z
+        .looseObject({
+            size: z.number().int().nonnegative().safe().nullish(),
+        })
+        .nullish(),
+});
+const audiobookTracksSchema = z
+    .array(audiobookTrackSchema)
+    .min(1)
+    .max(MAX_AUDIOBOOK_TRACKS);
+const contentLengthSchema = z.union([
+    z.number().int().nonnegative().safe(),
+    z
+        .string()
+        .regex(/^\d+$/)
+        .transform(Number)
+        .pipe(z.number().int().nonnegative().safe()),
+]);
+
+type AudiobookTrack = Readonly<{
+    contentPath: string;
+    byteLength?: number;
+    mimeType?: string;
+}>;
+
+type CachedAudiobookStreamMap = Readonly<{
+    fingerprint: string;
+    byteLengths: ReadonlyArray<number>;
+    contentType?: string;
+    expiresAt: number;
+}>;
+
+type OpenTrackStream = Readonly<{
+    stream: Readable;
+    contentType?: string;
+    close(): void;
+}>;
+
+type RequestController = Readonly<{
+    controller: AbortController;
+    headersReceived(): void;
+    dispose(): void;
+}>;
+
+type AudiobookStreamResult = Readonly<{
+    stream: Readable;
+    headers: Record<string, string>;
+    status: number;
+}>;
+
+type ResolvedTrackMetadata = Readonly<{
+    byteLengths: number[];
+    contentType?: string;
+}>;
+
+type AudiobookStreamPlan = Readonly<{
+    status: 200 | 206 | 416;
+    totalBytes: number;
+    contentLength: number;
+    contentRange?: string;
+    slices: ReadonlyArray<AudiobookFileSlice>;
+}>;
+
+type PreparedAudiobookStream = Readonly<{
+    tracks: ReadonlyArray<AudiobookTrack>;
+    metadata: ResolvedTrackMetadata;
+    plan: AudiobookStreamPlan;
+}>;
+
+type StreamSlicesInput = Readonly<{
+    tracks: ReadonlyArray<AudiobookTrack>;
+    byteLengths: ReadonlyArray<number>;
+    slices: ReadonlyArray<AudiobookFileSlice>;
+    firstOpen: OpenTrackStream;
+    contentType: string;
+    signal: AbortSignal;
+    detachDisconnect(): void;
+}>;
 
 function resolveStreamContentPath(
     contentUrl: unknown,
@@ -45,6 +138,148 @@ function resolveStreamContentPath(
     }
 
     return `${resolvedContentUrl.pathname}${resolvedContentUrl.search}`;
+}
+
+function parseAudiobookTracks(
+    payload: unknown,
+    baseUrl: string | null,
+): AudiobookTrack[] {
+    const tracksValue =
+        typeof payload === "object" && payload !== null && "media" in payload
+            ? (payload as { media?: { tracks?: unknown } }).media?.tracks
+            : undefined;
+    if (Array.isArray(tracksValue) && tracksValue.length === 0) {
+        throw new Error("No audio track found for this audiobook");
+    }
+    const tracks = audiobookTracksSchema.parse(tracksValue);
+    return tracks.map((track) => ({
+        contentPath: resolveStreamContentPath(track.contentUrl, baseUrl),
+        ...(track.metadata?.size === null || track.metadata?.size === undefined
+            ? {}
+            : { byteLength: track.metadata.size }),
+        ...(track.mimeType ? { mimeType: track.mimeType } : {}),
+    }));
+}
+
+function streamMapFingerprint(tracks: ReadonlyArray<AudiobookTrack>): string {
+    return tracks.map((track) => track.contentPath).join("\u0000");
+}
+
+function normalizedContentType(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() !== ""
+        ? value.split(";", 1)[0]?.trim().toLowerCase()
+        : undefined;
+}
+
+function sliceByteLength(slice: AudiobookFileSlice): number {
+    return slice.fileEndByte - slice.fileStartByte + 1;
+}
+
+function resolveStreamPlan(
+    map: AudiobookStreamMap,
+    rangeHeader?: string,
+): AudiobookStreamPlan {
+    const totalBytes = map.totalBytes();
+    const range = rangeHeader
+        ? resolveAudiobookRange(rangeHeader, map)
+        : undefined;
+    if (range?.kind === "unsatisfiable") {
+        return {
+            status: 416,
+            totalBytes,
+            contentLength: 0,
+            contentRange: `bytes */${totalBytes}`,
+            slices: [],
+        };
+    }
+    if (range?.kind === "partial") {
+        return {
+            status: 206,
+            totalBytes,
+            contentLength: range.endByte - range.startByte + 1,
+            contentRange: `bytes ${range.startByte}-${range.endByte}/${totalBytes}`,
+            slices: range.slices,
+        };
+    }
+    return {
+        status: 200,
+        totalBytes,
+        contentLength: totalBytes,
+        slices: totalBytes === 0 ? [] : map.resolveRange(0, totalBytes - 1),
+    };
+}
+
+function streamHeaders(
+    plan: AudiobookStreamPlan,
+    contentType?: string,
+): Record<string, string> {
+    return {
+        ...(plan.status === 416
+            ? {}
+            : { "content-type": contentType ?? "audio/mpeg" }),
+        "accept-ranges": "bytes",
+        "content-length": String(plan.contentLength),
+        ...(plan.contentRange ? { "content-range": plan.contentRange } : {}),
+    };
+}
+
+function abortOnEarlyClose(
+    stream: Readable,
+    controller: AbortController,
+): void {
+    stream.once("close", () => {
+        if (!stream.readableEnded && !controller.signal.aborted) {
+            controller.abort(
+                new Error("Audiobook response stream closed early"),
+            );
+        }
+    });
+}
+
+function warnOnContentTypeMismatch(
+    expectedContentType: string,
+    actualContentType: string | undefined,
+    fileIndex: number,
+): void {
+    if (!actualContentType || actualContentType === expectedContentType) return;
+    logger
+        .child("AudiobookStream")
+        .warn("Audiobook track content type differs from the first file", {
+            firstContentType: expectedContentType,
+            trackContentType: actualContentType,
+            fileIndex,
+        });
+}
+
+function asStreamChunk(value: unknown): Buffer {
+    if (Buffer.isBuffer(value)) return value;
+    if (typeof value === "string" || value instanceof Uint8Array) {
+        return Buffer.from(value);
+    }
+    throw new Error("Audiobookshelf returned a non-byte stream chunk");
+}
+
+async function* readExactStream(
+    stream: Readable,
+    expectedBytes: number,
+): AsyncGenerator<Buffer> {
+    let emittedBytes = 0;
+    // The byte count bounds this transport-driven loop even though chunking is upstream-owned.
+    for await (const value of stream) {
+        const chunk = asStreamChunk(value);
+        if (emittedBytes + chunk.byteLength > expectedBytes) {
+            throw new Error(
+                "Audiobookshelf track exceeded its declared byte range",
+            );
+        }
+        emittedBytes += chunk.byteLength;
+        yield chunk;
+    }
+    if (emittedBytes !== expectedBytes) {
+        throw new Error(
+            "Audiobookshelf track ended before its declared byte range",
+        );
+    }
 }
 
 interface StreamDisconnectSource {
@@ -103,6 +338,10 @@ class AudiobookshelfService {
     private initialized = false;
     private podcastCache: { items: any[]; expiresAt: number } | null = null;
     private readonly PODCAST_CACHE_TTL_MS = 5 * 60 * 1000;
+    private readonly audiobookStreamMapCache = new Map<
+        string,
+        CachedAudiobookStreamMap
+    >();
 
     private async ensureInitialized() {
         if (this.initialized && this.client) return;
@@ -356,62 +595,343 @@ class AudiobookshelfService {
         return `${this.baseUrl}/api/items/${audiobookId}/play`;
     }
 
-    /**
-     * Stream an audiobook with authentication
-     * Returns a readable stream that can be piped to the response
-     */
+    private createRequestController(
+        parentSignal: AbortSignal,
+    ): RequestController {
+        const controller = new AbortController();
+        const abortFromParent = () => controller.abort(parentSignal.reason);
+        parentSignal.addEventListener("abort", abortFromParent, { once: true });
+        if (parentSignal.aborted) abortFromParent();
+        const timeoutId = setTimeout(() => {
+            controller.abort(
+                new Error(
+                    `Audiobookshelf stream headers timed out after ${STREAM_HEADER_TIMEOUT_MS}ms`,
+                ),
+            );
+        }, STREAM_HEADER_TIMEOUT_MS);
+        return {
+            controller,
+            headersReceived: () => clearTimeout(timeoutId),
+            dispose: () => {
+                clearTimeout(timeoutId);
+                parentSignal.removeEventListener("abort", abortFromParent);
+            },
+        };
+    }
+
+    private getCachedStreamMap(
+        audiobookId: string,
+        fingerprint: string,
+    ): CachedAudiobookStreamMap | undefined {
+        const cached = this.audiobookStreamMapCache.get(audiobookId);
+        if (
+            !cached ||
+            cached.fingerprint !== fingerprint ||
+            cached.expiresAt <= Date.now()
+        ) {
+            this.audiobookStreamMapCache.delete(audiobookId);
+            return undefined;
+        }
+        this.audiobookStreamMapCache.delete(audiobookId);
+        this.audiobookStreamMapCache.set(audiobookId, cached);
+        return cached;
+    }
+
+    private cacheStreamMap(
+        audiobookId: string,
+        entry: CachedAudiobookStreamMap,
+    ): void {
+        this.audiobookStreamMapCache.delete(audiobookId);
+        if (
+            this.audiobookStreamMapCache.size >=
+            AUDIOBOOK_STREAM_MAP_CACHE_MAX_ITEMS
+        ) {
+            const oldestKey = this.audiobookStreamMapCache.keys().next().value;
+            if (typeof oldestKey === "string") {
+                this.audiobookStreamMapCache.delete(oldestKey);
+            }
+        }
+        this.audiobookStreamMapCache.set(audiobookId, entry);
+    }
+
+    private async headTrack(
+        track: AudiobookTrack,
+        parentSignal: AbortSignal,
+    ): Promise<{ byteLength: number; contentType?: string }> {
+        const request = this.createRequestController(parentSignal);
+        try {
+            const response = await this.client!.head(track.contentPath, {
+                allowAbsoluteUrls: false,
+                timeout: STREAM_HEADER_TIMEOUT_MS,
+                signal: request.controller.signal,
+                validateStatus: (status) => status >= 200 && status < 300,
+            });
+            request.headersReceived();
+            return {
+                byteLength: contentLengthSchema.parse(
+                    response.headers["content-length"],
+                ),
+                ...(normalizedContentType(response.headers["content-type"])
+                    ? {
+                          contentType: normalizedContentType(
+                              response.headers["content-type"],
+                          ),
+                      }
+                    : {}),
+            };
+        } finally {
+            request.dispose();
+        }
+    }
+
+    private async resolveTrackMetadata(
+        audiobookId: string,
+        tracks: ReadonlyArray<AudiobookTrack>,
+        signal: AbortSignal,
+    ): Promise<ResolvedTrackMetadata> {
+        const fingerprint = streamMapFingerprint(tracks);
+        const cached = this.getCachedStreamMap(audiobookId, fingerprint);
+        const byteLengths = tracks.map(
+            (track, index) => track.byteLength ?? cached?.byteLengths[index],
+        );
+        let contentType =
+            normalizedContentType(tracks[0]?.mimeType) ?? cached?.contentType;
+        for (let index = 0; index < tracks.length; index += 1) {
+            const track = tracks[index];
+            if (!track) throw new Error("Audiobook track index is missing");
+            const needsType = index === 0 && contentType === undefined;
+            if (byteLengths[index] !== undefined && !needsType) continue;
+            const head = await this.headTrack(track, signal);
+            byteLengths[index] ??= head.byteLength;
+            if (needsType) contentType = head.contentType;
+        }
+        const resolvedLengths = z
+            .array(z.number().int().nonnegative().safe())
+            .length(tracks.length)
+            .parse(byteLengths);
+        this.cacheStreamMap(audiobookId, {
+            fingerprint,
+            byteLengths: resolvedLengths,
+            ...(contentType ? { contentType } : {}),
+            expiresAt: Date.now() + AUDIOBOOK_STREAM_MAP_CACHE_TTL_MS,
+        });
+        return {
+            byteLengths: resolvedLengths,
+            ...(contentType ? { contentType } : {}),
+        };
+    }
+
+    private async openTrackStream(
+        track: AudiobookTrack,
+        fileByteLength: number,
+        slice: AudiobookFileSlice,
+        parentSignal: AbortSignal,
+    ): Promise<OpenTrackStream> {
+        const request = this.createRequestController(parentSignal);
+        const isFullFile =
+            slice.fileStartByte === 0 &&
+            slice.fileEndByte === fileByteLength - 1;
+        try {
+            const response = await this.client!.get(track.contentPath, {
+                allowAbsoluteUrls: false,
+                responseType: "stream",
+                timeout: STREAM_HEADER_TIMEOUT_MS,
+                signal: request.controller.signal,
+                headers: isFullFile
+                    ? {}
+                    : {
+                          Range: `bytes=${slice.fileStartByte}-${slice.fileEndByte}`,
+                      },
+                validateStatus: (status) => status >= 200 && status < 300,
+            });
+            request.headersReceived();
+            if (!isFullFile && response.status !== 206) {
+                throw new Error("Audiobookshelf ignored a track byte range");
+            }
+            if (!(response.data instanceof Readable)) {
+                throw new Error(
+                    "Audiobookshelf track response is not readable",
+                );
+            }
+            return this.manageOpenTrack(
+                response.data,
+                response.headers["content-type"],
+                request,
+                parentSignal,
+            );
+        } catch (error) {
+            request.dispose();
+            throw error;
+        }
+    }
+
+    private manageOpenTrack(
+        stream: Readable,
+        contentType: unknown,
+        request: RequestController,
+        parentSignal: AbortSignal,
+    ): OpenTrackStream {
+        const destroyOnAbort = () => stream.destroy(parentSignal.reason);
+        parentSignal.addEventListener("abort", destroyOnAbort, { once: true });
+        if (parentSignal.aborted) destroyOnAbort();
+        return {
+            stream,
+            contentType: normalizedContentType(contentType),
+            close: () => {
+                parentSignal.removeEventListener("abort", destroyOnAbort);
+                stream.destroy();
+                request.dispose();
+            },
+        };
+    }
+
+    private async openSlice(
+        input: StreamSlicesInput,
+        slice: AudiobookFileSlice,
+        index: number,
+    ): Promise<OpenTrackStream> {
+        if (index === 0) return input.firstOpen;
+        const track = input.tracks[slice.fileIndex];
+        const byteLength = input.byteLengths[slice.fileIndex];
+        if (!track || byteLength === undefined) {
+            throw new Error("Audiobook stream map references a missing track");
+        }
+        return this.openTrackStream(track, byteLength, slice, input.signal);
+    }
+
+    private async *streamSlices(
+        input: StreamSlicesInput,
+    ): AsyncGenerator<Buffer> {
+        try {
+            for (let index = 0; index < input.slices.length; index += 1) {
+                const slice = input.slices[index];
+                if (!slice)
+                    throw new Error("Audiobook stream slice is missing");
+                const opened = await this.openSlice(input, slice, index);
+                try {
+                    warnOnContentTypeMismatch(
+                        input.contentType,
+                        opened.contentType,
+                        slice.fileIndex,
+                    );
+                    yield* readExactStream(
+                        opened.stream,
+                        sliceByteLength(slice),
+                    );
+                } finally {
+                    opened.close();
+                }
+            }
+        } finally {
+            input.detachDisconnect();
+        }
+    }
+
+    private async prepareAudiobookStream(
+        audiobookId: string,
+        rangeHeader: string | undefined,
+        signal: AbortSignal,
+    ): Promise<PreparedAudiobookStream> {
+        const payload = await this.getAudiobook(audiobookId, signal);
+        const tracks = parseAudiobookTracks(payload, this.baseUrl);
+        const metadata = await this.resolveTrackMetadata(
+            audiobookId,
+            tracks,
+            signal,
+        );
+        const map = buildAudiobookStreamMap(
+            metadata.byteLengths.map((byteLength, index) => ({
+                index,
+                byteLength,
+            })),
+        );
+        return {
+            tracks,
+            metadata,
+            plan: resolveStreamPlan(map, rangeHeader),
+        };
+    }
+
+    private async createAudiobookStreamResult(
+        prepared: PreparedAudiobookStream,
+        controller: AbortController,
+        detachDisconnect: () => void,
+    ): Promise<AudiobookStreamResult> {
+        const firstSlice = prepared.plan.slices[0];
+        if (!firstSlice) {
+            detachDisconnect();
+            return {
+                stream: Readable.from([]),
+                status: prepared.plan.status,
+                headers: streamHeaders(
+                    prepared.plan,
+                    prepared.metadata.contentType,
+                ),
+            };
+        }
+        const firstTrack = prepared.tracks[firstSlice.fileIndex];
+        const firstLength = prepared.metadata.byteLengths[firstSlice.fileIndex];
+        if (!firstTrack || firstLength === undefined) {
+            throw new Error("Audiobook first stream slice is invalid");
+        }
+        const firstOpen = await this.openTrackStream(
+            firstTrack,
+            firstLength,
+            firstSlice,
+            controller.signal,
+        );
+        // One book is one resource. Mixed containers keep the first file's type.
+        const contentType =
+            prepared.metadata.contentType ??
+            (firstSlice.fileIndex === 0 ? firstOpen.contentType : undefined) ??
+            "audio/mpeg";
+        const stream = Readable.from(
+            this.streamSlices({
+                tracks: prepared.tracks,
+                byteLengths: prepared.metadata.byteLengths,
+                slices: prepared.plan.slices,
+                firstOpen,
+                contentType,
+                signal: controller.signal,
+                detachDisconnect,
+            }),
+        );
+        abortOnEarlyClose(stream, controller);
+        return {
+            stream,
+            status: prepared.plan.status,
+            headers: streamHeaders(prepared.plan, contentType),
+        };
+    }
+
+    /** Stream all audiobook tracks as one byte-addressable readable stream. */
     async streamAudiobook(
         audiobookId: string,
         rangeHeader?: string,
         lifecycle?: StreamAcquisitionLifecycle,
-    ) {
-        const controller = new AbortController();
+    ): Promise<AudiobookStreamResult> {
+        const sessionController = new AbortController();
         const detachDisconnect = lifecycle
-            ? bindStreamDisconnect(lifecycle, controller)
+            ? bindStreamDisconnect(lifecycle, sessionController)
             : () => undefined;
-        const timeoutError = new Error(
-            `Audiobookshelf stream headers timed out after ${STREAM_HEADER_TIMEOUT_MS}ms`,
-        );
-        const timeoutId = setTimeout(() => {
-            if (!controller.signal.aborted) controller.abort(timeoutError);
-        }, STREAM_HEADER_TIMEOUT_MS);
-
         try {
             await this.ensureInitialized();
-            const audiobook = await this.getAudiobook(
+            const prepared = await this.prepareAudiobookStream(
                 audiobookId,
-                controller.signal,
+                rangeHeader,
+                sessionController.signal,
             );
-            const contentUrl = audiobook.media?.tracks?.[0]?.contentUrl;
-            if (!contentUrl) {
-                throw new Error("No audio track found for this audiobook");
-            }
-            const contentPath = resolveStreamContentPath(
-                contentUrl,
-                this.baseUrl,
+            return await this.createAudiobookStreamResult(
+                prepared,
+                sessionController,
+                detachDisconnect,
             );
-
-            const headers: Record<string, string> = {};
-            if (rangeHeader) headers["Range"] = rangeHeader;
-            const response = await this.client!.get(contentPath, {
-                allowAbsoluteUrls: false,
-                responseType: "stream",
-                timeout: 0,
-                signal: controller.signal,
-                headers,
-                validateStatus: (status) => status >= 200 && status < 300,
-            });
-            return {
-                stream: response.data,
-                headers: response.headers,
-                status: response.status,
-            };
         } catch (error) {
-            if (controller.signal.aborted) throw controller.signal.reason;
-            throw error;
-        } finally {
-            clearTimeout(timeoutId);
             detachDisconnect();
+            if (sessionController.signal.aborted) {
+                throw sessionController.signal.reason;
+            }
+            throw error;
         }
     }
 

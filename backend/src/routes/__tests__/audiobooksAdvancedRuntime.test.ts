@@ -722,7 +722,7 @@ describe("audiobooks advanced runtime", () => {
         });
     });
 
-    it("returns multi-file parts but marks their seek targets non-playable", async () => {
+    it("returns playable seek targets for multi-file parts", async () => {
         prisma.audiobook.findUnique.mockResolvedValueOnce({
             id: "book-parts",
             title: "Parted Book",
@@ -765,7 +765,7 @@ describe("audiobooks advanced runtime", () => {
                     { index: 0, title: "Part One", startSeconds: 0 },
                     { index: 1, title: "Part Two", startSeconds: 600 },
                 ],
-                sectionsPlayable: false,
+                sectionsPlayable: true,
             }),
         );
         expect(audiobookshelfService.getAudiobook).not.toHaveBeenCalled();
@@ -1067,6 +1067,31 @@ describe("audiobooks advanced runtime", () => {
 
         successRes.emit("close");
         expect(stream.destroy).toHaveBeenCalled();
+
+        const unsatisfiableStream = createMockStream();
+        audiobookshelfService.streamAudiobook.mockResolvedValueOnce({
+            stream: unsatisfiableStream,
+            headers: {
+                "accept-ranges": "bytes",
+                "content-length": "0",
+                "content-range": "bytes */100",
+            },
+            status: 416,
+        });
+        const unsatisfiableRes = createRes();
+        await streamHandler(
+            {
+                params: { id: "stream-416" },
+                headers: { range: "bytes=100-" },
+                user: { id: "u1" },
+            } as any,
+            unsatisfiableRes,
+        );
+        expect(unsatisfiableRes.statusCode).toBe(416);
+        expect(unsatisfiableRes.headers["Content-Type"]).toBeUndefined();
+        expect(unsatisfiableRes.headers["Content-Length"]).toBe("0");
+        expect(unsatisfiableRes.headers["Accept-Ranges"]).toBe("bytes");
+        expect(unsatisfiableRes.headers["Content-Range"]).toBe("bytes */100");
 
         const defaultStream = createMockStream();
         audiobookshelfService.streamAudiobook.mockResolvedValueOnce({

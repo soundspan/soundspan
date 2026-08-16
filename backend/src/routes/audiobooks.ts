@@ -117,13 +117,8 @@ function audiobookListResponse(
     };
 }
 
-function sectionsArePlayable(
-    book: AudiobookRow,
-    cachedSections: AudiobookSections,
-): boolean {
-    // The stream proxy currently serves only media.tracks[0]. Keep all computed
-    // multi-file parts cached, but do not expose unsafe seek navigation for them.
-    return cachedSections.kind === "chapters" && book.numTracks === 1;
+function sectionsArePlayable(cachedSections: AudiobookSections): boolean {
+    return cachedSections.kind !== "none";
 }
 
 /**
@@ -1017,10 +1012,7 @@ router.get<{ id: string }>(
                     : null,
                 sectionKind: cachedSections.kind,
                 sections: cachedSections.sections,
-                sectionsPlayable: sectionsArePlayable(
-                    audiobook,
-                    cachedSections,
-                ),
+                sectionsPlayable: sectionsArePlayable(cachedSections),
                 libraryId: audiobook.libraryId,
                 progress: progress
                     ? {
@@ -1070,14 +1062,33 @@ router.get<{ id: string }>(
  *         description: HTTP range header for partial content
  *     responses:
  *       200:
- *         description: Full audio stream
+ *         description: Full concatenated audio stream
+ *         headers:
+ *           Accept-Ranges:
+ *             schema: { type: string, example: bytes }
+ *           Content-Length:
+ *             schema: { type: integer, format: int64 }
  *         content:
  *           audio/mpeg:
  *             schema:
  *               type: string
  *               format: binary
  *       206:
- *         description: Partial audio stream
+ *         description: Partial concatenated audio stream
+ *         headers:
+ *           Accept-Ranges:
+ *             schema: { type: string, example: bytes }
+ *           Content-Length:
+ *             schema: { type: integer, format: int64 }
+ *           Content-Range:
+ *             schema: { type: string, example: "bytes 100-199/1000" }
+ *       416:
+ *         description: Requested byte range is outside the concatenated audiobook
+ *         headers:
+ *           Accept-Ranges:
+ *             schema: { type: string, example: bytes }
+ *           Content-Range:
+ *             schema: { type: string }
  *       401:
  *         description: Not authenticated
  *       503:
@@ -1189,8 +1200,12 @@ router.get<{ id: string }>(
 
             // Set content type - ensure it's audio
             // axios >=1.18 types indexed header access as a union; coerce to string.
-            const contentType = String(headers["content-type"] || "audio/mpeg");
-            res.setHeader("Content-Type", contentType);
+            if (responseStatus !== 416) {
+                const contentType = String(
+                    headers["content-type"] || "audio/mpeg",
+                );
+                res.setHeader("Content-Type", contentType);
+            }
 
             // Set other headers
             if (headers["content-length"]) {

@@ -16,8 +16,8 @@ Start-here guide for `frontend/features/audiobook`.
 
 The detail page renders only validated cached sections. Sparse or malformed
 Audiobookshelf chapters are replaced by derived multi-file parts when possible.
-Navigation remains hidden for honest-empty results and for multi-file books
-until the stream proxy can serve more than the first file.
+Navigation remains hidden for honest-empty results. Valid chapters and
+multi-file parts seek within the concatenated audiobook stream.
 
 ## Directory Contents
 

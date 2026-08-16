@@ -26,8 +26,8 @@ Connect soundspan to Lidarr to request/download new music and trigger imports.
 Audiobook detail metadata and section navigation are served from soundspan's
 local cache. Scheduled or manual Audiobookshelf sync validates chapter coverage
 and fills section data for rows created before this model was added. Multi-file
-part boundaries remain visible in the API but are not playable in the UI while
-the stream proxy serves only the first file.
+part boundaries are playable because the stream proxy exposes all files as one
+byte-addressable audiobook resource.
 
 ### Networking note
 
