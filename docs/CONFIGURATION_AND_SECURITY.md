@@ -68,6 +68,40 @@ For multi-replica backend/frontend deployments, configure Redis as a highly avai
 A single Redis pod is a runtime SPOF for sessions, queues, and realtime coordination.
 Redis HA is an operator-managed prerequisite (external managed Redis/Dragonfly, Sentinel, or equivalent); soundspan consumes the configured endpoint for queues, claims, and realtime coordination and does not manage Redis HA topology itself.
 
+## Browser Content Security Policy
+
+The frontend sends a nonce-based Content Security Policy on every Next-served document, including unauthenticated `/share/*` pages and PWA navigations. API response CSP headers are separate and do not protect documents rendered by the browser.
+
+The production policy is:
+
+```text
+default-src 'self'; script-src 'self' 'nonce-{PER_REQUEST_NONCE}' 'strict-dynamic'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+The frontend generates a new unpredictable nonce for each request. Next applies it to framework, page, and inline runtime scripts. This avoids `script-src 'unsafe-inline'`. Development mode adds `script-src 'unsafe-eval'` because the Next development runtime requires it. `style-src 'unsafe-inline'` remains necessary for framework and application inline styles.
+
+Nonce propagation requires dynamic rendering, so Next static optimization, ISR, and default CDN document caching are disabled. Static assets remain cacheable. The policy contains no deployment hostname. Browser API, cover-art, provider-thumbnail, playback, and Listen Together requests use same-origin frontend proxy paths by default. Enforcing CSP does not support a separately originated `NEXT_PUBLIC_API_URL`; use `NEXT_PUBLIC_API_PATH_MODE=proxy` or the default unset configuration before enforcement.
+
+The policy defaults to `Content-Security-Policy-Report-Only`. Use this rollout sequence:
+
+1. Leave `CSP_ENFORCE` unset or set it to `false`.
+2. Review browser console violations during normal playback, Listen Together, offline/PWA use, unauthenticated share pages, and administrator workflows.
+3. Fix or explicitly account for every required source.
+4. Set `CSP_ENFORCE=true` and restart the frontend or AIO container.
+5. Repeat the same workflow checks against the enforcing header.
+
+Set `CSP_REPORT_URI` to a root-relative path handled by your reverse proxy or to an HTTPS collector URL to receive reports. soundspan does not include a report collector. When configured, the frontend emits both the legacy `report-uri` directive and the `report-to` directive with a matching `Reporting-Endpoints` header. Treat reports as potentially sensitive because browsers can include document and blocked-resource URLs. Values containing header delimiters, credentials, fragments, unsupported schemes, or protocol-relative URLs are ignored.
+
+### SVG image optimization exception
+
+`images.dangerouslyAllowSVG` remains enabled for cover-art compatibility. The Next image optimizer is explicitly configured to return optimized images with `Content-Disposition: attachment` and this image-specific CSP:
+
+```text
+default-src 'self'; script-src 'none'; frame-src 'none'; sandbox;
+```
+
+This sandbox applies to optimized image responses independently of the document policy. External MusicBrainz, Last.fm, Deezer, podcast RSS, TIDAL, YouTube Music, and other provider images are fetched through the backend cover/browse proxy or the same-origin Next image optimizer. The browser document policy therefore does not allow provider image hosts directly.
+
 ## Sensitive Variables
 
 Never commit `.env` files or credentials.

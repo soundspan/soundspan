@@ -1263,6 +1263,7 @@ export function mapYtMusicChartsToFeaturedPlaylists(
 
             const creator = resolveChartArtist(entry);
             const album = resolveChartAlbum(entry);
+            const thumbnail = resolveChartThumbnail(entry);
             featured.push({
                 id: videoId,
                 source: "ytmusic",
@@ -1270,7 +1271,7 @@ export function mapYtMusicChartsToFeaturedPlaylists(
                 title,
                 description: album ? `${creator} - ${album}` : creator,
                 creator,
-                imageUrl: resolveChartThumbnail(entry),
+                imageUrl: thumbnail ? api.getBrowseImageUrl(thumbnail) : null,
                 trackCount: 1,
                 url: `https://music.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
             });

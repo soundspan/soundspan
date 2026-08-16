@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Added a per-request nonce Content Security Policy to every Next-served page, including share pages and PWA navigations. The policy starts in report-only mode and can be enforced with `CSP_ENFORCE=true`; optimized SVG responses retain a separate script-blocking sandbox. (#486)
 - Removed the ambient cookie credential surface from backend API
   authentication. (#491)
 - Startup administrator password resets now invalidate outstanding access and

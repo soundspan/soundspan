@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Montserrat } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
+import { connection } from "next/server";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { FeaturesProvider } from "@/lib/features-context";
@@ -63,11 +64,15 @@ export const metadata: Metadata = {
 /**
  * Renders the RootLayout component.
  */
-export default function RootLayout({
+export default async function RootLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    // A fresh CSP nonce is generated for every document request. Dynamic
+    // rendering lets Next attach that request nonce to its runtime scripts.
+    await connection();
+
     return (
         <html lang="en">
             <body

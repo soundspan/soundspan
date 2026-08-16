@@ -163,6 +163,9 @@ services:
             # Exposed to the browser; leave empty by default so the app uses /api via rewrites.
             NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
             NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING: ${NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING:-false}
+            # Next-served documents start in report-only CSP mode.
+            CSP_ENFORCE: ${CSP_ENFORCE:-false}
+            CSP_REPORT_URI: ${CSP_REPORT_URI:-}
         ports:
             # For frontend scale-out in compose on a single host, run behind a reverse proxy
             # and avoid fixed host-port bindings on each replica.

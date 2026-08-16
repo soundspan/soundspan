@@ -6,6 +6,7 @@ import { MapHintChip } from "./MapHintChip";
 import { hintForMode } from "./mapHints";
 import { worldToScreen } from "./mapViewport";
 import { getMoodColor } from "./types";
+import { api } from "@/lib/api";
 import type { VibeMapViewModel } from "./useVibeMapController";
 
 function HoverTooltip({ model }: { model: VibeMapViewModel }) {
@@ -18,6 +19,13 @@ function HoverTooltip({ model }: { model: VibeMapViewModel }) {
     if (!world) return null;
     const screen = worldToScreen(viewport, world);
     const flip = screen.x > model.dims.width - 280;
+    const coverUrl =
+        track.coverUrl &&
+        !track.coverUrl.startsWith("/") &&
+        !track.coverUrl.startsWith("data:") &&
+        !track.coverUrl.startsWith("blob:")
+            ? api.getCoverArtUrl(track.coverUrl, 80)
+            : track.coverUrl;
     return (
         <div
             className="pointer-events-none absolute z-40 -translate-y-1/2"
@@ -28,9 +36,9 @@ function HoverTooltip({ model }: { model: VibeMapViewModel }) {
             }}
         >
             <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-3 py-2 shadow-lg inline-flex items-center gap-2 max-w-[260px]">
-                {track.coverUrl && (
+                {coverUrl && (
                     <img
-                        src={track.coverUrl}
+                        src={coverUrl}
                         alt=""
                         loading="lazy"
                         className="w-10 h-10 rounded object-cover flex-shrink-0"

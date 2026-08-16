@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Crosshair, Music, Pause, Play } from "lucide-react";
+import { api } from "@/lib/api";
 import { VIBE_ACCENTS } from "./types";
 
 export interface NowPlayingCardTrack {
@@ -55,7 +56,14 @@ function CoverButton({
     color: string;
     onFlyTo: () => void;
 }) {
-    const cover = track.album?.coverArt ?? null;
+    const rawCover = track.album?.coverArt ?? null;
+    const cover =
+        rawCover &&
+        !rawCover.startsWith("/") &&
+        !rawCover.startsWith("data:") &&
+        !rawCover.startsWith("blob:")
+            ? api.getCoverArtUrl(rawCover, 96)
+            : rawCover;
     return (
         <button
             type="button"

@@ -34,6 +34,8 @@ export function SimilarAlbums({
                             album.coverArt
                                 ? api.getCoverArtUrl(album.coverArt, 300)
                                 : album.coverUrl
+                                  ? api.getCoverArtUrl(album.coverUrl, 300)
+                                  : null
                         }
                         title={album.title}
                         subtitle={album.artist?.name}

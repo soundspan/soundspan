@@ -73,6 +73,11 @@ const nextConfig: NextConfig = {
         imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
         minimumCacheTTL: 60 * 60 * 24 * 7, // Cache for 7 days
         dangerouslyAllowSVG: true,
+        // SVG optimization remains enabled for remote cover art. Force direct
+        // image responses to download and deny script/frame execution.
+        contentDispositionType: "attachment",
+        contentSecurityPolicy:
+            "default-src 'self'; script-src 'none'; frame-src 'none'; sandbox;",
     },
     experimental: {
         // Frontend pods may run with read-only root filesystems; disable

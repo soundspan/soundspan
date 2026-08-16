@@ -42,6 +42,8 @@ mock.module("@/lib/api", {
             createPlaylist: (name: string) => state.api.createPlaylist(name),
             addTrackToPlaylist: (playlistId: string, ref: unknown) =>
                 state.api.addTrackToPlaylist(playlistId, ref),
+            getCoverArtUrl: (url: string) =>
+                `/api/library/cover-art?url=${encodeURIComponent(url)}`,
         },
     },
 });
@@ -432,6 +434,31 @@ test("NowPlayingCard shows the playing track's title, artist and pause control",
     // cover/title click alone doesn't read as a fly-to affordance).
     assert.match(html, /Find on map/);
     assert.match(html, /aria-label="Find Playing Title on the map"/);
+});
+
+test("NowPlayingCard proxies external cover art through the same origin", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t-cover",
+                title: "Covered Track",
+                artist: { name: "Artist" },
+                album: { coverArt: "https://img.example/cover.jpg" },
+            },
+            isPlaying: false,
+            onMapPresent: false,
+            moodColor: null,
+            onFlyTo: noop,
+            onTogglePlay: noop,
+        }),
+    );
+
+    assert.match(
+        html,
+        /src="\/api\/library\/cover-art\?url=https%3A%2F%2Fimg\.example%2Fcover\.jpg"/,
+    );
+    assert.doesNotMatch(html, /src="https:\/\/img\.example\/cover\.jpg"/);
 });
 
 test("NowPlayingCard disables fly-to when the track isn't on the map", async () => {

@@ -34,14 +34,18 @@ test("mapYtMusicChartsToFeaturedPlaylists maps chart tracks to home cards", () =
         title: "Song One",
         description: "Artist One - Album One",
         creator: "Artist One",
-        imageUrl: "https://img.example/song-1.jpg",
+        imageUrl:
+            "http://127.0.0.1:3006/api/browse/ytmusic/image?url=https%3A%2F%2Fimg.example%2Fsong-1.jpg",
         trackCount: 1,
         url: "https://music.youtube.com/watch?v=song-1",
     });
     assert.equal(cards[1]?.id, "song-2");
     assert.equal(cards[1]?.creator, "Artist Two");
     assert.equal(cards[1]?.description, "Artist Two");
-    assert.equal(cards[1]?.imageUrl, "https://img.example/song-2.jpg");
+    assert.equal(
+        cards[1]?.imageUrl,
+        "http://127.0.0.1:3006/api/browse/ytmusic/image?url=https%3A%2F%2Fimg.example%2Fsong-2.jpg",
+    );
 });
 
 test("mapYtMusicChartsToFeaturedPlaylists deduplicates by videoId and enforces limit", () => {

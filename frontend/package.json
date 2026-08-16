@@ -28,7 +28,7 @@
         "test:coverage": "bash -lc 'npm run test:coverage:raw 2>&1 | node scripts/check-targeted-coverage.mjs'",
         "test:coverage:raw": "node --test --import tsx --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=components/layout/activityPanelTabs.ts --test-coverage-include=components/layout/socialNavigation.ts --test-coverage-include=features/settings/components/sections/playbackHistoryConfig.ts 'tests/unit/**/*.test.ts'",
         "test:coverage:semantic": "node --test --import tsx tests/unit/activityPanelTabs.test.ts tests/unit/socialNavigation.test.ts tests/unit/playbackHistoryConfig.test.ts",
-        "test:config:runtime": "node scripts/smoke-next-config-runtime.mjs",
+        "test:config:runtime": "node --import tsx scripts/smoke-next-config-runtime.mjs",
         "pretest:component": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
         "test:component": "node --test --experimental-test-module-mocks --import tsx 'tests/component/*.test.ts'",
         "test:component:coverage": "node --test --experimental-test-module-mocks --import tsx --experimental-test-coverage --test-coverage-include=components/layout/ActivityPanel.tsx --test-coverage-include=components/layout/Sidebar.tsx --test-coverage-include=components/layout/MobileSidebar.tsx --test-coverage-include=features/settings/components/sections/PlaybackHistorySection.tsx 'tests/component/*.test.ts'",
