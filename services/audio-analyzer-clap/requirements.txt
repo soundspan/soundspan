@@ -4,7 +4,7 @@ torch>=2.0.0
 torchaudio>=2.11.0
 torchvision>=0.15.0
 transformers>=5.15.0
-librosa>=0.11.0
+librosa>=1.0.0
 
 # Database and queue
 redis>=8.1.0
