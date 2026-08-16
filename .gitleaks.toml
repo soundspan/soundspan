@@ -14,6 +14,16 @@ useDefault = true
 [allowlist]
 description = "Confirmed false positives / synthetic test fixtures, triaged 2026-07-10 (cycle 2 / packet E) from a full-history scan of the main checkout."
 regexes = [
+  # backend/src/middleware/__tests__/subsonicAuth.test.ts -- synthetic
+  # ssap_ app-password fixtures for the OpenSubsonic auth tests: a literal
+  # alphabet run and two self-describing phrases. The ssap_ prefix marks
+  # soundspan app passwords, so the generic-api-key rule fires, but none of
+  # these are real credentials. Hit at commits eb3a4a8a and later revisions
+  # of the same test file.
+  '''ssap_0123456789abcdefghijklmnopqrstuv''',
+  '''ssap_this-is-a-real-local-password''',
+  '''ssap_credential-beyond-position-twenty''',
+
   # backend/src/utils/__tests__/apiKeyHash.test.ts:123 -- a named, obviously
   # non-real legacy-pepper value used to test the encryption-key compat
   # alias path ("compat-alias-pepper" is literally what it says it is).

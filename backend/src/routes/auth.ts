@@ -2629,7 +2629,7 @@ async function registerHandler(req: Request, res: Response): Promise<Response> {
 }
 
 // POST /auth/register - Public registration with invite code
-router.post("/register", registerHandler);
+router.post("/register", authLimiter, registerHandler);
 
 /**
  * @openapi

@@ -351,6 +351,17 @@ describe("auth routes runtime", () => {
         );
     });
 
+    it("throttles repeated invalid registration attempts", async () => {
+        await expectFailedRequestsAreThrottled(
+            async () =>
+                request(routeApp)
+                    .post("/register")
+                    .set("X-Forwarded-For", "198.51.100.77")
+                    .send({ username: "" }),
+            400,
+        );
+    });
+
     it("throttles repeated invalid current passwords without blocking a password change", async () => {
         const payload = {
             currentPassword: "current-password",
