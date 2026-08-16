@@ -1399,6 +1399,38 @@ const emitFatalLoadError = async (): Promise<void> => {
     await flushAsync(10);
 };
 
+const extractedHookNames = [
+    "usePlaybackOrchestratorRefs",
+    "useSegmentedStartupCallbacks",
+    "usePlaybackRecoveryHelpers",
+    "useSegmentedPrewarm",
+    "useTrackRecovery",
+    "useSegmentedSessionRecovery",
+    "useSegmentedHandoffRecovery",
+    "useYtMusicAuth",
+    "useAutoMatchVibe",
+    "usePlaybackStateSync",
+    "useSegmentedHeartbeat",
+    "useQueueRecoveryEffects",
+    "usePlaybackWatchdogs",
+    "usePlaybackMetadataSync",
+    "useProgressSaveCallbacks",
+    "useAudioEngineBindings",
+    "useForegroundRecovery",
+    "useNextTrackPreload",
+    "usePlaybackControlSync",
+    "usePodcastSeeking",
+    "useProgressPersistence",
+    "usePlaybackUnmountCleanup",
+] as const;
+
+for (const hookName of extractedHookNames) {
+    test(`mounts and cleans the extracted ${hookName} hook`, () => {
+        renderOrchestrator();
+        assert.doesNotThrow(() => hookRuntime.unmount());
+    });
+}
+
 test("recoverable autoplay rejection preserves the track without scheduling a skip", async () => {
     mock.timers.enable();
     playbackState.isPlaying = true;

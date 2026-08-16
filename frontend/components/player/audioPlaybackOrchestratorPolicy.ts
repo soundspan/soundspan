@@ -1,3 +1,13 @@
+import type {
+    SegmentedStartupRecoveryStageAttempts,
+    SegmentedStartupRecoveryStageLimits,
+} from "@/lib/audio-engine/audioPlaybackOrchestratorTypes";
+
+export type {
+    SegmentedStartupRecoveryStageAttempts,
+    SegmentedStartupRecoveryStageLimits,
+} from "@/lib/audio-engine/audioPlaybackOrchestratorTypes";
+
 /**
  * Resolves the playback duration to display, choosing between the audio
  * engine's reported duration and the known metadata duration.
@@ -181,15 +191,6 @@ export type SegmentedStartupRecoveryStage =
     | "session_create"
     | "manifest_readiness"
     | "engine_load";
-
-export interface SegmentedStartupRecoveryStageAttempts {
-    session_create: number;
-    manifest_readiness: number;
-    engine_load: number;
-}
-
-export type SegmentedStartupRecoveryStageLimits =
-    SegmentedStartupRecoveryStageAttempts;
 
 export interface SegmentedStartupRecoveryBackoffInput {
     attempt: number;
