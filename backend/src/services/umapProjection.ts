@@ -6,6 +6,7 @@ import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { parseEmbedding } from "../utils/embedding";
 import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
+import { getActiveSpace } from "./embeddingSpaces";
 
 const MIN_TRACKS_FOR_UMAP = 5;
 const MAX_EMBEDDINGS = 15000;
@@ -260,6 +261,7 @@ function runUmapInWorker(
 
 async function doCompute(): Promise<VibeMapResponse> {
     const startedAt = Date.now();
+    const activeSpace = await getActiveSpace();
 
     const rows = await prisma.$queryRaw<
         Array<TrackRow & { embedding: string }>
@@ -287,6 +289,7 @@ async function doCompute(): Promise<VibeMapResponse> {
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
         ORDER BY RANDOM()
         LIMIT ${MAX_EMBEDDINGS}
     `;

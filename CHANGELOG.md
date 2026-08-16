@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Vibe embeddings are now tracked against a versioned embedding-space registry.
+  The backend and audio-analyzer-clap images must be upgraded together for this
+  release; older CLAP images cannot write embeddings against the new schema.
 - Confined vibe and analysis vector SQL to the track embedding service layer.
 - Release-note generation now always includes the standing 2.0.0 upgrade path
   and accepts repeatable per-release `--upgrade-note` bullets.

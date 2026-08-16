@@ -5,7 +5,11 @@ import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings } from "../utils/systemSettings";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
-import { countEmbeddedLocalTracks } from "../services/trackEmbeddings";
+import {
+    countEmbeddedLocalTracks,
+    missingActiveEmbeddingWhere,
+} from "../services/trackEmbeddings";
+import { getActiveSpace } from "../services/embeddingSpaces";
 import analysisInternalRoutes from "./analysisInternal";
 import os from "os";
 import {
@@ -786,11 +790,15 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                 ? Math.min(requestedLimit, 1000)
                 : 500;
         const force = req.body.force === true;
+        const activeSpace = await getActiveSpace();
 
         // If force mode, delete all existing embeddings first
         if (force) {
             await prisma.trackEmbedding.deleteMany({
-                where: { track: LOCAL_TRACK_WHERE },
+                where: {
+                    spaceId: activeSpace.id,
+                    track: LOCAL_TRACK_WHERE,
+                },
             });
             await prisma.track.updateMany({
                 where: LOCAL_TRACK_WHERE,
@@ -806,7 +814,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         // Find tracks without vibe embeddings (all tracks if force was used)
         const tracks = await prisma.track.findMany({
             where: {
-                embedding: null,
+                ...missingActiveEmbeddingWhere(activeSpace.id),
                 ...TRACK_VISIBLE_WHERE,
                 ...LOCAL_TRACK_WHERE,
             },

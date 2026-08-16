@@ -33,6 +33,9 @@ describe("audioAnalysisCleanupService", () => {
         jest.doMock("../enrichmentFailureService", () => ({
             enrichmentFailureService,
         }));
+        jest.doMock("../embeddingSpaces", () => ({
+            getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../audioAnalysisCleanup");
@@ -117,6 +120,10 @@ describe("audioAnalysisCleanupService", () => {
         prisma.track.update.mockResolvedValue({});
 
         const result = await service.cleanupStaleProcessing();
+
+        const [query, ...values] = prisma.$queryRaw.mock.calls[0];
+        expect(query.join(" ")).toContain("space_id =");
+        expect(values).toContain("space-active");
 
         expect(prisma.track.update).toHaveBeenCalledWith({
             where: { id: "track-1" },

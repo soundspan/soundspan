@@ -67,6 +67,10 @@ jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
 }));
 
+jest.mock("../../services/embeddingSpaces", () => ({
+    getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+}));
+
 jest.mock("../../utils/embedding", () => {
     const actual = jest.requireActual("../../utils/embedding");
     return {
@@ -168,16 +172,29 @@ describe("vibe calibration runtime", () => {
         expect(typeof res.body.updatedAt).toBe("string");
         expect(res.body.quantiles).toHaveLength(101);
         expect(isMonotonicNonDecreasing(res.body.quantiles)).toBe(true);
+        expect(mockEmbeddingCount).toHaveBeenCalledWith({
+            where: {
+                spaceId: "space-active",
+                track: { origin: "LOCAL" },
+            },
+        });
 
         // The id scan is bounded and index-ordered — never a full-table
         // random sort touching the vector column.
         expect(mockEmbeddingFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
+                where: expect.objectContaining({
+                    spaceId: "space-active",
+                }),
                 select: { trackId: true },
                 orderBy: { trackId: "asc" },
                 take: expect.any(Number),
             }),
         );
+
+        const [query, ...values] = mockQueryRaw.mock.calls[0];
+        expect(query.join(" ")).toContain("te.space_id =");
+        expect(values).toContain("space-active");
 
         expect(mockRedisSetEx).toHaveBeenCalledWith(
             "vibe:calibration:v1:50",

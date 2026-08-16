@@ -1,9 +1,20 @@
 jest.mock("../../utils/db", () => ({
-    prisma: { $executeRaw: jest.fn(), $queryRaw: jest.fn() },
+    prisma: {
+        $executeRaw: jest.fn(),
+        $queryRaw: jest.fn(),
+        track: { findMany: jest.fn() },
+        trackEmbedding: { deleteMany: jest.fn() },
+    },
 }));
 
 jest.mock("../../utils/annQuery", () => ({
     runAnnQuery: jest.fn(),
+}));
+
+const mockGetActiveSpace = jest.fn();
+
+jest.mock("../embeddingSpaces", () => ({
+    getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
 }));
 
 import { prisma } from "../../utils/db";
@@ -12,8 +23,10 @@ import * as embeddingUtils from "../../utils/embedding";
 import {
     countEmbeddedBrowsableTracks,
     countEmbeddedLocalTracks,
+    deleteActiveLocalTrackEmbeddings,
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
+    findLocalTracksNeedingActiveEmbedding,
     findNearestToEmbedding,
     findTracksByTextEmbedding,
     upsertTrackEmbedding,
@@ -25,6 +38,13 @@ const parseEmbeddingSpy = jest.spyOn(embeddingUtils, "parseEmbedding");
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockGetActiveSpace.mockResolvedValue({
+        id: "space-active",
+        family: "clap-music-audioset",
+        checkpointHash: "checkpoint-hash",
+        dim: 512,
+        preprocessing: {},
+    });
 });
 
 describe("upsertTrackEmbedding", () => {
@@ -34,6 +54,11 @@ describe("upsertTrackEmbedding", () => {
         await upsertTrackEmbedding("track-1", Array(512).fill(0.25));
 
         expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        const [query, ...values] = (prisma.$executeRaw as jest.Mock).mock
+            .calls[0];
+        expect(query.join(" ")).toContain("space_id");
+        expect(query.join(" ")).not.toContain("model_version");
+        expect(values).toContain("space-active");
     });
 
     it("rejects malformed vectors before writing", async () => {
@@ -41,6 +66,41 @@ describe("upsertTrackEmbedding", () => {
             "512 finite values",
         );
         expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+});
+
+describe("active-space maintenance", () => {
+    it("selects local tracks missing an active-space embedding", async () => {
+        (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
+
+        await findLocalTracksNeedingActiveEmbedding(25);
+
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    AND: expect.arrayContaining([
+                        expect.objectContaining({
+                            OR: expect.arrayContaining([{ embedding: null }]),
+                        }),
+                    ]),
+                }),
+                take: 25,
+            }),
+        );
+    });
+
+    it("deletes only local vectors in the active space", async () => {
+        (prisma.trackEmbedding.deleteMany as jest.Mock).mockResolvedValue({
+            count: 3,
+        });
+
+        await expect(deleteActiveLocalTrackEmbeddings()).resolves.toBe(3);
+        expect(prisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
+            where: {
+                spaceId: "space-active",
+                track: { origin: "LOCAL" },
+            },
+        });
     });
 });
 
@@ -53,6 +113,7 @@ describe("fetchEmbeddingsByTrackIds", () => {
         const query = (prisma.$queryRaw as jest.Mock).mock.calls[0][0];
         expect(query.join(" ")).toContain('JOIN "Track"');
         expect(query.join(" ")).toContain('t."removedAt" IS NULL');
+        expect(query.join(" ")).toContain("te.space_id =");
     });
 
     it("does not query for an empty track list", async () => {
@@ -69,6 +130,9 @@ describe("fetchTrackEmbedding", () => {
             0.25, -0.5, 1,
         ]);
         expect(parseEmbeddingSpy).toHaveBeenCalledWith("[0.25,-0.5,1]");
+        const [query, ...values] = mockQueryRaw.mock.calls[0];
+        expect(query.join(" ")).toContain("te.space_id =");
+        expect(values).toContain("space-active");
     });
 
     it("returns null when the track has no embedding row", async () => {
@@ -88,6 +152,8 @@ describe("findNearestToEmbedding", () => {
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
         const query = mockRunAnnQuery.mock.calls[0][0];
         expect(query.strings.join(" ")).toContain("FROM track_embeddings te");
+        expect(query.strings.join(" ")).toContain("te.space_id =");
+        expect(query.values).toContain("space-active");
         expect(query.strings.join(" ")).not.toContain("!= ALL");
     });
 
@@ -99,6 +165,7 @@ describe("findNearestToEmbedding", () => {
         const query = mockRunAnnQuery.mock.calls[0][0];
         expect(query.strings.join(" ")).toContain("!= ALL");
         expect(query.values).toContainEqual(["track-2"]);
+        expect(query.values).toContain("space-active");
     });
 });
 
@@ -114,6 +181,8 @@ describe("findTracksByTextEmbedding", () => {
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
         const query = mockRunAnnQuery.mock.calls[0][0];
         expect(query.strings.join(" ")).toContain("FROM track_embeddings te");
+        expect(query.strings.join(" ")).toContain("te.space_id =");
+        expect(query.values).toContain("space-active");
         const values = query.values as unknown[];
         // Pin binding positions so a maxDistance/candidateLimit swap cannot
         // pass: LIMIT binds last, preceded by the ORDER BY vector, preceded
@@ -132,6 +201,7 @@ describe("embedding counts", () => {
 
         const query = mockQueryRaw.mock.calls[0][0];
         expect(query.join(" ")).toContain("FROM track_embeddings te");
+        expect(query.join(" ")).toContain("te.space_id =");
     });
 
     it("counts only local embeddings for analysis status", async () => {
@@ -141,6 +211,7 @@ describe("embedding counts", () => {
 
         const query = mockQueryRaw.mock.calls[0][0];
         expect(query.join(" ")).toContain("t.origin =");
+        expect(query.join(" ")).toContain("te.space_id =");
     });
 
     it("returns zero when a count query has no rows", async () => {

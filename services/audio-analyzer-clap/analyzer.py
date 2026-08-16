@@ -29,6 +29,7 @@ import threading
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -93,6 +94,7 @@ NUM_WORKERS = get_int_env("NUM_WORKERS", 2)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:3006")
 MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
 IDLE_POLL_SECONDS = 5
+ACTIVE_SPACE_CACHE_TTL_SECONDS = 300
 
 # Queue and channel names
 ANALYSIS_QUEUE = "audio:clap:queue"
@@ -111,6 +113,49 @@ MODEL_VERSION = "laion-clap-music-v1"
 # 60 seconds captures the "vibe" without intros/outros and reduces memory usage
 MAX_AUDIO_DURATION = 60  # seconds
 CLAP_SAMPLE_RATE = 48000  # 48kHz for CLAP model
+
+
+class ActiveEmbeddingSpaceNotFoundError(RuntimeError):
+    """Raised when a vibe embedding cannot be stamped with an active space."""
+
+
+def resolve_active_space_id(db: "DatabaseConnection") -> str:
+    """Resolve the oldest active embedding-space ID from PostgreSQL."""
+    cursor = db.get_cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, created_at FROM embedding_spaces
+            WHERE status = 'active'
+            ORDER BY created_at ASC
+        """
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+
+    if not rows:
+        raise ActiveEmbeddingSpaceNotFoundError(
+            "No active embedding space is registered; embedding was not stored"
+        )
+
+    active_ids = [str(row["id"]) for row in rows]
+    if len(active_ids) > 1:
+        logger.warning(
+            f"Multiple active embedding spaces found; using oldest {active_ids[0]}. "
+            f"Active ids: {', '.join(active_ids)}"
+        )
+    return active_ids[0]
+
+
+def _is_embedding_space_insert_error(error: Exception) -> bool:
+    """Return whether an insert failure can reflect stale space/schema state."""
+    message = str(error).lower()
+    return (
+        "foreign key" in message
+        or "space_id" in message
+        or "embedding_spaces" in message
+    )
 
 
 def _resolve_music_path(file_path: str) -> str | None:
@@ -338,10 +383,13 @@ class CLAPAnalyzer:
 class DatabaseConnection:
     """PostgreSQL connection manager with pgvector support and auto-reconnect"""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, clock: Callable[[], float] | None = None):
         """Store connection URL and initialize disconnected state."""
         self.url = url
         self.conn = None
+        self._clock = clock or time.monotonic
+        self._active_space_id: str | None = None
+        self._active_space_resolved_at: float | None = None
 
     def connect(self):
         """Establish database connection with pgvector extension"""
@@ -381,6 +429,24 @@ class DatabaseConnection:
         if not self.is_connected():
             self.reconnect()
         return self.conn.cursor(cursor_factory=RealDictCursor)
+
+    def get_active_space_id(self) -> str:
+        """Return the cached active embedding-space ID within its TTL."""
+        now = self._clock()
+        if self._active_space_id is not None and self._active_space_resolved_at is not None:
+            cache_age = now - self._active_space_resolved_at
+            if cache_age <= ACTIVE_SPACE_CACHE_TTL_SECONDS:
+                return self._active_space_id
+
+        space_id = resolve_active_space_id(self)
+        self._active_space_id = space_id
+        self._active_space_resolved_at = now
+        return space_id
+
+    def invalidate_active_space_id(self) -> None:
+        """Clear the active embedding-space cache before a forced refresh."""
+        self._active_space_id = None
+        self._active_space_resolved_at = None
 
     def commit(self):
         if self.conn:
@@ -491,7 +557,11 @@ class Worker:
             return
 
         # Store embedding in database
-        success = self._store_embedding(track_id, embedding)
+        try:
+            success = self._store_embedding(track_id, embedding)
+        except ActiveEmbeddingSpaceNotFoundError as error:
+            self._mark_failed(track_id, str(error))
+            return
 
         if success:
             self._update_track_status(track_id, "completed")
@@ -606,34 +676,79 @@ class Worker:
 
     def _store_embedding(self, track_id: str, embedding: np.ndarray) -> bool:
         """Store the embedding in the track_embeddings table"""
+        try:
+            space_id = self.db.get_active_space_id()
+        except ActiveEmbeddingSpaceNotFoundError:
+            raise
+        except Exception as error:
+            self._log_embedding_store_failure(track_id, error)
+            return False
+
+        embedding_list = embedding.tolist()
+        try:
+            self._insert_embedding(track_id, embedding_list, space_id)
+            return True
+        except Exception as error:
+            self.db.rollback()
+            if not _is_embedding_space_insert_error(error):
+                self._log_embedding_store_failure(track_id, error)
+                return False
+
+        logger.warning(
+            f"Embedding insert for {track_id} failed on embedding-space "
+            "schema state; refreshing the active embedding space once"
+        )
+        return self._retry_embedding_store(track_id, embedding_list)
+
+    def _retry_embedding_store(self, track_id: str, embedding_list: list[float]) -> bool:
+        """Retry one embedding insert after forcing an active-space refresh."""
+        self.db.invalidate_active_space_id()
+        try:
+            space_id = self.db.get_active_space_id()
+        except ActiveEmbeddingSpaceNotFoundError:
+            raise
+        except Exception as error:
+            self._log_embedding_store_failure(track_id, error)
+            return False
+
+        try:
+            self._insert_embedding(track_id, embedding_list, space_id)
+            return True
+        except Exception as error:
+            self.db.rollback()
+            self._log_embedding_store_failure(track_id, error)
+            return False
+
+    def _insert_embedding(
+        self,
+        track_id: str,
+        embedding_list: list[float],
+        space_id: str,
+    ) -> None:
+        """Execute one space-stamped embedding upsert."""
         cursor = self.db.get_cursor()
         try:
-            # Convert numpy array to list for pgvector
-            embedding_list = embedding.tolist()
-
             cursor.execute(
                 """
-                INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+                INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
                 VALUES (%s, %s::vector, %s, %s)
                 ON CONFLICT (track_id)
                 DO UPDATE SET
                     embedding = EXCLUDED.embedding,
-                    model_version = EXCLUDED.model_version,
+                    space_id = EXCLUDED.space_id,
                     analyzed_at = EXCLUDED.analyzed_at
             """,
-                (track_id, embedding_list, MODEL_VERSION, datetime.now(UTC)),
+                (track_id, embedding_list, space_id, datetime.now(UTC)),
             )
-
             self.db.commit()
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to store embedding for {track_id}: {e}")
-            traceback.print_exc()
-            self.db.rollback()
-            return False
         finally:
             cursor.close()
+
+    @staticmethod
+    def _log_embedding_store_failure(track_id: str, error: Exception) -> None:
+        """Log a terminal embedding-store failure with its active traceback."""
+        logger.error(f"Failed to store embedding for {track_id}: {error}")
+        traceback.print_exc()
 
 
 class TextEmbedHandler:

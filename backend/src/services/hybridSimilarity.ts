@@ -8,6 +8,7 @@ import {
     TRACK_BROWSE_SQL,
     trackBrowseSql,
 } from "../utils/libraryRadioPredicates";
+import { getActiveSpace } from "./embeddingSpaces";
 
 export interface SimilarTrack {
     id: string;
@@ -144,6 +145,7 @@ async function findSimilarHybrid(
 ): Promise<SimilarTrack[]> {
     // Fetch 5x candidates from CLAP to ensure good coverage after re-ranking
     const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
+    const activeSpace = await getActiveSpace();
 
     const results = await runAnnQuery<SimilarTrack[]>(Prisma.sql`
         WITH source AS (
@@ -155,6 +157,7 @@ async function findSimilarHybrid(
             JOIN "Track" t ON te.track_id = t.id
             WHERE t."removedAt" IS NULL
               AND ${TRACK_BROWSE_SQL}
+              AND te.space_id = ${activeSpace.id}
               AND te.track_id = ${trackId}
         ),
         clap_candidates AS (
@@ -165,6 +168,7 @@ async function findSimilarHybrid(
             JOIN "Track" candidate_track ON te.track_id = candidate_track.id
             WHERE candidate_track."removedAt" IS NULL
               AND ${trackBrowseSql("candidate_track")}
+              AND te.space_id = ${activeSpace.id}
               AND te.track_id != ${trackId}
             ORDER BY te.embedding <=> (SELECT embedding FROM source)
             LIMIT ${candidateLimit}
@@ -212,6 +216,7 @@ async function findSimilarClapOnly(
     limit: number,
 ): Promise<SimilarTrack[]> {
     const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
+    const activeSpace = await getActiveSpace();
     const results = await runAnnQuery<SimilarTrack[]>(Prisma.sql`
         WITH source AS (
             SELECT te.embedding
@@ -219,6 +224,7 @@ async function findSimilarClapOnly(
             JOIN "Track" source_track ON te.track_id = source_track.id
             WHERE source_track."removedAt" IS NULL
               AND ${trackBrowseSql("source_track")}
+              AND te.space_id = ${activeSpace.id}
               AND te.track_id = ${trackId}
         )
         SELECT
@@ -242,6 +248,7 @@ async function findSimilarClapOnly(
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
           AND te.track_id != ${trackId}
         ORDER BY distance
         LIMIT ${candidateLimit}

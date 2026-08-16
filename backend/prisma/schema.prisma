@@ -1323,6 +1323,12 @@ enum PeerStatus {
   REVOKED
 }
 
+enum EmbeddingSpaceStatus {
+  active
+  migrating
+  retired
+}
+
 model TrackLyrics {
   id           String   @id @default(cuid())
   trackId      String   @unique
@@ -1336,14 +1342,30 @@ model TrackLyrics {
   @@index([trackId])
 }
 
-model TrackEmbedding {
-  trackId      String                     @id @map("track_id")
-  embedding    Unsupported("vector(512)")
-  modelVersion String                     @default("laion-clap-music") @map("model_version") @db.VarChar(50)
-  analyzedAt   DateTime                   @default(now()) @map("analyzed_at") @db.Timestamptz
-  track        Track                      @relation(fields: [trackId], references: [id], onDelete: Cascade)
+model EmbeddingSpace {
+  id             String               @id @default(cuid())
+  family         String
+  checkpointHash String               @map("checkpoint_hash")
+  dim            Int
+  preprocessing  Json
+  status         EmbeddingSpaceStatus
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  embeddings     TrackEmbedding[]
 
-  @@index([modelVersion])
+  @@unique([family, checkpointHash])
+  @@index([status])
+  @@map("embedding_spaces")
+}
+
+model TrackEmbedding {
+  trackId    String                     @id @map("track_id")
+  embedding  Unsupported("vector(512)")
+  spaceId    String                     @map("space_id")
+  analyzedAt DateTime                   @default(now()) @map("analyzed_at") @db.Timestamptz
+  track      Track                      @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  space      EmbeddingSpace             @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+
+  @@index([spaceId])
   @@map("track_embeddings")
 }
 

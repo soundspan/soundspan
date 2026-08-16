@@ -3,6 +3,8 @@ import { prisma } from "../utils/db";
 import { parseEmbedding } from "../utils/embedding";
 import { runAnnQuery } from "../utils/annQuery";
 import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
+import { getActiveSpace } from "./embeddingSpaces";
+import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 
 /**
  * trackEmbeddings — service-layer reads of the pgvector `track_embeddings`
@@ -58,7 +60,58 @@ export interface TextSearchResult {
     speechiness: number | null;
 }
 
-const EMBEDDING_DIMENSIONS = 512;
+/** Prisma relation filter for tracks without a vector in `activeSpaceId`. */
+export function missingActiveEmbeddingWhere(
+    activeSpaceId: string,
+): Prisma.TrackWhereInput {
+    return {
+        OR: [
+            { embedding: null },
+            {
+                embedding: {
+                    is: { spaceId: { not: activeSpaceId } },
+                },
+            },
+        ],
+    };
+}
+
+/** Select bounded local queue candidates missing an active-space vector. */
+export async function findLocalTracksNeedingActiveEmbedding(
+    limit: number,
+): Promise<Array<{ id: string; filePath: string | null }>> {
+    const activeSpace = await getActiveSpace();
+    return prisma.track.findMany({
+        where: {
+            removedAt: null,
+            ...LOCAL_TRACK_WHERE,
+            AND: [
+                missingActiveEmbeddingWhere(activeSpace.id),
+                {
+                    OR: [
+                        { vibeAnalysisStatus: null },
+                        { vibeAnalysisStatus: "pending" },
+                    ],
+                },
+            ],
+        },
+        select: { id: true, filePath: true },
+        take: limit,
+        orderBy: { fileModified: "desc" },
+    });
+}
+
+/** Delete active-space vectors for local tracks during a forced rebuild. */
+export async function deleteActiveLocalTrackEmbeddings(): Promise<number> {
+    const activeSpace = await getActiveSpace();
+    const result = await prisma.trackEmbedding.deleteMany({
+        where: {
+            spaceId: activeSpace.id,
+            track: LOCAL_TRACK_WHERE,
+        },
+    });
+    return result.count;
+}
 
 /** Upserts one validated CLAP vector received from a trusted service boundary. */
 export async function upsertTrackEmbedding(
@@ -66,18 +119,24 @@ export async function upsertTrackEmbedding(
     embedding: readonly number[],
 ): Promise<void> {
     if (
-        embedding.length !== EMBEDDING_DIMENSIONS ||
+        embedding.length === 0 ||
         embedding.some((value) => !Number.isFinite(value))
     ) {
-        throw new Error("Track embedding must contain 512 finite values");
+        throw new Error("Track embedding must contain only finite values");
+    }
+    const activeSpace = await getActiveSpace();
+    if (embedding.length !== activeSpace.dim) {
+        throw new Error(
+            `Track embedding must contain ${activeSpace.dim} finite values`,
+        );
     }
     const vector = `[${embedding.join(",")}]`;
     await prisma.$executeRaw`
-        INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-        VALUES (${trackId}, ${vector}::vector, 'laion-clap-music', NOW())
+        INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
+        VALUES (${trackId}, ${vector}::vector, ${activeSpace.id}, NOW())
         ON CONFLICT (track_id) DO UPDATE SET
             embedding = EXCLUDED.embedding,
-            model_version = EXCLUDED.model_version,
+            space_id = EXCLUDED.space_id,
             analyzed_at = EXCLUDED.analyzed_at
     `;
 }
@@ -92,6 +151,7 @@ export async function fetchEmbeddingsByTrackIds(
     trackIds: readonly string[],
 ): Promise<TrackEmbeddingRow[]> {
     if (trackIds.length === 0) return [];
+    const activeSpace = await getActiveSpace();
     const rows = await prisma.$queryRaw<
         { trackId: string; embedding: string }[]
     >`
@@ -100,6 +160,7 @@ export async function fetchEmbeddingsByTrackIds(
         JOIN "Track" t ON t.id = te.track_id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
           AND te.track_id = ANY(${trackIds as string[]})
     `;
     return rows.map((row) => ({
@@ -114,12 +175,15 @@ export async function fetchEmbeddingsByTrackIds(
 export async function fetchTrackEmbedding(
     trackId: string,
 ): Promise<number[] | null> {
+    const activeSpace = await getActiveSpace();
     const rows = await prisma.$queryRaw<{ embedding: string }[]>`
         SELECT te.embedding::text
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         WHERE t."removedAt" IS NULL
-          AND ${TRACK_BROWSE_SQL} AND te.track_id = ${trackId}
+          AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
+          AND te.track_id = ${trackId}
         LIMIT 1
     `;
     if (!rows.length) return null;
@@ -132,6 +196,7 @@ export async function findNearestToEmbedding(
     limit: number,
     excludeIds: string[] = [],
 ): Promise<NearestTrackRow[]> {
+    const activeSpace = await getActiveSpace();
     if (excludeIds.length > 0) {
         return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
             SELECT
@@ -146,6 +211,7 @@ export async function findNearestToEmbedding(
             JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE t."removedAt" IS NULL
               AND ${TRACK_BROWSE_SQL}
+              AND te.space_id = ${activeSpace.id}
               AND te.track_id != ALL(${excludeIds}::text[])
             ORDER BY te.embedding <=> ${embedding}::vector
             LIMIT ${limit}
@@ -164,6 +230,7 @@ export async function findNearestToEmbedding(
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
         ORDER BY te.embedding <=> ${embedding}::vector
         LIMIT ${limit}
     `);
@@ -175,6 +242,7 @@ export async function findTracksByTextEmbedding(
     maxDistance: number,
     candidateLimit: number,
 ): Promise<TextSearchResult[]> {
+    const activeSpace = await getActiveSpace();
     return runAnnQuery<TextSearchResult[]>(Prisma.sql`
         SELECT
             t.id,
@@ -200,6 +268,7 @@ export async function findTracksByTextEmbedding(
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
           AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
         ORDER BY te.embedding <=> ${searchEmbedding}::vector
         LIMIT ${candidateLimit}
@@ -208,12 +277,14 @@ export async function findTracksByTextEmbedding(
 
 /** Counts embeddings for tracks visible on browsable library surfaces. */
 export async function countEmbeddedBrowsableTracks(): Promise<number> {
+    const activeSpace = await getActiveSpace();
     const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(*) as count
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
+          AND te.space_id = ${activeSpace.id}
     `;
 
     return Number(embeddedTracks[0]?.count || 0);
@@ -221,12 +292,14 @@ export async function countEmbeddedBrowsableTracks(): Promise<number> {
 
 /** Counts embeddings for local tracks included in analysis status. */
 export async function countEmbeddedLocalTracks(): Promise<number> {
+    const activeSpace = await getActiveSpace();
     const embeddingCount = await prisma.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(*) as count
         FROM track_embeddings te
         INNER JOIN "Track" t ON t.id = te.track_id
         WHERE t."removedAt" IS NULL
           AND t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND te.space_id = ${activeSpace.id}
     `;
     return Number(embeddingCount[0]?.count || 0);
 }

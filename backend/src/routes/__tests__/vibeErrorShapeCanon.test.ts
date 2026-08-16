@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 
+const mockGetActiveSpace = jest.fn();
+
 jest.mock("crypto", () => ({
     randomUUID: jest.fn(() => "req-123"),
 }));
@@ -51,6 +53,10 @@ jest.mock("../../utils/annQuery", () => ({
 
 jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
+}));
+
+jest.mock("../../services/embeddingSpaces", () => ({
+    getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
 }));
 
 jest.mock("../../utils/embedding", () => {
@@ -127,11 +133,13 @@ function createRes() {
 describe("vibe canonical error response shape", () => {
     const similarHandler = getGetHandler("/similar/:trackId");
     const searchHandler = getPostHandler("/search");
+    const statusHandler = getGetHandler("/status");
 
     beforeEach(() => {
         jest.clearAllMocks();
         mockRedisXAdd.mockResolvedValue("1712345-0");
         mockRedisDel.mockResolvedValue(1);
+        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
     it("returns only the canonical error field when no similar tracks exist", async () => {
@@ -163,6 +171,21 @@ describe("vibe canonical error response shape", () => {
         expect(res.statusCode).toBe(504);
         expect(res.body).toEqual({
             error: "Text embedding service unavailable",
+        });
+        expect(res.body).not.toHaveProperty("message");
+    });
+
+    it("keeps the canonical error shape when no embedding space is active", async () => {
+        mockGetActiveSpace.mockRejectedValueOnce(
+            new Error("No active embedding space is configured"),
+        );
+        const res = createRes();
+
+        await statusHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({
+            error: "Failed to get embedding status",
         });
         expect(res.body).not.toHaveProperty("message");
     });

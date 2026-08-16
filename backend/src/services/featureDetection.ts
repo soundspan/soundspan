@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { getActiveSpace } from "./embeddingSpaces";
 
 // Analyzer script paths in the Docker image
 const ESSENTIA_ANALYZER_PATH = "/app/audio-analyzer/analyzer.py";
@@ -87,7 +88,10 @@ class FeatureDetectionService {
                 }
             }
 
-            const embeddingCount = await prisma.trackEmbedding.count();
+            const activeSpace = await getActiveSpace();
+            const embeddingCount = await prisma.trackEmbedding.count({
+                where: { spaceId: activeSpace.id },
+            });
             return embeddingCount > 0;
         } catch (error) {
             logger.error("[FEATURE-DETECTION] Error checking CLAP:", error);

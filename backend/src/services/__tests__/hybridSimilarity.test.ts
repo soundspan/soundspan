@@ -3,6 +3,7 @@ const mockRunAnnQuery = jest.fn();
 const mockGetFeatures = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerWarn = jest.fn();
+const mockGetActiveSpace = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -32,6 +33,10 @@ jest.mock("../../utils/logger", () => ({
         debug: (...args: unknown[]) => mockLoggerDebug(...args),
         warn: (...args: unknown[]) => mockLoggerWarn(...args),
     },
+}));
+
+jest.mock("../embeddingSpaces", () => ({
+    getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
 }));
 
 import { findSimilarTracks, type SimilarTrack } from "../hybridSimilarity";
@@ -65,6 +70,8 @@ describe("hybridSimilarity service", () => {
         mockGetFeatures.mockReset();
         mockLoggerDebug.mockReset();
         mockLoggerWarn.mockReset();
+        mockGetActiveSpace.mockReset();
+        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
     it("uses hybrid mode (via the ANN helper) when both feature systems are available", async () => {
@@ -100,6 +107,12 @@ describe("hybridSimilarity service", () => {
             values: unknown[];
         };
         expect(sqlArg.values).toContain(sourceTrackId);
+        expect(sqlArg.values).toContain("space-active");
+        expect(
+            (
+                mockRunAnnQuery.mock.calls[0]?.[0] as { strings: string[] }
+            ).strings.join(" "),
+        ).toContain("te.space_id =");
         expect(
             sqlArg.values.filter((value: unknown) => value === limit * 5)
                 .length,
@@ -140,6 +153,12 @@ describe("hybridSimilarity service", () => {
             values: unknown[];
         };
         expect(sqlArg.values).toContain(sourceTrackId);
+        expect(sqlArg.values).toContain("space-active");
+        expect(
+            (
+                mockRunAnnQuery.mock.calls[0]?.[0] as { strings: string[] }
+            ).strings.join(" "),
+        ).toContain("te.space_id =");
         expect(
             sqlArg.values.filter((value: unknown) => value === 100),
         ).toHaveLength(1);

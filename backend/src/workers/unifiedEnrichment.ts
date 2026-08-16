@@ -30,6 +30,11 @@ import { moodBucketService } from "../services/moodBucketService";
 import pLimit from "p-limit";
 import { enqueueReservedWork } from "./enrichmentQueue";
 import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
+import { getActiveSpace } from "../services/embeddingSpaces";
+import {
+    deleteActiveLocalTrackEmbeddings,
+    findLocalTracksNeedingActiveEmbedding,
+} from "../services/trackEmbeddings";
 
 const log = logger.child("Enrichment");
 
@@ -573,12 +578,7 @@ export async function runFullEnrichment(options?: {
     });
 
     if (forceVibeRebuild) {
-        await prisma.$executeRaw`
-            DELETE FROM track_embeddings te
-            USING "Track" t
-            WHERE t.id = te.track_id
-              AND t.origin = ${"LOCAL"}::"TrackOrigin"
-        `;
+        await deleteActiveLocalTrackEmbeddings();
 
         await prisma.track.updateMany({
             where: LOCAL_TRACK_WHERE,
@@ -1397,20 +1397,9 @@ async function queueVibeEmbeddings(): Promise<number> {
     const tracks = await withEnrichmentPrismaRetry(
         "queueVibeEmbeddings.track.select",
         () =>
-            prisma.track.findMany({
-                where: {
-                    embedding: null,
-                    removedAt: null,
-                    ...LOCAL_TRACK_WHERE,
-                    OR: [
-                        { vibeAnalysisStatus: null },
-                        { vibeAnalysisStatus: "pending" },
-                    ],
-                },
-                select: { id: true, filePath: true },
-                take: config.analysisQueues.vibeMaxDepth,
-                orderBy: { fileModified: "desc" },
-            }),
+            findLocalTracksNeedingActiveEmbedding(
+                config.analysisQueues.vibeMaxDepth,
+            ),
     );
 
     if (tracks.length === 0) {
@@ -1654,68 +1643,76 @@ export async function getEnrichmentProgress() {
         clapEmbeddingCount,
         clapProcessing,
         clapFailedByStatus,
-    ] = await withEnrichmentPrismaRetry("getEnrichmentProgress.dbReads", () =>
-        prisma.$transaction([
-            prisma.artist.groupBy({
-                by: ["enrichmentStatus"],
-                _count: true,
-            }),
-            prisma.track.count({ where: LOCAL_TRACK_WHERE }),
-            prisma.$queryRaw<{ count: bigint }[]>`
+    ] = await withEnrichmentPrismaRetry(
+        "getEnrichmentProgress.dbReads",
+        async () => {
+            // Resolved inside the retry wrapper so a transient DB failure here is
+            // retried exactly like the reads it scopes.
+            const activeSpace = await getActiveSpace();
+            return prisma.$transaction([
+                prisma.artist.groupBy({
+                    by: ["enrichmentStatus"],
+                    _count: true,
+                }),
+                prisma.track.count({ where: LOCAL_TRACK_WHERE }),
+                prisma.$queryRaw<{ count: bigint }[]>`
                 SELECT COUNT(*) as count
                 FROM "Track"
                 WHERE "filePath" IS NOT NULL
                   AND origin = ${"LOCAL"}::"TrackOrigin"
             `,
-            prisma.track.count({
-                where: {
-                    ...LOCAL_TRACK_WHERE,
-                    AND: [
-                        { NOT: { lastfmTags: { equals: [] } } },
-                        { NOT: { lastfmTags: { equals: null } } },
-                    ],
-                },
-            }),
-            prisma.track.count({
-                where: {
-                    analysisStatus: "completed",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-            prisma.track.count({
-                where: {
-                    analysisStatus: "pending",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-            prisma.track.count({
-                where: {
-                    analysisStatus: "processing",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-            prisma.track.count({
-                where: {
-                    analysisStatus: "failed",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-            prisma.$queryRaw<{ count: bigint }[]>`
-                SELECT COUNT(*) as count FROM track_embeddings
+                prisma.track.count({
+                    where: {
+                        ...LOCAL_TRACK_WHERE,
+                        AND: [
+                            { NOT: { lastfmTags: { equals: [] } } },
+                            { NOT: { lastfmTags: { equals: null } } },
+                        ],
+                    },
+                }),
+                prisma.track.count({
+                    where: {
+                        analysisStatus: "completed",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+                prisma.track.count({
+                    where: {
+                        analysisStatus: "pending",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+                prisma.track.count({
+                    where: {
+                        analysisStatus: "processing",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+                prisma.track.count({
+                    where: {
+                        analysisStatus: "failed",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+                prisma.$queryRaw<{ count: bigint }[]>`
+                SELECT COUNT(*) as count
+                FROM track_embeddings te
+                WHERE te.space_id = ${activeSpace.id}
             `,
-            prisma.track.count({
-                where: {
-                    vibeAnalysisStatus: "processing",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-            prisma.track.count({
-                where: {
-                    vibeAnalysisStatus: "failed",
-                    ...LOCAL_TRACK_WHERE,
-                },
-            }),
-        ]),
+                prisma.track.count({
+                    where: {
+                        vibeAnalysisStatus: "processing",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+                prisma.track.count({
+                    where: {
+                        vibeAnalysisStatus: "failed",
+                        ...LOCAL_TRACK_WHERE,
+                    },
+                }),
+            ]);
+        },
     );
 
     const artistTotal = artistCounts.reduce((sum, s) => sum + s._count, 0);

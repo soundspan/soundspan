@@ -48,6 +48,9 @@ describe("unified enrichment runtime behavior", () => {
                 findMany: jest.fn(async () => []),
                 update: jest.fn(async () => undefined),
             },
+            trackEmbedding: {
+                deleteMany: jest.fn(async () => ({ count: 0 })),
+            },
             enrichmentFailure: {
                 count: jest.fn(async () => 1),
             },
@@ -242,6 +245,9 @@ describe("unified enrichment runtime behavior", () => {
                 getFeatures,
             },
         }));
+        jest.doMock("../../services/embeddingSpaces", () => ({
+            getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+        }));
         jest.doMock("../../services/moodBucketService", () => ({
             moodBucketService,
         }));
@@ -290,6 +296,13 @@ describe("unified enrichment runtime behavior", () => {
         expect(progress.audioAnalysis.completed).toBe(4);
         expect(progress.clapEmbeddings.completed).toBe(2);
         expect(progress.coreComplete).toBe(false);
+        const embeddingCountCall = (
+            prisma.$queryRaw as jest.Mock
+        ).mock.calls.find(([query]) =>
+            query.join(" ").includes("FROM track_embeddings te"),
+        );
+        expect(embeddingCountCall?.[0].join(" ")).toContain("te.space_id =");
+        expect(embeddingCountCall?.slice(1)).toContain("space-active");
 
         await expect(enrichment.resetArtistsOnly()).resolves.toEqual({
             count: 3,
@@ -463,7 +476,12 @@ describe("unified enrichment runtime behavior", () => {
                 data: { enrichmentStatus: "pending" },
             }),
         );
-        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
+            where: {
+                spaceId: "space-active",
+                track: { origin: "LOCAL" },
+            },
+        });
         expect(enrichmentFailureService.clearAllFailures).toHaveBeenCalledWith(
             "vibe",
         );
@@ -665,7 +683,24 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: expect.objectContaining({ embedding: null }),
+                where: expect.objectContaining({
+                    AND: expect.arrayContaining([
+                        {
+                            OR: [
+                                { embedding: null },
+                                {
+                                    embedding: {
+                                        is: {
+                                            spaceId: {
+                                                not: "space-active",
+                                            },
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    ]),
+                }),
                 take: 100,
             }),
         );
@@ -2068,7 +2103,7 @@ describe("unified enrichment runtime behavior", () => {
         (prisma.artist.findMany as jest.Mock).mockResolvedValueOnce([]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.embedding === null
+                query?.where?.AND?.[0]?.OR?.[0]?.embedding === null
                     ? [
                           {
                               id: "track-vibe-fail",
@@ -2200,7 +2235,7 @@ describe("unified enrichment runtime behavior", () => {
             .mockResolvedValueOnce([{ count: BigInt(1) }]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.embedding === null
+                query?.where?.AND?.[0]?.OR?.[0]?.embedding === null
                     ? [
                           {
                               id: "track-vibe-ok",

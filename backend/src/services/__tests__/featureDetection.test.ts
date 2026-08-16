@@ -6,6 +6,7 @@ const mockTrackFindFirst = jest.fn();
 const mockTrackEmbeddingCount = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
+const mockGetActiveSpace = jest.fn();
 
 jest.mock("fs", () => ({
     existsSync: (...args: unknown[]) => mockExistsSync(...args),
@@ -35,10 +36,15 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
+jest.mock("../embeddingSpaces", () => ({
+    getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
+}));
+
 describe("featureDetection service", () => {
     beforeEach(() => {
         jest.resetModules();
         jest.clearAllMocks();
+        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
     async function loadService() {
@@ -81,6 +87,9 @@ describe("featureDetection service", () => {
         expect(mockRedisGet).toHaveBeenCalledWith("audio:worker:heartbeat");
         expect(mockRedisGet).toHaveBeenCalledWith("clap:worker:heartbeat");
         expect(mockTrackEmbeddingCount).toHaveBeenCalledTimes(1);
+        expect(mockTrackEmbeddingCount).toHaveBeenCalledWith({
+            where: { spaceId: "space-active" },
+        });
     });
 
     it("falls back to database feature presence when heartbeat is stale or missing", async () => {

@@ -37,6 +37,7 @@ const mockUmapLoggerDebug = jest.fn<(...args: unknown[]) => void>();
 const mockUmapLoggerInfo = jest.fn<(...args: unknown[]) => void>();
 const mockUmapLoggerWarn = jest.fn<(...args: unknown[]) => void>();
 const mockUmapLoggerError = jest.fn<(...args: unknown[]) => void>();
+const mockGetActiveSpace = jest.fn<() => Promise<{ id: string }>>();
 
 let pipeline: MockPipeline;
 let workerBehavior: ((worker: MockWorker) => void) | null = null;
@@ -116,6 +117,10 @@ jest.mock("../../utils/embedding", () => ({
     parseEmbedding: (embedding: string) => mockParseEmbedding(embedding),
 }));
 
+jest.mock("../embeddingSpaces", () => ({
+    getActiveSpace: () => mockGetActiveSpace(),
+}));
+
 jest.mock("worker_threads", () => ({
     Worker: MockWorker,
 }));
@@ -191,6 +196,7 @@ describe("computeMapProjection", () => {
         mockParseEmbedding.mockImplementation(
             (embedding: string) => JSON.parse(embedding) as number[],
         );
+        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
     it("returns cached projection data without querying the database", async () => {
@@ -221,6 +227,11 @@ describe("computeMapProjection", () => {
         await flushMicrotasks();
 
         expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        const [query, ...values] = mockQueryRaw.mock.calls[0];
+        expect((query as readonly string[]).join(" ")).toContain(
+            "te.space_id =",
+        );
+        expect(values).toContain("space-active");
         expect(workers).toHaveLength(1);
         expect(mockUmapLoggerInfo).toHaveBeenCalledWith(
             "[VIBE-MAP] Waiting for in-progress computation",

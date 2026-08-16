@@ -1,6 +1,8 @@
 """Red-phase contracts for CLAP analyzer runtime reliability."""
 
 import importlib.util
+import json
+import logging
 import sys
 import threading
 import time
@@ -25,6 +27,79 @@ class ResponseError(Exception):
 
 class FakeRedisClient:
     """Placeholder client returned by the recording Redis constructor."""
+
+
+class FakeClock:
+    """Controllable monotonic clock for cache-expiry tests."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class RecordingSpaceCursor:
+    """Record embedding-space reads and embedding writes."""
+
+    def __init__(self, connection: "RecordingSpaceConnection") -> None:
+        self.connection = connection
+        self.rows: list[dict[str, Any]] = []
+        self.closed = False
+
+    def execute(self, query: str, params: Any = None) -> None:
+        self.connection.executions.append((query, params))
+        if "FROM embedding_spaces" in query:
+            self.connection.resolve_calls += 1
+            self.rows = list(self.connection.active_rows)
+            return
+        if "INSERT INTO track_embeddings" not in query:
+            return
+        self.connection.insert_attempts.append((query, params))
+        if self.connection.insert_errors:
+            raise self.connection.insert_errors.pop(0)
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self.rows
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class RecordingSpaceConnection:
+    """Minimal connection that drives resolver and storage behavior."""
+
+    def __init__(self, active_rows: list[dict[str, Any]]) -> None:
+        self.active_rows = active_rows
+        self.executions: list[tuple[str, Any]] = []
+        self.insert_attempts: list[tuple[str, Any]] = []
+        self.insert_errors: list[Exception] = []
+        self.resolve_calls = 0
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
+    def cursor(self, cursor_factory: Any = None) -> RecordingSpaceCursor:
+        assert cursor_factory is RealDictCursor
+        return RecordingSpaceCursor(self)
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+
+def _database_with_space_rows(
+    module: ModuleType,
+    active_rows: list[dict[str, Any]],
+    clock: FakeClock | None = None,
+) -> tuple[Any, RecordingSpaceConnection]:
+    """Build the production wrapper around a deterministic fake connection."""
+    database = module.DatabaseConnection("postgresql://test", clock=clock or FakeClock())
+    connection = RecordingSpaceConnection(active_rows)
+    database.conn = connection
+    database.is_connected = lambda: True
+    return database, connection
 
 
 def _stub_torch() -> ModuleType:
@@ -374,3 +449,178 @@ def test_clap_analyzer_source_does_not_use_deprecated_datetime_utcnow() -> None:
 
     assert "datetime.utcnow" not in source
     assert "utcnow()" not in source
+
+
+def test_resolve_active_space_id_returns_single_active_id(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+) -> None:
+    module, _ = loaded_analyzer
+    database, connection = _database_with_space_rows(
+        module,
+        [{"id": "space-current", "created_at": "2026-08-16T12:00:00Z"}],
+    )
+
+    resolved = module.resolve_active_space_id(database)
+
+    assert resolved == "space-current"
+    query = connection.executions[0][0]
+    assert "SELECT id, created_at FROM embedding_spaces" in query
+    assert "WHERE status = 'active'" in query
+    assert "ORDER BY created_at ASC" in query
+
+
+def test_resolve_active_space_id_uses_oldest_and_warns_for_multiple_actives(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    module, _ = loaded_analyzer
+    database, _ = _database_with_space_rows(
+        module,
+        [
+            {"id": "space-oldest", "created_at": "2026-08-16T12:00:00Z"},
+            {"id": "space-newest", "created_at": "2026-08-16T13:00:00Z"},
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING, logger=module.logger.name):
+        resolved = module.resolve_active_space_id(database)
+
+    assert resolved == "space-oldest"
+    assert "space-oldest" in caplog.text
+    assert "space-newest" in caplog.text
+
+
+def test_missing_active_space_marks_job_failed_without_insert(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module, _ = loaded_analyzer
+    database, connection = _database_with_space_rows(module, [])
+    failures: list[tuple[str, str]] = []
+    audio_path = tmp_path / "track.flac"
+    audio_path.touch()
+
+    class FakeJobRedis:
+        def blpop(self, _queue: str, timeout: int) -> tuple[str, bytes]:
+            assert timeout == module.SLEEP_INTERVAL
+            job = {"trackId": "track-1", "filePath": audio_path.name}
+            return module.ANALYSIS_QUEUE, json.dumps(job).encode()
+
+    class FakeAnalyzer:
+        def get_audio_embedding(
+            self,
+            _audio_path: str,
+            _duration: float | None,
+        ) -> np.ndarray:
+            return np.zeros(512, dtype=np.float32)
+
+    worker = module.Worker(1, FakeAnalyzer(), threading.Event())
+    worker.redis_client = FakeJobRedis()
+    worker.db = database
+    monkeypatch.setattr(module, "MUSIC_PATH", str(tmp_path))
+    monkeypatch.setattr(worker, "_claim_track", lambda _track_id: True)
+    monkeypatch.setattr(worker, "_release_queue_reservation", lambda _track_id: None)
+    monkeypatch.setattr(
+        worker,
+        "_mark_failed",
+        lambda track_id, error: failures.append((track_id, error)),
+    )
+
+    worker._process_job()
+
+    assert failures == [
+        ("track-1", "No active embedding space is registered; embedding was not stored")
+    ]
+    assert connection.insert_attempts == []
+
+
+def test_store_embedding_writes_space_id_without_model_version(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+) -> None:
+    module, _ = loaded_analyzer
+    database, connection = _database_with_space_rows(
+        module,
+        [{"id": "space-current", "created_at": "2026-08-16T12:00:00Z"}],
+    )
+    worker = module.Worker(1, None, threading.Event())
+    worker.db = database
+
+    stored = worker._store_embedding("track-1", np.zeros(512, dtype=np.float32))
+
+    assert stored is True
+    query, params = connection.insert_attempts[0]
+    assert "space_id" in query
+    assert "model_version" not in query
+    assert params[2] == "space-current"
+
+
+def test_active_space_cache_is_honored_then_refreshed_after_ttl(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+) -> None:
+    module, _ = loaded_analyzer
+    clock = FakeClock()
+    database, connection = _database_with_space_rows(
+        module,
+        [{"id": "space-old", "created_at": "2026-08-16T12:00:00Z"}],
+        clock,
+    )
+
+    assert database.get_active_space_id() == "space-old"
+    connection.active_rows = [{"id": "space-new", "created_at": "2026-08-16T13:00:00Z"}]
+    clock.now = module.ACTIVE_SPACE_CACHE_TTL_SECONDS
+    assert database.get_active_space_id() == "space-old"
+    clock.now = module.ACTIVE_SPACE_CACHE_TTL_SECONDS + 1
+    assert database.get_active_space_id() == "space-new"
+    assert connection.resolve_calls == 2
+
+
+def test_store_embedding_does_not_retry_unrelated_insert_failures(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+) -> None:
+    module, _ = loaded_analyzer
+    database, connection = _database_with_space_rows(
+        module,
+        [{"id": "space-old", "created_at": "2026-08-16T12:00:00Z"}],
+    )
+    assert database.get_active_space_id() == "space-old"
+    connection.insert_errors.append(
+        RuntimeError(
+            'null value in column "analyzed_at" violates not-null constraint'
+        )
+    )
+    worker = module.Worker(1, None, threading.Event())
+    worker.db = database
+
+    stored = worker._store_embedding("track-1", np.zeros(512, dtype=np.float32))
+
+    assert stored is False
+    assert len(connection.insert_attempts) == 1
+    assert connection.resolve_calls == 1
+
+
+def test_store_embedding_reresolves_once_after_foreign_key_failure(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+) -> None:
+    module, _ = loaded_analyzer
+    database, connection = _database_with_space_rows(
+        module,
+        [{"id": "space-old", "created_at": "2026-08-16T12:00:00Z"}],
+    )
+    assert database.get_active_space_id() == "space-old"
+    connection.active_rows = [{"id": "space-new", "created_at": "2026-08-16T13:00:00Z"}]
+    connection.insert_errors.append(
+        RuntimeError('violates foreign key constraint "track_embeddings_space_id_fkey"')
+    )
+    worker = module.Worker(1, None, threading.Event())
+    worker.db = database
+
+    stored = worker._store_embedding("track-1", np.zeros(512, dtype=np.float32))
+
+    assert stored is True
+    assert [params[2] for _, params in connection.insert_attempts] == [
+        "space-old",
+        "space-new",
+    ]
+    assert connection.resolve_calls == 2
+    assert connection.rollback_calls == 1

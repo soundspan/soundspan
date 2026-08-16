@@ -2,6 +2,7 @@ import { prisma } from "../utils/db";
 import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
 import { enrichmentFailureService } from "./enrichmentFailureService";
+import { getActiveSpace } from "./embeddingSpaces";
 
 const STALE_THRESHOLD_MINUTES = 15;
 const MAX_RETRIES = 3;
@@ -110,6 +111,7 @@ class AudioAnalysisCleanupService {
         if (staleTracks.length === 0) {
             return { reset: 0, permanentlyFailed: 0, recovered: 0 };
         }
+        const activeSpace = await getActiveSpace();
 
         logger.debug(
             `[AudioAnalysisCleanup] Found ${staleTracks.length} stale tracks (processing > ${STALE_THRESHOLD_MINUTES} min)`,
@@ -126,7 +128,10 @@ class AudioAnalysisCleanupService {
             const existingEmbedding = await prisma.$queryRaw<
                 { count: bigint }[]
             >`
-                SELECT COUNT(*) as count FROM track_embeddings WHERE track_id = ${track.id}
+                SELECT COUNT(*) as count
+                FROM track_embeddings
+                WHERE track_id = ${track.id}
+                  AND space_id = ${activeSpace.id}
             `;
 
             if (Number(existingEmbedding[0]?.count) > 0) {

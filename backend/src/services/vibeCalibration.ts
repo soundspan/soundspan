@@ -1,5 +1,6 @@
 import { prisma } from "../utils/db";
 import { parseEmbedding } from "../utils/embedding";
+import { getActiveSpace } from "./embeddingSpaces";
 
 /**
  * vibeCalibration — bounded sampling of pairwise CLAP cosine distances.
@@ -100,8 +101,12 @@ function validateEmbeddings(embeddings: number[][]): void {
 
 /** Number of tracks with a CLAP embedding row (pure Prisma count). */
 export async function countEmbeddedTracks(): Promise<number> {
+    const activeSpace = await getActiveSpace();
     return prisma.trackEmbedding.count({
-        where: { track: { origin: "LOCAL" } },
+        where: {
+            spaceId: activeSpace.id,
+            track: { origin: "LOCAL" },
+        },
     });
 }
 
@@ -156,8 +161,12 @@ function pickRandom<T>(items: T[], count: number): T[] {
  * bounded by CALIBRATION_SAMPLE_SIZE (≤ 200 ⇒ ≤ 19,900 distance pairs).
  */
 export async function computeCalibration(): Promise<CalibrationPayload> {
+    const activeSpace = await getActiveSpace();
     const idRows = await prisma.trackEmbedding.findMany({
-        where: { track: { origin: "LOCAL" } },
+        where: {
+            spaceId: activeSpace.id,
+            track: { origin: "LOCAL" },
+        },
         select: { trackId: true },
         orderBy: { trackId: "asc" },
         take: CALIBRATION_ID_SCAN_CAP,
@@ -172,6 +181,7 @@ export async function computeCalibration(): Promise<CalibrationPayload> {
         FROM track_embeddings te
         JOIN "Track" t ON t.id = te.track_id
         WHERE t.origin = ${"LOCAL"}::"TrackOrigin"
+          AND te.space_id = ${activeSpace.id}
           AND te.track_id = ANY(${sampledIds})
     `;
 

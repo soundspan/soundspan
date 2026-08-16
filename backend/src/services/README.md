@@ -47,6 +47,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/discovery/index.ts` | Discovery |
 | `backend/src/services/discoveryLogger.ts` | Core |
 | `backend/src/services/downloadQueue.ts` | Core |
+| `backend/src/services/embeddingSpaces.ts` | Active embedding-space registry lookup and process-local cache |
 | `backend/src/services/enrichment.ts` | Core |
 | `backend/src/services/enrichmentFailureService.ts` | Core |
 | `backend/src/services/enrichmentState.ts` | Core |

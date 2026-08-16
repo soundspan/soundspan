@@ -60,6 +60,10 @@ jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
 }));
 
+jest.mock("../../services/embeddingSpaces", () => ({
+    getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+}));
+
 jest.mock("../../utils/embedding", () => {
     const actual = jest.requireActual("../../utils/embedding");
     return {

@@ -1,6 +1,6 @@
 # Pluggable Vibe Embedding Provider
 
-Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design, implementation not started. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension embedding space; adopt DCLAP's distilled ONNX student as the default provider; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
+Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; the registry portion of rollout phase 1 is implemented by migration `20260816120000_add_embedding_space_registry`; remaining provider work has not started. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension embedding space; adopt DCLAP's distilled ONNX student as the default provider; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
 
 Related: cross-peer taste vectors in Blends ([issue #529](https://github.com/soundspan/soundspan/issues/529)) and federated discovery ([issue #530](https://github.com/soundspan/soundspan/issues/530)) depend on the space-identity contract defined here.
 

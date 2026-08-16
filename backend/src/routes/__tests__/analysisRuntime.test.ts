@@ -75,6 +75,16 @@ jest.mock("../../services/enrichmentFailureService", () => ({
 
 jest.mock("../../services/trackEmbeddings", () => ({
     countEmbeddedLocalTracks: jest.fn(),
+    missingActiveEmbeddingWhere: (spaceId: string) => ({
+        OR: [
+            { embedding: null },
+            { embedding: { is: { spaceId: { not: spaceId } } } },
+        ],
+    }),
+}));
+
+jest.mock("../../services/embeddingSpaces", () => ({
+    getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
 }));
 
 import router from "../analysis";
@@ -686,7 +696,10 @@ describe("analysis routes runtime", () => {
         await postVibeStart(req, res);
 
         expect(mockTrackEmbeddingDeleteMany).toHaveBeenCalledWith({
-            where: { track: { origin: "LOCAL" } },
+            where: {
+                spaceId: "space-active",
+                track: { origin: "LOCAL" },
+            },
         });
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
@@ -714,6 +727,20 @@ describe("analysis routes runtime", () => {
         const req = { body: {} } as any;
         const res = createRes();
         await postVibeStart(req, res);
+        expect(mockTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: [
+                        { embedding: null },
+                        {
+                            embedding: {
+                                is: { spaceId: { not: "space-active" } },
+                            },
+                        },
+                    ],
+                }),
+            }),
+        );
         expect(res.body).toEqual({
             message: "All tracks have vibe embeddings",
             queued: 0,
