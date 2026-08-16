@@ -65,11 +65,7 @@ export interface CanonicalMediaSearchResult {
 
 /** Media types currently understood by federation v1 consumers. */
 export type FederationMediaType =
-    | "artist"
-    | "album"
-    | "track"
-    | "podcast"
-    | "audiobook";
+    "artist" | "album" | "track" | "podcast" | "audiobook";
 
 /** Source discriminator emitted by unified track response serializers. */
 export type UnifiedTrackSource = "local" | "tidal" | "youtube" | "federated";
