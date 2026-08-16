@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Guarded every Python sidecar against Docker interpreter and uv lock-target
+  drift, and documented the TensorFlow 2.15 wheel ceiling that keeps the
+  Essentia analyzer on Python 3.11. (#494)
 - Fixed broken audiobook navigation for books whose sparse or malformed Audiobookshelf chapter markers do not cover the runtime. Valid multi-file durations now produce named parts, while navigation stays hidden when the current single-file stream proxy cannot play those seek targets. (#487)
 - Rate limits for security-sensitive endpoints are now enforced across backend
   replicas and survive backend restarts, while requests degrade open on Redis

@@ -1,6 +1,8 @@
 # Audio Analyzer Service - Essentia with TensorFlow (MusiCNN)
-# Runs on Python 3.11 (Debian bookworm slim), matching the repo's Python 3.11+
-# contract and the AIO image that already runs this workload on Python 3.11.
+# Python 3.11 is the runtime ceiling for the validated TensorFlow 2.15.x stack:
+# PyPI publishes its Linux wheels only through CPython 3.11. Essentia dev1389
+# has newer-interpreter wheels, but cannot move this image without TensorFlow.
+# Keep this base paired with the requirements.lock --python-version target.
 FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
 
 # Avoid interactive prompts
