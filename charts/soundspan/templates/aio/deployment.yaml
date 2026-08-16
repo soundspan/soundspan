@@ -57,6 +57,20 @@ spec:
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
             "INTERNAL_API_SECRET" true
+            "LOCAL_LOGIN_ENABLED" true
+            "OIDC_ENABLED" true
+            "OIDC_ISSUER_URL" true
+            "OIDC_CLIENT_ID" true
+            "OIDC_CLIENT_SECRET" true
+            "OIDC_REDIRECT_URI" true
+            "OIDC_SCOPES" true
+            "OIDC_AUTO_PROVISION" true
+            "OIDC_MANAGE_ROLES" true
+            "OIDC_GROUPS_CLAIM" true
+            "OIDC_ADMIN_GROUP" true
+            "OIDC_EMAIL_CLAIM" true
+            "OIDC_NAME_CLAIM" true
+            "OIDC_PROVIDER_NAME" true
             "POSTGRES_PASSWORD" true
             "ALLOWED_ORIGINS" true
             "LOG_LEVEL" true
@@ -116,6 +130,7 @@ spec:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
             {{- end }}
+            {{- include "soundspan.oidcEnv" (dict "ctx" . "envMap" $aioEnv) | nindent 12 }}
             {{- if hasKey $aioEnv "POSTGRES_PASSWORD" }}
             - name: POSTGRES_PASSWORD
               value: {{ index $aioEnv "POSTGRES_PASSWORD" | quote }}

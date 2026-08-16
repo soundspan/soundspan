@@ -76,6 +76,7 @@ Never commit `.env` files or credentials.
 | --- | --- | --- |
 | `SESSION_SECRET` | Session encryption (32+ chars) | Yes |
 | `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials | Yes |
+| `OIDC_CLIENT_SECRET` | OIDC confidential client authentication | If using OIDC |
 | `LIDARR_API_KEY` | Lidarr integration | If using Lidarr |
 | `OPENAI_API_KEY` | AI features | Optional |
 | `LASTFM_API_KEY` | Artist recommendations | Optional |
@@ -93,6 +94,14 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - Password changes invalidate existing sessions
 - Session cookies use `httpOnly`, `sameSite=lax`, and `secure` in production
 - Encryption key validity is checked at startup
+
+## OIDC and App-Password Security
+
+soundspan uses the OIDC Authorization Code flow with `state`, `nonce`, and S256 PKCE. Login and account-link attempts keep their pending state on the server. The callback sends the browser a short-lived, single-use exchange code. It never puts access or refresh tokens in a redirect URL.
+
+OpenSubsonic app passwords are restricted to `/rest`. Their `ssap_` secrets are encrypted at rest with authenticated encryption under `SETTINGS_ENCRYPTION_KEY`. Users can revoke each app password independently.
+
+See [`OIDC_SSO.md`](OIDC_SSO.md) for provider setup, account linking, provisioning, role ownership, app passwords, MFA, and break-glass recovery.
 
 ## Streaming Credential Security
 
@@ -154,6 +163,7 @@ openssl rand -base64 32
 ## See also
 
 - [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container
+- [OIDC and SSO](OIDC_SSO.md) — Provider setup, account linking, roles, and recovery
 - [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
 - [Reverse Proxy and Tunnels](REVERSE_PROXY_AND_TUNNELS.md) — Edge routing for split deployments
 - [Integrations Guide](INTEGRATIONS.md) — Integration-specific setup values

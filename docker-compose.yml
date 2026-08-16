@@ -44,6 +44,22 @@ services:
             # To reset admin password, uncomment and set, then restart:
             # ADMIN_RESET_PASSWORD: your-new-password
 
+            # Optional OIDC / SSO authentication
+            LOCAL_LOGIN_ENABLED: ${LOCAL_LOGIN_ENABLED:-true}
+            OIDC_ENABLED: ${OIDC_ENABLED:-false}
+            OIDC_ISSUER_URL: "${OIDC_ISSUER_URL:-}"
+            OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
+            OIDC_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
+            OIDC_REDIRECT_URI: "${OIDC_REDIRECT_URI:-}"
+            OIDC_SCOPES: "${OIDC_SCOPES:-openid profile email}"
+            OIDC_AUTO_PROVISION: ${OIDC_AUTO_PROVISION:-false}
+            OIDC_MANAGE_ROLES: ${OIDC_MANAGE_ROLES:-false}
+            OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+            OIDC_ADMIN_GROUP: "${OIDC_ADMIN_GROUP:-}"
+            OIDC_EMAIL_CLAIM: ${OIDC_EMAIL_CLAIM:-email}
+            OIDC_NAME_CLAIM: ${OIDC_NAME_CLAIM:-name}
+            OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-SSO}
+
             # Music library (required)
             # IMPORTANT: Inside Docker, music is always at /music (mounted from host MUSIC_PATH)
             # Don't use ${MUSIC_PATH} here as it contains the host path, not container path

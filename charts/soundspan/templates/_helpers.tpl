@@ -287,3 +287,39 @@ Usage:
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/* Render OIDC configuration and its Secret-backed client credential. */}}
+{{- define "soundspan.oidcEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $envMap := .envMap | default dict -}}
+{{- $values := dict
+  "LOCAL_LOGIN_ENABLED" $ctx.Values.config.localLoginEnabled
+  "OIDC_ENABLED" $ctx.Values.config.oidc.enabled
+  "OIDC_ISSUER_URL" $ctx.Values.config.oidc.issuerUrl
+  "OIDC_CLIENT_ID" $ctx.Values.config.oidc.clientId
+  "OIDC_REDIRECT_URI" $ctx.Values.config.oidc.redirectUri
+  "OIDC_SCOPES" $ctx.Values.config.oidc.scopes
+  "OIDC_AUTO_PROVISION" $ctx.Values.config.oidc.autoProvision
+  "OIDC_MANAGE_ROLES" $ctx.Values.config.oidc.manageRoles
+  "OIDC_GROUPS_CLAIM" $ctx.Values.config.oidc.groupsClaim
+  "OIDC_ADMIN_GROUP" $ctx.Values.config.oidc.adminGroup
+  "OIDC_EMAIL_CLAIM" $ctx.Values.config.oidc.emailClaim
+  "OIDC_NAME_CLAIM" $ctx.Values.config.oidc.nameClaim
+  "OIDC_PROVIDER_NAME" $ctx.Values.config.oidc.providerName
+-}}
+{{- range $name := keys $values | sortAlpha }}
+- name: {{ $name }}
+  value: {{ (ternary (index $envMap $name) (index $values $name) (hasKey $envMap $name)) | quote }}
+{{- end }}
+{{- if hasKey $envMap "OIDC_CLIENT_SECRET" }}
+- name: OIDC_CLIENT_SECRET
+  value: {{ index $envMap "OIDC_CLIENT_SECRET" | quote }}
+{{- else }}
+- name: OIDC_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "soundspan.secretName" $ctx }}
+      key: OIDC_CLIENT_SECRET
+      optional: true
+{{- end }}
+{{- end }}

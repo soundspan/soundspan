@@ -202,6 +202,7 @@ secrets:
   sessionSecret: "<openssl rand -hex 32>"
   settingsEncryptionKey: "<openssl rand -hex 32>"
   internalApiSecret: "<openssl rand -hex 32>"
+  oidcClientSecret: "<OIDC client secret>" # Required only when OIDC is enabled
   postgresPassword: "secure-password"
 ```
 
@@ -213,6 +214,33 @@ secrets:
 ```
 
 Expected keys: `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `INTERNAL_API_SECRET`.
+Add `OIDC_CLIENT_SECRET` when OIDC is enabled.
+
+#### OIDC / SSO
+
+Set the public callback URL exactly as it is registered at the identity provider:
+
+```yaml
+config:
+  localLoginEnabled: true
+  oidc:
+    enabled: true
+    issuerUrl: https://idp.example/realms/soundspan
+    clientId: soundspan
+    redirectUri: https://soundspan.example/api/auth/oidc/callback
+    scopes: openid profile email
+    autoProvision: false
+    manageRoles: false
+    groupsClaim: groups
+    adminGroup: ""
+    emailClaim: email
+    nameClaim: name
+    providerName: SSO
+secrets:
+  oidcClientSecret: "<OIDC client secret>"
+```
+
+Keep `localLoginEnabled: true` until SSO works. Keep `autoProvision: false` unless a private IdP restricts access to the soundspan application. See [`docs/OIDC_SSO.md`](../../docs/OIDC_SSO.md) for the full setup and recovery guide.
 
 #### Third-party API keys
 

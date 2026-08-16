@@ -662,6 +662,7 @@ music:
 #        secrets.existingSecret: my-soundspan-secrets
 #      Expected keys in that Secret:
 #        SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET
+#      Add OIDC_CLIENT_SECRET when config.oidc.enabled=true.
 #      Add these when using chart-managed PostgreSQL or host/port external PostgreSQL:
 #        POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 #
@@ -682,6 +683,7 @@ secrets:
   sessionSecret: "" # Session encryption key (auto: 64 char random)
   settingsEncryptionKey: "" # Credential encryption key (auto: 64 char random)
   internalApiSecret: "" # Service-to-service auth (auto: 64 char random)
+  oidcClientSecret: "" # OIDC confidential client secret (required when OIDC is enabled)
   postgresUser: soundspan
   postgresPassword: "" # (auto: 32 char random)
   postgresDatabase: soundspan
@@ -699,6 +701,23 @@ config:
   logLevel: warn
   allowedOrigins: ""
   timezone: UTC
+  # -- Keep local username/password login available.
+  #    Do not disable this unless OIDC is enabled and verified.
+  localLoginEnabled: true
+  # -- OpenID Connect single sign-on.
+  oidc:
+    enabled: false
+    issuerUrl: ""
+    clientId: ""
+    redirectUri: ""
+    scopes: "openid profile email"
+    autoProvision: false
+    manageRoles: false
+    groupsClaim: groups
+    adminGroup: ""
+    emailClaim: email
+    nameClaim: name
+    providerName: SSO
   # -- Flush Redis with FLUSHALL on backend startup.
   #    Default false to preserve Redis Streams/group metadata used by
   #    multi-replica analyzer services (for example CLAP text embedding).

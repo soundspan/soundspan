@@ -48,6 +48,18 @@ For single-service deployments (all-in-one image, Helm `deploymentMode: aio`):
 
 - Route everything to the single soundspan service (`:3030`)
 
+## OIDC callback routing
+
+Set `OIDC_REDIRECT_URI` to the public URL that users open. Register the same exact value at the identity provider:
+
+```env
+OIDC_REDIRECT_URI=https://soundspan.example.com/api/auth/oidc/callback
+```
+
+The callback path must reach the backend. The default examples below send `/api/*` through the frontend proxy. The direct path-split examples send `/api/*` straight to the backend. Both patterns deliver `/api/auth/oidc/callback` correctly.
+
+Keep the public scheme, host, port, and path identical in soundspan and the identity provider. Do not use a container-only hostname in `OIDC_REDIRECT_URI`.
+
 ## NGINX example (Docker/Kubernetes edge)
 
 ```nginx
@@ -180,3 +192,4 @@ Notes:
 - [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
 - [Kubernetes Guide](KUBERNETES.md) — Helm deployment and HA rollout
 - [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — External access settings and CORS configuration
+- [OIDC and SSO](OIDC_SSO.md) — Identity-provider and callback setup

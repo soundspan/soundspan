@@ -64,10 +64,55 @@ assert_deployment_image() {
   fi
 }
 
+assert_oidc_env() {
+  local deployment_name="$1"
+  local manifest_file="$2"
+
+  for expected in \
+    'LOCAL_LOGIN_ENABLED=false' \
+    'OIDC_ENABLED=true' \
+    'OIDC_ISSUER_URL=https://idp.example/realms/soundspan' \
+    'OIDC_CLIENT_ID=soundspan' \
+    'OIDC_REDIRECT_URI=https://soundspan.example/api/auth/oidc/callback' \
+    'OIDC_SCOPES=openid profile email groups' \
+    'OIDC_AUTO_PROVISION=true' \
+    'OIDC_MANAGE_ROLES=true' \
+    'OIDC_GROUPS_CLAIM=groups' \
+    'OIDC_ADMIN_GROUP=soundspan-admin' \
+    'OIDC_EMAIL_CLAIM=email' \
+    'OIDC_NAME_CLAIM=name' \
+    'OIDC_PROVIDER_NAME=Company SSO'; do
+    env_name="${expected%%=*}"
+    env_value="${expected#*=}"
+    if ! DEPLOYMENT_NAME="$deployment_name" ENV_NAME="$env_name" ENV_VALUE="$env_value" perl -0777 -ne '
+        for my $doc (split /^---/m, $_) {
+            next unless $doc =~ /kind:\s*Deployment/;
+            next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+            exit 0 if $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\s+value:\s+"\Q$ENV{ENV_VALUE}\E"/s;
+        }
+        exit 1' "$manifest_file"; then
+      echo "[ERROR] ${deployment_name} missing ${env_name}=${env_value}" >&2
+      exit 1
+    fi
+  done
+
+  if ! DEPLOYMENT_NAME="$deployment_name" SECRET_NAME="$RELEASE_NAME" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc =~ /name:\s+OIDC_CLIENT_SECRET\s+valueFrom:\s+secretKeyRef:\s+name:\s+\Q$ENV{SECRET_NAME}\E\s+key:\s+OIDC_CLIENT_SECRET/s;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${deployment_name} missing OIDC_CLIENT_SECRET secretKeyRef" >&2
+    exit 1
+  fi
+}
+
 tmp_aio="$(mktemp)"
 tmp_aio_sidecars="$(mktemp)"
 tmp_aio_rotated_secrets="$(mktemp)"
 tmp_aio_secret_overrides="$(mktemp)"
+tmp_aio_oidc="$(mktemp)"
 tmp_aio_digests="$(mktemp)"
 tmp_aio_reserved_labels="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
@@ -75,13 +120,14 @@ tmp_individual_component_database="$(mktemp)"
 tmp_individual_external_database="$(mktemp)"
 tmp_individual_digests="$(mktemp)"
 tmp_individual_reserved_labels="$(mktemp)"
+tmp_individual_oidc="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -97,6 +143,40 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   exit 1
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
+
+echo "[CHECK] render OIDC configuration in AIO and individual backend modes"
+for oidc_mode in aio individual; do
+  oidc_output="$tmp_aio_oidc"
+  oidc_deployment="$RELEASE_NAME"
+  oidc_mode_args=()
+  if [ "$oidc_mode" = "individual" ]; then
+    oidc_output="$tmp_individual_oidc"
+    oidc_deployment="${RELEASE_NAME}-backend"
+    oidc_mode_args=(--set deploymentMode=individual)
+  fi
+  helm template "$RELEASE_NAME" "$CHART_PATH" \
+    "${oidc_mode_args[@]}" \
+    --set config.localLoginEnabled=false \
+    --set config.oidc.enabled=true \
+    --set-string config.oidc.issuerUrl=https://idp.example/realms/soundspan \
+    --set-string config.oidc.clientId=soundspan \
+    --set-string config.oidc.redirectUri=https://soundspan.example/api/auth/oidc/callback \
+    --set-string 'config.oidc.scopes=openid profile email groups' \
+    --set config.oidc.autoProvision=true \
+    --set config.oidc.manageRoles=true \
+    --set-string config.oidc.groupsClaim=groups \
+    --set-string config.oidc.adminGroup=soundspan-admin \
+    --set-string config.oidc.emailClaim=email \
+    --set-string config.oidc.nameClaim=name \
+    --set-string 'config.oidc.providerName=Company SSO' \
+    --set-string secrets.oidcClientSecret=oidc-client-secret \
+    >"$oidc_output"
+  assert_oidc_env "$oidc_deployment" "$oidc_output"
+  if ! line_match '^  OIDC_CLIENT_SECRET: "oidc-client-secret"$' "$oidc_output"; then
+    echo "[ERROR] ${oidc_mode} render missing OIDC_CLIENT_SECRET in Secret" >&2
+    exit 1
+  fi
+done
 
 echo "[CHECK] reserved selector labels override global labels in AIO mode"
 helm template "$RELEASE_NAME" "$CHART_PATH" \

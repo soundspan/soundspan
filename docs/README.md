@@ -47,6 +47,7 @@ This index is the central navigation page for all project documentation under `d
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Self-hosters/operators | Docker run/compose deployment modes, release channels, and updates |
 | [`UPGRADING.md`](UPGRADING.md) | Users/operators | Operator-facing notes for upgrades that need action, newest first; unlisted releases are drop-in |
 | [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md) | Operators/admins | External-access config, secret handling, and security hardening |
+| [`OIDC_SSO.md`](OIDC_SSO.md) | Operators/admins | OIDC provider setup, account linking, role management, app passwords, and recovery |
 | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) | Operators/admins | Complete env var reference by container with defaults and status labels |
 | [`INTEGRATIONS.md`](INTEGRATIONS.md) | Operators/admins | Setup guides for Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL, and OpenSubsonic |
 | [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md) | Power users/operators | CLAP analysis service details and optional GPU acceleration |

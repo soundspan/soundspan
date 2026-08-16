@@ -100,6 +100,27 @@ Experimental feature note:
 | `ADMIN_RESET_PASSWORD` | `backend` | Optional | unset | One-time startup password reset for admin account. |
 | `JWT_SECRET` | `backend` | Optional | falls back to `SESSION_SECRET` | Explicit JWT signing secret override. |
 
+## Authentication Variables
+
+| Variable | Used In Container(s) | Required | Default | What It Does |
+| --- | --- | --- | --- | --- |
+| `LOCAL_LOGIN_ENABLED` | `backend`, `soundspan` (AIO) | Optional | `true` | Shows and accepts local username/password login. Startup rejects `false` when `OIDC_ENABLED=false` to prevent total lockout. |
+| `OIDC_ENABLED` | `backend`, `soundspan` (AIO) | Optional | `false` | Enables OpenID Connect login, account linking, and the public OIDC callback. |
+| `OIDC_ISSUER_URL` | `backend`, `soundspan` (AIO) | Required when `OIDC_ENABLED=true` | empty | OIDC issuer URL used for provider discovery. The value must be a valid HTTP(S) URL. |
+| `OIDC_CLIENT_ID` | `backend`, `soundspan` (AIO) | Required when `OIDC_ENABLED=true` | empty | Confidential OIDC client identifier registered at the identity provider. |
+| `OIDC_CLIENT_SECRET` | `backend`, `soundspan` (AIO) | Required when `OIDC_ENABLED=true` | empty | Confidential OIDC client secret. Keep it in a secret store. The Helm chart reads it from `secrets.oidcClientSecret` or the `OIDC_CLIENT_SECRET` key in `secrets.existingSecret`. |
+| `OIDC_REDIRECT_URI` | `backend`, `soundspan` (AIO) | Required when `OIDC_ENABLED=true` | empty | Exact public callback URL registered at the provider. Use `https://<host>/api/auth/oidc/callback`. The value must be a valid HTTP(S) URL. |
+| `OIDC_SCOPES` | `backend`, `soundspan` (AIO) | Optional | `openid profile email` | Space-separated scopes requested from the provider. Add the provider's groups scope when OIDC role management needs it. |
+| `OIDC_AUTO_PROVISION` | `backend`, `soundspan` (AIO) | Optional | `false` | Creates an account directly for an unknown OIDC identity. Keep this off for public identity providers. When false, unknown identities must redeem a soundspan invite code. |
+| `OIDC_MANAGE_ROLES` | `backend`, `soundspan` (AIO) | Optional | `false` | Makes the IdP groups claim authoritative for linked-user roles. Startup requires `OIDC_ENABLED=true` and a non-empty `OIDC_ADMIN_GROUP` when this is true. |
+| `OIDC_GROUPS_CLAIM` | `backend`, `soundspan` (AIO) | Optional | `groups` | Claim that supplies an array of group-name strings when OIDC role management is enabled. |
+| `OIDC_ADMIN_GROUP` | `backend`, `soundspan` (AIO) | Required when `OIDC_MANAGE_ROLES=true` | empty | Group name that maps a linked user to the `admin` role. Startup fails when role management is enabled and this value is empty. |
+| `OIDC_EMAIL_CLAIM` | `backend`, `soundspan` (AIO) | Optional | `email` | Claim used as the email hint for account linking and verified-email storage. Email never becomes the external identity key. |
+| `OIDC_NAME_CLAIM` | `backend`, `soundspan` (AIO) | Optional | `name` | Claim used as cached display metadata and as a username fallback during provisioning. |
+| `OIDC_PROVIDER_NAME` | `backend`, `soundspan` (AIO) | Optional | `SSO` | Provider label shown on the login and account-linking interfaces. |
+
+See [`OIDC_SSO.md`](OIDC_SSO.md) for provider setup, account linking, role management, and recovery guidance.
+
 ## Distributed Runtime and Scheduler Controls
 
 | Variable | Used In Container(s) | Required | Default | What It Does |
@@ -283,7 +304,7 @@ Used primarily with `docker-compose.local.yml` (host-run backend/frontend; conta
 
 | Topic | Recommendation |
 | --- | --- |
-| Secrets | Always set `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, and `INTERNAL_API_SECRET` explicitly in production. |
+| Secrets | Always set `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, and `INTERNAL_API_SECRET` explicitly in production. Also set `OIDC_CLIENT_SECRET` when OIDC is enabled. |
 | API routing mode | Keep `NEXT_PUBLIC_API_PATH_MODE=auto` unless you intentionally need direct browser calls (`direct`). |
 | Frontend build-time vars | In prebuilt frontend images, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_PATH_MODE`, and `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` require an image rebuild to change browser behavior. |
 | HA behavior | Keep Listen Together Redis/state/lock flags enabled for multi-replica correctness. |

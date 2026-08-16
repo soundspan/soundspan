@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added OIDC/SSO login with explicit `(provider, sub)` account links,
+  local-password confirmation for email-hinted links, and invite-gated account
+  provisioning by default.
+- Added revocable `ssap_` app passwords for OpenSubsonic password and token
+  authentication. Each secret is encrypted at rest and shown once.
+- Added `LOCAL_LOGIN_ENABLED` so operators can hide local login after they
+  verify OIDC. Startup rejects configurations that disable every login method.
+- Added administrator visibility for SSO-linked and OIDC-only users.
 - Added opt-in federated library sharing, disabled by default with
   `FEDERATION_ENABLED=false`:
   - Host instances expose a read-only `/api/federation/v1` manifest, catalog,

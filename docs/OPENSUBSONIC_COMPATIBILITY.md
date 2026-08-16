@@ -20,11 +20,13 @@ This document defines the current `/rest` compatibility contract implemented in 
 
 ## Supported Auth Modes
 
-- `u` + `p` (plain and `enc:` hex password forms)
-- `u` + `t` + `s` token mode (`t = md5(subsonicPassword + salt)`)
+- `u` + `p` (plain and `enc:` hex password forms). `p` accepts a local password or an active app password.
+- `u` + `t` + `s` token mode (`t = md5(secret + salt)`). `secret` can be the user's Subsonic password or an active app password.
 - `apiKey` query auth (OpenSubsonic extension), with optional `u` username consistency check
 - Required protocol params: one auth mode, `v`, `c` (`u` required for password/token auth, optional for `apiKey`)
 - Response formats: JSON, XML, JSONP (`f` + optional `callback`)
+
+Create app passwords under **Settings > Sign-in & Security**. Each generated secret starts with `ssap_`, is shown once, is limited to `/rest`, and can be revoked independently. Use the soundspan username with the app password. For token authentication, calculate `t` from the complete `ssap_` secret and the client-provided salt.
 
 ## Implemented Endpoint Surface
 
