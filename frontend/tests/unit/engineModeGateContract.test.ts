@@ -80,20 +80,3 @@ test("no engine-mode inequality gates outside lib/audio-engine/engineMode.ts", (
         `Engine-mode inequality gates found:\n${violations.join("\n")}`,
     );
 });
-
-test("the segmented orchestrator gates use the semantic helper", () => {
-    const orchestratorSource = readFileSync(
-        join(
-            FRONTEND_ROOT,
-            "components",
-            "player",
-            "AudioPlaybackOrchestrator.tsx",
-        ),
-        "utf8",
-    );
-    const gateUsages = orchestratorSource.match(/isSegmentedModeEnabled\(\)/g);
-    assert.ok(
-        gateUsages && gateUsages.length >= 3,
-        "segmentedStartupEligible, shouldAttemptSegmentedSession, and shouldPrewarmSegmentedSession must key on isSegmentedModeEnabled()",
-    );
-});

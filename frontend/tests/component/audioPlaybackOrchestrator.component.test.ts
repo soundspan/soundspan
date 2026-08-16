@@ -482,6 +482,7 @@ const preemptChecks: Array<{
 
 const toastErrors: string[] = [];
 const listenTogetherResyncCalls: string[] = [];
+const migratingStorageItems = new Map<string, string>();
 
 let runtimeEngineMode: "howler" | "native" | "videojs" = "howler";
 let listenTogetherSnapshot: {
@@ -619,6 +620,7 @@ const resetHarnessState = (): void => {
     preemptChecks.length = 0;
     toastErrors.length = 0;
     listenTogetherResyncCalls.length = 0;
+    migratingStorageItems.clear();
 
     runtimeEngineMode = "howler";
     listenTogetherSnapshot = null;
@@ -853,7 +855,14 @@ mock.module("@/lib/audio-controls-context", {
 
 mock.module("@/lib/audio-load-preemption", {
     exports: {
-        shouldAllowInitialPersistedTrackResume: () => false,
+        shouldAllowInitialPersistedTrackResume: (input: {
+            isInitialTrackLoad: boolean;
+            segmentedStartupEligible: boolean;
+            listenTogetherActiveOrPending: boolean;
+        }) =>
+            input.isInitialTrackLoad &&
+            !input.segmentedStartupEligible &&
+            !input.listenTogetherActiveOrPending,
         shouldPreemptInFlightAudioLoad: (input: {
             currentMediaId: string | null;
             previousMediaId: string | null;
@@ -1145,7 +1154,8 @@ mock.module("@/lib/storage-migration", {
     exports: {
         createMigratingStorageKey: (key: string) => key,
         PODCAST_DEBUG_STORAGE_KEY: "podcast_debug",
-        readMigratingStorageItem: () => null,
+        readMigratingStorageItem: (key: string) =>
+            migratingStorageItems.get(key) ?? null,
     },
 });
 
@@ -2077,6 +2087,67 @@ test("preempts in-flight load when track switches before initial load settles", 
                 check.previousMediaId === "track-a" &&
                 check.isLoading === true,
         ),
+    );
+});
+
+test("howler mode restores persisted startup and skips segmented session attempt and prewarm", async () => {
+    enableWindowMetrics();
+    playbackState.isPlaying = true;
+    const currentTrack = makeTrack("mode-howler-current");
+    const nextTrack = makeTrack("mode-howler-next");
+    audioState.currentTrack = currentTrack;
+    audioState.queue = [currentTrack, nextTrack];
+    migratingStorageItems.set("current_time_track_id", currentTrack.id);
+    migratingStorageItems.set("current_time", "37");
+
+    renderOrchestrator();
+    await flushAsync(20);
+
+    assert.ok(playbackCalls.setCurrentTime.includes(37));
+    assert.equal(apiCalls.createSegmentedStreamingSession.length, 0);
+    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 0);
+    assert.deepEqual(engine.preloadCalls, [
+        {
+            url: "https://stream.test/direct/mode-howler-next",
+            format: "mp3",
+        },
+    ]);
+    assert.equal(
+        engine.loadCalls[0]?.args[0],
+        "https://stream.test/direct/mode-howler-current",
+    );
+});
+
+test("videojs mode starts segmented playback and prewarms the next track without persisted resume", async () => {
+    enableWindowMetrics();
+    runtimeEngineMode = "videojs";
+    playbackState.isPlaying = true;
+    const currentTrack = makeTrack("mode-videojs-current");
+    const nextTrack = makeTrack("mode-videojs-next");
+    audioState.currentTrack = currentTrack;
+    audioState.queue = [currentTrack, nextTrack];
+    migratingStorageItems.set("current_time_track_id", currentTrack.id);
+    migratingStorageItems.set("current_time", "37");
+    segmentedSessionQueue.push(
+        makeSegmentedSession("mode-videojs-startup"),
+        makeSegmentedSession("mode-videojs-prewarm"),
+    );
+
+    renderOrchestrator();
+    await flushAsync(24);
+
+    assert.equal(playbackCalls.setCurrentTime.includes(37), false);
+    assert.deepEqual(
+        apiCalls.createSegmentedStreamingSession
+            .map((request) => request.trackId)
+            .sort(),
+        [currentTrack.id, nextTrack.id].sort(),
+    );
+    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 1);
+    assert.equal(engine.loadCalls.length, 1);
+    assert.equal(
+        (engine.loadCalls[0]?.args[0] as { protocol?: string }).protocol,
+        "dash",
     );
 });
 
