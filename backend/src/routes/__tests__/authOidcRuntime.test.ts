@@ -41,8 +41,11 @@ jest.mock("../../middleware/rateLimiter", () => ({
 
 const generateToken = jest.fn(() => "jwt-access");
 const generateRefreshToken = jest.fn(() => "jwt-refresh");
+const requireAuth = jest.fn((_req: unknown, _res: unknown, next: () => void) =>
+    next(),
+);
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
+    requireAuth,
     requireInteractiveSession: (
         _req: unknown,
         _res: unknown,
@@ -106,7 +109,20 @@ const prisma = {
         delete: jest.fn(),
     },
     userSettings: { create: jest.fn() },
-    externalIdentity: { create: jest.fn() },
+    externalIdentity: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        count: jest.fn(),
+        delete: jest.fn(),
+    },
+    appPassword: {
+        findMany: jest.fn(),
+        count: jest.fn(),
+        create: jest.fn(),
+        updateMany: jest.fn(),
+    },
     inviteCode: {
         findUnique: jest.fn(),
         create: jest.fn(),
@@ -135,16 +151,17 @@ jest.mock("qrcode", () => ({
     __esModule: true,
     default: { toDataURL: jest.fn() },
 }));
-jest.mock("../../utils/encryption", () => ({
-    encrypt: (value: string) => `enc(${value})`,
-    decrypt: (value: string) => value.replace(/^enc\((.*)\)$/, "$1"),
-}));
+const encrypt = jest.fn((value: string) => `enc(${value})`);
+const decrypt = jest.fn((value: string) =>
+    value.replace(/^enc\((.*)\)$/, "$1"),
+);
+jest.mock("../../utils/encryption", () => ({ encrypt, decrypt }));
 const runDummyBcrypt = jest.fn();
 jest.mock("../../utils/dummyCredential", () => ({ runDummyBcrypt }));
 
 import router from "../auth";
 
-type Method = "get" | "post";
+type Method = "get" | "post" | "delete";
 
 function getLayer(path: string, method: Method) {
     const layer = (
@@ -246,6 +263,20 @@ describe("OIDC auth routes", () => {
             twoFactorRecoveryCodes: null,
         });
         prisma.externalIdentity.create.mockResolvedValue({});
+        prisma.externalIdentity.findMany.mockResolvedValue([]);
+        prisma.externalIdentity.findUnique.mockResolvedValue(null);
+        prisma.externalIdentity.findFirst.mockResolvedValue(null);
+        prisma.externalIdentity.count.mockResolvedValue(2);
+        prisma.externalIdentity.delete.mockResolvedValue({});
+        prisma.appPassword.findMany.mockResolvedValue([]);
+        prisma.appPassword.count.mockResolvedValue(0);
+        prisma.appPassword.create.mockResolvedValue({
+            id: "app-1",
+            displayName: "Phone",
+            createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            lastUsedAt: null,
+        });
+        prisma.appPassword.updateMany.mockResolvedValue({ count: 1 });
         loadUsableInviteCode.mockResolvedValue({ id: "invite-1" });
     });
 
@@ -266,9 +297,31 @@ describe("OIDC auth routes", () => {
         ["post", "/oidc/exchange"],
         ["post", "/oidc/confirm-link"],
         ["post", "/oidc/redeem-invite"],
+        ["post", "/oidc/link/start"],
     ] as const)("attaches authLimiter first on %s %s", (method, path) => {
         expect(getLayer(path, method).route.stack[0].handle).toBe(authLimiter);
     });
+
+    it("protects the manual link start route with requireAuth", () => {
+        expect(getLayer("/oidc/link/start", "post").route.stack[1].handle).toBe(
+            requireAuth,
+        );
+    });
+
+    it.each([
+        ["get", "/app-passwords", apiLimiter],
+        ["post", "/app-passwords", authLimiter],
+        ["delete", "/app-passwords/:id", authLimiter],
+        ["get", "/identities", apiLimiter],
+        ["delete", "/identities/:id", authLimiter],
+    ] as const)(
+        "rate-limits and authenticates %s %s",
+        (method, path, limiter) => {
+            const stack = getLayer(path, method).route.stack;
+            expect(stack[0].handle).toBe(limiter);
+            expect(stack[1].handle).toBe(requireAuth);
+        },
+    );
 
     it("stores pending state and redirects with state, nonce, and PKCE", async () => {
         const res = createRes();
@@ -416,6 +469,270 @@ describe("OIDC auth routes", () => {
         await getHandler("/oidc/callback", "get")(callbackRequest(), res);
 
         expect(res.redirectUrl).toBe("/login?ssoError=account_already_linked");
+    });
+
+    it("starts a user-bound OIDC link flow and rejects it when OIDC is disabled", async () => {
+        const start = getHandler("/oidc/link/start", "post");
+        const enabled = createRes();
+        await start({ user: { id: "initiating-user" }, query: {} }, enabled);
+
+        expect(putOnce).toHaveBeenCalledWith(
+            "oidc:pending:state-1",
+            {
+                nonce: "nonce-1",
+                codeVerifier: "verifier-1",
+                returnTo: "/settings",
+                mode: "link",
+                userId: "initiating-user",
+            },
+            600,
+        );
+        expect(enabled.redirectUrl).toContain("state=state-1");
+
+        mockConfig.oidc.enabled = false;
+        const disabled = createRes();
+        await start({ user: { id: "initiating-user" }, query: {} }, disabled);
+        expect(disabled.statusCode).toBe(404);
+        expect(disabled.body).toEqual({ error: "OIDC is not enabled" });
+    });
+
+    it("links callback claims to the initiating user without logging in", async () => {
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/settings",
+            mode: "link",
+            userId: "initiating-user",
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(prisma.externalIdentity.create).toHaveBeenCalledWith({
+            data: {
+                userId: "initiating-user",
+                provider: "oidc:https://idp.example",
+                providerSubject: "subject-1",
+                email: "alice@example.com",
+                displayName: "Alice",
+            },
+        });
+        expect(res.redirectUrl).toBe("/settings?ssoLinked=1");
+        expect(resolveOidcAccount).not.toHaveBeenCalled();
+        expect(generateToken).not.toHaveBeenCalled();
+        expect(generateRefreshToken).not.toHaveBeenCalled();
+        expect(
+            [...values.keys()].some((key) => key.startsWith("oidc:exchange:")),
+        ).toBe(false);
+    });
+
+    it("rejects malformed link state instead of falling through to login", async () => {
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/settings",
+            mode: "link",
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe("/login?ssoError=invalid_state");
+        expect(handleCallback).not.toHaveBeenCalled();
+        expect(resolveOidcAccount).not.toHaveBeenCalled();
+    });
+
+    it("rejects a manual link when the provider subject is already linked", async () => {
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/settings",
+            mode: "link",
+            userId: "initiating-user",
+        });
+        prisma.externalIdentity.findUnique.mockResolvedValueOnce({
+            id: "existing-link",
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe(
+            "/settings?ssoError=identity_already_linked",
+        );
+        expect(prisma.externalIdentity.create).not.toHaveBeenCalled();
+        expect(resolveOidcAccount).not.toHaveBeenCalled();
+    });
+
+    it("creates an encrypted app password once and lists only safe active metadata", async () => {
+        const created = createRes();
+        await getHandler("/app-passwords", "post")(
+            {
+                user: { id: "u1" },
+                body: { displayName: "  Phone  " },
+            },
+            created,
+        );
+
+        const createData = prisma.appPassword.create.mock.calls[0][0].data;
+        expect(createData).toEqual({
+            userId: "u1",
+            displayName: "Phone",
+            encryptedSecret: expect.stringMatching(/^enc\(ssap_/),
+        });
+        expect(created.statusCode).toBe(201);
+        expect(created.body).toEqual({
+            appPassword: {
+                id: "app-1",
+                displayName: "Phone",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                lastUsedAt: null,
+                secret: expect.stringMatching(/^ssap_[A-Za-z0-9_-]{32}$/),
+            },
+        });
+
+        prisma.appPassword.findMany.mockResolvedValueOnce([
+            {
+                id: "app-1",
+                displayName: "Phone",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                lastUsedAt: null,
+            },
+        ]);
+        const listed = createRes();
+        await getHandler("/app-passwords", "get")(
+            { user: { id: "u1" } },
+            listed,
+        );
+
+        expect(prisma.appPassword.findMany).toHaveBeenCalledWith({
+            where: { userId: "u1", revokedAt: null },
+            select: {
+                id: true,
+                displayName: true,
+                createdAt: true,
+                lastUsedAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        expect(listed.body).toEqual({
+            appPasswords: [
+                {
+                    id: "app-1",
+                    displayName: "Phone",
+                    createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                    lastUsedAt: null,
+                },
+            ],
+        });
+        expect(JSON.stringify(listed.body)).not.toContain("secret");
+    });
+
+    it("caps active app passwords at twenty and soft-revokes owned credentials", async () => {
+        prisma.appPassword.count.mockResolvedValueOnce(20);
+        const capped = createRes();
+        await getHandler("/app-passwords", "post")(
+            { user: { id: "u1" }, body: { displayName: "Tablet" } },
+            capped,
+        );
+        expect(capped.statusCode).toBe(400);
+        expect(capped.body).toEqual({
+            error: "A maximum of 20 active app passwords is allowed",
+        });
+        expect(prisma.appPassword.create).not.toHaveBeenCalled();
+
+        const revoked = createRes();
+        await getHandler("/app-passwords/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "app-1" } },
+            revoked,
+        );
+        expect(prisma.appPassword.updateMany).toHaveBeenCalledWith({
+            where: { id: "app-1", userId: "u1", revokedAt: null },
+            data: { revokedAt: expect.any(Date) },
+        });
+        expect(revoked.body).toEqual({ message: "App password revoked" });
+    });
+
+    it("lists identities without full subjects and unlinks an owned identity", async () => {
+        prisma.externalIdentity.findMany.mockResolvedValueOnce([
+            {
+                id: "identity-1",
+                provider: "oidc:https://idp.example",
+                providerSubject: "subject-123456789",
+                email: "alice@example.com",
+                displayName: "Alice",
+                createdAt: new Date("2026-08-15T12:00:00.000Z"),
+            },
+        ]);
+        const listed = createRes();
+        await getHandler("/identities", "get")({ user: { id: "u1" } }, listed);
+        expect(listed.body).toEqual({
+            identities: [
+                {
+                    id: "identity-1",
+                    provider: "oidc:https://idp.example",
+                    email: "alice@example.com",
+                    displayName: "Alice",
+                    createdAt: new Date("2026-08-15T12:00:00.000Z"),
+                    subjectHint: "subject-…",
+                },
+            ],
+        });
+        expect(JSON.stringify(listed.body)).not.toContain("123456789");
+
+        prisma.externalIdentity.findFirst.mockResolvedValueOnce({
+            id: "identity-1",
+        });
+        prisma.user.findUnique.mockResolvedValueOnce({ passwordHash: "hash" });
+        const unlinked = createRes();
+        await getHandler("/identities/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "identity-1" } },
+            unlinked,
+        );
+        expect(prisma.externalIdentity.delete).toHaveBeenCalledWith({
+            where: { id: "identity-1" },
+        });
+        expect(unlinked.body).toEqual({ message: "Identity unlinked" });
+    });
+
+    it("returns 404 when revoking or unlinking another user's credential", async () => {
+        prisma.appPassword.updateMany.mockResolvedValueOnce({ count: 0 });
+        const appPassword = createRes();
+        await getHandler("/app-passwords/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "other-app" } },
+            appPassword,
+        );
+        expect(appPassword.statusCode).toBe(404);
+        expect(appPassword.body).toEqual({ error: "App password not found" });
+
+        prisma.externalIdentity.findFirst.mockResolvedValueOnce(null);
+        const identity = createRes();
+        await getHandler("/identities/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "other-identity" } },
+            identity,
+        );
+        expect(identity.statusCode).toBe(404);
+        expect(identity.body).toEqual({ error: "Identity not found" });
+    });
+
+    it("blocks unlinking the last credential for a null-hash user", async () => {
+        prisma.externalIdentity.findFirst.mockResolvedValueOnce({
+            id: "identity-1",
+        });
+        prisma.user.findUnique.mockResolvedValueOnce({ passwordHash: null });
+        prisma.externalIdentity.count.mockResolvedValueOnce(1);
+        const res = createRes();
+
+        await getHandler("/identities/:id", "delete")(
+            { user: { id: "u1" }, params: { id: "identity-1" } },
+            res,
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "Cannot unlink the last sign-in method",
+        });
+        expect(prisma.externalIdentity.delete).not.toHaveBeenCalled();
     });
 
     it("rejects wrong and null local passwords during link confirmation", async () => {

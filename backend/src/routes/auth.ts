@@ -16,6 +16,10 @@ import {
     verifyAuthToken,
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
+import {
+    generateAppPasswordSecret,
+    MAX_ACTIVE_APP_PASSWORDS,
+} from "../utils/appPasswords";
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
@@ -23,6 +27,7 @@ import { apiLimiter, authLimiter } from "../middleware/rateLimiter";
 import { config } from "../config";
 import {
     buildAuthorizationRequest,
+    getOidcProviderId,
     handleCallback,
     type OidcClaims,
 } from "../services/oidcAuth";
@@ -135,6 +140,12 @@ const subsonicPasswordSchema = z.object({
     password: z.string().min(8).max(128),
 });
 
+const appPasswordSchema = z
+    .object({
+        displayName: z.string().trim().min(1).max(64),
+    })
+    .strict();
+
 // Use shared encryption module for 2FA secrets
 const encrypt2FASecret = encrypt;
 const decrypt2FASecret = decrypt;
@@ -211,16 +222,29 @@ function sendLoginSuccess(res: Response, user: LoginUser): Response {
 const OIDC_PENDING_TTL_SECONDS = 600;
 const OIDC_EXCHANGE_TTL_SECONDS = 60;
 const oidcLog = logger.child("OIDCAuth");
+const credentialLog = logger.child("AuthCredentials");
 const opaqueValueSchema = z
     .string()
     .min(1)
     .max(256)
     .regex(/^[A-Za-z0-9_-]+$/);
-const pendingOidcSchema = z.object({
-    nonce: z.string().min(1),
-    codeVerifier: z.string().min(1),
-    returnTo: z.string().refine((value) => normalizeReturnTo(value) === value),
-});
+const pendingOidcSchema = z
+    .object({
+        nonce: z.string().min(1),
+        codeVerifier: z.string().min(1),
+        returnTo: z
+            .string()
+            .refine((value) => normalizeReturnTo(value) === value),
+        mode: z.literal("link").optional(),
+        userId: z.string().min(1).optional(),
+    })
+    .refine(
+        (pending) =>
+            pending.mode === "link"
+                ? pending.userId !== undefined
+                : pending.userId === undefined,
+        { path: ["userId"] },
+    );
 const linkEntrySchema = z.object({
     provider: z.string().min(1),
     providerSubject: z.string().min(1),
@@ -330,6 +354,31 @@ function redirectResponse(res: Response, url: string): Response {
     return res;
 }
 
+interface OidcFlowBinding {
+    returnTo: string;
+    mode?: "link";
+    userId?: string;
+}
+
+async function startOidcFlow(
+    res: Response,
+    binding: OidcFlowBinding,
+): Promise<Response> {
+    const authorization = await buildAuthorizationRequest();
+    const pending = {
+        nonce: authorization.nonce,
+        codeVerifier: authorization.codeVerifier,
+        ...binding,
+    };
+    const stored = await putOnce(
+        `oidc:pending:${authorization.state}`,
+        pending,
+        OIDC_PENDING_TTL_SECONDS,
+    );
+    if (!stored) throw new Error("Failed to store OIDC pending state");
+    return redirectResponse(res, authorization.redirectUrl);
+}
+
 async function redirectForResolution(
     res: Response,
     resolution: OidcAccountResolution,
@@ -364,23 +413,81 @@ async function oidcLoginHandler(
         return sendRouteError(res, 404, "OIDC is not enabled");
     }
     try {
-        const authorization = await buildAuthorizationRequest();
-        const pending = {
-            nonce: authorization.nonce,
-            codeVerifier: authorization.codeVerifier,
+        return startOidcFlow(res, {
             returnTo: normalizeReturnTo(req.query.returnTo),
-        };
-        const stored = await putOnce(
-            `oidc:pending:${authorization.state}`,
-            pending,
-            OIDC_PENDING_TTL_SECONDS,
-        );
-        if (!stored) throw new Error("Failed to store OIDC pending state");
-        return redirectResponse(res, authorization.redirectUrl);
+        });
     } catch (error) {
         oidcLog.error("OIDC login failed", { error });
         return redirectResponse(res, "/login?ssoError=oidc_failed");
     }
+}
+
+async function oidcLinkStartHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    if (!config.oidc.enabled) {
+        return sendRouteError(res, 404, "OIDC is not enabled");
+    }
+    try {
+        return startOidcFlow(res, {
+            returnTo: "/settings",
+            mode: "link",
+            userId: req.user!.id,
+        });
+    } catch (error) {
+        oidcLog.error("OIDC link start failed", { error });
+        return redirectResponse(res, "/settings?ssoError=oidc_failed");
+    }
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    return "code" in error && error.code === code;
+}
+
+async function createManualOidcLink(
+    userId: string,
+    claims: OidcClaims,
+): Promise<boolean> {
+    const provider = getOidcProviderId();
+    const existing = await prisma.externalIdentity.findUnique({
+        where: {
+            provider_providerSubject: {
+                provider,
+                providerSubject: claims.sub,
+            },
+        },
+        select: { id: true },
+    });
+    if (existing) return false;
+    try {
+        await prisma.externalIdentity.create({
+            data: {
+                userId,
+                provider,
+                providerSubject: claims.sub,
+                email: claims.email,
+                displayName: claims.name,
+            },
+        });
+        return true;
+    } catch (error) {
+        if (hasErrorCode(error, "P2002")) return false;
+        throw error;
+    }
+}
+
+async function completeManualOidcLink(
+    res: Response,
+    userId: string,
+    claims: OidcClaims,
+): Promise<Response> {
+    const linked = await createManualOidcLink(userId, claims);
+    const target = linked
+        ? "/settings?ssoLinked=1"
+        : "/settings?ssoError=identity_already_linked";
+    return redirectResponse(res, target);
 }
 
 async function oidcCallbackHandler(
@@ -402,12 +509,176 @@ async function oidcCallbackHandler(
             buildCurrentCallbackUrl(queryResult.data),
             { state: queryResult.data.state, ...pending },
         );
+        if (pending.mode === "link" && pending.userId) {
+            return completeManualOidcLink(res, pending.userId, claims);
+        }
         await regenerateSession(req);
         const resolution = await resolveOidcAccount(claims);
         return redirectForResolution(res, resolution, pending.returnTo);
     } catch (error) {
         oidcLog.error("OIDC callback failed", { error });
-        return redirectResponse(res, "/login?ssoError=oidc_failed");
+        const failureTarget =
+            pending.mode === "link"
+                ? "/settings?ssoError=oidc_failed"
+                : "/login?ssoError=oidc_failed";
+        return redirectResponse(res, failureTarget);
+    }
+}
+
+async function listAppPasswordsHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    try {
+        const appPasswords = await prisma.appPassword.findMany({
+            where: { userId: req.user!.id, revokedAt: null },
+            select: {
+                id: true,
+                displayName: true,
+                createdAt: true,
+                lastUsedAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        return res.json({ appPasswords });
+    } catch (error) {
+        credentialLog.error("List app passwords failed", { error });
+        return sendRouteError(res, 500, "Failed to list app passwords");
+    }
+}
+
+async function createAppPasswordHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    const parsed = appPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return sendRouteError(
+            res,
+            400,
+            "Display name must be between 1 and 64 characters",
+        );
+    }
+    try {
+        const activeCount = await prisma.appPassword.count({
+            where: { userId: req.user!.id, revokedAt: null },
+        });
+        if (activeCount >= MAX_ACTIVE_APP_PASSWORDS) {
+            return sendRouteError(
+                res,
+                400,
+                `A maximum of ${MAX_ACTIVE_APP_PASSWORDS} active app passwords is allowed`,
+            );
+        }
+        const secret = generateAppPasswordSecret();
+        const appPassword = await prisma.appPassword.create({
+            data: {
+                userId: req.user!.id,
+                displayName: parsed.data.displayName,
+                encryptedSecret: encrypt(secret),
+            },
+            select: {
+                id: true,
+                displayName: true,
+                createdAt: true,
+                lastUsedAt: true,
+            },
+        });
+        return res
+            .status(201)
+            .json({ appPassword: { ...appPassword, secret } });
+    } catch (error) {
+        credentialLog.error("Create app password failed", { error });
+        return sendRouteError(res, 500, "Failed to create app password");
+    }
+}
+
+async function revokeAppPasswordHandler(
+    req: Request<{ id: string }>,
+    res: Response,
+): Promise<Response> {
+    try {
+        const revoked = await prisma.appPassword.updateMany({
+            where: {
+                id: req.params.id,
+                userId: req.user!.id,
+                revokedAt: null,
+            },
+            data: { revokedAt: new Date() },
+        });
+        if (revoked.count === 0) {
+            return sendRouteError(res, 404, "App password not found");
+        }
+        return res.json({ message: "App password revoked" });
+    } catch (error) {
+        credentialLog.error("Revoke app password failed", { error });
+        return sendRouteError(res, 500, "Failed to revoke app password");
+    }
+}
+
+async function listIdentitiesHandler(
+    req: Request,
+    res: Response,
+): Promise<Response> {
+    try {
+        const rows = await prisma.externalIdentity.findMany({
+            where: { userId: req.user!.id },
+            select: {
+                id: true,
+                provider: true,
+                providerSubject: true,
+                email: true,
+                displayName: true,
+                createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        const identities = rows.map(({ providerSubject, ...identity }) => ({
+            ...identity,
+            subjectHint: `${providerSubject.slice(0, 8)}…`,
+        }));
+        return res.json({ identities });
+    } catch (error) {
+        credentialLog.error("List external identities failed", { error });
+        return sendRouteError(res, 500, "Failed to list identities");
+    }
+}
+
+async function unlinkIdentityHandler(
+    req: Request<{ id: string }>,
+    res: Response,
+): Promise<Response> {
+    try {
+        const identity = await prisma.externalIdentity.findFirst({
+            where: { id: req.params.id, userId: req.user!.id },
+            select: { id: true },
+        });
+        if (!identity) return sendRouteError(res, 404, "Identity not found");
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { passwordHash: true },
+        });
+        if (!user) return sendRouteError(res, 404, "Identity not found");
+        if (user.passwordHash === null) {
+            const identityCount = await prisma.externalIdentity.count({
+                where: { userId: req.user!.id },
+            });
+            if (identityCount <= 1) {
+                return sendRouteError(
+                    res,
+                    400,
+                    "Cannot unlink the last sign-in method",
+                );
+            }
+        }
+        await prisma.externalIdentity.delete({ where: { id: identity.id } });
+        return res.json({ message: "Identity unlinked" });
+    } catch (error) {
+        if (hasErrorCode(error, "P2025")) {
+            return sendRouteError(res, 404, "Identity not found");
+        }
+        credentialLog.error("Unlink external identity failed", { error });
+        return sendRouteError(res, 500, "Failed to unlink identity");
     }
 }
 
@@ -615,6 +886,26 @@ router.get("/oidc/login", authLimiter, oidcLoginHandler);
 
 /**
  * @openapi
+ * /api/auth/oidc/link/start:
+ *   post:
+ *     summary: Start linking an OIDC identity to the current user
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       302:
+ *         description: Redirect to the OIDC provider
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: OIDC is disabled
+ */
+router.post("/oidc/link/start", authLimiter, requireAuth, oidcLinkStartHandler);
+
+/**
+ * @openapi
  * /api/auth/oidc/callback:
  *   get:
  *     summary: Complete OIDC login
@@ -670,6 +961,143 @@ router.post("/oidc/confirm-link", authLimiter, oidcConfirmLinkHandler);
  *         description: Invalid invite code
  */
 router.post("/oidc/redeem-invite", authLimiter, oidcRedeemInviteHandler);
+
+/**
+ * @openapi
+ * /api/auth/app-passwords:
+ *   get:
+ *     summary: List active app passwords for the current user
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Active app-password metadata without secrets
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/app-passwords", apiLimiter, requireAuth, listAppPasswordsHandler);
+
+/**
+ * @openapi
+ * /api/auth/app-passwords:
+ *   post:
+ *     summary: Create an app password for the current user
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [displayName]
+ *             properties:
+ *               displayName:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 64
+ *     responses:
+ *       201:
+ *         description: App password with its one-time plaintext secret
+ *       400:
+ *         description: Invalid request or active app-password cap reached
+ *       401:
+ *         description: Not authenticated
+ */
+router.post(
+    "/app-passwords",
+    authLimiter,
+    requireAuth,
+    createAppPasswordHandler,
+);
+
+/**
+ * @openapi
+ * /api/auth/app-passwords/{id}:
+ *   delete:
+ *     summary: Revoke an owned app password
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: App password revoked
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: App password not found
+ */
+router.delete(
+    "/app-passwords/:id",
+    authLimiter,
+    requireAuth,
+    revokeAppPasswordHandler,
+);
+
+/**
+ * @openapi
+ * /api/auth/identities:
+ *   get:
+ *     summary: List external identities for the current user
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: External identity metadata with truncated subject hints
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/identities", apiLimiter, requireAuth, listIdentitiesHandler);
+
+/**
+ * @openapi
+ * /api/auth/identities/{id}:
+ *   delete:
+ *     summary: Unlink an owned external identity
+ *     tags: [Authentication]
+ *     security:
+ *       - sessionAuth: []
+ *       - bearerAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Identity unlinked
+ *       400:
+ *         description: Unlink would leave the account without a sign-in method
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Identity not found
+ */
+router.delete(
+    "/identities/:id",
+    authLimiter,
+    requireAuth,
+    unlinkIdentityHandler,
+);
 
 /**
  * @openapi
