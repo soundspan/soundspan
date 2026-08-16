@@ -243,12 +243,17 @@ ENV NEXT_PUBLIC_BUILD_TYPE=$NEXT_PUBLIC_BUILD_TYPE
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build
 
+# Validate the built runtime config (headers, CSP, proxy behavior) while dev
+# dependencies are still present: the smoke imports proxy.ts via the tsx
+# loader, which npm prune removes. Production never needs tsx -- server.js
+# uses the plain-JS server-proxy and Next compiles proxy.ts during build.
+RUN npm run test:config:runtime
+
 # Prune frontend dev dependencies after build (typescript, eslint, playwright, etc.)
 # and remove Next.js build cache (not needed at runtime)
 RUN npm prune --omit=dev && \
     npm cache clean --force && \
-    rm -rf .next/cache && \
-    npm run test:config:runtime
+    rm -rf .next/cache
 
 # ============================================
 # SECURITY HARDENING
