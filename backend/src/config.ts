@@ -420,6 +420,10 @@ export async function initializeMusicConfig() {
 /** Centralized runtime configuration object for backend services and integrations. */
 export const config = {
     port: parseEnvInt(process.env.PORT, 3006),
+    socketKeepAliveDelayMs: positiveIntEnvOr(
+        process.env.SOCKET_KEEPALIVE_DELAY_MS,
+        30_000,
+    ),
     nodeEnv: process.env.NODE_ENV || "development",
     get appVersion(): string {
         return process.env.npm_package_version || "unknown";

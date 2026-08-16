@@ -446,6 +446,23 @@ describe("config module", () => {
         expect(invalid.config.trustProxy).toBe(true);
     });
 
+    it("configures the TCP socket keepalive delay with a safe fallback", async () => {
+        const defaults = await loadConfigModule({
+            SOCKET_KEEPALIVE_DELAY_MS: undefined,
+        });
+        expect(defaults.config.socketKeepAliveDelayMs).toBe(30_000);
+
+        const overridden = await loadConfigModule({
+            SOCKET_KEEPALIVE_DELAY_MS: "45000",
+        });
+        expect(overridden.config.socketKeepAliveDelayMs).toBe(45_000);
+
+        const invalid = await loadConfigModule({
+            SOCKET_KEEPALIVE_DELAY_MS: "invalid",
+        });
+        expect(invalid.config.socketKeepAliveDelayMs).toBe(30_000);
+    });
+
     it("falls back for malformed numeric env values", async () => {
         const { config } = await loadConfigModule({
             PORT: "not-a-number",

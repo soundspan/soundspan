@@ -80,6 +80,7 @@ describe("api entrypoint runtime behavior", () => {
             allowedOrigins?: string[] | boolean;
             sessionSecret?: string;
             port?: number;
+            socketKeepAliveDelayMs?: number;
             databaseUrl?: string;
             redisUrl?: string;
             docsPublic?: boolean;
@@ -178,7 +179,11 @@ describe("api entrypoint runtime behavior", () => {
         }));
 
         const serverEventHandlers = new Map<string, (...args: any[]) => void>();
-        const server: any = {};
+        const server: any = {
+            keepAliveTimeout: 5_000,
+            headersTimeout: 60_000,
+            timeout: 0,
+        };
         server.listen = jest.fn((_port, _host, cb?: () => void) => {
             if (invokeListenCallback) {
                 void Promise.resolve(cb?.());
@@ -211,6 +216,7 @@ describe("api entrypoint runtime behavior", () => {
             allowedOrigins: true,
             sessionSecret: "test-secret",
             port: 3006,
+            socketKeepAliveDelayMs: 30_000,
             databaseUrl: "postgresql://user:secret@db:5432/soundspan",
             redisUrl: "redis://redis:6379/0",
             docsPublic: false,
@@ -445,6 +451,16 @@ describe("api entrypoint runtime behavior", () => {
             "connection",
             expect.any(Function),
         );
+        expect(mocks.server.keepAliveTimeout).toBe(65_000);
+        expect(mocks.server.headersTimeout).toBe(70_000);
+        expect(mocks.server.timeout).toBe(0);
+
+        const socket = {
+            setKeepAlive: jest.fn(),
+            on: jest.fn(),
+        };
+        mocks.serverEventHandlers.get("connection")?.(socket);
+        expect(socket.setKeepAlive).toHaveBeenCalledWith(true, 30_000);
         expect(mocks.startPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.createBullBoard).toHaveBeenCalledTimes(1);
         expect(mocks.app.get).toHaveBeenCalledWith(

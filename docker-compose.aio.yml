@@ -50,6 +50,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - BROWSE_IMAGE_CACHE_MAX_BYTES=${BROWSE_IMAGE_CACHE_MAX_BYTES:-268435456}
       - BROWSE_IMAGE_CACHE_MAX_ENTRIES=${BROWSE_IMAGE_CACHE_MAX_ENTRIES:-2048}
+      - SOCKET_KEEPALIVE_DELAY_MS=${SOCKET_KEEPALIVE_DELAY_MS:-30000}
       # Runtime streaming-engine selector. Accepted: native | howler | videojs.
       # Leave unset to use the server's built-in default engine.
       - STREAMING_ENGINE_MODE=${STREAMING_ENGINE_MODE:-}

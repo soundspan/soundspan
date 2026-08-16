@@ -37,6 +37,7 @@ services:
             # Server config
             PORT: 3006
             NODE_ENV: ${NODE_ENV:-production}
+            SOCKET_KEEPALIVE_DELAY_MS: ${SOCKET_KEEPALIVE_DELAY_MS:-30000}
             # Runtime role: all (combined API + workers), api, or worker
             BACKEND_PROCESS_ROLE: ${BACKEND_PROCESS_ROLE:-all}
             SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET is required - generate one with: openssl rand -base64 32}"

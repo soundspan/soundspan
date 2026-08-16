@@ -533,7 +533,14 @@ async function checkPasswordReset() {
 const httpServer = createServer(app);
 const activeHttpConnections = new Set<Socket>();
 
+// Keep the origin open past common 60s reverse-proxy idle timeouts so the proxy
+// closes first. headersTimeout must exceed keepAliveTimeout. Do not set
+// server.timeout: Node's default 0 preserves backpressured or paused streams.
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 70_000;
+
 httpServer.on("connection", (socket) => {
+    socket.setKeepAlive(true, config.socketKeepAliveDelayMs);
     activeHttpConnections.add(socket);
     socket.on("close", () => {
         activeHttpConnections.delete(socket);

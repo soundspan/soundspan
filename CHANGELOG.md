@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reaped dead-peer HTTP connections with TCP keepalive, made origin keep-alive
+  timeouts reverse-proxy safe, and kept Node's zero idle timeout so paused or
+  backpressured streams remain unaffected. (#487)
+
 ### Removed
 
 - Removed the never-documented `/api/spotify` endpoints, unused Spotify
