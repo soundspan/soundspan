@@ -35,8 +35,8 @@
         "generate:vocabulary": "tsx scripts/generateVibeVocabulary.ts"
     },
     "dependencies": {
-        "@bull-board/api": "^8.6.0",
-        "@bull-board/express": "^8.6.0",
+        "@bull-board/api": "^8.6.1",
+        "@bull-board/express": "^8.6.1",
         "@prisma/adapter-pg": "^7.9.1",
         "@prisma/client": "^7.9.1",
         "@socket.io/redis-adapter": "^8.3.0",

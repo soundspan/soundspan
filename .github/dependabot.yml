@@ -174,6 +174,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # The base interpreter is capped at Python 3.11 by essentia-tensorflow's wheel history
+    # (see the Dockerfile comment and the lock-target guard test). Interpreter
+    # bumps happen deliberately with a lock re-resolution, never via
+    # unaccompanied base-image updates.
+    ignore:
+      - dependency-name: python
     groups:
       minor-and-patch:
         update-types:
@@ -185,6 +191,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # The base interpreter is held on 3.12 until the full transitive set is re-resolved and tested under a newer interpreter
+    # (see the Dockerfile comment and the lock-target guard test). Interpreter
+    # bumps happen deliberately with a lock re-resolution, never via
+    # unaccompanied base-image updates.
+    ignore:
+      - dependency-name: python
     groups:
       minor-and-patch:
         update-types:

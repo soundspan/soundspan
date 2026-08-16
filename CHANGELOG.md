@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Release-note generation now always includes the standing 2.0.0 upgrade path
+  and accepts repeatable per-release `--upgrade-note` bullets.
+
 ### Fixed
 
 ## [2.2.0] - 2026-08-16

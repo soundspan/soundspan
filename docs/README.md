@@ -86,6 +86,7 @@ This index is the central navigation page for all project documentation under `d
 | [`designs/loudness-and-transitions.md`](designs/loudness-and-transitions.md)                                 | Design phase | Loudness normalization (LUFS/ReplayGain) and analysis-driven smart transitions  |
 | [`designs/natural-language-music.md`](designs/natural-language-music.md)                                     | Design phase | Local-LLM natural-language playlists: compile-not-generate trust boundary       |
 | [`designs/blends-and-federated-discovery.md`](designs/blends-and-federated-discovery.md)                     | Design phase | Taste vectors, max-min fairness Blends, peer catalogs as discovery surface      |
+| [`designs/vibe-embedding-provider.md`](designs/vibe-embedding-provider.md)                                   | Design phase | Pluggable vibe embedding provider, versioned embedding spaces, DCLAP default    |
 | [`designs/provider-strategy-track-mapping.md`](designs/provider-strategy-track-mapping.md)                   | Design phase | Provider strategy overhaul, browse redesign, TrackMapping data model            |
 | [`designs/explore-page-consolidation.md`](designs/explore-page-consolidation.md)                             | Design phase | Merge Home/Browse/Radio/Discovery into single Explore page                      |
 | [`designs/durable-track-identity.md`](designs/durable-track-identity.md)                                     | Shipped      | Durable local track identity, soft removal, revival, and retention purge design |
