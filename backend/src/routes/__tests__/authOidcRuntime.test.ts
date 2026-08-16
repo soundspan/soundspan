@@ -249,6 +249,10 @@ function callbackRequest(
 }
 
 describe("OIDC auth routes", () => {
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
         values.clear();
@@ -581,12 +585,37 @@ describe("OIDC auth routes", () => {
         expect(replay.statusCode).toBe(401);
     });
 
+    it("rejects a nonce mismatch without regenerating a session or creating an exchange code", async () => {
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/library",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        handleCallback.mockRejectedValueOnce(
+            new Error("unexpected nonce value in ID token"),
+        );
+        const req = callbackRequest();
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(req, res);
+
+        expect(res.redirectUrl).toBe("/login?ssoError=oidc_failed");
+        expect(req.session.regenerate).not.toHaveBeenCalled();
+        expect(resolveOidcAccount).not.toHaveBeenCalled();
+        expect(
+            [...values.keys()].some((key) => key.startsWith("oidc:exchange:")),
+        ).toBe(false);
+    });
+
     it.each([
         ["link", "ssoLink"],
         ["invite", "ssoInvite"],
     ] as const)(
         "redirects a %s resolution with opaque state",
         async (kind, key) => {
+            const now = 1_800_000_000_000;
+            jest.spyOn(Date, "now").mockReturnValue(now);
             values.set("oidc:pending:state-1", {
                 nonce: "nonce-1",
                 codeVerifier: "verifier-1",
@@ -624,7 +653,10 @@ describe("OIDC auth routes", () => {
                 "https://music.example",
             ).searchParams.get(key);
             expect(values.get(`oidc:${kind}:${token}`)).toEqual(
-                expect.objectContaining({ bindingHash: FLOW_BINDING_HASH }),
+                expect.objectContaining({
+                    bindingHash: FLOW_BINDING_HASH,
+                    expiresAt: now + 600_000,
+                }),
             );
         },
     );
@@ -1110,6 +1142,7 @@ describe("OIDC auth routes", () => {
                               ? { userId: "u1", groups: [] }
                               : {}),
                           bindingHash: FLOW_BINDING_HASH,
+                          expiresAt: Date.now() + 600_000,
                       };
             const body = {
                 [field]: token,
@@ -1139,6 +1172,7 @@ describe("OIDC auth routes", () => {
             userId: "u1",
             groups: [],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: Date.now() + 600_000,
         };
         values.set("oidc:link:wrong-token-value", entry);
         bcryptCompare.mockResolvedValueOnce(false);
@@ -1185,6 +1219,7 @@ describe("OIDC auth routes", () => {
             userId: "u1",
             groups: [],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: Date.now() + 600_000,
         };
 
         values.set("oidc:link:null-password-token", entry);
@@ -1242,6 +1277,7 @@ describe("OIDC auth routes", () => {
             userId: "missing-user",
             groups: [],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: Date.now() + 600_000,
         };
         values.set("oidc:link:vanished-user-token", entry);
         prisma.user.findUnique.mockResolvedValueOnce(null);
@@ -1264,6 +1300,8 @@ describe("OIDC auth routes", () => {
     });
 
     it("restores the same link token for the two-step 2FA challenge", async () => {
+        const now = 1_800_000_000_000;
+        jest.spyOn(Date, "now").mockReturnValue(now);
         const entry = {
             provider: "oidc:https://idp.example",
             providerSubject: "subject-1",
@@ -1272,6 +1310,7 @@ describe("OIDC auth routes", () => {
             userId: "u1",
             groups: [],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: now + 450_000,
         };
         values.set("oidc:link:two-factor-token", entry);
         prisma.user.findUnique.mockResolvedValueOnce({
@@ -1301,8 +1340,72 @@ describe("OIDC auth routes", () => {
         expect(putOnce).toHaveBeenCalledWith(
             "oidc:link:two-factor-token",
             entry,
-            600,
+            450,
         );
+    });
+
+    it("shrinks the restored link TTL as the absolute deadline approaches", async () => {
+        const createdAt = 1_800_000_000_000;
+        const now = createdAt + 125_000;
+        jest.spyOn(Date, "now").mockReturnValue(now);
+        const entry = {
+            provider: "oidc:https://idp.example",
+            providerSubject: "subject-1",
+            email: "alice@example.com",
+            displayName: "Alice",
+            userId: "u1",
+            groups: [],
+            bindingHash: FLOW_BINDING_HASH,
+            expiresAt: createdAt + 600_000,
+        };
+        values.set("oidc:link:shrinking-token", entry);
+        bcryptCompare.mockResolvedValueOnce(false);
+        const res = createRes();
+
+        await getHandler("/oidc/confirm-link", "post")(
+            {
+                body: { linkToken: "shrinking-token", password: "bad" },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(401);
+        expect(putOnce).toHaveBeenCalledWith(
+            "oidc:link:shrinking-token",
+            entry,
+            475,
+        );
+    });
+
+    it("consumes a link entry that expires before it can be restored", async () => {
+        const now = 1_800_000_000_000;
+        jest.spyOn(Date, "now").mockReturnValue(now);
+        const entry = {
+            provider: "oidc:https://idp.example",
+            providerSubject: "subject-1",
+            email: "alice@example.com",
+            displayName: "Alice",
+            userId: "u1",
+            groups: [],
+            bindingHash: FLOW_BINDING_HASH,
+            expiresAt: now,
+        };
+        values.set("oidc:link:expired-token", entry);
+        bcryptCompare.mockResolvedValueOnce(false);
+        const res = createRes();
+
+        await getHandler("/oidc/confirm-link", "post")(
+            {
+                body: { linkToken: "expired-token", password: "bad" },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(401);
+        expect(values.has("oidc:link:expired-token")).toBe(false);
+        expect(putOnce).not.toHaveBeenCalled();
     });
 
     it("restores the same link token after invalid TOTP so confirmation can be retried", async () => {
@@ -1315,6 +1418,7 @@ describe("OIDC auth routes", () => {
             userId: "u1",
             groups: [],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: Date.now() + 600_000,
         };
         values.set("oidc:link:invalid-totp-token", entry);
         prisma.user.findUnique.mockResolvedValue({
@@ -1375,6 +1479,7 @@ describe("OIDC auth routes", () => {
             userId: "u1",
             groups: ["admins"],
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: Date.now() + 600_000,
         };
         values.set("oidc:link:successful-link-token", entry);
         const res = createRes();
@@ -1416,6 +1521,8 @@ describe("OIDC auth routes", () => {
     });
 
     it("keeps an invalid invite token retryable and provisions a valid one", async () => {
+        const now = 1_800_000_000_000;
+        jest.spyOn(Date, "now").mockReturnValue(now);
         const redeem = getHandler("/oidc/redeem-invite", "post");
         const entry = {
             provider: "oidc:https://idp.example",
@@ -1423,6 +1530,7 @@ describe("OIDC auth routes", () => {
             email: "alice@example.com",
             displayName: "Alice",
             bindingHash: FLOW_BINDING_HASH,
+            expiresAt: now + 320_000,
         };
         values.set("oidc:invite:invite-token-value", entry);
         loadUsableInviteCode.mockRejectedValueOnce(
@@ -1441,6 +1549,11 @@ describe("OIDC auth routes", () => {
         );
         expect(invalid.statusCode).toBe(400);
         expect(values.get("oidc:invite:invite-token-value")).toEqual(entry);
+        expect(putOnce).toHaveBeenCalledWith(
+            "oidc:invite:invite-token-value",
+            entry,
+            320,
+        );
 
         const valid = createRes();
         await redeem(
@@ -1470,6 +1583,7 @@ describe("OIDC auth routes", () => {
         );
     });
 
+    // The spec's disabled-user criterion maps to LOCAL_LOGIN_ENABLED here; User has no disabled flag.
     it("returns generic local-login failures for null hashes and blocks disabled web login", async () => {
         const login = getHandler("/login", "post");
         prisma.user.findUnique.mockResolvedValueOnce({

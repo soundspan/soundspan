@@ -84,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened OIDC and app-password credential mutations with interactive-auth
   checks, race-safe PostgreSQL advisory locks, secure `__Host-` flow cookies,
   and complete bounded app-password authentication scans.
+- Administrator role editing now warns when OIDC role management can overwrite
+  a linked user's manual role change at their next SSO login.
 - Discover Weekly now rotates play-weighted seed artists deterministically each
   user-week and decays scores for artists featured in up to three of the prior
   six weeks.
@@ -120,8 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OIDC browser flows now bind callback and one-time hand-off tokens to the
   initiating browser, count redirect responses against rate limits, serialize
-  role demotion and identity unlink guards, and enforce one identity per
-  provider for each user.
+  role demotion and identity unlink guards, enforce one identity per provider
+  for each user, and preserve the original ten-minute expiry across link and
+  invite retries.
 - Federation pairing now denies reciprocal library sharing by default. The
   consumer sends callback credentials and upgrades to `BOTH` only when an
   administrator explicitly selects bidirectional sharing.

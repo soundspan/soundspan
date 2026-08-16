@@ -142,53 +142,146 @@ describe("OpenAPI authentication contract", () => {
         );
     });
 
-    test("documents OIDC hand-off request bodies and failure responses", () => {
+    test("exactly documents the three OIDC POST operation contracts", () => {
         const { swaggerSpec } = require("../swagger");
         const operations = swaggerSpec.paths;
 
-        expect(
-            operations["/api/auth/oidc/exchange"].post.requestBody.content[
-                "application/json"
-            ].schema,
-        ).toEqual({
-            type: "object",
-            required: ["code"],
-            properties: { code: { type: "string" } },
-        });
-        expect(
-            operations["/api/auth/oidc/confirm-link"].post.requestBody.content[
-                "application/json"
-            ].schema,
-        ).toEqual({
-            type: "object",
-            required: ["linkToken", "password"],
-            properties: {
-                linkToken: { type: "string" },
-                password: { type: "string", format: "password" },
-                twoFactorToken: { type: "string" },
+        expect(operations["/api/auth/oidc/exchange"].post).toEqual({
+            summary: "Exchange a one-time OIDC code for login tokens",
+            tags: ["Authentication"],
+            security: [],
+            requestBody: {
+                required: true,
+                content: {
+                    "application/json": {
+                        schema: {
+                            type: "object",
+                            required: ["code"],
+                            properties: {
+                                code: {
+                                    type: "string",
+                                    minLength: 1,
+                                    maxLength: 256,
+                                    pattern: "^[A-Za-z0-9_-]+$",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: "Login tokens and user",
+                    content: {
+                        "application/json": {
+                            schema: {
+                                $ref: "#/components/schemas/LoginTokenResponse",
+                            },
+                        },
+                    },
+                },
+                400: { description: "Invalid request" },
+                401: { description: "Invalid or expired code" },
             },
         });
-        expect(
-            operations["/api/auth/oidc/redeem-invite"].post.requestBody.content[
-                "application/json"
-            ].schema,
-        ).toEqual({
-            type: "object",
-            required: ["inviteToken", "inviteCode"],
-            properties: {
-                inviteToken: { type: "string" },
-                inviteCode: { type: "string" },
+        expect(operations["/api/auth/oidc/confirm-link"].post).toEqual({
+            summary: "Confirm an OIDC account link with local credentials",
+            tags: ["Authentication"],
+            security: [],
+            requestBody: {
+                required: true,
+                content: {
+                    "application/json": {
+                        schema: {
+                            type: "object",
+                            required: ["linkToken", "password"],
+                            properties: {
+                                linkToken: {
+                                    type: "string",
+                                    minLength: 1,
+                                    maxLength: 256,
+                                    pattern: "^[A-Za-z0-9_-]+$",
+                                },
+                                password: {
+                                    type: "string",
+                                    format: "password",
+                                    minLength: 1,
+                                },
+                                twoFactorToken: {
+                                    type: "string",
+                                    minLength: 1,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: "Login response or 2FA challenge",
+                    content: {
+                        "application/json": {
+                            schema: {
+                                oneOf: [
+                                    {
+                                        $ref: "#/components/schemas/LoginTokenResponse",
+                                    },
+                                    {
+                                        $ref: "#/components/schemas/LoginTwoFactorChallenge",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+                400: { description: "Invalid request" },
+                401: { description: "Invalid credentials or link" },
+                500: { description: "Failed to link OIDC account" },
             },
         });
-        expect(
-            operations["/api/auth/oidc/exchange"].post.responses,
-        ).toHaveProperty("400");
-        expect(
-            operations["/api/auth/oidc/confirm-link"].post.responses,
-        ).toHaveProperty("400");
-        expect(
-            operations["/api/auth/oidc/redeem-invite"].post.responses,
-        ).toHaveProperty("401");
+        expect(operations["/api/auth/oidc/redeem-invite"].post).toEqual({
+            summary: "Redeem an invite for OIDC account provisioning",
+            tags: ["Authentication"],
+            security: [],
+            requestBody: {
+                required: true,
+                content: {
+                    "application/json": {
+                        schema: {
+                            type: "object",
+                            required: ["inviteToken", "inviteCode"],
+                            properties: {
+                                inviteToken: {
+                                    type: "string",
+                                    minLength: 1,
+                                    maxLength: 256,
+                                    pattern: "^[A-Za-z0-9_-]+$",
+                                },
+                                inviteCode: {
+                                    type: "string",
+                                    minLength: 1,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: "Login tokens and provisioned user",
+                    content: {
+                        "application/json": {
+                            schema: {
+                                $ref: "#/components/schemas/LoginTokenResponse",
+                            },
+                        },
+                    },
+                },
+                400: { description: "Invalid invite code" },
+                401: { description: "Invalid or expired invite" },
+                500: { description: "Failed to redeem OIDC invite" },
+            },
+        });
     });
 
     test("excludes API keys from interactive credential-management operations", () => {

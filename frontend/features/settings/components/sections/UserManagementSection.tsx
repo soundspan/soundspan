@@ -581,6 +581,13 @@ export function UserManagementSection() {
                                 { value: "admin", label: "Admin" },
                             ]}
                         />
+                        {editingUser?.linkedProviders.length ? (
+                            <p className="mt-1.5 text-xs text-gray-400">
+                                OIDC role management (if enabled) will overwrite
+                                manual role changes at this user&apos;s next SSO
+                                login.
+                            </p>
+                        ) : null}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-white/90 mb-1.5">

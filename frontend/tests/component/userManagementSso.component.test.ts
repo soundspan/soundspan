@@ -236,6 +236,43 @@ test("sends an edited role for any user", async (t) => {
     ]);
 });
 
+test("shows the OIDC role overwrite warning only for linked users", async (t) => {
+    const harness = await mountUserManagementSection();
+    t.after(harness.unmount);
+    const linkedUserRow = Array.from(
+        harness.container.querySelectorAll("div"),
+    ).find(
+        (element) =>
+            element.textContent?.includes("local-linked-user") &&
+            element.querySelector("div") === null,
+    );
+    assert.ok(linkedUserRow, "Missing linked user row");
+    await click(linkedUserRow);
+
+    const warning =
+        "OIDC role management (if enabled) will overwrite manual role changes at this user's next SSO login.";
+    assert.match(
+        document.querySelector('[role="dialog"]')?.textContent ?? "",
+        new RegExp(warning.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+
+    await click(findButton("Cancel"));
+    const localUserRow = Array.from(
+        harness.container.querySelectorAll("div"),
+    ).find(
+        (element) =>
+            element.textContent?.includes("admin-target-user") &&
+            element.querySelector("div") === null,
+    );
+    assert.ok(localUserRow, "Missing unlinked user row");
+    await click(localUserRow);
+
+    assert.doesNotMatch(
+        document.querySelector('[role="dialog"]')?.textContent ?? "",
+        /OIDC role management/,
+    );
+});
+
 test("renders the backend last-admin rejection", async (t) => {
     patch.mock.mockImplementationOnce(async () => {
         throw new Error("Cannot demote the last admin");

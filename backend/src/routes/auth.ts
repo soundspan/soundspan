@@ -273,6 +273,7 @@ const linkEntrySchema = z.object({
     userId: z.string().min(1),
     groups: z.array(z.string()).default([]),
     bindingHash: bindingHashSchema,
+    expiresAt: z.number().int().positive(),
 });
 const inviteEntrySchema = z.object({
     provider: z.string().min(1),
@@ -281,6 +282,7 @@ const inviteEntrySchema = z.object({
     displayName: z.string().nullable(),
     preferredUsername: z.string().nullable().optional(),
     bindingHash: bindingHashSchema,
+    expiresAt: z.number().int().positive(),
 });
 const exchangeEntrySchema = z.object({
     userId: z.string().min(1),
@@ -488,9 +490,10 @@ async function redirectForResolution(
         return redirectResponse(res, loginRedirect("ssoCode", code, returnTo));
     }
     const prefix = resolution.kind;
+    const expiresAt = Date.now() + OIDC_PENDING_TTL_SECONDS * 1000;
     const token = await storeOpaqueEntry(
         prefix,
-        { ...resolution.entry, bindingHash },
+        { ...resolution.entry, bindingHash, expiresAt },
         OIDC_PENDING_TTL_SECONDS,
     );
     const parameter = resolution.kind === "link" ? "ssoLink" : "ssoInvite";
@@ -917,12 +920,16 @@ async function restoreLinkForRetry(
     token: string,
     entry: z.infer<typeof linkEntrySchema>,
 ): Promise<void> {
-    const restored = await putOnce(
-        `oidc:link:${token}`,
-        entry,
-        OIDC_PENDING_TTL_SECONDS,
-    );
+    const ttlSeconds = remainingEntryTtlSeconds(entry.expiresAt);
+    if (ttlSeconds === null) return;
+    const restored = await putOnce(`oidc:link:${token}`, entry, ttlSeconds);
     if (!restored) throw new Error("Failed to restore OIDC link state");
+}
+
+function remainingEntryTtlSeconds(expiresAt: number): number | null {
+    const remainingMilliseconds = expiresAt - Date.now();
+    if (remainingMilliseconds <= 0) return null;
+    return Math.max(1, Math.floor(remainingMilliseconds / 1000));
 }
 
 async function oidcConfirmLinkHandler(
@@ -1004,11 +1011,9 @@ async function restoreInviteForRetry(
     token: string,
     entry: z.infer<typeof inviteEntrySchema>,
 ): Promise<void> {
-    const restored = await putOnce(
-        `oidc:invite:${token}`,
-        entry,
-        OIDC_PENDING_TTL_SECONDS,
-    );
+    const ttlSeconds = remainingEntryTtlSeconds(entry.expiresAt);
+    if (ttlSeconds === null) return;
+    const restored = await putOnce(`oidc:invite:${token}`, entry, ttlSeconds);
     if (!restored) throw new Error("Failed to restore OIDC invite state");
 }
 
@@ -1169,9 +1174,16 @@ router.get(
  *             properties:
  *               code:
  *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 256
+ *                 pattern: '^[A-Za-z0-9_-]+$'
  *     responses:
  *       200:
  *         description: Login tokens and user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoginTokenResponse'
  *       400:
  *         description: Invalid request
  *       401:
@@ -1196,18 +1208,31 @@ router.post("/oidc/exchange", authLimiter, oidcExchangeHandler);
  *             properties:
  *               linkToken:
  *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 256
+ *                 pattern: '^[A-Za-z0-9_-]+$'
  *               password:
  *                 type: string
  *                 format: password
+ *                 minLength: 1
  *               twoFactorToken:
  *                 type: string
+ *                 minLength: 1
  *     responses:
  *       200:
  *         description: Login response or 2FA challenge
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - $ref: '#/components/schemas/LoginTokenResponse'
+ *                 - $ref: '#/components/schemas/LoginTwoFactorChallenge'
  *       400:
  *         description: Invalid request
  *       401:
  *         description: Invalid credentials or link
+ *       500:
+ *         description: Failed to link OIDC account
  */
 router.post("/oidc/confirm-link", authLimiter, oidcConfirmLinkHandler);
 
@@ -1228,15 +1253,25 @@ router.post("/oidc/confirm-link", authLimiter, oidcConfirmLinkHandler);
  *             properties:
  *               inviteToken:
  *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 256
+ *                 pattern: '^[A-Za-z0-9_-]+$'
  *               inviteCode:
  *                 type: string
+ *                 minLength: 1
  *     responses:
  *       200:
  *         description: Login tokens and provisioned user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoginTokenResponse'
  *       400:
  *         description: Invalid invite code
  *       401:
  *         description: Invalid or expired invite
+ *       500:
+ *         description: Failed to redeem OIDC invite
  */
 router.post("/oidc/redeem-invite", authLimiter, oidcRedeemInviteHandler);
 
