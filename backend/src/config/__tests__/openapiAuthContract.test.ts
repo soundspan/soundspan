@@ -142,6 +142,55 @@ describe("OpenAPI authentication contract", () => {
         );
     });
 
+    test("documents OIDC hand-off request bodies and failure responses", () => {
+        const { swaggerSpec } = require("../swagger");
+        const operations = swaggerSpec.paths;
+
+        expect(
+            operations["/api/auth/oidc/exchange"].post.requestBody.content[
+                "application/json"
+            ].schema,
+        ).toEqual({
+            type: "object",
+            required: ["code"],
+            properties: { code: { type: "string" } },
+        });
+        expect(
+            operations["/api/auth/oidc/confirm-link"].post.requestBody.content[
+                "application/json"
+            ].schema,
+        ).toEqual({
+            type: "object",
+            required: ["linkToken", "password"],
+            properties: {
+                linkToken: { type: "string" },
+                password: { type: "string", format: "password" },
+                twoFactorToken: { type: "string" },
+            },
+        });
+        expect(
+            operations["/api/auth/oidc/redeem-invite"].post.requestBody.content[
+                "application/json"
+            ].schema,
+        ).toEqual({
+            type: "object",
+            required: ["inviteToken", "inviteCode"],
+            properties: {
+                inviteToken: { type: "string" },
+                inviteCode: { type: "string" },
+            },
+        });
+        expect(
+            operations["/api/auth/oidc/exchange"].post.responses,
+        ).toHaveProperty("400");
+        expect(
+            operations["/api/auth/oidc/confirm-link"].post.responses,
+        ).toHaveProperty("400");
+        expect(
+            operations["/api/auth/oidc/redeem-invite"].post.responses,
+        ).toHaveProperty("401");
+    });
+
     test("excludes API keys from interactive credential-management operations", () => {
         const { swaggerSpec } = require("../swagger");
 

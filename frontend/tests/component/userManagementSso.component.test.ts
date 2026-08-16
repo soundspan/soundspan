@@ -27,6 +27,15 @@ const users = [
         hasPassword: false,
         linkedProviders: ["oidc:https://idp.example"],
     },
+    {
+        id: "admin-target",
+        username: "admin-target-user",
+        email: "admin@example.com",
+        role: "admin" as const,
+        createdAt: "2026-08-15T13:00:00.000Z",
+        hasPassword: true,
+        linkedProviders: [],
+    },
 ];
 
 const get = mock.fn(async (path: string) => {
@@ -141,6 +150,22 @@ async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
     });
 }
 
+async function selectValue(
+    select: HTMLSelectElement,
+    value: string,
+): Promise<void> {
+    const setter = Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value",
+    )?.set;
+    assert.ok(setter, "expected the select value setter");
+    await React.act(async () => {
+        setter.call(select, value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        await flushAsyncWork();
+    });
+}
+
 function findButton(text: string): HTMLButtonElement {
     const button = Array.from(document.querySelectorAll("button")).find(
         (candidate) => candidate.textContent?.trim() === text,
@@ -185,4 +210,55 @@ test("shows SSO badges and labels password setup for SSO-only users", async (t) 
         "/auth/users/sso-only",
         { password: "new-local-password" },
     ]);
+});
+
+test("sends an edited role for any user", async (t) => {
+    const harness = await mountUserManagementSection();
+    t.after(harness.unmount);
+    const userRow = Array.from(harness.container.querySelectorAll("div")).find(
+        (element) =>
+            element.textContent?.includes("local-linked-user") &&
+            element.querySelector("div") === null,
+    );
+    assert.ok(userRow, "Missing local user row");
+    await click(userRow);
+
+    const roleSelect = document.querySelector(
+        '[role="dialog"] select#edit-user-role',
+    );
+    assert.ok(roleSelect instanceof HTMLSelectElement);
+    await selectValue(roleSelect, "admin");
+    await click(findButton("Save Changes"));
+
+    assert.deepEqual(patch.mock.calls[0]?.arguments, [
+        "/auth/users/local-linked",
+        { role: "admin" },
+    ]);
+});
+
+test("renders the backend last-admin rejection", async (t) => {
+    patch.mock.mockImplementationOnce(async () => {
+        throw new Error("Cannot demote the last admin");
+    });
+    const harness = await mountUserManagementSection();
+    t.after(harness.unmount);
+    const userRow = Array.from(harness.container.querySelectorAll("div")).find(
+        (element) =>
+            element.textContent?.includes("admin-target-user") &&
+            element.querySelector("div") === null,
+    );
+    assert.ok(userRow, "Missing admin user row");
+    await click(userRow);
+
+    const roleSelect = document.querySelector(
+        '[role="dialog"] select#edit-user-role',
+    );
+    assert.ok(roleSelect instanceof HTMLSelectElement);
+    await selectValue(roleSelect, "user");
+    await click(findButton("Save Changes"));
+
+    assert.match(
+        document.querySelector('[role="dialog"]')?.textContent ?? "",
+        /Cannot demote the last admin/,
+    );
 });

@@ -913,7 +913,7 @@ async function oidcExchangeHandler(
     return sendLoginSuccess(res, user);
 }
 
-async function restoreLinkForChallenge(
+async function restoreLinkForRetry(
     token: string,
     entry: z.infer<typeof linkEntrySchema>,
 ): Promise<void> {
@@ -955,19 +955,23 @@ async function oidcConfirmLinkHandler(
             parsed.data.password,
             user.passwordHash,
         );
-        if (!valid) return sendRouteError(res, 401, "Invalid credentials");
+        if (!valid) {
+            await restoreLinkForRetry(parsed.data.linkToken, entry);
+            return sendRouteError(res, 401, "Invalid credentials");
+        }
         const secondFactor = await verifyLoginSecondFactor(
             user,
             parsed.data.twoFactorToken,
         );
         if (secondFactor.kind === "required") {
-            await restoreLinkForChallenge(parsed.data.linkToken, entry);
+            await restoreLinkForRetry(parsed.data.linkToken, entry);
             return res.json({
                 requires2FA: true,
                 message: "2FA token required",
             });
         }
         if (secondFactor.kind === "invalid") {
+            await restoreLinkForRetry(parsed.data.linkToken, entry);
             return sendRouteError(res, 401, secondFactor.message);
         }
         return completeOidcLink(res, user, entry);
@@ -1155,9 +1159,21 @@ router.get(
  *     summary: Exchange a one-time OIDC code for login tokens
  *     tags: [Authentication]
  *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code]
+ *             properties:
+ *               code:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Login tokens and user
+ *       400:
+ *         description: Invalid request
  *       401:
  *         description: Invalid or expired code
  */
@@ -1170,9 +1186,26 @@ router.post("/oidc/exchange", authLimiter, oidcExchangeHandler);
  *     summary: Confirm an OIDC account link with local credentials
  *     tags: [Authentication]
  *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [linkToken, password]
+ *             properties:
+ *               linkToken:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *                 format: password
+ *               twoFactorToken:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Login response or 2FA challenge
+ *       400:
+ *         description: Invalid request
  *       401:
  *         description: Invalid credentials or link
  */
@@ -1185,11 +1218,25 @@ router.post("/oidc/confirm-link", authLimiter, oidcConfirmLinkHandler);
  *     summary: Redeem an invite for OIDC account provisioning
  *     tags: [Authentication]
  *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [inviteToken, inviteCode]
+ *             properties:
+ *               inviteToken:
+ *                 type: string
+ *               inviteCode:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Login tokens and provisioned user
  *       400:
  *         description: Invalid invite code
+ *       401:
+ *         description: Invalid or expired invite
  */
 router.post("/oidc/redeem-invite", authLimiter, oidcRedeemInviteHandler);
 

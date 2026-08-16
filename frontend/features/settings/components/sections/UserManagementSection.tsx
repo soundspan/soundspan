@@ -75,6 +75,7 @@ export function UserManagementSection() {
     const [editUsername, setEditUsername] = useState("");
     const [editEmail, setEditEmail] = useState("");
     const [editPassword, setEditPassword] = useState("");
+    const [editRole, setEditRole] = useState<"user" | "admin">("user");
     const [editStatus, setEditStatus] = useState<StatusType>("idle");
     const [editMessage, setEditMessage] = useState("");
     const [savingEdit, setSavingEdit] = useState(false);
@@ -216,6 +217,7 @@ export function UserManagementSection() {
         setEditUsername(user.username);
         setEditEmail(user.email || "");
         setEditPassword("");
+        setEditRole(user.role);
         setEditStatus("idle");
         setEditMessage("");
     };
@@ -243,6 +245,9 @@ export function UserManagementSection() {
                 return;
             }
             payload.password = editPassword;
+        }
+        if (editRole !== editingUser.role) {
+            payload.role = editRole;
         }
 
         if (Object.keys(payload).length === 0) {
@@ -558,6 +563,25 @@ export function UserManagementSection() {
                 title={`Edit User — ${editingUser?.username}`}
             >
                 <div className="space-y-4">
+                    <div>
+                        <label
+                            htmlFor="edit-user-role"
+                            className="block text-sm font-medium text-white/90 mb-1.5"
+                        >
+                            Role
+                        </label>
+                        <SettingsSelect
+                            id="edit-user-role"
+                            value={editRole}
+                            onChange={(value) =>
+                                setEditRole(value as "user" | "admin")
+                            }
+                            options={[
+                                { value: "user", label: "User" },
+                                { value: "admin", label: "Admin" },
+                            ]}
+                        />
+                    </div>
                     <div>
                         <label className="block text-sm font-medium text-white/90 mb-1.5">
                             Username

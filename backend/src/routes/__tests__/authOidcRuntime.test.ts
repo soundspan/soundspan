@@ -1129,7 +1129,7 @@ describe("OIDC auth routes", () => {
         },
     );
 
-    it("rejects wrong and null local passwords during link confirmation", async () => {
+    it("restores the same link token after a wrong password so confirmation can be retried", async () => {
         const confirm = getHandler("/oidc/confirm-link", "post");
         const entry = {
             provider: "oidc:https://idp.example",
@@ -1151,6 +1151,41 @@ describe("OIDC auth routes", () => {
             wrong,
         );
         expect(wrong.statusCode).toBe(401);
+        expect(values.get("oidc:link:wrong-token-value")).toEqual(entry);
+
+        const retry = createRes();
+        await confirm(
+            {
+                body: {
+                    linkToken: "wrong-token-value",
+                    password: "correct",
+                },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            retry,
+        );
+
+        expect(retry.statusCode).toBe(200);
+        expect(retry.body).toEqual(
+            expect.objectContaining({
+                token: "jwt-access",
+                refreshToken: "jwt-refresh",
+            }),
+        );
+        expect(prisma.externalIdentity.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a null local password without restoring the link", async () => {
+        const confirm = getHandler("/oidc/confirm-link", "post");
+        const entry = {
+            provider: "oidc:https://idp.example",
+            providerSubject: "subject-1",
+            email: "alice@example.com",
+            displayName: "Alice",
+            userId: "u1",
+            groups: [],
+            bindingHash: FLOW_BINDING_HASH,
+        };
 
         values.set("oidc:link:null-password-token", entry);
         prisma.user.findUnique.mockResolvedValueOnce({
@@ -1172,8 +1207,9 @@ describe("OIDC auth routes", () => {
             nullPassword,
         );
         expect(nullPassword.statusCode).toBe(401);
-        expect(bcryptCompare).toHaveBeenCalledTimes(1);
+        expect(bcryptCompare).not.toHaveBeenCalled();
         expect(runDummyBcrypt).toHaveBeenCalledTimes(1);
+        expect(values.has("oidc:link:null-password-token")).toBe(false);
     });
 
     it("runs dummy bcrypt work for a missing link token", async () => {
@@ -1193,6 +1229,38 @@ describe("OIDC auth routes", () => {
         expect(res.statusCode).toBe(401);
         expect(res.body).toEqual({ error: "Invalid or expired link" });
         expect(runDummyBcrypt).toHaveBeenCalledTimes(1);
+        expect(putOnce).not.toHaveBeenCalled();
+        expect(values.has("oidc:link:missing-link-token")).toBe(false);
+    });
+
+    it("does not restore a link token when the linked user vanished", async () => {
+        const entry = {
+            provider: "oidc:https://idp.example",
+            providerSubject: "subject-1",
+            email: "alice@example.com",
+            displayName: "Alice",
+            userId: "missing-user",
+            groups: [],
+            bindingHash: FLOW_BINDING_HASH,
+        };
+        values.set("oidc:link:vanished-user-token", entry);
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        const res = createRes();
+
+        await getHandler("/oidc/confirm-link", "post")(
+            {
+                body: {
+                    linkToken: "vanished-user-token",
+                    password: "password",
+                },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            res,
+        );
+
+        expect(res.statusCode).toBe(401);
+        expect(values.has("oidc:link:vanished-user-token")).toBe(false);
+        expect(putOnce).not.toHaveBeenCalled();
     });
 
     it("restores the same link token for the two-step 2FA challenge", async () => {
@@ -1235,6 +1303,67 @@ describe("OIDC auth routes", () => {
             entry,
             600,
         );
+    });
+
+    it("restores the same link token after invalid TOTP so confirmation can be retried", async () => {
+        const confirm = getHandler("/oidc/confirm-link", "post");
+        const entry = {
+            provider: "oidc:https://idp.example",
+            providerSubject: "subject-1",
+            email: "alice@example.com",
+            displayName: "Alice",
+            userId: "u1",
+            groups: [],
+            bindingHash: FLOW_BINDING_HASH,
+        };
+        values.set("oidc:link:invalid-totp-token", entry);
+        prisma.user.findUnique.mockResolvedValue({
+            ...loginUser,
+            passwordHash: "hash",
+            twoFactorEnabled: true,
+            twoFactorSecret: "enc(SECRET)",
+            twoFactorRecoveryCodes: null,
+        });
+        verifyTotp.mockResolvedValueOnce({ valid: false });
+        const invalid = createRes();
+
+        await confirm(
+            {
+                body: {
+                    linkToken: "invalid-totp-token",
+                    password: "correct",
+                    twoFactorToken: "000000",
+                },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            invalid,
+        );
+
+        expect(invalid.statusCode).toBe(401);
+        expect(invalid.body).toEqual({ error: "Invalid 2FA token" });
+        expect(values.get("oidc:link:invalid-totp-token")).toEqual(entry);
+
+        const retry = createRes();
+        await confirm(
+            {
+                body: {
+                    linkToken: "invalid-totp-token",
+                    password: "correct",
+                    twoFactorToken: "123456",
+                },
+                headers: { cookie: `soundspan_oidc_flow=${FLOW_BINDING}` },
+            },
+            retry,
+        );
+
+        expect(retry.statusCode).toBe(200);
+        expect(retry.body).toEqual(
+            expect.objectContaining({
+                token: "jwt-access",
+                refreshToken: "jwt-refresh",
+            }),
+        );
+        expect(prisma.externalIdentity.create).toHaveBeenCalledTimes(1);
     });
 
     it("creates the external identity, syncs role, and returns login data after confirmation", async () => {
