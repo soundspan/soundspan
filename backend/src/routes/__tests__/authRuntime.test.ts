@@ -2,6 +2,16 @@ import crypto from "crypto";
 import express from "express";
 import request, { type Response } from "supertest";
 
+jest.mock("../../middleware/rateLimitStore", () => {
+    const { MemoryStore } = jest.requireActual("express-rate-limit");
+    return {
+        createRedisRateLimitOptions: () => ({
+            store: new MemoryStore(),
+            passOnStoreError: true,
+        }),
+    };
+});
+
 jest.mock("../../config", () => ({
     config: {
         port: 3006,
@@ -132,7 +142,11 @@ jest.mock("../../utils/encryption", () => ({
 }));
 
 import { swaggerSpec } from "../../config/swagger";
-import { apiLimiter, authLimiter } from "../../middleware/rateLimiter";
+import {
+    adminSurfaceLimiter,
+    apiLimiter,
+    authLimiter,
+} from "../../middleware/rateLimiter";
 import router from "../auth";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
@@ -304,13 +318,13 @@ describe("auth routes runtime", () => {
         ["get", "/me", apiLimiter],
         ["post", "/change-password", authLimiter],
         ["post", "/change-email", apiLimiter],
-        ["get", "/users", apiLimiter],
+        ["get", "/users", adminSurfaceLimiter],
         ["post", "/create-user", authLimiter],
         ["patch", "/users/:id", authLimiter],
-        ["delete", "/users/:id", apiLimiter],
-        ["post", "/invite-codes", apiLimiter],
-        ["get", "/invite-codes", apiLimiter],
-        ["delete", "/invite-codes/:id", apiLimiter],
+        ["delete", "/users/:id", adminSurfaceLimiter],
+        ["post", "/invite-codes", adminSurfaceLimiter],
+        ["get", "/invite-codes", adminSurfaceLimiter],
+        ["delete", "/invite-codes/:id", adminSurfaceLimiter],
         ["post", "/2fa/setup", authLimiter],
         ["post", "/2fa/enable", authLimiter],
         ["post", "/2fa/disable", authLimiter],

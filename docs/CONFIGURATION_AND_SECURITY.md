@@ -107,6 +107,33 @@ Cookie-session authentication has been removed. Each authenticated request now u
 - Encryption key validity is checked at startup.
 - Secure OIDC flow cookies default on when `NODE_ENV=production` and can be overridden with `SECURE_COOKIES`. The OIDC flow cookie drops its `__Host-` prefix when secure cookies are off.
 
+## Reverse Proxy Trust and Rate Limits
+
+soundspan is designed to run behind a reverse proxy. The backend uses its
+configured Express `trust proxy` policy, so the trusted `X-Forwarded-For` chain
+determines the client IP used by per-IP rate limits. Some authentication,
+registration, OIDC, OpenSubsonic, share-link, webhook, and federation endpoints
+can be unauthenticated and exposed to the internet. Set `TRUST_PROXY_HOPS` to
+the actual number of trusted proxy hops. Do not leave a permissive proxy chain
+in a deployment where clients can connect to the backend directly and supply
+their own forwarding headers.
+
+Security-relevant counters use the existing `REDIS_URL` connection. This makes
+authentication and account-management, admin and invite-management, OIDC,
+OpenSubsonic authentication, share-link, webhook, and federation limits common
+to every backend replica and preserves them across backend restarts. Redis keys
+are separated by limiter name. A Redis command has a 250 ms deadline. If Redis
+is disconnected or a command fails or times out, the affected request is
+allowed and the backend emits a rate-limited warning. This fail-open behavior
+keeps an infrastructure outage from blocking authentication and administration.
+
+The general high-ceiling API limiter and high-volume playback, image, download,
+lyrics, and provider-request limiters remain per-process and in memory. They are
+hot-path safeguards against client bugs, accidental loops, bandwidth bursts,
+and upstream-provider overload. They are not the distributed abuse-control
+boundary, and avoiding Redis on those paths keeps their latency and Redis load
+bounded.
+
 ## OIDC and App-Password Security
 
 soundspan uses the OIDC Authorization Code flow with `state`, `nonce`, and S256 PKCE. Login and account-link attempts keep their pending state on the server. The callback sends the browser a short-lived, single-use exchange code. It never puts access or refresh tokens in a redirect URL.

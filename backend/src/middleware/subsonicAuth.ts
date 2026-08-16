@@ -15,6 +15,7 @@ import {
     sendSubsonicError,
     SubsonicErrorCode,
 } from "../utils/subsonicResponse";
+import { createRedisRateLimitOptions } from "./rateLimitStore";
 
 const subsonicAuthLog = logger.child("SubsonicAuth");
 
@@ -457,4 +458,5 @@ export const subsonicRateLimiter = rateLimit({
         const username = typeof req.query.u === "string" ? req.query.u : "";
         return `subsonic:${ip}:${username}`;
     },
+    ...createRedisRateLimitOptions("subsonic-auth"),
 });

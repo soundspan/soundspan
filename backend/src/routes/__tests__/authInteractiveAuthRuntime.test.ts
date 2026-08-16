@@ -97,6 +97,7 @@ scopedLogger.child.mockReturnValue(scopedLogger);
 jest.mock("../../utils/logger", () => ({ logger: scopedLogger }));
 
 jest.mock("../../middleware/rateLimiter", () => ({
+    adminSurfaceLimiter: (_req: any, _res: any, next: () => void) => next(),
     authLimiter: (_req: any, _res: any, next: () => void) => next(),
     apiLimiter: (_req: any, _res: any, next: () => void) => next(),
     oidcFlowLimiter: (_req: any, _res: any, next: () => void) => next(),

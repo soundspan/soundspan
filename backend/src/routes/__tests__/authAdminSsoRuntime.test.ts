@@ -30,6 +30,7 @@ jest.mock("../../middleware/auth", () => ({
     verifyAuthToken: jest.fn(),
 }));
 jest.mock("../../middleware/rateLimiter", () => ({
+    adminSurfaceLimiter: passThrough,
     apiLimiter: passThrough,
     authLimiter: passThrough,
     oidcFlowLimiter: passThrough,

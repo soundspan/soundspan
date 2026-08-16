@@ -207,6 +207,8 @@ describe("api entrypoint runtime behavior", () => {
         const errorHandler = jest.fn((_err, _req, _res, _next) => undefined);
         const authLimiter = "auth-limiter";
         const apiLimiter = "api-limiter";
+        const adminSurfaceLimiter = "admin-surface-limiter";
+        const shareLinkLimiter = "share-link-limiter";
         const imageLimiter = "image-limiter";
         const lyricsLimiter = "lyrics-limiter";
         const swaggerSetup = jest.fn(() => "swagger-setup-middleware");
@@ -295,6 +297,8 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../middleware/rateLimiter", () => ({
             authLimiter,
             apiLimiter,
+            adminSurfaceLimiter,
+            shareLinkLimiter,
             imageLimiter,
             lyricsLimiter,
         }));
@@ -545,7 +549,11 @@ describe("api entrypoint runtime behavior", () => {
             expect(call).toBeDefined();
             // Disabled prefixes stay rate limited and mount the
             // feature-disabled handler instead of the router module.
-            expect(call![1]).toBe("api-limiter");
+            expect(call![1]).toBe(
+                prefix === "/api/federation/admin"
+                    ? "admin-surface-limiter"
+                    : "api-limiter",
+            );
             if (prefix === "/api/analysis") {
                 // The CLAP analyzer machine callbacks stay reachable so
                 // in-flight analysis work can still report results.
@@ -645,7 +653,7 @@ describe("api entrypoint runtime behavior", () => {
             "/api/settings": ["api-limiter", route("../routes/settings")],
             "/api/social": ["api-limiter", route("../routes/social")],
             "/api/system-settings": [
-                "api-limiter",
+                "admin-surface-limiter",
                 route("../routes/systemSettings"),
             ],
             "/api/listening-state": [
@@ -655,7 +663,10 @@ describe("api entrypoint runtime behavior", () => {
             "/api/playback-state": [route("../routes/playbackState")],
             "/api/offline": ["api-limiter", route("../routes/offline")],
             "/api/playlists": ["api-limiter", route("../routes/playlists")],
-            "/api/share-links": ["api-limiter", route("../routes/shareLinks")],
+            "/api/share-links": [
+                "share-link-limiter",
+                route("../routes/shareLinks"),
+            ],
             "/api/search": ["api-limiter", route("../routes/search")],
             "/api/recommendations": [
                 "api-limiter",
@@ -677,7 +688,7 @@ describe("api entrypoint runtime behavior", () => {
             "/api/homepage": ["api-limiter", route("../routes/homepage")],
             "/api/browse": ["api-limiter", route("../routes/browse")],
             "/api/analysis": ["api-limiter", route("../routes/analysis")],
-            "/api/admin": ["api-limiter", route("../routes/admin")],
+            "/api/admin": ["admin-surface-limiter", route("../routes/admin")],
             "/api/releases": ["api-limiter", route("../routes/releases")],
             "/api/vibe": ["api-limiter", route("../routes/vibe")],
             "/api/system": ["api-limiter", route("../routes/system")],
@@ -703,7 +714,7 @@ describe("api entrypoint runtime behavior", () => {
                 route("../routes/federation"),
             ],
             "/api/federation/admin": [
-                "api-limiter",
+                "admin-surface-limiter",
                 route("../routes/federationAdmin"),
             ],
             "/rest": [route("../routes/subsonic")],
@@ -757,7 +768,7 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(queuesCall).toBeDefined();
         expect(queuesCall!.slice(1)).toEqual([
-            "api-limiter",
+            "admin-surface-limiter",
             mocks.requireAuth,
             mocks.requireAdmin,
             "bull-router",

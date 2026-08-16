@@ -42,6 +42,7 @@ const apiLimiter = jest.fn((_req: unknown, _res: unknown, next: () => void) =>
     next(),
 );
 jest.mock("../../middleware/rateLimiter", () => ({
+    adminSurfaceLimiter: apiLimiter,
     authLimiter,
     apiLimiter,
     oidcFlowLimiter,

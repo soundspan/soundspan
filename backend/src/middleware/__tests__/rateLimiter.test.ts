@@ -8,6 +8,7 @@ type RateLimitOptions = {
     standardHeaders: boolean;
     legacyHeaders: boolean;
     validate: { trustProxy: boolean };
+    store?: unknown;
     skipSuccessfulRequests?: boolean;
     skip?: (req: { path: string }) => boolean;
     keyGenerator?: (req: {
@@ -48,6 +49,12 @@ describe("rateLimiter middleware config", () => {
             __esModule: true,
             default: (options: RateLimitOptions) => mockRateLimit(options),
         }));
+        jest.doMock("../rateLimitStore", () => ({
+            createRedisRateLimitOptions: (name: string) => ({
+                store: `redis:${name}`,
+                passOnStoreError: true,
+            }),
+        }));
 
         return import("../rateLimiter");
     }
@@ -59,8 +66,10 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(13);
+        expect(mockRateLimit).toHaveBeenCalledTimes(15);
         expect(mod.apiLimiter).toBeDefined();
+        expect(mod.adminSurfaceLimiter).toBeDefined();
+        expect(mod.shareLinkLimiter).toBeDefined();
         expect(mod.playbackStateLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
         expect(mod.oidcFlowLimiter).toBeDefined();
@@ -76,18 +85,20 @@ describe("rateLimiter middleware config", () => {
 
         const expectedConfigs = [
             { index: 0, windowMs: 60_000, max: 5000 },
-            { index: 1, windowMs: 60_000, max: 600 },
-            { index: 2, windowMs: 900_000, max: 40 },
-            { index: 3, windowMs: 900_000, max: 40 },
-            { index: 4, windowMs: 60_000, max: 500 },
-            { index: 5, windowMs: 60_000, max: 100 },
-            { index: 6, windowMs: 60_000, max: 120 },
-            { index: 7, windowMs: 900_000, max: 20 },
-            { index: 8, windowMs: 60_000, max: 30 },
-            { index: 9, windowMs: 60_000, max: 20 },
-            { index: 10, windowMs: 60_000, max: 60 },
-            { index: 11, windowMs: 60_000, max: 1000 },
-            { index: 12, windowMs: 900_000, max: 20 },
+            { index: 1, windowMs: 60_000, max: 5000 },
+            { index: 2, windowMs: 60_000, max: 5000 },
+            { index: 3, windowMs: 60_000, max: 600 },
+            { index: 4, windowMs: 900_000, max: 40 },
+            { index: 5, windowMs: 900_000, max: 40 },
+            { index: 6, windowMs: 60_000, max: 500 },
+            { index: 7, windowMs: 60_000, max: 100 },
+            { index: 8, windowMs: 60_000, max: 120 },
+            { index: 9, windowMs: 900_000, max: 20 },
+            { index: 10, windowMs: 60_000, max: 30 },
+            { index: 11, windowMs: 60_000, max: 20 },
+            { index: 12, windowMs: 60_000, max: 60 },
+            { index: 13, windowMs: 60_000, max: 1000 },
+            { index: 14, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -99,13 +110,42 @@ describe("rateLimiter middleware config", () => {
             );
         }
 
-        expect(getOptions(2).skipSuccessfulRequests).toBe(true);
-        expect(getOptions(3).skipSuccessfulRequests).not.toBe(true);
+        expect(getOptions(4).skipSuccessfulRequests).toBe(true);
+        expect(getOptions(5).skipSuccessfulRequests).not.toBe(true);
+    });
+
+    it.each([
+        ["admin-surface", 1],
+        ["share-link", 2],
+        ["auth", 4],
+        ["oidc-flow", 5],
+        ["webhook", 12],
+        ["federation-peer", 13],
+        ["federation-pairing", 14],
+    ])("uses the namespaced shared store for %s", async (name, index) => {
+        await loadRateLimiterModule();
+
+        expect(getOptions(index).store).toBe(`redis:${name}`);
+    });
+
+    it.each([
+        ["general API", 0],
+        ["playback state", 3],
+        ["image", 6],
+        ["download", 7],
+        ["lyrics lookup", 8],
+        ["lyrics mutation", 9],
+        ["YouTube Music search", 10],
+        ["YouTube Music stream", 11],
+    ])("keeps the %s limiter in memory", async (_name, index) => {
+        await loadRateLimiterModule();
+
+        expect(getOptions(index).store).toBeUndefined();
     });
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(11).keyGenerator!;
+        const keyGenerator = getOptions(13).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
@@ -193,7 +233,7 @@ describe("rateLimiter middleware config", () => {
 
     it("authLimiter handler logs the client IP and sends the configured limit response", async () => {
         await loadRateLimiterModule();
-        const handler = getOptions(2).handler as NonNullable<
+        const handler = getOptions(4).handler as NonNullable<
             RateLimitOptions["handler"]
         >;
         const res = {} as RateLimitHandlerResponse;
@@ -223,6 +263,19 @@ describe("rateLimiter middleware config", () => {
     it("counts redirect responses against the OIDC flow limit", async () => {
         jest.resetModules();
         jest.dontMock("express-rate-limit");
+        jest.doMock("../rateLimitStore", () => {
+            const { MemoryStore } = jest.requireActual(
+                "express-rate-limit",
+            ) as {
+                MemoryStore: new () => unknown;
+            };
+            return {
+                createRedisRateLimitOptions: () => ({
+                    store: new MemoryStore(),
+                    passOnStoreError: true,
+                }),
+            };
+        });
         const { oidcFlowLimiter } = await import("../rateLimiter");
         const runRedirect = async (): Promise<number> => {
             const req = {

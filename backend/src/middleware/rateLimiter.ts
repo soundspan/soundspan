@@ -1,18 +1,21 @@
 import rateLimit from "express-rate-limit";
 import { logger } from "../utils/logger";
+import { createRedisRateLimitOptions } from "./rateLimitStore";
 
-// Trust proxy validation is disabled because this is a self-hosted app
-// running behind a reverse proxy (nginx/traefik in Docker). The app.set("trust proxy", true)
-// setting is required for proper IP detection and session cookies to work.
-// Since this is self-hosted (not a public API), IP spoofing to bypass rate limiting is not a concern.
+// soundspan is self-hosted behind a reverse proxy, and app.set("trust proxy", ...)
+// makes X-Forwarded-For govern the client IP. Some auth, share-link, webhook,
+// and federation surfaces can be unauthenticated and internet-exposed. The
+// express-rate-limit trust-proxy warning is disabled because the proxy policy
+// is configured centrally; operators must set TRUST_PROXY_HOPS to their real
+// proxy depth so clients cannot select their own rate-limit key.
 const trustProxyValidation = { validate: { trustProxy: false } };
 
 // General API rate limiter (5000 req/minute per IP)
-// This is for a single-user self-hosted app, so limits should be VERY high
-// Only exists to prevent infinite loops or bugs from DOS'ing the server
+// This remains in-memory to avoid Redis latency on hot API paths. It provides
+// per-process bug and accidental-DOS containment, not distributed abuse control.
 export const apiLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minute
-    max: 5000, // Very high limit - personal app, not a public API
+    max: 5000, // High ceiling for bug and accidental-loop containment
     message: "Too many requests from this IP, please try again later.",
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
@@ -41,6 +44,42 @@ export const apiLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
+// Admin routes previously inherited apiLimiter, so retain its exact budget
+// while sharing the counter across replicas for distributed abuse control.
+export const adminSurfaceLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 5000,
+    message: "Too many requests from this IP, please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, next, options) => {
+        logger.warn(
+            `API rate limit exceeded: ${req.ip} on ${req.method} ${req.path}`,
+        );
+        res.status(options.statusCode).send(options.message);
+    },
+    ...createRedisRateLimitOptions("admin-surface"),
+    ...trustProxyValidation,
+});
+
+// Share-link routes previously inherited apiLimiter, so retain its exact
+// budget while enforcing one counter across replicas and restarts.
+export const shareLinkLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 5000,
+    message: "Too many requests from this IP, please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, next, options) => {
+        logger.warn(
+            `API rate limit exceeded: ${req.ip} on ${req.method} ${req.path}`,
+        );
+        res.status(options.statusCode).send(options.message);
+    },
+    ...createRedisRateLimitOptions("share-link"),
+    ...trustProxyValidation,
+});
+
 // Playback-state clients persist progress every 15 seconds (4 requests/minute).
 // Allow 600 requests/minute so even 150 normally syncing devices behind one IP fit.
 export const playbackStateLimiter = rateLimit({
@@ -65,6 +104,7 @@ export const authLimiter = rateLimit({
         logger.warn(`Auth rate limit exceeded: ${req.ip}`);
         res.status(options.statusCode).send(options.message);
     },
+    ...createRedisRateLimitOptions("auth"),
     ...trustProxyValidation,
 });
 
@@ -79,6 +119,7 @@ export const oidcFlowLimiter = rateLimit({
         logger.warn(`OIDC flow rate limit exceeded: ${req.ip}`);
         res.status(options.statusCode).send(options.message);
     },
+    ...createRedisRateLimitOptions("oidc-flow"),
     ...trustProxyValidation,
 });
 
@@ -173,6 +214,7 @@ export const webhookLimiter = rateLimit({
     message: "Too many webhook requests, please try again later.",
     standardHeaders: true,
     legacyHeaders: false,
+    ...createRedisRateLimitOptions("webhook"),
     ...trustProxyValidation,
 });
 
@@ -185,6 +227,7 @@ export const federationPeerLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => req.federationPeer?.id || "unresolved-peer",
+    ...createRedisRateLimitOptions("federation-peer"),
     ...trustProxyValidation,
 });
 
@@ -195,5 +238,6 @@ export const federationPairingLimiter = rateLimit({
     message: "Too many federation pairing attempts. Please try again later.",
     standardHeaders: true,
     legacyHeaders: false,
+    ...createRedisRateLimitOptions("federation-pairing"),
     ...trustProxyValidation,
 });

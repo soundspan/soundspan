@@ -1,6 +1,16 @@
 import express from "express";
 import request from "supertest";
 
+jest.mock("../../middleware/rateLimitStore", () => {
+    const { MemoryStore } = jest.requireActual("express-rate-limit");
+    return {
+        createRedisRateLimitOptions: () => ({
+            store: new MemoryStore(),
+            passOnStoreError: true,
+        }),
+    };
+});
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: () => void) => {
         req.user ??= { id: "u1" };

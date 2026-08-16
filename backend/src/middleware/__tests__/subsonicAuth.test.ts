@@ -26,6 +26,10 @@ jest.mock("express-rate-limit", () => ({
     ipKeyGenerator: mockIpKeyGenerator,
 }));
 
+jest.mock("../rateLimitStore", () => ({
+    createRedisRateLimitOptions: () => ({ store: "redis-shared-store" }),
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         user: {
@@ -922,6 +926,9 @@ describe("requireSubsonicAuth", () => {
         expect(mockIpKeyGenerator).toHaveBeenNthCalledWith(2, "");
         expect(withUsername).toBe("subsonic:ip:127.0.0.1:alice");
         expect(withoutUsername).toBe("subsonic:ip::");
+        expect((subsonicRateLimiter as any).__options.store).toBe(
+            "redis-shared-store",
+        );
     });
 
     it("rejects when apiKey and password/token auth are both provided", async () => {

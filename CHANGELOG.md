@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed broken audiobook navigation for books whose sparse or malformed Audiobookshelf chapter markers do not cover the runtime. Valid multi-file durations now produce named parts, while navigation stays hidden when the current single-file stream proxy cannot play those seek targets. (#487)
+- Rate limits for security-sensitive endpoints are now enforced across backend
+  replicas and survive backend restarts, while requests degrade open on Redis
+  outages instead of failing or hanging. (#489)
 - Reaped dead-peer HTTP connections with TCP keepalive, made origin keep-alive
   timeouts reverse-proxy safe, and kept Node's zero idle timeout so paused or
   backpressured streams remain unaffected. (#487)

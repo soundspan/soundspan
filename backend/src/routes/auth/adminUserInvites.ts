@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { requireAdmin, requireAuth } from "../../middleware/auth";
-import { apiLimiter, authLimiter } from "../../middleware/rateLimiter";
+import { adminSurfaceLimiter, authLimiter } from "../../middleware/rateLimiter";
 import {
     InviteCodeExhaustedError,
     InviteCodeValidationError,
@@ -128,7 +128,7 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
     // GET /auth/users (Admin only)
     router.get(
         "/users",
-        apiLimiter,
+        adminSurfaceLimiter,
         requireAuth,
         requireAdmin,
         async (req, res) => {
@@ -536,7 +536,7 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
     // DELETE /auth/users/:id (Admin only)
     router.delete<{ id: string }>(
         "/users/:id",
-        apiLimiter,
+        adminSurfaceLimiter,
         requireAuth,
         requireAdmin,
         async (req, res) => {
@@ -609,7 +609,7 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
     // POST /auth/invite-codes - Generate a new invite code (admin only)
     router.post(
         "/invite-codes",
-        apiLimiter,
+        adminSurfaceLimiter,
         requireAuth,
         requireAdmin,
         async (req, res) => {
@@ -683,7 +683,7 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
     // GET /auth/invite-codes - List all invite codes (admin only)
     router.get(
         "/invite-codes",
-        apiLimiter,
+        adminSurfaceLimiter,
         requireAuth,
         requireAdmin,
         async (_req, res) => {
@@ -757,7 +757,7 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
     // DELETE /auth/invite-codes/:id - Revoke an invite code (admin only)
     router.delete<{ id: string }>(
         "/invite-codes/:id",
-        apiLimiter,
+        adminSurfaceLimiter,
         requireAuth,
         requireAdmin,
         async (req, res) => {

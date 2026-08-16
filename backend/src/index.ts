@@ -74,9 +74,11 @@ import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 import {
     authLimiter,
+    adminSurfaceLimiter,
     apiLimiter,
     imageLimiter,
     lyricsLimiter,
+    shareLinkLimiter,
 } from "./middleware/rateLimiter";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger";
@@ -229,13 +231,13 @@ app.use("/api/library", libraryRoutes);
 app.use("/api/plays", apiLimiter, playsRoutes);
 app.use("/api/settings", apiLimiter, settingsRoutes);
 app.use("/api/social", apiLimiter, socialRoutes);
-app.use("/api/system-settings", apiLimiter, systemSettingsRoutes);
+app.use("/api/system-settings", adminSurfaceLimiter, systemSettingsRoutes);
 app.use("/api/listening-state", apiLimiter, listeningStateRoutes);
 // Playback-state routes use their dedicated high-volume limiter before auth.
 app.use("/api/playback-state", playbackStateRoutes);
 app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
-app.use("/api/share-links", apiLimiter, shareLinkRoutes);
+app.use("/api/share-links", shareLinkLimiter, shareLinkRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 // Feature-gated routers are required lazily so disabled subsystems skip their
 // module side effects entirely; disabled prefixes stay rate limited and
@@ -284,7 +286,7 @@ if (config.features.federation) {
     );
     app.use(
         "/api/federation/admin",
-        apiLimiter,
+        adminSurfaceLimiter,
         require("./routes/federationAdmin").default,
     );
 } else {
@@ -294,7 +296,7 @@ if (config.features.federation) {
     app.use("/api/federation/v1", apiLimiter, createFeatureDisabledHandler());
     app.use(
         "/api/federation/admin",
-        apiLimiter,
+        adminSurfaceLimiter,
         createFeatureDisabledHandler(),
     );
 }
@@ -314,7 +316,7 @@ if (config.features.audioAnalysis) {
         createFeatureDisabledHandler(),
     );
 }
-app.use("/api/admin", apiLimiter, adminRoutes);
+app.use("/api/admin", adminSurfaceLimiter, adminRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);
 if (config.features.audioAnalysis) {
     app.use("/api/vibe", apiLimiter, require("./routes/vibe").default);
@@ -620,7 +622,7 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
 
         app.use(
             "/api/admin/queues",
-            apiLimiter,
+            adminSurfaceLimiter,
             requireAuth,
             requireAdmin,
             serverAdapter.getRouter(),
