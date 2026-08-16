@@ -14,6 +14,7 @@ Start-here index for domain modules under `frontend/features`.
 | --- | --- | --- |
 | `album` | `frontend/features/album/README.md` | `frontend/app/album/[id]/page.tsx`<br>`frontend/app/artist/[id]/page.tsx` |
 | `artist` | `frontend/features/artist/README.md` | `frontend/app/album/[id]/page.tsx`<br>`frontend/app/artist/[id]/page.tsx` |
+| `auth` | `frontend/features/auth/README.md` | `frontend/app/login/page.tsx` |
 | `audiobook` | `frontend/features/audiobook/README.md` | `frontend/app/audiobooks/series/[name]/page.tsx` |
 | `discover` | `frontend/features/discover/README.md` | `frontend/app/discover/page.tsx`<br>`frontend/app/mix/page.tsx` |
 | `explore` | `frontend/features/explore/README.md` | `frontend/app/explore/page.tsx`<br>`frontend/app/library/page.tsx`<br>`frontend/app/page.tsx`<br>`frontend/app/radio/page.tsx` |

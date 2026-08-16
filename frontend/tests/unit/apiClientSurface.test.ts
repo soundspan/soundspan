@@ -28,6 +28,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "clearTidalStreamingAuth",
     "clearToken",
     "clearYtMusicAuth",
+    "confirmOidcLink",
     "createApiKey",
     "createFederationPairingCode",
     "createFederationPeer",
@@ -55,6 +56,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "downloadFromSoulseek",
     "downloadYouTube",
     "endListenGroup",
+    "exchangeOidcCode",
     "executePlaylistImport",
     "fetchSegmentedStreamingManifest",
     "fetchSegmentedStreamingSegment",
@@ -75,6 +77,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getAudiobookSeries",
     "getAudiobookStreamUrl",
     "getAudiobooks",
+    "getAuthConfig",
     "getBrowseImageUrl",
     "getContinueListening",
     "getCoverArtUrl",
@@ -217,6 +220,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "previewPlaylistImport",
     "previewPodcast",
     "reconnectImportJob",
+    "redeemOidcInvite",
     "refreshAllPodcasts",
     "refreshBaseUrl",
     "refreshMixes",
@@ -302,5 +306,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 282);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 286);
 });

@@ -1,8 +1,59 @@
 import { type ApiClientConstructor } from "./core";
 
+/** Public authentication capabilities returned by the backend. */
+export interface AuthConfig {
+    localLoginEnabled: boolean;
+    oidcEnabled: boolean;
+    oidcProviderName: string;
+}
+
+/** User fields returned after any successful login flow. */
+export interface AuthenticatedUser {
+    id: string;
+    username: string;
+    displayName?: string | null;
+    role: string;
+    requires2FA?: boolean;
+    onboardingComplete?: boolean;
+}
+
+/** Credentials used to confirm an email-matched OIDC account link. */
+export interface ConfirmOidcLinkPayload {
+    linkToken: string;
+    password: string;
+    twoFactorToken?: string;
+}
+
+/** Invite details used to provision an OIDC-authenticated account. */
+export interface RedeemOidcInvitePayload {
+    inviteToken: string;
+    inviteCode: string;
+}
+
+/** Challenge returned when account linking requires a local second factor. */
+export interface RequiresTwoFactorResponse {
+    requires2FA: true;
+    message: string;
+}
+
+interface LoginResponse {
+    token: string;
+    refreshToken: string;
+    user: AuthenticatedUser;
+}
+
 /** Add auth-domain operations to an API client base class. */
 export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class AuthApi extends Base {
+        private storeAuthTokens(token: string, refreshToken?: string): void {
+            this.setToken(token, refreshToken);
+        }
+
+        private completeLogin(response: LoginResponse): AuthenticatedUser {
+            this.storeAuthTokens(response.token, response.refreshToken);
+            return response.user;
+        }
+
         async getOnboardingStatus(): Promise<{
             needsOnboarding: boolean;
             hasAccount: boolean;
@@ -17,14 +68,7 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
             username: string,
             password: string,
             token?: string,
-        ): Promise<{
-            id: string;
-            username: string;
-            displayName?: string | null;
-            role: string;
-            requires2FA?: boolean;
-            onboardingComplete?: boolean;
-        }> {
+        ): Promise<AuthenticatedUser> {
             const data = await this.request<{
                 token?: string;
                 refreshToken?: string;
@@ -49,7 +93,7 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
 
             // If login returned JWT tokens, store them
             if (data.token) {
-                this.setToken(data.token, data.refreshToken);
+                this.storeAuthTokens(data.token, data.refreshToken);
             }
 
             // Return user data in consistent format
@@ -64,6 +108,51 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
                 requires2FA: data.requires2FA,
                 onboardingComplete: data.onboardingComplete,
             };
+        }
+
+        /** Loads public local-login and OIDC capability flags. */
+        async getAuthConfig(): Promise<AuthConfig> {
+            return this.request<AuthConfig>("/auth/config");
+        }
+
+        /** Exchanges a one-time OIDC callback code and stores login tokens. */
+        async exchangeOidcCode(code: string): Promise<AuthenticatedUser> {
+            const response = await this.request<LoginResponse>(
+                "/auth/oidc/exchange",
+                {
+                    method: "POST",
+                    body: JSON.stringify({ code }),
+                },
+            );
+            return this.completeLogin(response);
+        }
+
+        /** Confirms an OIDC link and stores tokens unless 2FA is required. */
+        async confirmOidcLink(
+            payload: ConfirmOidcLinkPayload,
+        ): Promise<AuthenticatedUser | RequiresTwoFactorResponse> {
+            const response = await this.request<
+                LoginResponse | RequiresTwoFactorResponse
+            >("/auth/oidc/confirm-link", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            if ("requires2FA" in response) return response;
+            return this.completeLogin(response);
+        }
+
+        /** Redeems an invite for OIDC provisioning and stores login tokens. */
+        async redeemOidcInvite(
+            payload: RedeemOidcInvitePayload,
+        ): Promise<AuthenticatedUser> {
+            const response = await this.request<LoginResponse>(
+                "/auth/oidc/redeem-invite",
+                {
+                    method: "POST",
+                    body: JSON.stringify(payload),
+                },
+            );
+            return this.completeLogin(response);
         }
 
         async register(fields: {
@@ -89,7 +178,7 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
             });
             // Store tokens on success
             if (data.token) {
-                this.setToken(data.token, data.refreshToken);
+                this.storeAuthTokens(data.token, data.refreshToken);
             }
             return data;
         }
