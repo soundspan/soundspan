@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added OIDC/SSO login with explicit `(provider, sub)` account links,
-  local-password confirmation for email-hinted links, and invite-gated account
-  provisioning by default.
+  local-password confirmation for email-hinted links, invite-gated account
+  provisioning by default, and `OIDC_WEB_BASE_URL` support for same-site web/API
+  origins on sibling subdomains or different ports.
 - Added revocable `ssap_` app passwords for OpenSubsonic password and token
   authentication. Each secret is encrypted at rest and shown once.
 - Added `LOCAL_LOGIN_ENABLED` so operators can hide local login after they

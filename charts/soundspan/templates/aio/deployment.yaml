@@ -63,6 +63,7 @@ spec:
             "OIDC_CLIENT_ID" true
             "OIDC_CLIENT_SECRET" true
             "OIDC_REDIRECT_URI" true
+            "OIDC_WEB_BASE_URL" true
             "OIDC_SCOPES" true
             "OIDC_AUTO_PROVISION" true
             "OIDC_MANAGE_ROLES" true

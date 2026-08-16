@@ -190,6 +190,7 @@ describe("config module", () => {
             OIDC_CLIENT_ID: undefined,
             OIDC_CLIENT_SECRET: undefined,
             OIDC_REDIRECT_URI: undefined,
+            OIDC_WEB_BASE_URL: undefined,
             OIDC_SCOPES: undefined,
             OIDC_AUTO_PROVISION: undefined,
             OIDC_MANAGE_ROLES: undefined,
@@ -204,6 +205,7 @@ describe("config module", () => {
             localLoginEnabled: true,
             oidc: {
                 enabled: false,
+                webBaseUrl: "",
                 scopes: "openid profile email",
                 autoProvision: false,
                 manageRoles: false,
@@ -243,6 +245,48 @@ describe("config module", () => {
                 [key]: invalidValue,
             },
             `${key} must be a valid HTTP(S) URL`,
+        );
+    });
+
+    it.each([
+        ["https://music.example", "https://music.example"],
+        ["https://music.example/", "https://music.example"],
+        ["http://localhost:3030/", "http://localhost:3030"],
+    ])(
+        "normalizes OIDC_WEB_BASE_URL origin %s",
+        async (webBaseUrl, expected) => {
+            const { config } = await loadConfigModule({
+                ...validOidcEnv(),
+                OIDC_WEB_BASE_URL: webBaseUrl,
+            });
+
+            expect(config.oidc.webBaseUrl).toBe(expected);
+        },
+    );
+
+    it.each([
+        "https://music.example/app",
+        "https://music.example/?tenant=one",
+        "https://music.example/#login",
+        "https:music.example",
+        "ftp://music.example",
+    ])("rejects non-origin OIDC_WEB_BASE_URL %s", async (webBaseUrl) => {
+        await expectStartupValidationFailure(
+            {
+                ...validOidcEnv(),
+                OIDC_WEB_BASE_URL: webBaseUrl,
+            },
+            "OIDC_WEB_BASE_URL must be a valid HTTP(S) origin with no path, query, or fragment",
+        );
+    });
+
+    it("rejects OIDC_WEB_BASE_URL when OIDC is disabled", async () => {
+        await expectStartupValidationFailure(
+            {
+                OIDC_ENABLED: "false",
+                OIDC_WEB_BASE_URL: "https://music.example",
+            },
+            "OIDC_WEB_BASE_URL requires OIDC_ENABLED=true",
         );
     });
 

@@ -74,6 +74,7 @@ assert_oidc_env() {
     'OIDC_ISSUER_URL=https://idp.example/realms/soundspan' \
     'OIDC_CLIENT_ID=soundspan' \
     'OIDC_REDIRECT_URI=https://soundspan.example/api/auth/oidc/callback' \
+    'OIDC_WEB_BASE_URL=https://music.example' \
     'OIDC_SCOPES=openid profile email groups' \
     'OIDC_AUTO_PROVISION=true' \
     'OIDC_MANAGE_ROLES=true' \
@@ -161,6 +162,7 @@ for oidc_mode in aio individual; do
     --set-string config.oidc.issuerUrl=https://idp.example/realms/soundspan \
     --set-string config.oidc.clientId=soundspan \
     --set-string config.oidc.redirectUri=https://soundspan.example/api/auth/oidc/callback \
+    --set-string config.oidc.webBaseUrl=https://music.example \
     --set-string 'config.oidc.scopes=openid profile email groups' \
     --set config.oidc.autoProvision=true \
     --set config.oidc.manageRoles=true \

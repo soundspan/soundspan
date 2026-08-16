@@ -9,6 +9,7 @@ const mockConfig = {
         clientId: "soundspan",
         clientSecret: "secret",
         redirectUri: "https://music.example/api/auth/oidc/callback",
+        webBaseUrl: "",
         scopes: "openid profile email",
         autoProvision: false,
         manageRoles: false,
@@ -259,6 +260,7 @@ describe("OIDC auth routes", () => {
         mockConfig.localLoginEnabled = true;
         mockConfig.secureCookies = false;
         mockConfig.oidc.enabled = true;
+        mockConfig.oidc.webBaseUrl = "";
         buildAuthorizationRequest.mockResolvedValue({
             redirectUrl:
                 "https://idp.example/authorize?state=state-1&nonce=nonce-1&code_challenge=challenge&code_challenge_method=S256",
@@ -500,6 +502,20 @@ describe("OIDC auth routes", () => {
         expect(handleCallback).toHaveBeenCalledTimes(1);
     });
 
+    it("absolutizes invalid-state redirects for a configured web origin", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(
+            callbackRequest("unknown"),
+            res,
+        );
+
+        expect(res.redirectUrl).toBe(
+            "https://music.example/login?ssoError=invalid_state",
+        );
+    });
+
     it.each([
         ["missing", null],
         ["mismatched", "different-browser-binding"],
@@ -585,6 +601,23 @@ describe("OIDC auth routes", () => {
         expect(replay.statusCode).toBe(401);
     });
 
+    it("absolutizes the SSO exchange-code callback target", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/library",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toMatch(
+            /^https:\/\/music\.example\/login\?ssoCode=[A-Za-z0-9_-]+&returnTo=%2Flibrary$/,
+        );
+    });
+
     it("rejects a nonce mismatch without regenerating a session or creating an exchange code", async () => {
         values.set("oidc:pending:state-1", {
             nonce: "nonce-1",
@@ -661,6 +694,47 @@ describe("OIDC auth routes", () => {
         },
     );
 
+    it.each([
+        ["link", "ssoLink"],
+        ["invite", "ssoInvite"],
+    ] as const)("absolutizes a %s callback target", async (kind, parameter) => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        resolveOidcAccount.mockResolvedValueOnce({
+            kind,
+            entry:
+                kind === "link"
+                    ? {
+                          provider: "oidc:https://idp.example",
+                          providerSubject: "subject-1",
+                          email: "alice@example.com",
+                          displayName: "Alice",
+                          userId: "u1",
+                          groups: [],
+                      }
+                    : {
+                          provider: "oidc:https://idp.example",
+                          providerSubject: "subject-1",
+                          email: "alice@example.com",
+                          displayName: "Alice",
+                      },
+        });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toMatch(
+            new RegExp(
+                `^https://music\\.example/login\\?${parameter}=[A-Za-z0-9_-]+&returnTo=%2F$`,
+            ),
+        );
+    });
+
     it("rejects an email-matched account already linked to the provider", async () => {
         values.set("oidc:pending:state-1", {
             nonce: "nonce-1",
@@ -674,6 +748,42 @@ describe("OIDC auth routes", () => {
         await getHandler("/oidc/callback", "get")(callbackRequest(), res);
 
         expect(res.redirectUrl).toBe("/login?ssoError=account_already_linked");
+    });
+
+    it("absolutizes callback failure redirects", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        handleCallback.mockRejectedValueOnce(new Error("provider failure"));
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe(
+            "https://music.example/login?ssoError=oidc_failed",
+        );
+    });
+
+    it("absolutizes an account-already-linked callback target", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        resolveOidcAccount.mockResolvedValueOnce({ kind: "alreadyLinked" });
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe(
+            "https://music.example/login?ssoError=account_already_linked",
+        );
     });
 
     it("starts a user-bound OIDC link flow and rejects it when OIDC is disabled", async () => {
@@ -725,6 +835,23 @@ describe("OIDC auth routes", () => {
             expect.objectContaining({ maxAge: 600_000 }),
         );
         expect(res.redirect).not.toHaveBeenCalled();
+    });
+
+    it("absolutizes a manual-link start failure target", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        buildAuthorizationRequest.mockRejectedValueOnce(
+            new Error("provider unavailable"),
+        );
+        const res = createRes();
+
+        await getHandler("/oidc/link/start", "post")(
+            { user: { id: "initiating-user" }, body: {} },
+            res,
+        );
+
+        expect(res.redirectUrl).toBe(
+            "https://music.example/settings?ssoError=oidc_failed",
+        );
     });
 
     it("rejects an unsupported OIDC link response mode", async () => {
@@ -790,6 +917,56 @@ describe("OIDC auth routes", () => {
         expect(
             [...values.keys()].some((key) => key.startsWith("oidc:exchange:")),
         ).toBe(false);
+    });
+
+    it.each([
+        ["linked", false, "https://music.example/settings?ssoLinked=1"],
+        [
+            "already linked",
+            true,
+            "https://music.example/settings?ssoError=identity_already_linked",
+        ],
+    ] as const)(
+        "absolutizes the manual-link %s target",
+        async (_outcome, identityExists, expected) => {
+            mockConfig.oidc.webBaseUrl = "https://music.example";
+            values.set("oidc:pending:state-1", {
+                nonce: "nonce-1",
+                codeVerifier: "verifier-1",
+                returnTo: "/settings",
+                mode: "link",
+                userId: "initiating-user",
+                bindingHash: FLOW_BINDING_HASH,
+            });
+            prisma.externalIdentity.findUnique.mockResolvedValueOnce(
+                identityExists ? { id: "existing-link" } : null,
+            );
+            const res = createRes();
+
+            await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+            expect(res.redirectUrl).toBe(expected);
+        },
+    );
+
+    it("absolutizes a manual-link callback failure target", async () => {
+        mockConfig.oidc.webBaseUrl = "https://music.example";
+        values.set("oidc:pending:state-1", {
+            nonce: "nonce-1",
+            codeVerifier: "verifier-1",
+            returnTo: "/settings",
+            mode: "link",
+            userId: "initiating-user",
+            bindingHash: FLOW_BINDING_HASH,
+        });
+        handleCallback.mockRejectedValueOnce(new Error("provider failure"));
+        const res = createRes();
+
+        await getHandler("/oidc/callback", "get")(callbackRequest(), res);
+
+        expect(res.redirectUrl).toBe(
+            "https://music.example/settings?ssoError=oidc_failed",
+        );
     });
 
     it("rejects malformed link state instead of falling through to login", async () => {

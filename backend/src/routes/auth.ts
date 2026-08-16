@@ -432,7 +432,13 @@ async function regenerateSession(req: Request): Promise<void> {
 
 function loginRedirect(parameter: string, value: string, returnTo?: string) {
     const suffix = returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "";
-    return `/login?${parameter}=${encodeURIComponent(value)}${suffix}`;
+    return webRedirectTarget(
+        `/login?${parameter}=${encodeURIComponent(value)}${suffix}`,
+    );
+}
+
+function webRedirectTarget(path: string): string {
+    return config.oidc.webBaseUrl ? `${config.oidc.webBaseUrl}${path}` : path;
 }
 
 function redirectResponse(res: Response, url: string): Response {
@@ -479,7 +485,10 @@ async function redirectForResolution(
     bindingHash: string,
 ): Promise<Response> {
     if (resolution.kind === "alreadyLinked") {
-        return redirectResponse(res, "/login?ssoError=account_already_linked");
+        return redirectResponse(
+            res,
+            webRedirectTarget("/login?ssoError=account_already_linked"),
+        );
     }
     if (resolution.kind === "authenticated") {
         const code = await storeOpaqueEntry(
@@ -513,7 +522,10 @@ async function oidcLoginHandler(
         });
     } catch (error) {
         oidcLog.error("OIDC login failed", { error });
-        return redirectResponse(res, "/login?ssoError=oidc_failed");
+        return redirectResponse(
+            res,
+            webRedirectTarget("/login?ssoError=oidc_failed"),
+        );
     }
 }
 
@@ -542,7 +554,10 @@ async function oidcLinkStartHandler(
         if (responseMode === "json") {
             return sendRouteError(res, 500, "Failed to start OIDC link");
         }
-        return redirectResponse(res, "/settings?ssoError=oidc_failed");
+        return redirectResponse(
+            res,
+            webRedirectTarget("/settings?ssoError=oidc_failed"),
+        );
     }
 }
 
@@ -593,7 +608,7 @@ async function completeManualOidcLink(
     const target = linked
         ? "/settings?ssoLinked=1"
         : "/settings?ssoError=identity_already_linked";
-    return redirectResponse(res, target);
+    return redirectResponse(res, webRedirectTarget(target));
 }
 
 async function oidcCallbackHandler(
@@ -635,7 +650,7 @@ async function oidcCallbackHandler(
             pending.mode === "link"
                 ? "/settings?ssoError=oidc_failed"
                 : "/login?ssoError=oidc_failed";
-        return redirectResponse(res, failureTarget);
+        return redirectResponse(res, webRedirectTarget(failureTarget));
     }
 }
 
@@ -854,7 +869,10 @@ async function unlinkIdentityHandler(
 
 function rejectInvalidOidcState(res: Response): Response {
     oidcLog.warn("Rejected OIDC callback with invalid state");
-    return redirectResponse(res, "/login?ssoError=invalid_state");
+    return redirectResponse(
+        res,
+        webRedirectTarget("/login?ssoError=invalid_state"),
+    );
 }
 
 function queryStrippedLimiter(limiter: RequestHandler): RequestHandler {

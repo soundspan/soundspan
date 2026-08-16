@@ -135,6 +135,7 @@ type OidcEnvInput = {
     OIDC_CLIENT_ID?: string;
     OIDC_CLIENT_SECRET?: string;
     OIDC_REDIRECT_URI?: string;
+    OIDC_WEB_BASE_URL?: string;
     OIDC_MANAGE_ROLES?: string;
     OIDC_ADMIN_GROUP?: string;
 };
@@ -154,6 +155,35 @@ function isHttpUrl(value: string): boolean {
         return url.protocol === "http:" || url.protocol === "https:";
     } catch {
         return false;
+    }
+}
+
+function normalizeOidcWebBaseUrl(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (!/^https?:\/\//i.test(trimmed)) return null;
+    try {
+        const url = new URL(trimmed);
+        const isHttp = url.protocol === "http:" || url.protocol === "https:";
+        const schemeEnd = trimmed.indexOf("://") + 3;
+        const pathStart = trimmed.indexOf("/", schemeEnd);
+        const path = pathStart === -1 ? "" : trimmed.slice(pathStart);
+        const hasUrlSuffix =
+            (path !== "" && path !== "/") ||
+            trimmed.includes("?") ||
+            trimmed.includes("#");
+        if (
+            !isHttp ||
+            url.username ||
+            url.password ||
+            trimmed.includes("\\") ||
+            hasUrlSuffix
+        ) {
+            return null;
+        }
+        return url.origin;
+    } catch {
+        return null;
     }
 }
 
@@ -194,6 +224,29 @@ function addRoleManagementIssues(
     }
 }
 
+function addOidcWebBaseUrlIssues(
+    env: OidcEnvInput,
+    oidcEnabled: boolean,
+    context: z.RefinementCtx,
+): void {
+    const value = env.OIDC_WEB_BASE_URL?.trim();
+    if (!value) return;
+    if (!oidcEnabled) {
+        context.addIssue({
+            code: "custom",
+            path: ["OIDC_WEB_BASE_URL"],
+            message: "OIDC_WEB_BASE_URL requires OIDC_ENABLED=true",
+        });
+    }
+    if (normalizeOidcWebBaseUrl(value) !== null) return;
+    context.addIssue({
+        code: "custom",
+        path: ["OIDC_WEB_BASE_URL"],
+        message:
+            "OIDC_WEB_BASE_URL must be a valid HTTP(S) origin with no path, query, or fragment",
+    });
+}
+
 function addRequiredOidcIssues(
     env: OidcEnvInput,
     context: z.RefinementCtx,
@@ -230,6 +283,7 @@ function addOidcConfigIssues(
 
     addLoginLockoutIssue(localLoginEnabled, oidcEnabled, context);
     addRoleManagementIssues(env, oidcEnabled, manageRoles, context);
+    addOidcWebBaseUrlIssues(env, oidcEnabled, context);
     if (!oidcEnabled) return;
     addRequiredOidcIssues(env, context);
     addOidcUrlIssues(env, context);
@@ -263,6 +317,7 @@ const envSchema = z
         OIDC_CLIENT_ID: z.string().optional(),
         OIDC_CLIENT_SECRET: z.string().optional(),
         OIDC_REDIRECT_URI: z.string().optional(),
+        OIDC_WEB_BASE_URL: z.string().optional(),
         OIDC_SCOPES: z.string().optional(),
         OIDC_AUTO_PROVISION: z.string().optional(),
         OIDC_MANAGE_ROLES: z.string().optional(),
@@ -402,6 +457,8 @@ export const config = {
         clientId: process.env.OIDC_CLIENT_ID || "",
         clientSecret: process.env.OIDC_CLIENT_SECRET || "",
         redirectUri: process.env.OIDC_REDIRECT_URI || "",
+        webBaseUrl:
+            normalizeOidcWebBaseUrl(process.env.OIDC_WEB_BASE_URL ?? "") ?? "",
         scopes: process.env.OIDC_SCOPES || "openid profile email",
         autoProvision: parseEnvBool(process.env.OIDC_AUTO_PROVISION, false),
         manageRoles: parseEnvBool(process.env.OIDC_MANAGE_ROLES, false),

@@ -50,6 +50,8 @@ For single-service deployments (all-in-one image, Helm `deploymentMode: aio`):
 
 ## OIDC callback routing
 
+First select the app/API layout in the [`OIDC_SSO.md` deployment topology matrix](OIDC_SSO.md#deployment-topology). The matrix states when `OIDC_WEB_BASE_URL` is required. Cross-site app/API deployments on different registrable domains are not supported.
+
 Set `OIDC_REDIRECT_URI` to the public URL that users open. Register the same exact value at the identity provider:
 
 ```env
@@ -59,6 +61,15 @@ OIDC_REDIRECT_URI=https://soundspan.example.com/api/auth/oidc/callback
 The callback path must reach the backend. The default examples below send `/api/*` through the frontend proxy. The direct path-split examples send `/api/*` straight to the backend. Both patterns deliver `/api/auth/oidc/callback` correctly.
 
 Keep the public scheme, host, port, and path identical in soundspan and the identity provider. Do not use a container-only hostname in `OIDC_REDIRECT_URI`.
+
+When the callback origin differs from the web origin but remains same-site, set the canonical web origin:
+
+```env
+OIDC_REDIRECT_URI=https://api.example.com/api/auth/oidc/callback
+OIDC_WEB_BASE_URL=https://music.example.com
+```
+
+Set `SECURE_COOKIES=true` when the browser uses HTTPS, including when Cloudflare or another edge terminates TLS.
 
 ## NGINX example (Docker/Kubernetes edge)
 

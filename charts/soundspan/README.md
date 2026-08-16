@@ -228,6 +228,7 @@ config:
     issuerUrl: https://idp.example/realms/soundspan
     clientId: soundspan
     redirectUri: https://soundspan.example/api/auth/oidc/callback
+    webBaseUrl: ""
     scopes: openid profile email
     autoProvision: false
     manageRoles: false
@@ -240,7 +241,7 @@ secrets:
   oidcClientSecret: "<OIDC client secret>"
 ```
 
-Keep `localLoginEnabled: true` until SSO works. Keep `autoProvision: false` unless a private IdP restricts access to the soundspan application. See [`docs/OIDC_SSO.md`](../../docs/OIDC_SSO.md) for the full setup and recovery guide.
+Keep `localLoginEnabled: true` until SSO works. Set `webBaseUrl` to the web origin when the callback uses a sibling API subdomain or another port. Keep `autoProvision: false` unless a private IdP restricts access to the soundspan application. See [`docs/OIDC_SSO.md`](../../docs/OIDC_SSO.md) for the full setup, topology matrix, and recovery guide.
 
 #### Third-party API keys
 

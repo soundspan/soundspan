@@ -710,6 +710,7 @@ config:
     issuerUrl: ""
     clientId: ""
     redirectUri: ""
+    webBaseUrl: ""
     scopes: "openid profile email"
     autoProvision: false
     manageRoles: false

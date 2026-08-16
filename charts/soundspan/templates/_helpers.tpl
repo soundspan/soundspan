@@ -298,6 +298,7 @@ Usage:
   "OIDC_ISSUER_URL" $ctx.Values.config.oidc.issuerUrl
   "OIDC_CLIENT_ID" $ctx.Values.config.oidc.clientId
   "OIDC_REDIRECT_URI" $ctx.Values.config.oidc.redirectUri
+  "OIDC_WEB_BASE_URL" $ctx.Values.config.oidc.webBaseUrl
   "OIDC_SCOPES" $ctx.Values.config.oidc.scopes
   "OIDC_AUTO_PROVISION" $ctx.Values.config.oidc.autoProvision
   "OIDC_MANAGE_ROLES" $ctx.Values.config.oidc.manageRoles
