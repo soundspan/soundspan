@@ -734,13 +734,24 @@ describe("auth routes runtime", () => {
 
     it("handles admin user list/create/delete flows", async () => {
         prisma.user.findMany.mockResolvedValueOnce([
-            { id: "u1", username: "alice", role: "admin" },
+            {
+                id: "u1",
+                username: "alice",
+                role: "admin",
+                passwordHash: "hash-1",
+                externalIdentities: [],
+            },
         ]);
         const listReq = { user: { id: "admin-1" } } as any;
         const listRes = createRes();
         await listUsers(listReq, listRes);
         expect(listRes.statusCode).toBe(200);
         expect(listRes.body).toHaveLength(1);
+        expect(listRes.body[0]).toMatchObject({
+            hasPassword: true,
+            linkedProviders: [],
+        });
+        expect(listRes.body[0]).not.toHaveProperty("passwordHash");
 
         const missingFieldsReq = {
             body: { username: "", password: "" },

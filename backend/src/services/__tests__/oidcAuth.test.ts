@@ -1,4 +1,5 @@
 const mockConfig = {
+    nodeEnv: "test",
     oidc: {
         enabled: true,
         issuerUrl: "https://idp.example/realms/soundspan",

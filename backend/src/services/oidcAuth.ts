@@ -58,7 +58,7 @@ async function loadOpenIdClient(): Promise<OpenIdClientModule> {
 
 /** Injects the ESM-only openid-client boundary during tests. */
 export function __setOpenIdClientForTests(client: OpenIdClientModule): void {
-    if (process.env.NODE_ENV !== "test") {
+    if (config.nodeEnv !== "test") {
         throw new Error("OIDC client injection is only available in tests");
     }
     oidcClientModule = client;
@@ -67,7 +67,7 @@ export function __setOpenIdClientForTests(client: OpenIdClientModule): void {
 
 /** Clears the injected client and cached discovery result during tests. */
 export function __resetOpenIdClientForTests(): void {
-    if (process.env.NODE_ENV !== "test") {
+    if (config.nodeEnv !== "test") {
         throw new Error("OIDC client reset is only available in tests");
     }
     oidcClientModule = null;
