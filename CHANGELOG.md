@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.1.0] - 2026-08-16
+
+### Added
+
 - Added OIDC/SSO login with explicit `(provider, sub)` account links,
   local-password confirmation for email-hinted links, invite-gated account
   provisioning by default, and `OIDC_WEB_BASE_URL` support for same-site web/API
@@ -97,7 +105,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and may return fewer tracks instead of using an uncapped refill.
 - Federated audiobook mirror IDs now use the Node.js `randomUUID()` standard
   library API; the direct `@paralleldrive/cuid2` dependency was removed.
-
 - Federation sync now batches per-page identity and local dedup reads, limits
   incremental artist-count recomputation to touched artists, and persists a
   full-sync page cursor. Resumed full syncs perform a fresh catalog-ID pass
@@ -151,7 +158,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unplayable records, while Subsonic playlists omit them.
 - Continue Listening and social now-listening no longer expose missing or
   soft-removed local tracks retained for possible revival.
-
 - Background audio-analysis and vibe-embedding producers now use bounded,
   deduplicated Redis admission and leave queued tracks pending until an
   analyzer claims them. Queue wait time no longer consumes the processing
@@ -160,7 +166,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retrying all failed analyzer work now resets retry budgets and lets the
   bounded background producer drain the backlog instead of enqueueing every
   failed track at once. Selected vibe failures can also be retried correctly.
-
 - Backend track-mapping reconciliation now reuses a normalized local-library
   index, yields between mapping attempts, and enforces configurable per-run
   row and time limits. The scheduler persists its continuation cursor in Redis
