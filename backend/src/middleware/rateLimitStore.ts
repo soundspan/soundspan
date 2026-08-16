@@ -5,7 +5,22 @@ import type {
     Store,
 } from "express-rate-limit";
 import { logger as rootLogger, type Logger } from "../utils/logger";
-import { redisClient } from "../utils/redis";
+
+/**
+ * Resolve the shared Redis client lazily. Limiters (and therefore stores) are
+ * created when middleware modules load; importing ../utils/redis eagerly would
+ * chain into config validation at import time, which exits the process in
+ * environments without a full env (notably test workers that import a route or
+ * middleware module without mocking config). No command runs before a request
+ * reaches a limiter, so first-use resolution is equivalent in production.
+ */
+function loadDefaultRedisClient(): RateLimitRedisClient {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("../utils/redis") as {
+        redisClient: RateLimitRedisClient;
+    };
+    return mod.redisClient;
+}
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 250;
 const DEFAULT_WARNING_INTERVAL_MS = 60_000;
@@ -46,7 +61,7 @@ export type RedisRateLimitOptions = Readonly<{
 
 type FailureReporter = (error: unknown) => void;
 type ResolvedRateLimitOptions = Readonly<{
-    client: RateLimitRedisClient;
+    client: () => RateLimitRedisClient;
     commandTimeoutMs: number;
     warningIntervalMs: number;
     now: () => number;
@@ -99,8 +114,11 @@ function scopedLogger(base: Logger): Logger {
 function resolveRateLimitOptions(
     options: RedisRateLimitOptions,
 ): ResolvedRateLimitOptions {
+    const providedClient = options.client;
     return {
-        client: options.client ?? redisClient,
+        client: providedClient
+            ? () => providedClient
+            : loadDefaultRedisClient,
         commandTimeoutMs: requirePositiveInteger(
             options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
             "commandTimeoutMs",
@@ -157,7 +175,7 @@ class RedisRateLimitStore implements Store {
     private windowMs: number | null = null;
 
     constructor(
-        private readonly client: RateLimitRedisClient,
+        private readonly client: () => RateLimitRedisClient,
         readonly prefix: string,
         private readonly commandTimeoutMs: number,
         private readonly reportFailure: FailureReporter,
@@ -202,7 +220,8 @@ class RedisRateLimitStore implements Store {
     }
 
     private async execute(args: readonly string[]): Promise<unknown> {
-        if (!this.client.isReady) {
+        const client = this.client();
+        if (!client.isReady) {
             throw new Error("Redis client is not ready");
         }
         const controller = new AbortController();
@@ -219,7 +238,7 @@ class RedisRateLimitStore implements Store {
         });
         try {
             return await Promise.race([
-                this.client.sendCommand(args, {
+                client.sendCommand(args, {
                     timeout: this.commandTimeoutMs,
                     abortSignal: controller.signal,
                 }),
