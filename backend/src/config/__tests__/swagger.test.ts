@@ -41,7 +41,11 @@ describe("config/swagger", () => {
                         }),
                     }),
                 }),
-                apis: ["./src/routes/*.ts", "./src/routes/library/*.ts"],
+                apis: [
+                    "./src/routes/*.ts",
+                    "./src/routes/auth/*.ts",
+                    "./src/routes/library/*.ts",
+                ],
             }),
         );
         expect(swaggerSpec).toBe(mockedSpec);
