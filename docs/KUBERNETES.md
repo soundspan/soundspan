@@ -66,19 +66,21 @@ Images are published to GHCR.
 | Frontend                         | `ghcr.io/soundspan/soundspan-frontend:latest`            | 3030 |
 | Audio Analyzer                   | `ghcr.io/soundspan/soundspan-audio-analyzer:latest`      | —    |
 | Audio Analyzer CLAP              | `ghcr.io/soundspan/soundspan-audio-analyzer-clap:latest` | —    |
+| DCLAP Vibe Provider              | `ghcr.io/soundspan/soundspan-vibe-provider-dclap:latest` | 8091 |
 | TIDAL Sidecar                    | `ghcr.io/soundspan/soundspan-tidal-downloader:latest`    | 8585 |
 | YT Music Streamer                | `ghcr.io/soundspan/soundspan-ytmusic-streamer:latest`    | 8586 |
 
 Notes:
 
 - The backend worker image is only used in `deploymentMode: individual`.
+- The default-off DCLAP provider is only used in `deploymentMode: individual`.
 - AIO mode still uses the single `ghcr.io/soundspan/soundspan` image.
 
 ## Storage Class Guidance (RWX vs RWO)
 
 | Volume          | Access mode | Reason                                                   |
 | --------------- | ----------- | -------------------------------------------------------- |
-| `music`         | RWX         | Shared across backend, sidecars, and analyzers           |
+| `music`         | RWX         | Shared across backend, sidecars, analyzers, and providers |
 | `downloads`     | RWO         | Compose-only Lidarr add-on; not provisioned by the chart |
 | `postgres_data` | RWO         | Single PostgreSQL pod                                    |
 | `backend_cache` | RWO         | Backend-local transcode cache                            |
@@ -124,6 +126,7 @@ non-root.
 | YT Music Streamer                | Yes          | `GET /health`                                                                      |
 | Audio Analyzer                   | No           | Process check                                                                      |
 | Audio Analyzer CLAP              | No           | Import check                                                                       |
+| DCLAP Vibe Provider              | No           | TCP socket on `:8091` (`/health` requires internal authentication)                 |
 | AIO                              | Yes          | `GET /` on `:3030`                                                                 |
 
 ## Prometheus Scraping

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Helm chart now ships the DCLAP vibe provider component, disabled by
+  default for opt-in embedding migrations.
 - Operators can now start a blue/green vibe embedding migration by pointing
   `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
   backfills it, cuts over at configured coverage, retains the old vectors for

@@ -621,6 +621,60 @@ audioAnalyzerClap:
     runtimeClassName: ""
 
 # =============================================================================
+# VIBE PROVIDERS (optional, individual mode only)
+# =============================================================================
+
+# -- Disabled by default; Gate 2 / migration target for DCLAP embeddings.
+vibeProviderDclap:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ghcr.io/soundspan/soundspan-vibe-provider-dclap
+    tag: 2.2.0
+    # -- Immutable sha256 digest. When set, takes precedence over tag.
+    digest: ""
+    pullPolicy: Always
+  port: 8091
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 2560Mi
+  # TCP probes avoid the authenticated /health route, whose required internal
+  # secret header cannot be sourced from a Kubernetes httpGet probe.
+  livenessProbe:
+    tcpSocket:
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    tcpSocket:
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  env:
+    DCLAP_ONNX_INTRA_OP_THREADS: "1"
+    MODEL_IDLE_TIMEOUT: "300"
+  # -- Additional environment variable sources for DCLAP provider container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-vibe-provider-dclap-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+
+# =============================================================================
 # SHARED CONFIGURATION
 # =============================================================================
 
@@ -855,4 +909,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-

@@ -2,7 +2,7 @@ apiVersion: v2
 name: soundspan
 description: A self-hosted music server with TIDAL and YouTube Music streaming integration
 type: application
-version: 2.2.0
+version: 2.3.0
 appVersion: "2.2.0"
 home: https://github.com/soundspan/soundspan
 sources:

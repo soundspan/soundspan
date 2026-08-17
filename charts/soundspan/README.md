@@ -345,6 +345,27 @@ audioAnalyzerClap:
 > Unlike the sidecars above, these analyzer deployments are only used in Individual mode.
 > In AIO mode, audio analysis is built into the single AIO container.
 
+### DCLAP Vibe Provider (Individual Mode Only)
+
+The DCLAP provider is shipped but disabled by default. It is the Gate 2
+migration target for opt-in DCLAP embeddings.
+
+```yaml
+vibeProviderDclap:
+  enabled: true
+
+backend:
+  env:
+    VIBE_PROVIDER_URL: http://soundspan-vibe-provider-dclap:8091
+```
+
+Replace `soundspan` in the service hostname when using a different Helm release
+name. If `backendWorker.enabled=true`, set the same `VIBE_PROVIDER_URL` under
+`backendWorker.env` so worker-owned embedding jobs use the provider. The provider
+mounts the shared music volume read-only and receives only
+`INTERNAL_API_SECRET` from the chart Secret; it does not receive PostgreSQL or
+Redis credentials.
+
 ### Feature Flags
 
 Coarse feature flags render on the backend, backend-worker, and AIO workloads.
@@ -459,6 +480,11 @@ audioAnalyzerClap:
     - secretRef:
         name: soundspan-audio-analyzer-clap-extra-env
 
+vibeProviderDclap:
+  envFrom:
+    - secretRef:
+        name: soundspan-vibe-provider-dclap-extra-env
+
 tidalSidecar:
   envFrom:
     - secretRef:
@@ -507,6 +533,7 @@ This applies to:
 - `frontend.env`
 - `audioAnalyzer.env`
 - `audioAnalyzerClap.env`
+- `vibeProviderDclap.env`
 - `tidalSidecar.env`
 - `ytmusicStreamer.env`
 - `postgresql.env`
