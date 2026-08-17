@@ -57,7 +57,7 @@ RUN set -eu; \
     echo "9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288  /app/tokenizer/config.json" | sha256sum -c -; \
     echo "fe36cab26d4f4421ed725e10a2e9ddb7f799449c603a96e7f29b5a3c82a95862  /app/tokenizer/merges.txt" | sha256sum -c -; \
     echo "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f  /app/tokenizer/special_tokens_map.json" | sha256sum -c -; \
-    echo "4e105259baf1a26f1ed8b503ad09678d69d02b6be1c91faa55075a22d5bee148  /app/tokenizer/tokenizer.json" | sha256sum -c -; \
+    echo "77ef92283d67f0d97e1454909a964afcbfa2019f0fb9f18f8e88d5c25c3ba729  /app/tokenizer/tokenizer.json" | sha256sum -c -; \
     echo "377f91458f7729a4574a84c77bdce67dbc3c58c1a345a29bbf8c4eb1307948a3  /app/tokenizer/tokenizer_config.json" | sha256sum -c -; \
     echo "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e  /app/tokenizer/vocab.json" | sha256sum -c -
 
