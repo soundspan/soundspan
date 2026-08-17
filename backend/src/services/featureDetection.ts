@@ -1,4 +1,5 @@
 import { existsSync } from "fs";
+import { config } from "../config";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -72,6 +73,10 @@ class FeatureDetectionService {
 
     private async checkCLAP(): Promise<boolean> {
         try {
+            if (config.vibeProviderUrl) {
+                return true;
+            }
+
             // Analyzer script bundled in image = feature is available
             if (existsSync(CLAP_ANALYZER_PATH)) {
                 return true;

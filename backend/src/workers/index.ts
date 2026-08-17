@@ -32,6 +32,7 @@ import {
     startMoodBucketWorker,
     stopMoodBucketWorker,
 } from "./moodBucketWorker";
+import { startVibeEmbedWorker, stopVibeEmbedWorker } from "./vibeEmbedWorker";
 import {
     startTrackMappingStalenessWorker,
     stopTrackMappingStalenessWorker,
@@ -1162,6 +1163,12 @@ startUnifiedEnrichmentWorker().catch((err) => {
     log.error("Failed to start unified enrichment worker:", err);
 });
 
+if (!startVibeEmbedWorker()) {
+    log.info(
+        "Vibe provider embedding worker not started; provider mode or audio analysis is disabled",
+    );
+}
+
 // Start mood bucket worker
 // Assigns newly analyzed tracks to mood buckets for fast mood mix generation
 if (config.features.audioAnalysis) {
@@ -1384,6 +1391,9 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Stop unified enrichment worker
     await stopUnifiedEnrichmentWorker();
+
+    // Stop intake and drain provider-owned audio embedding work.
+    await stopVibeEmbedWorker();
 
     // Stop mood bucket worker
     stopMoodBucketWorker();

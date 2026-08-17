@@ -161,6 +161,81 @@ def test_queued_in_library_path_is_embedded(
     assert stored_track_ids == ["track-1"]
 
 
+def test_successful_store_reports_completion_to_backend(
+    analyzer_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Report a stored embedding through the existing backend success callback."""
+    music_root = tmp_path / "music"
+    track_path = music_root / "artist" / "track.flac"
+    track_path.parent.mkdir(parents=True)
+    track_path.touch()
+    post_calls: list[tuple[str, dict[str, str], dict[str, str], int]] = []
+    monkeypatch.setenv("INTERNAL_API_SECRET", "callback-secret")
+
+    def record_post(
+        url: str,
+        *,
+        json: dict[str, str],
+        headers: dict[str, str],
+        timeout: int,
+    ) -> None:
+        post_calls.append((url, json, headers, timeout))
+
+    monkeypatch.setattr(analyzer_module.requests, "post", record_post, raising=False)
+
+    _process_queued_path(
+        analyzer_module,
+        monkeypatch,
+        music_root,
+        "artist/track.flac",
+    )
+
+    assert post_calls == [
+        (
+            f"{analyzer_module.BACKEND_URL}/api/analysis/vibe/success",
+            {"trackId": "track-1"},
+            {
+                "Content-Type": "application/json",
+                "X-Internal-Secret": "callback-secret",
+            },
+            5,
+        )
+    ]
+
+
+def test_success_callback_failure_does_not_fail_completed_job(
+    analyzer_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Log and continue when the best-effort success callback fails."""
+    music_root = tmp_path / "music"
+    track_path = music_root / "artist" / "track.flac"
+    track_path.parent.mkdir(parents=True)
+    track_path.touch()
+
+    def fail_post(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(analyzer_module.requests, "post", fail_post, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger=analyzer_module.logger.name):
+        analyzer, status_updates, stored_track_ids = _process_queued_path(
+            analyzer_module,
+            monkeypatch,
+            music_root,
+            "artist/track.flac",
+        )
+
+    assert analyzer.paths == [str(track_path.resolve())]
+    assert status_updates == [("track-1", "completed")]
+    assert stored_track_ids == ["track-1"]
+    assert "Failed to report success to backend" in caplog.text
+
+
 def test_duplicate_queue_job_is_skipped_when_pending_claim_fails(
     analyzer_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

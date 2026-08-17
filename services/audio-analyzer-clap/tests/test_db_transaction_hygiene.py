@@ -254,7 +254,10 @@ def test_worker_update_succeeds_under_autocommit_and_rolls_back_failure(
     worker._update_track_status("track-1", "processing")
 
     update_cursor = conn.cursors[-1]
-    assert 'UPDATE "Track"' in update_cursor.executions[0][0]
+    update_query = update_cursor.executions[0][0]
+    assert 'UPDATE "Track"' in update_query
+    assert '"vibeAnalysisError" = NULL' in update_query
+    assert '"vibeAnalysisStartedAt" = NULL' in update_query
     assert update_cursor.executions[0][1][0] == "processing"
     assert update_cursor.executions[0][1][2] == "track-1"
     assert conn.commit_calls == 1

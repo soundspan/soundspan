@@ -153,6 +153,13 @@ const vibeProviderUrlEnvSchema = z
     )
     .optional();
 
+const vibeEmbedConcurrencyEnvSchema = z
+    .string()
+    .regex(/^[1-8]$/, {
+        message: "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 8",
+    })
+    .optional();
+
 function normalizeVibeProviderUrl(
     value: string | undefined,
 ): string | undefined {
@@ -338,6 +345,7 @@ const envSchema = z
         ENCRYPTION_KEY: z.string().optional(),
         INTERNAL_API_SECRET: z.string().optional(),
         VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
+        VIBE_EMBED_CONCURRENCY: vibeEmbedConcurrencyEnvSchema,
         METRICS_TOKEN: z.string().optional(),
         METRICS_PUBLIC: z.string().optional(),
         PORT: z.string().optional(),
@@ -481,9 +489,10 @@ export const config = {
     databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
 
-    // Optional text-embedding provider base URL. Absence preserves the legacy
-    // Redis-stream transport used by vibe search.
+    // Optional text/audio embedding provider base URL. Absence preserves the
+    // legacy Redis transports and sidecar consumer.
     vibeProviderUrl: normalizeVibeProviderUrl(process.env.VIBE_PROVIDER_URL),
+    vibeEmbedConcurrency: Number(process.env.VIBE_EMBED_CONCURRENCY ?? "1"),
 
     // Required stable deployment secret retained as the JWT signing fallback
     // and final API-key pepper fallback. It no longer configures sessions.

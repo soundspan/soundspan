@@ -146,6 +146,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeCalibration.ts` | Vibe distance calibration |
+| `backend/src/services/vibeEmbedJobs.ts` | Provider-backed audio embedding job lifecycle |
+| `backend/src/services/vibeEmbeddingCoverage.ts` | Active-space audio embedding coverage metrics |
 | `backend/src/services/vibeProvider.ts` | Validated, bounded vibe-provider HTTP client and active-space trust boundary |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/vibeVocabularyGenerator.ts` | Testable provider-backed vocabulary artifact generation |

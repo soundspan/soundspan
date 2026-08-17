@@ -7,6 +7,11 @@ import {
     type VibeProviderOutcome,
 } from "./providerMetrics";
 import type { FederationEmbeddingPageOutcome } from "../services/federationEmbeddingSpace";
+import {
+    createVibeEmbedMetrics,
+    type VibeEmbedJobOutcome,
+    type VibeEmbeddingCoverage,
+} from "./vibeEmbedMetrics";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -19,6 +24,7 @@ collectDefaultMetrics({
 const httpMetrics = createHttpRequestMetrics(metricsRegistry);
 const domainMetrics = createDomainMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
+const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry);
 
 /** Express middleware recording bounded HTTP request duration labels. */
 export const httpMetricsMiddleware = httpMetrics.middleware;
@@ -47,6 +53,18 @@ export function recordVibeProviderRequest(
     durationSeconds: number,
 ): void {
     providerMetrics.record(endpoint, outcome, durationSeconds);
+}
+
+/** Records one final backend-driven audio embedding job outcome. */
+export function recordVibeEmbedJobOutcome(outcome: VibeEmbedJobOutcome): void {
+    vibeEmbedMetrics.recordJob(outcome);
+}
+
+/** Replaces the active-space audio embedding coverage gauge values. */
+export function setVibeEmbeddingCoverage(
+    coverage: VibeEmbeddingCoverage,
+): void {
+    vibeEmbedMetrics.setCoverage(coverage);
 }
 
 /** Records one completed federation page carrying peer embeddings. */

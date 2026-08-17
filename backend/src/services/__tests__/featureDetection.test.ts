@@ -7,6 +7,11 @@ const mockTrackEmbeddingCount = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerError = jest.fn();
 const mockGetActiveSpace = jest.fn();
+const mockConfig: { vibeProviderUrl: string | undefined } = {
+    vibeProviderUrl: undefined,
+};
+
+jest.mock("../../config", () => ({ config: mockConfig }));
 
 jest.mock("fs", () => ({
     existsSync: (...args: unknown[]) => mockExistsSync(...args),
@@ -44,6 +49,7 @@ describe("featureDetection service", () => {
     beforeEach(() => {
         jest.resetModules();
         jest.clearAllMocks();
+        mockConfig.vibeProviderUrl = undefined;
         mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
@@ -106,6 +112,39 @@ describe("featureDetection service", () => {
         expect(mockTrackFindFirst).toHaveBeenCalledWith({
             where: { energy: { not: null } },
             select: { id: true },
+        });
+    });
+
+    it("reports vibe embeddings in provider mode without legacy signals", async () => {
+        mockConfig.vibeProviderUrl = "http://vibe-provider:8090";
+        const service = await loadService();
+        mockExistsSync.mockReturnValue(false);
+        mockRedisGet.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue(null);
+        mockTrackEmbeddingCount.mockResolvedValue(0);
+
+        await expect(service.getFeatures()).resolves.toEqual({
+            musicCNN: false,
+            vibeEmbeddings: true,
+        });
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+        expect(mockTrackEmbeddingCount).not.toHaveBeenCalled();
+    });
+
+    it("keeps legacy vibe detection when the provider URL is unset", async () => {
+        const service = await loadService();
+        mockExistsSync.mockReturnValue(false);
+        mockRedisGet.mockResolvedValue(null);
+        mockTrackFindFirst.mockResolvedValue(null);
+        mockTrackEmbeddingCount.mockResolvedValue(0);
+
+        await expect(service.getFeatures()).resolves.toEqual({
+            musicCNN: false,
+            vibeEmbeddings: false,
+        });
+        expect(mockGetActiveSpace).toHaveBeenCalledTimes(1);
+        expect(mockTrackEmbeddingCount).toHaveBeenCalledWith({
+            where: { spaceId: "space-active" },
         });
     });
 

@@ -29,7 +29,9 @@ describe("workers runtime behavior", () => {
         discovery?: boolean;
         autoPlaylists?: boolean;
         federation?: boolean;
+        vibeProviderUrl?: string;
     }) {
+        const { vibeProviderUrl, ...featureFlags } = featureOverrides ?? {};
         const scanQueue = createQueueMock();
         const discoverQueue = createQueueMock();
         const imageQueue = createQueueMock();
@@ -51,6 +53,10 @@ describe("workers runtime behavior", () => {
         const stopUnifiedEnrichmentWorker = jest.fn(async () => undefined);
         const startMoodBucketWorker = jest.fn(async () => undefined);
         const stopMoodBucketWorker = jest.fn();
+        const startVibeEmbedWorker = jest.fn(() =>
+            Boolean(vibeProviderUrl && featureFlags.audioAnalysis !== false),
+        );
+        const stopVibeEmbedWorker = jest.fn(async () => undefined);
         const startDiscoverWeeklyCron = jest.fn();
         const stopDiscoverWeeklyCron = jest.fn();
         const processDiscoverCronTick = jest.fn(async () => ({ ok: true }));
@@ -209,6 +215,10 @@ describe("workers runtime behavior", () => {
             startMoodBucketWorker,
             stopMoodBucketWorker,
         }));
+        jest.doMock("../vibeEmbedWorker", () => ({
+            startVibeEmbedWorker,
+            stopVibeEmbedWorker,
+        }));
         jest.doMock("../../services/downloadQueue", () => ({
             downloadQueueManager,
         }));
@@ -220,12 +230,14 @@ describe("workers runtime behavior", () => {
         }));
         jest.doMock("../../config", () => ({
             config: {
+                vibeProviderUrl,
+                vibeEmbedConcurrency: 1,
                 features: {
                     audioAnalysis: true,
                     discovery: true,
                     autoPlaylists: true,
                     federation: false,
-                    ...(featureOverrides ?? {}),
+                    ...featureFlags,
                 },
             },
         }));
@@ -276,6 +288,8 @@ describe("workers runtime behavior", () => {
             stopUnifiedEnrichmentWorker,
             startMoodBucketWorker,
             stopMoodBucketWorker,
+            startVibeEmbedWorker,
+            stopVibeEmbedWorker,
             startDiscoverWeeklyCron,
             stopDiscoverWeeklyCron,
             processGenericImport,
@@ -346,6 +360,7 @@ describe("workers runtime behavior", () => {
         expect(mocks.registerFederationSchedules).not.toHaveBeenCalled();
         expect(mocks.startUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startMoodBucketWorker).toHaveBeenCalledTimes(1);
+        expect(mocks.startVibeEmbedWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
         expect(mocks.stopDiscoverWeeklyCron).not.toHaveBeenCalled();
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
@@ -548,6 +563,7 @@ describe("workers runtime behavior", () => {
 
         expect(mocks.stopUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.stopMoodBucketWorker).toHaveBeenCalledTimes(1);
+        expect(mocks.stopVibeEmbedWorker).toHaveBeenCalledTimes(1);
         expect(mocks.downloadQueueManager.shutdown).toHaveBeenCalledTimes(1);
         expect(mocks.scanQueue.removeAllListeners).toHaveBeenCalledTimes(1);
         expect(

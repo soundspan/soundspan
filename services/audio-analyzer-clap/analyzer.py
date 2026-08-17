@@ -575,6 +575,7 @@ class Worker:
 
         if success:
             self._update_track_status(track_id, "completed")
+            self._report_success(track_id)
             logger.info(f"Worker {self.worker_id} completed track: {track_id}")
         else:
             self._mark_failed(track_id, "Failed to store embedding")
@@ -622,6 +623,8 @@ class Worker:
                 UPDATE "Track"
                 SET
                     "vibeAnalysisStatus" = %s,
+                    "vibeAnalysisError" = NULL,
+                    "vibeAnalysisStartedAt" = NULL,
                     "vibeAnalysisStatusUpdatedAt" = %s
                 WHERE id = %s
             """,
@@ -633,6 +636,23 @@ class Worker:
             self.db.rollback()
         finally:
             cursor.close()
+
+    @staticmethod
+    def _report_success(track_id: str) -> None:
+        """Report a stored vibe embedding to the backend failure ledger."""
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Internal-Secret": os.getenv("INTERNAL_API_SECRET", ""),
+            }
+            requests.post(
+                f"{BACKEND_URL}/api/analysis/vibe/success",
+                json={"trackId": track_id},
+                headers=headers,
+                timeout=5,
+            )
+        except Exception as report_err:
+            logger.warning(f"Failed to report success to backend: {report_err}")
 
     def _mark_failed(self, track_id: str, error: str):
         """Mark track as failed and record in enrichment failures"""

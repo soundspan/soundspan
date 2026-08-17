@@ -221,10 +221,34 @@ describe("config module", () => {
     it("keeps the vibe provider disabled when its URL is absent", async () => {
         const { config } = await loadConfigModule({
             VIBE_PROVIDER_URL: undefined,
+            VIBE_EMBED_CONCURRENCY: undefined,
         });
 
         expect(config.vibeProviderUrl).toBeUndefined();
+        expect(config.vibeEmbedConcurrency).toBe(1);
     });
+
+    it.each([
+        ["1", 1],
+        ["4", 4],
+        ["8", 8],
+    ])("parses VIBE_EMBED_CONCURRENCY %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            VIBE_EMBED_CONCURRENCY: raw,
+        });
+
+        expect(config.vibeEmbedConcurrency).toBe(expected);
+    });
+
+    it.each(["", "0", "9", "1.5", "not-a-number"])(
+        "rejects invalid VIBE_EMBED_CONCURRENCY %s",
+        async (raw) => {
+            await expectStartupValidationFailure(
+                { VIBE_EMBED_CONCURRENCY: raw },
+                "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 8",
+            );
+        },
+    );
 
     it.each([
         ["http://vibe-provider:8090", "http://vibe-provider:8090"],

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an opt-in, validated vibe-provider HTTP client for text search and
   vocabulary generation, with active-space vector checks and bounded metrics.
 - The torch CLAP sidecar now exposes the internal embedding provider HTTP contract.
+- Added backend-driven provider audio embedding behind `VIBE_PROVIDER_URL`,
+  with bounded concurrency, graceful draining, status ownership, and
+  active-space coverage metrics.
 
 ### Changed
 
