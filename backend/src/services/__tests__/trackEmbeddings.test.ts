@@ -237,12 +237,7 @@ describe("findTracksByTextEmbedding", () => {
         mockRunAnnQuery.mockResolvedValue(rows);
 
         await expect(
-            findTracksByTextEmbedding(
-                [0.25, 0.75],
-                0.8,
-                60,
-                "space-migrating",
-            ),
+            findTracksByTextEmbedding([0.25, 0.75], 0.8, 60, "space-migrating"),
         ).resolves.toBe(rows);
 
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);

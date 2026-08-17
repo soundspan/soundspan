@@ -759,5 +759,4 @@ describe("analysis routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to retry vibe failures" });
     });
-
 });

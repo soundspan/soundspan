@@ -52,11 +52,7 @@ function warnUnregisteredProviderSpace(
     checkpointHash: string,
 ): void {
     const now = Date.now();
-    if (
-        now - lastUnregisteredWarningAt <
-        PROVIDER_SPACE_CACHE_TTL_MS
-    )
-        return;
+    if (now - lastUnregisteredWarningAt < PROVIDER_SPACE_CACHE_TTL_MS) return;
     lastUnregisteredWarningAt = now;
     log.warn("Vibe text provider space is not registered", {
         family,
@@ -94,10 +90,7 @@ async function loadProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
 
 async function getProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
     if (!config.vibeProviderUrl) throw new VibeProviderUnavailableError();
-    if (
-        cachedProviderSearchSpace &&
-        Date.now() < providerSpaceCacheExpiresAt
-    ) {
+    if (cachedProviderSearchSpace && Date.now() < providerSpaceCacheExpiresAt) {
         return cachedProviderSearchSpace;
     }
     const searchSpace = await loadProviderSearchSpace();

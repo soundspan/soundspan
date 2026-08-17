@@ -23,7 +23,11 @@ jest.mock("../../services/vibeProvider", () => {
             mockFetchProviderSpace(...args),
         assertProviderMatchesActiveSpace: jest.fn(
             (
-                provider: { family: string; checkpointHash: string; dim: number },
+                provider: {
+                    family: string;
+                    checkpointHash: string;
+                    dim: number;
+                },
                 active: { family: string; checkpointHash: string; dim: number },
             ) => {
                 if (
@@ -488,10 +492,10 @@ describe("vibe search transport compatibility", () => {
                 ],
             }),
         );
-        expect(mockProviderEmbedText).toHaveBeenCalledWith(
-            "upbeat synthwave",
-            { id: "space-active", dim: 512 },
-        );
+        expect(mockProviderEmbedText).toHaveBeenCalledWith("upbeat synthwave", {
+            id: "space-active",
+            dim: 512,
+        });
         expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
             "space-active",
         );
@@ -557,10 +561,10 @@ describe("vibe search transport compatibility", () => {
                     tracks: [expect.objectContaining({ id: "track-provider" })],
                 }),
             );
-            expect(mockProviderEmbedText).toHaveBeenCalledWith(
-                "quiet focus",
-                { id: "space-migrating", dim: 512 },
-            );
+            expect(mockProviderEmbedText).toHaveBeenCalledWith("quiet focus", {
+                id: "space-migrating",
+                dim: 512,
+            });
             expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
                 "space-migrating",
             );

@@ -317,11 +317,7 @@ if (config.features.audioAnalysis) {
     logger.info(
         "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); /api/analysis and /api/vibe return 404",
     );
-    app.use(
-        "/api/analysis",
-        apiLimiter,
-        createFeatureDisabledHandler(),
-    );
+    app.use("/api/analysis", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/admin", adminSurfaceLimiter, adminRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);

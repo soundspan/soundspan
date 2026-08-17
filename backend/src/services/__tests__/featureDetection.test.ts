@@ -46,19 +46,22 @@ describe("featureDetection service", () => {
     it.each([
         ["http://vibe-provider:8090", true],
         [undefined, false],
-    ])("reports provider-backed vibe availability for %s", async (url, expected) => {
-        mockConfig.vibeProviderUrl = url;
-        mockExistsSync.mockReturnValue(false);
-        mockRedisGet.mockResolvedValue(null);
-        mockTrackFindFirst.mockResolvedValue(null);
-        const service = await loadService();
+    ])(
+        "reports provider-backed vibe availability for %s",
+        async (url, expected) => {
+            mockConfig.vibeProviderUrl = url;
+            mockExistsSync.mockReturnValue(false);
+            mockRedisGet.mockResolvedValue(null);
+            mockTrackFindFirst.mockResolvedValue(null);
+            const service = await loadService();
 
-        await expect(service.getFeatures()).resolves.toEqual({
-            musicCNN: false,
-            vibeEmbeddings: expected,
-        });
-        expect(mockRedisGet).toHaveBeenCalledTimes(1);
-    });
+            await expect(service.getFeatures()).resolves.toEqual({
+                musicCNN: false,
+                vibeEmbeddings: expected,
+            });
+            expect(mockRedisGet).toHaveBeenCalledTimes(1);
+        },
+    );
 
     it("preserves MusicCNN script, heartbeat, and database detection", async () => {
         const service = await loadService();

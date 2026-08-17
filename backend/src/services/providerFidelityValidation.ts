@@ -177,9 +177,7 @@ export function parseProviderFidelityArgs(
     if (!candidate) throw new TypeError("--candidate-url is required");
     const baseline = flags.get("--baseline-url") ?? configuredBaselineUrl;
     if (!baseline) {
-        throw new TypeError(
-            "--baseline-url or VIBE_PROVIDER_URL is required",
-        );
+        throw new TypeError("--baseline-url or VIBE_PROVIDER_URL is required");
     }
     const sample = flags.has("--sample")
         ? parseIntegerFlag(flags.get("--sample"), "--sample")

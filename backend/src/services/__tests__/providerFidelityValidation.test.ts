@@ -270,9 +270,7 @@ describe("provider fidelity CLI arguments", () => {
                 ["--candidate-url", "http://candidate"],
                 undefined,
             ),
-        ).toThrow(
-            "--baseline-url or VIBE_PROVIDER_URL is required",
-        );
+        ).toThrow("--baseline-url or VIBE_PROVIDER_URL is required");
     });
 
     it.each([
@@ -302,8 +300,6 @@ describe("provider fidelity CLI arguments", () => {
     ])("rejects invalid numeric bounds", (argv, message) => {
         expect(() =>
             parseProviderFidelityArgs(argv, "http://baseline"),
-        ).toThrow(
-            message,
-        );
+        ).toThrow(message);
     });
 });

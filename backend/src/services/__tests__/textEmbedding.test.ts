@@ -148,12 +148,12 @@ describe("text embedding space routing", () => {
     it("rejects an unregistered provider space without embedding", async () => {
         mockFindRegisteredProviderSpace.mockResolvedValue(null);
 
-        await expect(resolveTextEmbedding("quiet focus")).rejects.toBeInstanceOf(
-            TextEmbeddingProviderError,
-        );
-        await expect(resolveTextEmbedding("second query")).rejects.toBeInstanceOf(
-            TextEmbeddingProviderError,
-        );
+        await expect(
+            resolveTextEmbedding("quiet focus"),
+        ).rejects.toBeInstanceOf(TextEmbeddingProviderError);
+        await expect(
+            resolveTextEmbedding("second query"),
+        ).rejects.toBeInstanceOf(TextEmbeddingProviderError);
 
         expect(mockEmbedText).not.toHaveBeenCalled();
         expect(mockWarn).toHaveBeenCalledTimes(1);
@@ -169,9 +169,9 @@ describe("text embedding space routing", () => {
     it("reports provider mode as unavailable when the URL is unset", async () => {
         mockConfig.vibeProviderUrl = undefined;
 
-        await expect(resolveTextEmbedding("quiet focus")).rejects.toBeInstanceOf(
-            TextEmbeddingTimeoutError,
-        );
+        await expect(
+            resolveTextEmbedding("quiet focus"),
+        ).rejects.toBeInstanceOf(TextEmbeddingTimeoutError);
 
         expect(mockFetchProviderSpace).not.toHaveBeenCalled();
         expect(mockFindRegisteredProviderSpace).not.toHaveBeenCalled();
