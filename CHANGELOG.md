@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.3.0] - 2026-08-17
+
+### Added
+
 - The Helm chart now ships the DCLAP vibe provider component, disabled by
   default for opt-in embedding migrations.
 - Added a DCLAP provider target to the default and analysis Docker Bake groups.
