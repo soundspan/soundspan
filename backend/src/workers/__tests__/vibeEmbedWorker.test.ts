@@ -2,6 +2,7 @@ jest.mock("../../config", () => ({
     config: {
         vibeProviderUrl: undefined,
         vibeEmbedConcurrency: 1,
+        analysisQueues: { vibeMaxDepth: 100 },
         features: { audioAnalysis: true },
         redisUrl: "redis://mock:6379",
         internalApiSecret: "test-secret",
@@ -36,7 +37,11 @@ describe("vibe embed worker", () => {
         const pop = jest.fn<Promise<string | null>, [string, number]>();
         const processJob = jest.fn(async () => "stored" as const);
         const requeue = jest.fn(async () => undefined);
-        const refreshCoverage = jest.fn(async () => undefined);
+        const refreshCoverage = jest.fn(async () => ({
+            embedded: 8,
+            pending: 2,
+            failed: 1,
+        }));
         const runLifecycle = jest.fn(async () => undefined);
         const cleanupLegacyArtifacts = jest.fn<Promise<void>, []>(
             async () => undefined,
@@ -44,12 +49,16 @@ describe("vibe embed worker", () => {
         const setTargetSpace = jest.fn();
         const clearTargetSpace = jest.fn();
         const recordSpaceTransition = jest.fn();
+        const setMigrationActive = jest.fn();
+        const writeStatus = jest.fn(async () => undefined);
+        const now = jest.fn(() => new Date("2026-08-17T12:00:00.000Z"));
         const resolveTargetSpace = jest.fn<
             Promise<{
                 id: string;
                 dim: number;
                 status: "active" | "migrating";
                 registered: boolean;
+                family: string;
             }>,
             []
         >(async () => ({
@@ -57,6 +66,7 @@ describe("vibe embed worker", () => {
             dim: 2,
             status: "active",
             registered: false,
+            family: "test-family",
         }));
         const logger = {
             info: jest.fn(),
@@ -76,6 +86,9 @@ describe("vibe embed worker", () => {
             setTargetSpace,
             clearTargetSpace,
             recordSpaceTransition,
+            setMigrationActive,
+            writeStatus,
+            now,
             resolveTargetSpace,
             logger,
         });
@@ -90,6 +103,8 @@ describe("vibe embed worker", () => {
             setTargetSpace,
             clearTargetSpace,
             recordSpaceTransition,
+            setMigrationActive,
+            writeStatus,
             resolveTargetSpace,
             logger,
         };
@@ -134,6 +149,18 @@ describe("vibe embed worker", () => {
         expect(harness.pop).toHaveBeenCalledWith("audio:clap:queue", 1);
         expect(harness.refreshCoverage).toHaveBeenCalledTimes(1);
         expect(harness.refreshCoverage).toHaveBeenCalledWith("space-active");
+        expect(harness.writeStatus).toHaveBeenLastCalledWith({
+            providerReachability: {
+                reachable: true,
+                checkedAt: "2026-08-17T12:00:00.000Z",
+            },
+            targetSpace: {
+                id: "space-active",
+                family: "test-family",
+                status: "active",
+            },
+            coverage: { embedded: 8, pending: 2, failed: 1 },
+        });
 
         const stopping = harness.worker.stop();
         firstPop.resolve(null);
@@ -183,6 +210,29 @@ describe("vibe embed worker", () => {
         const stopping = harness.worker.stop();
         firstPop.resolve(null);
         await stopping;
+    });
+
+    it("abandons legacy cleanup at the fixed shutdown deadline", async () => {
+        jest.useFakeTimers();
+        const firstPop = deferred<string | null>();
+        const cleanup = deferred<void>();
+        const harness = createHarness({
+            providerUrl: "http://provider:8090",
+        });
+        harness.pop.mockReturnValueOnce(firstPop.promise);
+        harness.cleanupLegacyArtifacts.mockReturnValueOnce(cleanup.promise);
+
+        await harness.worker.start();
+        await Promise.resolve();
+        const stopping = harness.worker.stop();
+        firstPop.resolve(null);
+        await jest.advanceTimersByTimeAsync(60_000);
+
+        await expect(stopping).resolves.toBeUndefined();
+        expect(harness.logger.warn).toHaveBeenCalledWith(
+            "Legacy vibe Redis cleanup abandoned at its deadline",
+            { timeoutMs: 60_000 },
+        );
     });
 
     it("finishes an in-flight job before shutdown resolves", async () => {
@@ -324,12 +374,16 @@ describe("vibe embed worker", () => {
                 dim: 2,
                 status,
                 registered: false,
+                family: "test-family",
             });
             harness.pop.mockReturnValueOnce(firstPop.promise);
 
             await expect(harness.worker.start()).resolves.toBe(true);
             expect(harness.setTargetSpace).toHaveBeenCalledWith(
                 `space-${status}`,
+            );
+            expect(harness.setMigrationActive).toHaveBeenCalledWith(
+                status === "migrating",
             );
             await flushPromises();
             expect(harness.processJob).not.toHaveBeenCalled();
@@ -350,6 +404,7 @@ describe("vibe embed worker", () => {
             dim: 2,
             status: "migrating",
             registered: true,
+            family: "test-family",
         });
         harness.pop.mockReturnValueOnce(firstPop.promise);
 
@@ -381,6 +436,7 @@ describe("vibe embed worker", () => {
                 dim: 3,
                 status: "migrating",
                 registered: false,
+                family: "test-family",
             });
         harness.pop.mockReturnValueOnce(firstPop.promise);
 
@@ -397,6 +453,14 @@ describe("vibe embed worker", () => {
             "Vibe embedding worker target-space resolution failed",
             { error },
         );
+        expect(harness.writeStatus).toHaveBeenCalledWith({
+            providerReachability: {
+                reachable: false,
+                checkedAt: "2026-08-17T12:00:00.000Z",
+            },
+            targetSpace: null,
+            coverage: null,
+        });
 
         const stopping = harness.worker.stop();
         firstPop.resolve(null);
@@ -450,6 +514,7 @@ describe("vibe embed worker", () => {
             dim: number;
             status: "active";
             registered: false;
+            family: string;
         }>();
         const firstPop = deferred<string | null>();
         const harness = createHarness({
@@ -466,6 +531,7 @@ describe("vibe embed worker", () => {
             dim: 2,
             status: "active",
             registered: false,
+            family: "test-family",
         });
 
         await expect(starting).resolves.toBe(true);

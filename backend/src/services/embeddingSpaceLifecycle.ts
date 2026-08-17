@@ -1,5 +1,6 @@
 import {
     recordVibeSpaceTransition,
+    setVibeMigrationActive,
     setVibeEmbeddingCoverage,
 } from "../metrics";
 import { prisma } from "../utils/db";
@@ -174,6 +175,7 @@ async function completeCutover(
     await flipActiveSpace(migratingSpaceId, retiredAt);
     invalidateActiveSpaceCache();
     recordVibeSpaceTransition("cutover");
+    setVibeMigrationActive(false);
 }
 
 async function cutOverEmptyActiveSpace(

@@ -107,4 +107,41 @@ describe("vibe embed metrics", () => {
         expect(getProviderQueueDepth).toHaveBeenCalledTimes(1);
         expect(exposition).toContain("soundspan_vibe_provider_queue_depth 7");
     });
+
+    it("keeps the last queue depth and records a bounded collector error", async () => {
+        const registry = new Registry();
+        const getProviderQueueDepth = jest
+            .fn<Promise<number>, []>()
+            .mockResolvedValueOnce(7)
+            .mockRejectedValueOnce(new Error("redis unavailable"));
+        createVibeEmbedMetrics(registry, { getProviderQueueDepth });
+
+        const firstExposition = await registry.metrics();
+        const degradedExposition = await registry.metrics();
+        const nextExposition = await registry.metrics();
+
+        expect(firstExposition).toContain(
+            "soundspan_vibe_provider_queue_depth 7",
+        );
+        expect(degradedExposition).toContain(
+            "soundspan_vibe_provider_queue_depth 7",
+        );
+        expect(nextExposition).toMatch(
+            /soundspan_metrics_collection_errors_total\{collector="vibe_queue_depth"\} [1-9][0-9]*/,
+        );
+    });
+
+    it("publishes queue capacity and migration state for alert ratios", async () => {
+        const registry = new Registry();
+        const { metrics } = createMetrics(registry);
+
+        metrics.setProviderQueueCapacity(100);
+        metrics.setMigrationActive(true);
+
+        const exposition = await registry.metrics();
+        expect(exposition).toContain(
+            "soundspan_vibe_provider_queue_capacity 100",
+        );
+        expect(exposition).toContain("soundspan_vibe_migration_active 1");
+    });
 });

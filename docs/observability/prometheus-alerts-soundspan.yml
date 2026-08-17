@@ -1,0 +1,70 @@
+groups:
+    - name: soundspan-vibe-operational-resilience
+      rules:
+          - alert: SoundspanVibeProviderFailureRateHigh
+            expr: |
+                (
+                  sum(rate(soundspan_vibe_provider_requests_total{outcome!="ok"}[10m]))
+                  /
+                  clamp_min(sum(rate(soundspan_vibe_provider_requests_total[10m])), 0.001)
+                ) > 0.10
+                and sum(increase(soundspan_vibe_provider_requests_total[10m])) >= 10
+            for: 10m
+            labels:
+                severity: warning
+            annotations:
+                summary: Vibe provider request failure rate is high
+                description: More than 10% of at least 10 vibe provider requests failed during the last 10 minutes.
+
+          - alert: SoundspanVibeMigrationCoverageStalled
+            expr: |
+                max(soundspan_vibe_migration_active) == 1
+                and max(changes(soundspan_vibe_embedding_coverage{state="embedded"}[30m])) == 0
+                and max(soundspan_vibe_embedding_coverage{state="pending"}) > 0
+            for: 15m
+            labels:
+                severity: warning
+            annotations:
+                summary: Vibe migration coverage is stalled
+                description: A migrating space has pending tracks but its embedded-track count has not changed for at least 30 minutes.
+
+          - alert: SoundspanVibeFailedTracksHigh
+            expr: max(soundspan_vibe_embedding_coverage{state="failed"}) > 25
+            for: 10m
+            labels:
+                severity: warning
+            annotations:
+                summary: Vibe failed-track count is high
+                description: More than 25 eligible tracks are in the failed vibe embedding state.
+
+          - alert: SoundspanVibeProviderQueueNearCapacity
+            expr: |
+                max(soundspan_vibe_provider_queue_depth)
+                /
+                clamp_min(max(soundspan_vibe_provider_queue_capacity), 1)
+                >= 0.90
+            for: 10m
+            labels:
+                severity: warning
+            annotations:
+                summary: Vibe provider queue is near capacity
+                description: Provider queue depth has remained at or above 90% of its configured admission capacity.
+
+          - alert: SoundspanMetricsCollectionErrors
+            expr: sum(increase(soundspan_metrics_collection_errors_total[10m])) > 0
+            for: 5m
+            labels:
+                severity: warning
+            annotations:
+                summary: Soundspan metrics collection is degraded
+                description: At least one bounded scrape-time collector failed during the last 10 minutes.
+
+          - alert: SoundspanFederationSuppressedExportsPostCutover
+            expr: |
+                sum(increase(soundspan_federation_embedding_exports_total{outcome="suppressed_legacy_peer"}[15m])) > 0
+            for: 0m
+            labels:
+                severity: warning
+            annotations:
+                summary: Federation exports are being suppressed after vibe cutover
+                description: A peer without embedding-space support requested embeddings after the active space left the legacy teacher space.

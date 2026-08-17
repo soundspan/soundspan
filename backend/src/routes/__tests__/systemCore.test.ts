@@ -86,6 +86,20 @@ describe("system routes integration", () => {
             clapAvailable: true,
             tidalAvailable: false,
             allAvailable: false,
+            vibe: {
+                provider: {
+                    configured: true,
+                    reachable: true,
+                    checkedAt: "2026-08-17T12:00:00.000Z",
+                },
+                activeSpace: { id: "space-active", family: "teacher" },
+                migration: {
+                    spaceId: "space-migrating",
+                    family: "student",
+                    coverage: { embedded: 80, pending: 20, failed: 2 },
+                    cutoverThreshold: 0.95,
+                },
+            },
         };
         mockGetFeatures.mockResolvedValueOnce(features);
 

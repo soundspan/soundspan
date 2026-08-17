@@ -5,12 +5,19 @@ const LEGACY_TEXT_EMBED_STREAM = "audio:text:embed:requests";
 const LEGACY_TEXT_EMBED_GROUP = "clap:text:embed:group";
 const LEGACY_WORKER_HEARTBEAT = "clap:worker:heartbeat";
 const RESERVATION_PATTERN = `${VIBE_PROVIDER_QUEUE_KEY}:reserved:*`;
-const SCAN_BATCH_SIZE = 100;
+const CLEANUP_MARKER_KEY = "soundspan:legacy-vibe-cleanup:v1";
+const SCAN_BATCH_SIZE = 2_048;
+const MAX_KEYS_PER_PAGE = 2_048;
 const MAX_SCAN_PAGES = 1_000;
 
 /** Minimal Redis surface required by the one-shot transition cleanup. */
 export interface LegacyVibeRedisCleanupClient {
     del(key: string): Promise<number>;
+    set(
+        key: string,
+        value: string,
+        options: { NX: true },
+    ): Promise<string | null>;
     scan(
         cursor: string,
         options: { MATCH: string; COUNT: number },
@@ -51,11 +58,25 @@ async function deleteStaleReservations(
             MATCH: RESERVATION_PATTERN,
             COUNT: SCAN_BATCH_SIZE,
         });
-        for (let index = 0; index < SCAN_BATCH_SIZE; index += 1) {
-            const key = result.keys[index];
-            if (!key) break;
+        if (result.keys.length > MAX_KEYS_PER_PAGE) {
+            logger.warn(
+                "Legacy vibe reservation scan page exceeded its key limit",
+                {
+                    cursor,
+                    keyCount: result.keys.length,
+                    maxKeysPerPage: MAX_KEYS_PER_PAGE,
+                },
+            );
+            return deleted;
+        }
+        for (const key of result.keys) {
             await runBestEffort(
                 async () => {
+                    // Safety: enqueueReservedWork is the only current producer.
+                    // Its Lua script creates each reservation with SET NX EX
+                    // atomically, so a new reservation is never momentarily
+                    // TTL-less. Therefore TTL == -1 identifies pre-atomic
+                    // legacy reservations; expiring and missing keys are kept.
                     if ((await client.ttl(key)) !== -1) return;
                     deleted += await client.del(key);
                 },
@@ -72,11 +93,31 @@ async function deleteStaleReservations(
     return deleted;
 }
 
+async function claimCleanup(
+    client: LegacyVibeRedisCleanupClient,
+    logger: CleanupLogger,
+): Promise<boolean> {
+    try {
+        const result = await client.set(CLEANUP_MARKER_KEY, "done", {
+            NX: true,
+        });
+        return result === "OK";
+    } catch (error) {
+        logger.warn("Failed to claim the legacy vibe Redis cleanup marker", {
+            error,
+        });
+        return false;
+    }
+}
+
 /** Removes retired CLAP transport artifacts without disturbing valid jobs. */
 export async function cleanupLegacyVibeRedisArtifacts(
     client: LegacyVibeRedisCleanupClient,
     logger: CleanupLogger,
 ): Promise<LegacyVibeRedisCleanupResult> {
+    if (!(await claimCleanup(client, logger))) {
+        return { staleReservationsDeleted: 0 };
+    }
     await runBestEffort(
         () =>
             client.xGroupDestroy(

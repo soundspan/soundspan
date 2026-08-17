@@ -78,7 +78,8 @@ export function createVibeEmbeddingCoverageRefresher(
 /** Refreshes target-space coverage in the process-local metrics registry. */
 export async function refreshVibeEmbeddingCoverage(
     targetSpaceId?: string,
-): Promise<void> {
+): Promise<VibeEmbeddingCoverage> {
     const coverage = await loadVibeEmbeddingCoverage(targetSpaceId);
     setVibeEmbeddingCoverage(coverage);
+    return coverage;
 }

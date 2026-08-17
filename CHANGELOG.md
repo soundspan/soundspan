@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index lifecycle, statement timeouts, and retired-vector cleanup.
 - Added starter Grafana panels for provider failures, migration coverage and
   failures, provider queue depth, and suppressed federation exports.
+- Added Prometheus alert rules for vibe provider failures, stalled migrations,
+  failed tracks, queue saturation, metrics collection errors, and suppressed
+  federation exports.
+- Added vibe migration and provider state to the system status API.
+- Manual re-embed calls now leave automatic backfill headroom in the shared
+  provider queue.
 
 ### Changed
 
@@ -88,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lifecycle creates a missing index after backfill to heal fresh-install recall.
 - Vibe vocabulary blending is now checked against the searched embedding-space
   identity; incompatible or legacy artifacts are skipped with bounded telemetry.
+- Metrics endpoints now remain available when Redis-backed vibe queue-depth
+  collection fails, while retaining the last successful sample.
+- Legacy vibe Redis cleanup is deadline-bounded, restart-durable, safe across
+  replica races, and processes complete bounded SCAN pages.
 - Force rebuilding vibe embeddings now preserves active-space vectors, and a
   durable space marker prevents wiped spaces from triggering fresh-install
   cutover behavior.

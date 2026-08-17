@@ -98,6 +98,45 @@ describe("system routes runtime", () => {
         });
     });
 
+    it("returns cached vibe provider and migration state", async () => {
+        mockGetFeatures.mockResolvedValue({
+            musicCNN: true,
+            vibeEmbeddings: true,
+            vibe: {
+                provider: {
+                    configured: true,
+                    reachable: false,
+                    checkedAt: "2026-08-17T12:00:00.000Z",
+                },
+                activeSpace: { id: "space-active", family: "teacher" },
+                migration: {
+                    spaceId: "space-migrating",
+                    family: "student",
+                    coverage: { embedded: 80, pending: 20, failed: 3 },
+                    cutoverThreshold: 0.95,
+                },
+            },
+        });
+        const res = createRes();
+
+        await getFeatures({ user: { id: "u1" } } as any, res);
+
+        expect(res.body.vibe).toEqual({
+            provider: {
+                configured: true,
+                reachable: false,
+                checkedAt: "2026-08-17T12:00:00.000Z",
+            },
+            activeSpace: { id: "space-active", family: "teacher" },
+            migration: {
+                spaceId: "space-migrating",
+                family: "student",
+                coverage: { embedded: 80, pending: 20, failed: 3 },
+                cutoverThreshold: 0.95,
+            },
+        });
+    });
+
     it("returns 500 when feature detection fails", async () => {
         mockGetFeatures.mockRejectedValueOnce(new Error("probe failed"));
         const req = { user: { id: "u1" } } as any;

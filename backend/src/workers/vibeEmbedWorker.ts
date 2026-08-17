@@ -15,13 +15,22 @@ import {
     setVibeEmbeddingTargetSpaceId,
 } from "../services/embeddingSpaces";
 import { fetchProviderSpace } from "../services/vibeProvider";
-import { recordVibeSpaceTransition } from "../metrics";
+import {
+    recordVibeSpaceTransition,
+    setVibeMigrationActive,
+    setVibeProviderQueueCapacity,
+} from "../metrics";
+import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 import { logger } from "../utils/logger";
 import { blockingBlPop, redisClient } from "../utils/redis";
 import {
     cleanupLegacyVibeRedisArtifacts,
     VIBE_PROVIDER_QUEUE_KEY,
 } from "./legacyVibeRedisCleanup";
+import {
+    writeVibeWorkerStatus,
+    type VibeWorkerStatus,
+} from "./vibeWorkerStatus";
 
 const BLPOP_TIMEOUT_SECONDS = 1;
 const COVERAGE_REFRESH_INTERVAL_MS = 60_000;
@@ -29,6 +38,7 @@ const SPACE_LIFECYCLE_INTERVAL_MS = 5 * 60_000;
 const POP_ERROR_BACKOFF_MS = 250;
 const TARGET_RESOLUTION_RETRY_MS = 60_000;
 const TERMINAL_TARGET_RESOLUTION_RETRY_MS = 15 * 60_000;
+const LEGACY_CLEANUP_TIMEOUT_MS = 60_000;
 
 interface WorkerLogger {
     info(message: string, context?: unknown): void;
@@ -43,21 +53,28 @@ interface VibeEmbedWorkerDependencies {
     pop(queue: string, timeoutSeconds: number): Promise<string | null>;
     processJob(
         rawJob: string,
-        targetSpace: ResolvedWorkerTargetSpace,
+        targetSpace: VibeWorkerJobTargetSpace,
     ): Promise<unknown>;
     requeue(rawJob: string): Promise<void>;
-    refreshCoverage(targetSpaceId: string): Promise<void>;
+    refreshCoverage(targetSpaceId: string): Promise<VibeEmbeddingCoverage>;
     runLifecycle(): Promise<void>;
     cleanupLegacyArtifacts(): Promise<void>;
     resolveTargetSpace(): Promise<ResolvedWorkerTargetSpace>;
     setTargetSpace(spaceId: string): void;
     clearTargetSpace(): void;
     recordSpaceTransition(transition: "registered"): void;
+    setMigrationActive(active: boolean): void;
+    writeStatus(status: VibeWorkerStatus): Promise<void>;
+    now(): Date;
     logger: WorkerLogger;
 }
 
-interface ResolvedWorkerTargetSpace extends VibeEmbedJobTargetSpace {
+interface VibeWorkerJobTargetSpace extends VibeEmbedJobTargetSpace {
     registered: boolean;
+}
+
+interface ResolvedWorkerTargetSpace extends VibeWorkerJobTargetSpace {
+    family: string;
 }
 
 /** Lifecycle surface for the backend-driven audio embedding consumer. */
@@ -68,6 +85,25 @@ export interface VibeEmbedWorker {
 
 function delay(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function settleAtDeadline(
+    task: Promise<void>,
+    timeoutMs: number,
+): Promise<"completed" | "deadline"> {
+    let timer: NodeJS.Timeout | null = null;
+    const deadline = new Promise<"deadline">((resolve) => {
+        timer = setTimeout(() => resolve("deadline"), timeoutMs);
+        timer.unref();
+    });
+    try {
+        return await Promise.race([
+            task.then(() => "completed" as const),
+            deadline,
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 function isTerminalTargetResolutionError(error: unknown): boolean {
@@ -92,6 +128,11 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private terminalResolutionFailureCount = 0;
     private cleanupStarted = false;
     private cleanupTask: Promise<void> | null = null;
+    private providerReachability:
+        | VibeWorkerStatus["providerReachability"]
+        | null = null;
+    private coverage: VibeEmbeddingCoverage | null = null;
+    private statusWriteTask: Promise<void> = Promise.resolve();
     private stopped = false;
 
     constructor(private readonly dependencies: VibeEmbedWorkerDependencies) {
@@ -101,13 +142,42 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private async refreshCoverage(): Promise<void> {
         if (!this.targetSpace) return;
         try {
-            await this.dependencies.refreshCoverage(this.targetSpace.id);
+            this.coverage = await this.dependencies.refreshCoverage(
+                this.targetSpace.id,
+            );
+            await this.publishStatus();
         } catch (error) {
             this.dependencies.logger.warn(
                 "Vibe coverage refresh failed",
                 error,
             );
         }
+    }
+
+    private async publishStatus(): Promise<void> {
+        if (!this.providerReachability) return;
+        const targetSpace = this.targetSpace
+            ? {
+                  id: this.targetSpace.id,
+                  family: this.targetSpace.family,
+                  status: this.targetSpace.status,
+              }
+            : null;
+        const status = {
+            providerReachability: this.providerReachability,
+            targetSpace,
+            coverage: this.coverage,
+        };
+        const writeTask = this.statusWriteTask
+            .then(() => this.dependencies.writeStatus(status))
+            .catch((error) => {
+                this.dependencies.logger.warn(
+                    "Failed to publish vibe worker status",
+                    error,
+                );
+            });
+        this.statusWriteTask = writeTask;
+        await writeTask;
     }
 
     private scheduleLifecycle(): void {
@@ -131,7 +201,13 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
             if (!this.targetSpace) {
                 throw new Error("Vibe embedding target space is unresolved");
             }
-            await this.dependencies.processJob(rawJob, this.targetSpace);
+            const jobTarget = {
+                id: this.targetSpace.id,
+                dim: this.targetSpace.dim,
+                status: this.targetSpace.status,
+                registered: this.targetSpace.registered,
+            };
+            await this.dependencies.processJob(rawJob, jobTarget);
         } catch (error) {
             this.dependencies.logger.error(
                 "Vibe embedding job failed before finalization",
@@ -204,6 +280,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.terminalResolutionFailureCount = 0;
         this.targetSpace = target;
         this.dependencies.setTargetSpace(target.id);
+        this.dependencies.setMigrationActive(target.status === "migrating");
         if (target.registered) {
             this.dependencies.recordSpaceTransition("registered");
             this.dependencies.logger.warn(
@@ -211,6 +288,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
                 { spaceId: target.id },
             );
         }
+        void this.publishStatus();
         this.startCoverageRefresh();
         this.startLifecycleChecks();
         this.dependencies.logger.info("Vibe embedding worker started", {
@@ -224,9 +302,18 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         try {
             const target = await this.dependencies.resolveTargetSpace();
             if (this.stopped || !this.running) return;
+            this.providerReachability = {
+                reachable: true,
+                checkedAt: this.dependencies.now().toISOString(),
+            };
             this.activateTarget(target);
         } catch (error) {
+            this.providerReachability = {
+                reachable: false,
+                checkedAt: this.dependencies.now().toISOString(),
+            };
             const retryDelayMs = this.recordTargetResolutionFailure(error);
+            void this.publishStatus();
             if (this.running) await this.waitForTargetRetry(retryDelayMs);
         }
     }
@@ -276,18 +363,30 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private startLegacyCleanup(): void {
         if (this.cleanupStarted) return;
         this.cleanupStarted = true;
-        const task = this.dependencies
-            .cleanupLegacyArtifacts()
-            .catch((error) => {
-                this.dependencies.logger.warn(
-                    "Legacy vibe Redis cleanup failed",
-                    error,
-                );
-            })
-            .finally(() => {
-                if (this.cleanupTask === task) this.cleanupTask = null;
-            });
+        const task = this.runLegacyCleanup().finally(() => {
+            if (this.cleanupTask === task) this.cleanupTask = null;
+        });
         this.cleanupTask = task;
+    }
+
+    private async runLegacyCleanup(): Promise<void> {
+        try {
+            const outcome = await settleAtDeadline(
+                this.dependencies.cleanupLegacyArtifacts(),
+                LEGACY_CLEANUP_TIMEOUT_MS,
+            );
+            if (outcome === "deadline") {
+                this.dependencies.logger.warn(
+                    "Legacy vibe Redis cleanup abandoned at its deadline",
+                    { timeoutMs: LEGACY_CLEANUP_TIMEOUT_MS },
+                );
+            }
+        } catch (error) {
+            this.dependencies.logger.warn(
+                "Legacy vibe Redis cleanup failed",
+                error,
+            );
+        }
     }
 
     async start(): Promise<boolean> {
@@ -347,7 +446,7 @@ const worker = createVibeEmbedWorker({
         await redisClient.rPush(VIBE_PROVIDER_QUEUE_KEY, rawJob);
     },
     refreshCoverage: async (targetSpaceId) => {
-        await refreshVibeEmbeddingCoverage(targetSpaceId);
+        return refreshVibeEmbeddingCoverage(targetSpaceId);
     },
     runLifecycle: async () => {
         await runEmbeddingSpaceLifecycleCheck({
@@ -368,13 +467,21 @@ const worker = createVibeEmbedWorker({
             dim: resolution.space.dim,
             status: resolution.space.status,
             registered: resolution.registered,
+            family: resolution.space.family,
         };
     },
     setTargetSpace: setVibeEmbeddingTargetSpaceId,
     clearTargetSpace: clearVibeEmbeddingTargetSpaceId,
     recordSpaceTransition: recordVibeSpaceTransition,
+    setMigrationActive: setVibeMigrationActive,
+    writeStatus: async (status) => {
+        await writeVibeWorkerStatus(redisClient, status);
+    },
+    now: () => new Date(),
     logger: log,
 });
+
+setVibeProviderQueueCapacity(config.analysisQueues.vibeMaxDepth);
 
 /** Starts the singleton consumer when provider mode is enabled. */
 export function startVibeEmbedWorker(): Promise<boolean> {

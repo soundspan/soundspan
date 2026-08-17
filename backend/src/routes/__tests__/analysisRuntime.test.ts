@@ -605,7 +605,7 @@ describe("analysis routes runtime", () => {
             expect.objectContaining({
                 queueKey: "audio:clap:queue",
                 trackId: "t1",
-                maxDepth: 2,
+                maxDepth: 1,
                 reservationTtlSeconds: 3600,
             }),
         );
@@ -617,7 +617,7 @@ describe("analysis routes runtime", () => {
         });
     });
 
-    it("deduplicates repeated force queueing and stops at the shared cap", async () => {
+    it("reserves queue headroom so automatic backfill admits after a manual burst", async () => {
         mockTrackFindMany.mockResolvedValue([
             { id: "t1", filePath: "/x.mp3", duration: 111, title: "T1" },
             { id: "t2", filePath: "/y.mp3", duration: 222, title: "T2" },
@@ -626,8 +626,11 @@ describe("analysis routes runtime", () => {
         const reservations = new Set<string>();
         let depth = 0;
         mockEnqueueReservedWork.mockImplementation(
-            async (_redis: unknown, input: { trackId: string }) => {
-                if (depth >= 2) return "full";
+            async (
+                _redis: unknown,
+                input: { trackId: string; maxDepth: number },
+            ) => {
+                if (depth >= input.maxDepth) return "full";
                 if (reservations.has(input.trackId)) return "duplicate";
                 reservations.add(input.trackId);
                 depth += 1;
@@ -636,15 +639,27 @@ describe("analysis routes runtime", () => {
         );
 
         const firstRes = createRes();
-        const secondRes = createRes();
         const request = { body: { limit: 1000, force: true } } as any;
         await postVibeStart(request, firstRes);
-        await postVibeStart(request, secondRes);
 
-        expect(firstRes.body.queued).toBe(2);
-        expect(secondRes.body.queued).toBe(0);
-        expect(reservations).toEqual(new Set(["t1", "t2"]));
-        expect(mockEnqueueReservedWork).toHaveBeenCalledTimes(4);
+        const automaticAdmission = await mockEnqueueReservedWork(redisClient, {
+            queueKey: "audio:clap:queue",
+            trackId: "automatic-oldest-pending",
+            payload: "payload",
+            maxDepth: 2,
+            reservationTtlSeconds: 3600,
+        });
+
+        expect(firstRes.body.queued).toBe(1);
+        expect(automaticAdmission).toBe("queued");
+        expect(reservations).toEqual(
+            new Set(["t1", "automatic-oldest-pending"]),
+        );
+        expect(mockEnqueueReservedWork).toHaveBeenNthCalledWith(
+            1,
+            redisClient,
+            expect.objectContaining({ maxDepth: 1 }),
+        );
     });
 
     it("returns no-op vibe start when all tracks already have embeddings", async () => {

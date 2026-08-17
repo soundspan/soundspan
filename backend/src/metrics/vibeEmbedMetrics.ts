@@ -36,7 +36,10 @@ export interface VibeEmbedMetrics {
     spaceTransitions: Counter<"transition">;
     providerConfigErrors: Counter<"reason">;
     vocabularySpaceMismatches: Counter<"reason">;
+    collectionErrors: Counter<"collector">;
     providerQueueDepth: Gauge;
+    providerQueueCapacity: Gauge;
+    migrationActive: Gauge;
     recordJob(outcome: VibeEmbedJobOutcome): void;
     recordSpaceTransition(transition: VibeSpaceTransition): void;
     recordProviderConfigError(reason: VibeProviderConfigErrorReason): void;
@@ -44,6 +47,8 @@ export interface VibeEmbedMetrics {
         reason: VibeVocabularySpaceMismatchReason,
     ): void;
     setCoverage(values: VibeEmbeddingCoverage): void;
+    setProviderQueueCapacity(capacity: number): void;
+    setMigrationActive(active: boolean): void;
 }
 
 /** Scrape-time dependencies for provider queue instrumentation. */
@@ -51,33 +56,46 @@ export interface VibeEmbedMetricsDependencies {
     getProviderQueueDepth(): Promise<number>;
 }
 
-/** Registers bounded audio-embedding job and target-space coverage metrics. */
-export function createVibeEmbedMetrics(
+function createOutcomeMetrics(registry: Registry) {
+    return {
+        jobs: new Counter({
+            name: "soundspan_vibe_embed_jobs_total",
+            help: "Backend-driven vibe embedding jobs by final outcome.",
+            labelNames: ["outcome"] as const,
+            registers: [registry],
+        }),
+        coverage: new Gauge({
+            name: "soundspan_vibe_embedding_coverage",
+            help: "Local-track vibe embedding coverage for the worker target space.",
+            labelNames: ["state"] as const,
+            registers: [registry],
+        }),
+        spaceTransitions: new Counter({
+            name: "soundspan_vibe_space_transitions_total",
+            help: "Embedding-space lifecycle transitions by bounded type.",
+            labelNames: ["transition"] as const,
+            registers: [registry],
+        }),
+        providerConfigErrors: new Counter({
+            name: "soundspan_vibe_provider_config_errors_total",
+            help: "Vibe provider configuration errors by bounded reason.",
+            labelNames: ["reason"] as const,
+            registers: [registry],
+        }),
+    };
+}
+
+function createQueueCollectionMetrics(
     registry: Registry,
     dependencies: VibeEmbedMetricsDependencies,
-): VibeEmbedMetrics {
-    const jobs = new Counter({
-        name: "soundspan_vibe_embed_jobs_total",
-        help: "Backend-driven vibe embedding jobs by final outcome.",
-        labelNames: ["outcome"] as const,
-        registers: [registry],
-    });
-    const coverage = new Gauge({
-        name: "soundspan_vibe_embedding_coverage",
-        help: "Local-track vibe embedding coverage for the worker target space.",
-        labelNames: ["state"] as const,
-        registers: [registry],
-    });
-    const spaceTransitions = new Counter({
-        name: "soundspan_vibe_space_transitions_total",
-        help: "Embedding-space lifecycle transitions by bounded type.",
-        labelNames: ["transition"] as const,
-        registers: [registry],
-    });
-    const providerConfigErrors = new Counter({
-        name: "soundspan_vibe_provider_config_errors_total",
-        help: "Vibe provider configuration errors by bounded reason.",
-        labelNames: ["reason"] as const,
+): Pick<
+    VibeEmbedMetrics,
+    "collectionErrors" | "providerQueueDepth" | "vocabularySpaceMismatches"
+> {
+    const collectionErrors = new Counter({
+        name: "soundspan_metrics_collection_errors_total",
+        help: "Prometheus collection errors by bounded collector name.",
+        labelNames: ["collector"] as const,
         registers: [registry],
     });
     const vocabularySpaceMismatches = new Counter({
@@ -91,33 +109,69 @@ export function createVibeEmbedMetrics(
         help: "Raw Redis job depth for the backend vibe provider queue.",
         registers: [registry],
         async collect() {
-            this.set(await dependencies.getProviderQueueDepth());
+            try {
+                this.set(await dependencies.getProviderQueueDepth());
+            } catch {
+                // Keep the last successful sample. Telemetry dependency
+                // failures must not make the complete scrape unavailable.
+                collectionErrors.inc({ collector: "vibe_queue_depth" });
+            }
         },
     });
+    providerQueueDepth.reset();
+    return { collectionErrors, providerQueueDepth, vocabularySpaceMismatches };
+}
+
+function createOperationalGauges(registry: Registry) {
+    return {
+        providerQueueCapacity: new Gauge({
+            name: "soundspan_vibe_provider_queue_capacity",
+            help: "Configured admission capacity for the vibe provider queue.",
+            registers: [registry],
+        }),
+        migrationActive: new Gauge({
+            name: "soundspan_vibe_migration_active",
+            help: "Whether this worker is targeting a migrating vibe space.",
+            registers: [registry],
+        }),
+    };
+}
+
+/** Registers bounded audio-embedding job and target-space coverage metrics. */
+export function createVibeEmbedMetrics(
+    registry: Registry,
+    dependencies: VibeEmbedMetricsDependencies,
+): VibeEmbedMetrics {
+    const outcomeMetrics = createOutcomeMetrics(registry);
+    const queueMetrics = createQueueCollectionMetrics(registry, dependencies);
+    const operationalGauges = createOperationalGauges(registry);
 
     return {
-        jobs,
-        coverage,
-        spaceTransitions,
-        providerConfigErrors,
-        vocabularySpaceMismatches,
-        providerQueueDepth,
+        ...outcomeMetrics,
+        ...queueMetrics,
+        ...operationalGauges,
         recordJob(outcome): void {
-            jobs.inc({ outcome });
+            outcomeMetrics.jobs.inc({ outcome });
         },
         recordSpaceTransition(transition): void {
-            spaceTransitions.inc({ transition });
+            outcomeMetrics.spaceTransitions.inc({ transition });
         },
         recordProviderConfigError(reason): void {
-            providerConfigErrors.inc({ reason });
+            outcomeMetrics.providerConfigErrors.inc({ reason });
         },
         recordVocabularySpaceMismatch(reason): void {
-            vocabularySpaceMismatches.inc({ reason });
+            queueMetrics.vocabularySpaceMismatches.inc({ reason });
         },
         setCoverage(values): void {
-            coverage.set({ state: "embedded" }, values.embedded);
-            coverage.set({ state: "pending" }, values.pending);
-            coverage.set({ state: "failed" }, values.failed);
+            outcomeMetrics.coverage.set({ state: "embedded" }, values.embedded);
+            outcomeMetrics.coverage.set({ state: "pending" }, values.pending);
+            outcomeMetrics.coverage.set({ state: "failed" }, values.failed);
+        },
+        setProviderQueueCapacity(capacity): void {
+            operationalGauges.providerQueueCapacity.set(capacity);
+        },
+        setMigrationActive(active): void {
+            operationalGauges.migrationActive.set(active ? 1 : 0);
         },
     };
 }

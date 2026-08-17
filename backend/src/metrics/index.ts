@@ -102,6 +102,16 @@ export function setVibeEmbeddingCoverage(
     vibeEmbedMetrics.setCoverage(coverage);
 }
 
+/** Publishes the configured vibe provider queue admission capacity. */
+export function setVibeProviderQueueCapacity(capacity: number): void {
+    vibeEmbedMetrics.setProviderQueueCapacity(capacity);
+}
+
+/** Marks whether the worker currently owns a migrating target space. */
+export function setVibeMigrationActive(active: boolean): void {
+    vibeEmbedMetrics.setMigrationActive(active);
+}
+
 /** Records one completed federation page carrying peer embeddings. */
 export function recordFederationEmbeddingPageOutcome(
     outcome: FederationEmbeddingPageOutcome,

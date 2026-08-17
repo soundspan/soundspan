@@ -2,6 +2,7 @@ import express from "express";
 import { Gauge, Registry } from "prom-client";
 import request from "supertest";
 import { createMetricsRouter } from "../endpoint";
+import { createVibeEmbedMetrics } from "../vibeEmbedMetrics";
 
 describe("metrics endpoint", () => {
     function createApp(options: { token?: string; publicAccess?: boolean }) {
@@ -54,5 +55,54 @@ describe("metrics endpoint", () => {
             .expect(200);
 
         expect(response.text).toContain("soundspan_test_known_value 1");
+    });
+
+    it("returns 200 when the vibe queue collector cannot reach Redis", async () => {
+        const registry = new Registry();
+        createVibeEmbedMetrics(registry, {
+            getProviderQueueDepth: async () => {
+                throw new Error("redis unavailable");
+            },
+        });
+        const router = createMetricsRouter({
+            registry,
+            publicAccess: true,
+        });
+        const route = (router as any).stack.find(
+            (entry: any) => entry.route?.path === "/metrics",
+        ).route;
+        const response = {
+            body: "",
+            statusCode: 200,
+            set: jest.fn(),
+            send: jest.fn(function (body: string) {
+                response.body = body;
+            }),
+        } as any;
+        let authorized = false;
+        route.stack[0].handle(
+            { get: jest.fn() },
+            response,
+            () => (authorized = true),
+        );
+        expect(authorized).toBe(true);
+        await route.stack[1].handle({}, response, jest.fn());
+
+        expect(response.send).toHaveBeenCalledTimes(1);
+        expect(response.statusCode).toBe(200);
+        const nextResponse = {
+            body: "",
+            statusCode: 200,
+            set: jest.fn(),
+            send: jest.fn(function (body: string) {
+                nextResponse.body = body;
+            }),
+        } as any;
+        await route.stack[1].handle({}, nextResponse, jest.fn());
+
+        expect(nextResponse.statusCode).toBe(200);
+        expect(nextResponse.body).toMatch(
+            /soundspan_metrics_collection_errors_total\{collector="vibe_queue_depth"\} [1-9][0-9]*/,
+        );
     });
 });

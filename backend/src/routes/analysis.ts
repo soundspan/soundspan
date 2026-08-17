@@ -23,6 +23,18 @@ const router = Router();
 // Redis queue key for audio analysis
 const ANALYSIS_QUEUE = "audio:analysis:queue";
 const VIBE_QUEUE = "audio:clap:queue";
+const MANUAL_VIBE_HEADROOM_FRACTION = 0.1;
+
+function manualVibeQueueMaxDepth(capacity: number): number {
+    // Manual re-embedding can consume at most 90% of the shared queue. The
+    // automatic producer retains at least one slot and 10% at normal scale,
+    // so older pending backfill continues to make progress after admin bursts.
+    const reserved = Math.max(
+        1,
+        Math.ceil(capacity * MANUAL_VIBE_HEADROOM_FRACTION),
+    );
+    return Math.max(0, capacity - reserved);
+}
 
 function buildVibePendingReset() {
     return {
@@ -31,6 +43,88 @@ function buildVibePendingReset() {
         vibeAnalysisStartedAt: null,
         vibeAnalysisStatusUpdatedAt: new Date(),
     };
+}
+
+interface ManualVibeTrack {
+    id: string;
+    filePath: string | null;
+    duration: number;
+    title: string;
+}
+
+async function resetVibeTracksForForce(force: boolean): Promise<void> {
+    if (!force) return;
+    await prisma.track.updateMany({
+        where: LOCAL_TRACK_WHERE,
+        data: {
+            ...buildVibePendingReset(),
+            vibeAnalysisRetryCount: 0,
+        },
+    });
+    await enrichmentFailureService.clearAllFailures("vibe");
+    logger.info(
+        "Preserved active vibe embeddings and reset tracks for re-generation",
+    );
+}
+
+async function findManualVibeTracks(
+    activeSpaceId: string,
+    force: boolean,
+    limit: number,
+): Promise<ManualVibeTrack[]> {
+    return prisma.track.findMany({
+        where: {
+            ...(force ? {} : missingActiveEmbeddingWhere(activeSpaceId)),
+            ...TRACK_VISIBLE_WHERE,
+            ...LOCAL_TRACK_WHERE,
+        },
+        select: {
+            id: true,
+            filePath: true,
+            duration: true,
+            title: true,
+        },
+        orderBy: { fileModified: "desc" },
+        take: limit,
+    });
+}
+
+async function markManualVibeTracksPending(
+    tracks: ManualVibeTrack[],
+    force: boolean,
+): Promise<void> {
+    if (force) return;
+    await prisma.track.updateMany({
+        where: { id: { in: tracks.map((track) => track.id) } },
+        data: buildVibePendingReset(),
+    });
+}
+
+async function enqueueManualVibeTracks(
+    tracks: ManualVibeTrack[],
+): Promise<number> {
+    const maxDepth = manualVibeQueueMaxDepth(
+        config.analysisQueues.vibeMaxDepth,
+    );
+    let queued = 0;
+    for (const track of tracks) {
+        const admission = await enqueueReservedNodeRedisWork(redisClient, {
+            queueKey: VIBE_QUEUE,
+            trackId: track.id,
+            payload: JSON.stringify({
+                trackId: track.id,
+                filePath: track.filePath,
+                duration: track.duration,
+            }),
+            maxDepth,
+            reservationTtlSeconds: config.analysisQueues.reservationTtlSeconds,
+        });
+        if (admission === "full") break;
+        if (admission !== "queued") continue;
+        queued += 1;
+        await enrichmentFailureService.clearFailure("vibe", track.id);
+    }
+    return queued;
 }
 
 /**
@@ -675,36 +769,8 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                 : 500;
         const force = req.body.force === true;
         const activeSpace = await getActiveSpace();
-
-        if (force) {
-            await prisma.track.updateMany({
-                where: LOCAL_TRACK_WHERE,
-                data: {
-                    ...buildVibePendingReset(),
-                    vibeAnalysisRetryCount: 0,
-                },
-            });
-            await enrichmentFailureService.clearAllFailures("vibe");
-            logger.info(
-                "Preserved active vibe embeddings and reset tracks for re-generation",
-            );
-        }
-
-        const tracks = await prisma.track.findMany({
-            where: {
-                ...(force ? {} : missingActiveEmbeddingWhere(activeSpace.id)),
-                ...TRACK_VISIBLE_WHERE,
-                ...LOCAL_TRACK_WHERE,
-            },
-            select: {
-                id: true,
-                filePath: true,
-                duration: true,
-                title: true,
-            },
-            orderBy: { fileModified: "desc" },
-            take: limit,
-        });
+        await resetVibeTracksForForce(force);
+        const tracks = await findManualVibeTracks(activeSpace.id, force, limit);
 
         if (tracks.length === 0) {
             return res.json({
@@ -713,34 +779,9 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Align producer state with queue handoff: newly queued tracks should
-        // be recoverable as pending if Redis is later drained or workers are down.
-        if (!force) {
-            await prisma.track.updateMany({
-                where: { id: { in: tracks.map((track) => track.id) } },
-                data: buildVibePendingReset(),
-            });
-        }
-
-        let queued = 0;
-        for (const track of tracks) {
-            const admission = await enqueueReservedNodeRedisWork(redisClient, {
-                queueKey: VIBE_QUEUE,
-                trackId: track.id,
-                payload: JSON.stringify({
-                    trackId: track.id,
-                    filePath: track.filePath,
-                    duration: track.duration,
-                }),
-                maxDepth: config.analysisQueues.vibeMaxDepth,
-                reservationTtlSeconds:
-                    config.analysisQueues.reservationTtlSeconds,
-            });
-            if (admission === "full") break;
-            if (admission !== "queued") continue;
-            queued += 1;
-            await enrichmentFailureService.clearFailure("vibe", track.id);
-        }
+        // Align producer state with queue handoff so drained work remains pending.
+        await markManualVibeTracksPending(tracks, force);
+        const queued = await enqueueManualVibeTracks(tracks);
 
         logger.info(
             `Queued ${queued} tracks for vibe embedding${force ? " (force reset)" : ""}`,

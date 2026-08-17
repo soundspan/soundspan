@@ -1,3 +1,6 @@
+import { Registry } from "prom-client";
+import { createVibeEmbedMetrics } from "../metrics/vibeEmbedMetrics";
+
 describe("worker entrypoint behavior", () => {
     const originalEnv = process.env;
     const originalExit = process.exit;
@@ -24,6 +27,7 @@ describe("worker entrypoint behavior", () => {
         initializeMusicConfigImpl,
         shutdownWorkersImpl,
         processExitImpl,
+        metricsRegistryOverride,
     }: {
         envOverrides?: Record<string, string>;
         dependencyProbeImpl?: () => Promise<any>;
@@ -37,6 +41,10 @@ describe("worker entrypoint behavior", () => {
         initializeMusicConfigImpl?: () => Promise<unknown>;
         shutdownWorkersImpl?: () => Promise<unknown>;
         processExitImpl?: (...args: any[]) => never | void;
+        metricsRegistryOverride?: {
+            contentType: string;
+            metrics(): Promise<string>;
+        };
     } = {}) {
         process.env = {
             ...originalEnv,
@@ -143,10 +151,12 @@ describe("worker entrypoint behavior", () => {
         jest.doMock("../workers", () => ({
             shutdownWorkers,
         }));
-        const metricsRegistry = {
-            contentType: "text/plain; version=0.0.4; charset=utf-8",
-            metrics: jest.fn(async () => "soundspan_test_metric 1\n"),
-        };
+        const metricsRegistry =
+            metricsRegistryOverride ??
+            ({
+                contentType: "text/plain; version=0.0.4; charset=utf-8",
+                metrics: jest.fn(async () => "soundspan_test_metric 1\n"),
+            } as const);
         const registerQueueMetrics = jest.fn();
         jest.doMock("../metrics", () => ({ metricsRegistry }));
         jest.doMock("../metrics/endpoint", () => ({
@@ -184,6 +194,13 @@ describe("worker entrypoint behavior", () => {
     const flushWorkerTicks = async (): Promise<void> => {
         await Promise.resolve();
         await Promise.resolve();
+    };
+
+    const waitForResponse = async (res: { writeHead: jest.Mock }) => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (res.writeHead.mock.calls.length > 0) return;
+            await Promise.resolve();
+        }
     };
 
     const waitForWorkerReadyLog = async (
@@ -357,6 +374,52 @@ describe("worker entrypoint behavior", () => {
         });
         expect(authorized.end).toHaveBeenCalledWith(
             "soundspan_test_metric 1\n",
+        );
+    });
+
+    it("serves worker metrics when the vibe queue collector cannot reach Redis", async () => {
+        const registry = new Registry();
+        createVibeEmbedMetrics(registry, {
+            getProviderQueueDepth: async () => {
+                throw new Error("redis unavailable");
+            },
+        });
+        const { requestHandler } = setupWorkerRuntime({
+            metricsRegistryOverride: registry,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../worker");
+        await flushWorkerTicks();
+        const handler = requestHandler();
+        const firstResponse = createHealthRes();
+        handler!(
+            {
+                url: "/metrics",
+                headers: { authorization: "Bearer metrics-token" },
+            },
+            firstResponse,
+        );
+        await waitForResponse(firstResponse);
+        expect(firstResponse.writeHead).toHaveBeenCalledWith(200, {
+            "Content-Type": registry.contentType,
+        });
+
+        const response = createHealthRes();
+        handler!(
+            {
+                url: "/metrics",
+                headers: { authorization: "Bearer metrics-token" },
+            },
+            response,
+        );
+        await waitForResponse(response);
+
+        expect(response.writeHead).toHaveBeenCalledWith(200, {
+            "Content-Type": registry.contentType,
+        });
+        expect(response.end.mock.calls[0]?.[0]).toMatch(
+            /soundspan_metrics_collection_errors_total\{collector="vibe_queue_depth"\} [1-9][0-9]*/,
         );
     });
 

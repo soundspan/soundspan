@@ -16,6 +16,7 @@ const mockLoadSpaceVectorState = jest.fn();
 const mockGetActiveSpace = jest.fn();
 const mockLogInfo = jest.fn();
 const mockSetCoverage = jest.fn();
+const mockSetMigrationActive = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -48,6 +49,8 @@ jest.mock("../../metrics", () => ({
     recordVibeSpaceTransition: (...args: unknown[]) =>
         mockRecordTransition(...args),
     setVibeEmbeddingCoverage: (...args: unknown[]) => mockSetCoverage(...args),
+    setVibeMigrationActive: (...args: unknown[]) =>
+        mockSetMigrationActive(...args),
 }));
 
 jest.mock("../vibeEmbeddingCoverage", () => ({
@@ -228,6 +231,7 @@ describe("embedding-space lifecycle effects", () => {
         });
         expect(mockInvalidate).toHaveBeenCalledTimes(1);
         expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
+        expect(mockSetMigrationActive).toHaveBeenCalledWith(false);
         expect(mockLogInfo).toHaveBeenCalledWith(
             "Embedding-space cutover completed",
             {
