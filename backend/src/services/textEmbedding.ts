@@ -17,7 +17,12 @@ const TEXT_EMBED_RESPONSE_PREFIX = "audio:text:embed:response:";
 const TEXT_EMBED_TIMEOUT_SECONDS = 30;
 const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
 const PROVIDER_SPACE_MATCH_TTL_MS = 60_000;
-const log = logger.child("TextEmbedding");
+// Several route suites stub the logger without .child; tolerate the partial
+// double like the other services that scope their logger at module init.
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("TextEmbedding")
+        : logger;
 
 let cachedProviderMatchesActive = false;
 let providerMatchCacheExpiresAt = 0;

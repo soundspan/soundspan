@@ -7,7 +7,10 @@ import { loadVibeEmbeddingCoverage } from "./vibeEmbeddingCoverage";
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
 const SPACE_ID_PATTERN = /^[A-Za-z0-9_]{1,48}$/;
-const log = logger.child("EmbeddingSpaceLifecycle");
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("EmbeddingSpaceLifecycle")
+        : logger;
 
 /** Rows deleted in one retirement-cleanup transaction. */
 export const RETIREMENT_DELETE_BATCH_SIZE = 500;

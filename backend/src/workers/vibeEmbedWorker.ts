@@ -302,7 +302,10 @@ export function createVibeEmbedWorker(
     return new VibeEmbedWorkerRuntime(dependencies);
 }
 
-const log = logger.child("VibeEmbedWorker");
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("VibeEmbedWorker")
+        : logger;
 const worker = createVibeEmbedWorker({
     providerUrl: config.vibeProviderUrl,
     audioAnalysisEnabled: config.features.audioAnalysis,

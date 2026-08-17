@@ -13,7 +13,10 @@ import { vibeEmbeddingTargetGateWhere } from "./vibeEmbeddingEligibility";
 const VIBE_QUEUE = "audio:clap:queue";
 const MAX_ERROR_LENGTH = 500;
 const INVALID_PAYLOAD_ERROR = "Invalid vibe embedding job payload";
-const jobLog = logger.child("VibeEmbedJobs");
+const jobLog =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("VibeEmbedJobs")
+        : logger;
 const trackIdSchema = z.string().min(1);
 
 function isSyntacticallyContainedPath(filePath: string): boolean {

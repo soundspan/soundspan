@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { invalidateTextEmbeddingProviderSpaceCache } from "../../services/textEmbedding";
 
 const mockGetActiveSpace = jest.fn();
 let mockVibeProviderUrl: string | undefined;
@@ -16,6 +17,16 @@ jest.mock("../../services/vibeProvider", () => {
     class VibeProviderError extends Error {}
     return {
         embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
+        fetchProviderSpace: jest.fn(async () => ({
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+            sampleRateHz: 48000,
+            preprocessing: {},
+            revision: "test",
+            textTower: true,
+        })),
+        assertProviderMatchesActiveSpace: jest.fn(),
         VibeProviderError,
         VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
         VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
@@ -159,6 +170,7 @@ describe("vibe canonical error response shape", () => {
     const statusHandler = getGetHandler("/status");
 
     beforeEach(() => {
+        invalidateTextEmbeddingProviderSpaceCache();
         jest.clearAllMocks();
         mockVibeProviderUrl = undefined;
         mockRedisXAdd.mockResolvedValue("1712345-0");

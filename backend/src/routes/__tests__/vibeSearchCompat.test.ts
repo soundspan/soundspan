@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { invalidateTextEmbeddingProviderSpaceCache } from "../../services/textEmbedding";
 
 let mockVibeProviderUrl: string | undefined;
 const mockProviderEmbedText = jest.fn();
@@ -15,6 +16,16 @@ jest.mock("../../services/vibeProvider", () => {
     class VibeProviderError extends Error {}
     return {
         embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
+        fetchProviderSpace: jest.fn(async () => ({
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+            sampleRateHz: 48000,
+            preprocessing: {},
+            revision: "test",
+            textTower: true,
+        })),
+        assertProviderMatchesActiveSpace: jest.fn(),
         VibeProviderError,
         VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
         VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
@@ -182,6 +193,7 @@ describe("vibe search transport compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        invalidateTextEmbeddingProviderSpaceCache();
         mockVibeProviderUrl = undefined;
         mockTrackCount.mockResolvedValue(0);
         mockTrackFindUnique.mockResolvedValue(null);

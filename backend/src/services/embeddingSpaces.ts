@@ -3,7 +3,10 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
 const CACHE_TTL_MS = 60_000;
-const log = logger.child("EmbeddingSpaces");
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("EmbeddingSpaces")
+        : logger;
 
 /** Identity and vector contract for the embedding space serving requests. */
 export interface ActiveEmbeddingSpace {
