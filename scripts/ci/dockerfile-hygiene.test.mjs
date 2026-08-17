@@ -472,11 +472,7 @@ test("8. split-stack compose passes PostgreSQL components to database consumers"
 
     assert.equal(result.status, 0, result.stderr);
     const services = JSON.parse(result.stdout).services;
-    const databaseConsumers = [
-        "backend",
-        "backend-worker",
-        "audio-analyzer",
-    ];
+    const databaseConsumers = ["backend", "backend-worker", "audio-analyzer"];
 
     for (const serviceName of databaseConsumers) {
         const environment = services[serviceName].environment;
@@ -508,7 +504,10 @@ test("8a. split-stack compose defaults to the DCLAP vibe provider", () => {
 
     assert.equal(defaultServices["audio-analyzer-clap"], undefined);
     assert.ok(defaultServices["vibe-provider-dclap"]);
-    assert.equal(defaultServices.backend.environment.VIBE_PROVIDER_URL, providerUrl);
+    assert.equal(
+        defaultServices.backend.environment.VIBE_PROVIDER_URL,
+        providerUrl,
+    );
     assert.equal(
         workerServices["backend-worker"].environment.VIBE_PROVIDER_URL,
         providerUrl,
