@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fresh installs with only a provider-backed vibe space now cut over
+  immediately instead of stalling behind an active space with no vectors.
 - The clap sidecar's embedding upsert now targets the composite
   `(track_id, space_id)` key; against the migrated schema its previous
   single-column conflict target failed every store.

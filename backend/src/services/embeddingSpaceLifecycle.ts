@@ -1,8 +1,11 @@
 import { recordVibeSpaceTransition } from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { invalidateActiveSpaceCache } from "./embeddingSpaces";
-import { loadVibeEmbeddingCoverage } from "./vibeEmbeddingCoverage";
+import { getActiveSpace, invalidateActiveSpaceCache } from "./embeddingSpaces";
+import {
+    loadVibeEmbeddingCoverage,
+    loadVibeSpaceEmbeddedCount,
+} from "./vibeEmbeddingCoverage";
 
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
@@ -31,6 +34,15 @@ interface LifecycleSpace {
 /** Decide whether measured coverage has reached the configured cutover floor. */
 export function shouldCutOver(coverage: number, threshold: number): boolean {
     return Number.isFinite(coverage) && coverage >= threshold;
+}
+
+/** Decide whether an empty active space permits immediate cutover. */
+export function shouldCutOverEmptyActiveSpace(
+    activeEmbeddedCount: number,
+): boolean {
+    // Pending active-space work does not protect query results and may have no
+    // deployed teacher worker capable of completing it on a fresh install.
+    return activeEmbeddedCount === 0;
 }
 
 /** Decide whether a retired space has reached its cleanup boundary. */
@@ -108,10 +120,44 @@ async function loadCoverage(spaceId: string): Promise<number> {
     return actionable === 0 ? 0 : coverage.embedded / actionable;
 }
 
+async function completeCutover(
+    migratingSpaceId: string,
+    retiredAt: Date,
+): Promise<void> {
+    await buildPartialAnnIndex(migratingSpaceId);
+    await flipActiveSpace(migratingSpaceId, retiredAt);
+    invalidateActiveSpaceCache();
+    recordVibeSpaceTransition("cutover");
+}
+
+async function cutOverEmptyActiveSpace(
+    activeSpaceId: string,
+    migratingSpaceId: string,
+    retiredAt: Date,
+): Promise<void> {
+    log.info(
+        "Embedding-space cutover starting because active space has no embedded vectors",
+        { activeSpaceId, migratingSpaceId },
+    );
+    await completeCutover(migratingSpaceId, retiredAt);
+    log.info("Embedding-space cutover completed", {
+        spaceId: migratingSpaceId,
+        reason: "empty_active_space",
+    });
+}
+
 async function cutOverIfReady(
     space: LifecycleSpace,
     config: LifecycleConfig,
 ): Promise<void> {
+    const activeSpace = await getActiveSpace();
+    const activeEmbeddedCount = await loadVibeSpaceEmbeddedCount(
+        activeSpace.id,
+    );
+    if (shouldCutOverEmptyActiveSpace(activeEmbeddedCount)) {
+        await cutOverEmptyActiveSpace(activeSpace.id, space.id, config.now());
+        return;
+    }
     const coverage = await loadCoverage(space.id);
     log.info("Embedding-space migration coverage sampled", {
         spaceId: space.id,
@@ -119,10 +165,7 @@ async function cutOverIfReady(
         thresholdPercent: config.threshold * 100,
     });
     if (!shouldCutOver(coverage, config.threshold)) return;
-    await buildPartialAnnIndex(space.id);
-    await flipActiveSpace(space.id, config.now());
-    invalidateActiveSpaceCache();
-    recordVibeSpaceTransition("cutover");
+    await completeCutover(space.id, config.now());
     log.info("Embedding-space cutover completed", {
         spaceId: space.id,
         coverage,

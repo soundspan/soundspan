@@ -9,6 +9,13 @@ interface CoverageRefresherDependencies {
     setCoverage(coverage: VibeEmbeddingCoverage): void;
 }
 
+/** Counts every stored vector in one embedding space. */
+export async function loadVibeSpaceEmbeddedCount(
+    spaceId: string,
+): Promise<number> {
+    return prisma.trackEmbedding.count({ where: { spaceId } });
+}
+
 /** Loads target-space coverage for local tracks eligible for audio analysis. */
 export async function loadVibeEmbeddingCoverage(
     targetSpaceId?: string,

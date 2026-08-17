@@ -72,6 +72,8 @@ Invariants:
 3. When coverage reaches `VIBE_SPACE_CUTOVER_THRESHOLD` (default 95%), the worker builds the target's partial ANN index, atomically marks the old space `retired` and the target `active`, then invalidates the active-space cache.
 4. The old vectors remain available for `VIBE_SPACE_RETIREMENT_GRACE_DAYS` (default 7). The worker then deletes them in bounded batches, drops their partial index if present, clears the grace anchor to mark cleanup complete, and retains the registry identity row as history.
 
+When the active space contains zero vectors, the worker builds the target's partial ANN index and cuts over immediately without waiting for migration coverage. A fresh install may never deploy the teacher worker, and an empty active space protects no query results, so this closes the provider-only text-search dead window without sacrificing existing similarity results.
+
 Keep the torch CLAP sidecar and its Redis text-embedding handler running throughout a migration. While the configured provider's space is not active, text search falls back to that legacy text tower so queries remain in the active space. `CLAP_WORKERS=0` disables its audio workers without stopping the text handler.
 
 At the cutover boundary, a cached provider-space mismatch can keep text search on the legacy tower while ANN reads use the new active space for at most 60 seconds. This bounded cross-space window equals the provider/active-space verdict-cache TTL. The next verdict refresh sees that the configured provider now matches the active space and moves text encoding to that provider without operator action.
