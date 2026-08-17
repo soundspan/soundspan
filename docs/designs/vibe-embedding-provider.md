@@ -1,6 +1,6 @@
 # Pluggable Vibe Embedding Provider
 
-Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; rollout phase 1 and the blue/green migration machinery are implemented by migrations `20260816120000_add_embedding_space_registry` and `20260816130000_add_embedding_space_migration`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Upstream DCLAP validation measured approximately 0.88 student-to-teacher fidelity, so the student registers as the distinct `clap-music-audioset-dclap-student` space and adoption rides the migration path; the default-provider flip remains a maintainer decision informed by the Gate 2 run. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension space active until cutover; adopt DCLAP's distilled ONNX student as the default provider through a full re-embed; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
+Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; rollout phase 1 and the blue/green migration machinery are implemented by migrations `20260816120000_add_embedding_space_registry` and `20260816130000_add_embedding_space_migration`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Upstream DCLAP validation measured approximately 0.88 student-to-teacher fidelity. The 2026-08-17 Gate 2 run confirmed the distinct `clap-music-audioset-dclap-student` space and selected the migration path for adoption; the default-provider flip remains a maintainer decision. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension space active until cutover; adopt DCLAP's distilled ONNX student as the default provider through a full re-embed; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
 
 Related: cross-peer taste vectors in Blends ([issue #529](https://github.com/soundspan/soundspan/issues/529)) and federated discovery ([issue #530](https://github.com/soundspan/soundspan/issues/530)) depend on the space-identity contract defined here.
 
@@ -133,17 +133,19 @@ The audio comparison is cosine `a·b / (||a|| ||b||)` for each paired track. Nei
 
 Record real-library runs here when they happen. Do not replace the measured values with synthetic fixtures or upstream validation metrics.
 
-| Run date | Library/sample | Baseline identity | Candidate identity | Median cosine | Mean top-10 overlap | Mean text-query overlap | Verdict | Report |
+| Run date | Library/sample | Baseline identity | Candidate identity | Median cosine | Mean top-k overlap | Mean text-query overlap | Verdict | Report |
 | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |
-| Pending | Real-library run required | — | — | — | — | — | — | — |
+| 2026-08-17 | Production library; 50/50 valid; k=5; 0 exclusions; 753449 ms | `clap-music-audioset` / `fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd` / 512 | `clap-music-audioset-dclap-student` / `c892c7a8666dfa5adec5f0b76ecdd9b5394f5afa925d1362750309b6b9b96639` / 512 | 0.854375 | 0.668000 | 1.000000 | `distinct_space_required` | [Full report](gate2-report-2026-08-17.md) |
 
-The shipped sidecar takes the conservative fail outcome now: observed student-to-teacher fidelity is approximately 0.88 cosine, below the proposed 0.98 threshold, so `/v1/space` never claims the teacher identity. It advertises `clap-music-audioset-dclap-student` with a combined SHA-256 identity derived from the pinned audio graph shell, external audio weights, and text tower. A larger fleet recall study may still inform later rollout tuning, but it cannot silently merge the two spaces.
+This real-library run used n=50, not the target n≥1,000. The operator deliberately chose the reduced sample and k=5. Chance-level top-5 overlap for a 50-track index is approximately 10%. The observed mean overlap of 0.668000 is far above chance but below the 0.900000 same-space bar. The 0.854375 median cosine also falls well below the 0.980000 bar, so the reduced sample size does not affect the verdict. The exclusion policy passed.
+
+The perfect 1.000000 text-query overlap shows that the teacher-derived text tower remains intact in the student packaging: text queries against the baseline index rank identically. The audio tower remains a distillation approximation. The measured `distinct_space_required` verdict confirms the shipped conservative default. The student remains the distinct `clap-music-audioset-dclap-student` space, and adoption uses the blue/green migration flow. No same-space claim is permitted.
 
 ## Rollout phases
 
 1. **Registry + interface** (no behavior change): space table, spaceId on embeddings backfilled from `model_version`, provider HTTP contract extracted over the existing torch sidecar (it becomes Provider 2 in place).
 2. **DCLAP student sidecar** shipped default-off under an opt-in Compose profile; Gate 1 mode (b) executed; distinct student space identity enforced (upstream fidelity approximately 0.88 selects the distinct-space migration path).
-3. **Default flip** after the implemented blue/green backfill and automatic cutover; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults and UPGRADING notes remain follow-up rollout work informed by the Gate 2 run.
+3. **Default flip** after the implemented blue/green backfill and automatic cutover; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults and UPGRADING notes remain follow-up rollout work under the recorded Gate 2 distinct-space verdict.
 4. **Later**: MuQ-MuLan provider (new space, GPU) and hosted tags-level adapters, each their own issue.
 
 ## Non-goals
