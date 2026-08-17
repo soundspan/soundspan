@@ -238,12 +238,17 @@ function effectiveStageCopies(stages) {
     });
 }
 
-function composeConfig(postgresPassword) {
+function composeConfig(
+    postgresPassword,
+    profiles = ["*"],
+    environmentOverrides = {},
+) {
     const environment = {
         ...process.env,
         INTERNAL_API_SECRET: "test-internal-secret",
         SESSION_SECRET: "test-session-secret",
         SETTINGS_ENCRYPTION_KEY: "test-settings-key",
+        ...environmentOverrides,
     };
     delete environment.DATABASE_URL;
     if (postgresPassword === undefined) {
@@ -252,12 +257,12 @@ function composeConfig(postgresPassword) {
         environment.POSTGRES_PASSWORD = postgresPassword;
     }
 
+    const profileArgs = profiles.flatMap((profile) => ["--profile", profile]);
     const args = [
         "compose",
         "--env-file",
         os.devNull,
-        "--profile",
-        "*",
+        ...profileArgs,
         "-f",
         path.join(repoRoot, "docker-compose.yml"),
         "config",
@@ -471,7 +476,6 @@ test("8. split-stack compose passes PostgreSQL components to database consumers"
         "backend",
         "backend-worker",
         "audio-analyzer",
-        "audio-analyzer-clap",
     ];
 
     for (const serviceName of databaseConsumers) {
@@ -484,6 +488,35 @@ test("8. split-stack compose passes PostgreSQL components to database consumers"
         assert.equal(environment.POSTGRES_DB, "soundspan");
     }
     assert.equal(services.postgres.environment.POSTGRES_PASSWORD, password);
+});
+
+test("8a. split-stack compose defaults to the DCLAP vibe provider", () => {
+    const defaultResult = composeConfig("test-password", []);
+    const workerResult = composeConfig("test-password", ["worker"]);
+    const customPortResult = composeConfig("test-password", [], {
+        DCLAP_HTTP_PORT: "8192",
+    });
+
+    assert.equal(defaultResult.status, 0, defaultResult.stderr);
+    assert.equal(workerResult.status, 0, workerResult.stderr);
+    assert.equal(customPortResult.status, 0, customPortResult.stderr);
+
+    const defaultServices = JSON.parse(defaultResult.stdout).services;
+    const workerServices = JSON.parse(workerResult.stdout).services;
+    const customPortServices = JSON.parse(customPortResult.stdout).services;
+    const providerUrl = "http://vibe-provider-dclap:8092";
+
+    assert.equal(defaultServices["audio-analyzer-clap"], undefined);
+    assert.ok(defaultServices["vibe-provider-dclap"]);
+    assert.equal(defaultServices.backend.environment.VIBE_PROVIDER_URL, providerUrl);
+    assert.equal(
+        workerServices["backend-worker"].environment.VIBE_PROVIDER_URL,
+        providerUrl,
+    );
+    assert.equal(
+        customPortServices.backend.environment.VIBE_PROVIDER_URL,
+        "http://vibe-provider-dclap:8192",
+    );
 });
 
 test("9. compose files never interpolate PostgreSQL components into DATABASE_URL", () => {

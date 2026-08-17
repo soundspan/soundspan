@@ -1,6 +1,7 @@
 # Advanced Analysis and GPU Guide
 
-This guide covers vibe embeddings and GPU acceleration for analyzer workloads.
+This guide covers DCLAP vibe embeddings and optional GPU acceleration for the
+MusiCNN analyzer.
 
 ## Essentia MusiCNN Platform Matrix
 
@@ -40,37 +41,41 @@ MB, instead of installing torch or downloading the former 2.35 GB checkpoint.
 Existing libraries move to the DCLAP embedding space through the backend's
 automatic blue/green migration.
 
-## CLAP Audio Analysis
+## DCLAP Vibe Embeddings
 
-The split-stack CLAP service generates audio embeddings for similarity/vibe
-workflows. It is not part of the AIO image.
+The DCLAP ONNX provider generates text and audio embeddings for similarity and
+vibe workflows. It is the default provider in split-stack Compose deployments.
+The backend calls it over HTTP through `VIBE_PROVIDER_URL`; the provider does
+not need PostgreSQL or Redis credentials.
 
 ### Requirements
 
-- PostgreSQL with pgvector (provided by `pgvector/pgvector:pg16`)
-- ~2 to 4 GB RAM per worker
-- First build downloads the 2.35 GB CLAP checkpoint
+- CPU-only runtime; GPU passthrough is not supported or required
+- Read-only access to the same `/music` library mounted by the backend
+- The same `INTERNAL_API_SECRET` used by the backend
 
 ### Configuration
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `CLAP_WORKERS` | `2` | Analysis workers |
-| `CLAP_THREADS_PER_WORKER` | `1` | CPU threads per worker |
-| `CLAP_SLEEP_INTERVAL` | `5` | Queue poll interval (seconds) |
-| `CLAP_REDIS_SOCKET_TIMEOUT` | `10` | Redis read timeout (seconds); effective minimum is `CLAP_SLEEP_INTERVAL + 5` |
+| Variable                      | Default                           | Description                                               |
+| ----------------------------- | --------------------------------- | --------------------------------------------------------- |
+| `VIBE_PROVIDER_URL`           | `http://vibe-provider-dclap:8092` | Provider base URL used by the backend and worker.         |
+| `DCLAP_HTTP_PORT`             | `8092`                            | Internal HTTP port; Compose does not publish it.          |
+| `DCLAP_ONNX_INTRA_OP_THREADS` | `1`                               | ONNX Runtime intra-operation CPU thread limit.            |
+| `DCLAP_MODEL_IDLE_TIMEOUT`    | `300`                             | Seconds before idle models unload; `0` keeps them loaded. |
 
 ### Usage
 
-Analyzers are enabled by default in `docker-compose.yml`.
-
-For local host-run development, start analyzer services from local compose profile:
+The provider starts by default with `docker-compose.yml`, and Compose points the
+backend and worker at its internal service URL:
 
 ```bash
-docker compose -f docker-compose.local.yml --profile audio-analysis up -d
+docker compose up -d
+docker compose --profile worker up -d
 ```
 
-When backend runs on host, ensure `INTERNAL_API_SECRET` in `backend/.env` matches compose value so CLAP callbacks are authenticated.
+Custom and bare-metal deployments must run the `vibe-provider-dclap` service,
+mount the library read-only at `/music`, and set `VIBE_PROVIDER_URL` on every
+backend process that handles vibe work.
 
 ### API endpoints
 
@@ -82,7 +87,8 @@ When backend runs on host, ensure `INTERNAL_API_SECRET` in `backend/.env` matche
 
 ## GPU Acceleration (Optional)
 
-GPU acceleration speeds up analyzer workloads; CPU-only mode is fully supported.
+GPU acceleration applies only to the MusiCNN analyzer. The DCLAP vibe provider
+is CPU-only.
 
 ### Requirements
 
@@ -125,7 +131,7 @@ docker run -d --gpus all -p 3030:3030 -v /path/to/music:/music -v soundspan_data
 
 Compose split stack:
 
-Uncomment the `devices` block under `audio-analyzer` (and optionally `audio-analyzer-clap`) in `docker-compose.yml`:
+Uncomment the `devices` block under `audio-analyzer` in `docker-compose.yml`:
 
 ```yaml
 reservations:
@@ -147,12 +153,9 @@ docker compose up -d
 ```bash
 # MusiCNN analyzer
 docker logs soundspan_audio_analyzer 2>&1 | grep -i gpu
-
-# CLAP analyzer
-docker logs soundspan_audio_analyzer_clap 2>&1 | grep -i gpu
 ```
 
-Expected examples: `TensorFlow GPU detected` or `CUDA available: True`.
+Expected example: `TensorFlow GPU detected`.
 If logs show CPU-only mode, GPU passthrough is not active.
 
 ---

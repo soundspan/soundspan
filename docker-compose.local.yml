@@ -10,8 +10,8 @@
 #   cd backend && npm run dev
 #   cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 npm run dev
 #
-# Optional analyzers (heavier):
-#   (starts both MusicCNN + CLAP analyzers)
+# Optional analyzer (heavier):
+#   (starts the MusicCNN analyzer)
 #   docker compose -f docker-compose.local.yml --profile audio-analysis up -d
 #
 # Host port map:
@@ -74,38 +74,7 @@ services:
                 condition: service_healthy
         restart: unless-stopped
 
-    # CLAP Audio Analyzer - embedding generation for similarity search
-    audio-analyzer-clap-local:
-        profiles: ["audio-analysis"]
-        build:
-            context: .
-            dockerfile: services/audio-analyzer-clap/Dockerfile
-        environment:
-            REDIS_URL: redis://redis-local:6379
-            DATABASE_URL: postgresql://soundspan:soundspan@postgres-local:5432/soundspan
-            # Host-run backend URL (frontend/backend run outside compose in local dev)
-            BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:3007}
-            MUSIC_PATH: /music
-            SLEEP_INTERVAL: ${CLAP_SLEEP_INTERVAL:-5}
-            CLAP_REDIS_SOCKET_TIMEOUT: ${CLAP_REDIS_SOCKET_TIMEOUT:-10}
-            NUM_WORKERS: ${CLAP_WORKERS:-2}
-            THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
-            MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
-            CLAP_HTTP_PORT: ${CLAP_HTTP_PORT:-8091}
-            # Empty fails closed (backend rejects callbacks with 403); set a real value in .env (see .env.example).
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
-        volumes:
-            - "${MUSIC_PATH:-./music}:/music:ro"
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
-        depends_on:
-            postgres-local:
-                condition: service_healthy
-            redis-local:
-                condition: service_healthy
-        restart: unless-stopped
-
-    # DCLAP HTTP provider - standalone and default-off for local testing.
+    # DCLAP HTTP provider - standalone provider for local testing.
     vibe-provider-dclap-local:
         profiles: ["vibe-provider-dclap"]
         build:

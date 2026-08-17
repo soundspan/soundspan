@@ -1,7 +1,7 @@
 # Lite Mode Override
 #
 # Copy this file to docker-compose.override.yml to disable ML analyzers
-# and reduce RAM usage by ~3-4GB in split-stack compose runs.
+# and reduce RAM usage in split-stack compose runs.
 #
 # Usage:
 #   cp docker-compose.override.lite-mode.yml docker-compose.override.yml
@@ -29,5 +29,15 @@ services:
   audio-analyzer:
     profiles: ["audio-analysis-disabled"]
 
-  audio-analyzer-clap:
+  vibe-provider-dclap:
     profiles: ["audio-analysis-disabled"]
+
+  # An empty VIBE_PROVIDER_URL disables provider mode entirely, so the
+  # backend does not retry a provider that lite mode never starts.
+  backend:
+    environment:
+      VIBE_PROVIDER_URL: ""
+
+  backend-worker:
+    environment:
+      VIBE_PROVIDER_URL: ""

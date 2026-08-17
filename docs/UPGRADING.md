@@ -5,15 +5,37 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
-## 2.3.0
+## 2.3.0: DCLAP replaces the torch CLAP analyzer
 
-- **Helm: replace the torch CLAP analyzer with DCLAP.** A Helm upgrade removes
-  the torch analyzer Deployment. Operators who previously set
-  `audioAnalyzerClap.enabled=true` should set
-  `vibeProviderDclap.enabled=true` instead. The chart wires the backend and an
-  enabled backend worker automatically, and the library re-embeds itself
-  through the backend's blue/green space migration. All
-  `audioAnalyzerClap.*` values are dead and should be deleted.
+**Who this affects:** all Compose and Helm deployments, and custom or
+bare-metal deployments that run the torch CLAP analyzer directly.
+
+**What changed.** The torch `audio-analyzer-clap` service has been removed from
+Compose. Its multi-GB image is no longer pulled or run. The CPU-only
+`vibe-provider-dclap` service now starts by default, and the backend connects to
+it through `VIBE_PROVIDER_URL`. In the Helm chart, an upgrade removes the torch
+analyzer Deployment; operators who previously set
+`audioAnalyzerClap.enabled=true` should set `vibeProviderDclap.enabled=true`
+instead — the chart wires the backend and an enabled backend worker
+automatically, and all `audioAnalyzerClap.*` values are dead and should be
+deleted.
+
+**Existing libraries.** On first start, the backend registers the DCLAP
+embedding space and re-embeds the library in the background. This is a
+blue/green migration: existing similarity continues to use the old vectors
+until the new space reaches the configured coverage threshold, then the backend
+cuts over automatically. It removes the old vectors after the retirement grace
+window. No operator action is required.
+
+During backfill, text-based vibe search may return fewer results until cutover
+completes. Audio similarity ("more like this") is unaffected. Fresh or empty
+libraries cut over immediately.
+
+**Action required:** standard Compose deployments need no migration steps. After
+upgrading, operators may delete the stopped torch CLAP container and its old
+image. Custom or bare-metal deployments must replace the torch analyzer with the
+`vibe-provider-dclap` service and set `VIBE_PROVIDER_URL` on the backend and any
+worker process.
 
 ---
 

@@ -40,7 +40,7 @@ container loopback. The provider vendors a few hundred MB of artifacts instead
 of the former torch stack and its 2.35 GB checkpoint. Plan for up to 8 GiB of
 memory, or disable audio analysis on constrained hosts.
 
-### AIO with GPU acceleration (optional)
+### AIO with MusiCNN GPU acceleration (optional)
 
 Requires NVIDIA Container Toolkit. See [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md).
 
@@ -59,7 +59,7 @@ docker run -d \
 | File                                    | Purpose                                                                                                                                | Typical command                                                                                 |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `docker-compose.aio.yml`                | All-in-one (AIO) soundspan container (frontend+backend+db+redis bundled)                                                               | `docker compose -f docker-compose.aio.yml up -d`                                                |
-| `docker-compose.yml`                    | Split stack (frontend, backend, postgres, redis, sidecars, analyzers) with deployment-safe canonical ports and optional worker profile | `docker compose -f docker-compose.yml up -d`                                                    |
+| `docker-compose.yml`                    | Split stack (frontend, backend, postgres, redis, sidecars, analyzers, and default DCLAP vibe provider) with deployment-safe canonical ports and optional worker profile | `docker compose -f docker-compose.yml up -d`                                                    |
 | `docker-compose.override.ha.yml`        | HA-focused override for split stack (`backend` API role, dynamic backend host-port for scale-out, worker profile ready)                | `docker compose -f docker-compose.yml -f docker-compose.override.ha.yml --profile worker up -d` |
 | `docker-compose.services.yml`           | Optional external Lidarr service layered onto either stack above                                                                       | `docker compose -f docker-compose.yml -f docker-compose.services.yml up -d`                     |
 | `docker-compose.local.yml`              | Local npm/tsx host-run dependencies only (postgres+redis; optional analyzer profile), using +1 collision-avoidance ports               | `docker compose -f docker-compose.local.yml up -d postgres-local redis-local`                   |
@@ -165,14 +165,14 @@ docker buildx version
 
 ### Groups
 
-| Group      | Targets                                                                                                    | Description                                                           |
-| ---------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `default`  | frontend, backend, backend-worker, tidal-downloader, ytmusic-streamer, audio-analyzer, audio-analyzer-clap | All buildable split-stack images                                      |
-| `core`     | frontend, backend, backend-worker                                                                          | Application services only                                             |
-| `db`       | postgres, redis                                                                                            | Tags upstream images locally (pgvector/pgvector:pg16, redis:7-alpine) |
-| `external` | tidal-downloader, ytmusic-streamer                                                                         | Streaming sidecars                                                    |
-| `analysis` | audio-analyzer, audio-analyzer-clap                                                                        | ML audio analysis services                                            |
-| `aio`      | soundspan-aio                                                                                              | All-in-one container                                                  |
+| Group      | Description                                                           |
+| ---------- | --------------------------------------------------------------------- |
+| `default`  | All buildable split-stack images                                      |
+| `core`     | Application services only                                             |
+| `db`       | Tags upstream images locally (pgvector/pgvector:pg16, redis:7-alpine) |
+| `external` | Streaming sidecars                                                    |
+| `analysis` | ML audio analysis services                                            |
+| `aio`      | All-in-one container                                                  |
 
 ### Usage
 
@@ -197,7 +197,6 @@ Build a single target:
 ```bash
 docker buildx bake frontend
 docker buildx bake backend
-docker buildx bake audio-analyzer-clap
 ```
 
 Build multiple groups at once:
@@ -388,4 +387,4 @@ If startup logs show permission errors, `chown` the host path to the UID/GID sho
 - [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL setup
 - [Kubernetes Guide](KUBERNETES.md) — Helm and manual Kubernetes deployment
 - [Reverse Proxy and Tunnels](REVERSE_PROXY_AND_TUNNELS.md) — Edge routing for split deployments
-- [Advanced Analysis and GPU](ADVANCED_ANALYSIS_AND_GPU.md) — Vibe analysis and GPU acceleration
+- [Advanced Analysis and GPU](ADVANCED_ANALYSIS_AND_GPU.md) — DCLAP vibe analysis and optional MusiCNN GPU acceleration

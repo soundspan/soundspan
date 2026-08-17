@@ -17,16 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added read-only provider-fidelity validation tooling for real-library paired
   cosine, teacher-indexed neighbor overlap, text-query overlap, and inclusive
   same-space gate reports.
-- Added an opt-in, validated vibe-provider HTTP client for text search and
+- Added a validated vibe-provider HTTP client for text search and
   vocabulary generation, with active-space vector checks and bounded metrics.
-- The torch CLAP sidecar now exposes the internal embedding provider HTTP contract.
 - Added backend-driven provider audio embedding behind `VIBE_PROVIDER_URL`,
   with bounded concurrency, graceful draining, status ownership, and
   active-space coverage metrics.
-- Added a default-off DCLAP student ONNX provider image with the provider v1
+- Added a DCLAP student ONNX provider image with the provider v1
   HTTP contract, offline-vendored model/tokenizer artifacts, lazy idle unloading,
-  upstream-matched audio preprocessing, combined artifact identity, and an opt-in
-  Compose profile. Provider registry wiring remains disabled.
+  upstream-matched audio preprocessing, and combined artifact identity.
 
 ### Changed
 
@@ -35,12 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enabling the Helm DCLAP provider now wires the backend to it automatically
   through `VIBE_PROVIDER_URL`. It replaces the removed torch analyzer while
   keeping the same opt-in default.
+- DCLAP is now the default vibe embedding provider in Compose, and the backend
+  and worker are wired to it through `VIBE_PROVIDER_URL`.
 - Federation embedding sync now verifies the JSON-encoded
   `X-Soundspan-Embedding-Space` response header before storing peer vectors,
   while preserving strict catalog response bodies for released consumers.
 - Vibe embeddings are now tracked against a versioned embedding-space registry.
-  The backend and audio-analyzer-clap images must be upgraded together for this
-  release; older CLAP images cannot write embeddings against the new schema.
 - Confined vibe and analysis vector SQL to the track embedding service layer.
 - Release-note generation now always includes the standing 2.0.0 upgrade path
   and accepts repeatable per-release `--upgrade-note` bullets.
@@ -64,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the local-profile Docker builds for both audio analyzer sidecars:
   their compose entries now build from the repository root, matching the
   root-relative paths their Dockerfiles have always used.
+- Removed the torch CLAP analyzer Compose service and its configuration
+  variables, so default installs no longer pull its multi-GB image. Existing
+  libraries migrate automatically to the DCLAP embedding space.
+
+### Fixed
+
+- Fixed the local-profile Docker build for the MusicCNN audio analyzer by using
+  the repository root, matching the root-relative paths its Dockerfile uses.
 - The interface font (Montserrat) is now bundled with the app instead of
   being fetched from Google Fonts at build time, removing a network
   dependency from builds; rendering is unchanged.

@@ -59,7 +59,7 @@ provider. The backend sends text and audio vibe embedding work to the provider
 over container loopback. Its vendored artifacts are a few hundred MB instead of
 the former multi-GB torch model stack.
 
-### Optional GPU mode
+### Optional GPU mode for MusiCNN analysis
 
 ```bash
 docker run -d \
@@ -84,7 +84,7 @@ For deployment variants, release channels, compose files, and updates, see [`doc
 - OIDC and SSO setup: [`docs/OIDC_SSO.md`](docs/OIDC_SSO.md)
 - Environment variables reference: [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md)
 - Integration setup (Lidarr, Soulseek, YouTube Music, TIDAL, OpenSubsonic): [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
-- Advanced analysis and GPU acceleration: [`docs/ADVANCED_ANALYSIS_AND_GPU.md`](docs/ADVANCED_ANALYSIS_AND_GPU.md)
+- Vibe analysis and optional GPU acceleration: [`docs/ADVANCED_ANALYSIS_AND_GPU.md`](docs/ADVANCED_ANALYSIS_AND_GPU.md)
 - Kubernetes deployment: [`docs/KUBERNETES.md`](docs/KUBERNETES.md)
 - Reverse proxy and tunnel routing: [`docs/REVERSE_PROXY_AND_TUNNELS.md`](docs/REVERSE_PROXY_AND_TUNNELS.md)
 - OpenSubsonic compatibility contract: [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)
