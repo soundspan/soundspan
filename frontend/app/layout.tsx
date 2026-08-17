@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Montserrat } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
 import { connection } from "next/server";
@@ -20,9 +19,13 @@ import {
     BRAND_NAME,
 } from "@/lib/brand";
 
-const montserrat = Montserrat({
-    weight: ["300", "400", "500", "600", "700", "800"],
-    subsets: ["latin"],
+// Self-hosted latin variable instance (weights 300-800) of the same font the
+// build previously fetched from Google at build time - CI must not depend on
+// fonts.gstatic.com availability. License: assets/fonts/OFL-Montserrat.txt.
+const montserrat = localFont({
+    src: "../assets/fonts/montserrat-latin-wght-normal.woff2",
+    weight: "300 800",
+    style: "normal",
     display: "swap",
     variable: "--font-montserrat",
 });

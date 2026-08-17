@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the local-profile Docker builds for both audio analyzer sidecars:
   their compose entries now build from the repository root, matching the
   root-relative paths their Dockerfiles have always used.
+- The interface font (Montserrat) is now bundled with the app instead of
+  being fetched from Google Fonts at build time, removing a network
+  dependency from builds; rendering is unchanged.
 - Hardened blue/green vibe migrations so completed post-cutover tails
   self-heal into the target space, text search stays in the active space,
   failed concurrent ANN indexes recover, terminal worker startup retries are
