@@ -51,7 +51,8 @@ services:
     audio-analyzer-local:
         profiles: ["audio-analysis"]
         build:
-            context: ./services/audio-analyzer
+            context: .
+            dockerfile: services/audio-analyzer/Dockerfile
         environment:
             # Connect to host machine's services (or Docker services)
             REDIS_URL: redis://redis-local:6379
@@ -77,7 +78,8 @@ services:
     audio-analyzer-clap-local:
         profiles: ["audio-analysis"]
         build:
-            context: ./services/audio-analyzer-clap
+            context: .
+            dockerfile: services/audio-analyzer-clap/Dockerfile
         environment:
             REDIS_URL: redis://redis-local:6379
             DATABASE_URL: postgresql://soundspan:soundspan@postgres-local:5432/soundspan
