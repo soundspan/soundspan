@@ -97,9 +97,9 @@ describe("embedding-space lifecycle decisions", () => {
     ])(
         "evaluates empty-active-space cutover with %s embedded vectors",
         (activeEmbeddedCount, due) => {
-            expect(
-                shouldCutOverEmptyActiveSpace(activeEmbeddedCount),
-            ).toBe(due);
+            expect(shouldCutOverEmptyActiveSpace(activeEmbeddedCount)).toBe(
+                due,
+            );
         },
     );
 
