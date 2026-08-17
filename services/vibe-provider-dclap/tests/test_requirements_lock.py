@@ -10,7 +10,7 @@ LOCK_PATH = SERVICE_ROOT / "requirements.lock"
 
 
 def test_docker_python_matches_lock_target() -> None:
-    """Require the future lock target to match the Python 3.12 image."""
+    """Require the shipped lock target to match the Python 3.12 image."""
     dockerfile = (SERVICE_ROOT / "Dockerfile").read_text(encoding="utf-8")
     lock = LOCK_PATH.read_text(encoding="utf-8")
     image_match = re.search(

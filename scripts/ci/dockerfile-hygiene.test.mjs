@@ -405,7 +405,7 @@ test("4. ytmusic-streamer has no world-writable token directory", () => {
     );
 });
 
-test("root Docker context excludes Python bytecode caches", () => {
+test("4a. root Docker context excludes Python bytecode caches", () => {
     const dockerignore = readRepoFile(".dockerignore");
 
     assert.match(
