@@ -106,6 +106,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/programmaticPlaylists/service.ts` | Mix rotation orchestration and shared service instance |
 | `backend/src/services/programmaticPlaylists/shared.ts` | Shared types, selection helpers, constants, and service state |
 | `backend/src/services/programmaticPlaylists/weeklyAndMoodMixes.ts` | Weekly curated and on-demand mood mixes |
+| `backend/src/services/providerFidelity.ts` | Pure provider-fidelity cosine, recall-overlap, and gate evaluation metrics |
+| `backend/src/services/providerFidelityValidation.ts` | Testable provider-fidelity sampling, orchestration, reporting, and CLI parsing |
 | `backend/src/services/radioVibeEngine.ts` | Core |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |

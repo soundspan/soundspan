@@ -107,9 +107,35 @@ Recommendation: **(b)**, with the sidecar's repository/source offer documented, 
 Distillation approximates the teacher. Existing libraries hold teacher vectors, so a student could claim the teacher space only after this gate:
 
 - Sample N tracks (target ≥1,000 across genres) from a real library; embed with both towers; measure (a) teacher-vs-student cosine per track, (b) top-k neighbor overlap querying teacher-indexed vectors with student query vectors, (c) text-query result overlap.
-- Acceptance: defined thresholds (proposed: median cosine ≥ 0.98, top-10 overlap ≥ 0.9) recorded with the results in this document when run.
+- Acceptance: median cosine ≥ 0.98 and mean top-10 neighbor overlap ≥ 0.9, recorded with the results in this document when run.
 - **Pass** → student registers with the same space identity; no re-embedding; mixed vectors permitted.
 - **Fail** → student registers as a distinct space and enters the migration flow above. The 5-6x speedup makes full re-embed tractable on the constrained fleet; this is the fallback, not a blocker.
+
+#### How to run
+
+Prerequisites: start both provider sidecars with the same `INTERNAL_API_SECRET`, make the real local library and its persisted `filePath` references visible to both sidecars, and configure the backend database connection. Run from the repository root:
+
+```bash
+cd backend
+npx tsx scripts/validateProviderFidelity.ts \
+  --baseline-url http://audio-analyzer-clap:8091 \
+  --candidate-url http://vibe-provider-dclap:8092 \
+  --sample 1000 \
+  --k 10 \
+  --output ../provider-fidelity-report.md
+```
+
+`--baseline-url` may be omitted; it defaults to `VIBE_PROVIDER_URL` when configured, then to `http://audio-analyzer-clap:8091`. The candidate URL is always explicit. The tool uses the vocabulary artifact's term names for text queries, writes the Markdown path plus an adjacent JSON report, and never registers a provider or mutates library data.
+
+The audio comparison is cosine `a·b / (||a|| ||b||)` for each paired track. Neighbor recall is `|topK(A query, A index) ∩ topK(B query, A index)| / k`, excluding the query track. Text-query recall uses the same overlap formula against the baseline audio index. The gate uses inclusive comparisons: median paired cosine `>= 0.98` and mean top-10 neighbor overlap `>= 0.9`.
+
+#### Results
+
+Record real-library runs here when they happen. Do not replace the measured values with synthetic fixtures or upstream validation metrics.
+
+| Run date | Library/sample | Baseline identity | Candidate identity | Median cosine | Mean top-10 overlap | Mean text-query overlap | Verdict | Report |
+| --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| Pending | Real-library run required | — | — | — | — | — | — | — |
 
 The shipped sidecar takes the conservative fail outcome now: observed student-to-teacher fidelity is approximately 0.88 cosine, below the proposed 0.98 threshold, so `/v1/space` never claims the teacher identity. It advertises `clap-music-audioset-dclap-student` with a combined SHA-256 identity derived from the pinned audio graph shell, external audio weights, and text tower. A larger fleet recall study may still inform later rollout tuning, but it cannot silently merge the two spaces.
 

@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
   backfills it, cuts over at configured coverage, retains the old vectors for
   rollback, and cleans them after the configured grace period.
+- Added read-only provider-fidelity validation tooling for real-library paired
+  cosine, teacher-indexed neighbor overlap, text-query overlap, and inclusive
+  same-space gate reports.
 - Added an opt-in, validated vibe-provider HTTP client for text search and
   vocabulary generation, with active-space vector checks and bounded metrics.
 - The torch CLAP sidecar now exposes the internal embedding provider HTTP contract.

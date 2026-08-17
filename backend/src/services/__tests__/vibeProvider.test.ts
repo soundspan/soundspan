@@ -15,6 +15,7 @@ jest.mock("../../metrics", () => ({
 }));
 
 import {
+    createProviderClient,
     embedAudio,
     embedText,
     fetchProviderSpace,
@@ -348,5 +349,53 @@ describe("vibe provider client", () => {
             VibeProviderUnavailableError,
         );
         expectMetric("text", "error");
+    });
+
+    it("validates explicit clients against each provider's declared space", async () => {
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    family: "candidate-space",
+                    checkpointHash: "sha256:candidate",
+                    dim: 3,
+                    sampleRateHz: 48_000,
+                    preprocessing: { mono: true },
+                    revision: "candidate",
+                    textTower: true,
+                }),
+            )
+            .mockResolvedValueOnce(jsonResponse({ vector: [1, 0, 0] }));
+        const client = createProviderClient("http://candidate.test/root/");
+
+        await expect(client.fetchSpace()).resolves.toMatchObject({ dim: 3 });
+        await expect(client.embedText("query")).resolves.toEqual([1, 0, 0]);
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+        expect(mockFetch).toHaveBeenNthCalledWith(
+            2,
+            "http://candidate.test/root/v1/embed/text",
+            expect.any(Object),
+        );
+    });
+
+    it("rejects an explicit client's malformed vector using its declared dimension", async () => {
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    family: "candidate-space",
+                    checkpointHash: "sha256:candidate",
+                    dim: 3,
+                    sampleRateHz: 48_000,
+                    preprocessing: { mono: true },
+                    revision: "candidate",
+                    textTower: true,
+                }),
+            )
+            .mockResolvedValueOnce(jsonResponse({ vector: [1, 0] }));
+        const client = createProviderClient("http://candidate.test");
+
+        await client.fetchSpace();
+        await expect(client.embedAudio("track.flac")).rejects.toBeInstanceOf(
+            VibeProviderContractError,
+        );
     });
 });
