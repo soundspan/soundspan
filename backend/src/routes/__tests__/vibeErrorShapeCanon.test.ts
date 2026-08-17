@@ -1,6 +1,29 @@
 import { Request, Response } from "express";
 
 const mockGetActiveSpace = jest.fn();
+let mockVibeProviderUrl: string | undefined;
+const mockProviderEmbedText = jest.fn();
+
+jest.mock("../../config", () => ({
+    config: {
+        get vibeProviderUrl() {
+            return mockVibeProviderUrl;
+        },
+    },
+}));
+
+jest.mock("../../services/vibeProvider", () => {
+    class VibeProviderError extends Error {}
+    return {
+        embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
+        VibeProviderError,
+        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
+        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
+        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {},
+        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {},
+        VibeProviderSpaceMismatchError: class VibeProviderSpaceMismatchError extends VibeProviderError {},
+    };
+});
 
 jest.mock("crypto", () => ({
     randomUUID: jest.fn(() => "req-123"),
@@ -137,6 +160,7 @@ describe("vibe canonical error response shape", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockVibeProviderUrl = undefined;
         mockRedisXAdd.mockResolvedValue("1712345-0");
         mockRedisDel.mockResolvedValue(1);
         mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
@@ -173,6 +197,30 @@ describe("vibe canonical error response shape", () => {
             error: "Text embedding service unavailable",
         });
         expect(res.body).not.toHaveProperty("message");
+    });
+
+    it("keeps the canonical timeout shape in provider mode", async () => {
+        const { VibeProviderTimeoutError } = jest.requireMock(
+            "../../services/vibeProvider",
+        ) as { VibeProviderTimeoutError: new () => Error };
+        mockVibeProviderUrl = "http://vibe-provider:8090";
+        mockProviderEmbedText.mockRejectedValueOnce(
+            new VibeProviderTimeoutError(),
+        );
+        const req = {
+            body: { query: "quiet focus" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await searchHandler(req, res);
+
+        expect(res.statusCode).toBe(504);
+        expect(res.body).toEqual({
+            error: "Text embedding service unavailable",
+        });
+        expect(res.body).not.toHaveProperty("message");
+        expect(mockRedisXAdd).not.toHaveBeenCalled();
     });
 
     it("keeps the canonical error shape when no embedding space is active", async () => {

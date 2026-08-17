@@ -128,6 +128,39 @@ const federationTombstoneRetentionEnvSchema = z
     })
     .optional();
 
+const vibeProviderUrlEnvSchema = z
+    .string()
+    .trim()
+    .refine(
+        (value) => {
+            try {
+                const url = new URL(value);
+                return (
+                    (url.protocol === "http:" || url.protocol === "https:") &&
+                    !url.username &&
+                    !url.password &&
+                    !url.search &&
+                    !url.hash
+                );
+            } catch {
+                return false;
+            }
+        },
+        {
+            message:
+                "VIBE_PROVIDER_URL must be a valid HTTP(S) URL without credentials",
+        },
+    )
+    .optional();
+
+function normalizeVibeProviderUrl(
+    value: string | undefined,
+): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) return undefined;
+    return trimmed.replace(/\/+$/, "");
+}
+
 type OidcEnvInput = {
     LOCAL_LOGIN_ENABLED?: string;
     OIDC_ENABLED?: string;
@@ -304,6 +337,7 @@ const envSchema = z
         SETTINGS_ENCRYPTION_KEY: z.string().optional(),
         ENCRYPTION_KEY: z.string().optional(),
         INTERNAL_API_SECRET: z.string().optional(),
+        VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
         METRICS_TOKEN: z.string().optional(),
         METRICS_PUBLIC: z.string().optional(),
         PORT: z.string().optional(),
@@ -446,6 +480,10 @@ export const config = {
     // DATABASE_URL and REDIS_URL are validated by envSchema above, so they're guaranteed to exist
     databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
+
+    // Optional text-embedding provider base URL. Absence preserves the legacy
+    // Redis-stream transport used by vibe search.
+    vibeProviderUrl: normalizeVibeProviderUrl(process.env.VIBE_PROVIDER_URL),
 
     // Required stable deployment secret retained as the JWT signing fallback
     // and final API-key pepper fallback. It no longer configures sessions.

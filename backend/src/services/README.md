@@ -131,6 +131,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/spotifyImport/state.ts` | Shared Spotify import persistence, retry, cache, and logger state |
 | `backend/src/services/spotifyImport/types.ts` | Shared Spotify import contracts |
 | `backend/src/services/staleJobCleanup.ts` | Core |
+| `backend/src/services/textEmbedding.ts` | Config-selected provider or legacy Redis text-embedding transport |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
@@ -143,7 +144,9 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeCalibration.ts` | Vibe distance calibration |
+| `backend/src/services/vibeProvider.ts` | Validated, bounded vibe-provider HTTP client and active-space trust boundary |
 | `backend/src/services/vibeVocabulary.ts` | Core |
+| `backend/src/services/vibeVocabularyGenerator.ts` | Testable provider-backed vocabulary artifact generation |
 | `backend/src/services/wikidata.ts` | Core |
 | `backend/src/services/workerEventLoopMonitor.ts` | Core |
 | `backend/src/services/youtubeDownload.ts` | Core |

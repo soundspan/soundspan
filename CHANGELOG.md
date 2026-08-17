@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an opt-in, validated vibe-provider HTTP client for text search and
+  vocabulary generation, with active-space vector checks and bounded metrics.
+
 ### Changed
 
 - Vibe embeddings are now tracked against a versioned embedding-space registry.

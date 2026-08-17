@@ -1,118 +1,43 @@
 // backend/scripts/generateVibeVocabulary.ts
 
-import { createClient } from "redis";
-import { randomUUID } from "crypto";
 import { writeFileSync } from "fs";
 import { join } from "path";
+import { config } from "../src/config";
 import {
     VOCAB_DEFINITIONS,
     VOCABULARY_TERMS,
 } from "../src/config/featureProfiles";
-
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
-
-interface VocabTerm {
-    name: string;
-    type: string;
-    embedding: number[];
-    featureProfile: Record<string, number>;
-    related?: string[];
-}
-
-async function getClapTextEmbedding(
-    redisClient: ReturnType<typeof createClient>,
-    text: string,
-): Promise<number[]> {
-    const requestId = randomUUID();
-    const responseChannel = `audio:text:embed:response:${requestId}`;
-    const requestChannel = "audio:text:embed";
-
-    const subscriber = redisClient.duplicate();
-    await subscriber.connect();
-
-    try {
-        return await new Promise<number[]>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error(`Timeout getting embedding for: ${text}`));
-            }, 30000);
-
-            subscriber.subscribe(responseChannel, (message) => {
-                clearTimeout(timeout);
-                try {
-                    const data = JSON.parse(message);
-                    if (data.error) {
-                        reject(new Error(data.error));
-                    } else {
-                        resolve(data.embedding);
-                    }
-                } catch (e) {
-                    reject(new Error("Invalid response"));
-                }
-            });
-
-            redisClient.publish(
-                requestChannel,
-                JSON.stringify({ requestId, text }),
-            );
-        });
-    } finally {
-        await subscriber.unsubscribe(responseChannel);
-        await subscriber.disconnect();
-    }
-}
+import { embedText } from "../src/services/vibeProvider";
+import {
+    generateVibeVocabulary,
+    requireVibeProviderUrl,
+} from "../src/services/vibeVocabularyGenerator";
 
 async function main() {
-    console.log("Connecting to Redis...");
-    const redisClient = createClient({ url: REDIS_URL });
-    await redisClient.connect();
-
+    requireVibeProviderUrl(config.vibeProviderUrl);
     console.log(
         `Generating embeddings for ${VOCABULARY_TERMS.length} terms...`,
     );
-
-    const terms: Record<string, VocabTerm> = {};
-    let success = 0;
-    let failed = 0;
-
-    for (const termName of VOCABULARY_TERMS) {
-        const definition = VOCAB_DEFINITIONS[termName];
-
-        try {
-            process.stdout.write(`  ${termName}... `);
-            const embedding = await getClapTextEmbedding(redisClient, termName);
-
-            terms[termName] = {
-                name: termName,
-                type: definition.type,
-                embedding,
-                featureProfile: definition.featureProfile,
-                related: definition.related,
-            };
-
-            console.log(`OK (${embedding.length} dims)`);
-            success++;
-        } catch (error) {
-            console.log(`FAILED: ${error}`);
-            failed++;
-        }
-
-        // Small delay to not overwhelm the CLAP service
-        await new Promise((r) => setTimeout(r, 100));
-    }
-
-    const vocabulary = {
-        version: "1.0.0",
-        generatedAt: new Date().toISOString(),
-        terms,
-    };
+    const result = await generateVibeVocabulary({
+        termNames: VOCABULARY_TERMS,
+        definitions: VOCAB_DEFINITIONS,
+        embed: embedText,
+    });
 
     const outputPath = join(__dirname, "../src/config/vibe-vocabulary.json");
-    writeFileSync(outputPath, JSON.stringify(vocabulary, null, 2));
+    writeFileSync(outputPath, JSON.stringify(result.vocabulary, null, 2));
 
-    console.log(`\nDone! ${success} terms generated, ${failed} failed.`);
+    console.log(
+        `\nDone! ${result.succeeded} terms generated, ${result.failed.length} failed.`,
+    );
+    if (result.failed.length > 0) {
+        console.log(`Failed terms: ${result.failed.join(", ")}`);
+    }
     console.log(`Vocabulary saved to: ${outputPath}`);
-
-    await redisClient.disconnect();
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exitCode = 1;
+});

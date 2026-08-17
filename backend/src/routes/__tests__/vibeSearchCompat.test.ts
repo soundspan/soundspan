@@ -1,5 +1,29 @@
 import { Request, Response } from "express";
 
+let mockVibeProviderUrl: string | undefined;
+const mockProviderEmbedText = jest.fn();
+
+jest.mock("../../config", () => ({
+    config: {
+        get vibeProviderUrl() {
+            return mockVibeProviderUrl;
+        },
+    },
+}));
+
+jest.mock("../../services/vibeProvider", () => {
+    class VibeProviderError extends Error {}
+    return {
+        embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
+        VibeProviderError,
+        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
+        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
+        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {},
+        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {},
+        VibeProviderSpaceMismatchError: class VibeProviderSpaceMismatchError extends VibeProviderError {},
+    };
+});
+
 jest.mock("crypto", () => ({
     randomUUID: jest.fn(() => "req-123"),
 }));
@@ -158,6 +182,7 @@ describe("vibe search transport compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockVibeProviderUrl = undefined;
         mockTrackCount.mockResolvedValue(0);
         mockTrackFindUnique.mockResolvedValue(null);
         mockRedisXAdd.mockResolvedValue("1712345-0");
@@ -471,6 +496,105 @@ describe("vibe search transport compatibility", () => {
         expect(mockRedisDel).toHaveBeenCalledWith(
             "audio:text:embed:response:req-123",
         );
+        expect(mockProviderEmbedText).not.toHaveBeenCalled();
+    });
+
+    describe("provider mode", () => {
+        beforeEach(() => {
+            mockVibeProviderUrl = "http://vibe-provider:8090";
+            mockProviderEmbedText.mockResolvedValue([0.6, 0.8]);
+            mockRunAnnQuery.mockResolvedValue([
+                {
+                    id: "track-provider",
+                    title: "Provider Track",
+                    duration: 180,
+                    trackNo: 1,
+                    distance: 0.2,
+                    albumId: "album-1",
+                    albumTitle: "Album One",
+                    albumCoverUrl: null,
+                    artistId: "artist-1",
+                    artistName: "Artist One",
+                    energy: 0.8,
+                    valence: 0.7,
+                    danceability: 0.6,
+                    acousticness: 0.1,
+                    instrumentalness: 0.05,
+                    arousal: 0.7,
+                    speechiness: 0.12,
+                },
+            ]);
+        });
+
+        it("drives vibe search without reaching the legacy Redis transport", async () => {
+            const req = {
+                body: { query: "  quiet focus  ", limit: 10 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await searchHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual(
+                expect.objectContaining({
+                    query: "quiet focus",
+                    tracks: [expect.objectContaining({ id: "track-provider" })],
+                }),
+            );
+            expect(mockProviderEmbedText).toHaveBeenCalledWith("quiet focus");
+            expect(mockRedisXAdd).not.toHaveBeenCalled();
+            expect(mockBlockingBlPop).not.toHaveBeenCalled();
+            expect(mockRedisDel).not.toHaveBeenCalled();
+        });
+
+        it("maps an unavailable provider to the canonical 504 response", async () => {
+            const { VibeProviderUnavailableError } = jest.requireMock(
+                "../../services/vibeProvider",
+            ) as { VibeProviderUnavailableError: new () => Error };
+            mockProviderEmbedText.mockRejectedValueOnce(
+                new VibeProviderUnavailableError(),
+            );
+            const req = {
+                body: { query: "quiet focus" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await searchHandler(req, res);
+
+            expect(res.statusCode).toBe(504);
+            expect(res.body).toEqual({
+                error: "Text embedding service unavailable",
+            });
+            expect(mockRedisXAdd).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            "VibeProviderAuthError",
+            "VibeProviderContractError",
+            "VibeProviderSpaceMismatchError",
+        ] as const)("maps %s to the canonical 500 response", async (name) => {
+            const providerErrors = jest.requireMock(
+                "../../services/vibeProvider",
+            ) as Record<typeof name, new () => Error>;
+            mockProviderEmbedText.mockRejectedValueOnce(
+                new providerErrors[name](),
+            );
+            const req = {
+                body: { query: "quiet focus" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await searchHandler(req, res);
+
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({
+                error: "Failed to search tracks by vibe",
+            });
+            expect(mockRedisXAdd).not.toHaveBeenCalled();
+        });
     });
 
     it("returns 504 when no embedding response arrives before timeout", async () => {

@@ -1,12 +1,11 @@
 import { Request, Response, Router } from "express";
-import { randomUUID } from "crypto";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import {
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
-import { blockingBlPop, redisClient } from "../utils/redis";
+import { redisClient } from "../utils/redis";
 import { blendEmbeddings, lerpEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -50,20 +49,18 @@ import {
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
+import {
+    resolveTextEmbedding,
+    TextEmbeddingProviderError,
+    TextEmbeddingTimeoutError,
+} from "../services/textEmbedding";
 
 const router = Router();
 
 // Load vocabulary at module initialization
 loadVocabulary();
 
-const TEXT_EMBED_REQUEST_STREAM = "audio:text:embed:requests";
-const TEXT_EMBED_RESPONSE_PREFIX = "audio:text:embed:response:";
-const TEXT_EMBED_TIMEOUT_SECONDS = 30;
 const MAX_TEXT_SEARCH_QUERY_LENGTH = 512;
-// The CLAP consumer handles one request per replica at a time and callers wait
-// at most 30 seconds. Retaining 100 entries leaves burst headroom without
-// allowing timed-out request payloads to accumulate indefinitely.
-const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
 
 async function buildTrackPreferenceScoreMapForUser(
     userId: string | undefined,
@@ -994,14 +991,6 @@ function distanceToSimilarity(distance: number): number {
 // 0.65 = 65% match, meaning distance <= 0.7
 const MIN_SEARCH_SIMILARITY = 0.6;
 
-interface TextEmbedResponsePayload {
-    requestId: string;
-    success: boolean;
-    embedding: number[] | null;
-    modelVersion: string;
-    error?: string;
-}
-
 /**
  * @openapi
  * /api/vibe/search:
@@ -1106,172 +1095,128 @@ router.post(
             // similarity = 1 - (distance / 2), so distance = 2 * (1 - similarity)
             const maxDistance = 2 * (1 - similarityThreshold);
 
-            const requestId = randomUUID();
-            const responseKey = `${TEXT_EMBED_RESPONSE_PREFIX}${requestId}`;
             const normalizedQuery = query.trim();
+            const textEmbedding = await resolveTextEmbedding(normalizedQuery);
 
-            try {
-                // Queue text-embedding request via Redis Streams to ensure a single
-                // CLAP replica claims and processes each request.
-                await redisClient.xAdd(
-                    TEXT_EMBED_REQUEST_STREAM,
-                    "*",
-                    {
-                        requestId,
-                        text: normalizedQuery,
-                        responseKey,
-                    },
-                    {
-                        TRIM: {
-                            strategy: "MAXLEN",
-                            strategyModifier: "~",
-                            threshold: TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH,
-                        },
-                    },
+            // Query expansion with vocabulary
+            const vocab = getVocabulary();
+            let searchEmbedding = textEmbedding;
+            let genreConfidence = 0;
+            let matchedTerms: VocabTerm[] = [];
+
+            if (vocab) {
+                const expansion = expandQueryWithVocabulary(
+                    textEmbedding,
+                    normalizedQuery,
+                    vocab,
                 );
-
-                // Wait for response from the CLAP worker.
-                const response = await blockingBlPop(
-                    responseKey,
-                    TEXT_EMBED_TIMEOUT_SECONDS,
-                );
-
-                if (!response?.element) {
-                    throw new Error("Text embedding request timed out");
-                }
-
-                let payload: TextEmbedResponsePayload;
-                try {
-                    payload = JSON.parse(
-                        response.element,
-                    ) as TextEmbedResponsePayload;
-                } catch (_error) {
-                    throw new Error("Invalid response from analyzer");
-                }
-
-                if (payload.error) {
-                    throw new Error(payload.error);
-                }
-
-                if (!Array.isArray(payload.embedding)) {
-                    throw new Error("Invalid response from analyzer");
-                }
-
-                const textEmbedding = payload.embedding;
-
-                // Query expansion with vocabulary
-                const vocab = getVocabulary();
-                let searchEmbedding = textEmbedding;
-                let genreConfidence = 0;
-                let matchedTerms: VocabTerm[] = [];
-
-                if (vocab) {
-                    const expansion = expandQueryWithVocabulary(
-                        textEmbedding,
-                        normalizedQuery,
-                        vocab,
-                    );
-                    searchEmbedding = expansion.embedding;
-                    genreConfidence = expansion.genreConfidence;
-                    matchedTerms = expansion.matchedTerms;
-
-                    logger.info(
-                        `[VIBE-SEARCH] Query "${normalizedQuery}" expanded with terms: ${matchedTerms.map((t) => t.name).join(", ") || "none"}, genre confidence: ${(genreConfidence * 100).toFixed(0)}%`,
-                    );
-                }
-
-                // Query for similar tracks using the (possibly expanded) embedding
-                // Fetch more candidates for re-ranking (3x limit)
-                // Filter by max distance to exclude poor matches
-                const candidateLimit = limit * 3;
-                const similarTracks = await findTracksByTextEmbedding(
-                    searchEmbedding,
-                    maxDistance,
-                    candidateLimit,
-                );
+                searchEmbedding = expansion.embedding;
+                genreConfidence = expansion.genreConfidence;
+                matchedTerms = expansion.matchedTerms;
 
                 logger.info(
-                    `Vibe search "${normalizedQuery}": found ${similarTracks.length} candidates above ${Math.round(similarityThreshold * 100)}% similarity (max distance: ${maxDistance.toFixed(2)})`,
+                    `[VIBE-SEARCH] Query "${normalizedQuery}" expanded with terms: ${matchedTerms.map((t) => t.name).join(", ") || "none"}, genre confidence: ${(genreConfidence * 100).toFixed(0)}%`,
                 );
-
-                // Re-rank using audio features if we have vocabulary matches
-                let rankedTracks:
-                    | typeof similarTracks
-                    | ReturnType<typeof rerankWithFeatures<TextSearchResult>> =
-                    similarTracks;
-                if (vocab && matchedTerms.length > 0) {
-                    const reranked = rerankWithFeatures(
-                        similarTracks,
-                        matchedTerms,
-                        genreConfidence,
-                    );
-                    rankedTracks = reranked.slice(0, limit);
-
-                    logger.info(
-                        `[VIBE-SEARCH] Re-ranked ${similarTracks.length} candidates, top result: ${rankedTracks[0]?.title || "none"}`,
-                    );
-                } else {
-                    rankedTracks = similarTracks.slice(0, limit);
-                }
-
-                // If we have results, log the similarity range
-                if (rankedTracks.length > 0) {
-                    const first = rankedTracks[0];
-                    const last = rankedTracks[rankedTracks.length - 1];
-                    const bestSim =
-                        "finalScore" in first
-                            ? first.finalScore
-                            : distanceToSimilarity(first.distance);
-                    const worstSim =
-                        "finalScore" in last
-                            ? last.finalScore
-                            : distanceToSimilarity(last.distance);
-                    logger.info(
-                        `Vibe search similarity range: ${Math.round(bestSim * 100)}% - ${Math.round(worstSim * 100)}%`,
-                    );
-                }
-
-                const tracks = rankedTracks.map((row) => ({
-                    id: row.id,
-                    title: row.title,
-                    duration: row.duration,
-                    trackNo: row.trackNo,
-                    distance: row.distance,
-                    similarity:
-                        "finalScore" in row
-                            ? row.finalScore
-                            : distanceToSimilarity(row.distance),
-                    album: {
-                        id: row.albumId,
-                        title: row.albumTitle,
-                        coverUrl: row.albumCoverUrl,
-                    },
-                    artist: {
-                        id: row.artistId,
-                        name: row.artistName,
-                    },
-                }));
-
-                res.json({
-                    query: normalizedQuery,
-                    tracks,
-                    minSimilarity: similarityThreshold,
-                    totalAboveThreshold: tracks.length,
-                    debug: {
-                        matchedTerms: matchedTerms.map((t) => t.name),
-                        genreConfidence,
-                        featureWeight:
-                            matchedTerms.length > 0
-                                ? 0.2 + genreConfidence * 0.5
-                                : 0,
-                    },
-                });
-            } finally {
-                await redisClient.del(responseKey).catch(() => {});
             }
-        } catch (error: any) {
+
+            // Query for similar tracks using the (possibly expanded) embedding
+            // Fetch more candidates for re-ranking (3x limit)
+            // Filter by max distance to exclude poor matches
+            const candidateLimit = limit * 3;
+            const similarTracks = await findTracksByTextEmbedding(
+                searchEmbedding,
+                maxDistance,
+                candidateLimit,
+            );
+
+            logger.info(
+                `Vibe search "${normalizedQuery}": found ${similarTracks.length} candidates above ${Math.round(similarityThreshold * 100)}% similarity (max distance: ${maxDistance.toFixed(2)})`,
+            );
+
+            // Re-rank using audio features if we have vocabulary matches
+            let rankedTracks:
+                | typeof similarTracks
+                | ReturnType<typeof rerankWithFeatures<TextSearchResult>> =
+                similarTracks;
+            if (vocab && matchedTerms.length > 0) {
+                const reranked = rerankWithFeatures(
+                    similarTracks,
+                    matchedTerms,
+                    genreConfidence,
+                );
+                rankedTracks = reranked.slice(0, limit);
+
+                logger.info(
+                    `[VIBE-SEARCH] Re-ranked ${similarTracks.length} candidates, top result: ${rankedTracks[0]?.title || "none"}`,
+                );
+            } else {
+                rankedTracks = similarTracks.slice(0, limit);
+            }
+
+            // If we have results, log the similarity range
+            if (rankedTracks.length > 0) {
+                const first = rankedTracks[0];
+                const last = rankedTracks[rankedTracks.length - 1];
+                const bestSim =
+                    "finalScore" in first
+                        ? first.finalScore
+                        : distanceToSimilarity(first.distance);
+                const worstSim =
+                    "finalScore" in last
+                        ? last.finalScore
+                        : distanceToSimilarity(last.distance);
+                logger.info(
+                    `Vibe search similarity range: ${Math.round(bestSim * 100)}% - ${Math.round(worstSim * 100)}%`,
+                );
+            }
+
+            const tracks = rankedTracks.map((row) => ({
+                id: row.id,
+                title: row.title,
+                duration: row.duration,
+                trackNo: row.trackNo,
+                distance: row.distance,
+                similarity:
+                    "finalScore" in row
+                        ? row.finalScore
+                        : distanceToSimilarity(row.distance),
+                album: {
+                    id: row.albumId,
+                    title: row.albumTitle,
+                    coverUrl: row.albumCoverUrl,
+                },
+                artist: {
+                    id: row.artistId,
+                    name: row.artistName,
+                },
+            }));
+
+            res.json({
+                query: normalizedQuery,
+                tracks,
+                minSimilarity: similarityThreshold,
+                totalAboveThreshold: tracks.length,
+                debug: {
+                    matchedTerms: matchedTerms.map((t) => t.name),
+                    genreConfidence,
+                    featureWeight:
+                        matchedTerms.length > 0
+                            ? 0.2 + genreConfidence * 0.5
+                            : 0,
+                },
+            });
+        } catch (error: unknown) {
             logger.error("Vibe text search error:", error);
-            if (error.message?.includes("timed out")) {
+            if (error instanceof TextEmbeddingProviderError) {
+                return sendInternalRouteError(
+                    res,
+                    "Failed to search tracks by vibe",
+                );
+            }
+            if (
+                error instanceof TextEmbeddingTimeoutError ||
+                (error instanceof Error && error.message.includes("timed out"))
+            ) {
                 return sendRouteError(
                     res,
                     504,

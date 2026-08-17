@@ -96,6 +96,11 @@ jest.mock("../../services/vibeVocabulary", () => ({
     rerankWithFeatures: jest.fn((tracks: unknown[]) => tracks),
 }));
 
+jest.mock("../../services/textEmbedding", () => ({
+    resolveTextEmbedding: jest.fn(),
+    TextEmbeddingTimeoutError: class TextEmbeddingTimeoutError extends Error {},
+}));
+
 import router from "../vibe";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";

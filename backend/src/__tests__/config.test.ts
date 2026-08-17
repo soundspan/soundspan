@@ -218,6 +218,44 @@ describe("config module", () => {
         });
     });
 
+    it("keeps the vibe provider disabled when its URL is absent", async () => {
+        const { config } = await loadConfigModule({
+            VIBE_PROVIDER_URL: undefined,
+        });
+
+        expect(config.vibeProviderUrl).toBeUndefined();
+    });
+
+    it.each([
+        ["http://vibe-provider:8090", "http://vibe-provider:8090"],
+        ["http://vibe-provider:8090/", "http://vibe-provider:8090"],
+        [
+            "https://example.test/internal/vibe/",
+            "https://example.test/internal/vibe",
+        ],
+    ])("normalizes VIBE_PROVIDER_URL %s", async (providerUrl, expected) => {
+        const { config } = await loadConfigModule({
+            VIBE_PROVIDER_URL: providerUrl,
+        });
+
+        expect(config.vibeProviderUrl).toBe(expected);
+    });
+
+    it.each([
+        "",
+        "   ",
+        "not-a-url",
+        "ftp://provider.test",
+        "http://user:pass@host",
+        "https://provider.test?tenant=one",
+        "https://provider.test#fragment",
+    ])("rejects invalid VIBE_PROVIDER_URL %s", async (providerUrl) => {
+        await expectStartupValidationFailure(
+            { VIBE_PROVIDER_URL: providerUrl },
+            "VIBE_PROVIDER_URL must be a valid HTTP(S) URL without credentials",
+        );
+    });
+
     it.each([
         "OIDC_ISSUER_URL",
         "OIDC_CLIENT_ID",
