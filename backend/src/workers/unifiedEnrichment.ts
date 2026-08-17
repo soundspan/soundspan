@@ -31,10 +31,7 @@ import pLimit from "p-limit";
 import { enqueueReservedWork } from "./enrichmentQueue";
 import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import { getActiveSpace } from "../services/embeddingSpaces";
-import {
-    deleteActiveLocalTrackEmbeddings,
-    findLocalTracksNeedingActiveEmbedding,
-} from "../services/trackEmbeddings";
+import { findLocalTracksNeedingActiveEmbedding } from "../services/trackEmbeddings";
 
 const log = logger.child("Enrichment");
 
@@ -578,8 +575,6 @@ export async function runFullEnrichment(options?: {
     });
 
     if (forceVibeRebuild) {
-        await deleteActiveLocalTrackEmbeddings();
-
         await prisma.track.updateMany({
             where: LOCAL_TRACK_WHERE,
             data: {
@@ -592,7 +587,7 @@ export async function runFullEnrichment(options?: {
         await enrichmentFailureService.clearAllFailures("vibe");
 
         log.info(
-            "forceVibeRebuild enabled: cleared CLAP embeddings and reset vibe analysis state to pending",
+            "forceVibeRebuild enabled: preserved active vectors and reset vibe analysis state to pending",
         );
     }
 
@@ -1583,6 +1578,11 @@ async function executeVibePhase(): Promise<number> {
         return 0;
     }
 
+    const { reset } = await vibeAnalysisCleanupService.cleanupStaleProcessing();
+    if (reset > 0) {
+        log.debug(`Cleaned up ${reset} stale vibe processing entries`);
+    }
+
     const audioProcessing = await withEnrichmentPrismaRetry(
         "executeVibePhase.audioProcessing.count",
         () =>
@@ -1608,11 +1608,6 @@ async function executeVibePhase(): Promise<number> {
             `Skipping vibe phase - audio still running (${audioProcessing} processing, ${audioQueue} queued)`,
         );
         return 0;
-    }
-
-    const { reset } = await vibeAnalysisCleanupService.cleanupStaleProcessing();
-    if (reset > 0) {
-        log.debug(`Cleaned up ${reset} stale vibe processing entries`);
     }
 
     const result = await queueVibeEmbeddings();
@@ -1940,6 +1935,7 @@ export const __unifiedEnrichmentTestables = {
     runEnrichmentCycle,
     enrichArtistsBatch,
     enrichTrackTagsBatch,
+    executeVibePhase,
     __setRuntimeStateForTests: (
         nextState: Partial<{
             isRunning: boolean;

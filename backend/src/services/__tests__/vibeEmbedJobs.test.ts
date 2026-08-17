@@ -19,7 +19,35 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
-import { createVibeEmbedJobProcessor } from "../vibeEmbedJobs";
+import {
+    createVibeEmbedJobProcessor,
+    isTransientVibeProviderFailure,
+} from "../vibeEmbedJobs";
+import {
+    VibeProviderContractError,
+    VibeProviderRequestError,
+    VibeProviderServerError,
+    VibeProviderTimeoutError,
+    VibeProviderUnavailableError,
+} from "../vibeProvider";
+
+describe("vibe provider retry classification", () => {
+    it.each([
+        new VibeProviderTimeoutError(),
+        new VibeProviderUnavailableError(),
+        new VibeProviderServerError(503),
+    ])("classifies %s as transient", (error) => {
+        expect(isTransientVibeProviderFailure(error)).toBe(true);
+    });
+
+    it.each([
+        new VibeProviderContractError(),
+        new VibeProviderRequestError(404),
+        new Error("database write failed"),
+    ])("classifies %s as terminal", (error) => {
+        expect(isTransientVibeProviderFailure(error)).toBe(false);
+    });
+});
 
 describe("vibe embed job processor", () => {
     beforeEach(() => {
@@ -43,6 +71,7 @@ describe("vibe embed job processor", () => {
         const describeFailure = jest.fn((error: unknown) =>
             error instanceof Error ? error.message : "Embedding failed",
         );
+        const isTransientFailure = jest.fn(() => false);
         const now = jest.fn(() => new Date("2026-08-16T12:00:00.000Z"));
         const processJob = createVibeEmbedJobProcessor({
             targetSpaceId: "space-provider",
@@ -54,6 +83,7 @@ describe("vibe embed job processor", () => {
             releaseReservation,
             recordOutcome,
             describeFailure,
+            isTransientFailure,
             now,
         });
 
@@ -65,6 +95,7 @@ describe("vibe embed job processor", () => {
             resolveByEntity,
             releaseReservation,
             recordOutcome,
+            isTransientFailure,
             processJob,
         };
     }
@@ -91,11 +122,16 @@ describe("vibe embed job processor", () => {
                 id: "track-1",
                 origin: "LOCAL",
                 removedAt: null,
-                embeddings: { none: { spaceId: "space-provider" } },
                 OR: [
-                    { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },
-                    { vibeAnalysisStatus: "completed" },
+                    {
+                        vibeAnalysisStatus: null,
+                        embeddings: { none: { spaceId: "space-provider" } },
+                    },
+                    {
+                        vibeAnalysisStatus: "completed",
+                        embeddings: { none: { spaceId: "space-provider" } },
+                    },
                 ],
             },
             data: {
@@ -155,17 +191,14 @@ describe("vibe embed job processor", () => {
                 id: "track-2",
                 origin: "LOCAL",
                 removedAt: null,
-                OR: [
-                    { vibeAnalysisStatus: null },
-                    { vibeAnalysisStatus: "pending" },
-                    { vibeAnalysisStatus: "processing" },
-                    { vibeAnalysisStatus: "completed" },
-                ],
+                vibeAnalysisStatus: "processing",
+                vibeAnalysisRetryCount: 0,
             },
             data: {
                 vibeAnalysisStatus: "failed",
                 vibeAnalysisError: truncated,
                 vibeAnalysisRetryCount: { increment: 1 },
+                vibeAnalysisStartedAt: null,
                 vibeAnalysisStatusUpdatedAt: new Date(
                     "2026-08-16T12:00:00.000Z",
                 ),
@@ -180,6 +213,77 @@ describe("vibe embed job processor", () => {
         });
         expect(harness.upsertTrackEmbedding).not.toHaveBeenCalled();
         expect(harness.recordOutcome).toHaveBeenCalledWith("embed_failed");
+    });
+
+    it("resets transient provider failures to pending below the retry bound", async () => {
+        const harness = createHarness();
+        const transient = new Error("provider unavailable");
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-retry",
+            title: "Retry Track",
+            vibeAnalysisRetryCount: 0,
+        });
+        harness.embedAudio.mockRejectedValue(transient);
+        harness.isTransientFailure.mockReturnValue(true);
+
+        await expect(
+            harness.processJob(
+                JSON.stringify({
+                    trackId: "track-retry",
+                    filePath: "artist/retry.flac",
+                }),
+            ),
+        ).resolves.toBe("embed_failed");
+
+        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith({
+            where: {
+                id: "track-retry",
+                origin: "LOCAL",
+                removedAt: null,
+                vibeAnalysisStatus: "processing",
+                vibeAnalysisRetryCount: 0,
+            },
+            data: {
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisError: "provider unavailable",
+                vibeAnalysisRetryCount: { increment: 1 },
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: new Date(
+                    "2026-08-16T12:00:00.000Z",
+                ),
+            },
+        });
+        expect(harness.recordFailure).not.toHaveBeenCalled();
+    });
+
+    it("marks transient provider failures terminal at the retry bound", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-exhausted",
+            title: "Exhausted Track",
+            vibeAnalysisRetryCount: 2,
+        });
+        harness.embedAudio.mockRejectedValue(new Error("provider timeout"));
+        harness.isTransientFailure.mockReturnValue(true);
+
+        await harness.processJob(
+            JSON.stringify({
+                trackId: "track-exhausted",
+                filePath: "artist/exhausted.flac",
+            }),
+        );
+
+        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    vibeAnalysisStatus: "failed",
+                    vibeAnalysisRetryCount: { increment: 1 },
+                }),
+            }),
+        );
+        expect(harness.recordFailure).toHaveBeenCalledWith(
+            expect.objectContaining({ entityId: "track-exhausted" }),
+        );
     });
 
     it.each(["not-json", JSON.stringify({ filePath: "track.flac" })])(
@@ -229,8 +333,8 @@ describe("vibe embed job processor", () => {
                         { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },
                         { vibeAnalysisStatus: "processing" },
-                        { vibeAnalysisStatus: "completed" },
                     ],
+                    embeddings: { none: { spaceId: "space-provider" } },
                 },
                 data: {
                     vibeAnalysisStatus: "failed",
@@ -256,20 +360,38 @@ describe("vibe embed job processor", () => {
         },
     );
 
-    it("never demotes a settled track on an invalid payload", async () => {
+    it("never demotes a completed track on an invalid payload", async () => {
         const harness = createHarness();
         harness.prisma.track.findFirst.mockResolvedValue({
             id: "track-3",
             title: "Track Three",
+            vibeAnalysisStatus: "completed",
+            embeddings: [],
         });
-        harness.prisma.track.updateMany.mockResolvedValue({ count: 0 });
 
         await expect(
             harness.processJob(JSON.stringify({ trackId: "track-3" })),
         ).resolves.toBe("invalid_payload");
 
         expect(harness.recordFailure).not.toHaveBeenCalled();
+        expect(harness.prisma.track.updateMany).not.toHaveBeenCalled();
         expect(harness.releaseReservation).toHaveBeenCalledWith("track-3");
+    });
+
+    it("never demotes a track with a target-space vector on an invalid payload", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-stored",
+            title: "Stored Track",
+            vibeAnalysisStatus: "pending",
+            embeddings: [{ spaceId: "space-provider" }],
+        });
+
+        await harness.processJob(JSON.stringify({ trackId: "track-stored" }));
+
+        expect(harness.prisma.track.updateMany).not.toHaveBeenCalled();
+        expect(harness.recordFailure).not.toHaveBeenCalled();
+        expect(harness.recordOutcome).toHaveBeenCalledWith("invalid_payload");
     });
 
     it.each(["../x", "/music/x", "..\\x", "artist/\0x"])(
@@ -325,7 +447,11 @@ describe("vibe embed job processor", () => {
                 origin: "LOCAL",
                 removedAt: null,
             },
-            select: { id: true, title: true },
+            select: {
+                id: true,
+                title: true,
+                vibeAnalysisRetryCount: true,
+            },
         });
         expect(harness.releaseReservation).toHaveBeenCalledWith(
             "removed-track",
@@ -381,11 +507,16 @@ describe("vibe embed job processor", () => {
                 id: "track-migrating",
                 origin: "LOCAL",
                 removedAt: null,
-                embeddings: { none: { spaceId: "space-provider" } },
                 OR: [
-                    { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },
-                    { vibeAnalysisStatus: "completed" },
+                    {
+                        vibeAnalysisStatus: null,
+                        embeddings: { none: { spaceId: "space-provider" } },
+                    },
+                    {
+                        vibeAnalysisStatus: "completed",
+                        embeddings: { none: { spaceId: "space-provider" } },
+                    },
                 ],
             },
             data: expect.objectContaining({
@@ -415,11 +546,13 @@ describe("vibe embed job processor", () => {
         expect(harness.upsertTrackEmbedding).not.toHaveBeenCalled();
     });
 
-    it("allows a failure write to settle a completed track claimed for the target", async () => {
+    it("marks a pending track failed for an invalid payload", async () => {
         const harness = createHarness();
         harness.prisma.track.findFirst.mockResolvedValue({
             id: "track-invalid",
             title: "Invalid Track",
+            vibeAnalysisStatus: "pending",
+            embeddings: [],
         });
 
         await harness.processJob(JSON.stringify({ trackId: "track-invalid" }));
@@ -433,8 +566,8 @@ describe("vibe embed job processor", () => {
                     { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },
                     { vibeAnalysisStatus: "processing" },
-                    { vibeAnalysisStatus: "completed" },
                 ],
+                embeddings: { none: { spaceId: "space-provider" } },
             },
             data: expect.objectContaining({ vibeAnalysisStatus: "failed" }),
         });

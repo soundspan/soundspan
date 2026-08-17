@@ -1,5 +1,21 @@
 import os from "os";
 
+const mockEnqueueReservedWork = jest.fn();
+
+jest.mock("../../config", () => ({
+    config: {
+        analysisQueues: {
+            vibeMaxDepth: 2,
+            reservationTtlSeconds: 3600,
+        },
+    },
+}));
+
+jest.mock("../../workers/enrichmentQueue", () => ({
+    enqueueReservedNodeRedisWork: (...args: unknown[]) =>
+        mockEnqueueReservedWork(...args),
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: () => void) => {
         if (req.headers?.["x-api-key"] === "non-admin-key") {
@@ -216,6 +232,7 @@ describe("analysis routes runtime", () => {
         mockRedisRPush.mockResolvedValue(1);
         mockRedisPublish.mockResolvedValue(1);
         mockRedisMulti.mockImplementation(() => createPipeline());
+        mockEnqueueReservedWork.mockResolvedValue("queued");
 
         mockGetSystemSettings.mockResolvedValue({
             audioAnalyzerWorkers: 2,
@@ -557,9 +574,7 @@ describe("analysis routes runtime", () => {
         expect(okRes.statusCode).toBe(200);
     });
 
-    it("queues vibe embedding jobs in force mode and clears failures", async () => {
-        const pipeline = createPipeline();
-        mockRedisMulti.mockReturnValue(pipeline);
+    it("queues vibe embedding jobs in force mode without deleting active vectors", async () => {
         mockTrackFindMany.mockResolvedValue([
             { id: "t1", filePath: "/x.mp3", duration: 111, title: "T1" },
             { id: "t2", filePath: "/y.mp3", duration: 222, title: "T2" },
@@ -570,12 +585,7 @@ describe("analysis routes runtime", () => {
 
         await postVibeStart(req, res);
 
-        expect(mockTrackEmbeddingDeleteMany).toHaveBeenCalledWith({
-            where: {
-                spaceId: "space-active",
-                track: { origin: "LOCAL" },
-            },
-        });
+        expect(mockTrackEmbeddingDeleteMany).not.toHaveBeenCalled();
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
             where: { origin: "LOCAL" },
@@ -588,13 +598,53 @@ describe("analysis routes runtime", () => {
             }),
         });
         expect(mockClearAllFailures).toHaveBeenCalledWith("vibe");
-        expect(pipeline.rPush).toHaveBeenCalledTimes(2);
+        expect(mockEnqueueReservedWork).toHaveBeenCalledTimes(2);
+        expect(mockEnqueueReservedWork).toHaveBeenNthCalledWith(
+            1,
+            redisClient,
+            expect.objectContaining({
+                queueKey: "audio:clap:queue",
+                trackId: "t1",
+                maxDepth: 2,
+                reservationTtlSeconds: 3600,
+            }),
+        );
         expect(mockClearFailure).toHaveBeenCalledWith("vibe", "t1");
         expect(mockClearFailure).toHaveBeenCalledWith("vibe", "t2");
         expect(res.body).toEqual({
             message: "Queued 2 tracks for vibe embedding",
             queued: 2,
         });
+    });
+
+    it("deduplicates repeated force queueing and stops at the shared cap", async () => {
+        mockTrackFindMany.mockResolvedValue([
+            { id: "t1", filePath: "/x.mp3", duration: 111, title: "T1" },
+            { id: "t2", filePath: "/y.mp3", duration: 222, title: "T2" },
+            { id: "t3", filePath: "/z.mp3", duration: 333, title: "T3" },
+        ]);
+        const reservations = new Set<string>();
+        let depth = 0;
+        mockEnqueueReservedWork.mockImplementation(
+            async (_redis: unknown, input: { trackId: string }) => {
+                if (depth >= 2) return "full";
+                if (reservations.has(input.trackId)) return "duplicate";
+                reservations.add(input.trackId);
+                depth += 1;
+                return "queued";
+            },
+        );
+
+        const firstRes = createRes();
+        const secondRes = createRes();
+        const request = { body: { limit: 1000, force: true } } as any;
+        await postVibeStart(request, firstRes);
+        await postVibeStart(request, secondRes);
+
+        expect(firstRes.body.queued).toBe(2);
+        expect(secondRes.body.queued).toBe(0);
+        expect(reservations).toEqual(new Set(["t1", "t2"]));
+        expect(mockEnqueueReservedWork).toHaveBeenCalledTimes(4);
     });
 
     it("returns no-op vibe start when all tracks already have embeddings", async () => {

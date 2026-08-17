@@ -1,5 +1,7 @@
 import {
+    enqueueReservedNodeRedisWork,
     enqueueReservedWork,
+    type EnrichmentQueueNodeRedis,
     type EnrichmentQueueRedis,
 } from "../enrichmentQueue";
 
@@ -48,5 +50,26 @@ describe("enrichment queue admission", () => {
                 reservationTtlSeconds: 3600,
             }),
         ).rejects.toThrow("Unexpected enrichment queue admission result");
+    });
+
+    it("uses the same queue and reservation keys through node-redis", async () => {
+        const client: EnrichmentQueueNodeRedis = {
+            eval: jest.fn().mockResolvedValue(1),
+        };
+
+        await expect(
+            enqueueReservedNodeRedisWork(client, {
+                queueKey: "audio:clap:queue",
+                trackId: "track-1",
+                payload: "payload",
+                maxDepth: 25,
+                reservationTtlSeconds: 3600,
+            }),
+        ).resolves.toBe("queued");
+
+        expect(client.eval).toHaveBeenCalledWith(expect.any(String), {
+            keys: ["audio:clap:queue", "audio:clap:queue:reserved:track-1"],
+            arguments: ["25", "3600", "payload"],
+        });
     });
 });

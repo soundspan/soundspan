@@ -2,6 +2,20 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { config } from "../config";
 
+interface AnnQueryOptions {
+    statementTimeoutMs: number;
+    timeoutMessage: string;
+}
+
+function isStatementTimeout(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "57014"
+    );
+}
+
 /**
  * Run a pgvector ANN query with `ivfflat.probes` applied on the SAME pooled
  * connection as the query (roadmap F14).
@@ -38,6 +52,7 @@ import { config } from "../config";
 export async function runAnnQuery<T>(
     annQuery: Prisma.Sql,
     probes: number = config.ivfflatProbes,
+    options?: AnnQueryOptions,
 ): Promise<T> {
     // Clamp to ivfflat.probes' valid domain, 1..32768. An out-of-range value
     // does NOT error: Postgres emits only a server-log WARNING (invisible to
@@ -48,9 +63,26 @@ export async function runAnnQuery<T>(
     // single consumption point, so a misconfigured IVFFLAT_PROBES (0, negative,
     // huge, fractional) degrades to the nearest valid value instead.
     const effectiveProbes = Math.min(32768, Math.max(1, Math.trunc(probes)));
-    const [, rows] = await prisma.$transaction([
+    const statements = [
         prisma.$queryRaw`SELECT set_config('ivfflat.probes', ${String(effectiveProbes)}, true)`,
-        prisma.$queryRaw<T>(annQuery),
-    ]);
-    return rows;
+    ];
+    if (options) {
+        const timeoutMs = Math.min(
+            60_000,
+            Math.max(1, Math.trunc(options.statementTimeoutMs)),
+        );
+        statements.push(
+            prisma.$queryRaw`SELECT set_config('statement_timeout', ${String(timeoutMs)}, true)`,
+        );
+    }
+    statements.push(prisma.$queryRaw<T>(annQuery));
+    try {
+        const results = await prisma.$transaction(statements);
+        return results[results.length - 1] as T;
+    } catch (error) {
+        if (options && isStatementTimeout(error)) {
+            throw new Error(options.timeoutMessage, { cause: error });
+        }
+        throw error;
+    }
 }

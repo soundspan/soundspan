@@ -53,6 +53,7 @@ EmbeddingSpace {
   dim           int
   preprocessing json      // sample rate, mel config, mono/stereo policy
   status        enum      // active | migrating | retired
+  hadVectors    boolean   // durable once the space receives its first vector
   createdAt     timestamp
 }
 TrackEmbedding.spaceId -> EmbeddingSpace.id   // replaces model_version
@@ -61,6 +62,7 @@ TrackEmbedding.spaceId -> EmbeddingSpace.id   // replaces model_version
 Invariants:
 
 - **Exactly one `active` space** serves all similarity queries, radio, mixes, Discover Weekly, and text search. Outside the bounded cutover cache window documented below, queries never cross spaces.
+- A registered tuple includes canonicalized preprocessing. Reusing `(family, checkpointHash, dim)` with different preprocessing is a provider-configuration error and never mixes vectors or creates a duplicate tuple.
 - The existing global ANN index continues to serve the active space. A partial ANN index for a migrating space is created immediately before cutover and dropped after that space is later retired and cleaned.
 - In steady state, text queries encode through the active space's text tower. During migration, the backend uses the fallback and bounded cutover behavior documented below instead of requesting `/v1/embed/text` from a provider whose space is not active.
 - Cross-peer vector exchange (Blends, federated discovery) transmits `(spaceId identity tuple, vector)`; peers compare identity tuples and only consume vectors whose space matches their own active space. Mismatch downgrades cross-peer features to metadata-level gracefully.
@@ -72,15 +74,15 @@ Invariants:
 3. When coverage reaches `VIBE_SPACE_CUTOVER_THRESHOLD` (default 95%), the worker builds the target's partial ANN index, atomically marks the old space `retired` and the target `active`, then invalidates the active-space cache.
 4. The old vectors remain available for `VIBE_SPACE_RETIREMENT_GRACE_DAYS` (default 7). The worker then deletes them in bounded batches, drops their partial index if present, clears the grace anchor to mark cleanup complete, and retains the registry identity row as history.
 
-When the active space contains zero vectors, the worker builds the target's partial ANN index and cuts over immediately without waiting for migration coverage. A fresh install may never deploy the teacher worker, and an empty active space protects no query results, so this closes the provider-only text-search dead window without sacrificing existing similarity results.
+When the active space contains zero vectors and its durable `hadVectors` marker is false, the worker builds the target's partial ANN index and cuts over immediately without waiting for migration coverage. The embedding store sets the marker on the first vector, and the migration backfills it for existing populated spaces. A later wipe therefore cannot masquerade as a fresh install. A genuinely fresh install may never deploy the teacher worker, so the guarded shortcut still closes the provider-only text-search dead window.
 
-While the configured provider serves a registered migrating space, text search embeds and queries in that provider space, returning partial results that grow with the backfill; the 60-second provider-space cache continues routing to the same space across cutover and then refreshes its active status.
+While the configured provider serves a registered migrating space, text search embeds and queries in that provider space, returning partial results that grow with the backfill; its exact scan has a fixed candidate bound and a transaction-local statement timeout. The 60-second provider-space cache continues routing to the same space across cutover and then refreshes its active status.
 
-Migration exposes two intentional operational lenses. The vibe embedding coverage gauge measures the migrating worker target so operators can assess cutover readiness. Enrichment progress and feature detection continue to measure the active space because they describe the vectors currently serving user queries.
+Migration exposes two intentional operational lenses. The vibe embedding coverage gauge and lifecycle logs measure embedded, pending, and failed counts for the migrating worker target so operators can assess cutover readiness and see the permanently failed tail excluded from the actionable denominator. Cutover completion logs retain that failed count. Enrichment progress and feature detection continue to measure the active space because they describe the vectors currently serving user queries.
 
 Tracks added while a migration is running receive only the migrating-space vector. They become available to active-space similarity features at cutover; the worker does not also write the old active space during the migration.
 
-The producer and claim gate continuously admit `null`, `pending`, or `completed` tracks that lack a vector in the worker's target space. This automatically heals migration and post-cutover tails. `POST /api/analysis/vibe/start` remains available as a break-glass way to enqueue missing active-space vectors immediately, but normal tail recovery does not require it.
+The producer and claim gate continuously admit `null` or `completed` tracks that lack a vector in the worker's target space, plus `pending` rebuild tracks whether or not an older target vector exists. Transient provider timeouts, connection failures, and 5xx responses return to `pending` under a three-attempt bound; content and contract failures remain terminal. This automatically heals migration and post-cutover tails. `POST /api/analysis/vibe/start` remains available as a break-glass way to enqueue missing active-space vectors immediately. Its force mode preserves serving vectors, resets track state, and uses the same bounded per-track reservation admission as the automatic producer.
 
 To abort before cutover, delete the migrating space's vectors first, then delete its registry row; `ON DELETE RESTRICT` enforces that order. To roll back after cutover but within grace, atomically return the new space to `migrating` or `retired` and restore the prior retired space to `active`. This release does not add an administration endpoint for either operation.
 

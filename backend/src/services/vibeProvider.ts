@@ -5,7 +5,11 @@ import type {
     VibeProviderEndpoint,
     VibeProviderOutcome,
 } from "../metrics/providerMetrics";
-import { getActiveSpace, type ActiveEmbeddingSpace } from "./embeddingSpaces";
+import {
+    embeddingPreprocessingMatches,
+    getActiveSpace,
+    type ActiveEmbeddingSpace,
+} from "./embeddingSpaces";
 
 /** Shared deadline for provider identity and health operations. */
 export const PROVIDER_SPACE_HEALTH_TIMEOUT_MS = 5_000;
@@ -362,7 +366,11 @@ export function assertProviderMatchesActiveSpace(
     const matches =
         providerSpace.family === activeSpace.family &&
         providerSpace.checkpointHash === activeSpace.checkpointHash &&
-        providerSpace.dim === activeSpace.dim;
+        providerSpace.dim === activeSpace.dim &&
+        embeddingPreprocessingMatches(
+            activeSpace.preprocessing,
+            providerSpace.preprocessing,
+        );
     if (!matches) throw new VibeProviderSpaceMismatchError();
 }
 

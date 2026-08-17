@@ -121,4 +121,44 @@ describe("runAnnQuery (F14 ivfflat.probes helper)", () => {
         expect(batch[0].__sqlArgs).toContain("7");
         expect(batch[0].__sqlArgs).not.toContain("7.9");
     });
+
+    it("applies a transaction-local statement timeout before a bounded query", async () => {
+        mockTransaction.mockResolvedValueOnce([
+            [{ set_config: "12" }],
+            [{ set_config: "5000" }],
+            [],
+        ]);
+        const query = Prisma.sql`SELECT 1`;
+
+        await runAnnQuery(query, undefined, {
+            statementTimeoutMs: 5_000,
+            timeoutMessage: "Vibe text search query timed out",
+        });
+
+        const batch = mockTransaction.mock.calls[0][0] as Descriptor[];
+        expect(batch).toHaveLength(3);
+        expect((batch[1].__sqlArgs[0] as string[]).join(" ")).toContain(
+            "statement_timeout",
+        );
+        expect(batch[1].__sqlArgs).toContain("5000");
+        expect(batch[2].__sqlArgs[0]).toBe(query);
+    });
+
+    it("maps PostgreSQL statement cancellation to the caller's bounded error", async () => {
+        mockTransaction.mockRejectedValueOnce(
+            Object.assign(
+                new Error("canceling statement due to statement timeout"),
+                {
+                    code: "57014",
+                },
+            ),
+        );
+
+        await expect(
+            runAnnQuery(Prisma.sql`SELECT 1`, undefined, {
+                statementTimeoutMs: 5_000,
+                timeoutMessage: "Vibe text search query timed out",
+            }),
+        ).rejects.toThrow("Vibe text search query timed out");
+    });
 });

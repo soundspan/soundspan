@@ -11,6 +11,7 @@ jest.mock("../../config", () => ({
 import { createVibeEmbedWorker } from "../vibeEmbedWorker";
 import {
     EmbeddingSpaceDimensionMismatchError,
+    EmbeddingSpacePreprocessingMismatchError,
     RetiredEmbeddingSpaceError,
 } from "../../services/embeddingSpaces";
 
@@ -355,6 +356,7 @@ describe("vibe embed worker", () => {
     it.each([
         new RetiredEmbeddingSpaceError("space-retired"),
         new EmbeddingSpaceDimensionMismatchError("space-mismatch", 512, 768),
+        new EmbeddingSpacePreprocessingMismatchError("space-mismatch"),
     ])(
         "rate-limits terminal target resolution error $name on a longer retry interval",
         async (error) => {

@@ -12,9 +12,10 @@ const mockTransaction = jest.fn();
 const mockInvalidate = jest.fn();
 const mockRecordTransition = jest.fn();
 const mockLoadCoverage = jest.fn();
-const mockLoadSpaceEmbeddedCount = jest.fn();
+const mockLoadSpaceVectorState = jest.fn();
 const mockGetActiveSpace = jest.fn();
 const mockLogInfo = jest.fn();
+const mockSetCoverage = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -46,13 +47,14 @@ jest.mock("../embeddingSpaces", () => ({
 jest.mock("../../metrics", () => ({
     recordVibeSpaceTransition: (...args: unknown[]) =>
         mockRecordTransition(...args),
+    setVibeEmbeddingCoverage: (...args: unknown[]) => mockSetCoverage(...args),
 }));
 
 jest.mock("../vibeEmbeddingCoverage", () => ({
     loadVibeEmbeddingCoverage: (...args: unknown[]) =>
         mockLoadCoverage(...args),
-    loadVibeSpaceEmbeddedCount: (...args: unknown[]) =>
-        mockLoadSpaceEmbeddedCount(...args),
+    loadVibeSpaceVectorState: (...args: unknown[]) =>
+        mockLoadSpaceVectorState(...args),
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -92,12 +94,14 @@ describe("embedding-space lifecycle decisions", () => {
     });
 
     it.each([
-        [0, true],
-        [1, false],
+        [false, false, true],
+        [false, true, false],
+        [true, false, false],
+        [true, true, false],
     ])(
-        "evaluates empty-active-space cutover with %s embedded vectors",
-        (activeEmbeddedCount, due) => {
-            expect(shouldCutOverEmptyActiveSpace(activeEmbeddedCount)).toBe(
+        "evaluates empty-active-space cutover with hasVectors=%s and hadVectors=%s",
+        (hasVectors, hadVectors, due) => {
+            expect(shouldCutOverEmptyActiveSpace(hasVectors, hadVectors)).toBe(
                 due,
             );
         },
@@ -125,8 +129,14 @@ describe("embedding-space lifecycle effects", () => {
             pending: 1,
             failed: 0,
         });
-        mockLoadSpaceEmbeddedCount.mockResolvedValue(1);
-        mockGetActiveSpace.mockResolvedValue({ id: "space_teacher_1" });
+        mockLoadSpaceVectorState.mockResolvedValue({
+            hasVectors: true,
+            hadVectors: true,
+        });
+        mockGetActiveSpace.mockResolvedValue({
+            id: "space_teacher_1",
+            hadVectors: true,
+        });
         mockTransaction.mockImplementation(
             async (operation: (tx: unknown) => Promise<unknown>) =>
                 operation({
@@ -169,7 +179,7 @@ describe("embedding-space lifecycle effects", () => {
         });
 
         expect(order).toEqual(["index", "transaction"]);
-        expect(mockLoadSpaceEmbeddedCount).toHaveBeenCalledWith(
+        expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
             "space_teacher_1",
         );
         expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
@@ -179,8 +189,16 @@ describe("embedding-space lifecycle effects", () => {
                 spaceId: "space_student_1",
                 coveragePercent: 95,
                 thresholdPercent: 95,
+                embedded: 95,
+                pending: 5,
+                failed: 20,
             },
         );
+        expect(mockSetCoverage).toHaveBeenCalledWith({
+            embedded: 95,
+            pending: 5,
+            failed: 20,
+        });
         expect(mockExecuteRawUnsafe).toHaveBeenCalledWith(
             expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
         );
@@ -194,6 +212,14 @@ describe("embedding-space lifecycle effects", () => {
         });
         expect(mockInvalidate).toHaveBeenCalledTimes(1);
         expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
+        expect(mockLogInfo).toHaveBeenCalledWith(
+            "Embedding-space cutover completed",
+            {
+                spaceId: "space_student_1",
+                coverage: 0.95,
+                failed: 20,
+            },
+        );
     });
 
     it("keeps an existing valid partial index", async () => {
@@ -232,7 +258,7 @@ describe("embedding-space lifecycle effects", () => {
             now: () => now,
         });
 
-        expect(mockLoadSpaceEmbeddedCount).toHaveBeenCalledWith(
+        expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
             "space_teacher_1",
         );
         expect(mockLogInfo).toHaveBeenCalledTimes(1);
@@ -242,15 +268,25 @@ describe("embedding-space lifecycle effects", () => {
                 spaceId: "space_student_1",
                 coveragePercent: 80,
                 thresholdPercent: 95,
+                embedded: 80,
+                pending: 20,
+                failed: 10,
             },
         );
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockTransaction).not.toHaveBeenCalled();
     });
 
-    it("cuts over immediately when the active space has no embedded vectors", async () => {
+    it("cuts over immediately when a fresh active space has no vectors", async () => {
         mockFindFirst.mockResolvedValue(migrating);
-        mockLoadSpaceEmbeddedCount.mockResolvedValue(0);
+        mockLoadSpaceVectorState.mockResolvedValue({
+            hasVectors: false,
+            hadVectors: false,
+        });
+        mockGetActiveSpace.mockResolvedValue({
+            id: "space_teacher_1",
+            hadVectors: false,
+        });
         mockLoadCoverage.mockResolvedValue({
             embedded: 0,
             pending: 0,
@@ -263,10 +299,10 @@ describe("embedding-space lifecycle effects", () => {
             now: () => now,
         });
 
-        expect(mockLoadSpaceEmbeddedCount).toHaveBeenCalledWith(
+        expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
             "space_teacher_1",
         );
-        expect(mockLoadCoverage).not.toHaveBeenCalled();
+        expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
         expect(mockExecuteRawUnsafe).toHaveBeenCalledWith(
             expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
         );
@@ -280,6 +316,41 @@ describe("embedding-space lifecycle effects", () => {
                 migratingSpaceId: "space_student_1",
             },
         );
+        expect(mockLogInfo).toHaveBeenCalledWith(
+            "Embedding-space cutover completed",
+            {
+                spaceId: "space_student_1",
+                reason: "empty_active_space",
+                failed: 0,
+            },
+        );
+    });
+
+    it("does not instant-cut over a wiped active space that previously had vectors", async () => {
+        mockFindFirst.mockResolvedValue(migrating);
+        mockLoadSpaceVectorState.mockResolvedValue({
+            hasVectors: false,
+            hadVectors: true,
+        });
+        mockGetActiveSpace.mockResolvedValue({
+            id: "space_teacher_1",
+            hadVectors: true,
+        });
+        mockLoadCoverage.mockResolvedValue({
+            embedded: 1,
+            pending: 99,
+            failed: 4,
+        });
+
+        await runEmbeddingSpaceLifecycleCheck({
+            threshold: 0.95,
+            retirementGraceDays: 7,
+            now: () => now,
+        });
+
+        expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
+        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockRecordTransition).not.toHaveBeenCalledWith("cutover");
     });
 
     it("drops and rebuilds an existing invalid partial index once", async () => {

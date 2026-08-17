@@ -1349,6 +1349,7 @@ model EmbeddingSpace {
   dim            Int
   preprocessing  Json
   status         EmbeddingSpaceStatus
+  hadVectors     Boolean              @default(false) @map("had_vectors")
   createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
   retiredAt      DateTime?            @map("retired_at") @db.Timestamptz
   embeddings     TrackEmbedding[]

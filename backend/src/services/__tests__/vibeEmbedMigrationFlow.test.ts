@@ -10,21 +10,26 @@ const tracks = [
     },
 ];
 
-function statusMatches(
-    or: Array<{ vibeAnalysisStatus: string | null }>,
+function targetGateMatches(
+    or: Array<{
+        vibeAnalysisStatus: string | null;
+        embeddings?: { none: { spaceId: string } };
+    }>,
 ): boolean {
-    return or.some(
-        (candidate) =>
-            candidate.vibeAnalysisStatus === tracks[0].vibeAnalysisStatus,
-    );
+    return or.some((candidate) => {
+        if (candidate.vibeAnalysisStatus !== tracks[0].vibeAnalysisStatus) {
+            return false;
+        }
+        const targetSpaceId = candidate.embeddings?.none.spaceId;
+        return (
+            !targetSpaceId || !tracks[0].embeddingSpaceIds.has(targetSpaceId)
+        );
+    });
 }
 
 const mockTrackFindMany = jest.fn(async (args: any) => {
-    const missing = args.where.embeddings.none.spaceId as string;
     const statuses = args.where.OR;
-    if (tracks[0].embeddingSpaceIds.has(missing) || !statusMatches(statuses)) {
-        return [];
-    }
+    if (!targetGateMatches(statuses)) return [];
     return [{ id: tracks[0].id, filePath: tracks[0].filePath }];
 });
 const mockTrackFindFirst = jest.fn(async () => ({
@@ -32,13 +37,7 @@ const mockTrackFindFirst = jest.fn(async () => ({
     title: tracks[0].title,
 }));
 const mockTrackUpdateMany = jest.fn(async (args: any) => {
-    const targetSpaceId = args.where.embeddings?.none.spaceId as
-        | string
-        | undefined;
-    if (
-        !statusMatches(args.where.OR) ||
-        (targetSpaceId && tracks[0].embeddingSpaceIds.has(targetSpaceId))
-    ) {
+    if (!targetGateMatches(args.where.OR)) {
         return { count: 0 };
     }
     tracks[0].vibeAnalysisStatus = args.data.vibeAnalysisStatus;
@@ -120,6 +119,7 @@ describe("target-space selection through claim", () => {
             releaseReservation: jest.fn(async () => undefined),
             recordOutcome: jest.fn(),
             describeFailure: jest.fn(() => "failed"),
+            isTransientFailure: jest.fn(() => false),
             now: () => new Date("2026-08-16T12:00:00.000Z"),
         });
     }

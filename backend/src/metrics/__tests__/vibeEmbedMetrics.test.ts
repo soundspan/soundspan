@@ -59,4 +59,16 @@ describe("vibe embed metrics", () => {
         expect(exposition).toContain('transition="cutover"} 1');
         expect(exposition).toContain('transition="retired_cleaned"} 1');
     });
+
+    it("emits bounded provider configuration errors", async () => {
+        const registry = new Registry();
+        const metrics = createVibeEmbedMetrics(registry);
+
+        metrics.recordProviderConfigError("preprocessing_mismatch");
+
+        const exposition = await registry.metrics();
+        expect(exposition).toContain(
+            'soundspan_vibe_provider_config_errors_total{reason="preprocessing_mismatch"} 1',
+        );
+    });
 });

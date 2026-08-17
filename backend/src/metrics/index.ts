@@ -11,6 +11,7 @@ import {
     createVibeEmbedMetrics,
     type VibeEmbedJobOutcome,
     type VibeEmbeddingCoverage,
+    type VibeProviderConfigErrorReason,
     type VibeSpaceTransition,
 } from "./vibeEmbedMetrics";
 
@@ -66,6 +67,13 @@ export function recordVibeSpaceTransition(
     transition: VibeSpaceTransition,
 ): void {
     vibeEmbedMetrics.recordSpaceTransition(transition);
+}
+
+/** Records one rejected provider configuration. */
+export function recordVibeProviderConfigError(
+    reason: VibeProviderConfigErrorReason,
+): void {
+    vibeEmbedMetrics.recordProviderConfigError(reason);
 }
 
 /** Replaces the worker target-space audio embedding coverage gauge values. */

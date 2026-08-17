@@ -1,11 +1,15 @@
-import { recordVibeSpaceTransition } from "../metrics";
+import {
+    recordVibeSpaceTransition,
+    setVibeEmbeddingCoverage,
+} from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { getActiveSpace, invalidateActiveSpaceCache } from "./embeddingSpaces";
 import {
     loadVibeEmbeddingCoverage,
-    loadVibeSpaceEmbeddedCount,
+    loadVibeSpaceVectorState,
 } from "./vibeEmbeddingCoverage";
+import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
@@ -38,11 +42,12 @@ export function shouldCutOver(coverage: number, threshold: number): boolean {
 
 /** Decide whether an empty active space permits immediate cutover. */
 export function shouldCutOverEmptyActiveSpace(
-    activeEmbeddedCount: number,
+    activeHasVectors: boolean,
+    activeHadVectors: boolean,
 ): boolean {
     // Pending active-space work does not protect query results and may have no
     // deployed teacher worker capable of completing it on a fresh install.
-    return activeEmbeddedCount === 0;
+    return !activeHasVectors && !activeHadVectors;
 }
 
 /** Decide whether a retired space has reached its cleanup boundary. */
@@ -114,10 +119,27 @@ async function flipActiveSpace(
     });
 }
 
-async function loadCoverage(spaceId: string): Promise<number> {
+interface CoverageSample extends VibeEmbeddingCoverage {
+    ratio: number;
+}
+
+async function sampleCoverage(
+    spaceId: string,
+    threshold: number,
+): Promise<CoverageSample> {
     const coverage = await loadVibeEmbeddingCoverage(spaceId);
     const actionable = coverage.embedded + coverage.pending;
-    return actionable === 0 ? 0 : coverage.embedded / actionable;
+    const ratio = actionable === 0 ? 0 : coverage.embedded / actionable;
+    setVibeEmbeddingCoverage(coverage);
+    log.info("Embedding-space migration coverage sampled", {
+        spaceId,
+        coveragePercent: ratio * 100,
+        thresholdPercent: threshold * 100,
+        embedded: coverage.embedded,
+        pending: coverage.pending,
+        failed: coverage.failed,
+    });
+    return { ...coverage, ratio };
 }
 
 async function completeCutover(
@@ -134,6 +156,7 @@ async function cutOverEmptyActiveSpace(
     activeSpaceId: string,
     migratingSpaceId: string,
     retiredAt: Date,
+    failed: number,
 ): Promise<void> {
     log.info(
         "Embedding-space cutover starting because active space has no embedded vectors",
@@ -143,6 +166,7 @@ async function cutOverEmptyActiveSpace(
     log.info("Embedding-space cutover completed", {
         spaceId: migratingSpaceId,
         reason: "empty_active_space",
+        failed,
     });
 }
 
@@ -151,24 +175,28 @@ async function cutOverIfReady(
     config: LifecycleConfig,
 ): Promise<void> {
     const activeSpace = await getActiveSpace();
-    const activeEmbeddedCount = await loadVibeSpaceEmbeddedCount(
-        activeSpace.id,
-    );
-    if (shouldCutOverEmptyActiveSpace(activeEmbeddedCount)) {
-        await cutOverEmptyActiveSpace(activeSpace.id, space.id, config.now());
+    const activeVectorState = await loadVibeSpaceVectorState(activeSpace.id);
+    const coverage = await sampleCoverage(space.id, config.threshold);
+    if (
+        shouldCutOverEmptyActiveSpace(
+            activeVectorState.hasVectors,
+            activeVectorState.hadVectors,
+        )
+    ) {
+        await cutOverEmptyActiveSpace(
+            activeSpace.id,
+            space.id,
+            config.now(),
+            coverage.failed,
+        );
         return;
     }
-    const coverage = await loadCoverage(space.id);
-    log.info("Embedding-space migration coverage sampled", {
-        spaceId: space.id,
-        coveragePercent: coverage * 100,
-        thresholdPercent: config.threshold * 100,
-    });
-    if (!shouldCutOver(coverage, config.threshold)) return;
+    if (!shouldCutOver(coverage.ratio, config.threshold)) return;
     await completeCutover(space.id, config.now());
     log.info("Embedding-space cutover completed", {
         spaceId: space.id,
-        coverage,
+        coverage: coverage.ratio,
+        failed: coverage.failed,
     });
 }
 

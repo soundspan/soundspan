@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Vibe migration coverage telemetry now exposes failed tracks at sampling and
+  cutover, while retaining the actionable coverage denominator.
+- Migrating-space vibe text scans and lifecycle coverage reads are now bounded
+  by a statement timeout, candidate cap, existence query, and two-query sampler.
+- Vibe provider registration now rejects preprocessing mismatches for an
+  existing model tuple and records the configuration error.
 - During a vibe embedding-space migration, text search now embeds and queries
   in the provider's registered space, returning partial results that grow with
   the backfill instead of using the removed legacy analyzer stream.
@@ -61,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Force rebuilding vibe embeddings now preserves active-space vectors, and a
+  durable space marker prevents wiped spaces from triggering fresh-install
+  cutover behavior.
+- Transient vibe-provider failures now receive bounded automatic retries, and
+  malformed queue entries cannot demote completed or already-stored tracks.
+- Stale vibe claims are now recovered independently of MusicCNN queue state.
 - Fresh installs with only a provider-backed vibe space now cut over
   immediately instead of stalling behind an active space with no vectors.
 - The clap sidecar's embedding upsert now targets the composite

@@ -8,6 +8,8 @@ const mockConfig = {
 jest.mock("../../config", () => ({ config: mockConfig }));
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
+    embeddingPreprocessingMatches: (left: unknown, right: unknown) =>
+        JSON.stringify(left) === JSON.stringify(right),
 }));
 jest.mock("../../metrics", () => ({
     recordVibeProviderRequest: (...args: unknown[]) =>

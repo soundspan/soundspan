@@ -13,6 +13,7 @@ import { vibeEmbeddingTargetGateWhere } from "./vibeEmbeddingEligibility";
 const VIBE_QUEUE = "audio:clap:queue";
 const MAX_ERROR_LENGTH = 500;
 const INVALID_PAYLOAD_ERROR = "Invalid vibe embedding job payload";
+export const MAX_VIBE_ANALYSIS_RETRIES = 3;
 const jobLog =
     typeof (logger as { child?: unknown }).child === "function"
         ? logger.child("VibeEmbedJobs")
@@ -36,7 +37,13 @@ const vibeEmbedJobSchema = z.strictObject({
 const vibeEmbedTrackIdSchema = z.object({ trackId: trackIdSchema });
 
 type VibeEmbedJob = z.infer<typeof vibeEmbedJobSchema>;
-type TrackSnapshot = { id: string; title: string };
+type TrackSnapshot = {
+    id: string;
+    title: string;
+    vibeAnalysisRetryCount?: number;
+    vibeAnalysisStatus?: string | null;
+    embeddings?: Array<{ spaceId: string }>;
+};
 type ParsedVibeEmbedJob =
     | { kind: "valid"; job: VibeEmbedJob }
     | { kind: "invalid"; trackId: string | null };
@@ -77,6 +84,7 @@ interface VibeEmbedJobDependencies {
     releaseReservation(trackId: string): Promise<void>;
     recordOutcome(outcome: VibeEmbedJobOutcome): void;
     describeFailure(error: unknown): string;
+    isTransientFailure(error: unknown): boolean;
     now(): Date;
 }
 
@@ -110,7 +118,26 @@ async function findActiveTrack(
 ): Promise<TrackSnapshot | null> {
     return db.track.findFirst({
         where: activeTrackWhere(trackId),
-        select: { id: true, title: true },
+        select: { id: true, title: true, vibeAnalysisRetryCount: true },
+    });
+}
+
+async function findTrackForInvalidPayload(
+    dependencies: VibeEmbedJobDependencies,
+    trackId: string,
+): Promise<TrackSnapshot | null> {
+    return dependencies.prisma.track.findFirst({
+        where: activeTrackWhere(trackId),
+        select: {
+            id: true,
+            title: true,
+            vibeAnalysisStatus: true,
+            embeddings: {
+                where: { spaceId: dependencies.targetSpaceId },
+                select: { spaceId: true },
+                take: 1,
+            },
+        },
     });
 }
 
@@ -160,7 +187,6 @@ function failureStatusWhere() {
         { vibeAnalysisStatus: null },
         { vibeAnalysisStatus: "pending" },
         { vibeAnalysisStatus: "processing" },
-        { vibeAnalysisStatus: "completed" },
     ];
 }
 
@@ -176,12 +202,12 @@ async function markFailedWithMessage(
     track: TrackSnapshot,
     errorMessage: string,
 ): Promise<boolean> {
-    // The claim may begin from completed when its target-space vector is
-    // absent, while processing covers failures after the claim succeeds.
+    // Invalid payloads may settle only unfinished rows without target vectors.
     const updated = await dependencies.prisma.track.updateMany({
         where: {
             ...activeTrackWhere(track.id),
             OR: failureStatusWhere(),
+            embeddings: { none: { spaceId: dependencies.targetSpaceId } },
         },
         data: {
             vibeAnalysisStatus: "failed",
@@ -211,11 +237,68 @@ async function markFailed(
     track: TrackSnapshot,
     error: unknown,
 ): Promise<void> {
-    await markFailedWithMessage(
-        dependencies,
-        track,
-        failureMessage(dependencies, error),
-    );
+    const errorMessage = failureMessage(dependencies, error);
+    const retryCount = track.vibeAnalysisRetryCount ?? 0;
+    const updated = await dependencies.prisma.track.updateMany({
+        where: {
+            ...activeTrackWhere(track.id),
+            vibeAnalysisStatus: "processing",
+            vibeAnalysisRetryCount: retryCount,
+        },
+        data: {
+            vibeAnalysisStatus: "failed",
+            vibeAnalysisError: errorMessage,
+            vibeAnalysisRetryCount: { increment: 1 },
+            vibeAnalysisStartedAt: null,
+            vibeAnalysisStatusUpdatedAt: dependencies.now(),
+        },
+    });
+    if (updated.count === 0) return;
+    await dependencies.failureService.recordFailure({
+        entityType: "vibe",
+        entityId: track.id,
+        entityName: track.title,
+        errorMessage,
+        errorCode: "VIBE_EMBEDDING_FAILED",
+    });
+}
+
+async function resetTransientFailure(
+    dependencies: VibeEmbedJobDependencies,
+    track: TrackSnapshot,
+    error: unknown,
+): Promise<boolean> {
+    const retryCount = track.vibeAnalysisRetryCount ?? 0;
+    if (
+        !dependencies.isTransientFailure(error) ||
+        retryCount + 1 >= MAX_VIBE_ANALYSIS_RETRIES
+    ) {
+        return false;
+    }
+    const updated = await dependencies.prisma.track.updateMany({
+        where: {
+            ...activeTrackWhere(track.id),
+            vibeAnalysisStatus: "processing",
+            vibeAnalysisRetryCount: retryCount,
+        },
+        data: {
+            vibeAnalysisStatus: "pending",
+            vibeAnalysisError: failureMessage(dependencies, error),
+            vibeAnalysisRetryCount: { increment: 1 },
+            vibeAnalysisStartedAt: null,
+            vibeAnalysisStatusUpdatedAt: dependencies.now(),
+        },
+    });
+    return updated.count === 1;
+}
+
+async function handleGenerationFailure(
+    dependencies: VibeEmbedJobDependencies,
+    track: TrackSnapshot,
+    error: unknown,
+): Promise<void> {
+    if (await resetTransientFailure(dependencies, track, error)) return;
+    await markFailed(dependencies, track, error);
 }
 
 async function markCompleted(
@@ -265,11 +348,17 @@ async function processValidJob(
         return finish(dependencies, "stale_claim");
     }
 
+    let vector: number[];
     try {
-        const vector = await dependencies.embedAudio(job.filePath, {
+        vector = await dependencies.embedAudio(job.filePath, {
             id: dependencies.targetSpaceId,
             dim: dependencies.targetSpaceDim,
         });
+    } catch (error) {
+        await handleGenerationFailure(dependencies, track, error);
+        return finish(dependencies, "embed_failed");
+    }
+    try {
         const stillActive = await findActiveTrack(
             dependencies.prisma,
             track.id,
@@ -298,9 +387,19 @@ async function processInvalidJob(
     if (trackId === null) return finish(dependencies, "invalid_payload");
 
     await releaseReservation(dependencies, trackId);
-    const track = await findActiveTrack(dependencies.prisma, trackId);
-    if (track) {
+    const track = await findTrackForInvalidPayload(dependencies, trackId);
+    const protectedTrack =
+        track?.vibeAnalysisStatus === "completed" ||
+        (track?.embeddings?.length ?? 0) > 0;
+    if (track && !protectedTrack) {
         await markFailedWithMessage(dependencies, track, INVALID_PAYLOAD_ERROR);
+    } else if (track) {
+        jobLog.warn(
+            "Dropped invalid vibe embedding job for a protected track",
+            {
+                trackId,
+            },
+        );
     }
     return finish(dependencies, "invalid_payload");
 }
@@ -340,6 +439,16 @@ function describeVibeEmbedFailure(error: unknown): string {
     }
 }
 
+/** Classifies provider failures that are safe for bounded automatic retry. */
+export function isTransientVibeProviderFailure(error: unknown): boolean {
+    return (
+        error instanceof VibeProviderError &&
+        (error.code === "timeout" ||
+            error.code === "unreachable" ||
+            error.code === "provider_5xx")
+    );
+}
+
 /** Process one queued audio-embedding job for an explicit provider space. */
 export async function processVibeEmbedJob(
     rawJob: string,
@@ -357,6 +466,7 @@ export async function processVibeEmbedJob(
         },
         recordOutcome: recordVibeEmbedJobOutcome,
         describeFailure: describeVibeEmbedFailure,
+        isTransientFailure: isTransientVibeProviderFailure,
         now: () => new Date(),
     })(rawJob);
 }

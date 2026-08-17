@@ -9,6 +9,7 @@ import { runEmbeddingSpaceLifecycleCheck } from "../services/embeddingSpaceLifec
 import {
     clearVibeEmbeddingTargetSpaceId,
     EmbeddingSpaceDimensionMismatchError,
+    EmbeddingSpacePreprocessingMismatchError,
     resolveProviderEmbeddingSpace,
     RetiredEmbeddingSpaceError,
     setVibeEmbeddingTargetSpaceId,
@@ -68,7 +69,8 @@ function delay(milliseconds: number): Promise<void> {
 function isTerminalTargetResolutionError(error: unknown): boolean {
     return (
         error instanceof RetiredEmbeddingSpaceError ||
-        error instanceof EmbeddingSpaceDimensionMismatchError
+        error instanceof EmbeddingSpaceDimensionMismatchError ||
+        error instanceof EmbeddingSpacePreprocessingMismatchError
     );
 }
 

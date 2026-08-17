@@ -477,12 +477,7 @@ describe("unified enrichment runtime behavior", () => {
                 data: { enrichmentStatus: "pending" },
             }),
         );
-        expect(prisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
-            where: {
-                spaceId: "space-active",
-                track: { origin: "LOCAL" },
-            },
-        });
+        expect(prisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
         expect(enrichmentFailureService.clearAllFailures).toHaveBeenCalledWith(
             "vibe",
         );
@@ -685,13 +680,20 @@ describe("unified enrichment runtime behavior", () => {
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    embeddings: {
-                        none: { spaceId: "space-active" },
-                    },
                     OR: [
-                        { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },
-                        { vibeAnalysisStatus: "completed" },
+                        {
+                            vibeAnalysisStatus: null,
+                            embeddings: {
+                                none: { spaceId: "space-active" },
+                            },
+                        },
+                        {
+                            vibeAnalysisStatus: "completed",
+                            embeddings: {
+                                none: { spaceId: "space-active" },
+                            },
+                        },
                     ],
                 }),
                 take: 100,
@@ -772,7 +774,7 @@ describe("unified enrichment runtime behavior", () => {
         ).toHaveBeenCalled();
         expect(
             vibeAnalysisCleanupService.cleanupStaleProcessing,
-        ).not.toHaveBeenCalled();
+        ).toHaveBeenCalledTimes(1);
         expect(claimRedisPrimary.eval).toHaveBeenCalledTimes(1);
         expect(result).toEqual({ artists: 0, tracks: 0, audioQueued: 0 });
     });
@@ -2096,7 +2098,10 @@ describe("unified enrichment runtime behavior", () => {
         (prisma.artist.findMany as jest.Mock).mockResolvedValueOnce([]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.embeddings?.none?.spaceId === "space-active"
+                query?.where?.OR?.some(
+                    (candidate: any) =>
+                        candidate.embeddings?.none?.spaceId === "space-active",
+                )
                     ? [
                           {
                               id: "track-vibe-fail",
@@ -2228,7 +2233,10 @@ describe("unified enrichment runtime behavior", () => {
             .mockResolvedValueOnce([{ count: BigInt(1) }]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.embeddings?.none?.spaceId === "space-active"
+                query?.where?.OR?.some(
+                    (candidate: any) =>
+                        candidate.embeddings?.none?.spaceId === "space-active",
+                )
                     ? [
                           {
                               id: "track-vibe-ok",
@@ -2250,6 +2258,30 @@ describe("unified enrichment runtime behavior", () => {
         expect(logger.debug).toHaveBeenCalledWith(
             "Queued 1 tracks for vibe embedding",
         );
+    });
+
+    it("runs vibe cleanup while the audio queue is nonzero", async () => {
+        const {
+            prisma,
+            getFeatures,
+            vibeAnalysisCleanupService,
+            queueRedisPrimary,
+        } = setupUnifiedEnrichmentMocks();
+        getFeatures.mockResolvedValue({ vibeEmbeddings: true });
+        (prisma.track.count as jest.Mock).mockResolvedValue(0);
+        (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(7);
+        (
+            vibeAnalysisCleanupService.cleanupStaleProcessing as jest.Mock
+        ).mockResolvedValue({ reset: 1 });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        await enrichment.__unifiedEnrichmentTestables.executeVibePhase();
+
+        expect(
+            vibeAnalysisCleanupService.cleanupStaleProcessing,
+        ).toHaveBeenCalledTimes(1);
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
     });
 
     it("retries enrichment progress reads on rust panic prisma errors", async () => {

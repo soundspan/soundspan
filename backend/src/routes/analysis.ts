@@ -15,6 +15,8 @@ import {
     LOCAL_TRACK_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../utils/librarySorting";
+import { config } from "../config";
+import { enqueueReservedNodeRedisWork } from "../workers/enrichmentQueue";
 
 const router = Router();
 
@@ -649,7 +651,7 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
  *               force:
  *                 type: boolean
  *                 default: false
- *                 description: If true, delete all existing embeddings and re-queue all tracks
+ *                 description: If true, preserve active vectors, reset analysis state, and re-queue all tracks
  *     responses:
  *       200:
  *         description: Tracks queued for vibe embedding generation
@@ -662,7 +664,7 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
  * POST /api/analysis/vibe/start
  * Queue tracks for vibe embedding generation (admin only)
  *
- * @param force - If true, delete all embeddings and re-queue all tracks
+ * @param force - If true, preserve active vectors and re-queue all tracks
  */
 router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -674,14 +676,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         const force = req.body.force === true;
         const activeSpace = await getActiveSpace();
 
-        // If force mode, delete all existing embeddings first
         if (force) {
-            await prisma.trackEmbedding.deleteMany({
-                where: {
-                    spaceId: activeSpace.id,
-                    track: LOCAL_TRACK_WHERE,
-                },
-            });
             await prisma.track.updateMany({
                 where: LOCAL_TRACK_WHERE,
                 data: {
@@ -690,13 +685,14 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                 },
             });
             await enrichmentFailureService.clearAllFailures("vibe");
-            logger.info("Cleared all vibe embeddings for re-generation");
+            logger.info(
+                "Preserved active vibe embeddings and reset tracks for re-generation",
+            );
         }
 
-        // Find tracks without vibe embeddings (all tracks if force was used)
         const tracks = await prisma.track.findMany({
             where: {
-                ...missingActiveEmbeddingWhere(activeSpace.id),
+                ...(force ? {} : missingActiveEmbeddingWhere(activeSpace.id)),
                 ...TRACK_VISIBLE_WHERE,
                 ...LOCAL_TRACK_WHERE,
             },
@@ -726,32 +722,33 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Queue tracks for provider-backed vibe embedding.
-        const pipeline = redisClient.multi();
+        let queued = 0;
         for (const track of tracks) {
-            pipeline.rPush(
-                VIBE_QUEUE,
-                JSON.stringify({
+            const admission = await enqueueReservedNodeRedisWork(redisClient, {
+                queueKey: VIBE_QUEUE,
+                trackId: track.id,
+                payload: JSON.stringify({
                     trackId: track.id,
                     filePath: track.filePath,
                     duration: track.duration,
                 }),
-            );
-        }
-        await pipeline.exec();
-
-        // Clear any existing vibe failures for these tracks
-        for (const track of tracks) {
+                maxDepth: config.analysisQueues.vibeMaxDepth,
+                reservationTtlSeconds:
+                    config.analysisQueues.reservationTtlSeconds,
+            });
+            if (admission === "full") break;
+            if (admission !== "queued") continue;
+            queued += 1;
             await enrichmentFailureService.clearFailure("vibe", track.id);
         }
 
         logger.info(
-            `Queued ${tracks.length} tracks for vibe embedding${force ? " (force reset)" : ""}`,
+            `Queued ${queued} tracks for vibe embedding${force ? " (force reset)" : ""}`,
         );
 
         res.json({
-            message: `Queued ${tracks.length} tracks for vibe embedding`,
-            queued: tracks.length,
+            message: `Queued ${queued} tracks for vibe embedding`,
+            queued,
         });
     } catch (error: any) {
         logger.error("Start vibe embedding error:", error);

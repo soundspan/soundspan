@@ -17,13 +17,7 @@ import {
     resolveTrackPreference,
     TRACK_DISLIKE_ENTITY_TYPE,
 } from "../services/trackPreference";
-import {
-    getVocabulary,
-    expandQueryWithVocabulary,
-    rerankWithFeatures,
-    loadVocabulary,
-    VocabTerm,
-} from "../services/vibeVocabulary";
+import { loadVocabulary } from "../services/vibeVocabulary";
 import {
     CALIBRATION_MIN_EMBEDDED_TRACKS,
     computeCalibration,
@@ -42,26 +36,25 @@ import {
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
     findNearestToEmbedding,
-    findTracksByTextEmbedding,
     type NearestTrackRow,
-    type TextSearchResult,
 } from "../services/trackEmbeddings";
 import { getActiveSpace } from "../services/embeddingSpaces";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import {
-    resolveTextEmbedding,
     TextEmbeddingProviderError,
     TextEmbeddingTimeoutError,
 } from "../services/textEmbedding";
+import {
+    executeVibeSearch,
+    parseVibeSearchRequest,
+} from "../services/vibeSearch";
 
 const router = Router();
 
 // Load vocabulary at module initialization
 loadVocabulary();
-
-const MAX_TEXT_SEARCH_QUERY_LENGTH = 512;
 
 async function buildTrackPreferenceScoreMapForUser(
     userId: string | undefined,
@@ -984,16 +977,6 @@ router.get<{ trackId: string }>(
     }),
 );
 
-// Convert CLAP cosine distance (0-2 range) to similarity percentage (0-1)
-// distance 0 = identical, distance 1 = orthogonal, distance 2 = opposite
-function distanceToSimilarity(distance: number): number {
-    return Math.max(0, 1 - distance / 2);
-}
-
-// Minimum similarity threshold for search results
-// 0.65 = 65% match, meaning distance <= 0.7
-const MIN_SEARCH_SIMILARITY = 0.6;
-
 /**
  * @openapi
  * /api/vibe/search:
@@ -1060,155 +1043,9 @@ router.post(
     requireAuth,
     asyncHandler(async (req, res) => {
         try {
-            const { query, limit: requestedLimit, minSimilarity } = req.body;
-
-            if (!query || typeof query !== "string") {
-                return sendRouteError(
-                    res,
-                    400,
-                    "Query must be at least 2 characters",
-                );
-            }
-
-            if (query.length > MAX_TEXT_SEARCH_QUERY_LENGTH) {
-                return sendRouteError(
-                    res,
-                    400,
-                    `Query must be at most ${MAX_TEXT_SEARCH_QUERY_LENGTH} characters`,
-                );
-            }
-
-            if (query.trim().length < 2) {
-                return sendRouteError(
-                    res,
-                    400,
-                    "Query must be at least 2 characters",
-                );
-            }
-
-            const limit = Math.min(Math.max(1, requestedLimit || 20), 100);
-
-            // Allow override but default to MIN_SEARCH_SIMILARITY
-            const similarityThreshold =
-                typeof minSimilarity === "number"
-                    ? Math.max(0, Math.min(1, minSimilarity))
-                    : MIN_SEARCH_SIMILARITY;
-
-            // Convert similarity threshold to max distance
-            // similarity = 1 - (distance / 2), so distance = 2 * (1 - similarity)
-            const maxDistance = 2 * (1 - similarityThreshold);
-
-            const normalizedQuery = query.trim();
-            const textEmbedding = await resolveTextEmbedding(normalizedQuery);
-
-            // Query expansion with vocabulary
-            const vocab = getVocabulary();
-            let searchEmbedding = textEmbedding.embedding;
-            let genreConfidence = 0;
-            let matchedTerms: VocabTerm[] = [];
-
-            if (vocab) {
-                const expansion = expandQueryWithVocabulary(
-                    textEmbedding.embedding,
-                    normalizedQuery,
-                    vocab,
-                );
-                searchEmbedding = expansion.embedding;
-                genreConfidence = expansion.genreConfidence;
-                matchedTerms = expansion.matchedTerms;
-
-                logger.info(
-                    `[VIBE-SEARCH] Query "${normalizedQuery}" expanded with terms: ${matchedTerms.map((t) => t.name).join(", ") || "none"}, genre confidence: ${(genreConfidence * 100).toFixed(0)}%`,
-                );
-            }
-
-            // Query for similar tracks using the (possibly expanded) embedding
-            // Fetch more candidates for re-ranking (3x limit)
-            // Filter by max distance to exclude poor matches
-            const candidateLimit = limit * 3;
-            const similarTracks = await findTracksByTextEmbedding(
-                searchEmbedding,
-                maxDistance,
-                candidateLimit,
-                textEmbedding.spaceId,
-            );
-
-            logger.info(
-                `Vibe search "${normalizedQuery}": found ${similarTracks.length} candidates above ${Math.round(similarityThreshold * 100)}% similarity (max distance: ${maxDistance.toFixed(2)})`,
-            );
-
-            // Re-rank using audio features if we have vocabulary matches
-            let rankedTracks:
-                | typeof similarTracks
-                | ReturnType<typeof rerankWithFeatures<TextSearchResult>> =
-                similarTracks;
-            if (vocab && matchedTerms.length > 0) {
-                const reranked = rerankWithFeatures(
-                    similarTracks,
-                    matchedTerms,
-                    genreConfidence,
-                );
-                rankedTracks = reranked.slice(0, limit);
-
-                logger.info(
-                    `[VIBE-SEARCH] Re-ranked ${similarTracks.length} candidates, top result: ${rankedTracks[0]?.title || "none"}`,
-                );
-            } else {
-                rankedTracks = similarTracks.slice(0, limit);
-            }
-
-            // If we have results, log the similarity range
-            if (rankedTracks.length > 0) {
-                const first = rankedTracks[0];
-                const last = rankedTracks[rankedTracks.length - 1];
-                const bestSim =
-                    "finalScore" in first
-                        ? first.finalScore
-                        : distanceToSimilarity(first.distance);
-                const worstSim =
-                    "finalScore" in last
-                        ? last.finalScore
-                        : distanceToSimilarity(last.distance);
-                logger.info(
-                    `Vibe search similarity range: ${Math.round(bestSim * 100)}% - ${Math.round(worstSim * 100)}%`,
-                );
-            }
-
-            const tracks = rankedTracks.map((row) => ({
-                id: row.id,
-                title: row.title,
-                duration: row.duration,
-                trackNo: row.trackNo,
-                distance: row.distance,
-                similarity:
-                    "finalScore" in row
-                        ? row.finalScore
-                        : distanceToSimilarity(row.distance),
-                album: {
-                    id: row.albumId,
-                    title: row.albumTitle,
-                    coverUrl: row.albumCoverUrl,
-                },
-                artist: {
-                    id: row.artistId,
-                    name: row.artistName,
-                },
-            }));
-
-            res.json({
-                query: normalizedQuery,
-                tracks,
-                minSimilarity: similarityThreshold,
-                totalAboveThreshold: tracks.length,
-                debug: {
-                    matchedTerms: matchedTerms.map((t) => t.name),
-                    genreConfidence,
-                    featureWeight:
-                        matchedTerms.length > 0
-                            ? 0.2 + genreConfidence * 0.5
-                            : 0,
-                },
-            });
+            const parsed = parseVibeSearchRequest(req.body);
+            if (!parsed.ok) return sendRouteError(res, 400, parsed.error);
+            res.json(await executeVibeSearch(parsed.value));
         } catch (error: unknown) {
             logger.error("Vibe text search error:", error);
             if (error instanceof TextEmbeddingProviderError) {

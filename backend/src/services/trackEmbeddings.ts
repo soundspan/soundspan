@@ -7,7 +7,6 @@ import {
     getActiveSpace,
     getVibeEmbeddingTargetSpaceId,
 } from "./embeddingSpaces";
-import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import {
     vibeEmbeddingEligibleTrackWhere,
     vibeEmbeddingTargetGateWhere,
@@ -67,6 +66,11 @@ export interface TextSearchResult {
     speechiness: number | null;
 }
 
+function boundedTextSearchCandidateLimit(candidateLimit: number): number {
+    if (!Number.isFinite(candidateLimit)) return 1;
+    return Math.min(Math.max(1, Math.trunc(candidateLimit)), 300);
+}
+
 /** Prisma relation filter for tracks without a vector in `targetSpaceId`. */
 export function missingActiveEmbeddingWhere(
     targetSpaceId: string,
@@ -92,18 +96,6 @@ export async function findLocalTracksNeedingActiveEmbedding(
         take: limit,
         orderBy: { fileModified: "desc" },
     });
-}
-
-/** Delete active-space vectors for local tracks during a forced rebuild. */
-export async function deleteActiveLocalTrackEmbeddings(): Promise<number> {
-    const activeSpace = await getActiveSpace();
-    const result = await prisma.trackEmbedding.deleteMany({
-        where: {
-            spaceId: activeSpace.id,
-            track: LOCAL_TRACK_WHERE,
-        },
-    });
-    return result.count;
 }
 
 /** Upserts one validated CLAP vector received from a trusted service boundary. */
@@ -138,6 +130,10 @@ export async function upsertTrackEmbedding(
             embedding = EXCLUDED.embedding,
             analyzed_at = EXCLUDED.analyzed_at
     `;
+    await prisma.embeddingSpace.updateMany({
+        where: { id: spaceId, hadVectors: false },
+        data: { hadVectors: true },
+    });
 }
 
 /**
@@ -243,9 +239,11 @@ export async function findTracksByTextEmbedding(
     spaceId?: string,
 ): Promise<TextSearchResult[]> {
     const resolvedSpaceId = spaceId ?? (await getActiveSpace()).id;
+    const boundedCandidateLimit =
+        boundedTextSearchCandidateLimit(candidateLimit);
     // Migrating spaces have no ANN index before cutover, so pgvector uses an
     // exact scan during this bounded migration window.
-    return runAnnQuery<TextSearchResult[]>(Prisma.sql`
+    const query = Prisma.sql`
         SELECT
             t.id,
             t.title,
@@ -273,8 +271,12 @@ export async function findTracksByTextEmbedding(
           AND te.space_id = ${resolvedSpaceId}
           AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
         ORDER BY te.embedding <=> ${searchEmbedding}::vector
-        LIMIT ${candidateLimit}
-    `);
+        LIMIT ${boundedCandidateLimit}
+    `;
+    return runAnnQuery<TextSearchResult[]>(query, undefined, {
+        statementTimeoutMs: 5_000,
+        timeoutMessage: "Vibe text search query timed out",
+    });
 }
 
 /** Counts embeddings for tracks visible on browsable library surfaces. */

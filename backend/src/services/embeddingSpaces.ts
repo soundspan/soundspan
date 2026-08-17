@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { recordVibeProviderConfigError } from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
@@ -15,6 +16,7 @@ export interface ActiveEmbeddingSpace {
     checkpointHash: string;
     dim: number;
     preprocessing: Prisma.JsonValue;
+    hadVectors: boolean;
 }
 
 /** Registry row used by provider migration and lifecycle orchestration. */
@@ -79,6 +81,18 @@ export class EmbeddingSpaceDimensionMismatchError extends Error {
     }
 }
 
+/** Raised when a provider tuple reuses incompatible preprocessing. */
+export class EmbeddingSpacePreprocessingMismatchError extends Error {
+    readonly code = "EMBEDDING_SPACE_PREPROCESSING_MISMATCH";
+
+    constructor(public readonly spaceId: string) {
+        super(
+            `Embedding space ${spaceId} has different registered preprocessing`,
+        );
+        this.name = "EmbeddingSpacePreprocessingMismatchError";
+    }
+}
+
 let cachedSpace: ActiveEmbeddingSpace | null = null;
 let cacheExpiresAt = 0;
 let inFlightLoad: Promise<ActiveEmbeddingSpace> | null = null;
@@ -90,6 +104,7 @@ const providerSpaceSelect = {
     checkpointHash: true,
     dim: true,
     preprocessing: true,
+    hadVectors: true,
     status: true,
     retiredAt: true,
     createdAt: true,
@@ -104,6 +119,7 @@ function toActiveSpace(
         checkpointHash: row.checkpointHash,
         dim: row.dim,
         preprocessing: row.preprocessing,
+        hadVectors: row.hadVectors,
     };
 }
 
@@ -118,6 +134,7 @@ async function loadActiveSpace(): Promise<ActiveEmbeddingSpace> {
             checkpointHash: true,
             dim: true,
             preprocessing: true,
+            hadVectors: true,
             createdAt: true,
         },
     });
@@ -185,7 +202,47 @@ function resolveRegisteredProviderSpace(
             providerSpace.dim,
         );
     }
+    if (
+        !embeddingPreprocessingMatches(
+            space.preprocessing,
+            providerSpace.preprocessing,
+        )
+    ) {
+        log.error(
+            "Embedding-space provider preprocessing does not match the registered tuple",
+            { spaceId: space.id },
+        );
+        recordVibeProviderConfigError("preprocessing_mismatch");
+        throw new EmbeddingSpacePreprocessingMismatchError(space.id);
+    }
     return assertUsableProviderSpace(space);
+}
+
+function canonicalJson(
+    value: Prisma.JsonValue | Prisma.InputJsonValue,
+): string {
+    return JSON.stringify(value, (_key, nestedValue: unknown) => {
+        if (
+            nestedValue === null ||
+            typeof nestedValue !== "object" ||
+            Array.isArray(nestedValue)
+        ) {
+            return nestedValue;
+        }
+        return Object.fromEntries(
+            Object.entries(nestedValue).sort(([left], [right]) =>
+                left.localeCompare(right),
+            ),
+        );
+    });
+}
+
+/** Compare preprocessing documents without depending on JSON object key order. */
+export function embeddingPreprocessingMatches(
+    registered: Prisma.JsonValue,
+    provider: Prisma.InputJsonValue,
+): boolean {
+    return canonicalJson(registered) === canonicalJson(provider);
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

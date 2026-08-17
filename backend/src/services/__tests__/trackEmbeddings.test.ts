@@ -3,8 +3,10 @@ jest.mock("../../utils/db", () => ({
         $executeRaw: jest.fn(),
         $queryRaw: jest.fn(),
         track: { findMany: jest.fn() },
-        trackEmbedding: { deleteMany: jest.fn() },
-        embeddingSpace: { findUnique: jest.fn() },
+        embeddingSpace: {
+            findUnique: jest.fn(),
+            updateMany: jest.fn(),
+        },
     },
 }));
 
@@ -27,7 +29,6 @@ import * as embeddingUtils from "../../utils/embedding";
 import {
     countEmbeddedBrowsableTracks,
     countEmbeddedLocalTracks,
-    deleteActiveLocalTrackEmbeddings,
     fetchEmbeddingsByTrackIds,
     fetchTrackEmbedding,
     findLocalTracksNeedingActiveEmbedding,
@@ -58,6 +59,9 @@ describe("upsertTrackEmbedding", () => {
         (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
             dim: 512,
         });
+        (prisma.embeddingSpace.updateMany as jest.Mock).mockResolvedValue({
+            count: 1,
+        });
 
         await upsertTrackEmbedding(
             "track-1",
@@ -75,6 +79,10 @@ describe("upsertTrackEmbedding", () => {
         expect(prisma.embeddingSpace.findUnique).toHaveBeenCalledWith({
             where: { id: "space-target" },
             select: { dim: true },
+        });
+        expect(prisma.embeddingSpace.updateMany).toHaveBeenCalledWith({
+            where: { id: "space-target", hadVectors: false },
+            data: { hadVectors: true },
         });
     });
 
@@ -101,9 +109,14 @@ describe("active-space maintenance", () => {
                     origin: "LOCAL",
                     removedAt: null,
                     filePath: { not: null },
-                    embeddings: {
-                        none: { spaceId: "space-target" },
-                    },
+                    OR: expect.arrayContaining([
+                        {
+                            vibeAnalysisStatus: "completed",
+                            embeddings: {
+                                none: { spaceId: "space-target" },
+                            },
+                        },
+                    ]),
                 }),
                 take: 25,
             }),
@@ -120,13 +133,20 @@ describe("active-space maintenance", () => {
             expect(prisma.track.findMany).toHaveBeenCalledWith(
                 expect.objectContaining({
                     where: expect.objectContaining({
-                        embeddings: {
-                            none: { spaceId: targetSpaceId },
-                        },
                         OR: [
-                            { vibeAnalysisStatus: null },
                             { vibeAnalysisStatus: "pending" },
-                            { vibeAnalysisStatus: "completed" },
+                            {
+                                vibeAnalysisStatus: null,
+                                embeddings: {
+                                    none: { spaceId: targetSpaceId },
+                                },
+                            },
+                            {
+                                vibeAnalysisStatus: "completed",
+                                embeddings: {
+                                    none: { spaceId: targetSpaceId },
+                                },
+                            },
                         ],
                     }),
                 }),
@@ -143,26 +163,33 @@ describe("active-space maintenance", () => {
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    embeddings: {
-                        none: { spaceId: "space-worker-target" },
-                    },
+                    OR: expect.arrayContaining([
+                        {
+                            vibeAnalysisStatus: "completed",
+                            embeddings: {
+                                none: { spaceId: "space-worker-target" },
+                            },
+                        },
+                    ]),
                 }),
             }),
         );
     });
 
-    it("deletes only local vectors in the active space", async () => {
-        (prisma.trackEmbedding.deleteMany as jest.Mock).mockResolvedValue({
-            count: 3,
-        });
+    it("selects pending rebuild tracks even when a target vector already exists", async () => {
+        (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
 
-        await expect(deleteActiveLocalTrackEmbeddings()).resolves.toBe(3);
-        expect(prisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
-            where: {
-                spaceId: "space-active",
-                track: { origin: "LOCAL" },
-            },
-        });
+        await findLocalTracksNeedingActiveEmbedding(25, "space-target");
+
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: expect.arrayContaining([
+                        { vibeAnalysisStatus: "pending" },
+                    ]),
+                }),
+            }),
+        );
     });
 });
 
@@ -252,6 +279,24 @@ describe("findTracksByTextEmbedding", () => {
         expect(values[values.length - 1]).toBe(60);
         expect(values[values.length - 2]).toEqual([0.25, 0.75]);
         expect(values[values.length - 3]).toBe(0.8);
+        expect(mockRunAnnQuery).toHaveBeenCalledWith(query, undefined, {
+            statementTimeoutMs: 5_000,
+            timeoutMessage: "Vibe text search query timed out",
+        });
+    });
+
+    it("caps exact-scan candidates at the route maximum", async () => {
+        mockRunAnnQuery.mockResolvedValue([]);
+
+        await findTracksByTextEmbedding(
+            [0.25, 0.75],
+            0.8,
+            50_000,
+            "space-migrating",
+        );
+
+        const query = mockRunAnnQuery.mock.calls[0][0];
+        expect(query.values[query.values.length - 1]).toBe(300);
     });
 });
 

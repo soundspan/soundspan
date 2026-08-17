@@ -2,6 +2,7 @@ const mockFindMany = jest.fn();
 const mockFindUnique = jest.fn();
 const mockCreate = jest.fn();
 const mockLoggerError = jest.fn();
+const mockRecordProviderConfigError = jest.fn();
 const mockChild = jest.fn((_scope: string) => ({
     debug: jest.fn(),
     info: jest.fn(),
@@ -24,8 +25,14 @@ jest.mock("../../utils/logger", () => ({
     logger: { child: (scope: string) => mockChild(scope) },
 }));
 
+jest.mock("../../metrics", () => ({
+    recordVibeProviderConfigError: (...args: unknown[]) =>
+        mockRecordProviderConfigError(...args),
+}));
+
 import {
     EmbeddingSpaceDimensionMismatchError,
+    EmbeddingSpacePreprocessingMismatchError,
     findRegisteredProviderEmbeddingSpace,
     getActiveSpace,
     invalidateActiveSpaceCache,
@@ -241,6 +248,49 @@ describe("provider embedding-space resolution", () => {
             expect(mockCreate).not.toHaveBeenCalled();
         },
     );
+
+    it("accepts canonically identical preprocessing documents", async () => {
+        mockFindUnique.mockResolvedValue({
+            ...registrySpace,
+            preprocessing: { window: "middle", mono: true },
+        });
+
+        await expect(
+            resolveProviderEmbeddingSpace({
+                ...providerSpace,
+                preprocessing: { mono: true, window: "middle" },
+            }),
+        ).resolves.toEqual({
+            space: expect.objectContaining({ id: "space-student" }),
+            registered: false,
+        });
+        expect(mockRecordProviderConfigError).not.toHaveBeenCalled();
+    });
+
+    it("refuses a tuple whose preprocessing document differs", async () => {
+        mockFindUnique.mockResolvedValue({
+            ...registrySpace,
+            preprocessing: { mono: false, window: "middle" },
+        });
+
+        const resolution = resolveProviderEmbeddingSpace(providerSpace);
+
+        await expect(resolution).rejects.toBeInstanceOf(
+            EmbeddingSpacePreprocessingMismatchError,
+        );
+        await expect(resolution).rejects.toMatchObject({
+            code: "EMBEDDING_SPACE_PREPROCESSING_MISMATCH",
+            spaceId: "space-student",
+        });
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            "Embedding-space provider preprocessing does not match the registered tuple",
+            { spaceId: "space-student" },
+        );
+        expect(mockRecordProviderConfigError).toHaveBeenCalledWith(
+            "preprocessing_mismatch",
+        );
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
 
     it("registers an unknown provider as migrating", async () => {
         mockFindUnique.mockResolvedValue(null);

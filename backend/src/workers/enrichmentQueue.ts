@@ -7,10 +7,18 @@ export interface EnrichmentQueueRedis {
     ): Promise<unknown>;
 }
 
+/** Minimal node-redis surface required for atomic enrichment admission. */
+export interface EnrichmentQueueNodeRedis {
+    eval(
+        script: string,
+        options: { keys: string[]; arguments: string[] },
+    ): Promise<unknown>;
+}
+
 /** Outcome returned by atomic enrichment queue admission. */
 export type EnrichmentQueueAdmission = "queued" | "duplicate" | "full";
 
-interface EnqueueReservedWorkInput {
+export interface EnqueueReservedWorkInput {
     queueKey: string;
     trackId: string;
     payload: string;
@@ -31,6 +39,23 @@ redis.call("RPUSH", KEYS[1], ARGV[3])
 return 1
 `;
 
+function admissionArguments(input: EnqueueReservedWorkInput): string[] {
+    return [
+        input.queueKey,
+        `${input.queueKey}:reserved:${input.trackId}`,
+        String(input.maxDepth),
+        String(input.reservationTtlSeconds),
+        input.payload,
+    ];
+}
+
+function parseAdmission(result: unknown): EnrichmentQueueAdmission {
+    if (result === 1) return "queued";
+    if (result === 0) return "duplicate";
+    if (result === -1) return "full";
+    throw new Error(`Unexpected enrichment queue admission result: ${result}`);
+}
+
 /** Atomically enforce queue depth and a per-track enqueue reservation. */
 export async function enqueueReservedWork(
     redis: EnrichmentQueueRedis,
@@ -39,15 +64,20 @@ export async function enqueueReservedWork(
     const result = await redis.eval(
         ADMIT_WORK_SCRIPT,
         2,
-        input.queueKey,
-        `${input.queueKey}:reserved:${input.trackId}`,
-        String(input.maxDepth),
-        String(input.reservationTtlSeconds),
-        input.payload,
+        ...admissionArguments(input),
     );
+    return parseAdmission(result);
+}
 
-    if (result === 1) return "queued";
-    if (result === 0) return "duplicate";
-    if (result === -1) return "full";
-    throw new Error(`Unexpected enrichment queue admission result: ${result}`);
+/** Apply the same atomic reservation admission through node-redis. */
+export async function enqueueReservedNodeRedisWork(
+    redis: EnrichmentQueueNodeRedis,
+    input: EnqueueReservedWorkInput,
+): Promise<EnrichmentQueueAdmission> {
+    const args = admissionArguments(input);
+    const result = await redis.eval(ADMIT_WORK_SCRIPT, {
+        keys: args.slice(0, 2),
+        arguments: args.slice(2),
+    });
+    return parseAdmission(result);
 }

@@ -695,6 +695,26 @@ describe("vibe search transport compatibility", () => {
         expect(mockProviderEmbedText).not.toHaveBeenCalled();
     });
 
+    it("maps a bounded embedding scan timeout to the canonical 504 response", async () => {
+        mockRunAnnQuery.mockRejectedValueOnce(
+            new Error("Vibe text search query timed out"),
+        );
+        const res = createRes();
+
+        await searchHandler(
+            {
+                body: { query: "quiet focus" },
+                user: { id: "user-1" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(504);
+        expect(res.body).toEqual({
+            error: "Text embedding service unavailable",
+        });
+    });
+
     it("expands and reranks vibe search results when vocabulary matches exist", async () => {
         mockProviderEmbedText.mockResolvedValueOnce([0.5, 0.25]);
         mockGetVocabulary.mockReturnValueOnce({ id: "mock-vocab" });

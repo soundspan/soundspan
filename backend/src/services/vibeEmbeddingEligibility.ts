@@ -15,11 +15,16 @@ export function vibeEmbeddingTargetGateWhere(
     targetSpaceId: string,
 ): Prisma.TrackWhereInput {
     return {
-        embeddings: { none: { spaceId: targetSpaceId } },
         OR: [
-            { vibeAnalysisStatus: null },
             { vibeAnalysisStatus: "pending" },
-            { vibeAnalysisStatus: "completed" },
+            {
+                vibeAnalysisStatus: null,
+                embeddings: { none: { spaceId: targetSpaceId } },
+            },
+            {
+                vibeAnalysisStatus: "completed",
+                embeddings: { none: { spaceId: targetSpaceId } },
+            },
         ],
     };
 }

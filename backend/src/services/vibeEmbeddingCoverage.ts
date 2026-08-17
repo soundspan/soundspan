@@ -9,11 +9,22 @@ interface CoverageRefresherDependencies {
     setCoverage(coverage: VibeEmbeddingCoverage): void;
 }
 
-/** Counts every stored vector in one embedding space. */
-export async function loadVibeSpaceEmbeddedCount(
+/** Loads durable vector-presence history for instant-cutover decisions. */
+export async function loadVibeSpaceVectorState(
     spaceId: string,
-): Promise<number> {
-    return prisma.trackEmbedding.count({ where: { spaceId } });
+): Promise<{ hasVectors: boolean; hadVectors: boolean }> {
+    const [embedding, space] = await Promise.all([
+        prisma.trackEmbedding.findFirst({
+            where: { spaceId },
+            select: { trackId: true },
+        }),
+        prisma.embeddingSpace.findUnique({
+            where: { id: spaceId },
+            select: { hadVectors: true },
+        }),
+    ]);
+    if (!space) throw new Error(`Embedding space ${spaceId} is not registered`);
+    return { hasVectors: embedding !== null, hadVectors: space.hadVectors };
 }
 
 /** Loads target-space coverage for local tracks eligible for audio analysis. */
@@ -23,26 +34,34 @@ export async function loadVibeEmbeddingCoverage(
     const resolvedTargetSpaceId =
         targetSpaceId ?? (await getVibeEmbeddingTargetSpaceId());
     const eligibleWhere = vibeEmbeddingEligibleTrackWhere();
-    const [total, embedded, failed] = await Promise.all([
-        prisma.track.count({ where: eligibleWhere }),
+    const [embedded, missingByStatus] = await Promise.all([
         prisma.track.count({
             where: {
                 ...eligibleWhere,
                 embeddings: { some: { spaceId: resolvedTargetSpaceId } },
             },
         }),
-        prisma.track.count({
+        prisma.track.groupBy({
+            by: ["vibeAnalysisStatus"],
             where: {
                 ...eligibleWhere,
                 embeddings: { none: { spaceId: resolvedTargetSpaceId } },
-                vibeAnalysisStatus: "failed",
             },
+            _count: true,
         }),
     ]);
+    const failed =
+        missingByStatus.find((row) => row.vibeAnalysisStatus === "failed")
+            ?._count ?? 0;
+    const pending = missingByStatus.reduce(
+        (count, row) =>
+            row.vibeAnalysisStatus === "failed" ? count : count + row._count,
+        0,
+    );
     return {
         embedded,
         failed,
-        pending: Math.max(0, total - embedded - failed),
+        pending,
     };
 }
 
