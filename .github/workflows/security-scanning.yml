@@ -224,6 +224,12 @@ jobs:
               --ignore-vuln PYSEC-2026-1805
               --ignore-vuln PYSEC-2026-2324
               --ignore-vuln PYSEC-2026-2547
+          # DCLAP provider image is python:3.12-slim; its hash-pinned lock is
+          # compiled for 3.12, so the audit checks exactly the shipped tree.
+          - requirements: services/vibe-provider-dclap/requirements.lock
+            python-version: "3.12"
+            audit-args: --disable-pip --no-deps
+            ignore-vulns: ""
           # AIO image bakes the analyzer dependencies into its Debian-bookworm
           # system Python 3.11 site-packages; requirements-aio.lock is that
           # resolved tree.
