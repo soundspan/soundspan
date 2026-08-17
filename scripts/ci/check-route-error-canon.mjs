@@ -13,7 +13,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const BASELINE = Object.freeze({
     "backend/src/routes/admin.ts": 3,
     "backend/src/routes/analysis.ts": 12,
-    "backend/src/routes/analysisInternal.ts": 2,
     "backend/src/routes/apiKeys.ts": 3,
     "backend/src/routes/artists.ts": 4,
     "backend/src/routes/audiobooks.ts": 12,

@@ -30,14 +30,23 @@ export interface VibeEmbedMetrics {
     coverage: Gauge<"state">;
     spaceTransitions: Counter<"transition">;
     providerConfigErrors: Counter<"reason">;
+    providerQueueDepth: Gauge;
     recordJob(outcome: VibeEmbedJobOutcome): void;
     recordSpaceTransition(transition: VibeSpaceTransition): void;
     recordProviderConfigError(reason: VibeProviderConfigErrorReason): void;
     setCoverage(values: VibeEmbeddingCoverage): void;
 }
 
+/** Scrape-time dependencies for provider queue instrumentation. */
+export interface VibeEmbedMetricsDependencies {
+    getProviderQueueDepth(): Promise<number>;
+}
+
 /** Registers bounded audio-embedding job and target-space coverage metrics. */
-export function createVibeEmbedMetrics(registry: Registry): VibeEmbedMetrics {
+export function createVibeEmbedMetrics(
+    registry: Registry,
+    dependencies: VibeEmbedMetricsDependencies,
+): VibeEmbedMetrics {
     const jobs = new Counter({
         name: "soundspan_vibe_embed_jobs_total",
         help: "Backend-driven vibe embedding jobs by final outcome.",
@@ -62,12 +71,21 @@ export function createVibeEmbedMetrics(registry: Registry): VibeEmbedMetrics {
         labelNames: ["reason"] as const,
         registers: [registry],
     });
+    const providerQueueDepth = new Gauge({
+        name: "soundspan_vibe_provider_queue_depth",
+        help: "Raw Redis job depth for the backend vibe provider queue.",
+        registers: [registry],
+        async collect() {
+            this.set(await dependencies.getProviderQueueDepth());
+        },
+    });
 
     return {
         jobs,
         coverage,
         spaceTransitions,
         providerConfigErrors,
+        providerQueueDepth,
         recordJob(outcome): void {
             jobs.inc({ outcome });
         },

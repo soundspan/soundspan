@@ -1455,7 +1455,7 @@ class AnalysisWorker:
         self.executor = None
         self.pool_active = False
         gc.collect()
-        # Force glibc to return freed pages to OS (Python/PyTorch hold RSS otherwise)
+        # Force glibc to return pages retained by the Python worker processes.
         try:
             import ctypes
 

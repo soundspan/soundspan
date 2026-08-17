@@ -515,8 +515,8 @@ export const config = {
     databaseUrl: databaseUrl!,
     redisUrl: process.env.REDIS_URL!,
 
-    // Optional text/audio embedding provider base URL. Absence preserves the
-    // legacy Redis transports and sidecar consumer.
+    // Optional text/audio embedding provider base URL. An empty value disables
+    // provider-backed text search and audio embedding consumption.
     vibeProviderUrl: normalizeVibeProviderUrl(process.env.VIBE_PROVIDER_URL),
     vibeEmbedConcurrency: Number(process.env.VIBE_EMBED_CONCURRENCY ?? "1"),
     vibeSpaceCutoverThreshold: Number(

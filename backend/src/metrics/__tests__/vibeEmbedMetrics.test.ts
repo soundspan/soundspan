@@ -2,9 +2,19 @@ import { Registry } from "prom-client";
 import { createVibeEmbedMetrics } from "../vibeEmbedMetrics";
 
 describe("vibe embed metrics", () => {
+    function createMetrics(registry: Registry, queueDepth = 0) {
+        const getProviderQueueDepth = jest.fn(async () => queueDepth);
+        return {
+            metrics: createVibeEmbedMetrics(registry, {
+                getProviderQueueDepth,
+            }),
+            getProviderQueueDepth,
+        };
+    }
+
     it("emits every bounded job outcome", async () => {
         const registry = new Registry();
-        const metrics = createVibeEmbedMetrics(registry);
+        const { metrics } = createMetrics(registry);
 
         for (const outcome of [
             "stored",
@@ -28,7 +38,7 @@ describe("vibe embed metrics", () => {
 
     it("publishes active-space coverage by bounded state", async () => {
         const registry = new Registry();
-        const metrics = createVibeEmbedMetrics(registry);
+        const { metrics } = createMetrics(registry);
 
         metrics.setCoverage({ embedded: 8, pending: 3, failed: 2 });
 
@@ -42,7 +52,7 @@ describe("vibe embed metrics", () => {
 
     it("emits every bounded space transition", async () => {
         const registry = new Registry();
-        const metrics = createVibeEmbedMetrics(registry);
+        const { metrics } = createMetrics(registry);
 
         for (const transition of [
             "registered",
@@ -62,7 +72,7 @@ describe("vibe embed metrics", () => {
 
     it("emits bounded provider configuration errors", async () => {
         const registry = new Registry();
-        const metrics = createVibeEmbedMetrics(registry);
+        const { metrics } = createMetrics(registry);
 
         metrics.recordProviderConfigError("preprocessing_mismatch");
 
@@ -70,5 +80,17 @@ describe("vibe embed metrics", () => {
         expect(exposition).toContain(
             'soundspan_vibe_provider_config_errors_total{reason="preprocessing_mismatch"} 1',
         );
+    });
+
+    it("collects raw provider queue depth only on the scrape cadence", async () => {
+        const registry = new Registry();
+        const { getProviderQueueDepth } = createMetrics(registry, 7);
+
+        expect(getProviderQueueDepth).not.toHaveBeenCalled();
+
+        const exposition = await registry.metrics();
+
+        expect(getProviderQueueDepth).toHaveBeenCalledTimes(1);
+        expect(exposition).toContain("soundspan_vibe_provider_queue_depth 7");
     });
 });

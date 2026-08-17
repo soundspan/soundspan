@@ -41,9 +41,10 @@ erDiagram
     Track ||--o{ LikedTrack : "liked by"
     Track ||--o{ MoodBucket : categorized
     Track ||--o{ TrackGenre : tagged
-    Track ||--o| TrackEmbedding : "has embedding"
+    Track ||--o{ TrackEmbedding : "has embeddings by space"
     Track ||--o| TrackLyrics : "has lyrics"
     Track ||--o{ Track : "deduplicates federated copies"
+    EmbeddingSpace ||--o{ TrackEmbedding : contains
 
     FederationPeer ||--o{ Artist : mirrors
     FederationPeer ||--o{ Album : mirrors
@@ -77,9 +78,24 @@ erDiagram
 | --------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Track`               | Local file-backed or peer-mirrored music row                              | `origin`, nullable unique `filePath`, `peerId`/`remoteId`, `dedupOfTrackId`, `dedupPinned`, durable identity keys, soft-removal and analysis fields |
 | `TranscodedFile`      | Cached transcoded variant for locally served content                      | `trackId`, `quality`, `cachePath`                                                                                                                   |
-| `TrackEmbedding`      | CLAP 512-dim vector; peer embeddings can be imported when scoped          | `trackId`, `embedding` (pgvector)                                                                                                                   |
+| `EmbeddingSpace`      | Registry identity and lifecycle for one compatible vector space           | `family`, `checkpointHash`, `dim`, `preprocessing`, `status`, `hadVectors`                                                                          |
+| `TrackEmbedding`      | Space-scoped 512-dim vector; peer embeddings can be imported when compatible | composite `(trackId, spaceId)` primary key, `embedding` (pgvector), `analyzedAt`                                                                  |
 | `TrackLyrics`         | Synced/plain lyrics for local tracks                                      | `trackId`, `source` (lrclib, embedded, none)                                                                                                        |
 | `LibraryHealthRecord` | Current missing-file or unreadable-metadata condition for one local track | unique `trackId`, `status`, `filePath`, `detail`, detection/update timestamps                                                                       |
+
+`embedding_spaces` is the compatibility registry for every stored vector. Its
+`status` is `active`, `migrating`, or `retired`. Exactly one active space serves
+steady-state similarity queries. The durable `hadVectors` flag becomes true
+when the first vector is stored and remains true if vectors are later removed;
+the lifecycle uses it to distinguish a genuinely fresh empty space from a
+previously populated space that lost data.
+
+`track_embeddings` stores `space_id` as a required foreign key to
+`embedding_spaces`. Its composite `(track_id, space_id)` primary key allows one
+track to hold active and migrating vectors during blue/green re-embedding.
+Reads, counts, ANN queries, federation exchange, and text searches select an
+explicit registered space, so vectors from different model or preprocessing
+identities are never compared as one set.
 
 ### Remote-Provider (catalog references)
 

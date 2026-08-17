@@ -18,8 +18,11 @@ import { fetchProviderSpace } from "../services/vibeProvider";
 import { recordVibeSpaceTransition } from "../metrics";
 import { logger } from "../utils/logger";
 import { blockingBlPop, redisClient } from "../utils/redis";
+import {
+    cleanupLegacyVibeRedisArtifacts,
+    VIBE_PROVIDER_QUEUE_KEY,
+} from "./legacyVibeRedisCleanup";
 
-const VIBE_QUEUE = "audio:clap:queue";
 const BLPOP_TIMEOUT_SECONDS = 1;
 const COVERAGE_REFRESH_INTERVAL_MS = 60_000;
 const SPACE_LIFECYCLE_INTERVAL_MS = 5 * 60_000;
@@ -45,6 +48,7 @@ interface VibeEmbedWorkerDependencies {
     requeue(rawJob: string): Promise<void>;
     refreshCoverage(targetSpaceId: string): Promise<void>;
     runLifecycle(): Promise<void>;
+    cleanupLegacyArtifacts(): Promise<void>;
     resolveTargetSpace(): Promise<ResolvedWorkerTargetSpace>;
     setTargetSpace(spaceId: string): void;
     clearTargetSpace(): void;
@@ -86,6 +90,8 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private targetSpace: ResolvedWorkerTargetSpace | null = null;
     private retryWake: (() => void) | null = null;
     private terminalResolutionFailureCount = 0;
+    private cleanupStarted = false;
+    private cleanupTask: Promise<void> | null = null;
     private stopped = false;
 
     constructor(private readonly dependencies: VibeEmbedWorkerDependencies) {
@@ -150,7 +156,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private async popNext(): Promise<string | null> {
         try {
             return await this.dependencies.pop(
-                VIBE_QUEUE,
+                VIBE_PROVIDER_QUEUE_KEY,
                 BLPOP_TIMEOUT_SECONDS,
             );
         } catch (error) {
@@ -267,6 +273,23 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.lifecycleInterval.unref();
     }
 
+    private startLegacyCleanup(): void {
+        if (this.cleanupStarted) return;
+        this.cleanupStarted = true;
+        const task = this.dependencies
+            .cleanupLegacyArtifacts()
+            .catch((error) => {
+                this.dependencies.logger.warn(
+                    "Legacy vibe Redis cleanup failed",
+                    error,
+                );
+            })
+            .finally(() => {
+                if (this.cleanupTask === task) this.cleanupTask = null;
+            });
+        this.cleanupTask = task;
+    }
+
     async start(): Promise<boolean> {
         if (
             !this.dependencies.providerUrl ||
@@ -276,6 +299,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         if (this.running) return true;
         this.stopped = false;
         this.running = true;
+        this.startLegacyCleanup();
         this.loopPromise = this.runLoop();
         return true;
     }
@@ -290,6 +314,8 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.lifecycleInterval = null;
         await this.lifecycleTask;
         this.lifecycleTask = null;
+        await this.cleanupTask;
+        this.cleanupTask = null;
         await this.loopPromise;
         this.loopPromise = null;
         this.targetSpace = null;
@@ -318,7 +344,7 @@ const worker = createVibeEmbedWorker({
     },
     processJob: processVibeEmbedJob,
     requeue: async (rawJob) => {
-        await redisClient.rPush(VIBE_QUEUE, rawJob);
+        await redisClient.rPush(VIBE_PROVIDER_QUEUE_KEY, rawJob);
     },
     refreshCoverage: async (targetSpaceId) => {
         await refreshVibeEmbeddingCoverage(targetSpaceId);
@@ -329,6 +355,10 @@ const worker = createVibeEmbedWorker({
             retirementGraceDays: config.vibeSpaceRetirementGraceDays,
             now: () => new Date(),
         });
+    },
+    cleanupLegacyArtifacts: async () => {
+        const result = await cleanupLegacyVibeRedisArtifacts(redisClient, log);
+        log.info("Legacy vibe Redis cleanup completed", result);
     },
     resolveTargetSpace: async () => {
         const providerSpace = await fetchProviderSpace();

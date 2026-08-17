@@ -1,6 +1,6 @@
 # Pluggable Vibe Embedding Provider
 
-Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; rollout phase 1 and the blue/green migration machinery are implemented by migrations `20260816120000_add_embedding_space_registry` and `20260816130000_add_embedding_space_migration`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Upstream DCLAP validation measured approximately 0.88 student-to-teacher fidelity. The 2026-08-17 Gate 2 run confirmed the distinct `clap-music-audioset-dclap-student` space and selected the migration path for adoption; the default-provider flip remains a maintainer decision. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension space active until cutover; adopt DCLAP's distilled ONNX student as the default provider through a full re-embed; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
+Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted and implemented through rollout phase 3. The registry, blue/green lifecycle, provider HTTP client, and backend-owned audio job path are live. DCLAP is the default provider in split Compose and AIO, remains an opt-in replacement in individual Helm mode, and the torch provider path was removed for 2.3.0. Upstream DCLAP validation measured approximately 0.88 student-to-teacher fidelity. The 2026-08-17 Gate 2 run confirmed the distinct `clap-music-audioset-dclap-student` space and selected the full re-embed migration path. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension space active until cutover; adopt DCLAP's distilled ONNX student as the default provider through a full re-embed; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
 
 Related: cross-peer taste vectors in Blends ([issue #529](https://github.com/soundspan/soundspan/issues/529)) and federated discovery ([issue #530](https://github.com/soundspan/soundspan/issues/530)) depend on the space-identity contract defined here.
 
@@ -17,8 +17,8 @@ Vibe similarity is hard-wired to one implementation: the `services/audio-analyze
 | Question | Decision |
 | --- | --- |
 | Embedding space | Keep LAION-CLAP `music_audioset`, 512-dim, cosine; DCLAP advertises a distinct student identity |
-| Planned default provider | DCLAP distilled student, ONNX Runtime, CPU-first; shipped default-off pending later wiring |
-| Compat/GPU provider | Current torch `laion-clap` sidecar, unchanged |
+| Default provider | DCLAP distilled student, ONNX Runtime, CPU-first; default in Compose/AIO and opt-in in individual Helm mode |
+| Former compat/GPU provider | Torch `laion-clap` sidecar removed in 2.3.0 |
 | Future providers | MuQ-MuLan (GPU, new space, NC-weights caveat); hosted tags-level adapters only — never embedding-level primaries |
 | Space changes | Versioned space registry with background re-embed and threshold cutover |
 
@@ -37,7 +37,7 @@ GET  /v1/space                                  -> { family, checkpointHash,
 
 Rules:
 
-- **Text and audio towers travel together.** A provider must serve both from the same joint space, or declare itself audio-only (in which case text→music search is disabled for that space — surfaced in settings, not silently degraded). The default and compat providers both serve text.
+- **Text and audio towers travel together.** A provider must serve both from the same joint space, or declare itself audio-only (in which case text→music search is disabled for that space — surfaced in settings, not silently degraded). DCLAP serves both text and audio.
 - The backend addresses providers by configured base URL (`VIBE_PROVIDER_URL`), following the existing sidecar patterns: internal-network only, bounded timeouts, health endpoint, the analyzer queue's admission and retry semantics unchanged.
 - Vector normalization (L2) and dimension are asserted at the trust boundary on every response; worker writes are also dimension-checked against their resolved target registry row, and a mismatch is a hard job failure rather than a stored vector.
 
@@ -64,7 +64,7 @@ Invariants:
 - **Exactly one `active` space** serves all similarity queries, radio, mixes, Discover Weekly, and text search. Outside the bounded cutover cache window documented below, queries never cross spaces.
 - A registered tuple includes canonicalized preprocessing. Reusing `(family, checkpointHash, dim)` with different preprocessing is a provider-configuration error and never mixes vectors or creates a duplicate tuple.
 - The existing global ANN index continues to serve the active space. A partial ANN index for a migrating space is created immediately before cutover and dropped after that space is later retired and cleaned.
-- In steady state, text queries encode through the active space's text tower. During migration, the backend uses the fallback and bounded cutover behavior documented below instead of requesting `/v1/embed/text` from a provider whose space is not active.
+- In steady state, text queries encode through the active space's text tower. During migration, the backend uses the provider's registered migrating space and the bounded query behavior documented below.
 - Cross-peer vector exchange (Blends, federated discovery) transmits `(spaceId identity tuple, vector)`; peers compare identity tuples and only consume vectors whose space matches their own active space. Mismatch downgrades cross-peer features to metadata-level gracefully.
 
 ### Space migration (blue/green for vectors)
@@ -145,9 +145,9 @@ The perfect 1.000000 text-query overlap shows that the teacher-derived text towe
 
 ## Rollout phases
 
-1. **Registry + interface** (no behavior change): space table, spaceId on embeddings backfilled from `model_version`, provider HTTP contract extracted over the existing torch sidecar (it becomes Provider 2 in place).
-2. **DCLAP student sidecar** shipped default-off under an opt-in Compose profile; Gate 1 mode (b) executed; distinct student space identity enforced (upstream fidelity approximately 0.88 selects the distinct-space migration path).
-3. **Default flip** after the implemented blue/green backfill and automatic cutover; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults and UPGRADING notes remain follow-up rollout work under the recorded Gate 2 distinct-space verdict.
+1. **Registry + interface — complete.** The historical phase added the space table, backfilled `spaceId` from `model_version`, and extracted the provider HTTP contract over the then-existing torch sidecar.
+2. **DCLAP student sidecar — complete.** The historical phase shipped DCLAP default-off, executed Gate 1 mode (b), and enforced the distinct student identity selected by fidelity validation.
+3. **Default flip and torch removal — complete for 2.3.0.** Blue/green backfill and automatic cutover are implemented. DCLAP is default in Compose/AIO and opt-in in individual Helm mode. The torch path is removed, and the operator transition is documented in `docs/UPGRADING.md`.
 4. **Later**: MuQ-MuLan provider (new space, GPU) and hosted tags-level adapters, each their own issue.
 
 ## Non-goals

@@ -28,14 +28,83 @@ cuts over automatically. It removes the old vectors after the retirement grace
 window. No operator action is required.
 
 During backfill, text-based vibe search may return fewer results until cutover
-completes. Audio similarity ("more like this") is unaffected. Fresh or empty
-libraries cut over immediately.
+completes. Existing active-space audio similarity continues to work before
+cutover. After cutover at the coverage threshold, tracks in the missing tail may
+return no similarity results until their DCLAP re-embed completes. Fresh or
+empty libraries whose active space has never held vectors cut over immediately.
 
-**Action required:** standard Compose deployments need no migration steps. After
-upgrading, operators may delete the stopped torch CLAP container and its old
-image. Custom or bare-metal deployments must replace the torch analyzer with the
-`vibe-provider-dclap` service and set `VIBE_PROVIDER_URL` on the backend and any
-worker process.
+**Rollback warning:** an image-only downgrade to 2.2.0 is not supported after
+the 2.3.0 migration begins. The 2.2.0 code does not understand the 2.3.0
+embedding-space schema or the DCLAP student vectors. Back up PostgreSQL before
+the upgrade. To roll back the release, restore that database backup and then
+redeploy the 2.2.0 images. The prior vectors retained during the grace period
+support an embedding-space rollback within the 2.3.0 migration lifecycle; they
+do not make a 2.2.0 image rollback safe.
+
+**Compose warning:** Compose does not stop a service removed from the file; the
+old analyzer container becomes an orphan. A surviving analyzer writes with the
+removed single-space contract, so every embedding store against the new
+composite schema fails and can leave tracks permanently failed. Remove any
+custom override that still declares `audio-analyzer-clap`, then recreate the
+stack with orphan removal:
+
+```bash
+docker compose up -d --remove-orphans
+```
+
+Use the same `-f` arguments as your normal deployment if you select Compose
+files explicitly. The old torch image can be removed after the orphaned
+container is gone. Helm operators must replace
+`audioAnalyzerClap.enabled=true` with `vibeProviderDclap.enabled=true`; the DCLAP
+provider remains opt-in in individual Helm mode.
+
+**Bare-metal or custom deployment:** run the provider with the music library
+mounted read-only, publish its HTTP port only where the backend and worker can
+reach it, and use the same internal secret on both sides. This example binds the
+provider to loopback for a backend on the same host:
+
+```bash
+export INTERNAL_API_SECRET="replace-with-the-existing-soundspan-secret"
+docker run -d \
+  --name soundspan-vibe-provider-dclap \
+  --restart unless-stopped \
+  -p 127.0.0.1:8092:8092 \
+  -v /srv/music:/music:ro \
+  -e INTERNAL_API_SECRET \
+  ghcr.io/soundspan/soundspan-vibe-provider-dclap:2.3.0
+```
+
+Set `VIBE_PROVIDER_URL=http://127.0.0.1:8092` on the backend and every worker
+process. A minimal systemd-managed Docker unit uses an environment file so the
+secret is not embedded in the unit:
+
+```ini
+[Unit]
+Description=soundspan DCLAP vibe provider
+After=docker.service
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/soundspan/vibe-provider.env
+ExecStartPre=-/usr/bin/docker rm -f soundspan-vibe-provider-dclap
+ExecStart=/usr/bin/docker run --rm --name soundspan-vibe-provider-dclap --network host -v /srv/music:/music:ro -e INTERNAL_API_SECRET ghcr.io/soundspan/soundspan-vibe-provider-dclap:2.3.0
+ExecStop=/usr/bin/docker stop -t 30 soundspan-vibe-provider-dclap
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Store `INTERNAL_API_SECRET=<same-secret>` in
+`/etc/soundspan/vibe-provider.env`, restrict that file to the service
+administrator, enable the unit, and verify the authenticated health endpoint:
+
+```bash
+curl --fail \
+  -H "X-Internal-Secret: ${INTERNAL_API_SECRET}" \
+  http://127.0.0.1:8092/health
+```
 
 ---
 

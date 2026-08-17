@@ -1385,8 +1385,8 @@ async function queueAudioAnalysis(): Promise<number> {
 }
 
 /**
- * Step 4: Queue tracks for CLAP vibe embeddings
- * Only runs if CLAP analyzer is available
+ * Step 4: Queue tracks for provider-backed vibe embeddings.
+ * Feature detection keeps this idle when no provider is available.
  */
 async function queueVibeEmbeddings(): Promise<number> {
     const tracks = await withEnrichmentPrismaRetry(

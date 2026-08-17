@@ -15,8 +15,8 @@ graph TD
     TD["tidal-downloader<br/>FastAPI :8585"]
     YT["ytmusic-streamer<br/>FastAPI :8586"]
     AA["audio-analyzer<br/>Essentia/MusiCNN"]
-    AC["audio-analyzer-clap<br/>LAION-CLAP"]
-    DC["vibe-provider-dclap<br/>DCLAP ONNX :8092<br/>(default-off profile)"]
+    VQ["audio:clap:queue<br/>Redis provider jobs"]
+    DC["vibe-provider-dclap<br/>DCLAP ONNX :8092<br/>(Compose/AIO default; Helm opt-in)"]
     PEER["peer soundspan instance<br/>/api/federation/v1"]
     IDP["OIDC identity provider"]
 
@@ -30,10 +30,12 @@ graph TD
     BE -->|HTTP| YT
     AA --> PG
     AA --> RD
-    AC --> PG
-    AC --> RD
-    AC -->|HTTP| BE
-    BE -.->|"provider HTTP when configured"| DC
+    BW -->|enqueue| VQ
+    VQ -->|"BLPOP to worker"| BW
+    VQ -.->|stored in| RD
+    BW -->|"audio embedding HTTP"| DC
+    BW -->|"TrackEmbedding writes"| PG
+    BE -->|"text embedding HTTP"| DC
     BE <-->|"HTTPS catalog, cover, stream"| PEER
     BE -->|"HTTPS discovery, token, JWKS"| IDP
 ```
@@ -52,10 +54,7 @@ graph TD
 | backend-worker           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | Job queues (Bull/streams), scheduler claims                                                           |
 | audio-analyzer           | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Analysis results write                                                                                |
 | audio-analyzer           | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
-| audio-analyzer-clap      | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Embedding writes                                                                                      |
-| audio-analyzer-clap      | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
-| audio-analyzer-clap      | backend                 | HTTP                                                                       | 3006                            | `INTERNAL_API_SECRET`                                                                                                         | Track metadata lookup                                                                                 |
-| configured internal caller | vibe-provider-dclap   | HTTP                                                                       | 8092                            | `x-internal-secret` (`INTERNAL_API_SECRET`)                                                                                   | Default-off DCLAP space identity plus text and audio embedding                                        |
+| backend / backend-worker | vibe-provider-dclap     | HTTP                                                                       | 8092                            | `x-internal-secret` (`INTERNAL_API_SECRET`)                                                                                   | Provider space identity plus text and audio embedding                                                 |
 | backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`)                                               | 443                             | Scoped instance Bearer token                                                                                                  | Pairing, catalog sync, health checks, cover art, and audio streaming                                  |
 | backend                  | OIDC identity provider  | HTTPS                                                                      | 443                             | OIDC confidential client credentials                                                                                          | Provider discovery, authorization-code token exchange, and JWKS retrieval                             |
 | OpenSubsonic client      | backend (`/rest`)       | HTTP/HTTPS                                                                 | 3006, or frontend proxy on 3030 | Local password, revocable `ssap_` app password, token digest, or API key                                                      | OpenSubsonic-compatible browse, state, and media operations                                           |
@@ -189,14 +188,29 @@ transcoding and cache use.
 ### Audio Analysis Pipeline
 
 ```
-backend writes track to Redis queue
+backend-worker writes audio:analysis:queue in Redis
   → audio-analyzer BRPOP → Essentia analysis (BPM, key, mood, energy) → writes to PostgreSQL
-  → audio-analyzer-clap BRPOP → CLAP embedding (512-dim vector) → writes to track_embeddings table
+
+backend-worker writes and consumes audio:clap:queue in Redis
+  → backend-worker POSTs the audio reference to vibe-provider-dclap
+  → DCLAP returns a 512-dim vector over HTTP
+  → backend-worker validates the provider space and writes TrackEmbedding through Prisma/pgvector
+
+backend text vibe query
+  → backend POSTs text to vibe-provider-dclap
+  → backend queries TrackEmbedding rows in the provider's registered space
 ```
 
-Analyzers run as independent workers. MusiCNN analyzer writes mood/feature columns on `Track`. Its Redis read timeout defaults to 35 seconds and is kept at least five seconds above `BRPOP_TIMEOUT`; deployments can tune it with `AUDIO_REDIS_SOCKET_TIMEOUT`. CLAP analyzer writes to `TrackEmbedding` for vibe/similarity search via pgvector.
+The MusiCNN analyzer remains an independent worker and writes mood/feature
+columns on `Track`. Its Redis read timeout defaults to 35 seconds and is kept at
+least five seconds above `BRPOP_TIMEOUT`; deployments can tune it with
+`AUDIO_REDIS_SOCKET_TIMEOUT`.
 
-The default-off `vibe-provider-dclap` sidecar is an HTTP-only inference provider. It reads audio from the read-only music mount and has no direct PostgreSQL or Redis access. Provider registry and queue wiring remain disabled until the later rollout phase.
+The `vibe-provider-dclap` sidecar is an HTTP-only inference provider. It reads
+audio from the read-only music mount and has no direct PostgreSQL or Redis
+access. The backend owns queue admission, retries, space registration, and
+`TrackEmbedding` writes. Split Compose and AIO enable DCLAP by default. Helm
+keeps `vibeProviderDclap.enabled: false` until an operator opts in.
 
 The API process also serves `/api/vibe/map` by reading CLAP embeddings from PostgreSQL, projecting them through an in-process Node worker thread, and caching the normalized coordinates in Redis. That worker entrypoint must resolve in both tsx `src/` runtime and compiled `dist/` runtime layouts.
 

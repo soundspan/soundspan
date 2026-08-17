@@ -36,7 +36,7 @@ A multiplexing proxy in front of N instances would need to re-implement search r
 | Building block | Where | Reused for |
 | --- | --- | --- |
 | HMAC-at-rest key hashing + pepper resolution | `backend/src/utils/apiKeyHash.ts` | Peer credential storage |
-| Constant-time secret compare, fail-closed | `backend/src/middleware/internalAuth.ts` | Peer auth middleware template |
+| HMAC-at-rest credential hashing | `backend/src/utils/apiKeyHash.ts` | Peer bearer-token lookup |
 | Short-code pairing flow ending in a minted key | `DeviceLinkCode` + `backend/src/routes/deviceLink.ts` | Instance pairing handshake |
 | Remote-source tables + arbitration | `TrackTidal`/`TrackYtMusic`/`TrackMapping` (`confidence`, `source`, `stale`) | Dedup/link model |
 | Provenance fields that already exist | `Album.location` enum (`LIBRARY \| DISCOVER \| REMOTE`), `Artist.remoteTrackCount` | Origin discriminators |
@@ -114,7 +114,7 @@ model FederationPeer {
 ```
 
 - Issue/rotate/revoke via admin-only routes (`requireAuth` + `requireAdmin`, pattern of `routes/admin.ts`). Raw token shown once; stored as `hmac:` hash via `apiKeyHash.ts` helpers. No fixed lifetime; revocation is status change (auditable), not row delete.
-- Auth middleware `requireFederationPeer(scope)` attaches **`req.federationPeer`, never `req.user`** — downstream `userId`-scoped queries fail safely instead of impersonating a user. Constant-time compare per `internalAuth.ts`. Per-peer rate limiting.
+- Auth middleware `requireFederationPeer(scope)` hashes the bounded bearer token, resolves an active peer by `credentialHash`, and attaches **`req.federationPeer`, never `req.user`** — downstream `userId`-scoped queries fail safely instead of impersonating a user. Per-peer rate limiting.
 - Pairing handshake: an admin on the host generates a short-lived pairing code; an admin on the consumer enters `https://host.example` plus the code. Pairing defaults to `CONSUMER`, which creates only the requested one-way link and does not disclose a callback URL or mint a reciprocal code. When the consumer admin explicitly selects `BOTH`, the consumer generates a reciprocal code and calls `POST /api/federation/v1/pair`; the host consumes its code, calls the consumer back through the same bounded endpoint, and both sides upgrade one row to `BOTH`. Callback failure leaves the original one-directional link active with a warning. Manual HOST, CONSUMER, and BOTH token exchange remains available.
 
 ### Layer 2 — Swarm layer (consumer side)

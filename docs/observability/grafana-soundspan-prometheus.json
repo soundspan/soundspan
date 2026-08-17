@@ -192,6 +192,100 @@
             ],
             "title": "Process resident memory",
             "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 24
+            },
+            "id": 8,
+            "targets": [
+                {
+                    "expr": "sum(rate(soundspan_vibe_provider_requests_total{outcome!=\"ok\"}[$__rate_interval])) by (endpoint, outcome)",
+                    "legendFormat": "{{endpoint}} {{outcome}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Vibe provider request failures",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 24
+            },
+            "id": 9,
+            "targets": [
+                {
+                    "expr": "soundspan_vibe_embedding_coverage",
+                    "legendFormat": "{{state}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Vibe migration coverage and failed tracks",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 32
+            },
+            "id": 10,
+            "targets": [
+                {
+                    "expr": "soundspan_vibe_provider_queue_depth",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Vibe provider queue depth",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 32
+            },
+            "id": 11,
+            "targets": [
+                {
+                    "expr": "sum(increase(soundspan_federation_embedding_exports_total{outcome=\"suppressed_legacy_peer\"}[$__rate_interval]))",
+                    "legendFormat": "suppressed legacy peer",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation embedding exports suppressed",
+            "type": "timeseries"
         }
     ],
     "schemaVersion": 41,

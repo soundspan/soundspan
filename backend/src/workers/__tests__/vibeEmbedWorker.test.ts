@@ -38,6 +38,9 @@ describe("vibe embed worker", () => {
         const requeue = jest.fn(async () => undefined);
         const refreshCoverage = jest.fn(async () => undefined);
         const runLifecycle = jest.fn(async () => undefined);
+        const cleanupLegacyArtifacts = jest.fn<Promise<void>, []>(
+            async () => undefined,
+        );
         const setTargetSpace = jest.fn();
         const clearTargetSpace = jest.fn();
         const recordSpaceTransition = jest.fn();
@@ -69,6 +72,7 @@ describe("vibe embed worker", () => {
             requeue,
             refreshCoverage,
             runLifecycle,
+            cleanupLegacyArtifacts,
             setTargetSpace,
             clearTargetSpace,
             recordSpaceTransition,
@@ -82,6 +86,7 @@ describe("vibe embed worker", () => {
             requeue,
             refreshCoverage,
             runLifecycle,
+            cleanupLegacyArtifacts,
             setTargetSpace,
             clearTargetSpace,
             recordSpaceTransition,
@@ -129,6 +134,51 @@ describe("vibe embed worker", () => {
         expect(harness.pop).toHaveBeenCalledWith("audio:clap:queue", 1);
         expect(harness.refreshCoverage).toHaveBeenCalledTimes(1);
         expect(harness.refreshCoverage).toHaveBeenCalledWith("space-active");
+
+        const stopping = harness.worker.stop();
+        firstPop.resolve(null);
+        await stopping;
+    });
+
+    it("starts legacy cleanup once without delaying intake on failure", async () => {
+        const firstPop = deferred<string | null>();
+        const cleanup = deferred<void>();
+        const harness = createHarness({
+            providerUrl: "http://provider:8090",
+        });
+        harness.pop.mockReturnValueOnce(firstPop.promise);
+        harness.cleanupLegacyArtifacts.mockReturnValueOnce(cleanup.promise);
+
+        await expect(harness.worker.start()).resolves.toBe(true);
+        await expect(harness.worker.start()).resolves.toBe(true);
+        await flushPromises();
+
+        expect(harness.cleanupLegacyArtifacts).toHaveBeenCalledTimes(1);
+        expect(harness.pop).toHaveBeenCalledWith("audio:clap:queue", 1);
+
+        cleanup.resolve();
+        const stopping = harness.worker.stop();
+        firstPop.resolve(null);
+        await stopping;
+    });
+
+    it("logs legacy cleanup failure and continues provider intake", async () => {
+        const firstPop = deferred<string | null>();
+        const error = new Error("redis unavailable");
+        const harness = createHarness({
+            providerUrl: "http://provider:8090",
+        });
+        harness.pop.mockReturnValueOnce(firstPop.promise);
+        harness.cleanupLegacyArtifacts.mockRejectedValueOnce(error);
+
+        await expect(harness.worker.start()).resolves.toBe(true);
+        await flushPromises();
+
+        expect(harness.pop).toHaveBeenCalledWith("audio:clap:queue", 1);
+        expect(harness.logger.warn).toHaveBeenCalledWith(
+            "Legacy vibe Redis cleanup failed",
+            error,
+        );
 
         const stopping = harness.worker.stop();
         firstPop.resolve(null);

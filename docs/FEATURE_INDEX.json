@@ -1,7 +1,7 @@
 {
     "metadata": {
         "id": "soundspan-feature-index",
-        "version": "2026-08-16.01",
+        "version": "2026-08-17.01",
         "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
         "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
     },
@@ -302,8 +302,7 @@
                 "routes": [
                     "playlists.ts",
                     "playlistImport.ts",
-                    "shareLinks.ts",
-                    "spotify.ts"
+                    "shareLinks.ts"
                 ],
                 "services": [
                     "playlistImportService.ts",
@@ -324,8 +323,7 @@
             "tests": {
                 "backend_route": [
                     "playlistsRuntime.test.ts",
-                    "importRoutes.integration.test.ts",
-                    "spotifyRuntime.test.ts"
+                    "importRoutes.integration.test.ts"
                 ],
                 "backend_contract": [
                     "programmaticPlaylistArtistCap.test.ts",
@@ -615,11 +613,19 @@
             "backend": {
                 "routes": ["analysis.ts", "vibe.ts"],
                 "services": [
+                    "embeddingSpaceLifecycle.ts",
+                    "embeddingSpaces.ts",
                     "hybridSimilarity.ts",
+                    "textEmbedding.ts",
+                    "trackEmbeddings.ts",
+                    "vibeEmbedJobs.ts",
+                    "vibeEmbeddingCoverage.ts",
+                    "vibeProvider.ts",
                     "vibeVocabulary.ts",
                     "vibeAnalysisCleanup.ts",
                     "audioAnalysisCleanup.ts"
-                ]
+                ],
+                "workers": ["vibeEmbedWorker.ts"]
             },
             "tests": {
                 "backend_route": [
@@ -628,14 +634,29 @@
                     "vibeJourneyRuntime.test.ts",
                     "vibeCalibrationRuntime.test.ts"
                 ],
-                "backend_contract": ["clapTextEmbedRecoveryContract.test.ts"],
+                "backend_contract": [
+                    "embeddingSpaceMigration.test.ts",
+                    "embeddingSpaceLifecycle.test.ts",
+                    "embeddingSpaces.test.ts",
+                    "federationCatalog.test.ts",
+                    "vibeEmbedJobs.test.ts",
+                    "vibeEmbedMigrationFlow.test.ts",
+                    "vibeEmbeddingCoverage.test.ts",
+                    "vibeProvider.test.ts",
+                    "vibeEmbedWorker.test.ts"
+                ],
                 "sidecar_pytest": [
                     "test_audio_analyzer_class_columns.py",
                     "test_audio_analyzer_env.py",
                     "test_batch_timeout_requeue.py",
+                    "test_http_server.py",
                     "test_failure_resolution.py",
+                    "test_model_provider.py",
+                    "test_music_path.py",
                     "test_pool_crash_recovery.py",
-                    "test_queue_claim_alignment.py"
+                    "test_preprocessing.py",
+                    "test_queue_claim_alignment.py",
+                    "test_settings.py"
                 ]
             }
         },

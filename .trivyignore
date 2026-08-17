@@ -38,12 +38,11 @@
 # to be a false positive or a deliberate, reasoned "not fixing this now".
 #
 # --- Anticipated (not yet seeded) base-image baseline -----------------------
-# services/audio-analyzer/Dockerfile is `FROM ubuntu:20.04` (EOL) and
-# audio-analyzer-clap pulls in torch/torchaudio/torchvision -- both will
-# carry unfixable-in-place CVEs once trivy-image actually scans the built
-# GHCR images (schedule/workflow_dispatch only, see
+# services/audio-analyzer/Dockerfile is `FROM ubuntu:20.04` (EOL), so it may
+# carry unfixable-in-place CVEs once trivy-image scans the built GHCR images
+# (schedule/workflow_dispatch only, see
 # .github/workflows/image-security-scanning.yml). This worktree can't build all
-# 8 images to pre-seed that baseline, so nothing has been added for it yet.
+# images to pre-seed that baseline, so nothing has been added for it yet.
 # Add entries here with rationale (CVE ID + why it's unfixable/accepted) the
 # first time that job actually reports something -- don't invent CVE IDs
 # speculatively.

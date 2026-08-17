@@ -17,6 +17,7 @@ import {
     type VibeProviderConfigErrorReason,
     type VibeSpaceTransition,
 } from "./vibeEmbedMetrics";
+import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -29,7 +30,14 @@ collectDefaultMetrics({
 const httpMetrics = createHttpRequestMetrics(metricsRegistry);
 const domainMetrics = createDomainMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
-const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry);
+const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
+    // Resolved at scrape time: importing the client eagerly would pull the
+    // validated runtime config into every module that imports metrics.
+    getProviderQueueDepth: async () => {
+        const { redisClient } = await import("../utils/redis");
+        return redisClient.lLen(VIBE_PROVIDER_QUEUE_KEY);
+    },
+});
 
 /** Express middleware recording bounded HTTP request duration labels. */
 export const httpMetricsMiddleware = httpMetrics.middleware;

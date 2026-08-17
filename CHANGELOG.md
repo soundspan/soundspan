@@ -13,8 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a DCLAP provider target to the default and analysis Docker Bake groups.
 - Operators can now start a blue/green vibe embedding migration by pointing
   `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
-  backfills it, cuts over at configured coverage, retains the old vectors for
-  rollback, and cleans them after the configured grace period.
+  backfills it, cuts over at configured coverage, retains the prior space's
+  vectors for a 2.3 space-level rollback during the grace period, and then
+  cleans them. This does not support downgrading 2.3 database state to 2.2
+  images; that rollback requires a pre-upgrade database backup and restore.
 - Added read-only provider-fidelity validation tooling for real-library paired
   cosine, teacher-indexed neighbor overlap, text-query overlap, and inclusive
   same-space gate reports.
@@ -26,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a DCLAP student ONNX provider image with the provider v1
   HTTP contract, offline-vendored model/tokenizer artifacts, lazy idle unloading,
   upstream-matched audio preprocessing, and combined artifact identity.
+- Added one-shot vibe-worker cleanup for the retired text-embedding stream,
+  consumer group, heartbeat, and non-expiring legacy queue reservations.
+- Added a scrape-time gauge for raw provider job depth in
+  `audio:clap:queue`.
+- Added starter Grafana panels for provider failures, migration coverage and
+  failures, provider queue depth, and suppressed federation exports.
 
 ### Changed
 

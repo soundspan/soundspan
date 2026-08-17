@@ -8,7 +8,6 @@ import path from "path";
 const ALLOWLIST = [
     "index.ts",
     "middleware/auth.ts",
-    "middleware/internalAuth.ts",
     "routes/auth/localCredentials.ts",
     "services/segmented-streaming/cacheService.ts",
     "services/segmented-streaming/segmentService.ts",
