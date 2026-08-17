@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The clap sidecar's embedding upsert now targets the composite
+  `(track_id, space_id)` key; against the migrated schema its previous
+  single-column conflict target failed every store.
 - Fixed the local-profile Docker builds for both audio analyzer sidecars:
   their compose entries now build from the repository root, matching the
   root-relative paths their Dockerfiles have always used.

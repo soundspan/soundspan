@@ -775,10 +775,9 @@ class Worker:
                 """
                 INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
                 VALUES (%s, %s::vector, %s, %s)
-                ON CONFLICT (track_id)
+                ON CONFLICT (track_id, space_id)
                 DO UPDATE SET
                     embedding = EXCLUDED.embedding,
-                    space_id = EXCLUDED.space_id,
                     analyzed_at = EXCLUDED.analyzed_at
             """,
                 (track_id, embedding_list, space_id, datetime.now(UTC)),

@@ -607,6 +607,10 @@ def test_store_embedding_writes_space_id_without_model_version(
     query, params = connection.insert_attempts[0]
     assert "space_id" in query
     assert "model_version" not in query
+    # The composite primary key from the migration machinery is the only
+    # unique constraint; a single-column conflict target fails every insert.
+    assert "ON CONFLICT (track_id, space_id)" in query
+    assert 'SET\n                    "space_id"' not in query
     assert params[2] == "space-current"
 
 
