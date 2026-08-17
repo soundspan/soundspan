@@ -2,7 +2,37 @@
 
 ## Release Summary
 
-This release includes 30 fixes, 14 additions, and 16 changes.
+Soundspan 2.3.0 replaces the heavyweight AI model behind the Vibe features
+with a new engine (DCLAP) that is a fraction of the size and several times
+faster — and runs well on an ordinary CPU. The old engine's 2.35 GB model
+download and multi-gigabyte container are gone for good.
+
+You don't need to re-set anything up: after upgrading, your library
+re-analyzes itself in the background while similarity search keeps working on
+the existing data, then switches over automatically once the new analysis is
+ready. You can watch the progress in Settings.
+
+The release also brings a much stronger operational picture — live provider
+health in Settings, new dashboard panels and alert rules — and safer vibe
+sharing between federated servers.
+
+This release includes 30 fixes, 14 additions, and 16 changes; the full
+detail is listed below.
+
+## Highlights
+
+- **Smaller, faster Vibe engine.** The DCLAP provider keeps the exact same
+  text understanding and closely comparable audio similarity at a fraction of
+  the size, with no GPU required.
+- **Hands-off migration.** Existing libraries re-embed automatically; search
+  stays available throughout, and the switch-over happens on its own when
+  coverage is high enough.
+- **See what's happening.** Settings now shows migration progress
+  (analyzed / pending / failed) and whether the provider is reachable.
+- **Better monitoring out of the box.** New Grafana panels and Prometheus
+  alert rules cover provider failures, stalled migrations, and queue health.
+- **Leaner installs.** The all-in-one image shrinks by roughly 2 GB, and
+  default Compose setups no longer pull the old analyzer image at all.
 
 ## Before you upgrade
 
@@ -10,9 +40,17 @@ This release includes 30 fixes, 14 additions, and 16 changes.
 to 2.3.0. Complete the 2.0.0 breaking changes first. See
 [Upgrading from an earlier version](#upgrading-from-an-earlier-version).
 
-- The torch CLAP analyzer is removed everywhere; existing libraries re-embed automatically through the blue/green DCLAP migration - read the 2.3.0 section of docs/UPGRADING.md BEFORE upgrading, including the mandatory full stop of backend and worker processes around the schema migration.
-- Image-only rollback to 2.2.0 is not supported once the migration begins; take a database backup before upgrading.
-- Helm: audioAnalyzerClap.* values now fail validation - use --reset-then-reuse-values or a clean values file, and set vibeProviderDclap.enabled=true to keep vibe features.
+- **Read the 2.3.0 section of `docs/UPGRADING.md` before upgrading.** The old
+  torch CLAP analyzer is removed everywhere, and the upgrade requires fully
+  stopping the backend and worker before the database migration runs — the
+  guide has copy-paste commands for each deployment type.
+- **Take a database backup first.** Once the new engine starts re-analyzing
+  your library, going back to 2.2.0 means restoring that backup — you cannot
+  simply roll the images back.
+- **Helm users:** leftover `audioAnalyzerClap.*` values now stop the upgrade
+  with a clear message. Use `--reset-then-reuse-values` (Helm 3.14+) or a
+  clean values file, and set `vibeProviderDclap.enabled=true` to keep Vibe
+  features on.
 
 ## Fixed
 
@@ -47,8 +85,6 @@ to 2.3.0. Complete the 2.0.0 breaking changes first. See
   space, so migrated tracks receive the full provider retry budget.
 - Provider 5xx availability failures now return 503 from vibe search, provider
   contract and space mismatches return 502, and timeouts remain 504.
-- Helm accepts absent or null removed analyzer values while rejecting non-null
-  legacy configuration.
 - DCLAP tokenizer artifacts are byte-verified in both the standalone and AIO
   images.
 - The Vibe UI now distinguishes provider-unavailable errors from transient
@@ -59,15 +95,14 @@ to 2.3.0. Complete the 2.0.0 breaking changes first. See
 - Transient vibe-provider failures now receive bounded automatic retries, and
   malformed queue entries cannot demote completed or already-stored tracks.
 - Stale vibe claims are now recovered independently of MusicCNN queue state.
-- Helm now rejects removed `audioAnalyzerClap.*` values and the conflicting
-  `vibeProviderDclap.env.DCLAP_HTTP_PORT` override instead of rendering a broken
-  component. Chart releases now wait for the DCLAP provider image.
+- Helm now rejects leftover `audioAnalyzerClap.*` values (null/absent values
+  are tolerated) and the conflicting `vibeProviderDclap.env.DCLAP_HTTP_PORT`
+  override instead of rendering a broken component. Chart releases now wait
+  for the DCLAP provider image.
 - Settings no longer shows the retired vibe embedding worker control, which
   targeted an endpoint removed with the torch CLAP analyzer.
 - Updated the Vibe and onboarding guidance for the DCLAP provider and current
   analysis memory requirements.
-- Provider-unavailable vibe text searches now return 503 while provider
-  timeouts continue to return 504.
 - Fresh installs with only a provider-backed vibe space now cut over
   immediately instead of stalling behind an active space with no vectors.
 - The clap sidecar's embedding upsert now targets the composite
@@ -191,7 +226,13 @@ to 2.3.0. Complete the 2.0.0 breaking changes first. See
 
 ## Admin/Operations
 
-- No admin/operations updates documented in this release.
+- Settings shows live migration progress and provider reachability, backed by
+  heartbeats that actively re-check the provider.
+- Starter Grafana panels and seven Prometheus alert rules cover provider
+  failures, stalled migrations, failed tracks, queue depth, and metric
+  collection errors (`docs/observability/`).
+- The system status API reports the active embedding space, migration
+  coverage, and provider state for external monitoring.
 
 ## Deployment and Distribution
 
@@ -208,7 +249,13 @@ helm upgrade --install soundspan soundspan/soundspan --version 2.3.0
 
 ## Breaking Changes
 
-- None documented in this release.
+- The torch CLAP analyzer is removed from Compose, Helm, the all-in-one
+  image, and the codebase. Deployments that ran it must move to the DCLAP
+  provider (automatic in Compose/AIO; one values flag in Helm).
+- Helm upgrades fail fast when removed `audioAnalyzerClap.*` values are still
+  present (see Before you upgrade).
+- Rolling back to 2.2.0 after the migration begins requires a database
+  restore; image-only rollback is not supported.
 
 ## Known Issues
 
@@ -216,7 +263,13 @@ helm upgrade --install soundspan soundspan/soundspan --version 2.3.0
 
 ## Compatibility and Migration
 
-- No manual migration steps required for standard Docker and Helm deployments.
+- Standard Compose and Helm deployments need no manual data migration — the
+  library re-embeds itself and cuts over automatically. The one required
+  manual step is the full stop of backend and worker around the schema
+  migration described in `docs/UPGRADING.md`.
+- Federated peers on older releases stop receiving vibe vectors once your
+  server switches to the new embedding space; upgrade both sides to restore
+  the exchange.
 
 ## Upgrading from an earlier version
 
