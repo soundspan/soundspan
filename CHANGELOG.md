@@ -103,6 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Provider heartbeats now re-probe reachability each cycle, migration progress
+  is visible in settings, coverage sampling is statement-time bounded, and Helm
+  upgrade guidance waits for old backend and worker pods to be deleted.
 - The legacy global ANN index is now dropped, so space-scoped vector queries
   cannot lose results through cross-space approximation.
 - ANN indexes now build only after a space crosses a size floor, and the active

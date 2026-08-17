@@ -2,8 +2,11 @@ import { z } from "zod";
 
 /** Namespace for TTL-bound per-worker provider status keys. */
 export const VIBE_WORKER_STATUS_KEY_PREFIX = "soundspan:vibe-worker-status:v2:";
+/** Cadence shared by worker publishing and reader-side freshness checks. */
+export const VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS = 60_000;
 /** Three missed one-minute refreshes expire a dead worker's verdict. */
-export const VIBE_WORKER_STATUS_TTL_MS = 180_000;
+export const VIBE_WORKER_STATUS_TTL_MS =
+    3 * VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS;
 const MAX_STATUS_SCAN_PAGES = 100;
 const STATUS_SCAN_COUNT = 128;
 
@@ -16,6 +19,7 @@ const workerStatusSchema = z.strictObject({
     providerReachability: z.strictObject({
         reachable: z.boolean(),
         checkedAt: z.iso.datetime(),
+        errorClass: z.string().min(1).max(128).optional(),
     }),
     targetSpace: z
         .strictObject({
@@ -69,6 +73,11 @@ function parseWorkerStatus(stored: string | null): VibeWorkerStatus | null {
     }
 }
 
+function isStatusFresh(status: VibeWorkerStatus, nowMs: number): boolean {
+    const checkedAtMs = Date.parse(status.providerReachability.checkedAt);
+    return nowMs - checkedAtMs <= VIBE_WORKER_STATUS_TTL_MS;
+}
+
 async function loadFreshStatusValues(
     redis: VibeWorkerStatusRedis,
 ): Promise<string[]> {
@@ -96,10 +105,15 @@ async function loadFreshStatusValues(
 /** Read the newest validated, unexpired worker snapshot. */
 export async function readVibeWorkerStatus(
     redis: VibeWorkerStatusRedis,
+    now: Date = new Date(),
 ): Promise<VibeWorkerStatus | null> {
+    const nowMs = now.getTime();
     const statuses = (await loadFreshStatusValues(redis))
         .map(parseWorkerStatus)
-        .filter((status): status is VibeWorkerStatus => status !== null);
+        .filter(
+            (status): status is VibeWorkerStatus =>
+                status !== null && isStatusFresh(status, nowMs),
+        );
     if (statuses.length === 0) return null;
     statuses.sort((left, right) =>
         right.providerReachability.checkedAt.localeCompare(

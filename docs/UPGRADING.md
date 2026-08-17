@@ -56,14 +56,25 @@ docker compose config
 ```
 
 Remove any custom override that still declares `audio-analyzer-clap`. Then
-recreate the stack with orphan removal:
+fully stop every backend API and worker container. Stop any surviving torch
+analyzer before a 2.3 entrypoint can run the migration:
+
+```bash
+docker compose stop backend backend-worker
+docker ps --filter name=audio-analyzer-clap -q | xargs -r docker stop
+docker compose ps --status running --format '{{.Name}}' backend backend-worker
+docker ps --filter name=audio-analyzer-clap --format '{{.Names}}'
+```
+
+The last two commands must print no container names. Recreate the stack only
+after every old writer has terminated:
 
 ```bash
 docker compose up -d --remove-orphans
 ```
 
-Verify that no torch analyzer container remains. This command must print no
-container names:
+Verify that the removed torch analyzer did not return. This command must print
+no container names:
 
 ```bash
 docker ps --filter name=audio-analyzer-clap --format '{{.Names}}'
@@ -84,45 +95,70 @@ enforce it.
 
 This upgrade changes the track-embedding composite key while individual-mode
 Deployments may still run 2.2 pods. Stop both workloads before `helm upgrade`.
-Set the namespace and the two rendered Deployment names. Save the original
-replica counts, then scale both Deployments to zero and wait until no ready
-replicas remain:
+Set the namespace, Helm release, chart name label, and the two rendered
+Deployment names. The chart's pod selectors contain
+`app.kubernetes.io/name`, `app.kubernetes.io/instance`, and
+`app.kubernetes.io/component`. If `nameOverride` is set, use that value for
+`chart_name`. Save the original replica counts, then scale the backend and the
+optional backend worker to zero:
 
 ```bash
 namespace=soundspan
+release=soundspan
+chart_name=soundspan
 backend_deployment=soundspan-backend
 worker_deployment=soundspan-backend-worker
+backend_selector="app.kubernetes.io/name=$chart_name,app.kubernetes.io/instance=$release,app.kubernetes.io/component=backend"
+worker_selector="app.kubernetes.io/name=$chart_name,app.kubernetes.io/instance=$release,app.kubernetes.io/component=backend-worker"
 backend_replicas=$(kubectl -n "$namespace" get deployment "$backend_deployment" -o jsonpath='{.spec.replicas}')
-worker_replicas=$(kubectl -n "$namespace" get deployment "$worker_deployment" -o jsonpath='{.spec.replicas}')
-kubectl -n "$namespace" scale deployment \
-  "$backend_deployment" "$worker_deployment" --replicas=0
-for attempt in $(seq 1 60); do
-  backend_ready=$(kubectl -n "$namespace" get deployment "$backend_deployment" -o jsonpath='{.status.readyReplicas}')
-  worker_ready=$(kubectl -n "$namespace" get deployment "$worker_deployment" -o jsonpath='{.status.readyReplicas}')
-  if [ "${backend_ready:-0}" = 0 ] && [ "${worker_ready:-0}" = 0 ]; then break; fi
-  if [ "$attempt" = 60 ]; then echo 'Timed out waiting for zero ready replicas' >&2; exit 1; fi
-  sleep 5
-done
-kubectl -n "$namespace" get deployment \
-  "$backend_deployment" "$worker_deployment" \
-  -o custom-columns=NAME:.metadata.name,READY:.status.readyReplicas
+worker_present=false
+if kubectl -n "$namespace" get deployment "$worker_deployment" >/dev/null 2>&1; then
+  worker_present=true
+  worker_replicas=$(kubectl -n "$namespace" get deployment "$worker_deployment" -o jsonpath='{.spec.replicas}')
+fi
+kubectl -n "$namespace" scale deployment "$backend_deployment" --replicas=0
+if [ "$worker_present" = true ]; then
+  kubectl -n "$namespace" scale deployment "$worker_deployment" --replicas=0
+fi
 ```
 
-The verification output must show `0` ready replicas for both Deployments.
-Run `helm upgrade`, then restore and verify the saved replica counts:
+Warning: zero ready replicas is not sufficient. A terminating 2.2 pod can
+continue draining work. Wait for Kubernetes to delete every pod selected by
+both chart workloads:
+
+```bash
+if [ -n "$(kubectl -n "$namespace" get pod -l "$backend_selector" -o name)" ]; then
+  kubectl -n "$namespace" wait --for=delete pod \
+    -l "$backend_selector" --timeout=5m
+fi
+if [ "$worker_present" = true ]; then
+  if [ -n "$(kubectl -n "$namespace" get pod -l "$worker_selector" -o name)" ]; then
+    kubectl -n "$namespace" wait --for=delete pod \
+      -l "$worker_selector" --timeout=5m
+  fi
+fi
+```
+
+Run `helm upgrade` only after both waits succeed. Then restore and verify the
+saved replica counts:
 
 ```bash
 kubectl -n "$namespace" scale deployment "$backend_deployment" \
   --replicas="$backend_replicas"
-kubectl -n "$namespace" scale deployment "$worker_deployment" \
-  --replicas="$worker_replicas"
+if [ "$worker_present" = true ]; then
+  kubectl -n "$namespace" scale deployment "$worker_deployment" \
+    --replicas="$worker_replicas"
+fi
 kubectl -n "$namespace" rollout status deployment/"$backend_deployment" --timeout=5m
-kubectl -n "$namespace" rollout status deployment/"$worker_deployment" --timeout=5m
+if [ "$worker_present" = true ]; then
+  kubectl -n "$namespace" rollout status deployment/"$worker_deployment" --timeout=5m
+fi
 ```
 
 **Bare-metal or custom deployment:** stop the backend and every worker before
-applying the 2.3 database migration. Run this command from the backend
-directory with the deployment's `DATABASE_URL`:
+applying the 2.3 database migration. Confirm that every process has fully exited;
+do not rely on readiness or shutdown initiation alone. Run this command from
+the backend directory with the deployment's `DATABASE_URL`:
 
 ```bash
 DATABASE_URL='postgresql://soundspan:password@database:5432/soundspan' npx prisma migrate deploy

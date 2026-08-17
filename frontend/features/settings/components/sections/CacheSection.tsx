@@ -562,6 +562,16 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         enrichmentState?.status === "running" ||
         enrichmentState?.status === "paused";
     const totalFailures = failureCounts?.total || 0;
+    const migrationCoverage = vibe.migration?.coverage;
+    const migrationActionable = migrationCoverage
+        ? migrationCoverage.embedded + migrationCoverage.pending
+        : 0;
+    const migrationPercent =
+        migrationCoverage && migrationActionable > 0
+            ? Math.round(
+                  (migrationCoverage.embedded / migrationActionable) * 100,
+              )
+            : 0;
 
     return (
         <>
@@ -789,6 +799,59 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                   ? "reachable"
                                                   : "unreachable"}
                                         </p>
+                                        {vibe.migration && (
+                                            <div
+                                                role="status"
+                                                aria-label="Vibe embedding migration"
+                                                className="mt-2 rounded-lg border border-white/10 bg-white/5 p-3"
+                                            >
+                                                <p className="text-xs font-medium text-white/80">
+                                                    Embedding migration
+                                                </p>
+                                                <p className="mt-1 text-[11px] text-white/50">
+                                                    Target space family:{" "}
+                                                    {vibe.migration.family}
+                                                </p>
+                                                {migrationCoverage ? (
+                                                    <>
+                                                        <div className="mt-2">
+                                                            <ProgressBar
+                                                                progress={
+                                                                    migrationPercent
+                                                                }
+                                                            />
+                                                        </div>
+                                                        <p className="mt-1 text-[10px] text-white/40">
+                                                            {
+                                                                migrationCoverage.embedded
+                                                            }{" "}
+                                                            embedded ·{" "}
+                                                            {
+                                                                migrationCoverage.pending
+                                                            }{" "}
+                                                            pending ·{" "}
+                                                            {
+                                                                migrationCoverage.failed
+                                                            }{" "}
+                                                            failed
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <p className="mt-2 text-[11px] text-white/40">
+                                                        Awaiting coverage sample
+                                                    </p>
+                                                )}
+                                                <p className="mt-1 text-[10px] text-white/40">
+                                                    Cutover threshold:{" "}
+                                                    {Math.round(
+                                                        vibe.migration
+                                                            .cutoverThreshold *
+                                                            100,
+                                                    )}
+                                                    %
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                     <button
                                         onClick={handleResetVibeEmbeddings}

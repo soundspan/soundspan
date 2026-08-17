@@ -3,9 +3,22 @@ const mockTrackGroupBy = jest.fn();
 const mockEmbeddingFindFirst = jest.fn();
 const mockSpaceFindUnique = jest.fn();
 const mockGetTargetSpaceId = jest.fn();
+const mockQueryRaw = jest.fn();
+const mockTransaction = jest.fn();
+const mockSetCoverage = jest.fn();
+const mockCollectionErrorInc = jest.fn();
+
+jest.mock("../../metrics", () => ({
+    metricsRegistry: {
+        getSingleMetric: () => ({ inc: mockCollectionErrorInc }),
+    },
+    setVibeEmbeddingCoverage: (...args: unknown[]) => mockSetCoverage(...args),
+}));
 
 jest.mock("../../utils/db", () => ({
     prisma: {
+        $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
+        $transaction: (...args: unknown[]) => mockTransaction(...args),
         track: {
             count: (...args: unknown[]) => mockTrackCount(...args),
             groupBy: (...args: unknown[]) => mockTrackGroupBy(...args),
@@ -28,11 +41,16 @@ import {
     createVibeEmbeddingCoverageRefresher,
     loadVibeEmbeddingCoverage,
     loadVibeSpaceVectorState,
+    refreshVibeEmbeddingCoverage,
 } from "../vibeEmbeddingCoverage";
 
 describe("vibe embedding coverage refresh", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockQueryRaw.mockResolvedValue([{ set_config: "10000" }]);
+        mockTransaction.mockImplementation(async (queries: unknown[]) =>
+            Promise.all(queries),
+        );
     });
 
     it("counts only eligible tracks in the active space", async () => {
@@ -70,6 +88,9 @@ describe("vibe embedding coverage refresh", () => {
         });
         expect(mockTrackCount).toHaveBeenCalledTimes(1);
         expect(mockTrackGroupBy).toHaveBeenCalledTimes(1);
+        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        expect(mockQueryRaw.mock.calls[0]?.[1]).toBe("10000");
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
     });
 
     it("checks active-space emptiness with an existence query", async () => {
@@ -110,6 +131,25 @@ describe("vibe embedding coverage refresh", () => {
             embedded: 12,
             pending: 4,
             failed: 1,
+        });
+    });
+
+    it("retains the previous sample when the bounded query times out", async () => {
+        const previous = { embedded: 10, pending: 5, failed: 1 };
+        mockTrackCount.mockResolvedValueOnce(12);
+        mockTrackGroupBy.mockResolvedValueOnce([]);
+        mockTransaction.mockRejectedValueOnce({
+            code: "P2010",
+            meta: { code: "57014" },
+        });
+
+        await expect(
+            refreshVibeEmbeddingCoverage("target-space", previous),
+        ).resolves.toEqual(previous);
+
+        expect(mockSetCoverage).not.toHaveBeenCalled();
+        expect(mockCollectionErrorInc).toHaveBeenCalledWith({
+            collector: "vibe_embedding_coverage",
         });
     });
 });

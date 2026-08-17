@@ -31,17 +31,18 @@ import {
     VIBE_PROVIDER_QUEUE_KEY,
 } from "./legacyVibeRedisCleanup";
 import {
+    VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS,
     writeVibeWorkerStatus,
     type VibeWorkerStatus,
 } from "./vibeWorkerStatus";
 
 const BLPOP_TIMEOUT_SECONDS = 1;
-const COVERAGE_REFRESH_INTERVAL_MS = 60_000;
 const SPACE_LIFECYCLE_INTERVAL_MS = 5 * 60_000;
 const POP_ERROR_BACKOFF_MS = 250;
 const TARGET_RESOLUTION_RETRY_MS = 60_000;
 const TERMINAL_TARGET_RESOLUTION_RETRY_MS = 15 * 60_000;
 const LEGACY_CLEANUP_TIMEOUT_MS = 60_000;
+const PROVIDER_STATUS_PROBE_TIMEOUT_MS = 3_000;
 const VIBE_WORKER_ID = `${process.pid}-${randomUUID()}`;
 
 interface WorkerLogger {
@@ -60,7 +61,11 @@ interface VibeEmbedWorkerDependencies {
         targetSpace: VibeWorkerJobTargetSpace,
     ): Promise<unknown>;
     requeue(rawJob: string): Promise<void>;
-    refreshCoverage(targetSpaceId: string): Promise<VibeEmbeddingCoverage>;
+    probeProvider(): Promise<unknown>;
+    refreshCoverage(
+        targetSpaceId: string,
+        previousCoverage: VibeEmbeddingCoverage | null,
+    ): Promise<VibeEmbeddingCoverage | null>;
     runLifecycle(): Promise<void>;
     cleanupLegacyArtifacts(): Promise<void>;
     resolveTargetSpace(): Promise<ResolvedWorkerTargetSpace>;
@@ -118,6 +123,13 @@ function isTerminalTargetResolutionError(error: unknown): boolean {
     );
 }
 
+function providerErrorClass(error: unknown): string {
+    if (error instanceof Error && error.name.trim().length > 0) {
+        return error.name.slice(0, 128);
+    }
+    return "UnknownError";
+}
+
 /** Creates a provider-gated, bounded, drainable audio embedding worker. */
 class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private readonly limit: ReturnType<typeof pLimit>;
@@ -128,6 +140,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private coverageInterval: NodeJS.Timeout | null = null;
     private lifecycleInterval: NodeJS.Timeout | null = null;
     private lifecycleTask: Promise<void> | null = null;
+    private statusRefreshTask: Promise<void> | null = null;
     private targetSpace: ResolvedWorkerTargetSpace | null = null;
     private retryWake: (() => void) | null = null;
     private terminalResolutionFailureCount = 0;
@@ -147,16 +160,47 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private async refreshCoverage(): Promise<void> {
         if (!this.targetSpace) return;
         try {
-            this.coverage = await this.dependencies.refreshCoverage(
+            const coverage = await this.dependencies.refreshCoverage(
                 this.targetSpace.id,
+                this.coverage,
             );
-            await this.publishStatus();
+            if (coverage !== null) this.coverage = coverage;
         } catch (error) {
             this.dependencies.logger.warn(
                 "Vibe coverage refresh failed",
                 error,
             );
         }
+    }
+
+    private async refreshProviderReachability(): Promise<void> {
+        try {
+            await this.dependencies.probeProvider();
+            this.providerReachability = {
+                reachable: true,
+                checkedAt: this.dependencies.now().toISOString(),
+            };
+        } catch (error) {
+            this.providerReachability = {
+                reachable: false,
+                checkedAt: this.dependencies.now().toISOString(),
+                errorClass: providerErrorClass(error),
+            };
+        }
+    }
+
+    private async refreshStatus(): Promise<void> {
+        await this.refreshProviderReachability();
+        await this.refreshCoverage();
+        await this.publishStatus();
+    }
+
+    private scheduleStatusRefresh(): void {
+        if (this.statusRefreshTask) return;
+        const task = this.refreshStatus().finally(() => {
+            if (this.statusRefreshTask === task) this.statusRefreshTask = null;
+        });
+        this.statusRefreshTask = task;
     }
 
     private async publishStatus(): Promise<void> {
@@ -361,6 +405,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
             this.providerReachability = {
                 reachable: false,
                 checkedAt: this.dependencies.now().toISOString(),
+                errorClass: providerErrorClass(error),
             };
             const retryDelayMs = this.recordTargetResolutionFailure(error);
             void this.publishStatus();
@@ -393,10 +438,10 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     }
 
     private startCoverageRefresh(): void {
-        void this.refreshCoverage();
+        void this.refreshCoverage().then(() => this.publishStatus());
         this.coverageInterval = setInterval(
-            () => void this.refreshCoverage(),
-            COVERAGE_REFRESH_INTERVAL_MS,
+            () => this.scheduleStatusRefresh(),
+            VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS,
         );
         this.coverageInterval.unref();
     }
@@ -461,6 +506,8 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.coverageInterval = null;
         if (this.lifecycleInterval) clearInterval(this.lifecycleInterval);
         this.lifecycleInterval = null;
+        await this.statusRefreshTask;
+        this.statusRefreshTask = null;
         await this.lifecycleTask;
         this.lifecycleTask = null;
         await this.cleanupTask;
@@ -494,8 +541,19 @@ const worker = createVibeEmbedWorker({
     requeue: async (rawJob) => {
         await redisClient.rPush(VIBE_PROVIDER_QUEUE_KEY, rawJob);
     },
-    refreshCoverage: async (targetSpaceId) => {
-        return refreshVibeEmbeddingCoverage(targetSpaceId);
+    probeProvider: async () => {
+        const outcome = await settleAtDeadline(
+            fetchProviderSpace().then(() => undefined),
+            PROVIDER_STATUS_PROBE_TIMEOUT_MS,
+        );
+        if (outcome === "deadline") {
+            const error = new Error("Vibe provider status probe timed out");
+            error.name = "VibeProviderProbeTimeoutError";
+            throw error;
+        }
+    },
+    refreshCoverage: async (targetSpaceId, previousCoverage) => {
+        return refreshVibeEmbeddingCoverage(targetSpaceId, previousCoverage);
     },
     runLifecycle: async () => {
         const currentProviderSpaceId = await getVibeEmbeddingTargetSpaceId();

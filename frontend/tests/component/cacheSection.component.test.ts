@@ -5,6 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { SystemSettings } from "../../features/settings/types";
 
+const activeMigration = {
+    spaceId: "space-migrating",
+    family: "student",
+    coverage: { embedded: 80, pending: 20, failed: 3 },
+    cutoverThreshold: 0.95,
+};
+let migration: typeof activeMigration | null = activeMigration;
+
 mock.module("@/lib/features-context", {
     namedExports: {
         useFeatures: () => ({
@@ -22,7 +30,7 @@ mock.module("@/lib/features-context", {
                     fresh: true,
                 },
                 activeSpace: { id: "space-active", family: "teacher" },
-                migration: null,
+                migration,
             },
             showVersion: false,
             loading: false,
@@ -85,7 +93,7 @@ const settings: SystemSettings = {
     showVersion: false,
 };
 
-test("renders live vibe embedding progress without the retired worker control", async () => {
+async function renderCacheSection(): Promise<string> {
     const { CacheSection } =
         await import("../../features/settings/components/sections/CacheSection");
     const queryClient = new QueryClient();
@@ -110,7 +118,7 @@ test("renders live vibe embedding progress without the retired worker control", 
         isFullyComplete: false,
     });
 
-    const html = renderToStaticMarkup(
+    return renderToStaticMarkup(
         React.createElement(
             QueryClientProvider,
             { client: queryClient },
@@ -120,9 +128,28 @@ test("renders live vibe embedding progress without the retired worker control", 
             }),
         ),
     );
+}
+
+test("renders live vibe embedding progress without the retired worker control", async () => {
+    migration = activeMigration;
+    const html = await renderCacheSection();
 
     assert.match(html, /Vibe Embeddings/);
     assert.match(html, /Provider\s+reachable/);
+    assert.match(html, /Embedding migration/);
+    assert.match(html, /Target space family:\s*student/);
+    assert.match(html, /80%/);
+    assert.match(html, /3 failed/);
+    assert.match(html, /Cutover threshold:\s*95%/);
     assert.match(html, /Re-run/);
     assert.doesNotMatch(html, /Vibe Embedding Workers/);
+});
+
+test("hides migration progress when no migration is active", async () => {
+    migration = null;
+
+    const html = await renderCacheSection();
+
+    assert.doesNotMatch(html, /Embedding migration/);
+    assert.doesNotMatch(html, /Target space family:/);
 });

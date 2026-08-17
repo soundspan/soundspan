@@ -59,7 +59,9 @@ describe("vibe worker status cache", () => {
             JSON.stringify(status),
         ]);
 
-        await expect(readVibeWorkerStatus(redis)).resolves.toEqual(status);
+        await expect(
+            readVibeWorkerStatus(redis, new Date("2026-08-17T12:01:00.000Z")),
+        ).resolves.toEqual(status);
     });
 
     it("treats an expired key omitted by Redis as stale", async () => {
@@ -71,6 +73,19 @@ describe("vibe worker status cache", () => {
         redis.mGet.mockResolvedValueOnce([null]);
 
         await expect(readVibeWorkerStatus(redis)).resolves.toBeNull();
+    });
+
+    it("treats an over-age checkedAt as stale while its Redis key survives", async () => {
+        const redis = createRedis();
+        redis.scan.mockResolvedValueOnce({
+            cursor: "0",
+            keys: [`${VIBE_WORKER_STATUS_KEY_PREFIX}worker-stale`],
+        });
+        redis.mGet.mockResolvedValueOnce([JSON.stringify(status)]);
+
+        await expect(
+            readVibeWorkerStatus(redis, new Date("2026-08-17T12:03:00.001Z")),
+        ).resolves.toBeNull();
     });
 
     it.each(["not-json", JSON.stringify({ reachable: "yes" })])(

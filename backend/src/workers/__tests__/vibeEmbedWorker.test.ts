@@ -43,6 +43,7 @@ describe("vibe embed worker", () => {
             pending: 2,
             failed: 1,
         }));
+        const probeProvider = jest.fn(async () => undefined);
         const runLifecycle = jest.fn(async () => undefined);
         const cleanupLegacyArtifacts = jest.fn<Promise<void>, []>(
             async () => undefined,
@@ -81,6 +82,7 @@ describe("vibe embed worker", () => {
             pop,
             processJob,
             requeue,
+            probeProvider,
             refreshCoverage,
             runLifecycle,
             cleanupLegacyArtifacts,
@@ -98,6 +100,7 @@ describe("vibe embed worker", () => {
             pop,
             processJob,
             requeue,
+            probeProvider,
             refreshCoverage,
             runLifecycle,
             cleanupLegacyArtifacts,
@@ -106,6 +109,7 @@ describe("vibe embed worker", () => {
             recordSpaceTransition,
             setMigrationActive,
             writeStatus,
+            now,
             resolveTargetSpace,
             logger,
         };
@@ -149,7 +153,10 @@ describe("vibe embed worker", () => {
         await flushPromises();
         expect(harness.pop).toHaveBeenCalledWith("audio:clap:queue", 1);
         expect(harness.refreshCoverage).toHaveBeenCalledTimes(1);
-        expect(harness.refreshCoverage).toHaveBeenCalledWith("space-active");
+        expect(harness.refreshCoverage).toHaveBeenCalledWith(
+            "space-active",
+            null,
+        );
         expect(harness.writeStatus).toHaveBeenLastCalledWith({
             providerReachability: {
                 reachable: true,
@@ -414,6 +421,43 @@ describe("vibe embed worker", () => {
         await stopping;
     });
 
+    it("publishes an unreachable provider verdict within one live-worker cadence", async () => {
+        jest.useFakeTimers();
+        const firstPop = deferred<string | null>();
+        const harness = createHarness({
+            providerUrl: "http://provider:8090",
+        });
+        harness.pop.mockReturnValueOnce(firstPop.promise);
+
+        await harness.worker.start();
+        await Promise.resolve();
+        harness.probeProvider.mockRejectedValueOnce(
+            new TypeError("provider connection refused"),
+        );
+        harness.now.mockReturnValue(new Date("2026-08-17T12:01:00.000Z"));
+
+        await jest.advanceTimersByTimeAsync(60_000);
+
+        expect(harness.probeProvider).toHaveBeenCalledTimes(1);
+        expect(harness.writeStatus).toHaveBeenLastCalledWith({
+            providerReachability: {
+                reachable: false,
+                checkedAt: "2026-08-17T12:01:00.000Z",
+                errorClass: "TypeError",
+            },
+            targetSpace: {
+                id: "space-active",
+                family: "test-family",
+                status: "active",
+            },
+            coverage: { embedded: 8, pending: 2, failed: 1 },
+        });
+
+        const stopping = harness.worker.stop();
+        firstPop.resolve(null);
+        await stopping;
+    });
+
     it.each(["active", "migrating"] as const)(
         "targets a provider resolved to a %s space",
         async (status) => {
@@ -509,6 +553,7 @@ describe("vibe embed worker", () => {
             providerReachability: {
                 reachable: false,
                 checkedAt: "2026-08-17T12:00:00.000Z",
+                errorClass: "Error",
             },
             targetSpace: null,
             coverage: null,
