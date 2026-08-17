@@ -82,7 +82,7 @@ updates:
           - minor
           - patch
 
-  # --- pip: the 4 Python sidecar services ----------------------------------
+  # --- pip: the 3 Python sidecar services ----------------------------------
   # ytmusic-streamer's yt-dlp / ytmusicapi pins are deliberately loose (see
   # header note above) -- no ignore rules for them here, ever.
   - package-ecosystem: pip
@@ -96,17 +96,6 @@ updates:
     # cp311 build appears or the interpreter ceiling moves.
     ignore:
       - dependency-name: essentia-tensorflow
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: pip
-    directory: "/services/audio-analyzer-clap"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
     groups:
       minor-and-patch:
         update-types:
@@ -135,7 +124,7 @@ updates:
           - minor
           - patch
 
-  # --- docker: all 7 Dockerfile directories --------------------------------
+  # --- docker: all 6 Dockerfile directories --------------------------------
   - package-ecosystem: docker
     directory: "/"
     schedule:
@@ -175,23 +164,6 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     # The base interpreter is capped at Python 3.11 by essentia-tensorflow's wheel history
-    # (see the Dockerfile comment and the lock-target guard test). Interpreter
-    # bumps happen deliberately with a lock re-resolution, never via
-    # unaccompanied base-image updates.
-    ignore:
-      - dependency-name: python
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: docker
-    directory: "/services/audio-analyzer-clap"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    # The base interpreter is held on 3.12 until the full transitive set is re-resolved and tested under a newer interpreter
     # (see the Dockerfile comment and the lock-target guard test). Interpreter
     # bumps happen deliberately with a lock re-resolution, never via
     # unaccompanied base-image updates.

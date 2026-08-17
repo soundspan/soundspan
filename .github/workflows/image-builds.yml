@@ -114,19 +114,6 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: audio-analyzer
-                    - id: audio-analyzer-clap
-                      job_name: Build & Push CLAP Image
-                      runs_on: self-hosted
-                      image_name: audio-analyzer-clap
-                      image_repo_mode: suffixed
-                      context: .
-                      file: ./services/audio-analyzer-clap/Dockerfile
-                      target: ""
-                      build_contexts: ""
-                      include_hf_token: true
-                      needs_node: false
-                      include_frontend_build_args: false
-                      cache_scope: audio-analyzer-clap
                     - id: vibe-provider-dclap
                       job_name: Build & Push DCLAP Provider Image
                       runs_on: self-hosted

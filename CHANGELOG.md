@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the torch CLAP stack and 2.35 GB checkpoint download from the AIO
   image, substantially reducing its size; existing libraries migrate
   automatically through the backend's blue/green embedding-space migration.
+- Deleted the standalone torch CLAP sidecar sources and removed its build,
+  scan, test, type-check, dependency-update, and release-image CI coverage.
 - Removed the `audioAnalyzerClap` Helm component, so the multi-GB torch image is
   no longer deployed. Libraries with the DCLAP provider enabled migrate
   automatically.

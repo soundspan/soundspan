@@ -34,9 +34,6 @@ ignore = [
 "services/audio-analyzer/analyzer.py" = [
   "E402", # Environment and multiprocessing setup must run before heavy optional imports.
 ]
-"services/audio-analyzer-clap/analyzer.py" = [
-  "E402", # Path, thread, and device setup must run before shared and ML imports.
-]
 "services/**/tests/**/*.py" = [
   "S101", # Pytest assertions are the test framework's expected assertion mechanism.
   "S105", # Test fixtures intentionally use token-like placeholder strings.
@@ -95,12 +92,7 @@ module = ["essentia", "essentia.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# laion-clap has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
-module = ["laion_clap", "laion_clap.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# librosa has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
+# librosa has no PEP 561 metadata in the DCLAP environment.
 module = ["librosa", "librosa.*"]
 ignore_missing_imports = true
 
@@ -115,12 +107,7 @@ module = ["transformers", "transformers.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# pgvector has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
-module = ["pgvector", "pgvector.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# psycopg2 has no bundled typing metadata in either analyzer environment (4 import diagnostics).
+# psycopg2 has no bundled typing metadata in the audio analyzer environment.
 module = ["psycopg2", "psycopg2.*"]
 ignore_missing_imports = true
 
@@ -130,29 +117,15 @@ module = ["redis", "redis.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# requests has no bundled typing metadata in the CLAP environment (1 import diagnostic).
-module = ["requests", "requests.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# torch is absent from the minimal CLAP check environment (1 import diagnostic).
-module = ["torch", "torch.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 # NumPy 2.5 stubs require Python 3.12 syntax while this gate targets Python 3.11
 # (1 transitive syntax diagnostic); the analyzer module owns its NumPy boundaries.
 module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-# Both large sidecars are standalone top-level `analyzer` modules, so mypy assigns
-# the same module name in their collision-free invocations. Measured strict debt:
+# The audio analyzer is a standalone top-level `analyzer` module. Measured strict debt:
 # - audio-analyzer/analyzer.py: 91 errors (51 no-untyped-call, 33 no-untyped-def,
 #   3 union-attr, 2 unreachable, 2 no-any-unimported).
-# - audio-analyzer-clap/analyzer.py: 87 errors (25 no-untyped-def, 25 attr-defined,
-#   22 no-untyped-call, 6 unreachable, 5 no-any-unimported, 2 union-attr,
-#   1 assignment, 1 type-arg).
 module = ["analyzer"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false

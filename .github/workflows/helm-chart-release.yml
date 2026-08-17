@@ -78,7 +78,6 @@ jobs:
             soundspan-tidal-downloader
             soundspan-ytmusic-streamer
             soundspan-audio-analyzer
-            soundspan-audio-analyzer-clap
           )
 
           max_wait_seconds=1800

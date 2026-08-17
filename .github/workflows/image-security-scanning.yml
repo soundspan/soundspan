@@ -1,6 +1,6 @@
 name: Image Security Scanning
 
-# Trivy scans of the 9 published GHCR images (root AIO + 8 suffixed), split
+# Trivy scans of the 8 published GHCR images (root AIO + 7 suffixed), split
 # out of security-scanning.yml: gating the job there with a job-level
 # event `if:` meant every PR showed a permanently skipped check literally
 # named "Trivy Image Scan (${{ matrix.name }})" (the matrix never expands
@@ -47,8 +47,6 @@ jobs:
             image: soundspan-frontend
           - name: audio-analyzer
             image: soundspan-audio-analyzer
-          - name: audio-analyzer-clap
-            image: soundspan-audio-analyzer-clap
           - name: vibe-provider-dclap
             image: soundspan-vibe-provider-dclap
           - name: tidal-downloader

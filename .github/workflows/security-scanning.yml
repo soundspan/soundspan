@@ -201,12 +201,6 @@ jobs:
             python-version: "3.14"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
-          # audio-analyzer-clap image is python:3.12-slim. Pulls in
-          # torch/torchaudio/torchvision -- can be slow on a cold pip cache.
-          - requirements: services/audio-analyzer-clap/requirements.lock
-            python-version: "3.12"
-            audit-args: --disable-pip --no-deps
-            ignore-vulns: ""
           # audio-analyzer's image is python:3.11-slim (roadmap F51). Its lock is
           # compiled FOR 3.11 and shares the TensorFlow 2.15 stack with the AIO
           # image, so its exceptions mirror the requirements-aio.lock lane below.
@@ -230,9 +224,9 @@ jobs:
               --ignore-vuln PYSEC-2026-1805
               --ignore-vuln PYSEC-2026-2324
               --ignore-vuln PYSEC-2026-2547
-          # AIO image bakes the analyzer + clap deps into one Debian-bookworm
+          # AIO image bakes the analyzer dependencies into its Debian-bookworm
           # system Python 3.11 site-packages; requirements-aio.lock is that
-          # merged, jointly-resolved tree.
+          # resolved tree.
           - requirements: requirements-aio.lock
             python-version: "3.11"
             audit-args: --disable-pip --no-deps

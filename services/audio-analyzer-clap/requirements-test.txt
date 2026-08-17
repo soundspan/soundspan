@@ -1,6 +1,0 @@
-# Test-only dependencies for the audio-analyzer-clap pytest suite.
-pytest>=9.1.1
-numpy>=1.26.4
-fastapi>=0.141.1
-uvicorn>=0.52.3
-httpx>=0.28.1

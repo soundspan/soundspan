@@ -158,7 +158,7 @@ jobs:
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     strategy:
       fail-fast: false
-      # Runtime/lock targets are tidal+ytmusic 3.14, CLAP+DCLAP 3.12, and audio-analyzer 3.11.
+      # Runtime/lock targets are tidal+ytmusic 3.14, DCLAP 3.12, and audio-analyzer 3.11.
       # The analyzer stays on 3.11 because TensorFlow 2.15.x has no CPython 3.12+
       # wheels; its dependency-light test job remains on 3.12.
       matrix:
@@ -168,8 +168,6 @@ jobs:
           - service: ytmusic-streamer
             python-version: "3.14"
           - service: audio-analyzer
-            python-version: "3.12"
-          - service: audio-analyzer-clap
             python-version: "3.12"
           - service: vibe-provider-dclap
             python-version: "3.12"
@@ -206,7 +204,6 @@ jobs:
           cache-dependency-path: |
             services/requirements-quality.txt
             services/audio-analyzer/requirements-test.txt
-            services/audio-analyzer-clap/requirements-test.txt
             services/vibe-provider-dclap/requirements-test.txt
             services/tidal-downloader/requirements-test.txt
             services/ytmusic-streamer/requirements-test.txt
@@ -216,7 +213,6 @@ jobs:
           pip install \
             -r services/requirements-quality.txt \
             -r services/audio-analyzer/requirements-test.txt \
-            -r services/audio-analyzer-clap/requirements-test.txt \
             -r services/vibe-provider-dclap/requirements-test.txt \
             -r services/tidal-downloader/requirements-test.txt \
             -r services/ytmusic-streamer/requirements-test.txt
@@ -241,9 +237,6 @@ jobs:
 
       - name: Mypy audio analyzer
         run: MYPYPATH=services mypy services/audio-analyzer/analyzer.py
-
-      - name: Mypy CLAP analyzer
-        run: MYPYPATH=services mypy services/audio-analyzer-clap/analyzer.py
 
       - name: Mypy DCLAP provider
         run: MYPYPATH=services mypy services/vibe-provider-dclap/__main__.py services/vibe-provider-dclap/http_server.py services/vibe-provider-dclap/inference.py services/vibe-provider-dclap/model_provider.py services/vibe-provider-dclap/music_path.py services/vibe-provider-dclap/preprocessing.py services/vibe-provider-dclap/settings.py

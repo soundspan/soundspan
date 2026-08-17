@@ -7,8 +7,7 @@
                 "backend-worker",
                 "tidal-downloader",
                 "ytmusic-streamer",
-                "audio-analyzer",
-                "audio-analyzer-clap"
+                "audio-analyzer"
             ]
         },
         "core": {
@@ -21,7 +20,7 @@
             "targets": ["tidal-downloader", "ytmusic-streamer"]
         },
         "analysis": {
-            "targets": ["audio-analyzer", "audio-analyzer-clap"]
+            "targets": ["audio-analyzer"]
         },
         "aio": {
             "targets": ["soundspan-aio"]
@@ -91,11 +90,6 @@
             "tags": ["soundspan-audio-analyzer:latest"]
         },
 
-        "audio-analyzer-clap": {
-            "context": ".",
-            "dockerfile": "services/audio-analyzer-clap/Dockerfile",
-            "tags": ["soundspan-audio-analyzer-clap:latest"]
-        },
 
         "soundspan-aio": {
             "context": ".",

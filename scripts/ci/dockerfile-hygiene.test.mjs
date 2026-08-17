@@ -13,7 +13,6 @@ const dockerfilePaths = [
     "services/audio-analyzer/Dockerfile",
     "services/tidal-downloader/Dockerfile",
     "services/ytmusic-streamer/Dockerfile",
-    "services/audio-analyzer-clap/Dockerfile",
     "services/vibe-provider-dclap/Dockerfile",
 ];
 
@@ -25,7 +24,6 @@ const chartComponentDockerfiles = new Map([
     ["tidalSidecar", "services/tidal-downloader/Dockerfile"],
     ["ytmusicStreamer", "services/ytmusic-streamer/Dockerfile"],
     ["audioAnalyzer", "services/audio-analyzer/Dockerfile"],
-    ["audioAnalyzerClap", "services/audio-analyzer-clap/Dockerfile"],
 ]);
 
 const binaryPackageProviders = new Map([["pgrep", "procps"]]);
