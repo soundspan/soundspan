@@ -78,6 +78,7 @@ jobs:
             soundspan-tidal-downloader
             soundspan-ytmusic-streamer
             soundspan-audio-analyzer
+            soundspan-vibe-provider-dclap
           )
 
           max_wait_seconds=1800

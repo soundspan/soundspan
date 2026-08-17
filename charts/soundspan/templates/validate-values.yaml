@@ -1,0 +1,7 @@
+{{- if hasKey .Values "audioAnalyzerClap" -}}
+{{- fail "audioAnalyzerClap values were removed; set vibeProviderDclap.enabled instead; see the 2.3.0 entry in docs/UPGRADING.md" -}}
+{{- end -}}
+{{- $vibeProviderDclapEnv := .Values.vibeProviderDclap.env | default (dict) -}}
+{{- if hasKey $vibeProviderDclapEnv "DCLAP_HTTP_PORT" -}}
+{{- fail "set vibeProviderDclap.port instead of env.DCLAP_HTTP_PORT" -}}
+{{- end -}}

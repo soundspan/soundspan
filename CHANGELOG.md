@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The Helm chart now ships the DCLAP vibe provider component, disabled by
   default for opt-in embedding migrations.
+- Added a DCLAP provider target to the default and analysis Docker Bake groups.
 - Operators can now start a blue/green vibe embedding migration by pointing
   `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
   backfills it, cuts over at configured coverage, retains the old vectors for
@@ -73,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Transient vibe-provider failures now receive bounded automatic retries, and
   malformed queue entries cannot demote completed or already-stored tracks.
 - Stale vibe claims are now recovered independently of MusicCNN queue state.
+- Helm now rejects removed `audioAnalyzerClap.*` values and the conflicting
+  `vibeProviderDclap.env.DCLAP_HTTP_PORT` override instead of rendering a broken
+  component. Chart releases now wait for the DCLAP provider image.
 - Fresh installs with only a provider-backed vibe space now cut over
   immediately instead of stalling behind an active space with no vectors.
 - The clap sidecar's embedding upsert now targets the composite

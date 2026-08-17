@@ -34,6 +34,8 @@ Individual mode — each service runs in its own pod:
 {{- end }}
 {{- if .Values.vibeProviderDclap.enabled }}
   • DCLAP:      {{ $fullName }}-vibe-provider-dclap
+{{- else }}
+  • Vibe similarity: Inactive — set vibeProviderDclap.enabled=true to deploy the embedding provider.
 {{- end }}
 {{- end }}
 

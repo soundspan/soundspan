@@ -366,6 +366,9 @@ backend:
 
 An explicit `backend.env.VIBE_PROVIDER_URL` or
 `backendWorker.env.VIBE_PROVIDER_URL` takes precedence over the generated URL.
+`vibeProviderDclap.env.DCLAP_HTTP_PORT` is reserved; set
+`vibeProviderDclap.port` so the provider, Service, probes, and backend URLs use
+the same port.
 The provider mounts the shared music volume read-only and receives only
 `INTERNAL_API_SECRET` from the chart Secret; it does not receive PostgreSQL or
 Redis credentials.
@@ -399,11 +402,9 @@ matching background workers.
 > new work is queued for them.
 >
 > In AIO mode analysis runs inside the all-in-one container and is not
-> controlled by `audioAnalyzer.enabled` or `vibeProviderDclap.enabled`; with
-> `config.features.audioAnalysis=false` they stay up and drain any leftover
-> queued work. The analyzer machine callbacks (`/api/analysis/vibe/failure`,
-> `/api/analysis/vibe/success`) remain mounted even when the flag is off so
-> in-flight work can still report results.
+> controlled by `audioAnalyzer.enabled` or `vibeProviderDclap.enabled`.
+> Setting `config.features.audioAnalysis=false` prevents the provider-backed
+> vibe consumer from starting, so it does not drain queued vibe work.
 
 ### External Database / Redis (Individual Mode)
 
@@ -514,7 +515,10 @@ Notes:
 
 ### Environment Variable Precedence and Overrides
 
-All service `*.env` maps support pass-through overrides, including keys that the chart also sets by default.
+Service `*.env` maps support pass-through overrides, including keys that the
+chart also sets by default. The reserved
+`vibeProviderDclap.env.DCLAP_HTTP_PORT` key is the exception; use
+`vibeProviderDclap.port` instead.
 
 For chart-managed containers, precedence is:
 - Service `*.env` key/value pairs

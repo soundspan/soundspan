@@ -126,7 +126,6 @@ aio:
     AUDIO_BRPOP_TIMEOUT: "30"
     AUDIO_REDIS_SOCKET_TIMEOUT: "35"
     AUDIO_MODEL_IDLE_TIMEOUT: "300"
-    CLAP_REDIS_SOCKET_TIMEOUT: "10"
   # -- Additional environment variable sources for AIO container.
   # Example:
   # envFrom:
@@ -732,8 +731,8 @@ config:
     nameClaim: name
     providerName: SSO
   # -- Flush Redis with FLUSHALL on backend startup.
-  #    Default false to preserve Redis Streams/group metadata used by
-  #    multi-replica analyzer services (for example CLAP text embedding).
+  #    Default false to preserve live provider job queues and cross-pod
+  #    coordination state.
   #    Set true only for fully disposable local/dev Redis instances.
   redisFlushOnStartup: false
   # -- Lidarr integration

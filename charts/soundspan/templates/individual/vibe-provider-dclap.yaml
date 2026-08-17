@@ -1,4 +1,5 @@
 {{- if and (eq .Values.deploymentMode "individual") .Values.vibeProviderDclap.enabled }}
+{{- $vibeProviderDclapEnv := .Values.vibeProviderDclap.env | default (dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,7 +38,6 @@ spec:
             - name: http
               containerPort: {{ .Values.vibeProviderDclap.port }}
               protocol: TCP
-          {{- $vibeProviderDclapEnv := .Values.vibeProviderDclap.env | default (dict) }}
           {{- $vibeProviderDclapExplicitEnvKeys := dict
             "MUSIC_PATH" true
             "DCLAP_HTTP_PORT" true
@@ -52,13 +52,8 @@ spec:
             - name: MUSIC_PATH
               value: /music
             {{- end }}
-            {{- if hasKey $vibeProviderDclapEnv "DCLAP_HTTP_PORT" }}
-            - name: DCLAP_HTTP_PORT
-              value: {{ index $vibeProviderDclapEnv "DCLAP_HTTP_PORT" | quote }}
-            {{- else }}
             - name: DCLAP_HTTP_PORT
               value: {{ .Values.vibeProviderDclap.port | quote }}
-            {{- end }}
             {{- if hasKey $vibeProviderDclapEnv "INTERNAL_API_SECRET" }}
             - name: INTERNAL_API_SECRET
               value: {{ index $vibeProviderDclapEnv "INTERNAL_API_SECRET" | quote }}

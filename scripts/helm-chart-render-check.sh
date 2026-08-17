@@ -101,6 +101,23 @@ assert_deployment_env_absent() {
   fi
 }
 
+assert_template_rejected() {
+  local description="$1"
+  local expected_message="$2"
+  shift 2
+  local output
+
+  if output="$(helm template "$RELEASE_NAME" "$CHART_PATH" "$@" 2>&1)"; then
+    echo "[ERROR] ${description} was accepted" >&2
+    exit 1
+  fi
+  if [[ "$output" != *"$expected_message"* ]]; then
+    echo "[ERROR] ${description} failed without the expected message: ${expected_message}" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+}
+
 assert_oidc_env() {
   local deployment_name="$1"
   local manifest_file="$2"
@@ -159,6 +176,7 @@ tmp_individual_external_database="$(mktemp)"
 tmp_individual_digests="$(mktemp)"
 tmp_individual_reserved_labels="$(mktemp)"
 tmp_individual_oidc="$(mktemp)"
+tmp_individual_notes="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
 tmp_dclap_default="$(mktemp)"
@@ -170,7 +188,7 @@ tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
 tmp_metrics="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -186,6 +204,7 @@ if ! line_match '^  name: '"$RELEASE_NAME"'$' "$tmp_aio"; then
   exit 1
 fi
 assert_service_selectors_isolated "default AIO" "$tmp_aio"
+assert_deployment_env_absent "$RELEASE_NAME" "CLAP_REDIS_SOCKET_TIMEOUT" "$tmp_aio"
 if line_match '^kind: ServiceMonitor$' "$tmp_aio"; then
   echo "[ERROR] ServiceMonitor must be disabled by default" >&2
   exit 1
@@ -532,6 +551,22 @@ if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap_defa
 fi
 assert_deployment_env_absent "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "$tmp_dclap_default"
 
+echo "[CHECK] explain inactive vibe similarity in individual-mode notes"
+helm install "$RELEASE_NAME" "$CHART_PATH" \
+  --dry-run=client \
+  --set deploymentMode=individual \
+  >"$tmp_individual_notes"
+if ! line_match 'Vibe similarity: Inactive — set vibeProviderDclap.enabled=true to deploy the embedding provider.' "$tmp_individual_notes"; then
+  echo "[ERROR] individual-mode notes missing inactive vibe similarity guidance" >&2
+  exit 1
+fi
+
+echo "[CHECK] reject removed audioAnalyzerClap values"
+assert_template_rejected \
+  "removed audioAnalyzerClap values" \
+  "audioAnalyzerClap values were removed; set vibeProviderDclap.enabled instead; see the 2.3.0 entry in docs/UPGRADING.md" \
+  --set audioAnalyzerClap.enabled=true
+
 echo "[CHECK] keep the DCLAP provider individual-mode-only"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set vibeProviderDclap.enabled=true \
@@ -590,6 +625,12 @@ if ! DEPLOYMENT_NAME="${RELEASE_NAME}-vibe-provider-dclap" SECRET_NAME="$RELEASE
   exit 1
 fi
 assert_service_selectors_isolated "individual with DCLAP provider" "$tmp_dclap_enabled"
+
+echo "[CHECK] reject DCLAP_HTTP_PORT env override"
+assert_template_rejected \
+  "vibeProviderDclap.env.DCLAP_HTTP_PORT" \
+  "set vibeProviderDclap.port instead of env.DCLAP_HTTP_PORT" \
+  --set-string vibeProviderDclap.env.DCLAP_HTTP_PORT=8199
 
 echo "[CHECK] preserve explicit backend VIBE_PROVIDER_URL override"
 helm template "$RELEASE_NAME" "$CHART_PATH" \

@@ -7,7 +7,8 @@
                 "backend-worker",
                 "tidal-downloader",
                 "ytmusic-streamer",
-                "audio-analyzer"
+                "audio-analyzer",
+                "vibe-provider-dclap"
             ]
         },
         "core": {
@@ -20,7 +21,7 @@
             "targets": ["tidal-downloader", "ytmusic-streamer"]
         },
         "analysis": {
-            "targets": ["audio-analyzer"]
+            "targets": ["audio-analyzer", "vibe-provider-dclap"]
         },
         "aio": {
             "targets": ["soundspan-aio"]
@@ -88,6 +89,12 @@
             "context": ".",
             "dockerfile": "services/audio-analyzer/Dockerfile",
             "tags": ["soundspan-audio-analyzer:latest"]
+        },
+
+        "vibe-provider-dclap": {
+            "context": ".",
+            "dockerfile": "services/vibe-provider-dclap/Dockerfile",
+            "tags": ["soundspan-vibe-provider-dclap:latest"]
         },
 
         "soundspan-aio": {
