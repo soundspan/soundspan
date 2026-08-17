@@ -90,7 +90,6 @@
             "tags": ["soundspan-audio-analyzer:latest"]
         },
 
-
         "soundspan-aio": {
             "context": ".",
             "dockerfile": "Dockerfile",
