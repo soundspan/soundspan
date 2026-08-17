@@ -35,6 +35,13 @@ regexes = [
   # comparison; not real key material. Hit at commit ab0bfc44 (2 lines).
   '''a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4''',
 
+  # services/vibe-provider-dclap/Dockerfile -- TOKENIZER_REVISION is the
+  # public immutable Hugging Face git commit of laion/clap-htsat-unfused
+  # that the build vendors tokenizer files from. A 40-hex assignment trips
+  # generic-api-key, but this exact value is a source-control revision,
+  # not a credential (allowlist regexes match the captured secret).
+  '''8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a''',
+
   # CHANGELOG.md:59,65 -- prose ("...OAuth tokens, 2FA/Subsonic secrets...")
   # describing what the encryption-at-rest work covers. "2FA/Subsonic" is
   # two feature names joined by a slash, not a credential; gitleaks'
