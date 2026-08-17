@@ -84,7 +84,7 @@ Summary:
 - Frontend CI-gated tests: unit tests under `frontend/tests/unit/`, component tests under `frontend/tests/component/`, and the standalone typecheck
 - Frontend Playwright tests: local/on-demand E2E flows under `frontend/tests/e2e/`
 - Backend manual diagnostics (not Jest): `backend/scripts/manual-tests/`
-- Python sidecars: all four sidecars have `pytest` suites under `services/*/tests/`
+- Python sidecars: all five sidecars have `pytest` suites under `services/*/tests/`
 
 Key backend commands:
 

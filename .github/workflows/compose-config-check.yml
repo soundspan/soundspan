@@ -36,8 +36,14 @@ jobs:
       - name: Validate local audio analysis profile
         run: docker compose -f docker-compose.local.yml --profile audio-analysis config --quiet
 
+      - name: Validate local DCLAP provider profile
+        run: docker compose -f docker-compose.local.yml --profile vibe-provider-dclap config --quiet
+
       - name: Validate dev compose config
         run: docker compose -f docker-compose.dev.yml config --quiet
 
       - name: Validate dev audio analysis profile
         run: docker compose -f docker-compose.dev.yml --profile audio-analysis config --quiet
+
+      - name: Validate dev DCLAP provider profile
+        run: docker compose -f docker-compose.dev.yml --profile vibe-provider-dclap config --quiet

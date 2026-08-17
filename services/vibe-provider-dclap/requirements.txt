@@ -1,0 +1,13 @@
+# DCLAP inference runtime
+onnxruntime>=1.20.0
+numpy>=1.26.4
+transformers>=5.15.0
+# librosa is the preprocessing loader for the active embedding space; a major
+# version change can shift resample/mel output and drift stored vectors, so it
+# stays on this family until a deliberate space bump.
+librosa>=0.11.0,<1.0
+
+# HTTP and configuration
+fastapi>=0.141.1
+uvicorn>=0.52.3
+python-dotenv>=1.2.2

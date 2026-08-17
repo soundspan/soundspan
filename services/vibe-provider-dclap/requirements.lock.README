@@ -1,0 +1,4 @@
+requirements.lock is the hash-pinned resolution the Dockerfile installs with
+--require-hashes. Regenerate it for the image's Python 3.12 target with:
+
+    uv pip compile --generate-hashes --python-version 3.12 services/vibe-provider-dclap/requirements.txt -o services/vibe-provider-dclap/requirements.lock

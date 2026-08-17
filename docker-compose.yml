@@ -540,6 +540,32 @@ services:
                     #       count: 1
                     #       capabilities: [gpu]
 
+    # DCLAP ONNX vibe provider - opt in with --profile vibe-provider-dclap.
+    # VIBE_PROVIDER_URL remains unset by default; registry/default wiring lands later.
+    vibe-provider-dclap:
+        profiles: ["vibe-provider-dclap"]
+        build:
+            context: .
+            dockerfile: services/vibe-provider-dclap/Dockerfile
+        container_name: ${SOUNDSPAN_DCLAP_CONTAINER_NAME:-soundspan_vibe_provider_dclap}
+        environment:
+            MUSIC_PATH: /music
+            MODEL_IDLE_TIMEOUT: ${DCLAP_MODEL_IDLE_TIMEOUT:-300}
+            DCLAP_ONNX_INTRA_OP_THREADS: ${DCLAP_ONNX_INTRA_OP_THREADS:-1}
+            DCLAP_HTTP_PORT: ${DCLAP_HTTP_PORT:-8092}
+            DCLAP_IMAGE_VERSION: ${VERSION:-latest}
+            INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
+        volumes:
+            - ${MUSIC_PATH:-./music}:/music:ro
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                    cpus: "2"
+                reservations:
+                    memory: 512M
+
 volumes:
     # soundspan core
     postgres_data:

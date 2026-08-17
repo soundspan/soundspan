@@ -154,6 +154,7 @@ pip install \
   -r services/requirements-quality.txt \
   -r services/audio-analyzer/requirements-test.txt \
   -r services/audio-analyzer-clap/requirements-test.txt \
+  -r services/vibe-provider-dclap/requirements-test.txt \
   -r services/tidal-downloader/requirements-test.txt \
   -r services/ytmusic-streamer/requirements-test.txt
 npm run verify:python
@@ -193,10 +194,10 @@ Quality visibility workflow:
 | -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend Tests + Coverage               | Configurable | Backend Jest tests plus coverage summary and artifacts.                                                                                                                                                                                                                                                               |
 | Frontend Quality Visibility            | Configurable | ESLint with the enforced 183-warning ceiling, Next build, targeted unit coverage, component tests, and E2E inventory visibility.                                                                                                                                                                                      |
-| Python Sidecar Tests (matrix)          | Configurable | The four sidecar `pytest` suites. The root AIO image-hardening suite runs in Python Quality and is also included by local `npm run verify:python`.                                                                                                                                                                    |
+| Python Sidecar Tests (matrix)          | Configurable | The five sidecar `pytest` suites. The root AIO image-hardening suite runs in Python Quality and is also included by local `npm run verify:python`.                                                                                                                                                                    |
 | Backend Typecheck / Frontend Typecheck | Configurable | Standalone TypeScript checks.                                                                                                                                                                                                                                                                                         |
 | Helm Chart Visibility                  | Configurable | Helm lint and render assertions.                                                                                                                                                                                                                                                                                      |
-| Python Quality                         | **Yes**      | Root AIO image-hardening tests, `ruff check`, `ruff format --check`, the aggregate `mypy` run, and four per-sidecar `mypy` runs that avoid top-level module collisions.                                                                                                                                               |
+| Python Quality                         | **Yes**      | Root AIO image-hardening tests, `ruff check`, `ruff format --check`, the aggregate `mypy` run, and five per-sidecar `mypy` runs that avoid top-level module collisions.                                                                                                                                               |
 | Enforcement Gates                      | **Yes**      | Route-error canonicalization and its self-test, Dockerfile hygiene, the 130-use hardcoded-hex baseline, OpenAPI route synchronization, and repository-wide Prettier checks. Local `npm run verify:gates` also runs the infrastructure/release helper tests; the CI enforcement job does not currently run that check. |
 
 The configurable visibility jobs are non-blocking by default and can be made
@@ -218,7 +219,7 @@ do not use `continue-on-error`; failures always fail the workflow.
 - `npm run format:check` applies Prettier checks to the contract, backend,
   frontend, root scripts, and root JSON. `ruff format --check services/` is the
   corresponding blocking Python format check.
-- `ruff check services/`, the aggregate mypy invocation, and four per-sidecar
+- `ruff check services/`, the aggregate mypy invocation, and five per-sidecar
   mypy invocations enforce the configured
   Python lint and typing baseline.
 
@@ -236,7 +237,7 @@ changes; they do not require workflow edits:
 
 1. Add `Frontend Typecheck` to the required status checks now. It is green, and
    the historical 92-error budget has been paid down.
-2. After one clean week, add the four `Python Sidecar Tests (...)` checks to the
+2. After one clean week, add the five `Python Sidecar Tests (...)` checks to the
    required status checks.
 3. Enable the backend coverage gate with the repository variable
    `CI_ENFORCE_TEST_GATE=true`. Set the `COVERAGE_*_MIN` floors slightly below
@@ -310,16 +311,17 @@ Release helpers remain maintainer-invoked workflows outside `awm verify`; use `s
 
 ## Sidecar Test Standard
 
-Python sidecar `pytest` suites exist for all four sidecars:
+Python sidecar `pytest` suites exist for all five sidecars:
 
 - `services/audio-analyzer/tests/`
 - `services/audio-analyzer-clap/tests/`
+- `services/vibe-provider-dclap/tests/`
 - `services/tidal-downloader/tests/`
 - `services/ytmusic-streamer/tests/`
 
 Counts drift; see CI output for current totals.
 
-All four sidecars have a `requirements-test.txt` manifest and run in CI through
+All five sidecars have a `requirements-test.txt` manifest and run in CI through
 the `Python Sidecar Tests` matrix job. Run each sidecar suite in a separate
 `pytest` invocation because test module basenames collide across sidecars.
 

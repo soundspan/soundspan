@@ -35,6 +35,7 @@
 **/coverage
 **/tests
 **/__tests__
+**/__pycache__
 **/*.test.ts
 **/*.test.tsx
 **/*.spec.ts

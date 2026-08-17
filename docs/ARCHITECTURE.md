@@ -16,6 +16,7 @@ graph TD
     YT["ytmusic-streamer<br/>FastAPI :8586"]
     AA["audio-analyzer<br/>Essentia/MusiCNN"]
     AC["audio-analyzer-clap<br/>LAION-CLAP"]
+    DC["vibe-provider-dclap<br/>DCLAP ONNX :8092<br/>(default-off profile)"]
     PEER["peer soundspan instance<br/>/api/federation/v1"]
     IDP["OIDC identity provider"]
 
@@ -32,6 +33,7 @@ graph TD
     AC --> PG
     AC --> RD
     AC -->|HTTP| BE
+    BE -.->|"provider HTTP when configured"| DC
     BE <-->|"HTTPS catalog, cover, stream"| PEER
     BE -->|"HTTPS discovery, token, JWKS"| IDP
 ```
@@ -53,6 +55,7 @@ graph TD
 | audio-analyzer-clap      | PostgreSQL              | TCP (direct)                                                               | 5432                            | Connection string                                                                                                             | Embedding writes                                                                                      |
 | audio-analyzer-clap      | Redis                   | TCP                                                                        | 6379                            | None                                                                                                                          | BRPOP job queue                                                                                       |
 | audio-analyzer-clap      | backend                 | HTTP                                                                       | 3006                            | `INTERNAL_API_SECRET`                                                                                                         | Track metadata lookup                                                                                 |
+| configured internal caller | vibe-provider-dclap   | HTTP                                                                       | 8092                            | `x-internal-secret` (`INTERNAL_API_SECRET`)                                                                                   | Default-off DCLAP space identity plus text and audio embedding                                        |
 | backend / backend-worker | peer soundspan instance | HTTPS (`/api/federation/v1`)                                               | 443                             | Scoped instance Bearer token                                                                                                  | Pairing, catalog sync, health checks, cover art, and audio streaming                                  |
 | backend                  | OIDC identity provider  | HTTPS                                                                      | 443                             | OIDC confidential client credentials                                                                                          | Provider discovery, authorization-code token exchange, and JWKS retrieval                             |
 | OpenSubsonic client      | backend (`/rest`)       | HTTP/HTTPS                                                                 | 3006, or frontend proxy on 3030 | Local password, revocable `ssap_` app password, token digest, or API key                                                      | OpenSubsonic-compatible browse, state, and media operations                                           |
@@ -193,6 +196,8 @@ backend writes track to Redis queue
 
 Analyzers run as independent workers. MusiCNN analyzer writes mood/feature columns on `Track`. Its Redis read timeout defaults to 35 seconds and is kept at least five seconds above `BRPOP_TIMEOUT`; deployments can tune it with `AUDIO_REDIS_SOCKET_TIMEOUT`. CLAP analyzer writes to `TrackEmbedding` for vibe/similarity search via pgvector.
 
+The default-off `vibe-provider-dclap` sidecar is an HTTP-only inference provider. It reads audio from the read-only music mount and has no direct PostgreSQL or Redis access. Provider registry and queue wiring remain disabled until the later rollout phase.
+
 The API process also serves `/api/vibe/map` by reading CLAP embeddings from PostgreSQL, projecting them through an in-process Node worker thread, and caching the normalized coordinates in Redis. That worker entrypoint must resolve in both tsx `src/` runtime and compiled `dist/` runtime layouts.
 
 The same authenticated vibe router builds track- or mood-targeted journeys from
@@ -258,3 +263,4 @@ The worker process runs an event-loop stall watchdog (`services/workerEventLoopM
 - **Backend config:** `backend/src/config.ts` — Zod-validated env vars
 - **Database access:** Prisma only, no raw SQL
 - **Logging:** Shared helpers (`frontend/lib/logger.ts`, `backend/src/utils/logger.ts`, `services/common/logging_utils.py`)
+- **DCLAP provider boundary:** `services/vibe-provider-dclap/http_server.py` — authenticated HTTP-only embedding and space-identity contract

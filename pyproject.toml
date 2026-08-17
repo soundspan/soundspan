@@ -105,6 +105,16 @@ module = ["librosa", "librosa.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# ONNX Runtime publishes no usable PEP 561 metadata in the DCLAP quality environment.
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Transformers is runtime-only and absent from the dependency-light DCLAP quality environment.
+module = ["transformers", "transformers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # pgvector has no PEP 561 metadata in the CLAP environment (1 import diagnostic).
 module = ["pgvector", "pgvector.*"]
 ignore_missing_imports = true

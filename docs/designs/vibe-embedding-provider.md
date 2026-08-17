@@ -1,6 +1,6 @@
 # Pluggable Vibe Embedding Provider
 
-Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; the registry portion of rollout phase 1 is implemented by migration `20260816120000_add_embedding_space_registry`; the backend provider client has landed, the torch CLAP sidecar serves the provider HTTP contract, and backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; the default-provider (DCLAP) work is in progress. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension embedding space; adopt DCLAP's distilled ONNX student as the default provider; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
+Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; the registry portion of rollout phase 1 is implemented by migration `20260816120000_add_embedding_space_registry`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Student-space registry wiring, blue/green migration machinery, and the default-provider flip remain separate rollout work. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension teacher space; expose DCLAP as the distinct `clap-music-audioset-dclap-student` space; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
 
 Related: cross-peer taste vectors in Blends ([issue #529](https://github.com/soundspan/soundspan/issues/529)) and federated discovery ([issue #530](https://github.com/soundspan/soundspan/issues/530)) depend on the space-identity contract defined here.
 
@@ -16,8 +16,8 @@ Vibe similarity is hard-wired to one implementation: the `services/audio-analyze
 
 | Question | Decision |
 | --- | --- |
-| Embedding space | Keep LAION-CLAP `music_audioset`, 512-dim, cosine |
-| Default provider | DCLAP distilled student, ONNX Runtime, CPU-first |
+| Embedding space | Keep LAION-CLAP `music_audioset`, 512-dim, cosine; DCLAP advertises a distinct student identity |
+| Planned default provider | DCLAP distilled student, ONNX Runtime, CPU-first; shipped default-off pending later wiring |
 | Compat/GPU provider | Current torch `laion-clap` sidecar, unchanged |
 | Future providers | MuQ-MuLan (GPU, new space, NC-weights caveat); hosted tags-level adapters only — never embedding-level primaries |
 | Space changes | Versioned space registry with background re-embed and threshold cutover |
@@ -90,20 +90,24 @@ DCLAP is AGPL-3.0; soundspan is GPL-3.0. As a separately-distributed networked s
 
 Recommendation: **(b)**, with the sidecar's repository/source offer documented, matching how the image pipeline already builds and scans sidecars. Alternative accepted outcome: in-house ONNX export of the exact teacher checkpoint (Apache-2.0 checkpoint, zero third-party code) if DCLAP vendoring proves awkward — same runtime win, slightly less speed, zero recall question.
 
+**Executed 2026-08-16:** mode **(b)**. `services/vibe-provider-dclap` builds a project-owned image that vendors the three DCLAP v1 ONNX artifacts with pinned SHA-256 checks and vendors the teacher tokenizer from an immutable Hugging Face commit. The image includes the upstream AGPL-3.0 license and a notice linking both this sidecar's corresponding source and the upstream DCLAP source. The service remains an isolated HTTP-only process and is not included in the AIO image.
+
 ### Gate 2 — mixed-space recall validation
 
-Distillation approximates the teacher. Existing libraries hold teacher vectors; the student claims the same space. Before the student may write into the teacher's space:
+Distillation approximates the teacher. Existing libraries hold teacher vectors, so a student could claim the teacher space only after this gate:
 
 - Sample N tracks (target ≥1,000 across genres) from a real library; embed with both towers; measure (a) teacher-vs-student cosine per track, (b) top-k neighbor overlap querying teacher-indexed vectors with student query vectors, (c) text-query result overlap.
 - Acceptance: defined thresholds (proposed: median cosine ≥ 0.98, top-10 overlap ≥ 0.9) recorded with the results in this document when run.
 - **Pass** → student registers with the same space identity; no re-embedding; mixed vectors permitted.
 - **Fail** → student registers as a distinct space and enters the migration flow above. The 5-6x speedup makes full re-embed tractable on the constrained fleet; this is the fallback, not a blocker.
 
+The shipped sidecar takes the conservative fail outcome now: observed student-to-teacher fidelity is approximately 0.88 cosine, below the proposed 0.98 threshold, so `/v1/space` never claims the teacher identity. It advertises `clap-music-audioset-dclap-student` with a combined SHA-256 identity derived from the pinned audio graph shell, external audio weights, and text tower. A larger fleet recall study may still inform later rollout tuning, but it cannot silently merge the two spaces.
+
 ## Rollout phases
 
 1. **Registry + interface** (no behavior change): space table, spaceId on embeddings backfilled from `model_version`, provider HTTP contract extracted over the existing torch sidecar (it becomes Provider 2 in place).
-2. **DCLAP student sidecar** behind `VIBE_PROVIDER_URL`, default-off; Gate 1 decision executed; Gate 2 validation run and recorded here.
-3. **Default flip** per Gate 2 outcome (same-space adoption or migration cutover); torch sidecar remains available as compat/GPU choice; compose/Helm defaults updated; UPGRADING notes.
+2. **DCLAP student sidecar** shipped default-off under an opt-in Compose profile; Gate 1 mode (b) executed; distinct student space identity enforced. Provider URL wiring remains a later change.
+3. **Default flip** through migration cutover into the distinct student space; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults updated; UPGRADING notes.
 4. **Later**: MuQ-MuLan provider (new space, GPU) and hosted tags-level adapters, each their own issue.
 
 ## Non-goals

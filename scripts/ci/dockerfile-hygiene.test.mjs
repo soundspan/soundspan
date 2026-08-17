@@ -14,6 +14,7 @@ const dockerfilePaths = [
     "services/tidal-downloader/Dockerfile",
     "services/ytmusic-streamer/Dockerfile",
     "services/audio-analyzer-clap/Dockerfile",
+    "services/vibe-provider-dclap/Dockerfile",
 ];
 
 const chartComponentDockerfiles = new Map([
@@ -401,6 +402,16 @@ test("4. ytmusic-streamer has no world-writable token directory", () => {
     assert.ok(
         !dockerfile.includes("chmod 777"),
         `${relativePath}: must not contain chmod 777`,
+    );
+});
+
+test("root Docker context excludes Python bytecode caches", () => {
+    const dockerignore = readRepoFile(".dockerignore");
+
+    assert.match(
+        dockerignore,
+        /^\*\*\/__pycache__\s*$/m,
+        ".dockerignore: host Python cache directories must not enter image contexts",
     );
 });
 

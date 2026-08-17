@@ -103,5 +103,22 @@ services:
                 condition: service_healthy
         restart: unless-stopped
 
+    # DCLAP HTTP provider - standalone and default-off for local testing.
+    vibe-provider-dclap-local:
+        profiles: ["vibe-provider-dclap"]
+        build:
+            context: .
+            dockerfile: services/vibe-provider-dclap/Dockerfile
+        environment:
+            MUSIC_PATH: /music
+            MODEL_IDLE_TIMEOUT: ${DCLAP_MODEL_IDLE_TIMEOUT:-300}
+            DCLAP_ONNX_INTRA_OP_THREADS: ${DCLAP_ONNX_INTRA_OP_THREADS:-1}
+            DCLAP_HTTP_PORT: ${DCLAP_HTTP_PORT:-8092}
+            DCLAP_IMAGE_VERSION: ${VERSION:-local}
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
+        volumes:
+            - "${MUSIC_PATH:-./music}:/music:ro"
+        restart: unless-stopped
+
 volumes:
     postgres_local_data:

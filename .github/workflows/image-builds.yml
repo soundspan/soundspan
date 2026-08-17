@@ -127,6 +127,19 @@ jobs:
                       needs_node: false
                       include_frontend_build_args: false
                       cache_scope: audio-analyzer-clap
+                    - id: vibe-provider-dclap
+                      job_name: Build & Push DCLAP Provider Image
+                      runs_on: self-hosted
+                      image_name: vibe-provider-dclap
+                      image_repo_mode: suffixed
+                      context: .
+                      file: ./services/vibe-provider-dclap/Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: false
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: vibe-provider-dclap
                     - id: tidal-downloader
                       job_name: Build & Push TIDAL Downloader Image
                       runs_on: ubuntu-latest

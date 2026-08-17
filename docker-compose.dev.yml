@@ -30,5 +30,10 @@ services:
             file: docker-compose.local.yml
             service: audio-analyzer-clap-local
 
+    vibe-provider-dclap:
+        extends:
+            file: docker-compose.local.yml
+            service: vibe-provider-dclap-local
+
 volumes:
     postgres_local_data:

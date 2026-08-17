@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added backend-driven provider audio embedding behind `VIBE_PROVIDER_URL`,
   with bounded concurrency, graceful draining, status ownership, and
   active-space coverage metrics.
+- Added a default-off DCLAP student ONNX provider image with the provider v1
+  HTTP contract, offline-vendored model/tokenizer artifacts, lazy idle unloading,
+  upstream-matched audio preprocessing, combined artifact identity, and an opt-in
+  Compose profile. Provider registry wiring remains disabled.
 
 ### Changed
 
