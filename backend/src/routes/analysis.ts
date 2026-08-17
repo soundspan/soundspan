@@ -17,6 +17,7 @@ import {
 } from "../utils/librarySorting";
 import { config } from "../config";
 import { enqueueReservedNodeRedisWork } from "../workers/enrichmentQueue";
+import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 
 const router = Router();
 
@@ -54,14 +55,7 @@ interface ManualVibeTrack {
 
 async function resetVibeTracksForForce(force: boolean): Promise<void> {
     if (!force) return;
-    await prisma.track.updateMany({
-        where: LOCAL_TRACK_WHERE,
-        data: {
-            ...buildVibePendingReset(),
-            vibeAnalysisRetryCount: 0,
-            vibeAnalysisGeneration: { increment: 1 },
-        },
-    });
+    await invalidateVibeAnalysis(prisma, LOCAL_TRACK_WHERE, new Date());
     await enrichmentFailureService.clearAllFailures("vibe");
     logger.info(
         "Preserved active vibe embeddings and reset tracks for re-generation",
@@ -820,29 +814,27 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
  */
 router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
     try {
-        const result = await prisma.track.updateMany({
-            where: {
+        const reset = await invalidateVibeAnalysis(
+            prisma,
+            {
                 vibeAnalysisStatus: "failed",
                 ...LOCAL_TRACK_WHERE,
             },
-            data: {
-                ...buildVibePendingReset(),
-                vibeAnalysisRetryCount: 0,
-            },
-        });
+            new Date(),
+        );
 
-        if (result.count === 0) {
+        if (reset === 0) {
             return res.json({
                 message: "No vibe failures to retry",
                 reset: 0,
             });
         }
 
-        logger.info(`Reset ${result.count} failed vibe embeddings for retry`);
+        logger.info(`Reset ${reset} failed vibe embeddings for retry`);
 
         res.json({
-            message: `Reset ${result.count} failed tracks for vibe embedding retry`,
-            reset: result.count,
+            message: `Reset ${reset} failed tracks for vibe embedding retry`,
+            reset,
         });
     } catch (error: any) {
         logger.error("Retry vibe failures error:", error);

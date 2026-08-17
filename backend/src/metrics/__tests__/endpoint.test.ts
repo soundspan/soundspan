@@ -63,6 +63,7 @@ describe("metrics endpoint", () => {
             getProviderQueueDepth: async () => {
                 throw new Error("redis unavailable");
             },
+            getProviderStatusFresh: async () => false,
         });
         const router = createMetricsRouter({
             registry,

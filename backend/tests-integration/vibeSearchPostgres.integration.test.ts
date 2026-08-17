@@ -8,6 +8,11 @@ import {
     runEmbeddingSpaceLifecycleCheck,
 } from "../src/services/embeddingSpaceLifecycle";
 import { invalidateActiveSpaceCache } from "../src/services/embeddingSpaces";
+import {
+    EmbeddingTargetInvalidatedError,
+    upsertTrackEmbedding,
+    VibeEmbeddingGenerationMismatchError,
+} from "../src/services/trackEmbeddings";
 import { runAnnQuery } from "../src/utils/annQuery";
 import { prisma } from "../src/utils/db";
 
@@ -28,6 +33,7 @@ const MIGRATIONS = [
 interface IndexRow {
     name: string;
     isValid: boolean;
+    options: string[] | null;
     predicate: string | null;
 }
 
@@ -48,6 +54,7 @@ async function loadEmbeddingIndexes(client: Client): Promise<IndexRow[]> {
     const result = await client.query<IndexRow>(`
         SELECT index_class.relname AS name,
                index_row.indisvalid AS "isValid",
+               index_class.reloptions AS options,
                pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate
         FROM pg_catalog.pg_index index_row
         JOIN pg_catalog.pg_class table_class
@@ -65,7 +72,18 @@ async function loadEmbeddingIndexes(client: Client): Promise<IndexRow[]> {
 
 async function seedVersion22Schema(client: Client): Promise<void> {
     await client.query(`
-        CREATE TABLE "Track" ("id" TEXT PRIMARY KEY);
+        CREATE TYPE "TrackOrigin" AS ENUM ('LOCAL', 'FEDERATED');
+        CREATE TABLE "Track" (
+            "id" TEXT PRIMARY KEY,
+            "origin" "TrackOrigin" NOT NULL DEFAULT 'LOCAL',
+            "removedAt" TIMESTAMP(3),
+            "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "vibeAnalysisStatus" TEXT,
+            "vibeAnalysisStartedAt" TIMESTAMP(3),
+            "vibeAnalysisError" TEXT,
+            "vibeAnalysisRetryCount" INTEGER NOT NULL DEFAULT 0,
+            "vibeAnalysisStatusUpdatedAt" TIMESTAMP(3)
+        );
         CREATE TABLE "track_embeddings" (
             "track_id" TEXT PRIMARY KEY REFERENCES "Track"("id") ON DELETE CASCADE,
             "embedding" vector(512) NOT NULL,
@@ -81,6 +99,92 @@ async function seedVersion22Schema(client: Client): Promise<void> {
         INSERT INTO "track_embeddings" ("track_id", "embedding")
             VALUES ('seed-track', '${VECTOR}'::vector);
     `);
+}
+
+async function insertComparisonCorpus(
+    client: Client,
+    spaceId: string,
+): Promise<void> {
+    await client.query(
+        `INSERT INTO embedding_spaces (
+            id, family, checkpoint_hash, dim, preprocessing, status
+         ) VALUES ($1, 'comparison', 'comparison-hash', 512, '{}'::jsonb, 'migrating')`,
+        [spaceId],
+    );
+    await client.query(
+        `INSERT INTO "Track" ("id")
+         SELECT 'comparison-track-' || value
+         FROM generate_series(1, $1::int) AS value`,
+        [ANN_INDEX_MIN_VECTOR_COUNT],
+    );
+    await client.query(
+        `INSERT INTO track_embeddings (track_id, space_id, embedding)
+         SELECT 'comparison-track-' || value,
+                $1,
+                ('[' || (1 - value::double precision / 2000)::text || ',' ||
+                 (value::double precision / 2000)::text || ',' ||
+                 array_to_string(array_fill(0::integer, ARRAY[510]), ',') || ']')::vector
+         FROM generate_series(1, $2::int) AS value`,
+        [spaceId, ANN_INDEX_MIN_VECTOR_COUNT],
+    );
+}
+
+async function queryNearestIds(
+    client: Client,
+    spaceId: string,
+    exact: boolean,
+): Promise<string[]> {
+    await client.query("BEGIN");
+    try {
+        if (exact) {
+            await client.query("SET LOCAL enable_indexscan = off");
+        } else {
+            // Route through the ivfflat scan (see loadAnnPlan): with seq,
+            // bitmap, and sort disabled, the ordered ivfflat scan is the only
+            // viable plan, so this result set genuinely exercises the index.
+            await client.query("SET LOCAL enable_seqscan = off");
+            await client.query("SET LOCAL enable_bitmapscan = off");
+            await client.query("SET LOCAL enable_sort = off");
+            await client.query("SET LOCAL ivfflat.probes = 32");
+        }
+        const result = await client.query<{ trackId: string }>(
+            `SELECT track_id AS "trackId"
+             FROM track_embeddings
+             WHERE space_id = $1
+             ORDER BY embedding <=> $2::vector, track_id
+             LIMIT 10`,
+            [spaceId, VECTOR],
+        );
+        return result.rows.map((row) => row.trackId);
+    } finally {
+        await client.query("ROLLBACK");
+    }
+}
+
+async function loadAnnPlan(client: Client, spaceId: string): Promise<string> {
+    await client.query("BEGIN");
+    try {
+        await client.query("SET LOCAL enable_seqscan = off");
+        await client.query("SET LOCAL enable_bitmapscan = off");
+        // The btree space_id index plus an explicit Sort can legitimately
+        // out-cost the ivfflat scan on small corpora; disabling Sort leaves
+        // the ordered ivfflat scan as the only viable plan, making both this
+        // probe and the ANN result set deterministic.
+        await client.query("SET LOCAL enable_sort = off");
+        await client.query("SET LOCAL ivfflat.probes = 32");
+        const result = await client.query<Record<string, string>>(
+            `EXPLAIN (COSTS OFF)
+             SELECT track_id
+             FROM track_embeddings
+             WHERE space_id = $1
+             ORDER BY embedding <=> $2::vector
+             LIMIT 10`,
+            [spaceId, VECTOR],
+        );
+        return result.rows.map((row) => row["QUERY PLAN"]).join("\n");
+    } finally {
+        await client.query("ROLLBACK");
+    }
 }
 
 async function applyMigrations(client: Client): Promise<void> {
@@ -204,6 +308,7 @@ describeWithPostgres("vibe search PostgreSQL correctness", () => {
             expect.objectContaining({
                 name: indexName,
                 isValid: true,
+                options: expect.arrayContaining(["lists=40"]),
                 predicate: expect.stringContaining(
                     `space_id = '${TEACHER_SPACE_ID}'`,
                 ),
@@ -212,6 +317,83 @@ describeWithPostgres("vibe search PostgreSQL correctness", () => {
         expect(
             indexes.some((index) => index.name.includes("space_empty")),
         ).toBe(false);
+    });
+
+    it("matches exact and ANN top-k at the first size band", async () => {
+        const spaceId = "space_ann_comparison";
+        await insertComparisonCorpus(database, spaceId);
+        await expect(ensureSpaceAnnIndex(spaceId)).resolves.toBe(true);
+        await database.query("ANALYZE track_embeddings");
+
+        const exactIds = await queryNearestIds(database, spaceId, true);
+        const annIds = await queryNearestIds(database, spaceId, false);
+        const plan = await loadAnnPlan(database, spaceId);
+        expect(annIds).toEqual(exactIds);
+        expect(plan).toContain(`track_embeddings_${spaceId}_ivfflat_idx`);
+    });
+
+    it("rolls back a vector write when the generation CAS is stale", async () => {
+        await database.query(`
+            INSERT INTO "Track" (
+                "id", "vibeAnalysisStatus", "vibeAnalysisGeneration"
+            ) VALUES ('stale-generation-track', 'processing', 2)
+        `);
+        await expect(
+            upsertTrackEmbedding(
+                "stale-generation-track",
+                Array(512).fill(0),
+                "space_ann_comparison",
+                { generation: 1, completedAt: new Date() },
+            ),
+        ).rejects.toBeInstanceOf(VibeEmbeddingGenerationMismatchError);
+
+        const state = await database.query<{
+            status: string;
+            generation: number;
+            vectors: string;
+        }>(`
+            SELECT track."vibeAnalysisStatus" AS status,
+                   track."vibeAnalysisGeneration" AS generation,
+                   COUNT(embedding.track_id)::text AS vectors
+            FROM "Track" track
+            LEFT JOIN track_embeddings embedding
+              ON embedding.track_id = track.id
+            WHERE track.id = 'stale-generation-track'
+            GROUP BY track."vibeAnalysisStatus", track."vibeAnalysisGeneration"
+        `);
+        expect(state.rows).toEqual([
+            { status: "processing", generation: 2, vectors: "0" },
+        ]);
+    });
+
+    it("rejects writes into a retired embedding space", async () => {
+        await database.query(`
+            INSERT INTO embedding_spaces (
+                id, family, checkpoint_hash, dim, preprocessing, status
+            ) VALUES (
+                'space_retired_write', 'retired-write', 'retired-write-hash',
+                512, '{}'::jsonb, 'retired'
+            )
+        `);
+        await database.query(`
+            INSERT INTO "Track" (
+                "id", "vibeAnalysisStatus", "vibeAnalysisGeneration"
+            ) VALUES ('retired-write-track', 'processing', 0)
+        `);
+        await expect(
+            upsertTrackEmbedding(
+                "retired-write-track",
+                Array(512).fill(0),
+                "space_retired_write",
+                { generation: 0, completedAt: new Date() },
+            ),
+        ).rejects.toBeInstanceOf(EmbeddingTargetInvalidatedError);
+
+        const vectors = await database.query<{ count: string }>(`
+            SELECT COUNT(*)::text AS count FROM track_embeddings
+            WHERE track_id = 'retired-write-track'
+        `);
+        expect(vectors.rows).toEqual([{ count: "0" }]);
     });
 
     it("maps a real Prisma P2010 statement-timeout envelope carrying 57014", async () => {
@@ -251,6 +433,8 @@ describeWithPostgres("vibe search PostgreSQL correctness", () => {
         const config = {
             threshold: 0.95,
             retirementGraceDays: 7,
+            allowFailed: false,
+            currentProviderSpaceId: TEACHER_SPACE_ID,
             now: () => new Date("2026-08-17T00:00:00.000Z"),
         };
         await runEmbeddingSpaceLifecycleCheck(config);
@@ -273,5 +457,71 @@ describeWithPostgres("vibe search PostgreSQL correctness", () => {
             GROUP BY space.retired_at
         `);
         expect(afterSecond.rows).toEqual([{ count: "0", retiredAt: null }]);
+    });
+
+    it("preserves vectors when reactivation wins a cleanup interleaving", async () => {
+        const cleanup = new Client({
+            connectionString: process.env.DATABASE_URL,
+        });
+        const reactivation = new Client({
+            connectionString: process.env.DATABASE_URL,
+        });
+        const retiredAt = new Date("2026-07-01T00:00:00.000Z");
+        const claimedAt = new Date("2026-08-17T00:00:00.000Z");
+        await Promise.all([cleanup.connect(), reactivation.connect()]);
+        try {
+            await database.query(
+                `INSERT INTO embedding_spaces (
+                    id, family, checkpoint_hash, dim, preprocessing,
+                    status, retired_at
+                 ) VALUES (
+                    'space_reactivated', 'reactivated', 'reactivated-hash',
+                    512, '{}'::jsonb, 'retired', $1
+                 )`,
+                [retiredAt],
+            );
+            await insertVectors(
+                database,
+                "space_reactivated",
+                "reactivated-track-",
+                1,
+                1,
+            );
+            await cleanup.query(
+                `UPDATE embedding_spaces SET cleaning_at = $1
+                 WHERE id = 'space_reactivated' AND status = 'retired'`,
+                [claimedAt],
+            );
+            await reactivation.query(`
+                UPDATE embedding_spaces
+                SET status = 'migrating', retired_at = NULL, cleaning_at = NULL
+                WHERE id = 'space_reactivated'
+            `);
+
+            await cleanup.query("BEGIN");
+            const claim = await cleanup.query(
+                `UPDATE embedding_spaces SET cleaning_at = cleaning_at
+                 WHERE id = 'space_reactivated'
+                   AND status = 'retired'
+                   AND retired_at = $1
+                   AND cleaning_at = $2`,
+                [retiredAt, claimedAt],
+            );
+            if (claim.rowCount === 1) {
+                await cleanup.query(
+                    "DELETE FROM track_embeddings WHERE space_id = 'space_reactivated'",
+                );
+            }
+            await cleanup.query("COMMIT");
+
+            expect(claim.rowCount).toBe(0);
+            const remaining = await database.query<{ count: string }>(`
+                SELECT COUNT(*)::text AS count FROM track_embeddings
+                WHERE space_id = 'space_reactivated'
+            `);
+            expect(remaining.rows).toEqual([{ count: "1" }]);
+        } finally {
+            await Promise.all([cleanup.end(), reactivation.end()]);
+        }
     });
 });

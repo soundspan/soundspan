@@ -29,11 +29,12 @@ const router = Router();
  *                   properties:
  *                     provider:
  *                       type: object
- *                       required: [configured, reachable, checkedAt]
+ *                       required: [configured, reachable, checkedAt, fresh]
  *                       properties:
  *                         configured: { type: boolean }
  *                         reachable: { type: boolean, nullable: true }
  *                         checkedAt: { type: string, format: date-time, nullable: true }
+ *                         fresh: { type: boolean }
  *                     activeSpace:
  *                       type: object
  *                       nullable: true

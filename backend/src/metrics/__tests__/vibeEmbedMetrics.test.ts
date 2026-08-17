@@ -4,11 +4,14 @@ import { createVibeEmbedMetrics } from "../vibeEmbedMetrics";
 describe("vibe embed metrics", () => {
     function createMetrics(registry: Registry, queueDepth = 0) {
         const getProviderQueueDepth = jest.fn(async () => queueDepth);
+        const getProviderStatusFresh = jest.fn(async () => true);
         return {
             metrics: createVibeEmbedMetrics(registry, {
                 getProviderQueueDepth,
+                getProviderStatusFresh,
             }),
             getProviderQueueDepth,
+            getProviderStatusFresh,
         };
     }
 
@@ -114,7 +117,10 @@ describe("vibe embed metrics", () => {
             .fn<Promise<number>, []>()
             .mockResolvedValueOnce(7)
             .mockRejectedValueOnce(new Error("redis unavailable"));
-        createVibeEmbedMetrics(registry, { getProviderQueueDepth });
+        createVibeEmbedMetrics(registry, {
+            getProviderQueueDepth,
+            getProviderStatusFresh: jest.fn(async () => true),
+        });
 
         const firstExposition = await registry.metrics();
         const degradedExposition = await registry.metrics();
@@ -143,5 +149,27 @@ describe("vibe embed metrics", () => {
             "soundspan_vibe_provider_queue_capacity 100",
         );
         expect(exposition).toContain("soundspan_vibe_migration_active 1");
+    });
+
+    it("collects provider heartbeat freshness on each scrape", async () => {
+        const registry = new Registry();
+        const { getProviderStatusFresh } = createMetrics(registry);
+
+        const exposition = await registry.metrics();
+
+        expect(getProviderStatusFresh).toHaveBeenCalledTimes(1);
+        expect(exposition).toContain("soundspan_vibe_provider_status_fresh 1");
+    });
+
+    it("publishes zero when no provider heartbeat is fresh", async () => {
+        const registry = new Registry();
+        createVibeEmbedMetrics(registry, {
+            getProviderQueueDepth: jest.fn(async () => 0),
+            getProviderStatusFresh: jest.fn(async () => false),
+        });
+
+        await expect(registry.metrics()).resolves.toContain(
+            "soundspan_vibe_provider_status_fresh 0",
+        );
     });
 });

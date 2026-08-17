@@ -1,12 +1,12 @@
 const mockTrackFindMany = jest.fn();
-const mockTrackUpdate = jest.fn();
+const mockTrackUpdateMany = jest.fn();
 const mockLoggerDebug = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
         track: {
             findMany: (...args: unknown[]) => mockTrackFindMany(...args),
-            update: (...args: unknown[]) => mockTrackUpdate(...args),
+            updateMany: (...args: unknown[]) => mockTrackUpdateMany(...args),
         },
     },
 }));
@@ -42,15 +42,19 @@ describe("vibeAnalysisCleanupService", () => {
                     },
                 ],
             },
-            include: {
+            select: {
+                id: true,
+                title: true,
+                vibeAnalysisGeneration: true,
+                vibeAnalysisStatusUpdatedAt: true,
                 album: {
-                    include: {
+                    select: {
                         artist: { select: { name: true } },
                     },
                 },
             },
         });
-        expect(mockTrackUpdate).not.toHaveBeenCalled();
+        expect(mockTrackUpdateMany).not.toHaveBeenCalled();
         expect(result).toEqual({ reset: 0 });
     });
 
@@ -59,34 +63,55 @@ describe("vibeAnalysisCleanupService", () => {
             {
                 id: "t1",
                 title: "Track One",
+                vibeAnalysisGeneration: 3,
+                vibeAnalysisStatusUpdatedAt: new Date(
+                    "2026-08-17T10:00:00.000Z",
+                ),
                 album: { artist: { name: "Artist One" } },
             },
             {
                 id: "t2",
                 title: "Track Two",
+                vibeAnalysisGeneration: 5,
+                vibeAnalysisStatusUpdatedAt: null,
                 album: { artist: { name: "Artist Two" } },
             },
         ]);
-        mockTrackUpdate.mockResolvedValue({});
+        mockTrackUpdateMany.mockResolvedValue({ count: 1 });
 
         const result =
             await vibeAnalysisCleanupService.cleanupStaleProcessing();
 
-        expect(mockTrackUpdate).toHaveBeenCalledTimes(2);
-        expect(mockTrackUpdate).toHaveBeenNthCalledWith(1, {
-            where: { id: "t1" },
-            data: {
-                vibeAnalysisStatus: null,
-                vibeAnalysisStatusUpdatedAt: null,
-            },
-        });
-        expect(mockTrackUpdate).toHaveBeenNthCalledWith(2, {
-            where: { id: "t2" },
-            data: {
-                vibeAnalysisStatus: null,
-                vibeAnalysisStatusUpdatedAt: null,
-            },
-        });
+        expect(mockTrackUpdateMany).toHaveBeenCalledTimes(2);
+        expect(mockTrackUpdateMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                where: {
+                    id: "t1",
+                    vibeAnalysisStatus: "processing",
+                    vibeAnalysisGeneration: 3,
+                    vibeAnalysisStatusUpdatedAt: new Date(
+                        "2026-08-17T10:00:00.000Z",
+                    ),
+                },
+                data: expect.objectContaining({
+                    vibeAnalysisStatus: "pending",
+                    vibeAnalysisGeneration: { increment: 1 },
+                }),
+            }),
+        );
+        expect(mockTrackUpdateMany).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    id: "t2",
+                    vibeAnalysisGeneration: 5,
+                }),
+                data: expect.objectContaining({
+                    vibeAnalysisGeneration: { increment: 1 },
+                }),
+            }),
+        );
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             "[VibeAnalysisCleanup] Found 2 stale vibe tracks (processing > 30 min)",
         );
@@ -104,14 +129,16 @@ describe("vibeAnalysisCleanupService", () => {
             {
                 id: "t1",
                 title: "Track One",
+                vibeAnalysisGeneration: 0,
+                vibeAnalysisStatusUpdatedAt: null,
                 album: { artist: { name: "Artist One" } },
             },
         ]);
-        mockTrackUpdate.mockRejectedValueOnce(new Error("write failed"));
+        mockTrackUpdateMany.mockRejectedValueOnce(new Error("write failed"));
 
         await expect(
             vibeAnalysisCleanupService.cleanupStaleProcessing(),
         ).rejects.toThrow("write failed");
-        expect(mockTrackUpdate).toHaveBeenCalledTimes(1);
+        expect(mockTrackUpdateMany).toHaveBeenCalledTimes(1);
     });
 });

@@ -66,9 +66,129 @@ export interface TextSearchResult {
     speechiness: number | null;
 }
 
+/** Claimed local vibe generation finalized with its vector write. */
+export interface VibeEmbeddingWriteClaim {
+    generation: number;
+    completedAt: Date;
+}
+
+/** Raised when a cached worker target can no longer accept vectors. */
+export class EmbeddingTargetInvalidatedError extends Error {
+    readonly code = "EMBEDDING_TARGET_INVALIDATED";
+
+    constructor(public readonly spaceId: string) {
+        super(`Embedding space ${spaceId} no longer accepts vector writes`);
+        this.name = "EmbeddingTargetInvalidatedError";
+    }
+}
+
+/** Raised when an invalidated local job loses its generation fence. */
+export class VibeEmbeddingGenerationMismatchError extends Error {
+    readonly code = "VIBE_EMBEDDING_GENERATION_MISMATCH";
+
+    constructor(
+        public readonly trackId: string,
+        public readonly generation: number,
+    ) {
+        super(`Track ${trackId} no longer owns vibe generation ${generation}`);
+        this.name = "VibeEmbeddingGenerationMismatchError";
+    }
+}
+
 function boundedTextSearchCandidateLimit(candidateLimit: number): number {
     if (!Number.isFinite(candidateLimit)) return 1;
     return Math.min(Math.max(1, Math.trunc(candidateLimit)), 300);
+}
+
+function validateEmbeddingValues(embedding: readonly number[]): void {
+    if (
+        embedding.length === 0 ||
+        embedding.some((value) => !Number.isFinite(value))
+    ) {
+        throw new Error("Track embedding must contain only finite values");
+    }
+}
+
+async function lockWritableEmbeddingSpace(
+    transaction: Prisma.TransactionClient,
+    spaceId: string,
+): Promise<number> {
+    const spaces = await transaction.$queryRaw<Array<{ dim: number }>>`
+        SELECT dim
+        FROM embedding_spaces
+        WHERE id = ${spaceId}
+          AND status IN ('active', 'migrating')
+          AND cleaning_at IS NULL
+        FOR SHARE
+    `;
+    const targetSpace = spaces[0];
+    if (!targetSpace) throw new EmbeddingTargetInvalidatedError(spaceId);
+    return targetSpace.dim;
+}
+
+async function finalizeVibeEmbeddingClaim(
+    transaction: Prisma.TransactionClient,
+    trackId: string,
+    claim: VibeEmbeddingWriteClaim | undefined,
+): Promise<void> {
+    if (!claim) return;
+    const completed = await transaction.track.updateMany({
+        where: {
+            id: trackId,
+            origin: "LOCAL",
+            removedAt: null,
+            vibeAnalysisStatus: "processing",
+            vibeAnalysisGeneration: claim.generation,
+        },
+        data: {
+            vibeAnalysisStatus: "completed",
+            vibeAnalysisError: null,
+            vibeAnalysisStartedAt: null,
+            vibeAnalysisStatusUpdatedAt: claim.completedAt,
+        },
+    });
+    if (completed.count !== 1) {
+        throw new VibeEmbeddingGenerationMismatchError(
+            trackId,
+            claim.generation,
+        );
+    }
+}
+
+async function writeEmbeddingVector(
+    transaction: Prisma.TransactionClient,
+    trackId: string,
+    vector: string,
+    spaceId: string,
+): Promise<void> {
+    const written = await transaction.$executeRaw`
+        INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
+        VALUES (${trackId}, ${vector}::vector, ${spaceId}, NOW())
+        ON CONFLICT (track_id, space_id) DO UPDATE SET
+            embedding = EXCLUDED.embedding,
+            analyzed_at = EXCLUDED.analyzed_at
+    `;
+    if (written !== 1) {
+        throw new Error("Track embedding upsert did not affect one row");
+    }
+}
+
+async function markEmbeddingSpacePopulated(
+    transaction: Prisma.TransactionClient,
+    spaceId: string,
+): Promise<void> {
+    const marked = await transaction.embeddingSpace.updateMany({
+        where: {
+            id: spaceId,
+            status: { in: ["active", "migrating"] },
+            cleaningAt: null,
+            hadVectors: false,
+        },
+        data: { hadVectors: true },
+    });
+    if (marked.count < 0 || marked.count > 1) {
+        throw new Error("Embedding-space marker update was inconsistent");
+    }
 }
 
 /** Prisma relation filter for tracks without a vector in `targetSpaceId`. */
@@ -103,44 +223,23 @@ export async function upsertTrackEmbedding(
     trackId: string,
     embedding: readonly number[],
     spaceId: string,
+    claim?: VibeEmbeddingWriteClaim,
 ): Promise<void> {
-    if (
-        embedding.length === 0 ||
-        embedding.some((value) => !Number.isFinite(value))
-    ) {
-        throw new Error("Track embedding must contain only finite values");
-    }
-    const targetSpace = await prisma.embeddingSpace.findUnique({
-        where: { id: spaceId },
-        select: { dim: true },
-    });
-    if (!targetSpace) {
-        throw new Error(`Embedding space ${spaceId} is not registered`);
-    }
-    if (embedding.length !== targetSpace.dim) {
-        throw new Error(
-            `Track embedding must contain ${targetSpace.dim} finite values`,
-        );
-    }
+    validateEmbeddingValues(embedding);
     const vector = `[${embedding.join(",")}]`;
     await prisma.$transaction(async (transaction) => {
-        const written = await transaction.$executeRaw`
-            INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
-            VALUES (${trackId}, ${vector}::vector, ${spaceId}, NOW())
-            ON CONFLICT (track_id, space_id) DO UPDATE SET
-                embedding = EXCLUDED.embedding,
-                analyzed_at = EXCLUDED.analyzed_at
-        `;
-        if (written !== 1) {
-            throw new Error("Track embedding upsert did not affect one row");
+        const expectedDim = await lockWritableEmbeddingSpace(
+            transaction,
+            spaceId,
+        );
+        if (embedding.length !== expectedDim) {
+            throw new Error(
+                `Track embedding must contain ${expectedDim} finite values`,
+            );
         }
-        const marked = await transaction.embeddingSpace.updateMany({
-            where: { id: spaceId, hadVectors: false },
-            data: { hadVectors: true },
-        });
-        if (marked.count < 0 || marked.count > 1) {
-            throw new Error("Embedding-space marker update was inconsistent");
-        }
+        await finalizeVibeEmbeddingClaim(transaction, trackId, claim);
+        await writeEmbeddingVector(transaction, trackId, vector, spaceId);
+        await markEmbeddingSpacePopulated(transaction, spaceId);
     });
 }
 

@@ -640,9 +640,9 @@ export const config = {
     },
 
     // pgvector ivfflat.probes: how many of the index's inverted lists each ANN
-    // ("similar tracks" / vibe) query scans. The track_embeddings index is built
-    // WITH (lists = 224); Postgres defaults probes to 1, so an unconfigured query
-    // scans 1/224 lists and recall is silently near-random. Applied per-query on
+    // ("similar tracks" / vibe) query scans. The indexes use size-banded lists
+    // capped at 224; Postgres defaults probes to 1, so an unconfigured query
+    // scans one list and recall can be silently near-random. Applied per-query on
     // the same pooled connection via utils/annQuery.ts (roadmap F14). Higher =
     // better recall, more list scans (≈ linear cost). Default is benchmark-chosen
     // for the local corpus (recall@10 ≥ ~0.95); see scripts/benchmark-ivfflat-probes.ts.

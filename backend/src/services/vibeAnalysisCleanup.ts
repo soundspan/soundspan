@@ -1,7 +1,7 @@
 import { prisma } from "../utils/db";
 import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
-import { enrichmentFailureService } from "./enrichmentFailureService";
+import { invalidateVibeAnalysis } from "./vibeInvalidation";
 
 const STALE_THRESHOLD_MINUTES = 30; // Longer than audio analysis due to CLAP processing time
 
@@ -28,9 +28,13 @@ class VibeAnalysisCleanupService {
                     },
                 ],
             },
-            include: {
+            select: {
+                id: true,
+                title: true,
+                vibeAnalysisGeneration: true,
+                vibeAnalysisStatusUpdatedAt: true,
                 album: {
-                    include: {
+                    select: {
                         artist: { select: { name: true } },
                     },
                 },
@@ -50,17 +54,21 @@ class VibeAnalysisCleanupService {
         for (const track of staleTracks) {
             const trackName = `${track.album.artist.name} - ${track.title}`;
 
-            // Reset to null (pending state)
-            await prisma.track.update({
-                where: { id: track.id },
-                data: {
-                    vibeAnalysisStatus: null,
-                    vibeAnalysisStatusUpdatedAt: null,
+            const reset = await invalidateVibeAnalysis(
+                prisma,
+                {
+                    id: track.id,
+                    vibeAnalysisStatus: "processing",
+                    vibeAnalysisGeneration: track.vibeAnalysisGeneration,
+                    vibeAnalysisStatusUpdatedAt:
+                        track.vibeAnalysisStatusUpdatedAt,
                 },
-            });
+                new Date(),
+            );
+            if (reset === 0) continue;
 
             logger.debug(`[VibeAnalysisCleanup] Reset for retry: ${trackName}`);
-            resetCount++;
+            resetCount += reset;
         }
 
         return { reset: resetCount };

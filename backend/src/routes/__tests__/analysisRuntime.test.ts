@@ -708,6 +708,7 @@ describe("analysis routes runtime", () => {
                 vibeAnalysisStartedAt: null,
                 vibeAnalysisRetryCount: 0,
                 vibeAnalysisStatusUpdatedAt: expect.any(Date),
+                vibeAnalysisGeneration: { increment: 1 },
             }),
         });
         expect(mockRedisMulti).not.toHaveBeenCalled();

@@ -140,7 +140,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
-| `backend/src/services/trackEmbeddings.ts` | Vibe pgvector reads, ANN queries, and embedding counts |
+| `backend/src/services/trackEmbeddings.ts` | Transactional vibe pgvector reads, writes, generation finalization, ANN queries, and embedding counts |
 | `backend/src/services/trackIdentityMatcher.ts` | Durable track move identity matching |
 | `backend/src/services/trackPreference.ts` | Core |
 | `backend/src/services/trackReconciliation.ts` | Core |
@@ -152,6 +152,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/vibeEmbedJobs.ts` | Provider-backed audio embedding job lifecycle |
 | `backend/src/services/vibeEmbeddingCoverage.ts` | Worker target-space audio embedding coverage metrics |
 | `backend/src/services/vibeEmbeddingEligibility.ts` | Shared local-track eligibility for vibe production and coverage |
+| `backend/src/services/vibeInvalidation.ts` | Atomic vibe-state reset and generation invalidation fence |
 | `backend/src/services/vibeProvider.ts` | Validated, bounded vibe-provider HTTP client and registry-space trust boundaries |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/vibeVocabularyGenerator.ts` | Testable provider-backed vocabulary artifact generation |

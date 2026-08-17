@@ -1,4 +1,5 @@
 import pLimit from "p-limit";
+import { randomUUID } from "node:crypto";
 import { config } from "../config";
 import {
     processVibeEmbedJob,
@@ -16,6 +17,7 @@ import {
     setVibeEmbeddingTargetSpaceId,
 } from "../services/embeddingSpaces";
 import { fetchProviderSpace } from "../services/vibeProvider";
+import { EmbeddingTargetInvalidatedError } from "../services/trackEmbeddings";
 import {
     recordVibeSpaceTransition,
     setVibeMigrationActive,
@@ -40,6 +42,7 @@ const POP_ERROR_BACKOFF_MS = 250;
 const TARGET_RESOLUTION_RETRY_MS = 60_000;
 const TERMINAL_TARGET_RESOLUTION_RETRY_MS = 15 * 60_000;
 const LEGACY_CLEANUP_TIMEOUT_MS = 60_000;
+const VIBE_WORKER_ID = `${process.pid}-${randomUUID()}`;
 
 interface WorkerLogger {
     info(message: string, context?: unknown): void;
@@ -119,6 +122,7 @@ function isTerminalTargetResolutionError(error: unknown): boolean {
 class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
     private readonly limit: ReturnType<typeof pLimit>;
     private readonly active = new Set<Promise<void>>();
+    private readonly targetInvalidationRetries = new Set<string>();
     private running = false;
     private loopPromise: Promise<void> | null = null;
     private coverageInterval: NodeJS.Timeout | null = null;
@@ -209,7 +213,12 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
                 registered: this.targetSpace.registered,
             };
             await this.dependencies.processJob(rawJob, jobTarget);
+            this.targetInvalidationRetries.delete(rawJob);
         } catch (error) {
+            if (error instanceof EmbeddingTargetInvalidatedError) {
+                await this.handleTargetInvalidation(rawJob, error);
+                return;
+            }
             this.dependencies.logger.error(
                 "Vibe embedding job failed before finalization",
                 error,
@@ -220,6 +229,46 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
                     requeueError,
                 );
             });
+        }
+    }
+
+    private clearResolvedTarget(): void {
+        this.targetSpace = null;
+        this.coverage = null;
+        this.dependencies.clearTargetSpace();
+        this.dependencies.setMigrationActive(false);
+        if (this.coverageInterval) clearInterval(this.coverageInterval);
+        this.coverageInterval = null;
+        if (this.lifecycleInterval) clearInterval(this.lifecycleInterval);
+        this.lifecycleInterval = null;
+    }
+
+    private async handleTargetInvalidation(
+        rawJob: string,
+        error: EmbeddingTargetInvalidatedError,
+    ): Promise<void> {
+        this.clearResolvedTarget();
+        if (this.targetInvalidationRetries.has(rawJob)) {
+            this.targetInvalidationRetries.delete(rawJob);
+            this.dependencies.logger.warn(
+                "Vibe job target changed twice; deferred to producer retry",
+                { spaceId: error.spaceId },
+            );
+            return;
+        }
+        this.targetInvalidationRetries.add(rawJob);
+        this.dependencies.logger.info(
+            "Vibe embedding target invalidated; resolving a fresh target",
+            { spaceId: error.spaceId },
+        );
+        try {
+            await this.dependencies.requeue(rawJob);
+        } catch (requeueError) {
+            this.targetInvalidationRetries.delete(rawJob);
+            this.dependencies.logger.error(
+                "Failed to requeue target-invalidated vibe job",
+                requeueError,
+            );
         }
     }
 
@@ -418,8 +467,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.cleanupTask = null;
         await this.loopPromise;
         this.loopPromise = null;
-        this.targetSpace = null;
-        this.dependencies.clearTargetSpace();
+        this.clearResolvedTarget();
     }
 }
 
@@ -460,8 +508,24 @@ const worker = createVibeEmbedWorker({
         });
     },
     cleanupLegacyArtifacts: async () => {
-        const result = await cleanupLegacyVibeRedisArtifacts(redisClient, log);
-        log.info("Legacy vibe Redis cleanup completed", result);
+        const cleanupClient = redisClient.duplicate();
+        try {
+            const connected = await settleAtDeadline(
+                cleanupClient.connect().then(() => undefined),
+                5_000,
+            );
+            if (connected === "deadline") {
+                cleanupClient.destroy();
+                throw new Error("Legacy vibe Redis cleanup connect timed out");
+            }
+            const result = await cleanupLegacyVibeRedisArtifacts(
+                cleanupClient,
+                log,
+            );
+            log.info("Legacy vibe Redis cleanup completed", result);
+        } finally {
+            if (cleanupClient.isOpen) cleanupClient.destroy();
+        }
     },
     resolveTargetSpace: async () => {
         const providerSpace = await fetchProviderSpace();
@@ -479,7 +543,7 @@ const worker = createVibeEmbedWorker({
     recordSpaceTransition: recordVibeSpaceTransition,
     setMigrationActive: setVibeMigrationActive,
     writeStatus: async (status) => {
-        await writeVibeWorkerStatus(redisClient, status);
+        await writeVibeWorkerStatus(redisClient, status, VIBE_WORKER_ID);
     },
     now: () => new Date(),
     logger: log,

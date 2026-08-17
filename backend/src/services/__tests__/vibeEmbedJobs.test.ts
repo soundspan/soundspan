@@ -30,6 +30,10 @@ import {
     VibeProviderTimeoutError,
     VibeProviderUnavailableError,
 } from "../vibeProvider";
+import {
+    EmbeddingTargetInvalidatedError,
+    VibeEmbeddingGenerationMismatchError,
+} from "../trackEmbeddings";
 
 describe("vibe provider retry classification", () => {
     it.each([
@@ -152,24 +156,12 @@ describe("vibe embed job processor", () => {
             "track-1",
             [0.6, 0.8],
             "space-provider",
+            {
+                generation: 0,
+                completedAt: new Date("2026-08-16T12:00:00.000Z"),
+            },
         );
-        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith({
-            where: {
-                id: "track-1",
-                origin: "LOCAL",
-                removedAt: null,
-                vibeAnalysisStatus: "processing",
-                vibeAnalysisGeneration: 0,
-            },
-            data: {
-                vibeAnalysisStatus: "completed",
-                vibeAnalysisError: null,
-                vibeAnalysisStartedAt: null,
-                vibeAnalysisStatusUpdatedAt: new Date(
-                    "2026-08-16T12:00:00.000Z",
-                ),
-            },
-        });
+        expect(harness.prisma.track.updateMany).toHaveBeenCalledTimes(1);
         expect(harness.resolveByEntity).toHaveBeenCalledWith("vibe", "track-1");
         expect(harness.recordOutcome).toHaveBeenCalledWith("stored");
     });
@@ -593,20 +585,21 @@ describe("vibe embed job processor", () => {
                 vibeAnalysisRetryCount: 0,
                 vibeAnalysisGeneration: 0,
             })
-            .mockResolvedValueOnce({ id: "track-force-race" })
             .mockResolvedValueOnce({
                 id: "track-force-race",
                 title: "Force Race",
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisRetryCount: 0,
                 vibeAnalysisGeneration: 1,
-            })
-            .mockResolvedValueOnce({ id: "track-force-race" });
+            });
         harness.prisma.track.updateMany
             .mockResolvedValueOnce({ count: 1 })
-            .mockResolvedValueOnce({ count: 0 })
-            .mockResolvedValueOnce({ count: 1 })
             .mockResolvedValueOnce({ count: 1 });
+        harness.upsertTrackEmbedding
+            .mockRejectedValueOnce(
+                new VibeEmbeddingGenerationMismatchError("track-force-race", 0),
+            )
+            .mockResolvedValueOnce(undefined);
         const payload = JSON.stringify({
             trackId: "track-force-race",
             filePath: "artist/force.flac",
@@ -621,16 +614,6 @@ describe("vibe embed job processor", () => {
             2,
             expect.objectContaining({
                 where: expect.objectContaining({
-                    vibeAnalysisStatus: "processing",
-                    vibeAnalysisGeneration: 0,
-                }),
-            }),
-        );
-        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(
-            4,
-            expect.objectContaining({
-                where: expect.objectContaining({
-                    vibeAnalysisStatus: "processing",
                     vibeAnalysisGeneration: 1,
                 }),
             }),
@@ -686,11 +669,15 @@ describe("vibe embed job processor", () => {
         });
     });
 
-    it("does not store when the track is removed during inference", async () => {
+    it("treats a removed track during transactional finalization as stale", async () => {
         const harness = createHarness();
-        harness.prisma.track.findFirst
-            .mockResolvedValueOnce({ id: "track-4", title: "Track Four" })
-            .mockResolvedValueOnce(null);
+        harness.prisma.track.findFirst.mockResolvedValueOnce({
+            id: "track-4",
+            title: "Track Four",
+        });
+        harness.upsertTrackEmbedding.mockRejectedValueOnce(
+            new VibeEmbeddingGenerationMismatchError("track-4", 0),
+        );
 
         await expect(
             harness.processJob(
@@ -699,10 +686,45 @@ describe("vibe embed job processor", () => {
                     filePath: "artist/track.flac",
                 }),
             ),
-        ).resolves.toBe("track_missing");
+        ).resolves.toBe("stale_claim");
 
         expect(harness.embedAudio).toHaveBeenCalledTimes(1);
-        expect(harness.upsertTrackEmbedding).not.toHaveBeenCalled();
-        expect(harness.recordOutcome).toHaveBeenCalledWith("track_missing");
+        expect(harness.upsertTrackEmbedding).toHaveBeenCalledTimes(1);
+        expect(harness.recordOutcome).toHaveBeenCalledWith("stale_claim");
+    });
+
+    it("resets and surfaces a target invalidation without marking the track failed", async () => {
+        const harness = createHarness();
+        const error = new EmbeddingTargetInvalidatedError("space-provider");
+        harness.prisma.track.findFirst.mockResolvedValueOnce({
+            id: "track-retired-target",
+            title: "Retired Target",
+            vibeAnalysisGeneration: 6,
+        });
+        harness.upsertTrackEmbedding.mockRejectedValueOnce(error);
+
+        await expect(
+            harness.processJob(
+                JSON.stringify({
+                    trackId: "track-retired-target",
+                    filePath: "artist/track.flac",
+                }),
+            ),
+        ).rejects.toBe(error);
+
+        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith({
+            where: {
+                id: "track-retired-target",
+                origin: "LOCAL",
+                removedAt: null,
+                vibeAnalysisStatus: "processing",
+                vibeAnalysisGeneration: 6,
+            },
+            data: expect.objectContaining({
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisStartedAt: null,
+            }),
+        });
+        expect(harness.recordFailure).not.toHaveBeenCalled();
     });
 });

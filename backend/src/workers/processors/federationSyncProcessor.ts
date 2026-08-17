@@ -84,7 +84,6 @@ interface SyncContext {
     skippedUnknownTombstones: number;
     localEmbeddingSpace: ActiveEmbeddingSpace | null;
     embeddingWarningEmitted: boolean;
-    legacyPreprocessingWarningEmitted: boolean;
 }
 
 /** Bounded summary of one completed peer sync. */
@@ -126,7 +125,6 @@ function newSyncContext(
         skippedUnknownTombstones: 0,
         localEmbeddingSpace,
         embeddingWarningEmitted: localEmbeddingSpace === null,
-        legacyPreprocessingWarningEmitted: false,
     };
 }
 

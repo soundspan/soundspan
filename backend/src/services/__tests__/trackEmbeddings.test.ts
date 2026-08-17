@@ -3,7 +3,7 @@ jest.mock("../../utils/db", () => ({
         $executeRaw: jest.fn(),
         $queryRaw: jest.fn(),
         $transaction: jest.fn(),
-        track: { findMany: jest.fn() },
+        track: { findMany: jest.fn(), updateMany: jest.fn() },
         embeddingSpace: {
             findUnique: jest.fn(),
             updateMany: jest.fn(),
@@ -48,9 +48,11 @@ beforeEach(() => {
         async (operation: (transaction: unknown) => Promise<unknown>) =>
             operation({
                 $executeRaw: prisma.$executeRaw,
+                $queryRaw: prisma.$queryRaw,
                 embeddingSpace: {
                     updateMany: prisma.embeddingSpace.updateMany,
                 },
+                track: { updateMany: prisma.track.updateMany },
             }),
     );
     mockGetActiveSpace.mockResolvedValue({
@@ -66,9 +68,7 @@ beforeEach(() => {
 describe("upsertTrackEmbedding", () => {
     it("writes a complete finite CLAP vector", async () => {
         (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
-        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
-            dim: 512,
-        });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ dim: 512 }]);
         (prisma.embeddingSpace.updateMany as jest.Mock).mockResolvedValue({
             count: 1,
         });
@@ -87,21 +87,21 @@ describe("upsertTrackEmbedding", () => {
         expect(query.join(" ")).not.toContain("model_version");
         expect(values).toContain("space-target");
         expect(query.join(" ")).toContain("ON CONFLICT (track_id, space_id)");
-        expect(prisma.embeddingSpace.findUnique).toHaveBeenCalledWith({
-            where: { id: "space-target" },
-            select: { dim: true },
-        });
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
         expect(prisma.embeddingSpace.updateMany).toHaveBeenCalledWith({
-            where: { id: "space-target", hadVectors: false },
+            where: {
+                id: "space-target",
+                status: { in: ["active", "migrating"] },
+                cleaningAt: null,
+                hadVectors: false,
+            },
             data: { hadVectors: true },
         });
     });
 
     it("rolls back the vector write when the hadVectors marker fails", async () => {
         (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
-        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
-            dim: 2,
-        });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ dim: 2 }]);
         (prisma.embeddingSpace.updateMany as jest.Mock).mockRejectedValue(
             new Error("marker write failed"),
         );
@@ -116,13 +116,77 @@ describe("upsertTrackEmbedding", () => {
     });
 
     it("rejects malformed vectors before writing", async () => {
-        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
-            dim: 2,
-        });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ dim: 2 }]);
         await expect(
             upsertTrackEmbedding("track-1", [0.25], "space-two-dimensional"),
         ).rejects.toThrow("2 finite values");
         expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it("rejects a retired target before writing", async () => {
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+
+        await expect(
+            upsertTrackEmbedding("track-1", [0.6, 0.8], "space-retired"),
+        ).rejects.toMatchObject({
+            name: "EmbeddingTargetInvalidatedError",
+            spaceId: "space-retired",
+        });
+
+        expect(prisma.$executeRaw).not.toHaveBeenCalled();
+        expect(prisma.embeddingSpace.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("completes only the claimed generation in the vector transaction", async () => {
+        const completedAt = new Date("2026-08-17T12:00:00.000Z");
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ dim: 2 }]);
+        (prisma.track.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+        (prisma.embeddingSpace.updateMany as jest.Mock).mockResolvedValue({
+            count: 0,
+        });
+
+        await upsertTrackEmbedding(
+            "track-claimed",
+            [0.6, 0.8],
+            "space-target",
+            { generation: 7, completedAt },
+        );
+
+        expect(prisma.track.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: "track-claimed",
+                origin: "LOCAL",
+                removedAt: null,
+                vibeAnalysisStatus: "processing",
+                vibeAnalysisGeneration: 7,
+            },
+            data: {
+                vibeAnalysisStatus: "completed",
+                vibeAnalysisError: null,
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: completedAt,
+            },
+        });
+    });
+
+    it("aborts a stale generation before the vector upsert", async () => {
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ dim: 2 }]);
+        (prisma.track.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+        await expect(
+            upsertTrackEmbedding("track-stale", [0.6, 0.8], "space-target", {
+                generation: 4,
+                completedAt: new Date("2026-08-17T12:00:00.000Z"),
+            }),
+        ).rejects.toMatchObject({
+            name: "VibeEmbeddingGenerationMismatchError",
+            trackId: "track-stale",
+            generation: 4,
+        });
+
+        expect(prisma.$executeRaw).not.toHaveBeenCalled();
+        expect(prisma.embeddingSpace.updateMany).not.toHaveBeenCalled();
     });
 });
 

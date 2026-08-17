@@ -24,6 +24,7 @@ import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { audioAnalysisCleanupService } from "../services/audioAnalysisCleanup";
 import { rateLimiter } from "../services/rateLimiter";
 import { vibeAnalysisCleanupService } from "../services/vibeAnalysisCleanup";
+import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 import { getSystemSettings } from "../utils/systemSettings";
 import { featureDetection } from "../services/featureDetection";
 import { moodBucketService } from "../services/moodBucketService";
@@ -575,14 +576,7 @@ export async function runFullEnrichment(options?: {
     });
 
     if (forceVibeRebuild) {
-        await prisma.track.updateMany({
-            where: LOCAL_TRACK_WHERE,
-            data: {
-                vibeAnalysisStatus: "pending",
-                vibeAnalysisStartedAt: null,
-                vibeAnalysisStatusUpdatedAt: new Date(),
-            },
-        });
+        await invalidateVibeAnalysis(prisma, LOCAL_TRACK_WHERE, new Date());
 
         await enrichmentFailureService.clearAllFailures("vibe");
 

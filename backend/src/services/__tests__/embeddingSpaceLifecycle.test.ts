@@ -76,6 +76,7 @@ import {
     ANN_INDEX_MIN_VECTOR_COUNT,
     MAX_RETIREMENT_DELETE_BATCHES,
     RETIREMENT_DELETE_BATCH_SIZE,
+    annIndexListsForVectorCount,
     retirementDue,
     runEmbeddingSpaceLifecycleCheck,
     shouldBuildAnnIndex,
@@ -139,6 +140,17 @@ describe("embedding-space lifecycle decisions", () => {
         [ANN_INDEX_MIN_VECTOR_COUNT + 1, true],
     ])("builds an ANN index for %s vectors: %s", (vectorCount, expected) => {
         expect(shouldBuildAnnIndex(vectorCount)).toBe(expected);
+    });
+
+    it.each([
+        [999, null],
+        [1_000, 40],
+        [2_499, 40],
+        [2_500, 100],
+        [5_000, 200],
+        [10_000, 224],
+    ])("sizes %s vectors into the %s-list band", (rows, lists) => {
+        expect(annIndexListsForVectorCount(rows)).toBe(lists);
     });
 });
 
@@ -305,7 +317,9 @@ describe("embedding-space lifecycle effects", () => {
             failed: 0,
         });
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
-        mockQueryRaw.mockResolvedValue([{ isValid: true }]);
+        mockQueryRaw.mockResolvedValue([
+            { isValid: true, options: ["lists=40"] },
+        ]);
 
         await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
@@ -345,7 +359,7 @@ describe("embedding-space lifecycle effects", () => {
                 failed: 10,
             },
         );
-        expect(mockQueryRaw).not.toHaveBeenCalled();
+        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
         expect(mockTransaction).not.toHaveBeenCalled();
     });
 
@@ -423,7 +437,9 @@ describe("embedding-space lifecycle effects", () => {
             failed: 0,
         });
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
-        mockQueryRaw.mockResolvedValue([{ isValid: false }]);
+        mockQueryRaw.mockResolvedValue([
+            { isValid: false, options: ["lists=40"] },
+        ]);
 
         await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
@@ -456,8 +472,27 @@ describe("embedding-space lifecycle effects", () => {
 
         await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
-        expect(mockQueryRaw).not.toHaveBeenCalled();
+        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
         expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds at most once when the active space crosses a list band", async () => {
+        mockEmbeddingCount.mockResolvedValue(2_500);
+        mockQueryRaw.mockResolvedValue([
+            { isValid: true, options: ["lists=40"] },
+        ]);
+
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
+
+        expect(mockExecuteRawUnsafe).toHaveBeenCalledTimes(2);
+        expect(mockExecuteRawUnsafe).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining("DROP INDEX CONCURRENTLY"),
+        );
+        expect(mockExecuteRawUnsafe).toHaveBeenNthCalledWith(
+            2,
+            expect.stringContaining("WITH (lists = 100)"),
+        );
     });
 
     it("selects the current provider migration instead of an older abandoned space", async () => {

@@ -38,6 +38,13 @@ const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
         const { redisClient } = await import("../utils/redis");
         return redisClient.lLen(VIBE_PROVIDER_QUEUE_KEY);
     },
+    getProviderStatusFresh: async () => {
+        const [{ redisClient }, { readVibeWorkerStatus }] = await Promise.all([
+            import("../utils/redis"),
+            import("../workers/vibeWorkerStatus"),
+        ]);
+        return (await readVibeWorkerStatus(redisClient)) !== null;
+    },
 });
 
 /** Express middleware recording bounded HTTP request duration labels. */

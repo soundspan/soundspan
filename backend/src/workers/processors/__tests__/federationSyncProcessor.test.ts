@@ -1521,7 +1521,7 @@ describe("federation sync processor", () => {
         );
     });
 
-    it("accepts a matching 2.3 tuple without preprocessingHash and warns once", async () => {
+    it("rejects a present tuple without preprocessingHash and warns once", async () => {
         const { preprocessingHash: _omitted, ...olderTuple } = embeddingSpace;
         client.getCatalogItems.mockImplementation((type: string) =>
             Promise.resolve(
@@ -1533,15 +1533,17 @@ describe("federation sync processor", () => {
 
         await processFederationSync(job());
 
-        expect(upsertTrackEmbedding).toHaveBeenCalledWith(
-            "fed-track-row",
-            track.attributes.embedding,
-            activeSpace.id,
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_mismatch",
         );
         expect(mockLog.warn).toHaveBeenCalledTimes(1);
         expect(mockLog.warn).toHaveBeenCalledWith(
-            "Accepting federation embeddings from a 2.3 peer without preprocessingHash",
-            { peerId: "peer-1" },
+            "Skipping federation embeddings because the page space does not match the local active space",
+            expect.objectContaining({
+                peerId: "peer-1",
+                outcome: "skipped_mismatch",
+            }),
         );
     });
 

@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { invalidateVibeAnalysis } from "./vibeInvalidation";
 
 const replacementLogger = logger.child("TrackReplacement");
 
@@ -12,7 +13,7 @@ type ReplacementTransaction = Pick<
     "track" | "trackEmbedding" | "transcodedFile"
 >;
 
-type TrackUpdateData = Prisma.TrackUpdateArgs["data"];
+type TrackUpdateData = Prisma.TrackUpdateManyMutationInput;
 
 function replacementResetData(now: Date) {
     return {
@@ -21,11 +22,6 @@ function replacementResetData(now: Date) {
         analysisError: null,
         analysisRetryCount: 0,
         analysisStartedAt: null,
-        vibeAnalysisStatus: "pending",
-        vibeAnalysisError: null,
-        vibeAnalysisRetryCount: 0,
-        vibeAnalysisStartedAt: null,
-        vibeAnalysisStatusUpdatedAt: now,
     } satisfies TrackUpdateData;
 }
 
@@ -43,10 +39,16 @@ export async function applyTrackReplacement(
         where: { trackId },
         select: { cachePath: true },
     });
-    await transaction.track.update({
-        where: { id: trackId },
-        data: { ...trackData, ...replacementResetData(new Date()) },
-    });
+    const invalidatedAt = new Date();
+    const updated = await invalidateVibeAnalysis(
+        transaction,
+        { id: trackId },
+        invalidatedAt,
+        { ...trackData, ...replacementResetData(invalidatedAt) },
+    );
+    if (updated !== 1) {
+        throw new Error("Track replacement requires exactly one track");
+    }
     await transaction.trackEmbedding.deleteMany({ where: { trackId } });
     await transaction.transcodedFile.deleteMany({ where: { trackId } });
     return cachedFiles.map((file) => file.cachePath);

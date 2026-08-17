@@ -107,6 +107,7 @@ const prisma = {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(async () => ({ count: 1 })),
     },
     systemSettings: {
         findUnique: jest.fn(),
@@ -1145,15 +1146,16 @@ describe("enrichment route runtime behavior", () => {
             res,
         );
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith({
+        expect(prisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-vibe" },
-            data: {
+            data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisError: null,
                 vibeAnalysisRetryCount: 0,
                 vibeAnalysisStartedAt: null,
                 vibeAnalysisStatusUpdatedAt: expect.any(Date),
-            },
+                vibeAnalysisGeneration: { increment: 1 },
+            }),
         });
         expect(res.body).toEqual({
             message:

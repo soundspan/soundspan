@@ -1318,6 +1318,7 @@ describe("MusicScannerService.scanLibrary", () => {
             .mockResolvedValueOnce([])
             .mockResolvedValueOnce([candidate]);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
+        mockPrisma.track.updateMany.mockResolvedValueOnce({ count: 1 });
         mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
             { cachePath: "track-old-high.mp3" },
         ]);
@@ -1331,7 +1332,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 tracksRemoved: 0,
             }),
         );
-        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+        expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-old" },
             data: expect.objectContaining({
                 filePath: "Artist/Album/01 Song.flac",
@@ -1346,6 +1347,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 vibeAnalysisRetryCount: 0,
                 vibeAnalysisStartedAt: null,
                 vibeAnalysisStatusUpdatedAt: expect.any(Date),
+                vibeAnalysisGeneration: { increment: 1 },
             }),
         });
         expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
@@ -1377,6 +1379,7 @@ describe("MusicScannerService.scanLibrary", () => {
         ).mockResolvedValue([audioFile]);
         mockPrisma.track.findMany.mockResolvedValueOnce([oldTrack]);
         mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-old" });
+        mockPrisma.track.updateMany.mockResolvedValueOnce({ count: 1 });
         mockComputeAudioStreamHash.mockResolvedValueOnce(newHash);
         mockPrisma.transcodedFile.findMany.mockResolvedValueOnce([
             { cachePath: "track-old-medium.mp3" },
@@ -1397,7 +1400,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 update: expect.objectContaining({ audioHash: newHash }),
             }),
         );
-        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+        expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-old" },
             data: expect.objectContaining({
                 analysisStatus: "pending",
@@ -1405,6 +1408,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 analysisRetryCount: 0,
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: { increment: 1 },
             }),
         });
         expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({
@@ -1594,6 +1598,7 @@ describe("MusicScannerService.scanLibrary", () => {
         ).mockResolvedValue([audioFile]);
         mockComputeAudioStreamHash.mockResolvedValueOnce(newHash);
         mockPrisma.track.upsert.mockResolvedValueOnce(candidate);
+        mockPrisma.track.updateMany.mockResolvedValueOnce({ count: 1 });
         mockPrisma.track.findMany
             .mockResolvedValueOnce([])
             .mockResolvedValueOnce([])
@@ -1605,7 +1610,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.track.update).toHaveBeenCalledWith({
+        expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: { id: "track-removed" },
             data: expect.objectContaining({
                 filePath: "New/01 Song.flac",
@@ -1613,6 +1618,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 removedAt: null,
                 analysisStatus: "pending",
                 vibeAnalysisStatus: "pending",
+                vibeAnalysisGeneration: { increment: 1 },
             }),
         });
         expect(mockPrisma.trackEmbedding.deleteMany).toHaveBeenCalledWith({

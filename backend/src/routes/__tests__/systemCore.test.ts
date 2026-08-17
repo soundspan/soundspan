@@ -91,6 +91,7 @@ describe("system routes integration", () => {
                     configured: true,
                     reachable: true,
                     checkedAt: "2026-08-17T12:00:00.000Z",
+                    fresh: true,
                 },
                 activeSpace: { id: "space-active", family: "teacher" },
                 migration: {

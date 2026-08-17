@@ -40,10 +40,10 @@ function isStatementTimeout(error: unknown): boolean {
  * Run a pgvector ANN query with `ivfflat.probes` applied on the SAME pooled
  * connection as the query (roadmap F14).
  *
- * The `track_embeddings` index is `ivfflat ... WITH (lists = 224)`. Postgres
- * defaults `ivfflat.probes` to 1, so an unconfigured ANN query scans only 1 of
- * the 224 inverted lists and recall is silently near-random. This helper is the
- * single place that fixes that: it wraps the caller's ANN query in an explicit
+ * The `track_embeddings` indexes use size-banded lists capped at 224. Postgres
+ * defaults `ivfflat.probes` to 1, so an unconfigured ANN query scans only one
+ * inverted list and recall can be silently near-random. This helper wraps the
+ * caller's ANN query in an explicit
  * batch `$transaction` alongside a probes-setting statement.
  *
  * Two footguns this shape avoids, both verified on the live DB:

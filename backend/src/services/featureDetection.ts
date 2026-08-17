@@ -23,6 +23,7 @@ export interface VibeFeatureStatus {
         configured: boolean;
         reachable: boolean | null;
         checkedAt: string | null;
+        fresh: boolean;
     };
     activeSpace: { id: string; family: string } | null;
     migration: {
@@ -82,6 +83,7 @@ async function loadVibeStatus(): Promise<VibeFeatureStatus> {
             configured,
             reachable: reachability?.reachable ?? null,
             checkedAt: reachability?.checkedAt ?? null,
+            fresh: workerStatus !== null,
         },
         activeSpace,
         migration: configured

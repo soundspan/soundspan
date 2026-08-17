@@ -16,7 +16,6 @@ const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
 const CLEANING_CLAIM_STALE_MS = 60 * 60 * 1_000;
 const SPACE_ID_PATTERN = /^[A-Za-z0-9_]{1,48}$/;
-const ANN_INDEX_LISTS = 224;
 const log =
     typeof (logger as { child?: unknown }).child === "function"
         ? logger.child("EmbeddingSpaceLifecycle")
@@ -27,10 +26,28 @@ export const RETIREMENT_DELETE_BATCH_SIZE = 500;
 /** Fixed per-run bound so a large retired space resumes on the next tick. */
 export const MAX_RETIREMENT_DELETE_BATCHES = 20;
 /**
- * Conservative training floor for the retained 224-list IVFFlat shape.
- * This supplies at least four vectors per list and bounds exact scans at 999.
+ * Conservative training floor for the first size-banded IVFFlat shape.
+ * Spaces below this size remain exact scans.
  */
 export const ANN_INDEX_MIN_VECTOR_COUNT = 1_000;
+
+/** Select the stable IVFFlat list band for a space's current vector count. */
+export function annIndexListsForVectorCount(
+    vectorCount: number,
+): number | null {
+    if (!Number.isSafeInteger(vectorCount) || vectorCount < 0) return null;
+    if (vectorCount < ANN_INDEX_MIN_VECTOR_COUNT) return null;
+    // pgvector's README recommends rows/1000 below one million rows as a
+    // starting point, then measuring recall against exact search. Soundspan's
+    // existing 15k-row benchmark selected 224 lists with 32 probes, so these
+    // stepped rows/25 bands avoid per-insert rebuilds while converging on that
+    // measured shape; the PostgreSQL integration suite pins exact top-k at the
+    // first band edge.
+    if (vectorCount < 2_500) return 40;
+    if (vectorCount < 5_000) return 100;
+    if (vectorCount < 10_000) return 200;
+    return 224;
+}
 
 interface LifecycleConfig {
     threshold: number;
@@ -90,11 +107,28 @@ function partialIndexName(spaceId: string): string {
     return `track_embeddings_${validatedSpaceId(spaceId)}_ivfflat_idx`;
 }
 
-async function buildPartialAnnIndex(spaceId: string): Promise<void> {
+interface AnnIndexState {
+    isValid: boolean;
+    lists: number | null;
+}
+
+function parseIndexLists(options: readonly string[] | null): number | null {
+    const value = options?.find((option) => option.startsWith("lists="));
+    if (!value) return null;
+    const lists = Number.parseInt(value.slice("lists=".length), 10);
+    return Number.isSafeInteger(lists) && lists > 0 ? lists : null;
+}
+
+async function loadPartialAnnIndex(
+    spaceId: string,
+): Promise<AnnIndexState | null> {
     const validatedId = validatedSpaceId(spaceId);
     const indexName = partialIndexName(validatedId);
-    const rows = await prisma.$queryRaw<Array<{ isValid: boolean }>>`
-        SELECT index_row.indisvalid AS "isValid"
+    const rows = await prisma.$queryRaw<
+        Array<{ isValid: boolean; options: string[] | null }>
+    >`
+        SELECT index_row.indisvalid AS "isValid",
+               index_class.reloptions AS options
         FROM pg_catalog.pg_index index_row
         INNER JOIN pg_catalog.pg_class index_class
             ON index_class.oid = index_row.indexrelid
@@ -104,15 +138,25 @@ async function buildPartialAnnIndex(spaceId: string): Promise<void> {
           AND namespace.nspname = current_schema()
         LIMIT 1
     `;
-    if (rows[0]?.isValid === true) return;
-    if (rows[0]?.isValid === false) await dropPartialAnnIndex(validatedId);
+    const row = rows[0];
+    return row
+        ? { isValid: row.isValid, lists: parseIndexLists(row.options) }
+        : null;
+}
+
+async function createPartialAnnIndex(
+    spaceId: string,
+    lists: number,
+): Promise<void> {
+    const validatedId = validatedSpaceId(spaceId);
+    const indexName = partialIndexName(validatedId);
     // PostgreSQL cannot parameterize identifiers or a partial-index predicate,
     // and CREATE INDEX CONCURRENTLY must run outside a transaction. The value
     // is a registry-owned id validated above, never request or operator input.
     await prisma.$executeRawUnsafe(
         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${indexName}" ` +
             `ON track_embeddings USING ivfflat (embedding vector_cosine_ops) ` +
-            `WITH (lists = ${ANN_INDEX_LISTS}) WHERE space_id = '${validatedId}'`,
+            `WITH (lists = ${lists}) WHERE space_id = '${validatedId}'`,
     );
 }
 
@@ -121,8 +165,15 @@ export async function ensureSpaceAnnIndex(spaceId: string): Promise<boolean> {
     const vectorCount = await prisma.trackEmbedding.count({
         where: { spaceId },
     });
-    if (!shouldBuildAnnIndex(vectorCount)) return false;
-    await buildPartialAnnIndex(spaceId);
+    const desiredLists = annIndexListsForVectorCount(vectorCount);
+    const current = await loadPartialAnnIndex(spaceId);
+    if (desiredLists === null) {
+        if (current) await dropPartialAnnIndex(spaceId);
+        return false;
+    }
+    if (current?.isValid && current.lists === desiredLists) return true;
+    if (current) await dropPartialAnnIndex(spaceId);
+    await createPartialAnnIndex(spaceId, desiredLists);
     return true;
 }
 

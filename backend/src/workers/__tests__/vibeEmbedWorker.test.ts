@@ -15,6 +15,7 @@ import {
     EmbeddingSpacePreprocessingMismatchError,
     RetiredEmbeddingSpaceError,
 } from "../../services/embeddingSpaces";
+import { EmbeddingTargetInvalidatedError } from "../../services/trackEmbeddings";
 
 const flushPromises = async (): Promise<void> => {
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -339,6 +340,57 @@ describe("vibe embed worker", () => {
         expect(harness.requeue).toHaveBeenCalledWith("unfinished-job");
         const stopping = harness.worker.stop();
         secondPop.resolve(null);
+        await stopping;
+    });
+
+    it("requeues once and succeeds after a target is retired", async () => {
+        const finalPop = deferred<string | null>();
+        const harness = createHarness({
+            providerUrl: "http://provider:8090",
+        });
+        harness.resolveTargetSpace
+            .mockResolvedValueOnce({
+                id: "space-retired",
+                dim: 2,
+                status: "migrating",
+                registered: false,
+                family: "test-family",
+            })
+            .mockResolvedValueOnce({
+                id: "space-new",
+                dim: 2,
+                status: "active",
+                registered: false,
+                family: "test-family",
+            });
+        harness.pop
+            .mockResolvedValueOnce("target-invalidated-job")
+            .mockResolvedValueOnce("target-invalidated-job")
+            .mockReturnValueOnce(finalPop.promise);
+        harness.processJob
+            .mockRejectedValueOnce(
+                new EmbeddingTargetInvalidatedError("space-retired"),
+            )
+            .mockResolvedValueOnce("stored");
+
+        await harness.worker.start();
+        await flushPromises();
+        await flushPromises();
+
+        expect(harness.requeue).toHaveBeenCalledTimes(1);
+        expect(harness.resolveTargetSpace).toHaveBeenCalledTimes(2);
+        expect(harness.processJob).toHaveBeenNthCalledWith(
+            2,
+            "target-invalidated-job",
+            expect.objectContaining({ id: "space-new", status: "active" }),
+        );
+        expect(harness.logger.info).toHaveBeenCalledWith(
+            "Vibe embedding target invalidated; resolving a fresh target",
+            { spaceId: "space-retired" },
+        );
+
+        const stopping = harness.worker.stop();
+        finalPop.resolve(null);
         await stopping;
     });
 

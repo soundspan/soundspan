@@ -16,6 +16,17 @@ groups:
                 summary: Vibe provider request failure rate is high
                 description: More than 10% of at least 10 vibe provider requests failed during the last 10 minutes.
 
+          - alert: SoundspanVibeProviderHeartbeatStale
+            expr: |
+                max(soundspan_vibe_provider_status_fresh) == 0
+                or absent(soundspan_vibe_provider_status_fresh)
+            for: 5m
+            labels:
+                severity: warning
+            annotations:
+                summary: Vibe provider worker heartbeat is absent or stale
+                description: No fresh per-worker vibe provider status heartbeat has been observed for at least 5 minutes.
+
           - alert: SoundspanVibeMigrationCoverageStalled
             expr: |
                 max(soundspan_vibe_migration_active) == 1

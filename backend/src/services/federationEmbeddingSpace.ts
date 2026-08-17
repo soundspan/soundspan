@@ -72,7 +72,7 @@ export function decideFederationEmbeddingPage(
         pageTuple.checkpointHash === localSpace.checkpointHash &&
         pageTuple.dim === localSpace.dim;
     if (!baseMatches) return "skipped_mismatch";
-    if (pageTuple.preprocessingHash === undefined) return "stored";
+    if (pageTuple.preprocessingHash === undefined) return "skipped_mismatch";
     return pageTuple.preprocessingHash ===
         embeddingPreprocessingHash(localSpace.preprocessing)
         ? "stored"
@@ -82,7 +82,6 @@ export function decideFederationEmbeddingPage(
 /** Mutable once-per-sync warning latches owned by the caller's sync context. */
 export interface FederationEmbeddingWarningLatches {
     embeddingWarningEmitted: boolean;
-    legacyPreprocessingWarningEmitted: boolean;
 }
 
 export interface ScopedEmbeddingPageInput {
@@ -97,8 +96,7 @@ export interface ScopedEmbeddingPageInput {
 
 /**
  * Decide one synced page's embedding outcome and emit each per-sync warning at
- * most once: accepting a hash-less 2.3 peer page, and skipping a page whose
- * space does not match the local active space.
+ * most once when a page's space does not match the local active space.
  */
 export function decideScopedEmbeddingPage(
     input: ScopedEmbeddingPageInput,
@@ -110,18 +108,6 @@ export function decideScopedEmbeddingPage(
         input.pageTuple,
         input.localEmbeddingSpace,
     );
-    if (
-        outcome === "stored" &&
-        input.pageTuple != null &&
-        input.pageTuple.preprocessingHash === undefined &&
-        !input.warnings.legacyPreprocessingWarningEmitted
-    ) {
-        input.warnings.legacyPreprocessingWarningEmitted = true;
-        input.warn(
-            "Accepting federation embeddings from a 2.3 peer without preprocessingHash",
-            { peerId: input.peerId },
-        );
-    }
     if (outcome === "stored" || input.warnings.embeddingWarningEmitted) {
         return outcome;
     }

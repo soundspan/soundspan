@@ -45,10 +45,10 @@ describe("federation embedding-space decision", () => {
         }
     });
 
-    it("accepts a 2.3 tuple without preprocessingHash when the original fields match", () => {
+    it("rejects a present tuple without preprocessingHash", () => {
         const { preprocessingHash: _omitted, ...legacyTuple } = tuple;
         expect(decideFederationEmbeddingPage(legacyTuple, canonicalSpace)).toBe(
-            "stored",
+            "skipped_mismatch",
         );
     });
 

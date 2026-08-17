@@ -383,6 +383,7 @@ describe("worker entrypoint behavior", () => {
             getProviderQueueDepth: async () => {
                 throw new Error("redis unavailable");
             },
+            getProviderStatusFresh: async () => false,
         });
         const { requestHandler } = setupWorkerRuntime({
             metricsRegistryOverride: registry,

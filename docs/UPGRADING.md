@@ -83,13 +83,42 @@ install/upgrade rendering. `helm lint` alone exits successfully and does not
 enforce it.
 
 This upgrade changes the track-embedding composite key while individual-mode
-Deployments may still run 2.2 pods. Scale the backend and backend-worker
-Deployments to zero before `helm upgrade`. Let the upgrade restore their
-configured replica counts. If you do not stop both workloads, accept a brief
-error window while 2.2 pods overlap the 2.3 migration. The chart exposes
-`backend.strategy.type` and `backendWorker.strategy.type`. Setting both to
-`Recreate` prevents old and new pods from overlapping within each Deployment,
-but it does not coordinate the two Deployments.
+Deployments may still run 2.2 pods. Stop both workloads before `helm upgrade`.
+Set the namespace and the two rendered Deployment names. Save the original
+replica counts, then scale both Deployments to zero and wait until no ready
+replicas remain:
+
+```bash
+namespace=soundspan
+backend_deployment=soundspan-backend
+worker_deployment=soundspan-backend-worker
+backend_replicas=$(kubectl -n "$namespace" get deployment "$backend_deployment" -o jsonpath='{.spec.replicas}')
+worker_replicas=$(kubectl -n "$namespace" get deployment "$worker_deployment" -o jsonpath='{.spec.replicas}')
+kubectl -n "$namespace" scale deployment \
+  "$backend_deployment" "$worker_deployment" --replicas=0
+for attempt in $(seq 1 60); do
+  backend_ready=$(kubectl -n "$namespace" get deployment "$backend_deployment" -o jsonpath='{.status.readyReplicas}')
+  worker_ready=$(kubectl -n "$namespace" get deployment "$worker_deployment" -o jsonpath='{.status.readyReplicas}')
+  if [ "${backend_ready:-0}" = 0 ] && [ "${worker_ready:-0}" = 0 ]; then break; fi
+  if [ "$attempt" = 60 ]; then echo 'Timed out waiting for zero ready replicas' >&2; exit 1; fi
+  sleep 5
+done
+kubectl -n "$namespace" get deployment \
+  "$backend_deployment" "$worker_deployment" \
+  -o custom-columns=NAME:.metadata.name,READY:.status.readyReplicas
+```
+
+The verification output must show `0` ready replicas for both Deployments.
+Run `helm upgrade`, then restore and verify the saved replica counts:
+
+```bash
+kubectl -n "$namespace" scale deployment "$backend_deployment" \
+  --replicas="$backend_replicas"
+kubectl -n "$namespace" scale deployment "$worker_deployment" \
+  --replicas="$worker_replicas"
+kubectl -n "$namespace" rollout status deployment/"$backend_deployment" --timeout=5m
+kubectl -n "$namespace" rollout status deployment/"$worker_deployment" --timeout=5m
+```
 
 **Bare-metal or custom deployment:** stop the backend and every worker before
 applying the 2.3 database migration. Run this command from the backend

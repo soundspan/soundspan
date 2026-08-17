@@ -37,25 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index lifecycle, statement timeouts, and retired-vector cleanup.
 - Added starter Grafana panels for provider failures, migration coverage and
   failures, provider queue depth, and suppressed federation exports.
-- Added Prometheus alert rules for vibe provider failures, stalled migrations,
-  failed tracks, queue saturation, metrics collection errors, and suppressed
-  federation exports.
-- Added vibe migration and provider state to the system status API.
+- Added Prometheus alert rules for absent or stale vibe-provider heartbeats,
+  provider failures, stalled migrations, failed tracks, queue saturation,
+  metrics collection errors, and suppressed federation exports.
+- Added TTL-backed per-worker vibe migration and provider state to the system
+  status API, with a minimal provider indicator in admin settings.
 - Manual re-embed calls now leave automatic backfill headroom in the shared
   provider queue.
 
 ### Changed
 
-- Federation embedding-space headers now include an additive canonical
-  preprocessing hash. Older 2.3 peers without the field remain compatible when
-  the family, checkpoint, and dimension match, with a bounded warning.
+- Federation embedding-space headers now require the additive canonical
+  preprocessing hash whenever an identity tuple is present. The legacy window
+  applies only to a fully absent tuple in the seeded teacher space. This
+  tightens the unreleased 2.3 exchange contract; no 2.3 release used the prior
+  hashless-tuple behavior.
 - Vibe cutover now holds failure tails above the configured coverage
   tolerance unless operators explicitly acknowledge them with
   `VIBE_SPACE_CUTOVER_ALLOW_FAILED=true`.
 - Embedding-space lifecycle selection now follows the currently configured
   provider and retires abandoned migrations after the configured grace period.
-- Upgrade guidance now covers Helm reused values, the rolling migration window,
-  bare-metal stop/migrate/start order, and Compose transition verification.
+- Upgrade guidance now requires backend and worker Deployments to reach zero
+  ready replicas before Helm migration, then restores their saved replica
+  counts. It also covers reused values and Compose transition verification.
 - Vibe migration coverage telemetry now exposes failed tracks at sampling and
   cutover, while retaining the actionable coverage denominator.
 - Migrating-space vibe text scans and lifecycle coverage reads are now bounded
@@ -108,7 +112,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Metrics endpoints now remain available when Redis-backed vibe queue-depth
   collection fails, while retaining the last successful sample.
 - Legacy vibe Redis cleanup is deadline-bounded, restart-durable, safe across
-  replica races, and processes complete bounded SCAN pages.
+  replica races, retries expired leases, atomically removes only non-expiring
+  reservations, and records completion only after every bounded operation.
+- Vibe invalidation now increments one generation CAS across manual rebuilds,
+  full enrichment, replacement, and stale-claim recovery. Vector storage and
+  claim completion share the same transaction, so stale workers cannot commit.
+- Workers reject retired or cleaning embedding targets transactionally, then
+  re-resolve and requeue once instead of failing the track.
+- Active-space ANN indexes now use size bands and rebuild at most once per
+  lifecycle tick when a space crosses a band boundary.
 - Retired-space cleanup now uses a durable claim across batched vector deletion
   and concurrent ANN index removal, preventing cleanup from deleting vectors
   after a space is reactivated.

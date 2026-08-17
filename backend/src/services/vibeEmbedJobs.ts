@@ -5,7 +5,12 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { enrichmentFailureService } from "./enrichmentFailureService";
-import { upsertTrackEmbedding } from "./trackEmbeddings";
+import {
+    EmbeddingTargetInvalidatedError,
+    upsertTrackEmbedding,
+    VibeEmbeddingGenerationMismatchError,
+    type VibeEmbeddingWriteClaim,
+} from "./trackEmbeddings";
 import { embedAudio, VibeProviderError } from "./vibeProvider";
 import type { EmbeddingVectorSpace } from "./vibeProvider";
 import { vibeEmbeddingTargetGateWhere } from "./vibeEmbeddingEligibility";
@@ -80,6 +85,7 @@ interface VibeEmbedJobDependencies {
         trackId: string,
         embedding: readonly number[],
         spaceId: string,
+        claim: VibeEmbeddingWriteClaim,
     ): Promise<void>;
     failureService: FailureServicePort;
     releaseReservation(trackId: string): Promise<void>;
@@ -326,24 +332,10 @@ async function handleGenerationFailure(
     await markFailed(dependencies, track, error);
 }
 
-async function markCompleted(
+async function resolveStaleFailure(
     dependencies: VibeEmbedJobDependencies,
     track: TrackSnapshot,
-): Promise<boolean> {
-    const updated = await dependencies.prisma.track.updateMany({
-        where: {
-            ...activeTrackWhere(track.id),
-            vibeAnalysisStatus: "processing",
-            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
-        },
-        data: {
-            vibeAnalysisStatus: "completed",
-            vibeAnalysisError: null,
-            vibeAnalysisStartedAt: null,
-            vibeAnalysisStatusUpdatedAt: dependencies.now(),
-        },
-    });
-    if (updated.count !== 1) return false;
+): Promise<void> {
     await dependencies.failureService
         .resolveByEntity("vibe", track.id)
         .catch((error) => {
@@ -352,7 +344,29 @@ async function markCompleted(
                 error,
             });
         });
-    return true;
+}
+
+async function resetInvalidatedTargetClaim(
+    dependencies: VibeEmbedJobDependencies,
+    track: TrackSnapshot,
+    error: unknown,
+): Promise<void> {
+    const updated = await dependencies.prisma.track.updateMany({
+        where: {
+            ...activeTrackWhere(track.id),
+            vibeAnalysisStatus: "processing",
+            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
+        },
+        data: {
+            vibeAnalysisStatus: "pending",
+            vibeAnalysisError: failureMessage(dependencies, error),
+            vibeAnalysisStartedAt: null,
+            vibeAnalysisStatusUpdatedAt: dependencies.now(),
+        },
+    });
+    if (updated.count < 0 || updated.count > 1) {
+        throw new Error("Target invalidation reset was inconsistent");
+    }
 }
 
 function finish(
@@ -391,23 +405,31 @@ async function processValidJob(
         return finish(dependencies, "embed_failed");
     }
     try {
-        const stillActive = await findActiveTrack(
-            dependencies.prisma,
-            track.id,
-        );
-        if (!stillActive) return finish(dependencies, "track_missing");
         // Status fields are intentionally shared across spaces because one
         // provider target is filled at a time in this worker process.
         await dependencies.upsertTrackEmbedding(
             track.id,
             vector,
             dependencies.targetSpaceId,
+            {
+                generation: claimedTrack.vibeAnalysisGeneration ?? 0,
+                completedAt: dependencies.now(),
+            },
         );
-        if (!(await markCompleted(dependencies, claimedTrack))) {
-            return finish(dependencies, "stale_claim");
-        }
+        await resolveStaleFailure(dependencies, claimedTrack);
         return finish(dependencies, "stored");
     } catch (error) {
+        if (error instanceof VibeEmbeddingGenerationMismatchError) {
+            return finish(dependencies, "stale_claim");
+        }
+        if (error instanceof EmbeddingTargetInvalidatedError) {
+            await resetInvalidatedTargetClaim(
+                dependencies,
+                claimedTrack,
+                error,
+            );
+            throw error;
+        }
         await markFailed(dependencies, claimedTrack, error);
         return finish(dependencies, "embed_failed");
     }

@@ -1,5 +1,37 @@
 import { type ApiClientConstructor, type ApiData } from "./core";
 
+/** Provider and migration state returned by the system features endpoint. */
+export interface VibeSystemStatus {
+    provider: {
+        configured: boolean;
+        reachable: boolean | null;
+        checkedAt: string | null;
+        fresh: boolean;
+    };
+    activeSpace: { id: string; family: string } | null;
+    migration: {
+        spaceId: string;
+        family: string;
+        coverage: {
+            embedded: number;
+            pending: number;
+            failed: number;
+        } | null;
+        cutoverThreshold: number;
+    } | null;
+}
+
+/** Feature flags and typed vibe status returned by the backend. */
+export interface SystemFeatures {
+    musicCNN: boolean;
+    vibeEmbeddings: boolean;
+    audioAnalysis: boolean;
+    discovery: boolean;
+    autoPlaylists: boolean;
+    federation: boolean;
+    vibe: VibeSystemStatus;
+}
+
 /** Add settings-domain operations to an API client base class. */
 export function WithSettings<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class SettingsApi extends Base {
@@ -52,22 +84,8 @@ export function WithSettings<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         // System Features
-        async getFeatures(): Promise<{
-            musicCNN: boolean;
-            vibeEmbeddings: boolean;
-            audioAnalysis: boolean;
-            discovery: boolean;
-            autoPlaylists: boolean;
-            federation: boolean;
-        }> {
-            return this.request<{
-                musicCNN: boolean;
-                vibeEmbeddings: boolean;
-                audioAnalysis: boolean;
-                discovery: boolean;
-                autoPlaylists: boolean;
-                federation: boolean;
-            }>("/system/features");
+        async getFeatures(): Promise<SystemFeatures> {
+            return this.request<SystemFeatures>("/system/features");
         }
 
         // System UI Settings (non-sensitive, available to all authenticated users)

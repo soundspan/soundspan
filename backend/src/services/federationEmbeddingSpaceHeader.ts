@@ -45,7 +45,7 @@ export function encodeFederationEmbeddingSpaceHeader(
     );
 }
 
-/** Parse the additive tuple; preprocessingHash is optional for older 2.3 peers. */
+/** Parse the tuple; policy rejects a present tuple without preprocessingHash. */
 export function parseFederationEmbeddingSpaceHeader(
     value: unknown,
 ): ParsedFederationEmbeddingSpaceIdentity | undefined {

@@ -14,6 +14,16 @@ mock.module("@/lib/features-context", {
             discovery: true,
             autoPlaylists: true,
             federation: false,
+            vibe: {
+                provider: {
+                    configured: true,
+                    reachable: true,
+                    checkedAt: "2026-08-17T12:00:00.000Z",
+                    fresh: true,
+                },
+                activeSpace: { id: "space-active", family: "teacher" },
+                migration: null,
+            },
             showVersion: false,
             loading: false,
         }),
@@ -112,6 +122,7 @@ test("renders live vibe embedding progress without the retired worker control", 
     );
 
     assert.match(html, /Vibe Embeddings/);
+    assert.match(html, /Provider\s+reachable/);
     assert.match(html, /Re-run/);
     assert.doesNotMatch(html, /Vibe Embedding Workers/);
 });

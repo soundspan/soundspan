@@ -6,9 +6,11 @@ import {
 function createClient(): jest.Mocked<LegacyVibeRedisCleanupClient> {
     return {
         del: jest.fn().mockResolvedValue(1),
+        destroy: jest.fn(),
+        eval: jest.fn().mockResolvedValue(1),
+        get: jest.fn().mockResolvedValue(null),
         scan: jest.fn().mockResolvedValue({ cursor: "0", keys: [] }),
         set: jest.fn().mockResolvedValue("OK"),
-        ttl: jest.fn().mockResolvedValue(60),
         xGroupDestroy: jest.fn().mockResolvedValue(1),
     };
 }
@@ -17,161 +19,149 @@ describe("legacy vibe Redis cleanup", () => {
     const logger = { warn: jest.fn() };
 
     beforeEach(() => {
-        logger.warn.mockClear();
+        jest.clearAllMocks();
+        jest.useRealTimers();
     });
 
-    it("removes the retired stream, consumer group, and heartbeat", async () => {
+    afterEach(() => jest.useRealTimers());
+
+    it("uses an expiring owner lease and writes completion only after success", async () => {
         const client = createClient();
 
-        await cleanupLegacyVibeRedisArtifacts(client, logger);
+        await cleanupLegacyVibeRedisArtifacts(client, logger, {
+            ownerToken: "owner-1",
+        });
 
         expect(client.set).toHaveBeenCalledWith(
-            "soundspan:legacy-vibe-cleanup:v1",
-            "done",
-            { NX: true },
+            "soundspan:legacy-vibe-cleanup:v1:lease",
+            "owner-1",
+            { NX: true, PX: 120_000 },
         );
-        expect(client.xGroupDestroy).toHaveBeenCalledWith(
-            "audio:text:embed:requests",
-            "clap:text:embed:group",
+        expect(client.eval).toHaveBeenLastCalledWith(
+            expect.stringContaining("redis.call('SET', KEYS[2], 'done')"),
+            {
+                keys: [
+                    "soundspan:legacy-vibe-cleanup:v1:lease",
+                    "soundspan:legacy-vibe-cleanup:v1",
+                ],
+                arguments: ["owner-1"],
+            },
         );
-        expect(client.del).toHaveBeenCalledWith("audio:text:embed:requests");
-        expect(client.del).toHaveBeenCalledWith("clap:worker:heartbeat");
     });
 
-    it("scans bounded pages and deletes only reservations missing a TTL", async () => {
+    it("retries after an earlier owner's lease expires", async () => {
+        const first = createClient();
+        first.set.mockResolvedValueOnce(null);
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(first, logger),
+        ).resolves.toEqual({ staleReservationsDeleted: 0 });
+
+        const later = createClient();
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(later, logger),
+        ).resolves.toEqual({ staleReservationsDeleted: 0 });
+
+        expect(first.xGroupDestroy).not.toHaveBeenCalled();
+        expect(later.xGroupDestroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not write completion after an operation fails", async () => {
         const client = createClient();
-        client.scan
-            .mockResolvedValueOnce({
-                cursor: "17",
-                keys: [
-                    "audio:clap:queue:reserved:stale",
-                    "audio:clap:queue:reserved:active",
-                ],
-            })
-            .mockResolvedValueOnce({ cursor: "0", keys: [] });
-        client.ttl.mockResolvedValueOnce(-1).mockResolvedValueOnce(120);
+        client.del.mockRejectedValueOnce(new Error("redis unavailable"));
 
-        const result = await cleanupLegacyVibeRedisArtifacts(client, logger);
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(client, logger),
+        ).rejects.toThrow("redis unavailable");
 
-        expect(client.scan).toHaveBeenNthCalledWith(1, "0", {
-            MATCH: "audio:clap:queue:reserved:*",
-            COUNT: 2048,
+        expect(client.eval).not.toHaveBeenCalledWith(
+            expect.stringContaining("redis.call('SET', KEYS[2], 'done')"),
+            expect.anything(),
+        );
+    });
+
+    it("treats an already-absent consumer group as cleaned", async () => {
+        const client = createClient();
+        client.xGroupDestroy.mockRejectedValueOnce(
+            new Error("NOGROUP missing"),
+        );
+
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(client, logger, {
+                ownerToken: "owner-absent-group",
+            }),
+        ).resolves.toEqual({ staleReservationsDeleted: 0 });
+
+        expect(client.eval).toHaveBeenLastCalledWith(
+            expect.stringContaining("redis.call('SET', KEYS[2], 'done')"),
+            expect.objectContaining({ arguments: ["owner-absent-group"] }),
+        );
+    });
+
+    it("checks TTL and deletes each legacy reservation atomically", async () => {
+        const client = createClient();
+        client.scan.mockResolvedValueOnce({
+            cursor: "0",
+            keys: ["audio:clap:queue:reserved:legacy"],
         });
-        expect(client.scan).toHaveBeenNthCalledWith(2, "17", {
-            MATCH: "audio:clap:queue:reserved:*",
-            COUNT: 2048,
-        });
-        expect(client.del).toHaveBeenCalledWith(
-            "audio:clap:queue:reserved:stale",
+        client.eval.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(client, logger),
+        ).resolves.toEqual({ staleReservationsDeleted: 1 });
+
+        expect(client.eval).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining("redis.call('TTL', KEYS[1]) == -1"),
+            { keys: ["audio:clap:queue:reserved:legacy"] },
         );
         expect(client.del).not.toHaveBeenCalledWith(
-            "audio:clap:queue:reserved:active",
+            "audio:clap:queue:reserved:legacy",
         );
-        expect(result).toEqual({ staleReservationsDeleted: 1 });
     });
 
-    it("processes every reservation returned in one bounded scan page", async () => {
+    it("destroys the cleanup connection when one Redis operation exceeds its bound", async () => {
+        jest.useFakeTimers();
         const client = createClient();
-        const keys = Array.from(
-            { length: 150 },
-            (_, index) => `audio:clap:queue:reserved:legacy-${index}`,
+        client.get.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const cleanup = cleanupLegacyVibeRedisArtifacts(client, logger, {
+            operationTimeoutMs: 25,
+        });
+        const rejection = expect(cleanup).rejects.toThrow(
+            "Redis operation timed out",
         );
-        client.scan.mockResolvedValueOnce({ cursor: "0", keys });
-        client.ttl.mockResolvedValue(-1);
+        await jest.advanceTimersByTimeAsync(25);
 
-        const result = await cleanupLegacyVibeRedisArtifacts(client, logger);
-
-        expect(client.ttl).toHaveBeenCalledTimes(150);
-        expect(client.del).toHaveBeenCalledTimes(152);
-        expect(result).toEqual({ staleReservationsDeleted: 150 });
+        await rejection;
+        expect(client.destroy).toHaveBeenCalledTimes(1);
     });
 
     it("stops before processing an oversized scan page", async () => {
         const client = createClient();
         const keys = Array.from(
-            { length: 2049 },
+            { length: 2_049 },
             (_, index) => `audio:clap:queue:reserved:legacy-${index}`,
         );
         client.scan.mockResolvedValueOnce({ cursor: "17", keys });
 
-        await cleanupLegacyVibeRedisArtifacts(client, logger);
-
-        expect(client.scan).toHaveBeenCalledTimes(1);
-        expect(client.ttl).not.toHaveBeenCalled();
-        expect(client.del).toHaveBeenCalledTimes(2);
+        await expect(
+            cleanupLegacyVibeRedisArtifacts(client, logger),
+        ).rejects.toThrow("exceeded its key limit");
         expect(logger.warn).toHaveBeenCalledWith(
             "Legacy vibe reservation scan page exceeded its key limit",
-            { cursor: "0", keyCount: 2049, maxKeysPerPage: 2048 },
+            { cursor: "0", keyCount: 2_049, maxKeysPerPage: 2_048 },
         );
     });
 
-    it("never deletes expiring or already-missing reservations", async () => {
+    it("skips completed cleanup without acquiring a lease", async () => {
         const client = createClient();
-        client.scan.mockResolvedValueOnce({
-            cursor: "0",
-            keys: [
-                "audio:clap:queue:reserved:legacy",
-                "audio:clap:queue:reserved:current",
-                "audio:clap:queue:reserved:missing",
-            ],
-        });
-        client.ttl
-            .mockResolvedValueOnce(-1)
-            .mockResolvedValueOnce(3600)
-            .mockResolvedValueOnce(-2);
-
-        await cleanupLegacyVibeRedisArtifacts(client, logger);
-
-        expect(client.del).toHaveBeenCalledWith(
-            "audio:clap:queue:reserved:legacy",
-        );
-        expect(client.del).not.toHaveBeenCalledWith(
-            "audio:clap:queue:reserved:current",
-        );
-        expect(client.del).not.toHaveBeenCalledWith(
-            "audio:clap:queue:reserved:missing",
-        );
-    });
-
-    it("skips cleanup when another replica owns the durable marker", async () => {
-        const client = createClient();
-        client.set.mockResolvedValueOnce(null);
-
-        await cleanupLegacyVibeRedisArtifacts(client, logger);
-
-        expect(client.xGroupDestroy).not.toHaveBeenCalled();
-        expect(client.del).not.toHaveBeenCalled();
-        expect(client.scan).not.toHaveBeenCalled();
-    });
-
-    it("does not scan when the durable marker claim fails", async () => {
-        const client = createClient();
-        client.set.mockRejectedValueOnce(new Error("redis unavailable"));
-
-        await cleanupLegacyVibeRedisArtifacts(client, logger);
-
-        expect(client.xGroupDestroy).not.toHaveBeenCalled();
-        expect(client.scan).not.toHaveBeenCalled();
-        expect(logger.warn).toHaveBeenCalledWith(
-            "Failed to claim the legacy vibe Redis cleanup marker",
-            { error: expect.any(Error) },
-        );
-    });
-
-    it("continues cleaning independent artifacts after a missing group", async () => {
-        const client = createClient();
-        client.xGroupDestroy.mockRejectedValueOnce(new Error("NOGROUP"));
+        client.get.mockResolvedValueOnce("done");
 
         await expect(
             cleanupLegacyVibeRedisArtifacts(client, logger),
         ).resolves.toEqual({ staleReservationsDeleted: 0 });
 
-        expect(client.del).toHaveBeenCalledWith("audio:text:embed:requests");
-        expect(client.del).toHaveBeenCalledWith("clap:worker:heartbeat");
-        expect(client.scan).toHaveBeenCalledTimes(1);
-        expect(logger.warn).toHaveBeenCalledWith(
-            "Failed to remove the legacy text-embedding consumer group",
-            { error: expect.any(Error) },
-        );
+        expect(client.set).not.toHaveBeenCalled();
+        expect(client.scan).not.toHaveBeenCalled();
     });
 });

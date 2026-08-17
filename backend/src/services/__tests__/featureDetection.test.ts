@@ -81,6 +81,7 @@ describe("featureDetection service", () => {
                         configured: expected,
                         reachable: null,
                         checkedAt: null,
+                        fresh: false,
                     },
                     activeSpace: {
                         id: "space-active",
@@ -106,6 +107,7 @@ describe("featureDetection service", () => {
                     configured: false,
                     reachable: null,
                     checkedAt: null,
+                    fresh: false,
                 },
                 activeSpace: {
                     id: "space-active",
@@ -130,6 +132,7 @@ describe("featureDetection service", () => {
                     configured: false,
                     reachable: null,
                     checkedAt: null,
+                    fresh: false,
                 },
                 activeSpace: {
                     id: "space-active",
@@ -163,6 +166,7 @@ describe("featureDetection service", () => {
                     configured: false,
                     reachable: null,
                     checkedAt: null,
+                    fresh: false,
                 },
                 activeSpace: {
                     id: "space-active",
@@ -197,6 +201,7 @@ describe("featureDetection service", () => {
                 configured: true,
                 reachable: true,
                 checkedAt: "2026-08-17T12:00:00.000Z",
+                fresh: true,
             },
             activeSpace: {
                 id: "space-active",
@@ -228,6 +233,7 @@ describe("featureDetection service", () => {
                 configured: true,
                 reachable: null,
                 checkedAt: null,
+                fresh: false,
             },
             activeSpace: null,
             migration: null,

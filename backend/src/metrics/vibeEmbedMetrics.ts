@@ -38,6 +38,7 @@ export interface VibeEmbedMetrics {
     vocabularySpaceMismatches: Counter<"reason">;
     collectionErrors: Counter<"collector">;
     providerQueueDepth: Gauge;
+    providerStatusFresh: Gauge;
     providerQueueCapacity: Gauge;
     migrationActive: Gauge;
     recordJob(outcome: VibeEmbedJobOutcome): void;
@@ -54,6 +55,7 @@ export interface VibeEmbedMetrics {
 /** Scrape-time dependencies for provider queue instrumentation. */
 export interface VibeEmbedMetricsDependencies {
     getProviderQueueDepth(): Promise<number>;
+    getProviderStatusFresh(): Promise<boolean>;
 }
 
 function createOutcomeMetrics(registry: Registry) {
@@ -90,7 +92,10 @@ function createQueueCollectionMetrics(
     dependencies: VibeEmbedMetricsDependencies,
 ): Pick<
     VibeEmbedMetrics,
-    "collectionErrors" | "providerQueueDepth" | "vocabularySpaceMismatches"
+    | "collectionErrors"
+    | "providerQueueDepth"
+    | "providerStatusFresh"
+    | "vocabularySpaceMismatches"
 > {
     const collectionErrors = new Counter({
         name: "soundspan_metrics_collection_errors_total",
@@ -119,7 +124,25 @@ function createQueueCollectionMetrics(
         },
     });
     providerQueueDepth.reset();
-    return { collectionErrors, providerQueueDepth, vocabularySpaceMismatches };
+    const providerStatusFresh = new Gauge({
+        name: "soundspan_vibe_provider_status_fresh",
+        help: "Whether Redis contains at least one unexpired vibe worker status heartbeat.",
+        registers: [registry],
+        async collect() {
+            try {
+                this.set((await dependencies.getProviderStatusFresh()) ? 1 : 0);
+            } catch {
+                this.set(0);
+                collectionErrors.inc({ collector: "vibe_provider_status" });
+            }
+        },
+    });
+    return {
+        collectionErrors,
+        providerQueueDepth,
+        providerStatusFresh,
+        vocabularySpaceMismatches,
+    };
 }
 
 function createOperationalGauges(registry: Registry) {

@@ -116,6 +116,10 @@ jobs:
         working-directory: backend
         run: npx prisma generate
 
+      - name: Typecheck PostgreSQL integration suite
+        working-directory: backend
+        run: npm run pretest:integration && npx tsc --noEmit -p tsconfig.integration.json
+
       - name: Run PostgreSQL integration tests
         working-directory: backend
         run: npm run test:integration

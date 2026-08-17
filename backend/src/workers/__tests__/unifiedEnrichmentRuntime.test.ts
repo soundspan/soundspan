@@ -478,6 +478,13 @@ describe("unified enrichment runtime behavior", () => {
             }),
         );
         expect(prisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.track.updateMany).toHaveBeenCalledWith({
+            where: { origin: "LOCAL" },
+            data: expect.objectContaining({
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisGeneration: { increment: 1 },
+            }),
+        });
         expect(enrichmentFailureService.clearAllFailures).toHaveBeenCalledWith(
             "vibe",
         );

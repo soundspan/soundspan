@@ -151,6 +151,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const {
         musicCNN,
         vibeEmbeddings,
+        vibe,
         loading: featuresLoading,
     } = useFeatures();
     const [syncing, setSyncing] = useState(false);
@@ -745,9 +746,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
                             {/* CLAP Embeddings (Vibe Similarity) with Re-run button */}
                             {!featuresLoading && vibeEmbeddings ? (
-                                enrichmentProgress.clapEmbeddings && (
-                                    <div className="flex items-start gap-2">
-                                        <div className="flex-1">
+                                <div className="flex items-start gap-2">
+                                    <div className="flex-1">
+                                        {enrichmentProgress.clapEmbeddings && (
                                             <EnrichmentStage
                                                 icon={Waves}
                                                 label="Vibe Embeddings"
@@ -776,24 +777,35 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                 }
                                                 isBackground={true}
                                             />
-                                        </div>
-                                        <button
-                                            onClick={handleResetVibeEmbeddings}
-                                            disabled={
-                                                resettingVibe ||
-                                                syncing ||
-                                                reEnriching ||
-                                                isEnrichmentActive
-                                            }
-                                            className="mt-1 px-2 py-1 text-[10px] bg-white/5 text-white/60 rounded-full
-                                                hover:bg-white/10 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                        )}
+                                        <p
+                                            role="status"
+                                            className="mt-1 text-xs text-white/50"
                                         >
-                                            {resettingVibe
-                                                ? "Resetting..."
-                                                : "Re-run"}
-                                        </button>
+                                            Provider{" "}
+                                            {!vibe.provider.fresh
+                                                ? "status stale"
+                                                : vibe.provider.reachable
+                                                  ? "reachable"
+                                                  : "unreachable"}
+                                        </p>
                                     </div>
-                                )
+                                    <button
+                                        onClick={handleResetVibeEmbeddings}
+                                        disabled={
+                                            resettingVibe ||
+                                            syncing ||
+                                            reEnriching ||
+                                            isEnrichmentActive
+                                        }
+                                        className="mt-1 px-2 py-1 text-[10px] bg-white/5 text-white/60 rounded-full
+                                                hover:bg-white/10 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                    >
+                                        {resettingVibe
+                                            ? "Resetting..."
+                                            : "Re-run"}
+                                    </button>
+                                </div>
                             ) : !featuresLoading ? (
                                 <div className="opacity-50 py-2">
                                     <h4 className="text-sm font-medium text-gray-300">

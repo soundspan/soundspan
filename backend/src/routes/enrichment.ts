@@ -33,6 +33,7 @@ import { config } from "../config";
 import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
 import { sendRouteError } from "./routeErrorResponse";
+import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
 
 const router = Router();
 
@@ -1202,17 +1203,13 @@ router.post("/retry", requireAdmin, async (req, res) => {
                         continue;
                     }
 
-                    await prisma.track.update({
-                        where: { id: failure.entityId },
-                        data: {
-                            vibeAnalysisStatus: "pending",
-                            vibeAnalysisError: null,
-                            vibeAnalysisRetryCount: 0,
-                            vibeAnalysisStartedAt: null,
-                            vibeAnalysisStatusUpdatedAt: new Date(),
-                        },
-                    });
-                    queued++;
+                    const reset = await invalidateVibeAnalysis(
+                        prisma,
+                        { id: failure.entityId },
+                        new Date(),
+                    );
+                    if (reset === 1) queued++;
+                    else skipped++;
                 }
             } catch (error) {
                 logger.error(
