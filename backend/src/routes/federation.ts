@@ -24,7 +24,11 @@ import {
     getFederationManifest,
     type FederationCatalogResponse,
 } from "../services/federationCatalog";
-import { FEDERATION_EMBEDDING_SPACE_HEADER } from "../services/federationEmbeddingSpaceHeader";
+import {
+    acceptsFederationEmbeddingSpace,
+    FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
+    FEDERATION_EMBEDDING_SPACE_HEADER,
+} from "../services/federationEmbeddingSpaceHeader";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import {
     consumeFederationPairingRequest,
@@ -105,6 +109,18 @@ function includesEmbeddingScope(req: Request): boolean {
     return req.federationPeer?.scopes.includes("embeddings:read") ?? false;
 }
 
+function embeddingExportRequest(req: Request) {
+    const peer = req.federationPeer;
+    if (!peer) throw new Error("Federation catalog peer is unavailable");
+    return {
+        includeEmbeddings: includesEmbeddingScope(req),
+        peerId: peer.id,
+        acceptsEmbeddingSpace: acceptsFederationEmbeddingSpace(
+            req.headers[FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER.toLowerCase()],
+        ),
+    };
+}
+
 function sendCatalogResponse(
     res: Response,
     response: FederationCatalogResponse<unknown>,
@@ -148,6 +164,12 @@ router.post(
  *     summary: Get the host federation manifest
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: header
+ *         name: X-Soundspan-Embedding-Space-Accept
+ *         required: false
+ *         schema: { type: string, enum: ["1"] }
+ *         description: Advertises that the consumer validates embedding-space identities
  *     responses:
  *       200: { description: Federation manifest }
  *       401: { description: Peer authentication required }
@@ -173,6 +195,12 @@ router.get(
  *     summary: Get a keyset page of federation catalog items
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: header
+ *         name: X-Soundspan-Embedding-Space-Accept
+ *         required: false
+ *         schema: { type: string, enum: ["1"] }
+ *         description: Advertises that the consumer validates embedding-space identities
  *     responses:
  *       200:
  *         description: Generic catalog envelope page
@@ -194,7 +222,7 @@ router.get(
             mediaType: parsed.data.type,
             cursor: parsed.data.cursor,
             limit: parsed.data.limit,
-            includeEmbeddings: includesEmbeddingScope(req),
+            ...embeddingExportRequest(req),
         });
         return sendCatalogResponse(res, response);
     }),
@@ -206,6 +234,12 @@ router.get(
  *     summary: Get one federation catalog item by remote identity
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: header
+ *         name: X-Soundspan-Embedding-Space-Accept
+ *         required: false
+ *         schema: { type: string, enum: ["1"] }
+ *         description: Advertises that the consumer validates embedding-space identities
  *     responses:
  *       200:
  *         description: Generic catalog item envelope
@@ -227,7 +261,7 @@ router.get(
         const response = await getFederationCatalogItem({
             mediaType: params.data.type,
             id: params.data.id,
-            includeEmbeddings: includesEmbeddingScope(req),
+            ...embeddingExportRequest(req),
         });
         if (!response)
             return sendRouteError(res, 404, "Catalog item not found");
@@ -241,6 +275,12 @@ router.get(
  *     summary: Get catalog changes and tombstones since an instant
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
+ *     parameters:
+ *       - in: header
+ *         name: X-Soundspan-Embedding-Space-Accept
+ *         required: false
+ *         schema: { type: string, enum: ["1"] }
+ *         description: Advertises that the consumer validates embedding-space identities
  *     responses:
  *       200:
  *         description: Bounded delta page
@@ -271,7 +311,7 @@ router.get(
             epoch: parsed.data.epoch,
             cursor,
             limit: parsed.data.limit,
-            includeEmbeddings: includesEmbeddingScope(req),
+            ...embeddingExportRequest(req),
         });
         const result = response.body;
         if (result.kind === "epochMismatch") {

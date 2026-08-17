@@ -6,6 +6,11 @@ import type {
 
 /** Skew-safe federation response header carrying an embedding-space identity. */
 export const FEDERATION_EMBEDDING_SPACE_HEADER = "X-Soundspan-Embedding-Space";
+/** Request header advertising that the consumer validates embedding-space identity. */
+export const FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER =
+    "X-Soundspan-Embedding-Space-Accept";
+/** Current embedding-space negotiation capability value. */
+export const FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE = "1";
 
 const embeddingSpaceHeaderSchema = z
     .looseObject({
@@ -48,4 +53,9 @@ export function parseFederationEmbeddingSpaceHeader(
     } catch (_error: unknown) {
         return null;
     }
+}
+
+/** Accept only the explicitly advertised embedding-space capability version. */
+export function acceptsFederationEmbeddingSpace(value: unknown): boolean {
+    return value === FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE;
 }

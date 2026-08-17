@@ -6,7 +6,10 @@ import {
     type VibeProviderEndpoint,
     type VibeProviderOutcome,
 } from "./providerMetrics";
-import type { FederationEmbeddingPageOutcome } from "../services/federationEmbeddingSpace";
+import type {
+    FederationEmbeddingExportOutcome,
+    FederationEmbeddingPageOutcome,
+} from "../services/federationEmbeddingSpace";
 import {
     createVibeEmbedMetrics,
     type VibeEmbedJobOutcome,
@@ -88,4 +91,11 @@ export function recordFederationEmbeddingPageOutcome(
     outcome: FederationEmbeddingPageOutcome,
 ): void {
     domainMetrics.federationEmbeddingPages.inc({ outcome });
+}
+
+/** Records one exporter-side embedding compatibility decision. */
+export function recordFederationEmbeddingExportOutcome(
+    outcome: FederationEmbeddingExportOutcome,
+): void {
+    domainMetrics.federationEmbeddingExports.inc({ outcome });
 }

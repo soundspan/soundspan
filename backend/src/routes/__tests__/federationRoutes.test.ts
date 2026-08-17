@@ -191,6 +191,8 @@ describe("federation host routes", () => {
             cursor: "track-1",
             limit: 500,
             includeEmbeddings: true,
+            peerId: "peer-1",
+            acceptsEmbeddingSpace: false,
         });
 
         const invalid = await request(app)
@@ -214,7 +216,26 @@ describe("federation host routes", () => {
             mediaType: "artist",
             id: "artist-1",
             includeEmbeddings: false,
+            peerId: "peer-1",
+            acceptsEmbeddingSpace: false,
         });
+    });
+
+    it("passes embedding-space capability negotiation to catalog exports", async () => {
+        const response = await request(app)
+            .get("/api/federation/v1/catalog/items?type=track")
+            .set("Authorization", "Bearer valid")
+            .set("x-test-scopes", "library:read,embeddings:read")
+            .set("X-Soundspan-Embedding-Space-Accept", "1");
+
+        expect(response.status).toBe(200);
+        expect(catalog.getFederationCatalogItems).toHaveBeenCalledWith(
+            expect.objectContaining({
+                includeEmbeddings: true,
+                peerId: "peer-1",
+                acceptsEmbeddingSpace: true,
+            }),
+        );
     });
 
     it("emits embedding-space headers without changing catalog bodies", async () => {

@@ -17,6 +17,7 @@ const prisma = {
 };
 class MockNoActiveEmbeddingSpaceError extends Error {}
 const mockLog = { warn: jest.fn() };
+const mockRecordFederationEmbeddingExportOutcome = jest.fn();
 
 jest.mock("../../utils/db", () => ({ prisma }));
 jest.mock("../trackEmbeddings", () => ({
@@ -28,6 +29,10 @@ jest.mock("../embeddingSpaces", () => ({
 }));
 jest.mock("../../utils/logger", () => ({
     logger: { child: jest.fn(() => mockLog) },
+}));
+jest.mock("../../metrics", () => ({
+    recordFederationEmbeddingExportOutcome:
+        mockRecordFederationEmbeddingExportOutcome,
 }));
 jest.mock("../../config", () => ({
     config: {
@@ -409,6 +414,96 @@ describe("federation catalog exports", () => {
                 }),
             }),
         );
+    });
+
+    it("serves embeddings to a headerless peer while the teacher space is active", async () => {
+        prisma.track.findMany.mockResolvedValue([track("teacher-track")]);
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "teacher-track", embedding: [0.1, 0.2] },
+        ]);
+        const input = {
+            mediaType: "track" as const,
+            limit: 200,
+            includeEmbeddings: true,
+            peerId: "legacy-teacher-peer",
+            acceptsEmbeddingSpace: false,
+        };
+
+        const result = await getFederationCatalogItems(input);
+
+        expect(result.body.items[0].attributes).toHaveProperty("embedding");
+        expect(result).toHaveProperty("embeddingSpaceHeaderValue");
+        expect(
+            mockRecordFederationEmbeddingExportOutcome,
+        ).not.toHaveBeenCalled();
+    });
+
+    it("suppresses post-cutover embeddings for a headerless peer and records the decision", async () => {
+        prisma.track.findMany.mockResolvedValue([track("student-track")]);
+        (getActiveSpace as jest.Mock).mockResolvedValue({
+            ...activeSpace,
+            id: "space_dclap_student_v1",
+        });
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "student-track", embedding: [0.1, 0.2] },
+        ]);
+        const input = {
+            mediaType: "track" as const,
+            limit: 200,
+            includeEmbeddings: true,
+            peerId: "legacy-student-peer",
+            acceptsEmbeddingSpace: false,
+        };
+
+        const first = await getFederationCatalogItems(input);
+        const second = await getFederationCatalogItems(input);
+
+        expect(first.body.items[0].attributes).not.toHaveProperty("embedding");
+        expect(first).not.toHaveProperty("embeddingSpaceHeaderValue");
+        expect(second.body.items[0].attributes).not.toHaveProperty("embedding");
+        expect(fetchEmbeddingsByTrackIds).not.toHaveBeenCalled();
+        expect(
+            mockRecordFederationEmbeddingExportOutcome,
+        ).toHaveBeenCalledTimes(2);
+        expect(mockRecordFederationEmbeddingExportOutcome).toHaveBeenCalledWith(
+            "suppressed_legacy_peer",
+        );
+        expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            "Suppressing federation embeddings for a peer without embedding-space support",
+            {
+                peerId: "legacy-student-peer",
+                activeSpaceId: "space_dclap_student_v1",
+            },
+        );
+    });
+
+    it("serves post-cutover embeddings to a capability-aware peer", async () => {
+        prisma.track.findMany.mockResolvedValue([track("student-track")]);
+        (getActiveSpace as jest.Mock).mockResolvedValueOnce({
+            ...activeSpace,
+            id: "space_dclap_student_v1",
+        });
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "student-track", embedding: [0.1, 0.2] },
+        ]);
+        const input = {
+            mediaType: "track" as const,
+            limit: 200,
+            includeEmbeddings: true,
+            peerId: "space-aware-peer",
+            acceptsEmbeddingSpace: true,
+        };
+
+        const result = await getFederationCatalogItems(input);
+
+        expect(result.body.items[0].attributes).toHaveProperty("embedding");
+        expect(result.embeddingSpaceHeaderValue).toBe(
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+        );
+        expect(
+            mockRecordFederationEmbeddingExportOutcome,
+        ).not.toHaveBeenCalled();
     });
 
     it.each(["active-space lookup", "embedding fetch"])(

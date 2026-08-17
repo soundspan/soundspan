@@ -8,6 +8,8 @@ import {
 } from "../utils/federationScopes";
 import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
 import {
+    FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
+    FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
     FEDERATION_EMBEDDING_SPACE_HEADER,
     parseFederationEmbeddingSpaceHeader,
 } from "./federationEmbeddingSpaceHeader";
@@ -21,6 +23,10 @@ export const MAX_PAGE_ITEMS = 500;
 const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
+const embeddingSpaceAcceptHeaders = {
+    [FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER]:
+        FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
+} as const;
 
 const KNOWN_MEDIA_TYPES = [
     "artist",
@@ -470,6 +476,10 @@ class FederationClient {
             method: "GET",
             ...config,
             url: peerUrl(this.baseUrl, path),
+            headers: {
+                ...config.headers,
+                ...embeddingSpaceAcceptHeaders,
+            },
             maxContentLength: MAX_JSON_BODY_BYTES,
             maxBodyLength: MAX_JSON_BODY_BYTES,
         });
@@ -499,6 +509,7 @@ class FederationClient {
             method: "GET",
             url: peerUrl(this.baseUrl, "/api/federation/v1/catalog/items"),
             params: { type: mediaType, limit: MAX_PAGE_ITEMS, cursor },
+            headers: embeddingSpaceAcceptHeaders,
             signal,
             maxContentLength: MAX_JSON_BODY_BYTES,
             maxBodyLength: MAX_JSON_BODY_BYTES,
@@ -542,6 +553,7 @@ class FederationClient {
                 cursor: input.cursor,
                 limit: MAX_PAGE_ITEMS,
             },
+            headers: embeddingSpaceAcceptHeaders,
             signal: input.signal,
             maxContentLength: MAX_JSON_BODY_BYTES,
             maxBodyLength: MAX_JSON_BODY_BYTES,

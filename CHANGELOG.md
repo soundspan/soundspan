@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by a statement timeout, candidate cap, existence query, and two-query sampler.
 - Vibe provider registration now rejects preprocessing mismatches for an
   existing model tuple and records the configuration error.
+- Federation embedding export now requires the peer to advertise
+  embedding-space support once the active space is no longer the original
+  teacher space, protecting pre-2.3 peers from storing incompatible vectors.
 - During a vibe embedding-space migration, text search now embeds and queries
   in the provider's registered space, returning partial results that grow with
   the backfill instead of using the removed legacy analyzer stream.

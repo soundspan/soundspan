@@ -1,4 +1,5 @@
 import {
+    acceptsFederationEmbeddingSpace,
     encodeFederationEmbeddingSpaceHeader,
     parseFederationEmbeddingSpaceHeader,
 } from "../federationEmbeddingSpaceHeader";
@@ -23,5 +24,12 @@ describe("federationEmbeddingSpaceHeader codec", () => {
         // pure ASCII while still parsing back to the original tuple.
         expect(/^[\x20-\x7e]*$/.test(encoded)).toBe(true);
         expect(parseFederationEmbeddingSpaceHeader(encoded)).toEqual(exotic);
+    });
+
+    it("accepts only capability value 1", () => {
+        expect(acceptsFederationEmbeddingSpace("1")).toBe(true);
+        expect(acceptsFederationEmbeddingSpace("0")).toBe(false);
+        expect(acceptsFederationEmbeddingSpace(["1"])).toBe(false);
+        expect(acceptsFederationEmbeddingSpace(undefined)).toBe(false);
     });
 });

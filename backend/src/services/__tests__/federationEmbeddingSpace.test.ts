@@ -1,4 +1,5 @@
 import {
+    canExportFederationEmbeddings,
     decideFederationEmbeddingPage,
     type FederationEmbeddingSpaceIdentity,
 } from "../federationEmbeddingSpace";
@@ -14,6 +15,16 @@ const canonicalSpace = {
 };
 
 describe("federation embedding-space decision", () => {
+    it("exports legacy-compatible teacher vectors without negotiation", () => {
+        expect(canExportFederationEmbeddings(false, canonicalSpace)).toBe(true);
+    });
+
+    it("requires negotiation after the active space changes", () => {
+        const studentSpace = { id: "space_dclap_student_v1" };
+        expect(canExportFederationEmbeddings(false, studentSpace)).toBe(false);
+        expect(canExportFederationEmbeddings(true, studentSpace)).toBe(true);
+    });
+
     it("stores a vector page only when every tuple field matches", () => {
         expect(decideFederationEmbeddingPage(tuple, canonicalSpace)).toBe(
             "stored",

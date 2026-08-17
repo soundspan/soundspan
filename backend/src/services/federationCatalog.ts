@@ -8,18 +8,22 @@ import type {
 } from "@soundspan/media-metadata-contract";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
+import { recordFederationEmbeddingExportOutcome } from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { ensureFederationIdentity } from "./federationPeers";
 import { fetchEmbeddingsByTrackIds } from "./trackEmbeddings";
 import { getActiveSpace, NoActiveEmbeddingSpaceError } from "./embeddingSpaces";
 import {
+    canExportFederationEmbeddings,
     federationEmbeddingSpaceIdentity,
     type FederationEmbeddingSpaceIdentity,
 } from "./federationEmbeddingSpace";
 import { encodeFederationEmbeddingSpaceHeader } from "./federationEmbeddingSpaceHeader";
 
 const log = logger.child("FederationCatalog");
+const LEGACY_EXPORT_WARNING_INTERVAL_MS = 60_000;
+const legacyExportWarningAt = new Map<string, number>();
 
 const EXPORTED_ALBUM_RELATION_WHERE = {
     location: "LIBRARY",
@@ -176,6 +180,12 @@ export interface FederationCatalogResponse<T> {
 interface EmbeddingExport {
     embeddings: ReadonlyMap<string, number[]>;
     embeddingSpace?: FederationEmbeddingSpaceIdentity;
+}
+
+interface EmbeddingExportRequest {
+    include: boolean;
+    peerId?: string;
+    acceptsEmbeddingSpace?: boolean;
 }
 
 /** Encodes a stable, opaque delta event key for the next request. */
@@ -345,16 +355,45 @@ function audiobookEnvelope(row: AudiobookRow): FederationMediaItemEnvelope {
     };
 }
 
+function warnSuppressedLegacyExport(
+    peerId: string | undefined,
+    activeSpaceId: string,
+): void {
+    const warningKey = peerId ?? "unknown-peer";
+    const now = Date.now();
+    const previous = legacyExportWarningAt.get(warningKey);
+    if (
+        previous !== undefined &&
+        now - previous < LEGACY_EXPORT_WARNING_INTERVAL_MS
+    ) {
+        return;
+    }
+    legacyExportWarningAt.set(warningKey, now);
+    log.warn(
+        "Suppressing federation embeddings for a peer without embedding-space support",
+        { peerId: warningKey, activeSpaceId },
+    );
+}
+
 async function loadEmbeddingExport(
     rows: readonly TrackRow[],
-    include: boolean,
+    request: EmbeddingExportRequest,
 ): Promise<EmbeddingExport> {
     const empty = { embeddings: new Map<string, number[]>() };
-    if (!include || rows.length === 0) return empty;
+    if (!request.include || rows.length === 0) return empty;
     try {
-        const embeddingSpace = federationEmbeddingSpaceIdentity(
-            await getActiveSpace(),
-        );
+        const activeSpace = await getActiveSpace();
+        if (
+            !canExportFederationEmbeddings(
+                request.acceptsEmbeddingSpace ?? false,
+                activeSpace,
+            )
+        ) {
+            recordFederationEmbeddingExportOutcome("suppressed_legacy_peer");
+            warnSuppressedLegacyExport(request.peerId, activeSpace.id);
+            return empty;
+        }
+        const embeddingSpace = federationEmbeddingSpaceIdentity(activeSpace);
         const embeddings = await fetchEmbeddingsByTrackIds(
             rows.map((row) => row.id),
         );
@@ -473,6 +512,8 @@ export async function getFederationCatalogItems(input: {
     cursor?: string;
     limit: number;
     includeEmbeddings: boolean;
+    peerId?: string;
+    acceptsEmbeddingSpace?: boolean;
 }) {
     if (input.mediaType === "artist") {
         const rows = await loadArtistItems(input.cursor, input.limit);
@@ -495,10 +536,11 @@ export async function getFederationCatalogItems(input: {
         );
     }
     const rows = await loadTrackItems(input.cursor, input.limit);
-    const embeddingExport = await loadEmbeddingExport(
-        rows,
-        input.includeEmbeddings,
-    );
+    const embeddingExport = await loadEmbeddingExport(rows, {
+        include: input.includeEmbeddings,
+        peerId: input.peerId,
+        acceptsEmbeddingSpace: input.acceptsEmbeddingSpace,
+    });
     const body = itemPage(
         rows.map((row) =>
             trackEnvelope(row, embeddingExport.embeddings.get(row.id)),
@@ -518,6 +560,8 @@ export async function getFederationCatalogItem(input: {
     mediaType: FederationMediaType;
     id: string;
     includeEmbeddings: boolean;
+    peerId?: string;
+    acceptsEmbeddingSpace?: boolean;
 }): Promise<FederationCatalogResponse<FederationMediaItemEnvelope> | null> {
     if (input.mediaType === "artist") {
         const row = await prisma.artist.findFirst({
@@ -552,10 +596,11 @@ export async function getFederationCatalogItem(input: {
         select: trackSelect,
     });
     if (!row) return null;
-    const embeddingExport = await loadEmbeddingExport(
-        [row],
-        input.includeEmbeddings,
-    );
+    const embeddingExport = await loadEmbeddingExport([row], {
+        include: input.includeEmbeddings,
+        peerId: input.peerId,
+        acceptsEmbeddingSpace: input.acceptsEmbeddingSpace,
+    });
     const body = trackEnvelope(row, embeddingExport.embeddings.get(row.id));
     return catalogResponse(
         body,
@@ -788,6 +833,8 @@ async function buildDeltaEvents(input: {
     cursor?: FederationDeltaCursor;
     limit: number;
     includeEmbeddings: boolean;
+    peerId?: string;
+    acceptsEmbeddingSpace?: boolean;
 }): Promise<{
     events: DeltaEvent[];
     embeddingSpace?: FederationEmbeddingSpaceIdentity;
@@ -802,10 +849,11 @@ async function buildDeltaEvents(input: {
             loadAudiobookDelta(input.since, input.until, input.cursor, take),
             loadTombstoneDelta(input.since, input.until, input.cursor, take),
         ]);
-    const embeddingExport = await loadEmbeddingExport(
-        tracks,
-        input.includeEmbeddings,
-    );
+    const embeddingExport = await loadEmbeddingExport(tracks, {
+        include: input.includeEmbeddings,
+        peerId: input.peerId,
+        acceptsEmbeddingSpace: input.acceptsEmbeddingSpace,
+    });
     const events = mergeDeltaEvents(
         { artists, albums, tracks, podcasts, audiobooks, tombstones },
         embeddingExport,
@@ -820,6 +868,8 @@ export async function getFederationCatalogDelta(input: {
     cursor?: FederationDeltaCursor;
     limit: number;
     includeEmbeddings: boolean;
+    peerId?: string;
+    acceptsEmbeddingSpace?: boolean;
     now?: Date;
 }) {
     const identity = await ensureFederationIdentity();

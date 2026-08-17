@@ -6,6 +6,7 @@ export interface DomainMetrics {
     transcodeCacheRequests: Counter<"result">;
     federationSyncs: Counter<"outcome">;
     federationEmbeddingPages: Counter<"outcome">;
+    federationEmbeddingExports: Counter<"outcome">;
 }
 
 /** Registers low-cardinality cache and federation counters. */
@@ -32,6 +33,12 @@ export function createDomainMetrics(registry: Registry): DomainMetrics {
         federationEmbeddingPages: new Counter({
             name: "soundspan_federation_embedding_pages_total",
             help: "Federation embedding pages by storage decision.",
+            labelNames: ["outcome"] as const,
+            registers: [registry],
+        }),
+        federationEmbeddingExports: new Counter({
+            name: "soundspan_federation_embedding_exports_total",
+            help: "Federation embedding export requests by compatibility decision.",
             labelNames: ["outcome"] as const,
             registers: [registry],
         }),

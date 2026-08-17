@@ -20,7 +20,20 @@ export type FederationEmbeddingPageOutcome =
     | "skipped_mismatch"
     | "skipped_legacy_strict";
 
+/** Bounded outcomes for exporter-side embedding compatibility guards. */
+export type FederationEmbeddingExportOutcome = "suppressed_legacy_peer";
+
 const SEEDED_CANONICAL_SPACE_ID = "space_clap_music_audioset_v1";
+
+/** Decide whether a peer may receive vectors from the active export space. */
+export function canExportFederationEmbeddings(
+    acceptsEmbeddingSpace: boolean,
+    activeSpace: Pick<LocalFederationEmbeddingSpace, "id">,
+): boolean {
+    return (
+        acceptsEmbeddingSpace || activeSpace.id === SEEDED_CANONICAL_SPACE_ID
+    );
+}
 
 /** Select only the stable cross-peer identity fields from a local space. */
 export function federationEmbeddingSpaceIdentity(

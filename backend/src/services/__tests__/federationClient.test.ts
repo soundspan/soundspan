@@ -158,6 +158,44 @@ describe("federation HTTP client", () => {
         );
     });
 
+    it("advertises embedding-space support on federation sync requests", async () => {
+        axiosRequest
+            .mockResolvedValueOnce({ status: 200, data: manifest })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: { items: [], nextCursor: null },
+            })
+            .mockResolvedValueOnce({ status: 200, data: artistEnvelope })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: {
+                    kind: "ok",
+                    changes: [],
+                    tombstones: [],
+                    nextCursor: null,
+                    nextSince: "2026-08-15T12:02:00.000Z",
+                },
+            });
+        const client = createFederationClient(peer);
+
+        await client.getManifest();
+        await client.getCatalogItems("track");
+        await client.getCatalogItem("artist", "artist-1");
+        await client.getCatalogDelta({
+            since: new Date("2026-08-15T12:00:00.000Z"),
+            epoch: "epoch-1",
+        });
+
+        expect(axiosRequest).toHaveBeenCalledTimes(4);
+        for (const [requestConfig] of axiosRequest.mock.calls) {
+            expect(requestConfig.headers).toEqual(
+                expect.objectContaining({
+                    "X-Soundspan-Embedding-Space-Accept": "1",
+                }),
+            );
+        }
+    });
+
     it("skips invalid catalog page items and reports their count", async () => {
         axiosRequest.mockResolvedValueOnce({
             status: 200,
