@@ -79,7 +79,7 @@ def test_supervisord_runs_services_as_nonroot() -> None:
         dockerfile, "/etc/supervisor/conf.d/soundspan.conf"
     )
 
-    for name in ("backend", "frontend", "audio-analyzer", "audio-analyzer-clap"):
+    for name in ("backend", "frontend", "audio-analyzer", "vibe-provider-dclap"):
         block = _program_block(supervisor_config, name)
         assert re.search(r"(?m)^user=soundspan\s*$", block), name
         assert not re.search(r"(?m)^user=root\s*$", block), name
@@ -276,19 +276,39 @@ def test_postgres_password_migration_for_existing_volumes() -> None:
     )
 
 
-def test_analyzer_tuning_env_is_parameterized() -> None:
-    """Analyzer worker and batch tuning must use exported supervisord values."""
+def test_analysis_tuning_env_is_parameterized() -> None:
+    """Analysis runtimes must use exported and scoped supervisord values."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     supervisor_config = _heredoc(
         dockerfile, "/etc/supervisor/conf.d/soundspan.conf"
     )
     analyzer = _program_block(supervisor_config, "audio-analyzer")
-    clap = _program_block(supervisor_config, "audio-analyzer-clap")
+    provider = _program_block(supervisor_config, "vibe-provider-dclap")
 
     assert 'NUM_WORKERS="2"' not in analyzer
     assert "%(ENV_NUM_WORKERS)s" in analyzer
     assert "%(ENV_BATCH_SIZE)s" in analyzer
-    assert re.search(r"%\(ENV_[A-Z0-9_]*WORKERS?[A-Z0-9_]*\)s", clap)
+    for pinned_value in (
+        "17860403f8fc90aff8ac0632a0741eb5e58d8c0b0ad2fce5ced967274b0ea971",
+        "2a735b23c2aad7b12d9ffc85334cebcc659c07696d2ff60e2e378da28b6df657",
+        "200d48f3905ff1f272af5006dd9851f94071a7dde4eafd9c07bc09c5ac65a714",
+        "8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a",
+    ):
+        assert pinned_value in dockerfile
+    assert dockerfile.count("sha256sum -c -") == 13
+    assert "services/vibe-provider-dclap/LICENSE" in dockerfile
+    assert "services/vibe-provider-dclap/NOTICE.md" in dockerfile
+    assert 'TRANSFORMERS_OFFLINE="1"' in provider
+    assert 'HF_HUB_OFFLINE="1"' in provider
+    assert 'TOKENIZERS_PARALLELISM="false"' in provider
+    assert "%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s" in provider
+    assert "%(ENV_DCLAP_MODEL_PATH)s" in provider
+    assert "%(ENV_DCLAP_TOKENIZER_PATH)s" in provider
+    assert "%(ENV_DCLAP_IMAGE_VERSION)s" in provider
+    assert "%(ENV_INTERNAL_API_SECRET)s" in provider
+    assert "%(ENV_MUSIC_PATH)s" in provider
+    assert "DATABASE_URL" not in provider
+    assert "REDIS_URL" not in provider
 
 
 def test_every_supervisord_env_placeholder_is_exported() -> None:
@@ -322,19 +342,23 @@ def test_start_sh_maps_aio_tuning_names() -> None:
     assert "AUDIO_ANALYSIS_BATCH_SIZE" in start_script
     assert "AUDIO_BRPOP_TIMEOUT" in start_script
     assert "AUDIO_MODEL_IDLE_TIMEOUT" in start_script
+    assert (
+        'export VIBE_PROVIDER_URL="${VIBE_PROVIDER_URL:-http://localhost:8092}"'
+        in start_script
+    )
+    assert "VIBE_PROVIDER_URL=$VIBE_PROVIDER_URL" in start_script
 
 
-def test_no_hf_token_build_secret() -> None:
-    """The public CLAP download must not retain a dead build-secret contract."""
+def test_removed_torch_clap_analyzer_is_absent() -> None:
+    """The AIO image must contain no torch CLAP analyzer setup or checkpoint."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert "hf_token" not in dockerfile
-    assert "HF_TOKEN" not in dockerfile
-    assert "/run/secrets/hf_token" not in dockerfile
-    assert (
-        "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd"
-        in dockerfile
-    )
+    assert "audio-analyzer-clap" not in dockerfile
+    assert "laion_clap" not in dockerfile.lower()
+    assert "laion-clap" not in dockerfile.lower()
+    assert "music_audioset" not in dockerfile
+    assert "CLAP_NUM_WORKERS" not in dockerfile
+    assert "CLAP_REDIS_SOCKET_TIMEOUT" not in dockerfile
 
 
 def test_apt_update_install_same_layer() -> None:

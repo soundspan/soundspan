@@ -18,7 +18,7 @@ soundspan is built for people who want streaming convenience without giving up o
 
 - Local FLAC, MP3, AAC/M4A, OGG/Opus, WAV, WMA, APE, and WavPack library with automatic MusicBrainz/Last.fm enrichment
 - YouTube Music and TIDAL gap-fill streaming with per-user OAuth and quality controls
-- CLAP-powered vibe matching, mood mixer presets, and radar-style analysis views
+- DCLAP ONNX-powered vibe matching, mood mixer presets, and radar-style analysis views
 - Podcast search/subscribe via RSS with resume, played-state tracking, and mobile skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
@@ -54,6 +54,11 @@ docker run -d \
 
 Open `http://localhost:3030` and create your account.
 
+The AIO image includes the MusicCNN analyzer and a CPU-first DCLAP ONNX
+provider. The backend sends text and audio vibe embedding work to the provider
+over container loopback. Its vendored artifacts are a few hundred MB instead of
+the former multi-GB torch model stack.
+
 ### Optional GPU mode
 
 ```bash
@@ -79,7 +84,7 @@ For deployment variants, release channels, compose files, and updates, see [`doc
 - OIDC and SSO setup: [`docs/OIDC_SSO.md`](docs/OIDC_SSO.md)
 - Environment variables reference: [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md)
 - Integration setup (Lidarr, Soulseek, YouTube Music, TIDAL, OpenSubsonic): [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
-- CLAP and GPU acceleration: [`docs/ADVANCED_ANALYSIS_AND_GPU.md`](docs/ADVANCED_ANALYSIS_AND_GPU.md)
+- Advanced analysis and GPU acceleration: [`docs/ADVANCED_ANALYSIS_AND_GPU.md`](docs/ADVANCED_ANALYSIS_AND_GPU.md)
 - Kubernetes deployment: [`docs/KUBERNETES.md`](docs/KUBERNETES.md)
 - Reverse proxy and tunnel routing: [`docs/REVERSE_PROXY_AND_TUNNELS.md`](docs/REVERSE_PROXY_AND_TUNNELS.md)
 - OpenSubsonic compatibility contract: [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)
@@ -142,6 +147,7 @@ graph TD
     RD["Redis"]
     YT["YT Music<br/>:8586 (Opt.)"]
     TD["TIDAL Sidecar<br/>:8585 (Opt.)"]
+    VP["DCLAP ONNX Provider<br/>:8092"]
     Lidarr["Lidarr<br/>(Optional)"]
     ABS["Audiobookshelf<br/>(Optional)"]
     PEER["Peer soundspan<br/>(Optional)"]
@@ -154,6 +160,7 @@ graph TD
     BW --> RD
     BE <--> YT
     BE <--> TD
+    BE -->|text/audio embeddings| VP
     BE <--> Lidarr
     BE <--> ABS
     BE <-->|HTTPS federation| PEER
@@ -172,7 +179,7 @@ graph TD
 | TIDAL Sidecar       | TIDAL streaming/download proxy                    | 8585                 |
 | YT Music Streamer   | YouTube Music streaming proxy                     | 8586                 |
 | Audio Analyzer      | MusiCNN analyzer service                          | —                    |
-| Audio Analyzer CLAP | CLAP embedding service                            | —                    |
+| DCLAP Vibe Provider | ONNX text/audio embedding service                 | 8092 (internal)      |
 
 ---
 

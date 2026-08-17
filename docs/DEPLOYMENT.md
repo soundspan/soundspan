@@ -34,8 +34,11 @@ docker run -d \
 
 Open `http://localhost:3030` and create your account.
 
-The AIO image starts both analyzers by default. Plan for up to 8 GiB of memory,
-or disable audio analysis on constrained hosts.
+The AIO image starts the MusicCNN analyzer and the CPU-first DCLAP ONNX provider
+by default. The backend sends text and audio vibe embedding work to DCLAP over
+container loopback. The provider vendors a few hundred MB of artifacts instead
+of the former torch stack and its 2.35 GB checkpoint. Plan for up to 8 GiB of
+memory, or disable audio analysis on constrained hosts.
 
 ### AIO with GPU acceleration (optional)
 
@@ -373,7 +376,8 @@ If startup logs show permission errors, `chown` the host path to the UID/GID sho
 - PostgreSQL database (internal)
 - Redis cache (internal)
 - MusicCNN/Essentia audio analyzer (enabled by default)
-- CLAP embedding analyzer (enabled by default)
+- DCLAP ONNX vibe provider (enabled by default on internal port `8092`); the
+  backend drives text and audio embedding through `VIBE_PROVIDER_URL`
 
 ---
 
@@ -384,4 +388,4 @@ If startup logs show permission errors, `chown` the host path to the UID/GID sho
 - [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL setup
 - [Kubernetes Guide](KUBERNETES.md) — Helm and manual Kubernetes deployment
 - [Reverse Proxy and Tunnels](REVERSE_PROXY_AND_TUNNELS.md) — Edge routing for split deployments
-- [Advanced Analysis and GPU](ADVANCED_ANALYSIS_AND_GPU.md) — CLAP analysis and GPU acceleration
+- [Advanced Analysis and GPU](ADVANCED_ANALYSIS_AND_GPU.md) — Vibe analysis and GPU acceleration

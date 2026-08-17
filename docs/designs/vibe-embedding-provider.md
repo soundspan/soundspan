@@ -100,7 +100,7 @@ DCLAP is AGPL-3.0; soundspan is GPL-3.0. As a separately-distributed networked s
 
 Recommendation: **(b)**, with the sidecar's repository/source offer documented, matching how the image pipeline already builds and scans sidecars. Alternative accepted outcome: in-house ONNX export of the exact teacher checkpoint (Apache-2.0 checkpoint, zero third-party code) if DCLAP vendoring proves awkward — same runtime win, slightly less speed, zero recall question.
 
-**Executed 2026-08-16:** mode **(b)**. `services/vibe-provider-dclap` builds a project-owned image that vendors the three DCLAP v1 ONNX artifacts with pinned SHA-256 checks and vendors the teacher tokenizer from an immutable Hugging Face commit. The image includes the upstream AGPL-3.0 license and a notice linking both this sidecar's corresponding source and the upstream DCLAP source. The service remains an isolated HTTP-only process and is not included in the AIO image.
+**Executed 2026-08-16:** mode **(b)**. `services/vibe-provider-dclap` builds a project-owned image that vendors the three DCLAP v1 ONNX artifacts with pinned SHA-256 checks and vendors the teacher tokenizer from an immutable Hugging Face commit. The image includes the upstream AGPL-3.0 license and a notice linking both this sidecar's corresponding source and the upstream DCLAP source. The service remains an isolated HTTP-only process and is also embedded in the AIO image as its default vibe provider.
 
 ### Gate 2 — mixed-space recall validation
 

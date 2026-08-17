@@ -178,9 +178,11 @@ Treat these as baseline estimates, then tune per library size and workload. The
 chart sets no CPU requests or limits by default. Add them through
 `<component>.resources`, such as `backend.resources` or
 `audioAnalyzer.resources`. The
-AIO container bundles the backend, frontend, Postgres, Redis, and (by default)
-both analyzers in one pod, so its memory limit must cover the analyzer model
-footprint; lower `aio.resources.limits.memory` only if you disable analysis
+AIO container bundles the backend, frontend, Postgres, Redis, the MusicCNN
+analyzer, and the CPU-first DCLAP ONNX provider in one pod. The DCLAP provider
+vendors a few hundred MB of artifacts instead of the former 2.35 GB torch
+checkpoint. The AIO memory limit must cover both analysis runtimes; lower
+`aio.resources.limits.memory` only if you disable analysis
 (`config.features.audioAnalysis: false`).
 
 ## Rollout Hardening (Individual Mode)

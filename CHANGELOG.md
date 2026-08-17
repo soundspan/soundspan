@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The AIO image now embeds the DCLAP ONNX provider as its vibe embedding
+  engine, wired to the backend through `VIBE_PROVIDER_URL`.
 - Federation embedding sync now verifies the JSON-encoded
   `X-Soundspan-Embedding-Space` response header before storing peer vectors,
   while preserving strict catalog response bodies for released consumers.
@@ -39,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Confined vibe and analysis vector SQL to the track embedding service layer.
 - Release-note generation now always includes the standing 2.0.0 upgrade path
   and accepts repeatable per-release `--upgrade-note` bullets.
+
+### Removed
+
+- Removed the torch CLAP stack and 2.35 GB checkpoint download from the AIO
+  image, substantially reducing its size; existing libraries migrate
+  automatically through the backend's blue/green embedding-space migration.
 
 ### Fixed
 

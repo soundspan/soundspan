@@ -1,6 +1,6 @@
 # Advanced Analysis and GPU Guide
 
-This guide covers optional CLAP embeddings and GPU acceleration for analyzer workloads.
+This guide covers vibe embeddings and GPU acceleration for analyzer workloads.
 
 ## Essentia MusiCNN Platform Matrix
 
@@ -30,15 +30,26 @@ manifest, regenerate both `services/audio-analyzer/requirements.lock` and
 `requirements-aio.lock` using the commands in their headers and validate the
 same committed model in both images.
 
+## AIO Vibe Embeddings
+
+The AIO image embeds the CPU-first DCLAP ONNX provider on internal port `8092`.
+The backend defaults `VIBE_PROVIDER_URL` to `http://localhost:8092` and drives
+both text and audio embedding through that provider. The image vendors the three
+checked ONNX artifacts and offline tokenizer snapshot, totaling a few hundred
+MB, instead of installing torch or downloading the former 2.35 GB checkpoint.
+Existing libraries move to the DCLAP embedding space through the backend's
+automatic blue/green migration.
+
 ## CLAP Audio Analysis
 
-The CLAP service generates audio embeddings for similarity/vibe workflows.
+The split-stack CLAP service generates audio embeddings for similarity/vibe
+workflows. It is not part of the AIO image.
 
 ### Requirements
 
 - PostgreSQL with pgvector (provided by `pgvector/pgvector:pg16`)
 - ~2 to 4 GB RAM per worker
-- First build downloads CLAP model (~700 MB)
+- First build downloads the 2.35 GB CLAP checkpoint
 
 ### Configuration
 
@@ -105,7 +116,8 @@ nvidia-container-runtime --version
 
 ### Enable GPU
 
-AIO container:
+AIO container (GPU access applies to compatible analyzer workloads; the embedded
+DCLAP provider remains CPU-only):
 
 ```bash
 docker run -d --gpus all -p 3030:3030 -v /path/to/music:/music -v soundspan_data:/data ghcr.io/soundspan/soundspan:latest

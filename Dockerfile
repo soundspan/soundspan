@@ -1,5 +1,5 @@
 # soundspan All-in-One Docker Image (Hardened)
-# Contains: Backend, Frontend, PostgreSQL, Redis, Audio Analyzer, Audio Analyzer CLAP
+# Contains: Backend, Frontend, PostgreSQL, Redis, Audio Analyzer, DCLAP Vibe Provider
 # Usage: docker run -d -p 3030:3030 -v /path/to/music:/music ghcr.io/soundspan/soundspan-aio:latest
 
 FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     redis-server \
     supervisor \
     ffmpeg \
+    libgomp1 \
     libsndfile1 \
     tini \
     openssl \
@@ -62,17 +63,16 @@ RUN set -eux; \
 # ============================================
 WORKDIR /app/audio-analyzer
 
-# Install ALL Python dependencies (Essentia analyzer + CLAP analyzer) from ONE
-# hash-pinned lock (roadmap F50). requirements-aio.lock is the analyzer + clap
+# Install ALL Python dependencies (Essentia analyzer + DCLAP provider) from ONE
+# hash-pinned lock (roadmap F50). requirements-aio.lock is the analyzer + DCLAP
 # manifests resolved JOINTLY for Python 3.11 (this image's system interpreter),
 # so both ML runtimes share one consistent transitive tree — subsuming the
-# former inline TensorFlow/essentia install here AND both `-r requirements.txt`
-# installs (the CLAP one below is now a no-op). Regenerate: see the lock header.
+# former inline TensorFlow/essentia install here. Regenerate: see the lock header.
 COPY requirements-aio.lock /tmp/requirements-aio.lock
 RUN pip3 install --no-cache-dir --break-system-packages \
     --require-hashes -r /tmp/requirements-aio.lock \
     && rm -f /tmp/requirements-aio.lock \
-    && python3 -c "import numpy, tensorflow; import importlib.util as i; assert i.find_spec('essentia')"
+    && python3 -c "import numpy, onnxruntime, tensorflow; import importlib.util as i; assert i.find_spec('essentia')"
 
 # Download Essentia ML models (~4MB total) - these enable Enhanced vibe matching
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
@@ -122,28 +122,41 @@ COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
 COPY services/common /app/services/common
 
 # ============================================
-# CLAP ANALYZER SETUP (Vibe Similarity)
+# DCLAP VIBE PROVIDER SETUP (ONNX)
 # ============================================
-WORKDIR /app/audio-analyzer-clap
+WORKDIR /app/vibe-provider-dclap
 
-# CLAP Python dependencies (torch/laion-clap/transformers) were already installed
-# above from the merged requirements-aio.lock — jointly resolved with the Essentia
-# analyzer deps into this one shared Python 3.11 site-packages (roadmap F50).
+RUN mkdir -p /app/vibe-provider-dclap/models \
+    /app/vibe-provider-dclap/tokenizer /app/licenses/dclap
 
-# Copy CLAP analyzer script and its provider HTTP module
-COPY services/audio-analyzer-clap/analyzer.py services/audio-analyzer-clap/http_server.py /app/audio-analyzer-clap/
+# Vendor the immutable upstream v1 release artifacts and fail on any byte drift.
+RUN set -eu; \
+    RELEASE_URL="https://github.com/NeptuneHub/AudioMuse-AI-DCLAP/releases/download/v1"; \
+    curl --fail --location --retry 3 --connect-timeout 30 --max-time 1800 \
+        --output /app/vibe-provider-dclap/models/model_epoch_36.onnx "${RELEASE_URL}/model_epoch_36.onnx"; \
+    echo "17860403f8fc90aff8ac0632a0741eb5e58d8c0b0ad2fce5ced967274b0ea971  /app/vibe-provider-dclap/models/model_epoch_36.onnx" | sha256sum -c -; \
+    curl --fail --location --retry 3 --connect-timeout 30 --max-time 1800 \
+        --output /app/vibe-provider-dclap/models/model_epoch_36.onnx.data "${RELEASE_URL}/model_epoch_36.onnx.data"; \
+    echo "2a735b23c2aad7b12d9ffc85334cebcc659c07696d2ff60e2e378da28b6df657  /app/vibe-provider-dclap/models/model_epoch_36.onnx.data" | sha256sum -c -; \
+    curl --fail --location --retry 3 --connect-timeout 30 --max-time 1800 \
+        --output /app/vibe-provider-dclap/models/clap_text_model.onnx "${RELEASE_URL}/clap_text_model.onnx"; \
+    echo "200d48f3905ff1f272af5006dd9851f94071a7dde4eafd9c07bc09c5ac65a714  /app/vibe-provider-dclap/models/clap_text_model.onnx" | sha256sum -c -
 
-# Pre-download CLAP model (~2.35 GB / 2,352,471,003 bytes) during build to avoid runtime download
-# The analyzer expects the model at /app/models/music_audioset_epoch_15_esc_90.14.pt
-# Pinned to an immutable repo commit (not `resolve/main`) and verified against
-# a pinned sha256 digest (roadmap F38); a mismatch fails the build. Digest
-# measured 2026-07-11 (see docs/modernization-roadmap.md F38).
-RUN echo "Downloading CLAP model for vibe similarity..." && \
-    curl -L --progress-bar -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt" && \
-    echo "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd  /app/models/music_audioset_epoch_15_esc_90.14.pt" | sha256sum -c - && \
-    echo "CLAP model downloaded successfully" && \
-    ls -lh /app/models/music_audioset_epoch_15_esc_90.14.pt
+# Vendor only tokenizer assets from an immutable Hugging Face snapshot. Runtime
+# offline flags make any accidental network fallback fail closed.
+RUN set -eu; \
+    TOKENIZER_REVISION="8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a"; \
+    TOKENIZER_URL="https://huggingface.co/laion/clap-htsat-unfused/resolve/${TOKENIZER_REVISION}"; \
+    for TOKENIZER_FILE in config.json merges.txt special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json; do \
+        curl --fail --location --retry 3 --connect-timeout 30 --max-time 600 \
+            --output "/app/vibe-provider-dclap/tokenizer/${TOKENIZER_FILE}" "${TOKENIZER_URL}/${TOKENIZER_FILE}"; \
+    done
+
+COPY services/vibe-provider-dclap/__main__.py services/vibe-provider-dclap/http_server.py \
+    services/vibe-provider-dclap/inference.py services/vibe-provider-dclap/model_provider.py \
+    services/vibe-provider-dclap/music_path.py services/vibe-provider-dclap/preprocessing.py \
+    services/vibe-provider-dclap/settings.py /app/vibe-provider-dclap/
+COPY services/vibe-provider-dclap/LICENSE services/vibe-provider-dclap/NOTICE.md /app/licenses/dclap/
 
 # Create database readiness check script
 RUN cat > /app/wait-for-db.sh << 'EOF'
@@ -349,19 +362,20 @@ stderr_logfile_maxbytes=0
 environment=DATABASE_URL="%(ENV_DATABASE_URL)s",REDIS_URL="%(ENV_REDIS_URL)s",MUSIC_PATH="%(ENV_MUSIC_PATH)s",BATCH_SIZE="%(ENV_BATCH_SIZE)s",SLEEP_INTERVAL="%(ENV_SLEEP_INTERVAL)s",MAX_ANALYZE_SECONDS="%(ENV_MAX_ANALYZE_SECONDS)s",BRPOP_TIMEOUT="%(ENV_BRPOP_TIMEOUT)s",MODEL_IDLE_TIMEOUT="%(ENV_MODEL_IDLE_TIMEOUT)s",NUM_WORKERS="%(ENV_NUM_WORKERS)s",THREADS_PER_WORKER="%(ENV_THREADS_PER_WORKER)s",AUDIO_REDIS_SOCKET_TIMEOUT="%(ENV_AUDIO_REDIS_SOCKET_TIMEOUT)s",CUDA_VISIBLE_DEVICES="%(ENV_CUDA_VISIBLE_DEVICES)s"
 priority=50
 
-[program:audio-analyzer-clap]
-command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer-clap && python3 analyzer.py"
+[program:vibe-provider-dclap]
+command=python3 __main__.py
 user=soundspan
 autostart=true
 autorestart=unexpected
 startretries=3
-startsecs=30
+startsecs=10
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="%(ENV_DATABASE_URL)s",REDIS_URL="%(ENV_REDIS_URL)s",MUSIC_PATH="%(ENV_MUSIC_PATH)s",BACKEND_URL="http://localhost:3006",SLEEP_INTERVAL="%(ENV_SLEEP_INTERVAL)s",NUM_WORKERS="%(ENV_CLAP_NUM_WORKERS)s",THREADS_PER_WORKER="%(ENV_THREADS_PER_WORKER)s",MODEL_IDLE_TIMEOUT="%(ENV_MODEL_IDLE_TIMEOUT)s",CLAP_REDIS_SOCKET_TIMEOUT="%(ENV_CLAP_REDIS_SOCKET_TIMEOUT)s",INTERNAL_API_SECRET="%(ENV_INTERNAL_API_SECRET)s",CUDA_VISIBLE_DEVICES="%(ENV_CUDA_VISIBLE_DEVICES)s"
-priority=60
+directory=/app/vibe-provider-dclap
+environment=PYTHONPATH="/app",PYTHONDONTWRITEBYTECODE="1",PYTHONUNBUFFERED="1",INTERNAL_API_SECRET="%(ENV_INTERNAL_API_SECRET)s",MUSIC_PATH="%(ENV_MUSIC_PATH)s",DCLAP_HTTP_PORT="%(ENV_DCLAP_HTTP_PORT)s",DCLAP_ONNX_INTRA_OP_THREADS="%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s",MODEL_IDLE_TIMEOUT="%(ENV_MODEL_IDLE_TIMEOUT)s",DCLAP_MODEL_PATH="%(ENV_DCLAP_MODEL_PATH)s",DCLAP_TOKENIZER_PATH="%(ENV_DCLAP_TOKENIZER_PATH)s",DCLAP_IMAGE_VERSION="%(ENV_DCLAP_IMAGE_VERSION)s",TRANSFORMERS_OFFLINE="1",HF_HUB_OFFLINE="1",TOKENIZERS_PARALLELISM="false",OMP_NUM_THREADS="%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s",OPENBLAS_NUM_THREADS="%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s",MKL_NUM_THREADS="%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s",NUMEXPR_MAX_THREADS="%(ENV_DCLAP_ONNX_INTRA_OP_THREADS)s"
+priority=25
 EOF
 
 # Fix Windows line endings in supervisor config
@@ -633,14 +647,18 @@ export THREADS_PER_WORKER="${AUDIO_ANALYSIS_THREADS_PER_WORKER:-1}"
 export BATCH_SIZE="${AUDIO_ANALYSIS_BATCH_SIZE:-10}"
 export BRPOP_TIMEOUT="${AUDIO_BRPOP_TIMEOUT:-30}"
 export MAX_ANALYZE_SECONDS="${MAX_ANALYZE_SECONDS:-90}"
-export MODEL_IDLE_TIMEOUT="${AUDIO_MODEL_IDLE_TIMEOUT:-300}"
+export MODEL_IDLE_TIMEOUT="${MODEL_IDLE_TIMEOUT:-${AUDIO_MODEL_IDLE_TIMEOUT:-300}}"
 export SLEEP_INTERVAL="${SLEEP_INTERVAL:-5}"
-export CLAP_NUM_WORKERS="${CLAP_WORKERS:-1}"
 export AUDIO_REDIS_SOCKET_TIMEOUT="${AUDIO_REDIS_SOCKET_TIMEOUT:-35}"
-export CLAP_REDIS_SOCKET_TIMEOUT="${CLAP_REDIS_SOCKET_TIMEOUT:-10}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export MUSIC_PATH="${MUSIC_PATH:-/music}"
+export DCLAP_HTTP_PORT="${DCLAP_HTTP_PORT:-8092}"
+export DCLAP_ONNX_INTRA_OP_THREADS="${DCLAP_ONNX_INTRA_OP_THREADS:-1}"
+export DCLAP_MODEL_PATH="${DCLAP_MODEL_PATH:-/app/vibe-provider-dclap/models}"
+export DCLAP_TOKENIZER_PATH="${DCLAP_TOKENIZER_PATH:-/app/vibe-provider-dclap/tokenizer}"
+export DCLAP_IMAGE_VERSION="${DCLAP_IMAGE_VERSION:-dclap-student-v1}"
+export VIBE_PROVIDER_URL="${VIBE_PROVIDER_URL:-http://localhost:8092}"
 export DATABASE_URL
 export SESSION_SECRET SETTINGS_ENCRYPTION_KEY INTERNAL_API_SECRET
 export NODE_ENV=production
@@ -659,6 +677,7 @@ TRANSCODE_CACHE_PATH=/data/cache/transcodes
 SESSION_SECRET=$SESSION_SECRET
 SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=$INTERNAL_API_SECRET
+VIBE_PROVIDER_URL=$VIBE_PROVIDER_URL
 ENVEOF
 chmod 600 /app/backend/.env
 chown soundspan:soundspan /app/backend/.env 2>/dev/null || true
