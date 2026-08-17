@@ -20,11 +20,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 class Analyzer(Protocol):
     """Embedding methods required by the HTTP transport."""
 
-    def get_text_embedding(self, text: str) -> np.ndarray | None:
-        """Generate one text embedding."""
+    def get_text_embedding(self, text: str) -> object | None:
+        """Generate one text embedding (numpy array; Any-typed boundary)."""
 
-    def get_audio_embedding(self, audio_path: str) -> np.ndarray | None:
-        """Generate one audio embedding."""
+    def get_audio_embedding(self, audio_path: str) -> object | None:
+        """Generate one audio embedding (numpy array; Any-typed boundary)."""
 
 
 class TextEmbeddingRequest(BaseModel):
@@ -61,7 +61,7 @@ def require_internal_secret(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _normalize_vector(value: Any) -> list[float]:
+def _normalize_vector(value: object) -> list[float]:
     """Validate and L2-normalize one 512-dimensional embedding."""
     vector = np.asarray(value, dtype=np.float32)
     if vector.shape != (clap.EMBEDDING_DIM,):
@@ -71,10 +71,11 @@ def _normalize_vector(value: Any) -> list[float]:
     norm = float(np.linalg.norm(vector))
     if not np.isfinite(norm) or norm <= 0:
         raise ValueError("Embedding has an invalid norm")
-    return (vector / norm).astype(np.float32).tolist()
+    normalized = (vector / norm).astype(np.float32)
+    return [float(component) for component in normalized]
 
 
-def _model_vector(value: Any) -> list[float]:
+def _model_vector(value: object) -> list[float]:
     """Map an invalid model result to provider unavailability."""
     try:
         return _normalize_vector(value)
