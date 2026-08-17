@@ -673,10 +673,8 @@ export default function VibePage() {
                         Feature not available
                     </p>
                     <p className="text-sm text-content-muted">
-                        Enable the DCLAP vibe provider. Compose and AIO enable
-                        it by default; for Helm, set
-                        vibeProviderDclap.enabled=true. Custom deployments must
-                        set VIBE_PROVIDER_URL.
+                        Enable the DCLAP vibe provider (on by default in Compose
+                        and AIO; see UPGRADING for Helm/custom).
                     </p>
                 </div>
             </div>
@@ -1516,10 +1514,8 @@ function VibePageContent() {
                                     {vibeStatus &&
                                         vibeStatus.embeddedTracks === 0 && (
                                             <p className="text-xs text-error mt-6">
-                                                No tracks embedded yet. Confirm
-                                                the DCLAP vibe provider is
-                                                running and wait for background
-                                                embedding.
+                                                No tracks embedded yet; the
+                                                provider embeds in background.
                                             </p>
                                         )}
                                 </div>
