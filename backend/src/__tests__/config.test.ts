@@ -250,6 +250,58 @@ describe("config module", () => {
         },
     );
 
+    it("uses safe embedding-space lifecycle defaults", async () => {
+        const { config } = await loadConfigModule({
+            VIBE_SPACE_CUTOVER_THRESHOLD: undefined,
+            VIBE_SPACE_RETIREMENT_GRACE_DAYS: undefined,
+        });
+
+        expect(config.vibeSpaceCutoverThreshold).toBe(0.95);
+        expect(config.vibeSpaceRetirementGraceDays).toBe(7);
+    });
+
+    it.each([
+        ["0.5", 0.5],
+        ["0.95", 0.95],
+        ["1", 1],
+    ])("parses VIBE_SPACE_CUTOVER_THRESHOLD %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            VIBE_SPACE_CUTOVER_THRESHOLD: raw,
+        });
+        expect(config.vibeSpaceCutoverThreshold).toBe(expected);
+    });
+
+    it.each(["", "0.49", "1.01", "NaN", "95%"])(
+        "rejects invalid VIBE_SPACE_CUTOVER_THRESHOLD %s",
+        async (raw) => {
+            await expectStartupValidationFailure(
+                { VIBE_SPACE_CUTOVER_THRESHOLD: raw },
+                "VIBE_SPACE_CUTOVER_THRESHOLD must be a number from 0.5 through 1",
+            );
+        },
+    );
+
+    it.each([
+        ["1", 1],
+        ["7", 7],
+        ["90", 90],
+    ])("parses VIBE_SPACE_RETIREMENT_GRACE_DAYS %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            VIBE_SPACE_RETIREMENT_GRACE_DAYS: raw,
+        });
+        expect(config.vibeSpaceRetirementGraceDays).toBe(expected);
+    });
+
+    it.each(["", "0", "91", "1.5", "seven"])(
+        "rejects invalid VIBE_SPACE_RETIREMENT_GRACE_DAYS %s",
+        async (raw) => {
+            await expectStartupValidationFailure(
+                { VIBE_SPACE_RETIREMENT_GRACE_DAYS: raw },
+                "VIBE_SPACE_RETIREMENT_GRACE_DAYS must be an integer from 1 through 90",
+            );
+        },
+    );
+
     it.each([
         ["http://vibe-provider:8090", "http://vibe-provider:8090"],
         ["http://vibe-provider:8090/", "http://vibe-provider:8090"],

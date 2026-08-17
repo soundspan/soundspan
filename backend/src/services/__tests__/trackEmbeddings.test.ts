@@ -4,6 +4,7 @@ jest.mock("../../utils/db", () => ({
         $queryRaw: jest.fn(),
         track: { findMany: jest.fn() },
         trackEmbedding: { deleteMany: jest.fn() },
+        embeddingSpace: { findUnique: jest.fn() },
     },
 }));
 
@@ -12,9 +13,12 @@ jest.mock("../../utils/annQuery", () => ({
 }));
 
 const mockGetActiveSpace = jest.fn();
+const mockGetTargetSpaceId = jest.fn();
 
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
+    getVibeEmbeddingTargetSpaceId: (...args: unknown[]) =>
+        mockGetTargetSpaceId(...args),
 }));
 
 import { prisma } from "../../utils/db";
@@ -45,26 +49,42 @@ beforeEach(() => {
         dim: 512,
         preprocessing: {},
     });
+    mockGetTargetSpaceId.mockResolvedValue("space-active");
 });
 
 describe("upsertTrackEmbedding", () => {
     it("writes a complete finite CLAP vector", async () => {
         (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
+            dim: 512,
+        });
 
-        await upsertTrackEmbedding("track-1", Array(512).fill(0.25));
+        await upsertTrackEmbedding(
+            "track-1",
+            Array(512).fill(0.25),
+            "space-target",
+        );
 
         expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
         const [query, ...values] = (prisma.$executeRaw as jest.Mock).mock
             .calls[0];
         expect(query.join(" ")).toContain("space_id");
         expect(query.join(" ")).not.toContain("model_version");
-        expect(values).toContain("space-active");
+        expect(values).toContain("space-target");
+        expect(query.join(" ")).toContain("ON CONFLICT (track_id, space_id)");
+        expect(prisma.embeddingSpace.findUnique).toHaveBeenCalledWith({
+            where: { id: "space-target" },
+            select: { dim: true },
+        });
     });
 
     it("rejects malformed vectors before writing", async () => {
-        await expect(upsertTrackEmbedding("track-1", [0.25])).rejects.toThrow(
-            "512 finite values",
-        );
+        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
+            dim: 2,
+        });
+        await expect(
+            upsertTrackEmbedding("track-1", [0.25], "space-two-dimensional"),
+        ).rejects.toThrow("2 finite values");
         expect(prisma.$executeRaw).not.toHaveBeenCalled();
     });
 });
@@ -73,18 +93,60 @@ describe("active-space maintenance", () => {
     it("selects local tracks missing an active-space embedding", async () => {
         (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
 
+        await findLocalTracksNeedingActiveEmbedding(25, "space-target");
+
+        expect(prisma.track.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    origin: "LOCAL",
+                    removedAt: null,
+                    filePath: { not: null },
+                    embeddings: {
+                        none: { spaceId: "space-target" },
+                    },
+                }),
+                take: 25,
+            }),
+        );
+    });
+
+    it.each(["space-active", "space-migrating"])(
+        "uses the target-space absence and shared status gate for %s",
+        async (targetSpaceId) => {
+            (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
+
+            await findLocalTracksNeedingActiveEmbedding(25, targetSpaceId);
+
+            expect(prisma.track.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        embeddings: {
+                            none: { spaceId: targetSpaceId },
+                        },
+                        OR: [
+                            { vibeAnalysisStatus: null },
+                            { vibeAnalysisStatus: "pending" },
+                            { vibeAnalysisStatus: "completed" },
+                        ],
+                    }),
+                }),
+            );
+        },
+    );
+
+    it("uses the worker-resolved target when the producer omits an override", async () => {
+        (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
+        mockGetTargetSpaceId.mockResolvedValue("space-worker-target");
+
         await findLocalTracksNeedingActiveEmbedding(25);
 
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    AND: expect.arrayContaining([
-                        expect.objectContaining({
-                            OR: expect.arrayContaining([{ embedding: null }]),
-                        }),
-                    ]),
+                    embeddings: {
+                        none: { spaceId: "space-worker-target" },
+                    },
                 }),
-                take: 25,
             }),
         );
     });

@@ -45,6 +45,8 @@ describe("vibe embed job processor", () => {
         );
         const now = jest.fn(() => new Date("2026-08-16T12:00:00.000Z"));
         const processJob = createVibeEmbedJobProcessor({
+            targetSpaceId: "space-provider",
+            targetSpaceDim: 2,
             prisma,
             embedAudio,
             upsertTrackEmbedding,
@@ -89,9 +91,11 @@ describe("vibe embed job processor", () => {
                 id: "track-1",
                 origin: "LOCAL",
                 removedAt: null,
+                embeddings: { none: { spaceId: "space-provider" } },
                 OR: [
                     { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },
+                    { vibeAnalysisStatus: "completed" },
                 ],
             },
             data: {
@@ -103,10 +107,14 @@ describe("vibe embed job processor", () => {
             },
         });
         expect(harness.releaseReservation).toHaveBeenCalledWith("track-1");
-        expect(harness.embedAudio).toHaveBeenCalledWith("artist/track.flac");
+        expect(harness.embedAudio).toHaveBeenCalledWith("artist/track.flac", {
+            id: "space-provider",
+            dim: 2,
+        });
         expect(harness.upsertTrackEmbedding).toHaveBeenCalledWith(
             "track-1",
             [0.6, 0.8],
+            "space-provider",
         );
         expect(harness.prisma.track.update).toHaveBeenCalledWith({
             where: { id: "track-1" },
@@ -151,6 +159,7 @@ describe("vibe embed job processor", () => {
                     { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },
                     { vibeAnalysisStatus: "processing" },
+                    { vibeAnalysisStatus: "completed" },
                 ],
             },
             data: {
@@ -220,6 +229,7 @@ describe("vibe embed job processor", () => {
                         { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },
                         { vibeAnalysisStatus: "processing" },
+                        { vibeAnalysisStatus: "completed" },
                     ],
                 },
                 data: {
@@ -348,6 +358,86 @@ describe("vibe embed job processor", () => {
             "Skipped stale vibe embedding job claim",
             { trackId: "track-stale" },
         );
+    });
+
+    it("claims completed tracks missing the target-space vector", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-migrating",
+            title: "Migrating Track",
+        });
+
+        await expect(
+            harness.processJob(
+                JSON.stringify({
+                    trackId: "track-migrating",
+                    filePath: "artist/track.flac",
+                }),
+            ),
+        ).resolves.toBe("stored");
+
+        expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: "track-migrating",
+                origin: "LOCAL",
+                removedAt: null,
+                embeddings: { none: { spaceId: "space-provider" } },
+                OR: [
+                    { vibeAnalysisStatus: null },
+                    { vibeAnalysisStatus: "pending" },
+                    { vibeAnalysisStatus: "completed" },
+                ],
+            },
+            data: expect.objectContaining({
+                vibeAnalysisStatus: "processing",
+            }),
+        });
+    });
+
+    it("does not reclaim a completed track already stored in the target space", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-backfilled",
+            title: "Backfilled Track",
+        });
+        harness.prisma.track.updateMany.mockResolvedValue({ count: 0 });
+
+        await expect(
+            harness.processJob(
+                JSON.stringify({
+                    trackId: "track-backfilled",
+                    filePath: "artist/track.flac",
+                }),
+            ),
+        ).resolves.toBe("stale_claim");
+
+        expect(harness.embedAudio).not.toHaveBeenCalled();
+        expect(harness.upsertTrackEmbedding).not.toHaveBeenCalled();
+    });
+
+    it("allows a failure write to settle a completed track claimed for the target", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-invalid",
+            title: "Invalid Track",
+        });
+
+        await harness.processJob(JSON.stringify({ trackId: "track-invalid" }));
+
+        expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: "track-invalid",
+                origin: "LOCAL",
+                removedAt: null,
+                OR: [
+                    { vibeAnalysisStatus: null },
+                    { vibeAnalysisStatus: "pending" },
+                    { vibeAnalysisStatus: "processing" },
+                    { vibeAnalysisStatus: "completed" },
+                ],
+            },
+            data: expect.objectContaining({ vibeAnalysisStatus: "failed" }),
+        });
     });
 
     it("does not store when the track is removed during inference", async () => {

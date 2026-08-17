@@ -39,4 +39,24 @@ describe("vibe embed metrics", () => {
         expect(exposition).toContain('state="pending"} 3');
         expect(exposition).toContain('state="failed"} 2');
     });
+
+    it("emits every bounded space transition", async () => {
+        const registry = new Registry();
+        const metrics = createVibeEmbedMetrics(registry);
+
+        for (const transition of [
+            "registered",
+            "cutover",
+            "retired_cleaned",
+        ] as const) {
+            metrics.recordSpaceTransition(transition);
+        }
+
+        const exposition = await registry.metrics();
+        expect(exposition).toContain(
+            'soundspan_vibe_space_transitions_total{transition="registered"} 1',
+        );
+        expect(exposition).toContain('transition="cutover"} 1');
+        expect(exposition).toContain('transition="retired_cleaned"} 1');
+    });
 });

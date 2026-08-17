@@ -76,10 +76,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
 jest.mock("../../services/trackEmbeddings", () => ({
     countEmbeddedLocalTracks: jest.fn(),
     missingActiveEmbeddingWhere: (spaceId: string) => ({
-        OR: [
-            { embedding: null },
-            { embedding: { is: { spaceId: { not: spaceId } } } },
-        ],
+        embeddings: { none: { spaceId } },
     }),
 }));
 
@@ -730,14 +727,7 @@ describe("analysis routes runtime", () => {
         expect(mockTrackFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    OR: [
-                        { embedding: null },
-                        {
-                            embedding: {
-                                is: { spaceId: { not: "space-active" } },
-                            },
-                        },
-                    ],
+                    embeddings: { none: { spaceId: "space-active" } },
                 }),
             }),
         );

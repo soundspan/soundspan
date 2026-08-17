@@ -3,8 +3,15 @@ import { prisma } from "../utils/db";
 import { parseEmbedding } from "../utils/embedding";
 import { runAnnQuery } from "../utils/annQuery";
 import { TRACK_BROWSE_SQL } from "../utils/libraryRadioPredicates";
-import { getActiveSpace } from "./embeddingSpaces";
+import {
+    getActiveSpace,
+    getVibeEmbeddingTargetSpaceId,
+} from "./embeddingSpaces";
 import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
+import {
+    vibeEmbeddingEligibleTrackWhere,
+    vibeEmbeddingTargetGateWhere,
+} from "./vibeEmbeddingEligibility";
 
 /**
  * trackEmbeddings — service-layer reads of the pgvector `track_embeddings`
@@ -60,40 +67,26 @@ export interface TextSearchResult {
     speechiness: number | null;
 }
 
-/** Prisma relation filter for tracks without a vector in `activeSpaceId`. */
+/** Prisma relation filter for tracks without a vector in `targetSpaceId`. */
 export function missingActiveEmbeddingWhere(
-    activeSpaceId: string,
+    targetSpaceId: string,
 ): Prisma.TrackWhereInput {
     return {
-        OR: [
-            { embedding: null },
-            {
-                embedding: {
-                    is: { spaceId: { not: activeSpaceId } },
-                },
-            },
-        ],
+        embeddings: { none: { spaceId: targetSpaceId } },
     };
 }
 
-/** Select bounded local queue candidates missing an active-space vector. */
+/** Select bounded local queue candidates missing a target-space vector. */
 export async function findLocalTracksNeedingActiveEmbedding(
     limit: number,
+    targetSpaceId?: string,
 ): Promise<Array<{ id: string; filePath: string | null }>> {
-    const activeSpace = await getActiveSpace();
+    const resolvedTargetSpaceId =
+        targetSpaceId ?? (await getVibeEmbeddingTargetSpaceId());
     return prisma.track.findMany({
         where: {
-            removedAt: null,
-            ...LOCAL_TRACK_WHERE,
-            AND: [
-                missingActiveEmbeddingWhere(activeSpace.id),
-                {
-                    OR: [
-                        { vibeAnalysisStatus: null },
-                        { vibeAnalysisStatus: "pending" },
-                    ],
-                },
-            ],
+            ...vibeEmbeddingEligibleTrackWhere(),
+            ...vibeEmbeddingTargetGateWhere(resolvedTargetSpaceId),
         },
         select: { id: true, filePath: true },
         take: limit,
@@ -117,6 +110,7 @@ export async function deleteActiveLocalTrackEmbeddings(): Promise<number> {
 export async function upsertTrackEmbedding(
     trackId: string,
     embedding: readonly number[],
+    spaceId: string,
 ): Promise<void> {
     if (
         embedding.length === 0 ||
@@ -124,19 +118,24 @@ export async function upsertTrackEmbedding(
     ) {
         throw new Error("Track embedding must contain only finite values");
     }
-    const activeSpace = await getActiveSpace();
-    if (embedding.length !== activeSpace.dim) {
+    const targetSpace = await prisma.embeddingSpace.findUnique({
+        where: { id: spaceId },
+        select: { dim: true },
+    });
+    if (!targetSpace) {
+        throw new Error(`Embedding space ${spaceId} is not registered`);
+    }
+    if (embedding.length !== targetSpace.dim) {
         throw new Error(
-            `Track embedding must contain ${activeSpace.dim} finite values`,
+            `Track embedding must contain ${targetSpace.dim} finite values`,
         );
     }
     const vector = `[${embedding.join(",")}]`;
     await prisma.$executeRaw`
         INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
-        VALUES (${trackId}, ${vector}::vector, ${activeSpace.id}, NOW())
-        ON CONFLICT (track_id) DO UPDATE SET
+        VALUES (${trackId}, ${vector}::vector, ${spaceId}, NOW())
+        ON CONFLICT (track_id, space_id) DO UPDATE SET
             embedding = EXCLUDED.embedding,
-            space_id = EXCLUDED.space_id,
             analyzed_at = EXCLUDED.analyzed_at
     `;
 }

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Operators can now start a blue/green vibe embedding migration by pointing
+  `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
+  backfills it, cuts over at configured coverage, retains the old vectors for
+  rollback, and cleans them after the configured grace period.
 - Added an opt-in, validated vibe-provider HTTP client for text search and
   vocabulary generation, with active-space vector checks and bounded metrics.
 - The torch CLAP sidecar now exposes the internal embedding provider HTTP contract.
@@ -32,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and accepts repeatable per-release `--upgrade-note` bullets.
 
 ### Fixed
+
+- Hardened blue/green vibe migrations so completed post-cutover tails
+  self-heal into the target space, text search stays in the active space,
+  failed concurrent ANN indexes recover, terminal worker startup retries are
+  rate-limited, and rollback stops retired-vector cleanup at the next batch
+  boundary.
 
 ## [2.2.0] - 2026-08-16
 

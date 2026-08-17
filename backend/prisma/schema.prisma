@@ -443,7 +443,7 @@ model Track {
   deduplicatedFederatedTracks Track[] @relation("FederationTrackDedup")
   trackGenres     TrackGenre[]
   transcodedFiles TranscodedFile[]
-  embedding       TrackEmbedding?
+  embeddings      TrackEmbedding[]
   lyrics          TrackLyrics?
   syncGroups      SyncGroup[]      @relation("SyncGroupTrack")
 
@@ -1350,6 +1350,7 @@ model EmbeddingSpace {
   preprocessing  Json
   status         EmbeddingSpaceStatus
   createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  retiredAt      DateTime?            @map("retired_at") @db.Timestamptz
   embeddings     TrackEmbedding[]
 
   @@unique([family, checkpointHash])
@@ -1358,13 +1359,14 @@ model EmbeddingSpace {
 }
 
 model TrackEmbedding {
-  trackId    String                     @id @map("track_id")
+  trackId    String                     @map("track_id")
   embedding  Unsupported("vector(512)")
   spaceId    String                     @map("space_id")
   analyzedAt DateTime                   @default(now()) @map("analyzed_at") @db.Timestamptz
   track      Track                      @relation(fields: [trackId], references: [id], onDelete: Cascade)
   space      EmbeddingSpace             @relation(fields: [spaceId], references: [id], onDelete: Restrict)
 
+  @@id([trackId, spaceId])
   @@index([spaceId])
   @@map("track_embeddings")
 }

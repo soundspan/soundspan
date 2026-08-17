@@ -1,8 +1,12 @@
 import { randomUUID } from "crypto";
 import { config } from "../config";
+import { logger } from "../utils/logger";
 import { blockingBlPop, redisClient } from "../utils/redis";
+import { getActiveSpace } from "./embeddingSpaces";
 import {
+    assertProviderMatchesActiveSpace,
     embedText,
+    fetchProviderSpace,
     VibeProviderError,
     VibeProviderTimeoutError,
     VibeProviderUnavailableError,
@@ -12,6 +16,12 @@ const TEXT_EMBED_REQUEST_STREAM = "audio:text:embed:requests";
 const TEXT_EMBED_RESPONSE_PREFIX = "audio:text:embed:response:";
 const TEXT_EMBED_TIMEOUT_SECONDS = 30;
 const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
+const PROVIDER_SPACE_MATCH_TTL_MS = 60_000;
+const log = logger.child("TextEmbedding");
+
+let cachedProviderMatchesActive = false;
+let providerMatchCacheExpiresAt = 0;
+let lastMismatchWarningAt = Number.NEGATIVE_INFINITY;
 
 interface LegacyTextEmbedResponse {
     requestId: string;
@@ -82,9 +92,47 @@ async function embedTextWithLegacyStream(text: string): Promise<number[]> {
     }
 }
 
+async function providerMatchesActiveSpace(): Promise<boolean> {
+    if (Date.now() < providerMatchCacheExpiresAt) {
+        return cachedProviderMatchesActive;
+    }
+    try {
+        const [providerSpace, activeSpace] = await Promise.all([
+            fetchProviderSpace(),
+            getActiveSpace(),
+        ]);
+        assertProviderMatchesActiveSpace(providerSpace, activeSpace);
+        cachedProviderMatchesActive = true;
+    } catch {
+        cachedProviderMatchesActive = false;
+    }
+    providerMatchCacheExpiresAt = Date.now() + PROVIDER_SPACE_MATCH_TTL_MS;
+    return cachedProviderMatchesActive;
+}
+
+function warnProviderMismatch(): void {
+    const now = Date.now();
+    if (now - lastMismatchWarningAt < PROVIDER_SPACE_MATCH_TTL_MS) return;
+    lastMismatchWarningAt = now;
+    log.warn(
+        "Vibe text provider does not match the active embedding space; using the legacy text tower",
+    );
+}
+
+/** Clear process-local text-provider identity state after configuration changes. */
+export function invalidateTextEmbeddingProviderSpaceCache(): void {
+    cachedProviderMatchesActive = false;
+    providerMatchCacheExpiresAt = 0;
+    lastMismatchWarningAt = Number.NEGATIVE_INFINITY;
+}
+
 /** Resolve text embeddings through provider mode or the unchanged legacy stream. */
 export async function resolveTextEmbedding(text: string): Promise<number[]> {
     if (!config.vibeProviderUrl) return embedTextWithLegacyStream(text);
+    if (!(await providerMatchesActiveSpace())) {
+        warnProviderMismatch();
+        return embedTextWithLegacyStream(text);
+    }
     try {
         return await embedText(text);
     } catch (error) {

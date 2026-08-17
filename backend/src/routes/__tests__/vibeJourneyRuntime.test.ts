@@ -226,6 +226,17 @@ describe("vibe journey + moods runtime", () => {
             await journeyHandler(req, res);
 
             expect(res.statusCode).toBe(404);
+            expect(mockMoodBucketFindMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        track: expect.objectContaining({
+                            embeddings: {
+                                some: { spaceId: "space-active" },
+                            },
+                        }),
+                    }),
+                }),
+            );
             // The pool short-circuits below the floor: only the fromTrackId
             // embedding lookup ever hits the raw-query boundary.
             expect(mockQueryRaw).toHaveBeenCalledTimes(1);
@@ -635,6 +646,17 @@ describe("vibe journey + moods runtime", () => {
                     { mood: "aggressive", trackCount: 0 },
                     { mood: "acoustic", trackCount: 0 },
                 ]),
+            );
+            expect(mockMoodBucketGroupBy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        track: expect.objectContaining({
+                            embeddings: {
+                                some: { spaceId: "space-active" },
+                            },
+                        }),
+                    }),
+                }),
             );
         });
     });

@@ -1507,6 +1507,7 @@ describe("federation sync processor", () => {
         expect(upsertTrackEmbedding).toHaveBeenCalledWith(
             "fed-track-row",
             track.attributes.embedding,
+            activeSpace.id,
         );
         expect(getActiveSpace).toHaveBeenCalledTimes(1);
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
@@ -1602,6 +1603,7 @@ describe("federation sync processor", () => {
         expect(upsertTrackEmbedding).toHaveBeenCalledWith(
             "fed-track-row",
             track.attributes.embedding,
+            activeSpace.id,
         );
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
             "stored",

@@ -1,41 +1,33 @@
 import { setVibeEmbeddingCoverage } from "../metrics";
 import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 import { prisma } from "../utils/db";
-import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
-import { getActiveSpace } from "./embeddingSpaces";
+import { getVibeEmbeddingTargetSpaceId } from "./embeddingSpaces";
+import { vibeEmbeddingEligibleTrackWhere } from "./vibeEmbeddingEligibility";
 
 interface CoverageRefresherDependencies {
     loadCoverage(): Promise<VibeEmbeddingCoverage>;
     setCoverage(coverage: VibeEmbeddingCoverage): void;
 }
 
-/** Loads active-space coverage for local tracks eligible for audio analysis. */
-export async function loadVibeEmbeddingCoverage(): Promise<VibeEmbeddingCoverage> {
-    const activeSpace = await getActiveSpace();
-    const eligibleWhere = {
-        ...LOCAL_TRACK_WHERE,
-        removedAt: null,
-        filePath: { not: null },
-    } as const;
+/** Loads target-space coverage for local tracks eligible for audio analysis. */
+export async function loadVibeEmbeddingCoverage(
+    targetSpaceId?: string,
+): Promise<VibeEmbeddingCoverage> {
+    const resolvedTargetSpaceId =
+        targetSpaceId ?? (await getVibeEmbeddingTargetSpaceId());
+    const eligibleWhere = vibeEmbeddingEligibleTrackWhere();
     const [total, embedded, failed] = await Promise.all([
         prisma.track.count({ where: eligibleWhere }),
         prisma.track.count({
             where: {
                 ...eligibleWhere,
-                embedding: { is: { spaceId: activeSpace.id } },
+                embeddings: { some: { spaceId: resolvedTargetSpaceId } },
             },
         }),
         prisma.track.count({
             where: {
                 ...eligibleWhere,
-                OR: [
-                    { embedding: null },
-                    {
-                        embedding: {
-                            is: { spaceId: { not: activeSpace.id } },
-                        },
-                    },
-                ],
+                embeddings: { none: { spaceId: resolvedTargetSpaceId } },
                 vibeAnalysisStatus: "failed",
             },
         }),
@@ -57,9 +49,10 @@ export function createVibeEmbeddingCoverageRefresher(
     };
 }
 
-/** Refreshes active-space coverage in the process-local metrics registry. */
-export const refreshVibeEmbeddingCoverage =
-    createVibeEmbeddingCoverageRefresher({
-        loadCoverage: loadVibeEmbeddingCoverage,
-        setCoverage: setVibeEmbeddingCoverage,
-    });
+/** Refreshes target-space coverage in the process-local metrics registry. */
+export async function refreshVibeEmbeddingCoverage(
+    targetSpaceId?: string,
+): Promise<void> {
+    const coverage = await loadVibeEmbeddingCoverage(targetSpaceId);
+    setVibeEmbeddingCoverage(coverage);
+}

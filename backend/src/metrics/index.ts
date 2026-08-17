@@ -11,6 +11,7 @@ import {
     createVibeEmbedMetrics,
     type VibeEmbedJobOutcome,
     type VibeEmbeddingCoverage,
+    type VibeSpaceTransition,
 } from "./vibeEmbedMetrics";
 
 /** Single process-local Prometheus registry. */
@@ -60,7 +61,14 @@ export function recordVibeEmbedJobOutcome(outcome: VibeEmbedJobOutcome): void {
     vibeEmbedMetrics.recordJob(outcome);
 }
 
-/** Replaces the active-space audio embedding coverage gauge values. */
+/** Records one embedding-space lifecycle transition. */
+export function recordVibeSpaceTransition(
+    transition: VibeSpaceTransition,
+): void {
+    vibeEmbedMetrics.recordSpaceTransition(transition);
+}
+
+/** Replaces the worker target-space audio embedding coverage gauge values. */
 export function setVibeEmbeddingCoverage(
     coverage: VibeEmbeddingCoverage,
 ): void {

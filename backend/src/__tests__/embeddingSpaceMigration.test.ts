@@ -39,3 +39,27 @@ describe("embedding-space registry migration", () => {
         expect(migration).toContain('DROP COLUMN "model_version"');
     });
 });
+
+describe("embedding-space blue-green migration", () => {
+    const migrationPath = path.resolve(
+        __dirname,
+        "../../prisma/migrations/20260816130000_add_embedding_space_migration/migration.sql",
+    );
+    const migration = fs.readFileSync(migrationPath, "utf8");
+
+    it("applies the composite embedding key atomically", () => {
+        expect(migration.trimStart().startsWith("BEGIN;")).toBe(true);
+        expect(migration.trimEnd().endsWith("COMMIT;")).toBe(true);
+        expect(migration).toContain('PRIMARY KEY ("track_id", "space_id")');
+        expect(
+            migration.indexOf('DROP CONSTRAINT "track_embeddings_pkey"'),
+        ).toBeLessThan(
+            migration.indexOf('PRIMARY KEY ("track_id", "space_id")'),
+        );
+    });
+
+    it("adds the nullable retirement anchor without building an ANN index", () => {
+        expect(migration).toContain('ADD COLUMN "retired_at" TIMESTAMPTZ');
+        expect(migration).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX/i);
+    });
+});

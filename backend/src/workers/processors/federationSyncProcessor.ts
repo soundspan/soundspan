@@ -603,9 +603,9 @@ async function upsertTrack(
     });
     if (hashChanged) await clearTrackTranscodeCache(row.id);
     await applyTrackDedup(row.id, match);
-    if (attributes.embedding && storeEmbedding) {
-        await upsertTrackEmbedding(row.id, attributes.embedding);
-    }
+    const space = context.localEmbeddingSpace;
+    if (attributes.embedding && storeEmbedding && space)
+        await upsertTrackEmbedding(row.id, attributes.embedding, space.id);
     context.touchedArtistIds.add(album.artistId);
 }
 

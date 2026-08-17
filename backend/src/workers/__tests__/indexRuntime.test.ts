@@ -53,7 +53,7 @@ describe("workers runtime behavior", () => {
         const stopUnifiedEnrichmentWorker = jest.fn(async () => undefined);
         const startMoodBucketWorker = jest.fn(async () => undefined);
         const stopMoodBucketWorker = jest.fn();
-        const startVibeEmbedWorker = jest.fn(() =>
+        const startVibeEmbedWorker = jest.fn(async () =>
             Boolean(vibeProviderUrl && featureFlags.audioAnalysis !== false),
         );
         const stopVibeEmbedWorker = jest.fn(async () => undefined);

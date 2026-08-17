@@ -160,6 +160,30 @@ const vibeEmbedConcurrencyEnvSchema = z
     })
     .optional();
 
+const vibeSpaceCutoverThresholdEnvSchema = z
+    .string()
+    .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/, {
+        message:
+            "VIBE_SPACE_CUTOVER_THRESHOLD must be a number from 0.5 through 1",
+    })
+    .refine((value) => Number(value) >= 0.5, {
+        message:
+            "VIBE_SPACE_CUTOVER_THRESHOLD must be a number from 0.5 through 1",
+    })
+    .optional();
+
+const vibeSpaceRetirementGraceDaysEnvSchema = z
+    .string()
+    .regex(/^[1-9]\d*$/, {
+        message:
+            "VIBE_SPACE_RETIREMENT_GRACE_DAYS must be an integer from 1 through 90",
+    })
+    .refine((value) => Number(value) <= 90, {
+        message:
+            "VIBE_SPACE_RETIREMENT_GRACE_DAYS must be an integer from 1 through 90",
+    })
+    .optional();
+
 function normalizeVibeProviderUrl(
     value: string | undefined,
 ): string | undefined {
@@ -346,6 +370,8 @@ const envSchema = z
         INTERNAL_API_SECRET: z.string().optional(),
         VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
         VIBE_EMBED_CONCURRENCY: vibeEmbedConcurrencyEnvSchema,
+        VIBE_SPACE_CUTOVER_THRESHOLD: vibeSpaceCutoverThresholdEnvSchema,
+        VIBE_SPACE_RETIREMENT_GRACE_DAYS: vibeSpaceRetirementGraceDaysEnvSchema,
         METRICS_TOKEN: z.string().optional(),
         METRICS_PUBLIC: z.string().optional(),
         PORT: z.string().optional(),
@@ -493,6 +519,12 @@ export const config = {
     // legacy Redis transports and sidecar consumer.
     vibeProviderUrl: normalizeVibeProviderUrl(process.env.VIBE_PROVIDER_URL),
     vibeEmbedConcurrency: Number(process.env.VIBE_EMBED_CONCURRENCY ?? "1"),
+    vibeSpaceCutoverThreshold: Number(
+        process.env.VIBE_SPACE_CUTOVER_THRESHOLD ?? "0.95",
+    ),
+    vibeSpaceRetirementGraceDays: Number(
+        process.env.VIBE_SPACE_RETIREMENT_GRACE_DAYS ?? "7",
+    ),
 
     // Required stable deployment secret retained as the JWT signing fallback
     // and final API-key pepper fallback. It no longer configures sessions.

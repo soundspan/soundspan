@@ -247,6 +247,7 @@ describe("unified enrichment runtime behavior", () => {
         }));
         jest.doMock("../../services/embeddingSpaces", () => ({
             getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+            getVibeEmbeddingTargetSpaceId: jest.fn(async () => "space-active"),
         }));
         jest.doMock("../../services/moodBucketService", () => ({
             moodBucketService,
@@ -684,22 +685,14 @@ describe("unified enrichment runtime behavior", () => {
         expect(prisma.track.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    AND: expect.arrayContaining([
-                        {
-                            OR: [
-                                { embedding: null },
-                                {
-                                    embedding: {
-                                        is: {
-                                            spaceId: {
-                                                not: "space-active",
-                                            },
-                                        },
-                                    },
-                                },
-                            ],
-                        },
-                    ]),
+                    embeddings: {
+                        none: { spaceId: "space-active" },
+                    },
+                    OR: [
+                        { vibeAnalysisStatus: null },
+                        { vibeAnalysisStatus: "pending" },
+                        { vibeAnalysisStatus: "completed" },
+                    ],
                 }),
                 take: 100,
             }),
@@ -2103,7 +2096,7 @@ describe("unified enrichment runtime behavior", () => {
         (prisma.artist.findMany as jest.Mock).mockResolvedValueOnce([]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.AND?.[0]?.OR?.[0]?.embedding === null
+                query?.where?.embeddings?.none?.spaceId === "space-active"
                     ? [
                           {
                               id: "track-vibe-fail",
@@ -2235,7 +2228,7 @@ describe("unified enrichment runtime behavior", () => {
             .mockResolvedValueOnce([{ count: BigInt(1) }]);
         (prisma.track.findMany as jest.Mock).mockImplementation(
             async (query?: any) =>
-                query?.where?.AND?.[0]?.OR?.[0]?.embedding === null
+                query?.where?.embeddings?.none?.spaceId === "space-active"
                     ? [
                           {
                               id: "track-vibe-ok",

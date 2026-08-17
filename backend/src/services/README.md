@@ -47,7 +47,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/discovery/index.ts` | Discovery |
 | `backend/src/services/discoveryLogger.ts` | Core |
 | `backend/src/services/downloadQueue.ts` | Core |
-| `backend/src/services/embeddingSpaces.ts` | Active embedding-space registry lookup and process-local cache |
+| `backend/src/services/embeddingSpaceLifecycle.ts` | Blue/green embedding-space cutover and retirement cleanup |
+| `backend/src/services/embeddingSpaces.ts` | Provider-space registry resolution, active cache, and worker target |
 | `backend/src/services/enrichment.ts` | Core |
 | `backend/src/services/enrichmentFailureService.ts` | Core |
 | `backend/src/services/enrichmentState.ts` | Core |
@@ -147,8 +148,9 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeCalibration.ts` | Vibe distance calibration |
 | `backend/src/services/vibeEmbedJobs.ts` | Provider-backed audio embedding job lifecycle |
-| `backend/src/services/vibeEmbeddingCoverage.ts` | Active-space audio embedding coverage metrics |
-| `backend/src/services/vibeProvider.ts` | Validated, bounded vibe-provider HTTP client and active-space trust boundary |
+| `backend/src/services/vibeEmbeddingCoverage.ts` | Worker target-space audio embedding coverage metrics |
+| `backend/src/services/vibeEmbeddingEligibility.ts` | Shared local-track eligibility for vibe production and coverage |
+| `backend/src/services/vibeProvider.ts` | Validated, bounded vibe-provider HTTP client and registry-space trust boundaries |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/vibeVocabularyGenerator.ts` | Testable provider-backed vocabulary artifact generation |
 | `backend/src/services/wikidata.ts` | Core |

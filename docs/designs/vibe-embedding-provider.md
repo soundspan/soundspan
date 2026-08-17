@@ -1,6 +1,6 @@
 # Pluggable Vibe Embedding Provider
 
-Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; the registry portion of rollout phase 1 is implemented by migration `20260816120000_add_embedding_space_registry`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Student-space registry wiring, blue/green migration machinery, and the default-provider flip remain separate rollout work. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension teacher space; expose DCLAP as the distinct `clap-music-audioset-dclap-student` space; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
+Spec drafted 2026-08-16 for [issue #537](https://github.com/soundspan/soundspan/issues/537). Status: accepted design; rollout phase 1 and the blue/green migration machinery are implemented by migrations `20260816120000_add_embedding_space_registry` and `20260816130000_add_embedding_space_migration`; the backend provider client and the torch CLAP provider contract have landed; backend-driven audio embedding is available behind `VIBE_PROVIDER_URL`; and the DCLAP ONNX sidecar ships default-off under an opt-in Compose profile. Upstream DCLAP validation measured approximately 0.88 student-to-teacher fidelity, so the student registers as the distinct `clap-music-audioset-dclap-student` space and adoption rides the migration path; the default-provider flip remains a maintainer decision informed by the Gate 2 run. Decision record: keep the LAION-CLAP `music_audioset` 512-dimension space active until cutover; adopt DCLAP's distilled ONNX student as the default provider through a full re-embed; formalize provider and embedding-space abstractions so future model changes are operational rollouts, not schema migrations.
 
 Related: cross-peer taste vectors in Blends ([issue #529](https://github.com/soundspan/soundspan/issues/529)) and federated discovery ([issue #530](https://github.com/soundspan/soundspan/issues/530)) depend on the space-identity contract defined here.
 
@@ -39,7 +39,7 @@ Rules:
 
 - **Text and audio towers travel together.** A provider must serve both from the same joint space, or declare itself audio-only (in which case text→music search is disabled for that space — surfaced in settings, not silently degraded). The default and compat providers both serve text.
 - The backend addresses providers by configured base URL (`VIBE_PROVIDER_URL`), following the existing sidecar patterns: internal-network only, bounded timeouts, health endpoint, the analyzer queue's admission and retry semantics unchanged.
-- Vector normalization (L2) and dimension are asserted at the trust boundary on every response; mismatch against the active space is a hard job failure, never a stored vector.
+- Vector normalization (L2) and dimension are asserted at the trust boundary on every response; worker writes are also dimension-checked against their resolved target registry row, and a mismatch is a hard job failure rather than a stored vector.
 
 ## Embedding-space registry
 
@@ -60,19 +60,29 @@ TrackEmbedding.spaceId -> EmbeddingSpace.id   // replaces model_version
 
 Invariants:
 
-- **Exactly one `active` space** serves all similarity queries, radio, mixes, Discover Weekly, and text search. Queries never cross spaces.
-- One ANN index per space (partial index on `spaceId`), created when a space enters `migrating`, dropped when `retired`.
-- Text queries encode through the active space's text tower — the backend requests `/v1/embed/text` from the provider bound to the active space, never a mismatched provider.
+- **Exactly one `active` space** serves all similarity queries, radio, mixes, Discover Weekly, and text search. Outside the bounded cutover cache window documented below, queries never cross spaces.
+- The existing global ANN index continues to serve the active space. A partial ANN index for a migrating space is created immediately before cutover and dropped after that space is later retired and cleaned.
+- In steady state, text queries encode through the active space's text tower. During migration, the backend uses the fallback and bounded cutover behavior documented below instead of requesting `/v1/embed/text` from a provider whose space is not active.
 - Cross-peer vector exchange (Blends, federated discovery) transmits `(spaceId identity tuple, vector)`; peers compare identity tuples and only consume vectors whose space matches their own active space. Mismatch downgrades cross-peer features to metadata-level gracefully.
 
 ### Space migration (blue/green for vectors)
 
-1. Register new space as `migrating`; new provider deployed alongside.
-2. Background re-embed via the existing analyzer queue at low priority: oldest-first, resumable, progress surfaced on the Library Health dashboard ([issue #532](https://github.com/soundspan/soundspan/issues/532)) and the metrics registry (gauge: per-space coverage).
-3. Cutover when coverage crosses threshold (default 95%): new space becomes `active`, remaining tail re-embeds opportunistically, old space enters `retired` grace (queries pinned to new space immediately).
-4. Retirement drops old vectors and index after a configurable grace window.
+1. Set `VIBE_PROVIDER_URL` on the worker to the new provider and restart it. The worker reads `/v1/space`; an unknown `(family, checkpointHash)` tuple is registered automatically as `migrating`.
+2. The enrichment producer queues eligible local tracks missing that target-space vector. The same queue remains bounded and resumable, and the coverage gauge reads the worker target space.
+3. When coverage reaches `VIBE_SPACE_CUTOVER_THRESHOLD` (default 95%), the worker builds the target's partial ANN index, atomically marks the old space `retired` and the target `active`, then invalidates the active-space cache.
+4. The old vectors remain available for `VIBE_SPACE_RETIREMENT_GRACE_DAYS` (default 7). The worker then deletes them in bounded batches, drops their partial index if present, clears the grace anchor to mark cleanup complete, and retains the registry identity row as history.
 
-Rollback before cutover is free (delete migrating space). Rollback after cutover re-activates the retired space if still in grace.
+Keep the torch CLAP sidecar and its Redis text-embedding handler running throughout a migration. While the configured provider's space is not active, text search falls back to that legacy text tower so queries remain in the active space. `CLAP_WORKERS=0` disables its audio workers without stopping the text handler.
+
+At the cutover boundary, a cached provider-space mismatch can keep text search on the legacy tower while ANN reads use the new active space for at most 60 seconds. This bounded cross-space window equals the provider/active-space verdict-cache TTL. The next verdict refresh sees that the configured provider now matches the active space and moves text encoding to that provider without operator action.
+
+Migration exposes two intentional operational lenses. The vibe embedding coverage gauge measures the migrating worker target so operators can assess cutover readiness. Enrichment progress and feature detection continue to measure the active space because they describe the vectors currently serving user queries.
+
+Tracks added while a migration is running receive only the migrating-space vector. They become available to active-space similarity features at cutover; the worker does not also write the old active space during the migration.
+
+The producer and claim gate continuously admit `null`, `pending`, or `completed` tracks that lack a vector in the worker's target space. This automatically heals migration and post-cutover tails. `POST /api/analysis/vibe/start` remains available as a break-glass way to enqueue missing active-space vectors immediately, but normal tail recovery does not require it.
+
+To abort before cutover, delete the migrating space's vectors first, then delete its registry row; `ON DELETE RESTRICT` enforces that order. To roll back after cutover but within grace, atomically return the new space to `migrating` or `retired` and restore the prior retired space to `active`. This release does not add an administration endpoint for either operation.
 
 ## Default provider: DCLAP student (ONNX)
 
@@ -106,8 +116,8 @@ The shipped sidecar takes the conservative fail outcome now: observed student-to
 ## Rollout phases
 
 1. **Registry + interface** (no behavior change): space table, spaceId on embeddings backfilled from `model_version`, provider HTTP contract extracted over the existing torch sidecar (it becomes Provider 2 in place).
-2. **DCLAP student sidecar** shipped default-off under an opt-in Compose profile; Gate 1 mode (b) executed; distinct student space identity enforced. Provider URL wiring remains a later change.
-3. **Default flip** through migration cutover into the distinct student space; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults updated; UPGRADING notes.
+2. **DCLAP student sidecar** shipped default-off under an opt-in Compose profile; Gate 1 mode (b) executed; distinct student space identity enforced (upstream fidelity approximately 0.88 selects the distinct-space migration path).
+3. **Default flip** after the implemented blue/green backfill and automatic cutover; torch sidecar remains available as the compat/GPU choice; compose/Helm defaults and UPGRADING notes remain follow-up rollout work informed by the Gate 2 run.
 4. **Later**: MuQ-MuLan provider (new space, GPU) and hosted tags-level adapters, each their own issue.
 
 ## Non-goals
@@ -119,5 +129,5 @@ The shipped sidecar takes the conservative fail outcome now: observed student-to
 ## Open questions
 
 - Student text tower: DCLAP reuses the original CLAP text tower in ONNX — confirm its exported text tower hashes to the same weights as ours before sharing space identity.
-- ANN index parameters per space (`lists` scales with row count) — recompute at cutover rather than inheriting.
+- ANN index tuning after initial rollout — the implemented cutover uses the established `lists = 224` setting and creates the partial index immediately before activation.
 - Whether provider `/v1/space` should be signed/attested for federation-facing trust, or whether peer space comparison by identity tuple suffices (current position: tuple suffices; vectors are opt-in shared already).

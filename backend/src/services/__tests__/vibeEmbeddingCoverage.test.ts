@@ -1,5 +1,5 @@
 const mockTrackCount = jest.fn();
-const mockGetActiveSpace = jest.fn();
+const mockGetTargetSpaceId = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -8,7 +8,8 @@ jest.mock("../../utils/db", () => ({
 }));
 
 jest.mock("../embeddingSpaces", () => ({
-    getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
+    getVibeEmbeddingTargetSpaceId: (...args: unknown[]) =>
+        mockGetTargetSpaceId(...args),
 }));
 
 import {
@@ -22,13 +23,15 @@ describe("vibe embedding coverage refresh", () => {
     });
 
     it("counts only eligible tracks in the active space", async () => {
-        mockGetActiveSpace.mockResolvedValue({ id: "active-space" });
+        mockGetTargetSpaceId.mockResolvedValue("active-space");
         mockTrackCount
             .mockResolvedValueOnce(20)
             .mockResolvedValueOnce(12)
             .mockResolvedValueOnce(3);
 
-        await expect(loadVibeEmbeddingCoverage()).resolves.toEqual({
+        await expect(
+            loadVibeEmbeddingCoverage("target-space"),
+        ).resolves.toEqual({
             embedded: 12,
             pending: 5,
             failed: 3,
@@ -39,7 +42,7 @@ describe("vibe embedding coverage refresh", () => {
                 origin: "LOCAL",
                 removedAt: null,
                 filePath: { not: null },
-                embedding: { is: { spaceId: "active-space" } },
+                embeddings: { some: { spaceId: "target-space" } },
             },
         });
         expect(mockTrackCount).toHaveBeenNthCalledWith(3, {
@@ -47,14 +50,7 @@ describe("vibe embedding coverage refresh", () => {
                 origin: "LOCAL",
                 removedAt: null,
                 vibeAnalysisStatus: "failed",
-                OR: [
-                    { embedding: null },
-                    {
-                        embedding: {
-                            is: { spaceId: { not: "active-space" } },
-                        },
-                    },
-                ],
+                embeddings: { none: { spaceId: "target-space" } },
             }),
         });
     });

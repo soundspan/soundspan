@@ -134,7 +134,12 @@ describe("vibe provider client", () => {
             .mockResolvedValueOnce(jsonResponse({ vector: [0, 1] }));
 
         await expect(embedText("quiet focus")).resolves.toEqual([0.6, 0.8]);
-        await expect(embedAudio("track-123")).resolves.toEqual([0, 1]);
+        await expect(
+            embedAudio("track-123", {
+                id: "space-active",
+                dim: 2,
+            }),
+        ).resolves.toEqual([0, 1]);
 
         expect(mockFetch).toHaveBeenNthCalledWith(
             1,
@@ -286,6 +291,19 @@ describe("vibe provider client", () => {
         expectMetric("text", "contract");
     });
 
+    it("validates audio vectors against the worker target dimension", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ vector: [1] }));
+
+        await expect(
+            embedAudio("track-123", {
+                id: "space-migrating",
+                dim: 1,
+            }),
+        ).resolves.toEqual([1]);
+        expect(mockGetActiveSpace).not.toHaveBeenCalled();
+        expectMetric("audio", "ok");
+    });
+
     it("rejects vectors outside the unit-norm tolerance", async () => {
         mockFetch.mockResolvedValueOnce(jsonResponse({ vector: [0.5, 0.5] }));
 
@@ -295,7 +313,7 @@ describe("vibe provider client", () => {
         expectMetric("text", "contract");
     });
 
-    it("rejects a provider bound to a different active space", async () => {
+    it("returns a distinct provider identity for worker registry resolution", async () => {
         mockFetch.mockResolvedValueOnce(
             jsonResponse({
                 family: "other-family",
@@ -308,10 +326,11 @@ describe("vibe provider client", () => {
             }),
         );
 
-        await expect(fetchProviderSpace()).rejects.toBeInstanceOf(
-            VibeProviderSpaceMismatchError,
-        );
-        expectMetric("space", "mismatch");
+        await expect(fetchProviderSpace()).resolves.toMatchObject({
+            family: "other-family",
+            checkpointHash: "sha256:fixture",
+        });
+        expectMetric("space", "ok");
     });
 
     it("distinguishes provider 5xx from an unreachable provider", async () => {

@@ -1163,11 +1163,17 @@ startUnifiedEnrichmentWorker().catch((err) => {
     log.error("Failed to start unified enrichment worker:", err);
 });
 
-if (!startVibeEmbedWorker()) {
-    log.info(
-        "Vibe provider embedding worker not started; provider mode or audio analysis is disabled",
-    );
-}
+startVibeEmbedWorker()
+    .then((started) => {
+        if (!started) {
+            log.info(
+                "Vibe provider embedding worker not started; provider mode or audio analysis is disabled",
+            );
+        }
+    })
+    .catch((error: unknown) => {
+        log.error("Failed to start vibe provider embedding worker", error);
+    });
 
 // Start mood bucket worker
 // Assigns newly analyzed tracks to mood buckets for fast mood mix generation

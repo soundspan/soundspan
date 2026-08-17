@@ -28,13 +28,16 @@ const providerSpaceSchema = z.object({
     checkpointHash: z.string().min(1),
     dim: z.number().int().positive(),
     sampleRateHz: z.number().int().positive(),
-    preprocessing: z.record(z.string(), z.unknown()),
+    preprocessing: z.record(z.string(), z.json()),
     revision: z.string().min(1),
     textTower: z.boolean(),
 });
 
 /** Validated provider embedding-space identity and capability metadata. */
 export type ProviderSpace = z.infer<typeof providerSpaceSchema>;
+
+/** Registry identity required to validate one provider vector response. */
+export type EmbeddingVectorSpace = Pick<ActiveEmbeddingSpace, "id" | "dim">;
 
 type VibeProviderErrorCode =
     | "unreachable"
@@ -227,9 +230,9 @@ function parseWithContract<T>(schema: z.ZodType<T>, value: unknown): T {
 
 function assertUnitVector(
     vector: readonly number[],
-    activeSpace: ActiveEmbeddingSpace,
+    targetSpace: EmbeddingVectorSpace,
 ): void {
-    if (vector.length !== activeSpace.dim) {
+    if (vector.length !== targetSpace.dim) {
         throw new VibeProviderContractError();
     }
     const squaredNorm = vector.reduce((sum, value) => sum + value * value, 0);
@@ -251,7 +254,7 @@ export function assertProviderMatchesActiveSpace(
     if (!matches) throw new VibeProviderSpaceMismatchError();
 }
 
-/** Fetch and validate provider identity against the active registry space. */
+/** Fetch and validate provider identity for worker-side registry resolution. */
 export async function fetchProviderSpace(): Promise<ProviderSpace> {
     return observeRequest("space", async () => {
         const body = await requestJson(
@@ -259,10 +262,7 @@ export async function fetchProviderSpace(): Promise<ProviderSpace> {
             PROVIDER_SPACE_HEALTH_TIMEOUT_MS,
             { method: "GET" },
         );
-        const providerSpace = parseWithContract(providerSpaceSchema, body);
-        const activeSpace = await getActiveSpace();
-        assertProviderMatchesActiveSpace(providerSpace, activeSpace);
-        return providerSpace;
+        return parseWithContract(providerSpaceSchema, body);
     });
 }
 
@@ -271,6 +271,7 @@ async function embed(
     path: string,
     body: Readonly<Record<string, string>>,
     timeoutMs: number,
+    targetSpace: EmbeddingVectorSpace,
 ): Promise<number[]> {
     return observeRequest(endpoint, async () => {
         const response = await requestJson(path, timeoutMs, {
@@ -278,8 +279,7 @@ async function embed(
             body: JSON.stringify(body),
         });
         const parsed = parseWithContract(vectorResponseSchema, response);
-        const activeSpace = await getActiveSpace();
-        assertUnitVector(parsed.vector, activeSpace);
+        assertUnitVector(parsed.vector, targetSpace);
         return parsed.vector;
     });
 }
@@ -287,21 +287,27 @@ async function embed(
 /** Embed text through the configured provider and active-space trust boundary. */
 export async function embedText(text: string): Promise<number[]> {
     const validatedText = parseWithContract(textInputSchema, text);
+    const activeSpace = await getActiveSpace();
     return embed(
         "text",
         "/v1/embed/text",
         { text: validatedText },
         PROVIDER_TEXT_TIMEOUT_MS,
+        activeSpace,
     );
 }
 
-/** Embed one provider-owned track reference through the active-space boundary. */
-export async function embedAudio(trackRef: string): Promise<number[]> {
+/** Embed one provider-owned track reference through its worker target boundary. */
+export async function embedAudio(
+    trackRef: string,
+    targetSpace: EmbeddingVectorSpace,
+): Promise<number[]> {
     const validatedTrackRef = parseWithContract(trackRefSchema, trackRef);
     return embed(
         "audio",
         "/v1/embed/audio",
         { trackRef: validatedTrackRef },
         PROVIDER_AUDIO_TIMEOUT_MS,
+        targetSpace,
     );
 }

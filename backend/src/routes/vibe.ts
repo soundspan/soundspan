@@ -46,6 +46,7 @@ import {
     type NearestTrackRow,
     type TextSearchResult,
 } from "../services/trackEmbeddings";
+import { getActiveSpace } from "../services/embeddingSpaces";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
@@ -408,6 +409,7 @@ async function resolveTrackDestination(
  * journeyable yet.
  */
 async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
+    const activeSpace = await getActiveSpace();
     const pool = await prisma.moodBucket.findMany({
         where: {
             mood,
@@ -415,7 +417,7 @@ async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
             track: {
                 ...TRACK_VISIBLE_WHERE,
                 ...TRACK_BROWSE_WHERE,
-                embedding: { isNot: null },
+                embeddings: { some: { spaceId: activeSpace.id } },
             },
         },
         orderBy: { score: "desc" },
@@ -647,6 +649,7 @@ router.get(
     requireAuth,
     asyncHandler(async (_req, res) => {
         try {
+            const activeSpace = await getActiveSpace();
             const grouped = await prisma.moodBucket.groupBy({
                 by: ["mood"],
                 where: {
@@ -654,7 +657,7 @@ router.get(
                     track: {
                         ...TRACK_VISIBLE_WHERE,
                         ...TRACK_BROWSE_WHERE,
-                        embedding: { isNot: null },
+                        embeddings: { some: { spaceId: activeSpace.id } },
                     },
                 },
                 _count: { _all: true },
