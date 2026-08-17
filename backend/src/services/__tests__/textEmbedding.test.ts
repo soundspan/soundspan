@@ -59,9 +59,11 @@ import {
     resolveTextEmbedding,
     TextEmbeddingProviderError,
     TextEmbeddingTimeoutError,
+    TextEmbeddingUnavailableError,
 } from "../textEmbedding";
 import {
     VibeProviderSpaceMismatchError,
+    VibeProviderTimeoutError,
     VibeProviderUnavailableError,
 } from "../vibeProvider";
 
@@ -171,7 +173,7 @@ describe("text embedding space routing", () => {
 
         await expect(
             resolveTextEmbedding("quiet focus"),
-        ).rejects.toBeInstanceOf(TextEmbeddingTimeoutError);
+        ).rejects.toBeInstanceOf(TextEmbeddingUnavailableError);
 
         expect(mockFetchProviderSpace).not.toHaveBeenCalled();
         expect(mockFindRegisteredProviderSpace).not.toHaveBeenCalled();
@@ -179,20 +181,26 @@ describe("text embedding space routing", () => {
     });
 
     it.each([
-        new VibeProviderUnavailableError(),
-        new VibeProviderSpaceMismatchError(),
-    ])("maps provider failures without a legacy fallback", async (error) => {
-        mockEmbedText.mockRejectedValueOnce(error);
+        {
+            error: new VibeProviderUnavailableError(),
+            expected: TextEmbeddingUnavailableError,
+        },
+        {
+            error: new VibeProviderTimeoutError(),
+            expected: TextEmbeddingTimeoutError,
+        },
+        {
+            error: new VibeProviderSpaceMismatchError(),
+            expected: TextEmbeddingProviderError,
+        },
+    ])(
+        "maps $error.name without a legacy fallback",
+        async ({ error, expected }) => {
+            mockEmbedText.mockRejectedValueOnce(error);
 
-        const request = resolveTextEmbedding("quiet focus");
-        if (error instanceof VibeProviderUnavailableError) {
-            await expect(request).rejects.toBeInstanceOf(
-                TextEmbeddingTimeoutError,
-            );
-        } else {
-            await expect(request).rejects.toBeInstanceOf(
-                TextEmbeddingProviderError,
-            );
-        }
-    });
+            await expect(
+                resolveTextEmbedding("quiet focus"),
+            ).rejects.toBeInstanceOf(expected);
+        },
+    );
 });

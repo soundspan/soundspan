@@ -611,7 +611,7 @@ describe("vibe search transport compatibility", () => {
                 res,
             );
 
-            expect(res.statusCode).toBe(504);
+            expect(res.statusCode).toBe(503);
             expect(res.body).toEqual({
                 error: "Text embedding service unavailable",
             });
@@ -619,7 +619,7 @@ describe("vibe search transport compatibility", () => {
             expect(mockProviderEmbedText).not.toHaveBeenCalled();
         });
 
-        it("maps an unavailable provider to the canonical 504 response", async () => {
+        it("maps an unavailable provider to the canonical 503 response", async () => {
             const { VibeProviderUnavailableError } = jest.requireMock(
                 "../../services/vibeProvider",
             ) as { VibeProviderUnavailableError: new () => Error };
@@ -634,7 +634,7 @@ describe("vibe search transport compatibility", () => {
 
             await searchHandler(req, res);
 
-            expect(res.statusCode).toBe(504);
+            expect(res.statusCode).toBe(503);
             expect(res.body).toEqual({
                 error: "Text embedding service unavailable",
             });

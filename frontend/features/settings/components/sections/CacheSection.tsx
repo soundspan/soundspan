@@ -313,43 +313,6 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         },
     });
 
-    // Fetch CLAP analyzer workers config
-    const { data: clapWorkersConfig, isLoading: isClapWorkersLoading } =
-        useQuery({
-            queryKey: ["clap-workers"],
-            queryFn: () => enrichmentApi.getClapWorkers(),
-            staleTime: 0,
-        });
-
-    // Update CLAP analyzer workers mutation with optimistic updates
-    const setClapWorkersMutation = useMutation({
-        mutationFn: (workers: number) => enrichmentApi.setClapWorkers(workers),
-        onMutate: async (newWorkers) => {
-            await queryClient.cancelQueries({
-                queryKey: ["clap-workers"],
-            });
-
-            const previousWorkers = queryClient.getQueryData(["clap-workers"]);
-
-            queryClient.setQueryData(["clap-workers"], {
-                workers: newWorkers,
-                cpuCores: clapWorkersConfig?.cpuCores || 4,
-                recommended: clapWorkersConfig?.recommended || 1,
-                description: `Using ${newWorkers} of ${
-                    clapWorkersConfig?.cpuCores || 4
-                } available CPU cores`,
-            });
-
-            return { previousWorkers };
-        },
-        onError: (err, newWorkers, context) => {
-            queryClient.setQueryData(
-                ["clap-workers"],
-                context?.previousWorkers,
-            );
-        },
-    });
-
     // Use query data directly instead of local state
     const enrichmentSpeed = concurrencyConfig?.concurrency ?? 1;
 
@@ -1221,58 +1184,6 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         </SettingsRow>
                     )}
 
-                {/* CLAP Analyzer Workers Control */}
-                {settings.autoEnrichMetadata &&
-                    !featuresLoading &&
-                    vibeEmbeddings && (
-                        <SettingsRow
-                            label="Vibe Embedding Workers"
-                            description="CPU workers for CLAP embeddings (vibe similarity). More memory intensive - reduce on systems with less RAM."
-                        >
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="range"
-                                    min={1}
-                                    max={8}
-                                    value={clapWorkersConfig?.workers ?? 2}
-                                    disabled={isClapWorkersLoading}
-                                    onChange={(e) => {
-                                        const newWorkers = parseInt(
-                                            e.target.value,
-                                        );
-                                        setClapWorkersMutation.mutate(
-                                            newWorkers,
-                                        );
-                                    }}
-                                    className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
-                                disabled:opacity-50 disabled:cursor-not-allowed
-                                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-                                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                                />
-                                <div className="flex flex-col items-end gap-0.5">
-                                    {isClapWorkersLoading ? (
-                                        <span className="text-sm text-white/50 w-24 text-right">
-                                            Loading...
-                                        </span>
-                                    ) : (
-                                        <>
-                                            <span className="text-sm text-white w-24 text-right">
-                                                {clapWorkersConfig?.workers ??
-                                                    2}{" "}
-                                                workers
-                                            </span>
-                                            {clapWorkersConfig && (
-                                                <span className="text-xs text-white/50 w-24 text-right">
-                                                    {clapWorkersConfig.cpuCores}{" "}
-                                                    cores available
-                                                </span>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        </SettingsRow>
-                    )}
                 {/* Cache Actions */}
                 <div className="flex flex-col gap-3 pt-4">
                     <button

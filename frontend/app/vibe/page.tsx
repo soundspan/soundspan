@@ -673,7 +673,10 @@ export default function VibePage() {
                         Feature not available
                     </p>
                     <p className="text-sm text-content-muted">
-                        Vibe similarity requires the CLAP analyzer service.
+                        Enable the DCLAP vibe provider. Compose and AIO enable
+                        it by default; for Helm, set
+                        vibeProviderDclap.enabled=true. Custom deployments must
+                        set VIBE_PROVIDER_URL.
                     </p>
                 </div>
             </div>
@@ -1513,9 +1516,10 @@ function VibePageContent() {
                                     {vibeStatus &&
                                         vibeStatus.embeddedTracks === 0 && (
                                             <p className="text-xs text-error mt-6">
-                                                No tracks analyzed yet. Run the
-                                                CLAP analyzer to enable vibe
-                                                search.
+                                                No tracks embedded yet. Confirm
+                                                the DCLAP vibe provider is
+                                                running and wait for background
+                                                embedding.
                                             </p>
                                         )}
                                 </div>

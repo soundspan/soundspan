@@ -210,23 +210,6 @@ export const enrichmentApi = {
         });
     },
 
-    /**
-     * Get CLAP analyzer worker configuration
-     */
-    getClapWorkers: async (): Promise<AnalysisWorkersConfig> => {
-        return api.get("/analysis/clap-workers");
-    },
-
-    /**
-     * Set CLAP analyzer worker count (1-8)
-     */
-    setClapWorkers: async (workers: number): Promise<AnalysisWorkersConfig> => {
-        return api.request("/analysis/clap-workers", {
-            method: "PUT",
-            body: JSON.stringify({ workers }),
-        });
-    },
-
     /** Reset every failed audio-analysis row for bounded background retry. */
     retryFailedAudioAnalysis: async (): Promise<{
         message: string;

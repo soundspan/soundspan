@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed the orphaned `clapWorkers` system-settings column.
 - Removed the backend's CLAP Redis-stream text-embedding integration and its
   analyzer-only callbacks, worker-control configuration, and detection signals.
 - Removed the torch CLAP stack and 2.35 GB checkpoint download from the AIO
@@ -80,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Helm now rejects removed `audioAnalyzerClap.*` values and the conflicting
   `vibeProviderDclap.env.DCLAP_HTTP_PORT` override instead of rendering a broken
   component. Chart releases now wait for the DCLAP provider image.
+- Settings no longer shows the retired vibe embedding worker control, which
+  targeted an endpoint removed with the torch CLAP analyzer.
+- Updated the Vibe and onboarding guidance for the DCLAP provider and current
+  analysis memory requirements.
+- Provider-unavailable vibe text searches now return 503 while provider
+  timeouts continue to return 504.
 - Fresh installs with only a provider-backed vibe space now cut over
   immediately instead of stalling behind an active space with no vectors.
 - The clap sidecar's embedding upsert now targets the composite

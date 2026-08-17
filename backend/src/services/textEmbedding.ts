@@ -39,6 +39,14 @@ export class TextEmbeddingTimeoutError extends Error {
     }
 }
 
+/** Stable unavailable-provider identity consumed by the vibe route mapper. */
+export class TextEmbeddingUnavailableError extends Error {
+    constructor(options?: ErrorOptions) {
+        super("Text embedding provider is unavailable", options);
+        this.name = "TextEmbeddingUnavailableError";
+    }
+}
+
 /** Stable non-timeout provider-failure identity for route error mapping. */
 export class TextEmbeddingProviderError extends Error {
     constructor(options?: ErrorOptions) {
@@ -100,11 +108,11 @@ async function getProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
 }
 
 function mapProviderError(error: unknown): never {
-    if (
-        error instanceof VibeProviderTimeoutError ||
-        error instanceof VibeProviderUnavailableError
-    ) {
+    if (error instanceof VibeProviderTimeoutError) {
         throw new TextEmbeddingTimeoutError({ cause: error });
+    }
+    if (error instanceof VibeProviderUnavailableError) {
+        throw new TextEmbeddingUnavailableError({ cause: error });
     }
     if (error instanceof VibeProviderError) {
         throw new TextEmbeddingProviderError({ cause: error });

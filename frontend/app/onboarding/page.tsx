@@ -686,12 +686,25 @@ export default function OnboardingPage() {
                                                     {musicCNN ||
                                                     vibeEmbeddings ? (
                                                         <>
-                                                            These analyzers run
-                                                            in the background
-                                                            and use ~3-4GB RAM
-                                                            combined. To disable
-                                                            them and save
-                                                            resources, copy{" "}
+                                                            Analysis workloads
+                                                            run in the
+                                                            background and can
+                                                            peak well above 4
+                                                            GiB of memory.
+                                                            Review the{" "}
+                                                            <a
+                                                                href="https://github.com/soundspan/soundspan/blob/main/docs/DEPLOYMENT.md"
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-brand hover:underline"
+                                                            >
+                                                                deployment guide
+                                                            </a>{" "}
+                                                            for capacity
+                                                            planning on
+                                                            constrained hosts.
+                                                            To disable them,
+                                                            copy{" "}
                                                             <code className="bg-gray-700 px-1.5 py-0.5 rounded text-xs">
                                                                 docker-compose.override.lite-mode.yml
                                                             </code>{" "}

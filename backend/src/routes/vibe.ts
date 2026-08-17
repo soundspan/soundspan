@@ -45,6 +45,7 @@ import { coalesceInFlightByKey } from "../utils/singleflight";
 import {
     TextEmbeddingProviderError,
     TextEmbeddingTimeoutError,
+    TextEmbeddingUnavailableError,
 } from "../services/textEmbedding";
 import {
     executeVibeSearch,
@@ -1052,6 +1053,13 @@ router.post(
                 return sendInternalRouteError(
                     res,
                     "Failed to search tracks by vibe",
+                );
+            }
+            if (error instanceof TextEmbeddingUnavailableError) {
+                return sendRouteError(
+                    res,
+                    503,
+                    "Text embedding service unavailable",
                 );
             }
             if (

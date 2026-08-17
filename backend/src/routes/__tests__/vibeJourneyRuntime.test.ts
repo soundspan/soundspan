@@ -91,7 +91,9 @@ jest.mock("../../services/vibeVocabulary", () => ({
 
 jest.mock("../../services/textEmbedding", () => ({
     resolveTextEmbedding: jest.fn(),
+    TextEmbeddingProviderError: class TextEmbeddingProviderError extends Error {},
     TextEmbeddingTimeoutError: class TextEmbeddingTimeoutError extends Error {},
+    TextEmbeddingUnavailableError: class TextEmbeddingUnavailableError extends Error {},
 }));
 
 import router from "../vibe";

@@ -195,7 +195,7 @@ describe("vibe canonical error response shape", () => {
 
         await searchHandler(req, res);
 
-        expect(res.statusCode).toBe(504);
+        expect(res.statusCode).toBe(503);
         expect(res.body).toEqual({
             error: "Text embedding service unavailable",
         });
