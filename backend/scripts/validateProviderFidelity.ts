@@ -62,6 +62,8 @@ async function validate(): Promise<void> {
                 exclusion,
             ),
     };
+    // Surface an invalid output path before the long embedding pass.
+    providerFidelityJsonPath(options.outputPath);
     try {
         const report = await runProviderFidelityValidation(
             options,
@@ -70,9 +72,15 @@ async function validate(): Promise<void> {
         await writeReport(report, options.outputPath);
     } catch (error) {
         if (error instanceof ProviderFidelityExclusionError) {
-            await writeReport(error.report, options.outputPath);
+            // A failed report write must not replace the validation error.
+            await writeReport(error.report, options.outputPath).catch(
+                (writeError) =>
+                    log.error("Failed to write exclusion report", writeError),
+            );
         }
         throw error;
+    } finally {
+        await prisma.$disconnect();
     }
 }
 

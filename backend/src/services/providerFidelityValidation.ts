@@ -324,11 +324,20 @@ function validatedTextEmbedder(
     };
 }
 
-function requireMeasurementSize(valid: number, k: number): void {
+function requireMeasurementSize(
+    valid: number,
+    k: number,
+    excluded: number,
+): void {
+    const context = `${valid} valid tracks after ${excluded} exclusions`;
     if (valid < 2)
-        throw new RangeError("at least two valid tracks are required");
+        throw new RangeError(
+            `at least two valid tracks are required (${context})`,
+        );
     if (k >= valid)
-        throw new RangeError("k must be less than the valid track count");
+        throw new RangeError(
+            `k must be less than the valid track count (${context})`,
+        );
 }
 
 async function loadProviderSpaces(
@@ -340,6 +349,14 @@ async function loadProviderSpaces(
     ]);
     if (!baseline.textTower || !candidate.textTower) {
         throw new TypeError("both providers must declare a text tower");
+    }
+    if (baseline.dim !== candidate.dim) {
+        // Differing dimensions answer the gate trivially; fail before the
+        // long embedding pass instead of crashing inside the math.
+        throw new TypeError(
+            `provider dimensions differ (baseline ${baseline.dim}, candidate ` +
+                `${candidate.dim}); the candidate requires a distinct space`,
+        );
     }
     return { baseline, candidate };
 }
@@ -414,7 +431,11 @@ export async function runProviderFidelityValidation(
         throw new RangeError("sampler exceeded requested size");
     const spaces = await loadProviderSpaces(dependencies);
     const embedded = await embedTracks(tracks, spaces, dependencies);
-    requireMeasurementSize(embedded.pairs.length, options.k);
+    requireMeasurementSize(
+        embedded.pairs.length,
+        options.k,
+        embedded.exclusions.length,
+    );
     const measurements = await measurePairs(
         embedded.pairs,
         spaces,
@@ -559,6 +580,11 @@ export function renderProviderFidelityMarkdown(
 export function providerFidelityJsonPath(markdownPath: string): string {
     if (!markdownPath) throw new TypeError("output path must not be empty");
     const extension = extname(markdownPath);
+    if (extension.toLowerCase() === ".json") {
+        throw new TypeError(
+            "output path must not end in .json; the JSON report is written beside the Markdown report",
+        );
+    }
     return extension
         ? `${markdownPath.slice(0, -extension.length)}.json`
         : `${markdownPath}.json`;

@@ -79,6 +79,30 @@ describe("provider fidelity validation orchestration", () => {
         );
     });
 
+    it("fails fast when the providers declare different dimensions", async () => {
+        const baseline = provider();
+        const candidate = provider();
+        candidate.fetchSpace.mockResolvedValue({ ...space, dim: 1024 });
+        const sampleTracks = jest.fn(async () => tracks(4));
+
+        await expect(
+            runProviderFidelityValidation(
+                { sample: 4, k: 1 },
+                {
+                    sampleTracks,
+                    baseline,
+                    candidate,
+                    queries: ["electronic"],
+                    nowMs: jest.fn(() => 1_000),
+                    onProgress: jest.fn(),
+                    onExclusion: jest.fn(),
+                },
+            ),
+        ).rejects.toThrow("requires a distinct space");
+        expect(baseline.embedAudio).not.toHaveBeenCalled();
+        expect(candidate.embedAudio).not.toHaveBeenCalled();
+    });
+
     it("calls both providers per track and permits exactly five percent exclusions", async () => {
         const sampledTracks = tracks(20);
         const baseline = provider();
@@ -225,6 +249,12 @@ describe("provider fidelity CLI arguments", () => {
         });
         expect(providerFidelityJsonPath("reports/run.md")).toBe(
             "reports/run.json",
+        );
+    });
+
+    it("rejects a .json output path before it can collide with the JSON report", () => {
+        expect(() => providerFidelityJsonPath("reports/run.json")).toThrow(
+            "must not end in .json",
         );
     });
 
