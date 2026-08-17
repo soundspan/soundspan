@@ -55,9 +55,11 @@ merged configuration so stale overrides are visible:
 docker compose config
 ```
 
-Remove any custom override that still declares `audio-analyzer-clap`. Then
-fully stop every backend API and worker container. Stop any surviving torch
-analyzer before a 2.3 entrypoint can run the migration:
+Remove any custom override that still declares `audio-analyzer-clap`.
+
+**Split-stack Compose** (`docker-compose.yml`): fully stop every backend API
+and worker container. Stop any surviving torch analyzer before a 2.3
+entrypoint can run the migration:
 
 ```bash
 docker compose stop backend backend-worker
@@ -78,6 +80,18 @@ no container names:
 
 ```bash
 docker ps --filter name=audio-analyzer-clap --format '{{.Names}}'
+```
+
+**AIO Compose** (`docker-compose.aio.yml`): the file exposes a single
+`soundspan` service, so the split-stack service names above do not apply.
+Stop the whole container, then pull and start; the 2.3 entrypoint runs the
+schema migration before any process serves, and no 2.2 process survives a
+`down`:
+
+```bash
+docker compose -f docker-compose.aio.yml down
+docker compose -f docker-compose.aio.yml pull
+docker compose -f docker-compose.aio.yml up -d
 ```
 
 Lingering `CLAP_*` environment variables are inert and may be deleted. The old
