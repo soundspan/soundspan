@@ -10,6 +10,7 @@ import {
     clearVibeEmbeddingTargetSpaceId,
     EmbeddingSpaceDimensionMismatchError,
     EmbeddingSpacePreprocessingMismatchError,
+    getVibeEmbeddingTargetSpaceId,
     resolveProviderEmbeddingSpace,
     RetiredEmbeddingSpaceError,
     setVibeEmbeddingTargetSpaceId,
@@ -449,9 +450,12 @@ const worker = createVibeEmbedWorker({
         return refreshVibeEmbeddingCoverage(targetSpaceId);
     },
     runLifecycle: async () => {
+        const currentProviderSpaceId = await getVibeEmbeddingTargetSpaceId();
         await runEmbeddingSpaceLifecycleCheck({
             threshold: config.vibeSpaceCutoverThreshold,
             retirementGraceDays: config.vibeSpaceRetirementGraceDays,
+            allowFailed: config.vibeSpaceCutoverAllowFailed,
+            currentProviderSpaceId,
             now: () => new Date(),
         });
     },

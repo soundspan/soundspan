@@ -123,16 +123,24 @@ export async function upsertTrackEmbedding(
         );
     }
     const vector = `[${embedding.join(",")}]`;
-    await prisma.$executeRaw`
-        INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
-        VALUES (${trackId}, ${vector}::vector, ${spaceId}, NOW())
-        ON CONFLICT (track_id, space_id) DO UPDATE SET
-            embedding = EXCLUDED.embedding,
-            analyzed_at = EXCLUDED.analyzed_at
-    `;
-    await prisma.embeddingSpace.updateMany({
-        where: { id: spaceId, hadVectors: false },
-        data: { hadVectors: true },
+    await prisma.$transaction(async (transaction) => {
+        const written = await transaction.$executeRaw`
+            INSERT INTO track_embeddings (track_id, embedding, space_id, analyzed_at)
+            VALUES (${trackId}, ${vector}::vector, ${spaceId}, NOW())
+            ON CONFLICT (track_id, space_id) DO UPDATE SET
+                embedding = EXCLUDED.embedding,
+                analyzed_at = EXCLUDED.analyzed_at
+        `;
+        if (written !== 1) {
+            throw new Error("Track embedding upsert did not affect one row");
+        }
+        const marked = await transaction.embeddingSpace.updateMany({
+            where: { id: spaceId, hadVectors: false },
+            data: { hadVectors: true },
+        });
+        if (marked.count < 0 || marked.count > 1) {
+            throw new Error("Embedding-space marker update was inconsistent");
+        }
     });
 }
 
@@ -144,9 +152,10 @@ export async function upsertTrackEmbedding(
  */
 export async function fetchEmbeddingsByTrackIds(
     trackIds: readonly string[],
+    spaceId?: string,
 ): Promise<TrackEmbeddingRow[]> {
     if (trackIds.length === 0) return [];
-    const activeSpace = await getActiveSpace();
+    const resolvedSpaceId = spaceId ?? (await getActiveSpace()).id;
     const rows = await prisma.$queryRaw<
         { trackId: string; embedding: string }[]
     >`
@@ -155,7 +164,7 @@ export async function fetchEmbeddingsByTrackIds(
         JOIN "Track" t ON t.id = te.track_id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
-          AND te.space_id = ${activeSpace.id}
+          AND te.space_id = ${resolvedSpaceId}
           AND te.track_id = ANY(${trackIds as string[]})
     `;
     return rows.map((row) => ({

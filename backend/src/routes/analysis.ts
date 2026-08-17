@@ -59,6 +59,7 @@ async function resetVibeTracksForForce(force: boolean): Promise<void> {
         data: {
             ...buildVibePendingReset(),
             vibeAnalysisRetryCount: 0,
+            vibeAnalysisGeneration: { increment: 1 },
         },
     });
     await enrichmentFailureService.clearAllFailures("vibe");

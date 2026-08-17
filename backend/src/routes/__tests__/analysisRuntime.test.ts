@@ -592,6 +592,7 @@ describe("analysis routes runtime", () => {
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: { increment: 1 },
                 vibeAnalysisError: null,
                 vibeAnalysisStartedAt: null,
                 vibeAnalysisStatusUpdatedAt: expect.any(Date),

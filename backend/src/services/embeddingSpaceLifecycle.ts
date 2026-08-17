@@ -14,6 +14,7 @@ import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
+const CLEANING_CLAIM_STALE_MS = 60 * 60 * 1_000;
 const SPACE_ID_PATTERN = /^[A-Za-z0-9_]{1,48}$/;
 const ANN_INDEX_LISTS = 224;
 const log =
@@ -34,12 +35,15 @@ export const ANN_INDEX_MIN_VECTOR_COUNT = 1_000;
 interface LifecycleConfig {
     threshold: number;
     retirementGraceDays: number;
+    allowFailed: boolean;
+    currentProviderSpaceId: string;
     now(): Date;
 }
 
 interface LifecycleSpace {
     id: string;
     retiredAt: Date | null;
+    cleaningAt: Date | null;
 }
 
 /** Decide whether measured coverage has reached the configured cutover floor. */
@@ -135,8 +139,12 @@ async function flipActiveSpace(
             throw new Error("Cutover requires exactly one active space");
         }
         const activated = await transaction.embeddingSpace.updateMany({
-            where: { id: migratingSpaceId, status: "migrating" },
-            data: { status: "active", retiredAt: null },
+            where: {
+                id: migratingSpaceId,
+                status: "migrating",
+                cleaningAt: null,
+            },
+            data: { status: "active", retiredAt: null, cleaningAt: null },
         });
         if (activated.count !== 1) {
             throw new Error("Cutover target is no longer migrating");
@@ -153,6 +161,13 @@ async function sampleCoverage(
     threshold: number,
 ): Promise<CoverageSample> {
     const coverage = await loadVibeEmbeddingCoverage(spaceId);
+    if (
+        ![coverage.embedded, coverage.pending, coverage.failed].every(
+            (value) => Number.isSafeInteger(value) && value >= 0,
+        )
+    ) {
+        throw new Error("Embedding-space coverage returned invalid counts");
+    }
     const actionable = coverage.embedded + coverage.pending;
     const ratio = actionable === 0 ? 0 : coverage.embedded / actionable;
     setVibeEmbeddingCoverage(coverage);
@@ -165,6 +180,25 @@ async function sampleCoverage(
         failed: coverage.failed,
     });
     return { ...coverage, ratio };
+}
+
+function failureTailAllowsCutover(
+    coverage: VibeEmbeddingCoverage,
+    config: LifecycleConfig,
+): boolean {
+    if (coverage.failed === 0 || config.allowFailed) return true;
+    const total = coverage.embedded + coverage.pending + coverage.failed;
+    if (total <= 0) return false;
+    const failureFraction = coverage.failed / total;
+    if (failureFraction <= 1 - config.threshold) return true;
+    log.warn("Embedding-space cutover held for unacknowledged failures", {
+        spaceId: config.currentProviderSpaceId,
+        failed: coverage.failed,
+        failureFraction,
+        toleratedFailureFraction: 1 - config.threshold,
+        retryEndpoint: "/api/analysis/vibe/retry",
+    });
+    return false;
 }
 
 async function completeCutover(
@@ -203,6 +237,7 @@ async function cutOverIfReady(
 ): Promise<boolean> {
     const activeVectorState = await loadVibeSpaceVectorState(activeSpace.id);
     const coverage = await sampleCoverage(space.id, config.threshold);
+    if (!failureTailAllowsCutover(coverage, config)) return false;
     if (
         shouldCutOverEmptyActiveSpace(
             activeVectorState.hasVectors,
@@ -227,37 +262,95 @@ async function cutOverIfReady(
     return true;
 }
 
-async function spaceStillRetired(space: LifecycleSpace): Promise<boolean> {
-    const unchanged = await prisma.embeddingSpace.updateMany({
+async function claimRetiredSpace(
+    space: LifecycleSpace,
+    claimedAt: Date,
+): Promise<Date | null> {
+    if (space.cleaningAt) {
+        const claimAgeMs = claimedAt.getTime() - space.cleaningAt.getTime();
+        if (claimAgeMs < CLEANING_CLAIM_STALE_MS) return null;
+        const reclaimed = await prisma.embeddingSpace.updateMany({
+            where: {
+                id: space.id,
+                status: "retired",
+                retiredAt: space.retiredAt,
+                cleaningAt: space.cleaningAt,
+            },
+            data: { cleaningAt: claimedAt },
+        });
+        return reclaimed.count === 1 ? claimedAt : null;
+    }
+    const claimed = await prisma.embeddingSpace.updateMany({
         where: {
             id: space.id,
             status: "retired",
             retiredAt: space.retiredAt,
+            cleaningAt: null,
         },
-        data: { retiredAt: space.retiredAt },
+        data: { cleaningAt: claimedAt },
     });
-    return unchanged.count === 1;
+    return claimed.count === 1 ? claimedAt : null;
 }
 
-async function deleteRetiredVectors(space: LifecycleSpace): Promise<boolean> {
-    for (let batch = 0; batch < MAX_RETIREMENT_DELETE_BATCHES; batch += 1) {
-        if (!(await spaceStillRetired(space))) return false;
-        const rows = await prisma.trackEmbedding.findMany({
+type DeleteBatchResult = "complete" | "more" | "claim_lost";
+
+async function deleteClaimedVectorBatch(
+    space: LifecycleSpace,
+    cleaningAt: Date,
+): Promise<DeleteBatchResult> {
+    return prisma.$transaction(async (transaction) => {
+        const validated = await transaction.embeddingSpace.updateMany({
+            where: {
+                id: space.id,
+                status: "retired",
+                retiredAt: space.retiredAt,
+                cleaningAt,
+            },
+            data: { cleaningAt },
+        });
+        if (validated.count !== 1) return "claim_lost";
+        const rows = await transaction.trackEmbedding.findMany({
             where: { spaceId: space.id },
             select: { trackId: true, spaceId: true },
             orderBy: { trackId: "asc" },
             take: RETIREMENT_DELETE_BATCH_SIZE,
         });
-        if (rows.length === 0) return true;
-        await prisma.trackEmbedding.deleteMany({
+        if (rows.length === 0) return "complete";
+        await transaction.trackEmbedding.deleteMany({
             where: {
                 spaceId: space.id,
                 trackId: { in: rows.map((row) => row.trackId) },
             },
         });
-        if (rows.length < RETIREMENT_DELETE_BATCH_SIZE) return true;
+        return rows.length < RETIREMENT_DELETE_BATCH_SIZE ? "complete" : "more";
+    });
+}
+
+async function deleteRetiredVectors(
+    space: LifecycleSpace,
+    cleaningAt: Date,
+): Promise<"complete" | "bounded" | "claim_lost"> {
+    for (let batch = 0; batch < MAX_RETIREMENT_DELETE_BATCHES; batch += 1) {
+        const result = await deleteClaimedVectorBatch(space, cleaningAt);
+        if (result === "claim_lost") return "claim_lost";
+        if (result === "complete") return "complete";
     }
-    return false;
+    return "bounded";
+}
+
+async function releaseBoundedCleaningClaim(
+    space: LifecycleSpace,
+    cleaningAt: Date,
+): Promise<void> {
+    await prisma.embeddingSpace.updateMany({
+        where: {
+            id: space.id,
+            status: "retired",
+            retiredAt: space.retiredAt,
+            cleaningAt,
+        },
+        data: { cleaningAt: null },
+    });
 }
 
 async function dropPartialAnnIndex(spaceId: string): Promise<void> {
@@ -269,16 +362,37 @@ async function dropPartialAnnIndex(spaceId: string): Promise<void> {
     );
 }
 
-async function cleanRetiredSpace(space: LifecycleSpace): Promise<void> {
-    if (!(await deleteRetiredVectors(space))) return;
+async function cleanRetiredSpace(
+    space: LifecycleSpace,
+    claimedAt: Date,
+): Promise<void> {
+    const cleaningAt = await claimRetiredSpace(space, claimedAt);
+    if (!cleaningAt) return;
+    const deletion = await deleteRetiredVectors(space, cleaningAt);
+    if (deletion === "claim_lost") return;
+    if (deletion === "bounded") {
+        await releaseBoundedCleaningClaim(space, cleaningAt);
+        return;
+    }
+    const claimValid = await prisma.embeddingSpace.updateMany({
+        where: {
+            id: space.id,
+            status: "retired",
+            retiredAt: space.retiredAt,
+            cleaningAt,
+        },
+        data: { cleaningAt },
+    });
+    if (claimValid.count !== 1) return;
     await dropPartialAnnIndex(space.id);
     const cleaned = await prisma.embeddingSpace.updateMany({
         where: {
             id: space.id,
             status: "retired",
             retiredAt: space.retiredAt,
+            cleaningAt,
         },
-        data: { retiredAt: null },
+        data: { retiredAt: null, cleaningAt: null },
     });
     if (cleaned.count !== 1) return;
     recordVibeSpaceTransition("retired_cleaned");
@@ -292,7 +406,7 @@ async function cleanDueRetiredSpaces(config: LifecycleConfig): Promise<void> {
         where: { status: "retired", retiredAt: { not: null } },
         orderBy: [{ retiredAt: "asc" }, { id: "asc" }],
         take: RETIRED_SPACE_SCAN_LIMIT,
-        select: { id: true, retiredAt: true },
+        select: { id: true, retiredAt: true, cleaningAt: true },
     });
     for (const space of spaces) {
         if (
@@ -302,8 +416,44 @@ async function cleanDueRetiredSpaces(config: LifecycleConfig): Promise<void> {
                 config.now(),
             )
         ) {
-            await cleanRetiredSpace(space);
+            await cleanRetiredSpace(space, config.now());
         }
+    }
+}
+
+async function refreshCurrentProviderMigration(
+    config: LifecycleConfig,
+): Promise<void> {
+    await prisma.embeddingSpace.updateMany({
+        where: {
+            id: config.currentProviderSpaceId,
+            status: "migrating",
+            cleaningAt: null,
+        },
+        data: { lastSeenAt: config.now() },
+    });
+}
+
+async function retireAbandonedMigrations(
+    config: LifecycleConfig,
+): Promise<void> {
+    const cutoff = new Date(
+        config.now().getTime() - config.retirementGraceDays * MILLIS_PER_DAY,
+    );
+    const retired = await prisma.embeddingSpace.updateMany({
+        where: {
+            status: "migrating",
+            id: { not: config.currentProviderSpaceId },
+            lastSeenAt: { lte: cutoff },
+            cleaningAt: null,
+        },
+        data: { status: "retired", retiredAt: config.now() },
+    });
+    if (retired.count > 0) {
+        log.warn("Abandoned embedding-space migrations retired", {
+            count: retired.count,
+            lastSeenCutoff: cutoff,
+        });
     }
 }
 
@@ -311,11 +461,30 @@ async function cleanDueRetiredSpaces(config: LifecycleConfig): Promise<void> {
 export async function runEmbeddingSpaceLifecycleCheck(
     config: LifecycleConfig,
 ): Promise<void> {
+    if (
+        !Number.isFinite(config.threshold) ||
+        config.threshold < 0.5 ||
+        config.threshold > 1
+    ) {
+        throw new Error("Embedding-space cutover threshold is invalid");
+    }
+    if (
+        !Number.isSafeInteger(config.retirementGraceDays) ||
+        config.retirementGraceDays < 1
+    ) {
+        throw new Error("Embedding-space retirement grace is invalid");
+    }
+    validatedSpaceId(config.currentProviderSpaceId);
+    await refreshCurrentProviderMigration(config);
+    await retireAbandonedMigrations(config);
     const [migrating, activeSpace] = await Promise.all([
         prisma.embeddingSpace.findFirst({
-            where: { status: "migrating" },
-            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-            select: { id: true, retiredAt: true },
+            where: {
+                id: config.currentProviderSpaceId,
+                status: "migrating",
+                cleaningAt: null,
+            },
+            select: { id: true, retiredAt: true, cleaningAt: true },
         }),
         getActiveSpace(),
     ]);

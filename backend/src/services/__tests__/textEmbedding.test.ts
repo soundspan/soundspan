@@ -10,10 +10,37 @@ const mockConfig: { vibeProviderUrl: string | undefined } = {
 jest.mock("../../config", () => ({ config: mockConfig }));
 
 jest.mock("../vibeProvider", () => {
-    class VibeProviderError extends Error {}
-    class VibeProviderTimeoutError extends VibeProviderError {}
-    class VibeProviderUnavailableError extends VibeProviderError {}
-    class VibeProviderSpaceMismatchError extends VibeProviderError {}
+    class VibeProviderError extends Error {
+        constructor(public readonly code: string) {
+            super(code);
+        }
+    }
+    class VibeProviderTimeoutError extends VibeProviderError {
+        constructor() {
+            super("timeout");
+        }
+    }
+    class VibeProviderUnavailableError extends VibeProviderError {
+        constructor() {
+            super("unreachable");
+        }
+    }
+    class VibeProviderSpaceMismatchError extends VibeProviderError {
+        constructor() {
+            super("space_mismatch");
+        }
+    }
+    class VibeProviderContractError extends VibeProviderError {
+        constructor() {
+            super("contract");
+        }
+    }
+    class VibeProviderServerError extends VibeProviderError {
+        readonly status = 503;
+        constructor() {
+            super("provider_5xx");
+        }
+    }
     return {
         embedText: (...args: unknown[]) => mockEmbedText(...args),
         fetchProviderSpace: (...args: unknown[]) =>
@@ -34,6 +61,8 @@ jest.mock("../vibeProvider", () => {
         VibeProviderTimeoutError,
         VibeProviderUnavailableError,
         VibeProviderSpaceMismatchError,
+        VibeProviderContractError,
+        VibeProviderServerError,
     };
 });
 
@@ -57,12 +86,14 @@ jest.mock("../../utils/logger", () => {
 import {
     invalidateTextEmbeddingProviderSpaceCache,
     resolveTextEmbedding,
-    TextEmbeddingProviderError,
+    TextEmbeddingBadGatewayError,
     TextEmbeddingTimeoutError,
     TextEmbeddingUnavailableError,
 } from "../textEmbedding";
 import {
     VibeProviderSpaceMismatchError,
+    VibeProviderContractError,
+    VibeProviderServerError,
     VibeProviderTimeoutError,
     VibeProviderUnavailableError,
 } from "../vibeProvider";
@@ -160,10 +191,10 @@ describe("text embedding space routing", () => {
 
         await expect(
             resolveTextEmbedding("quiet focus"),
-        ).rejects.toBeInstanceOf(TextEmbeddingProviderError);
+        ).rejects.toBeInstanceOf(TextEmbeddingBadGatewayError);
         await expect(
             resolveTextEmbedding("second query"),
-        ).rejects.toBeInstanceOf(TextEmbeddingProviderError);
+        ).rejects.toBeInstanceOf(TextEmbeddingBadGatewayError);
 
         expect(mockEmbedText).not.toHaveBeenCalled();
         expect(mockWarn).toHaveBeenCalledTimes(1);
@@ -199,7 +230,15 @@ describe("text embedding space routing", () => {
         },
         {
             error: new VibeProviderSpaceMismatchError(),
-            expected: TextEmbeddingProviderError,
+            expected: TextEmbeddingBadGatewayError,
+        },
+        {
+            error: new VibeProviderContractError(),
+            expected: TextEmbeddingBadGatewayError,
+        },
+        {
+            error: new VibeProviderServerError(503),
+            expected: TextEmbeddingUnavailableError,
         },
     ])(
         "maps $error.name without a legacy fallback",

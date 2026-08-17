@@ -22,6 +22,7 @@ const MIGRATIONS = [
     "20260816130000_add_embedding_space_migration",
     "20260817120000_add_embedding_space_had_vectors",
     "20260817130000_drop_legacy_global_embedding_index",
+    "20260817140000_harden_vibe_concurrency",
 ] as const;
 
 interface IndexRow {

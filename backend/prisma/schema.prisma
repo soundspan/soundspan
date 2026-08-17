@@ -426,6 +426,7 @@ model Track {
   vibeAnalysisStartedAt       DateTime?
   vibeAnalysisError           String?
   vibeAnalysisRetryCount      Int       @default(0)
+  vibeAnalysisGeneration      Int       @default(0)
   vibeAnalysisStatusUpdatedAt DateTime? // When the status was last updated
 
   cachedBy        CachedTrack[]
@@ -1350,7 +1351,9 @@ model EmbeddingSpace {
   status         EmbeddingSpaceStatus
   hadVectors     Boolean              @default(false) @map("had_vectors")
   createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  lastSeenAt     DateTime             @default(now()) @map("last_seen_at") @db.Timestamptz
   retiredAt      DateTime?            @map("retired_at") @db.Timestamptz
+  cleaningAt     DateTime?            @map("cleaning_at") @db.Timestamptz
   embeddings     TrackEmbedding[]
 
   @@unique([family, checkpointHash])

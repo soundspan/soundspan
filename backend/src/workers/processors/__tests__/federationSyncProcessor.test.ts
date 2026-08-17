@@ -105,6 +105,10 @@ jest.mock("../../../services/trackEmbeddings", () => ({
 jest.mock("../../../services/embeddingSpaces", () => ({
     getActiveSpace,
     NoActiveEmbeddingSpaceError: MockNoActiveEmbeddingSpaceError,
+    embeddingPreprocessingHash: jest.fn(
+        () =>
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    ),
 }));
 jest.mock("../../../metrics", () => ({
     recordFederationEmbeddingPageOutcome,
@@ -145,6 +149,8 @@ const embeddingSpace = {
     family: "clap-music-audioset",
     checkpointHash: "checkpoint-hash",
     dim: 512,
+    preprocessingHash:
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
 };
 const activeSpace = {
     id: "space_clap_music_audioset_v1",
@@ -1512,6 +1518,30 @@ describe("federation sync processor", () => {
         expect(getActiveSpace).toHaveBeenCalledTimes(1);
         expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
             "stored",
+        );
+    });
+
+    it("accepts a matching 2.3 tuple without preprocessingHash and warns once", async () => {
+        const { preprocessingHash: _omitted, ...olderTuple } = embeddingSpace;
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve(
+                type === "track"
+                    ? { ...catalogPageFor(type), embeddingSpace: olderTuple }
+                    : catalogPageFor(type),
+            ),
+        );
+
+        await processFederationSync(job());
+
+        expect(upsertTrackEmbedding).toHaveBeenCalledWith(
+            "fed-track-row",
+            track.attributes.embedding,
+            activeSpace.id,
+        );
+        expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            "Accepting federation embeddings from a 2.3 peer without preprocessingHash",
+            { peerId: "peer-1" },
         );
     });
 

@@ -2,6 +2,7 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         $executeRaw: jest.fn(),
         $queryRaw: jest.fn(),
+        $transaction: jest.fn(),
         track: { findMany: jest.fn() },
         embeddingSpace: {
             findUnique: jest.fn(),
@@ -43,6 +44,15 @@ const parseEmbeddingSpy = jest.spyOn(embeddingUtils, "parseEmbedding");
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.$transaction as jest.Mock).mockImplementation(
+        async (operation: (transaction: unknown) => Promise<unknown>) =>
+            operation({
+                $executeRaw: prisma.$executeRaw,
+                embeddingSpace: {
+                    updateMany: prisma.embeddingSpace.updateMany,
+                },
+            }),
+    );
     mockGetActiveSpace.mockResolvedValue({
         id: "space-active",
         family: "clap-music-audioset",
@@ -69,6 +79,7 @@ describe("upsertTrackEmbedding", () => {
             "space-target",
         );
 
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
         expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
         const [query, ...values] = (prisma.$executeRaw as jest.Mock).mock
             .calls[0];
@@ -84,6 +95,24 @@ describe("upsertTrackEmbedding", () => {
             where: { id: "space-target", hadVectors: false },
             data: { hadVectors: true },
         });
+    });
+
+    it("rolls back the vector write when the hadVectors marker fails", async () => {
+        (prisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+        (prisma.embeddingSpace.findUnique as jest.Mock).mockResolvedValue({
+            dim: 2,
+        });
+        (prisma.embeddingSpace.updateMany as jest.Mock).mockRejectedValue(
+            new Error("marker write failed"),
+        );
+
+        await expect(
+            upsertTrackEmbedding("track-rollback", [0.6, 0.8], "space-target"),
+        ).rejects.toThrow("marker write failed");
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.embeddingSpace.updateMany).toHaveBeenCalledTimes(1);
     });
 
     it("rejects malformed vectors before writing", async () => {

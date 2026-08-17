@@ -26,7 +26,7 @@ import {
 } from "../../services/embeddingSpaces";
 import {
     decideFederationEmbeddingPage,
-    federationEmbeddingSpaceIdentity,
+    decideScopedEmbeddingPage,
     type FederationEmbeddingPageOutcome,
     type ParsedFederationEmbeddingSpaceIdentity,
 } from "../../services/federationEmbeddingSpace";
@@ -84,6 +84,7 @@ interface SyncContext {
     skippedUnknownTombstones: number;
     localEmbeddingSpace: ActiveEmbeddingSpace | null;
     embeddingWarningEmitted: boolean;
+    legacyPreprocessingWarningEmitted: boolean;
 }
 
 /** Bounded summary of one completed peer sync. */
@@ -125,6 +126,7 @@ function newSyncContext(
         skippedUnknownTombstones: 0,
         localEmbeddingSpace,
         embeddingWarningEmitted: localEmbeddingSpace === null,
+        legacyPreprocessingWarningEmitted: false,
     };
 }
 
@@ -980,32 +982,17 @@ function decidePageEmbeddingOutcome(
     grouped: GroupedPage,
     pageTuple: ParsedFederationEmbeddingSpaceIdentity | undefined,
 ): FederationEmbeddingPageOutcome | null {
-    const carriesScopedEmbeddings =
-        context.scopes.includes("embeddings:read") &&
-        grouped.tracks.some((item) => item.attributes.embedding !== undefined);
-    if (!carriesScopedEmbeddings) return null;
-    if (!context.localEmbeddingSpace) return "skipped_mismatch";
-    const outcome = decideFederationEmbeddingPage(
+    return decideScopedEmbeddingPage({
+        scopes: context.scopes,
+        peerId: context.peerId,
+        localEmbeddingSpace: context.localEmbeddingSpace,
+        warnings: context,
+        pageCarriesEmbeddings: grouped.tracks.some(
+            (item) => item.attributes.embedding !== undefined,
+        ),
         pageTuple,
-        context.localEmbeddingSpace,
-    );
-    if (outcome === "stored" || context.embeddingWarningEmitted) {
-        return outcome;
-    }
-    context.embeddingWarningEmitted = true;
-    log.warn(
-        "Skipping federation embeddings because the page space does not match the local active space",
-        {
-            peerId: context.peerId,
-            outcome,
-            remoteEmbeddingSpace:
-                pageTuple === undefined ? "legacy-absent" : pageTuple,
-            localEmbeddingSpace: federationEmbeddingSpaceIdentity(
-                context.localEmbeddingSpace,
-            ),
-        },
-    );
-    return outcome;
+        warn: (message, details) => log.warn(message, details),
+    });
 }
 
 async function applyChanges(

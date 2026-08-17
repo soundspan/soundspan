@@ -371,6 +371,7 @@ const envSchema = z
         VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
         VIBE_EMBED_CONCURRENCY: vibeEmbedConcurrencyEnvSchema,
         VIBE_SPACE_CUTOVER_THRESHOLD: vibeSpaceCutoverThresholdEnvSchema,
+        VIBE_SPACE_CUTOVER_ALLOW_FAILED: z.string().optional(),
         VIBE_SPACE_RETIREMENT_GRACE_DAYS: vibeSpaceRetirementGraceDaysEnvSchema,
         METRICS_TOKEN: z.string().optional(),
         METRICS_PUBLIC: z.string().optional(),
@@ -521,6 +522,10 @@ export const config = {
     vibeEmbedConcurrency: Number(process.env.VIBE_EMBED_CONCURRENCY ?? "1"),
     vibeSpaceCutoverThreshold: Number(
         process.env.VIBE_SPACE_CUTOVER_THRESHOLD ?? "0.95",
+    ),
+    vibeSpaceCutoverAllowFailed: parseEnvBool(
+        process.env.VIBE_SPACE_CUTOVER_ALLOW_FAILED,
+        false,
     ),
     vibeSpaceRetirementGraceDays: Number(
         process.env.VIBE_SPACE_RETIREMENT_GRACE_DAYS ?? "7",

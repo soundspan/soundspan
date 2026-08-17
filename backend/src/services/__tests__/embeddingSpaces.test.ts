@@ -1,6 +1,7 @@
 const mockFindMany = jest.fn();
 const mockFindUnique = jest.fn();
 const mockCreate = jest.fn();
+const mockUpdateMany = jest.fn();
 const mockLoggerError = jest.fn();
 const mockRecordProviderConfigError = jest.fn();
 const mockChild = jest.fn((_scope: string) => ({
@@ -17,6 +18,7 @@ jest.mock("../../utils/db", () => ({
             findMany: (...args: unknown[]) => mockFindMany(...args),
             findUnique: (...args: unknown[]) => mockFindUnique(...args),
             create: (...args: unknown[]) => mockCreate(...args),
+            updateMany: (...args: unknown[]) => mockUpdateMany(...args),
         },
     },
 }));
@@ -178,7 +180,7 @@ describe("embeddingSpaces", () => {
 
         expect(mockFindMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { status: "active" },
+                where: { status: "active", cleaningAt: null },
                 orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 take: 2,
             }),
@@ -211,7 +213,10 @@ describe("provider embedding-space resolution", () => {
         createdAt: new Date("2026-08-16T12:00:00.000Z"),
     };
 
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockUpdateMany.mockResolvedValue({ count: 1 });
+    });
 
     it("returns a registered provider space without creating one", async () => {
         mockFindUnique.mockResolvedValue(registrySpace);
@@ -220,6 +225,14 @@ describe("provider embedding-space resolution", () => {
             findRegisteredProviderEmbeddingSpace(providerSpace),
         ).resolves.toEqual(registrySpace);
         expect(mockCreate).not.toHaveBeenCalled();
+        expect(mockUpdateMany).toHaveBeenCalledWith({
+            where: {
+                id: "space-student",
+                status: "migrating",
+                cleaningAt: null,
+            },
+            data: { lastSeenAt: expect.any(Date) },
+        });
     });
 
     it("returns null for an unregistered provider without creating one", async () => {

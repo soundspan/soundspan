@@ -396,6 +396,7 @@ async function loadEmbeddingExport(
         const embeddingSpace = federationEmbeddingSpaceIdentity(activeSpace);
         const embeddings = await fetchEmbeddingsByTrackIds(
             rows.map((row) => row.id),
+            activeSpace.id,
         );
         return {
             embeddings: new Map(

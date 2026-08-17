@@ -17,11 +17,16 @@ const embeddingSpaceHeaderSchema = z
         family: z.string().min(1).max(200),
         checkpointHash: z.string().min(1).max(256),
         dim: z.number().int().positive().max(65_536),
+        preprocessingHash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
     })
-    .transform(({ family, checkpointHash, dim }) => ({
+    .transform(({ family, checkpointHash, dim, preprocessingHash }) => ({
         family,
         checkpointHash,
         dim,
+        ...(preprocessingHash ? { preprocessingHash } : {}),
     }));
 
 /**
@@ -40,7 +45,7 @@ export function encodeFederationEmbeddingSpaceHeader(
     );
 }
 
-/** Parse a peer header without rejecting future additive tuple fields. */
+/** Parse the additive tuple; preprocessingHash is optional for older 2.3 peers. */
 export function parseFederationEmbeddingSpaceHeader(
     value: unknown,
 ): ParsedFederationEmbeddingSpaceIdentity | undefined {

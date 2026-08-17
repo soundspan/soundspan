@@ -8,10 +8,13 @@ const tuple: FederationEmbeddingSpaceIdentity = {
     family: "clap-music-audioset",
     checkpointHash: "checkpoint-hash",
     dim: 512,
+    preprocessingHash:
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
 };
 const canonicalSpace = {
     id: "space_clap_music_audioset_v1",
     ...tuple,
+    preprocessing: {},
 };
 
 describe("federation embedding-space decision", () => {
@@ -34,11 +37,19 @@ describe("federation embedding-space decision", () => {
             { ...tuple, family: "other-family" },
             { ...tuple, checkpointHash: "other-checkpoint" },
             { ...tuple, dim: 768 },
+            { ...tuple, preprocessingHash: "other-preprocessing" },
         ]) {
             expect(decideFederationEmbeddingPage(remote, canonicalSpace)).toBe(
                 "skipped_mismatch",
             );
         }
+    });
+
+    it("accepts a 2.3 tuple without preprocessingHash when the original fields match", () => {
+        const { preprocessingHash: _omitted, ...legacyTuple } = tuple;
+        expect(decideFederationEmbeddingPage(legacyTuple, canonicalSpace)).toBe(
+            "stored",
+        );
     });
 
     it("treats a malformed parsed tuple as a mismatch", () => {

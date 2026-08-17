@@ -15,8 +15,16 @@ jest.mock("../../config", () => ({
 }));
 
 jest.mock("../../services/vibeProvider", () => {
-    class VibeProviderError extends Error {}
-    class VibeProviderSpaceMismatchError extends VibeProviderError {}
+    class VibeProviderError extends Error {
+        constructor(public readonly code: string) {
+            super(code);
+        }
+    }
+    class VibeProviderSpaceMismatchError extends VibeProviderError {
+        constructor() {
+            super("space_mismatch");
+        }
+    }
     return {
         embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
         fetchProviderSpace: (...args: unknown[]) =>
@@ -40,10 +48,32 @@ jest.mock("../../services/vibeProvider", () => {
             },
         ),
         VibeProviderError,
-        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
-        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
-        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {},
-        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {},
+        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {
+            constructor() {
+                super("timeout");
+            }
+        },
+        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {
+            constructor() {
+                super("unreachable");
+            }
+        },
+        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {
+            constructor() {
+                super("auth");
+            }
+        },
+        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {
+            constructor() {
+                super("contract");
+            }
+        },
+        VibeProviderServerError: class VibeProviderServerError extends VibeProviderError {
+            readonly status = 503;
+            constructor() {
+                super("provider_5xx");
+            }
+        },
         VibeProviderSpaceMismatchError,
     };
 });
@@ -595,9 +625,9 @@ describe("vibe search transport compatibility", () => {
                 res,
             );
 
-            expect(res.statusCode).toBe(500);
+            expect(res.statusCode).toBe(502);
             expect(res.body).toEqual({
-                error: "Failed to search tracks by vibe",
+                error: "Text embedding provider returned an invalid response",
             });
             expect(mockProviderEmbedText).not.toHaveBeenCalled();
             expect(mockRunAnnQuery).not.toHaveBeenCalled();
@@ -646,10 +676,9 @@ describe("vibe search transport compatibility", () => {
         });
 
         it.each([
-            "VibeProviderAuthError",
             "VibeProviderContractError",
             "VibeProviderSpaceMismatchError",
-        ] as const)("maps %s to the canonical 500 response", async (name) => {
+        ] as const)("maps %s to the canonical 502 response", async (name) => {
             const providerErrors = jest.requireMock(
                 "../../services/vibeProvider",
             ) as Record<typeof name, new () => Error>;
@@ -664,11 +693,34 @@ describe("vibe search transport compatibility", () => {
 
             await searchHandler(req, res);
 
-            expect(res.statusCode).toBe(500);
+            expect(res.statusCode).toBe(502);
             expect(res.body).toEqual({
-                error: "Failed to search tracks by vibe",
+                error: "Text embedding provider returned an invalid response",
             });
             expect(mockRunAnnQuery).not.toHaveBeenCalled();
+        });
+
+        it("maps a provider-generated 503 to the canonical 503 response", async () => {
+            const { VibeProviderServerError } = jest.requireMock(
+                "../../services/vibeProvider",
+            ) as { VibeProviderServerError: new () => Error };
+            mockProviderEmbedText.mockRejectedValueOnce(
+                new VibeProviderServerError(),
+            );
+            const res = createRes();
+
+            await searchHandler(
+                {
+                    body: { query: "quiet focus" },
+                    user: { id: "user-1" },
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(503);
+            expect(res.body).toEqual({
+                error: "Text embedding service unavailable",
+            });
         });
     });
 

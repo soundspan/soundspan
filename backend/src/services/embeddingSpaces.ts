@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { recordVibeProviderConfigError } from "../metrics";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -23,6 +24,8 @@ export interface ActiveEmbeddingSpace {
 export interface ResolvedEmbeddingSpace extends ActiveEmbeddingSpace {
     status: "active" | "migrating" | "retired";
     retiredAt: Date | null;
+    cleaningAt: Date | null;
+    lastSeenAt: Date;
     createdAt: Date;
 }
 
@@ -107,6 +110,8 @@ const providerSpaceSelect = {
     hadVectors: true,
     status: true,
     retiredAt: true,
+    cleaningAt: true,
+    lastSeenAt: true,
     createdAt: true,
 } as const;
 
@@ -125,7 +130,7 @@ function toActiveSpace(
 
 async function loadActiveSpace(): Promise<ActiveEmbeddingSpace> {
     const rows = await prisma.embeddingSpace.findMany({
-        where: { status: "active" },
+        where: { status: "active", cleaningAt: null },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: 2,
         select: {
@@ -185,7 +190,10 @@ export function invalidateActiveSpaceCache(): void {
 function assertUsableProviderSpace(
     space: ResolvedEmbeddingSpace,
 ): UsableEmbeddingSpace {
-    if (space.status === "retired") {
+    if (
+        space.status === "retired" ||
+        (space.cleaningAt !== null && space.cleaningAt !== undefined)
+    ) {
         throw new RetiredEmbeddingSpaceError(space.id);
     }
     return { ...space, status: space.status };
@@ -218,7 +226,8 @@ function resolveRegisteredProviderSpace(
     return assertUsableProviderSpace(space);
 }
 
-function canonicalJson(
+/** Stable JSON representation used by registry and federation identity checks. */
+export function canonicalEmbeddingPreprocessing(
     value: Prisma.JsonValue | Prisma.InputJsonValue,
 ): string {
     return JSON.stringify(value, (_key, nestedValue: unknown) => {
@@ -242,7 +251,40 @@ export function embeddingPreprocessingMatches(
     registered: Prisma.JsonValue,
     provider: Prisma.InputJsonValue,
 ): boolean {
-    return canonicalJson(registered) === canonicalJson(provider);
+    return (
+        canonicalEmbeddingPreprocessing(registered) ===
+        canonicalEmbeddingPreprocessing(provider)
+    );
+}
+
+/** SHA-256 identity for a canonically ordered preprocessing document. */
+export function embeddingPreprocessingHash(
+    value: Prisma.JsonValue | Prisma.InputJsonValue,
+): string {
+    return createHash("sha256")
+        .update(canonicalEmbeddingPreprocessing(value), "utf8")
+        .digest("hex");
+}
+
+async function refreshProviderSpaceLastSeen(
+    space: UsableEmbeddingSpace,
+): Promise<UsableEmbeddingSpace> {
+    const refreshedAt = new Date();
+    const touched = await prisma.embeddingSpace.updateMany({
+        where: {
+            id: space.id,
+            status: space.status,
+            cleaningAt: null,
+        },
+        data: { lastSeenAt: refreshedAt },
+    });
+    if (touched.count === 1) return space;
+    const current = await prisma.embeddingSpace.findUnique({
+        where: { id: space.id },
+        select: providerSpaceSelect,
+    });
+    if (!current) throw new Error("Embedding-space registration vanished");
+    return assertUsableProviderSpace(current);
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -284,7 +326,9 @@ export async function findRegisteredProviderEmbeddingSpace(
         select: providerSpaceSelect,
     });
     if (!existing) return null;
-    return resolveRegisteredProviderSpace(existing, providerSpace);
+    return refreshProviderSpaceLastSeen(
+        resolveRegisteredProviderSpace(existing, providerSpace),
+    );
 }
 
 /** Resolve a provider tuple, registering an unseen tuple as migrating. */
@@ -303,7 +347,9 @@ export async function resolveProviderEmbeddingSpace(
     });
     if (existing) {
         return {
-            space: resolveRegisteredProviderSpace(existing, providerSpace),
+            space: await refreshProviderSpaceLastSeen(
+                resolveRegisteredProviderSpace(existing, providerSpace),
+            ),
             registered: false,
         };
     }
@@ -327,7 +373,9 @@ export async function resolveProviderEmbeddingSpace(
         if (!isUniqueConstraintError(error)) throw error;
         const raced = await loadProviderSpaceAfterConflict(providerSpace);
         return {
-            space: resolveRegisteredProviderSpace(raced, providerSpace),
+            space: await refreshProviderSpaceLastSeen(
+                resolveRegisteredProviderSpace(raced, providerSpace),
+            ),
             registered: false,
         };
     }

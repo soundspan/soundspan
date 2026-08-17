@@ -15,6 +15,7 @@ const mockLoadCoverage = jest.fn();
 const mockLoadSpaceVectorState = jest.fn();
 const mockGetActiveSpace = jest.fn();
 const mockLogInfo = jest.fn();
+const mockLogWarn = jest.fn();
 const mockSetCoverage = jest.fn();
 const mockSetMigrationActive = jest.fn();
 
@@ -65,7 +66,7 @@ jest.mock("../../utils/logger", () => ({
         child: () => ({
             debug: jest.fn(),
             info: (...args: unknown[]) => mockLogInfo(...args),
-            warn: jest.fn(),
+            warn: (...args: unknown[]) => mockLogWarn(...args),
             error: jest.fn(),
         }),
     },
@@ -87,6 +88,16 @@ const migrating = {
     id: "space_student_1",
     status: "migrating",
     retiredAt: null,
+    cleaningAt: null,
+    lastSeenAt: now,
+};
+
+const lifecycleConfig = {
+    threshold: 0.95,
+    retirementGraceDays: 7,
+    allowFailed: false,
+    currentProviderSpaceId: "space_student_1",
+    now: () => now,
 };
 
 describe("embedding-space lifecycle decisions", () => {
@@ -159,6 +170,10 @@ describe("embedding-space lifecycle effects", () => {
                         updateMany: mockUpdateMany,
                         update: mockUpdate,
                     },
+                    trackEmbedding: {
+                        findMany: mockEmbeddingFindMany,
+                        deleteMany: mockEmbeddingDeleteMany,
+                    },
                 }),
         );
     });
@@ -169,7 +184,7 @@ describe("embedding-space lifecycle effects", () => {
         mockLoadCoverage.mockResolvedValue({
             embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 5,
-            failed: 20,
+            failed: 5,
         });
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockExecuteRawUnsafe.mockImplementation(async () => {
@@ -188,11 +203,7 @@ describe("embedding-space lifecycle effects", () => {
             },
         );
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(order).toEqual(["index", "transaction"]);
         expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
@@ -210,13 +221,13 @@ describe("embedding-space lifecycle effects", () => {
                 thresholdPercent: 95,
                 embedded: ANN_INDEX_MIN_VECTOR_COUNT,
                 pending: 5,
-                failed: 20,
+                failed: 5,
             },
         );
         expect(mockSetCoverage).toHaveBeenCalledWith({
             embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 5,
-            failed: 20,
+            failed: 5,
         });
         expect(mockExecuteRawUnsafe).toHaveBeenCalledWith(
             expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
@@ -226,8 +237,12 @@ describe("embedding-space lifecycle effects", () => {
             data: { status: "retired", retiredAt: now },
         });
         expect(mockUpdateMany).toHaveBeenCalledWith({
-            where: { id: "space_student_1", status: "migrating" },
-            data: { status: "active", retiredAt: null },
+            where: {
+                id: "space_student_1",
+                status: "migrating",
+                cleaningAt: null,
+            },
+            data: { status: "active", retiredAt: null, cleaningAt: null },
         });
         expect(mockInvalidate).toHaveBeenCalledTimes(1);
         expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
@@ -239,9 +254,47 @@ describe("embedding-space lifecycle effects", () => {
                 coverage:
                     ANN_INDEX_MIN_VECTOR_COUNT /
                     (ANN_INDEX_MIN_VECTOR_COUNT + 5),
-                failed: 20,
+                failed: 5,
             },
         );
+    });
+
+    it("holds a covered migration when its unacknowledged failure tail exceeds tolerance", async () => {
+        mockFindFirst.mockResolvedValue(migrating);
+        mockLoadCoverage.mockResolvedValue({
+            embedded: 95,
+            pending: 5,
+            failed: 20,
+        });
+
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
+
+        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
+        expect(mockLogWarn).toHaveBeenCalledWith(
+            "Embedding-space cutover held for unacknowledged failures",
+            expect.objectContaining({
+                spaceId: "space_student_1",
+                retryEndpoint: "/api/analysis/vibe/retry",
+            }),
+        );
+    });
+
+    it("allows an operator-acknowledged failure tail to cut over", async () => {
+        mockFindFirst.mockResolvedValue(migrating);
+        mockLoadCoverage.mockResolvedValue({
+            embedded: 95,
+            pending: 5,
+            failed: 20,
+        });
+
+        await runEmbeddingSpaceLifecycleCheck({
+            ...lifecycleConfig,
+            allowFailed: true,
+        });
+
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
+        expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
     });
 
     it("keeps an existing valid partial index", async () => {
@@ -254,16 +307,16 @@ describe("embedding-space lifecycle effects", () => {
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockQueryRaw.mockResolvedValue([{ isValid: true }]);
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
         expect(mockUpdateMany).toHaveBeenCalledWith({
-            where: { id: "space_student_1", status: "migrating" },
-            data: { status: "active", retiredAt: null },
+            where: {
+                id: "space_student_1",
+                status: "migrating",
+                cleaningAt: null,
+            },
+            data: { status: "active", retiredAt: null, cleaningAt: null },
         });
     });
 
@@ -275,11 +328,7 @@ describe("embedding-space lifecycle effects", () => {
             failed: 10,
         });
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
             "space_teacher_1",
@@ -316,11 +365,7 @@ describe("embedding-space lifecycle effects", () => {
             failed: 0,
         });
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockLoadSpaceVectorState).toHaveBeenCalledWith(
             "space_teacher_1",
@@ -363,11 +408,7 @@ describe("embedding-space lifecycle effects", () => {
             failed: 4,
         });
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
         expect(mockTransaction).not.toHaveBeenCalled();
@@ -384,11 +425,7 @@ describe("embedding-space lifecycle effects", () => {
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockQueryRaw.mockResolvedValue([{ isValid: false }]);
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockExecuteRawUnsafe).toHaveBeenCalledTimes(2);
         expect(mockExecuteRawUnsafe).toHaveBeenNthCalledWith(
@@ -404,11 +441,7 @@ describe("embedding-space lifecycle effects", () => {
     it("builds a missing ANN index after the active space crosses the floor", async () => {
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockEmbeddingCount).toHaveBeenCalledWith({
             where: { spaceId: "space_teacher_1" },
@@ -421,14 +454,53 @@ describe("embedding-space lifecycle effects", () => {
     it("keeps an active space exact below the ANN index floor", async () => {
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT - 1);
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it("selects the current provider migration instead of an older abandoned space", async () => {
+        mockFindFirst.mockResolvedValue(migrating);
+        mockLoadCoverage.mockResolvedValue({
+            embedded: 1,
+            pending: 0,
+            failed: 0,
+        });
+
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
+
+        expect(mockFindFirst).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    id: "space_student_1",
+                    status: "migrating",
+                    cleaningAt: null,
+                },
+            }),
+        );
+        expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
+    });
+
+    it("retires migrations not seen within the configured grace", async () => {
+        mockFindFirst.mockResolvedValue(null);
+
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
+
+        expect(mockUpdateMany).toHaveBeenCalledWith({
+            where: {
+                status: "migrating",
+                id: { not: "space_student_1" },
+                lastSeenAt: {
+                    lte: new Date("2026-08-09T12:00:00.000Z"),
+                },
+                cleaningAt: null,
+            },
+            data: {
+                status: "retired",
+                retiredAt: now,
+            },
+        });
     });
 
     it("keeps retirement deletion bounded when every batch is full", async () => {
@@ -452,11 +524,7 @@ describe("embedding-space lifecycle effects", () => {
             count: RETIREMENT_DELETE_BATCH_SIZE,
         });
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockEmbeddingDeleteMany).toHaveBeenCalledTimes(
             MAX_RETIREMENT_DELETE_BATCHES,
@@ -480,11 +548,7 @@ describe("embedding-space lifecycle effects", () => {
             .mockResolvedValueOnce([]);
         mockEmbeddingDeleteMany.mockResolvedValue({ count: 2 });
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockEmbeddingDeleteMany).toHaveBeenCalledTimes(1);
         expect(mockEmbeddingDeleteMany).toHaveBeenCalledWith({
@@ -501,8 +565,9 @@ describe("embedding-space lifecycle effects", () => {
                 id: "space_retired_1",
                 status: "retired",
                 retiredAt,
+                cleaningAt: now,
             },
-            data: { retiredAt: null },
+            data: { retiredAt: null, cleaningAt: null },
         });
         expect(mockRecordTransition).toHaveBeenCalledWith("retired_cleaned");
     });
@@ -523,15 +588,25 @@ describe("embedding-space lifecycle effects", () => {
         mockEmbeddingDeleteMany.mockResolvedValue({
             count: RETIREMENT_DELETE_BATCH_SIZE,
         });
-        mockUpdateMany
-            .mockResolvedValueOnce({ count: 1 })
-            .mockResolvedValueOnce({ count: 0 });
+        let validationCount = 0;
+        mockTransaction.mockImplementation(
+            async (operation: (transaction: unknown) => Promise<unknown>) => {
+                validationCount += 1;
+                return operation({
+                    embeddingSpace: {
+                        updateMany: jest.fn(async () => ({
+                            count: validationCount === 1 ? 1 : 0,
+                        })),
+                    },
+                    trackEmbedding: {
+                        findMany: mockEmbeddingFindMany,
+                        deleteMany: mockEmbeddingDeleteMany,
+                    },
+                });
+            },
+        );
 
-        await runEmbeddingSpaceLifecycleCheck({
-            threshold: 0.95,
-            retirementGraceDays: 7,
-            now: () => now,
-        });
+        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
         expect(mockEmbeddingDeleteMany).toHaveBeenCalledTimes(1);
         expect(mockEmbeddingFindMany).toHaveBeenCalledTimes(1);

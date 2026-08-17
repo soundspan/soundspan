@@ -26,6 +26,10 @@ jest.mock("../trackEmbeddings", () => ({
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: jest.fn(),
     NoActiveEmbeddingSpaceError: MockNoActiveEmbeddingSpaceError,
+    embeddingPreprocessingHash: jest.fn(
+        () =>
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    ),
 }));
 jest.mock("../../utils/logger", () => ({
     logger: { child: jest.fn(() => mockLog) },
@@ -280,7 +284,7 @@ describe("federation catalog exports", () => {
 
         expect(result?.body.attributes).toHaveProperty("embedding", [0.1, 0.2]);
         expect(result?.embeddingSpaceHeaderValue).toBe(
-            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512,"preprocessingHash":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"}',
         );
     });
 
@@ -368,7 +372,7 @@ describe("federation catalog exports", () => {
         expect(trackWithout).not.toHaveProperty("embeddingSpaceHeaderValue");
         expect(trackWithout.body).not.toHaveProperty("embeddingSpace");
         expect(trackWith.embeddingSpaceHeaderValue).toBe(
-            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512,"preprocessingHash":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"}',
         );
         expect(trackWith.body).not.toHaveProperty("embeddingSpace");
         expect(trackWith.body.items[0].attributes).toEqual(
@@ -499,11 +503,45 @@ describe("federation catalog exports", () => {
 
         expect(result.body.items[0].attributes).toHaveProperty("embedding");
         expect(result.embeddingSpaceHeaderValue).toBe(
-            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512,"preprocessingHash":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"}',
+        );
+        expect(fetchEmbeddingsByTrackIds).toHaveBeenCalledWith(
+            ["student-track"],
+            "space_dclap_student_v1",
         );
         expect(
             mockRecordFederationEmbeddingExportOutcome,
         ).not.toHaveBeenCalled();
+    });
+
+    it("keeps the resolved header space and vector query space consistent across cutover", async () => {
+        prisma.track.findMany.mockResolvedValue([track("cutover-track")]);
+        let resolutionCount = 0;
+        (getActiveSpace as jest.Mock).mockImplementation(async () => {
+            resolutionCount += 1;
+            return resolutionCount === 1
+                ? activeSpace
+                : { ...activeSpace, id: "space-after-cutover" };
+        });
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "cutover-track", embedding: [0.1, 0.2] },
+        ]);
+
+        const result = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: true,
+            acceptsEmbeddingSpace: true,
+        });
+
+        expect(getActiveSpace).toHaveBeenCalledTimes(1);
+        expect(fetchEmbeddingsByTrackIds).toHaveBeenCalledWith(
+            ["cutover-track"],
+            activeSpace.id,
+        );
+        expect(result.embeddingSpaceHeaderValue).toContain(
+            '"checkpointHash":"checkpoint-hash"',
+        );
     });
 
     it.each(["active-space lookup", "embedding fetch"])(
@@ -684,7 +722,7 @@ describe("federation catalog exports", () => {
             new Date("2026-08-15T12:01:00.000Z"),
         );
         expect(result.embeddingSpaceHeaderValue).toBe(
-            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512,"preprocessingHash":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"}',
         );
         expect(result.body).not.toHaveProperty("embeddingSpace");
         expect(prisma.artist.findMany).toHaveBeenCalledWith(

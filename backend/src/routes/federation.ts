@@ -206,7 +206,7 @@ router.get(
  *         description: Generic catalog envelope page
  *         headers:
  *           X-Soundspan-Embedding-Space:
- *             description: JSON embedding-space tuple when the body carries vectors
+ *             description: JSON embedding-space tuple when the body carries vectors; preprocessingHash is additive and may be absent from older 2.3 peers
  *             schema: { type: string }
  *       400: { description: Invalid query }
  *       429: { description: Federation peer rate limit exceeded }
@@ -245,7 +245,7 @@ router.get(
  *         description: Generic catalog item envelope
  *         headers:
  *           X-Soundspan-Embedding-Space:
- *             description: JSON embedding-space tuple when the body carries a vector
+ *             description: JSON embedding-space tuple when the body carries a vector; preprocessingHash is additive and may be absent from older 2.3 peers
  *             schema: { type: string }
  *       404: { description: Exported catalog item not found }
  *       429: { description: Federation peer rate limit exceeded }
@@ -286,7 +286,7 @@ router.get(
  *         description: Bounded delta page
  *         headers:
  *           X-Soundspan-Embedding-Space:
- *             description: JSON embedding-space tuple when the body carries vectors
+ *             description: JSON embedding-space tuple when the body carries vectors; preprocessingHash is additive and may be absent from older 2.3 peers
  *             schema: { type: string }
  *       409: { description: Catalog epoch mismatch; full resync required }
  *       429: { description: Federation peer rate limit exceeded }

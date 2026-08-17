@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Federation embedding-space headers now include an additive canonical
+  preprocessing hash. Older 2.3 peers without the field remain compatible when
+  the family, checkpoint, and dimension match, with a bounded warning.
+- Vibe cutover now holds failure tails above the configured coverage
+  tolerance unless operators explicitly acknowledge them with
+  `VIBE_SPACE_CUTOVER_ALLOW_FAILED=true`.
+- Embedding-space lifecycle selection now follows the currently configured
+  provider and retires abandoned migrations after the configured grace period.
 - Vibe migration coverage telemetry now exposes failed tracks at sampling and
   cutover, while retaining the actionable coverage denominator.
 - Migrating-space vibe text scans and lifecycle coverage reads are now bounded
@@ -98,6 +106,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collection fails, while retaining the last successful sample.
 - Legacy vibe Redis cleanup is deadline-bounded, restart-durable, safe across
   replica races, and processes complete bounded SCAN pages.
+- Retired-space cleanup now uses a durable claim across batched vector deletion
+  and concurrent ANN index removal, preventing cleanup from deleting vectors
+  after a space is reactivated.
+- Federation exports now resolve one embedding space per response and fetch
+  vectors strictly from that space, preventing cutover-skewed headers and
+  vectors.
+- Historic vibe retry counts are reset on the first claim for a new target
+  space, so migrated tracks receive the full provider retry budget.
+- Provider 5xx availability failures now return 503 from vibe search, provider
+  contract and space mismatches return 502, and timeouts remain 504.
 - Force rebuilding vibe embeddings now preserves active-space vectors, and a
   durable space marker prevents wiped spaces from triggering fresh-install
   cutover behavior.

@@ -14,7 +14,11 @@ jest.mock("../../config", () => ({
 }));
 
 jest.mock("../../services/vibeProvider", () => {
-    class VibeProviderError extends Error {}
+    class VibeProviderError extends Error {
+        constructor(public readonly code: string) {
+            super(code);
+        }
+    }
     return {
         embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
         fetchProviderSpace: jest.fn(async () => ({
@@ -28,11 +32,37 @@ jest.mock("../../services/vibeProvider", () => {
         })),
         assertProviderMatchesActiveSpace: jest.fn(),
         VibeProviderError,
-        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
-        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
-        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {},
-        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {},
-        VibeProviderSpaceMismatchError: class VibeProviderSpaceMismatchError extends VibeProviderError {},
+        VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {
+            constructor() {
+                super("timeout");
+            }
+        },
+        VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {
+            constructor() {
+                super("unreachable");
+            }
+        },
+        VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {
+            constructor() {
+                super("auth");
+            }
+        },
+        VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {
+            constructor() {
+                super("contract");
+            }
+        },
+        VibeProviderServerError: class VibeProviderServerError extends VibeProviderError {
+            readonly status = 503;
+            constructor() {
+                super("provider_5xx");
+            }
+        },
+        VibeProviderSpaceMismatchError: class VibeProviderSpaceMismatchError extends VibeProviderError {
+            constructor() {
+                super("space_mismatch");
+            }
+        },
     };
 });
 
@@ -225,6 +255,30 @@ describe("vibe canonical error response shape", () => {
         });
         expect(res.body).not.toHaveProperty("message");
         expect(mockProviderEmbedText).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        [
+            "VibeProviderContractError",
+            502,
+            "Text embedding provider returned an invalid response",
+        ],
+        ["VibeProviderServerError", 503, "Text embedding service unavailable"],
+    ])("maps %s to canonical status %s", async (name, status, message) => {
+        const providerErrors = jest.requireMock(
+            "../../services/vibeProvider",
+        ) as Record<string, new () => Error>;
+        mockProviderEmbedText.mockRejectedValueOnce(new providerErrors[name]());
+        const res = createRes();
+
+        await searchHandler(
+            { body: { query: "quiet focus" }, user: { id: "user-1" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(status);
+        expect(res.body).toEqual({ error: message });
+        expect(res.body).not.toHaveProperty("message");
     });
 
     it("keeps the canonical error shape when no embedding space is active", async () => {

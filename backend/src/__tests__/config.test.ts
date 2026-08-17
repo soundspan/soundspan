@@ -258,6 +258,17 @@ describe("config module", () => {
 
         expect(config.vibeSpaceCutoverThreshold).toBe(0.95);
         expect(config.vibeSpaceRetirementGraceDays).toBe(7);
+        expect(config.vibeSpaceCutoverAllowFailed).toBe(false);
+    });
+
+    it.each([
+        ["true", true],
+        ["false", false],
+    ])("parses VIBE_SPACE_CUTOVER_ALLOW_FAILED %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            VIBE_SPACE_CUTOVER_ALLOW_FAILED: raw,
+        });
+        expect(config.vibeSpaceCutoverAllowFailed).toBe(expected);
     });
 
     it.each([

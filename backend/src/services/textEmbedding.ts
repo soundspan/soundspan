@@ -40,6 +40,8 @@ interface ProviderSearchSpace extends EmbeddingVectorSpace {
 
 /** Stable timeout identity consumed by the vibe route error mapper. */
 export class TextEmbeddingTimeoutError extends Error {
+    readonly status = 504;
+
     constructor(options?: ErrorOptions) {
         super("Text embedding request timed out", options);
         this.name = "TextEmbeddingTimeoutError";
@@ -48,6 +50,8 @@ export class TextEmbeddingTimeoutError extends Error {
 
 /** Stable unavailable-provider identity consumed by the vibe route mapper. */
 export class TextEmbeddingUnavailableError extends Error {
+    readonly status = 503;
+
     constructor(options?: ErrorOptions) {
         super("Text embedding provider is unavailable", options);
         this.name = "TextEmbeddingUnavailableError";
@@ -56,9 +60,21 @@ export class TextEmbeddingUnavailableError extends Error {
 
 /** Stable non-timeout provider-failure identity for route error mapping. */
 export class TextEmbeddingProviderError extends Error {
+    readonly status = 500;
+
     constructor(options?: ErrorOptions) {
         super("Text embedding provider request failed", options);
         this.name = "TextEmbeddingProviderError";
+    }
+}
+
+/** Stable invalid-upstream identity consumed by the vibe route mapper. */
+export class TextEmbeddingBadGatewayError extends Error {
+    readonly status = 502;
+
+    constructor(options?: ErrorOptions) {
+        super("Text embedding provider returned an invalid response", options);
+        this.name = "TextEmbeddingBadGatewayError";
     }
 }
 
@@ -132,6 +148,12 @@ function mapProviderError(error: unknown): never {
         throw new TextEmbeddingUnavailableError({ cause: error });
     }
     if (error instanceof VibeProviderError) {
+        if (error.code === "provider_5xx") {
+            throw new TextEmbeddingUnavailableError({ cause: error });
+        }
+        if (error.code === "contract" || error.code === "space_mismatch") {
+            throw new TextEmbeddingBadGatewayError({ cause: error });
+        }
         throw new TextEmbeddingProviderError({ cause: error });
     }
     throw error;

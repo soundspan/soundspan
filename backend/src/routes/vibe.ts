@@ -43,6 +43,7 @@ import { parseJourneyRequest } from "./vibeJourneyRequest";
 import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 import { coalesceInFlightByKey } from "../utils/singleflight";
 import {
+    TextEmbeddingBadGatewayError,
     TextEmbeddingProviderError,
     TextEmbeddingTimeoutError,
     TextEmbeddingUnavailableError,
@@ -1036,8 +1037,12 @@ router.get<{ trackId: string }>(
  *         description: Query must contain between 2 and 512 characters
  *       401:
  *         description: Not authenticated
+ *       502:
+ *         description: Text embedding provider returned an invalid response or incompatible space
+ *       503:
+ *         description: Text embedding provider unavailable
  *       504:
- *         description: Text embedding service unavailable
+ *         description: Text embedding provider timed out
  */
 router.post(
     "/search",
@@ -1049,6 +1054,13 @@ router.post(
             res.json(await executeVibeSearch(parsed.value));
         } catch (error: unknown) {
             logger.error("Vibe text search error:", error);
+            if (error instanceof TextEmbeddingBadGatewayError) {
+                return sendRouteError(
+                    res,
+                    error.status,
+                    "Text embedding provider returned an invalid response",
+                );
+            }
             if (error instanceof TextEmbeddingProviderError) {
                 return sendInternalRouteError(
                     res,
@@ -1058,7 +1070,7 @@ router.post(
             if (error instanceof TextEmbeddingUnavailableError) {
                 return sendRouteError(
                     res,
-                    503,
+                    error.status,
                     "Text embedding service unavailable",
                 );
             }
@@ -1068,7 +1080,9 @@ router.post(
             ) {
                 return sendRouteError(
                     res,
-                    504,
+                    error instanceof TextEmbeddingTimeoutError
+                        ? error.status
+                        : 504,
                     "Text embedding service unavailable",
                 );
             }

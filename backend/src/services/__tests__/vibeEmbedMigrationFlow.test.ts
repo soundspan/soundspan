@@ -6,6 +6,8 @@ const tracks = [
         origin: "LOCAL",
         removedAt: null,
         vibeAnalysisStatus: "completed" as string | null,
+        vibeAnalysisGeneration: 0,
+        vibeAnalysisRetryCount: 0,
         embeddingSpaceIds: new Set(["space-active"]),
     },
 ];
@@ -35,12 +37,23 @@ const mockTrackFindMany = jest.fn(async (args: any) => {
 const mockTrackFindFirst = jest.fn(async () => ({
     id: tracks[0].id,
     title: tracks[0].title,
+    vibeAnalysisStatus: tracks[0].vibeAnalysisStatus,
+    vibeAnalysisGeneration: tracks[0].vibeAnalysisGeneration,
+    vibeAnalysisRetryCount: tracks[0].vibeAnalysisRetryCount,
 }));
 const mockTrackUpdateMany = jest.fn(async (args: any) => {
-    if (!targetGateMatches(args.where.OR)) {
+    const matchesTargetGate = Array.isArray(args.where.OR)
+        ? targetGateMatches(args.where.OR)
+        : args.where.vibeAnalysisStatus === tracks[0].vibeAnalysisStatus;
+    const matchesGeneration =
+        args.where.vibeAnalysisGeneration === undefined ||
+        args.where.vibeAnalysisGeneration === tracks[0].vibeAnalysisGeneration;
+    if (!matchesTargetGate || !matchesGeneration) {
         return { count: 0 };
     }
     tracks[0].vibeAnalysisStatus = args.data.vibeAnalysisStatus;
+    tracks[0].vibeAnalysisRetryCount =
+        args.data.vibeAnalysisRetryCount ?? tracks[0].vibeAnalysisRetryCount;
     return { count: 1 };
 });
 const mockTrackUpdate = jest.fn(async (args: any) => {
@@ -92,6 +105,8 @@ describe("target-space selection through claim", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         tracks[0].vibeAnalysisStatus = "completed";
+        tracks[0].vibeAnalysisGeneration = 0;
+        tracks[0].vibeAnalysisRetryCount = 0;
         tracks[0].embeddingSpaceIds = new Set(["space-active"]);
     });
 

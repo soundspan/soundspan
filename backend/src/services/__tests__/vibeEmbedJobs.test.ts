@@ -117,11 +117,12 @@ describe("vibe embed job processor", () => {
             ),
         ).resolves.toBe("stored");
 
-        expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(1, {
             where: {
                 id: "track-1",
                 origin: "LOCAL",
                 removedAt: null,
+                vibeAnalysisGeneration: 0,
                 OR: [
                     { vibeAnalysisStatus: "pending" },
                     {
@@ -152,8 +153,14 @@ describe("vibe embed job processor", () => {
             [0.6, 0.8],
             "space-provider",
         );
-        expect(harness.prisma.track.update).toHaveBeenCalledWith({
-            where: { id: "track-1" },
+        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith({
+            where: {
+                id: "track-1",
+                origin: "LOCAL",
+                removedAt: null,
+                vibeAnalysisStatus: "processing",
+                vibeAnalysisGeneration: 0,
+            },
             data: {
                 vibeAnalysisStatus: "completed",
                 vibeAnalysisError: null,
@@ -193,6 +200,7 @@ describe("vibe embed job processor", () => {
                 removedAt: null,
                 vibeAnalysisStatus: "processing",
                 vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: 0,
             },
             data: {
                 vibeAnalysisStatus: "failed",
@@ -242,6 +250,7 @@ describe("vibe embed job processor", () => {
                 removedAt: null,
                 vibeAnalysisStatus: "processing",
                 vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: 0,
             },
             data: {
                 vibeAnalysisStatus: "pending",
@@ -329,6 +338,7 @@ describe("vibe embed job processor", () => {
                     id: "track-3",
                     origin: "LOCAL",
                     removedAt: null,
+                    vibeAnalysisGeneration: 0,
                     OR: [
                         { vibeAnalysisStatus: null },
                         { vibeAnalysisStatus: "pending" },
@@ -451,6 +461,8 @@ describe("vibe embed job processor", () => {
                 id: true,
                 title: true,
                 vibeAnalysisRetryCount: true,
+                vibeAnalysisStatus: true,
+                vibeAnalysisGeneration: true,
             },
         });
         expect(harness.releaseReservation).toHaveBeenCalledWith(
@@ -491,6 +503,9 @@ describe("vibe embed job processor", () => {
         harness.prisma.track.findFirst.mockResolvedValue({
             id: "track-migrating",
             title: "Migrating Track",
+            vibeAnalysisStatus: "completed",
+            vibeAnalysisRetryCount: 3,
+            vibeAnalysisGeneration: 7,
         });
 
         await expect(
@@ -502,11 +517,12 @@ describe("vibe embed job processor", () => {
             ),
         ).resolves.toBe("stored");
 
-        expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(1, {
             where: {
                 id: "track-migrating",
                 origin: "LOCAL",
                 removedAt: null,
+                vibeAnalysisGeneration: 7,
                 OR: [
                     { vibeAnalysisStatus: "pending" },
                     {
@@ -521,8 +537,104 @@ describe("vibe embed job processor", () => {
             },
             data: expect.objectContaining({
                 vibeAnalysisStatus: "processing",
+                vibeAnalysisRetryCount: 0,
             }),
         });
+    });
+
+    it("gives a pending 2.2 track a fresh DCLAP retry budget", async () => {
+        const harness = createHarness();
+        const transient = new Error("provider unavailable");
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-historic-retries",
+            title: "Historic Retries",
+            vibeAnalysisStatus: "pending",
+            vibeAnalysisRetryCount: 3,
+            vibeAnalysisGeneration: 4,
+        });
+        harness.embedAudio.mockRejectedValue(transient);
+        harness.isTransientFailure.mockReturnValue(true);
+
+        await harness.processJob(
+            JSON.stringify({
+                trackId: "track-historic-retries",
+                filePath: "artist/retry.flac",
+            }),
+        );
+
+        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                data: expect.objectContaining({ vibeAnalysisRetryCount: 0 }),
+            }),
+        );
+        expect(harness.prisma.track.updateMany).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    vibeAnalysisRetryCount: 0,
+                    vibeAnalysisGeneration: 4,
+                }),
+                data: expect.objectContaining({
+                    vibeAnalysisStatus: "pending",
+                    vibeAnalysisRetryCount: { increment: 1 },
+                }),
+            }),
+        );
+        expect(harness.recordFailure).not.toHaveBeenCalled();
+    });
+
+    it("rejects an old completion after force increments the generation and re-embeds", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst
+            .mockResolvedValueOnce({
+                id: "track-force-race",
+                title: "Force Race",
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: 0,
+            })
+            .mockResolvedValueOnce({ id: "track-force-race" })
+            .mockResolvedValueOnce({
+                id: "track-force-race",
+                title: "Force Race",
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisRetryCount: 0,
+                vibeAnalysisGeneration: 1,
+            })
+            .mockResolvedValueOnce({ id: "track-force-race" });
+        harness.prisma.track.updateMany
+            .mockResolvedValueOnce({ count: 1 })
+            .mockResolvedValueOnce({ count: 0 })
+            .mockResolvedValueOnce({ count: 1 })
+            .mockResolvedValueOnce({ count: 1 });
+        const payload = JSON.stringify({
+            trackId: "track-force-race",
+            filePath: "artist/force.flac",
+        });
+
+        await expect(harness.processJob(payload)).resolves.toBe("stale_claim");
+        await expect(harness.processJob(payload)).resolves.toBe("stored");
+
+        expect(harness.upsertTrackEmbedding).toHaveBeenCalledTimes(2);
+        expect(harness.resolveByEntity).toHaveBeenCalledTimes(1);
+        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    vibeAnalysisStatus: "processing",
+                    vibeAnalysisGeneration: 0,
+                }),
+            }),
+        );
+        expect(harness.prisma.track.updateMany).toHaveBeenNthCalledWith(
+            4,
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    vibeAnalysisStatus: "processing",
+                    vibeAnalysisGeneration: 1,
+                }),
+            }),
+        );
     });
 
     it("does not reclaim a completed track already stored in the target space", async () => {
@@ -562,6 +674,7 @@ describe("vibe embed job processor", () => {
                 id: "track-invalid",
                 origin: "LOCAL",
                 removedAt: null,
+                vibeAnalysisGeneration: 0,
                 OR: [
                     { vibeAnalysisStatus: null },
                     { vibeAnalysisStatus: "pending" },

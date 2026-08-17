@@ -9,11 +9,29 @@ describe("federationEmbeddingSpaceHeader codec", () => {
         family: "clap-music-audioset",
         checkpointHash: "abc123",
         dim: 512,
+        preprocessingHash:
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
     };
 
     it("round-trips the tuple through the header value", () => {
         const encoded = encodeFederationEmbeddingSpaceHeader(tuple);
         expect(parseFederationEmbeddingSpaceHeader(encoded)).toEqual(tuple);
+    });
+
+    it("parses an older additive-contract tuple without preprocessingHash", () => {
+        expect(
+            parseFederationEmbeddingSpaceHeader(
+                JSON.stringify({
+                    family: tuple.family,
+                    checkpointHash: tuple.checkpointHash,
+                    dim: tuple.dim,
+                }),
+            ),
+        ).toEqual({
+            family: tuple.family,
+            checkpointHash: tuple.checkpointHash,
+            dim: tuple.dim,
+        });
     });
 
     it("escapes non-ASCII to keep the header value Latin-1 safe", () => {

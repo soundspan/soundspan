@@ -42,6 +42,7 @@ type TrackSnapshot = {
     title: string;
     vibeAnalysisRetryCount?: number;
     vibeAnalysisStatus?: string | null;
+    vibeAnalysisGeneration?: number;
     embeddings?: Array<{ spaceId: string }>;
 };
 type ParsedVibeEmbedJob =
@@ -118,7 +119,13 @@ async function findActiveTrack(
 ): Promise<TrackSnapshot | null> {
     return db.track.findFirst({
         where: activeTrackWhere(trackId),
-        select: { id: true, title: true, vibeAnalysisRetryCount: true },
+        select: {
+            id: true,
+            title: true,
+            vibeAnalysisRetryCount: true,
+            vibeAnalysisStatus: true,
+            vibeAnalysisGeneration: true,
+        },
     });
 }
 
@@ -132,6 +139,7 @@ async function findTrackForInvalidPayload(
             id: true,
             title: true,
             vibeAnalysisStatus: true,
+            vibeAnalysisGeneration: true,
             embeddings: {
                 where: { spaceId: dependencies.targetSpaceId },
                 select: { spaceId: true },
@@ -157,27 +165,41 @@ async function releaseReservation(
 
 async function claimTrack(
     dependencies: VibeEmbedJobDependencies,
-    trackId: string,
-): Promise<boolean> {
+    track: TrackSnapshot,
+): Promise<TrackSnapshot | null> {
     const timestamp = dependencies.now();
+    const generation = track.vibeAnalysisGeneration ?? 0;
+    const retryCount = track.vibeAnalysisRetryCount ?? 0;
+    const freshSpaceAttempt =
+        track.vibeAnalysisStatus === null ||
+        track.vibeAnalysisStatus === "completed" ||
+        retryCount >= MAX_VIBE_ANALYSIS_RETRIES;
     const result = await dependencies.prisma.track.updateMany({
-        where: claimTrackWhere(dependencies, trackId),
+        where: claimTrackWhere(dependencies, track.id, generation),
         data: {
             vibeAnalysisStatus: "processing",
             vibeAnalysisStartedAt: timestamp,
             vibeAnalysisStatusUpdatedAt: timestamp,
+            ...(freshSpaceAttempt ? { vibeAnalysisRetryCount: 0 } : {}),
         },
     });
-    await releaseReservation(dependencies, trackId);
-    return result.count === 1;
+    await releaseReservation(dependencies, track.id);
+    if (result.count !== 1) return null;
+    return {
+        ...track,
+        vibeAnalysisGeneration: generation,
+        vibeAnalysisRetryCount: freshSpaceAttempt ? 0 : retryCount,
+    };
 }
 
 function claimTrackWhere(
     dependencies: VibeEmbedJobDependencies,
     trackId: string,
+    generation: number,
 ) {
     return {
         ...activeTrackWhere(trackId),
+        vibeAnalysisGeneration: generation,
         ...vibeEmbeddingTargetGateWhere(dependencies.targetSpaceId),
     };
 }
@@ -206,6 +228,7 @@ async function markFailedWithMessage(
     const updated = await dependencies.prisma.track.updateMany({
         where: {
             ...activeTrackWhere(track.id),
+            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
             OR: failureStatusWhere(),
             embeddings: { none: { spaceId: dependencies.targetSpaceId } },
         },
@@ -244,6 +267,7 @@ async function markFailed(
             ...activeTrackWhere(track.id),
             vibeAnalysisStatus: "processing",
             vibeAnalysisRetryCount: retryCount,
+            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
         },
         data: {
             vibeAnalysisStatus: "failed",
@@ -280,6 +304,7 @@ async function resetTransientFailure(
             ...activeTrackWhere(track.id),
             vibeAnalysisStatus: "processing",
             vibeAnalysisRetryCount: retryCount,
+            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
         },
         data: {
             vibeAnalysisStatus: "pending",
@@ -303,10 +328,14 @@ async function handleGenerationFailure(
 
 async function markCompleted(
     dependencies: VibeEmbedJobDependencies,
-    trackId: string,
-): Promise<void> {
-    await dependencies.prisma.track.update({
-        where: { id: trackId },
+    track: TrackSnapshot,
+): Promise<boolean> {
+    const updated = await dependencies.prisma.track.updateMany({
+        where: {
+            ...activeTrackWhere(track.id),
+            vibeAnalysisStatus: "processing",
+            vibeAnalysisGeneration: track.vibeAnalysisGeneration ?? 0,
+        },
         data: {
             vibeAnalysisStatus: "completed",
             vibeAnalysisError: null,
@@ -314,14 +343,16 @@ async function markCompleted(
             vibeAnalysisStatusUpdatedAt: dependencies.now(),
         },
     });
+    if (updated.count !== 1) return false;
     await dependencies.failureService
-        .resolveByEntity("vibe", trackId)
+        .resolveByEntity("vibe", track.id)
         .catch((error) => {
             jobLog.warn("Failed to resolve stale vibe failure", {
-                trackId,
+                trackId: track.id,
                 error,
             });
         });
+    return true;
 }
 
 function finish(
@@ -341,7 +372,8 @@ async function processValidJob(
         await releaseReservation(dependencies, job.trackId);
         return finish(dependencies, "track_missing");
     }
-    if (!(await claimTrack(dependencies, track.id))) {
+    const claimedTrack = await claimTrack(dependencies, track);
+    if (!claimedTrack) {
         jobLog.debug("Skipped stale vibe embedding job claim", {
             trackId: track.id,
         });
@@ -355,7 +387,7 @@ async function processValidJob(
             dim: dependencies.targetSpaceDim,
         });
     } catch (error) {
-        await handleGenerationFailure(dependencies, track, error);
+        await handleGenerationFailure(dependencies, claimedTrack, error);
         return finish(dependencies, "embed_failed");
     }
     try {
@@ -371,10 +403,12 @@ async function processValidJob(
             vector,
             dependencies.targetSpaceId,
         );
-        await markCompleted(dependencies, track.id);
+        if (!(await markCompleted(dependencies, claimedTrack))) {
+            return finish(dependencies, "stale_claim");
+        }
         return finish(dependencies, "stored");
     } catch (error) {
-        await markFailed(dependencies, track, error);
+        await markFailed(dependencies, claimedTrack, error);
         return finish(dependencies, "embed_failed");
     }
 }
