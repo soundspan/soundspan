@@ -37,31 +37,72 @@ empty libraries whose active space has never held vectors cut over immediately.
 the 2.3.0 migration begins. The 2.2.0 code does not understand the 2.3.0
 embedding-space schema or the DCLAP student vectors. Back up PostgreSQL before
 the upgrade. To roll back the release, restore that database backup and then
-redeploy the 2.2.0 images. The prior vectors retained during the grace period
-support an embedding-space rollback within the 2.3.0 migration lifecycle; they
-do not make a 2.2.0 image rollback safe.
+redeploy the 2.2.0 images. Before embedding-space cutover, you may instead
+abandon the DCLAP migration while staying on 2.3.0. Unset `VIBE_PROVIDER_URL`
+on the backend and workers, then restart them. The provider lifecycle stops,
+the prior active space keeps serving, and partial migrating-space vectors
+remain unused. After cutover, use the database restore and 2.2.0 image redeploy
+described above.
 
 **Compose warning:** Compose does not stop a service removed from the file; the
 old analyzer container becomes an orphan. A surviving analyzer writes with the
 removed single-space contract, so every embedding store against the new
-composite schema fails and can leave tracks permanently failed. Remove any
-custom override that still declares `audio-analyzer-clap`, then recreate the
-stack with orphan removal:
+composite schema fails and can leave tracks permanently failed. Use the same
+`-f` arguments as your normal deployment for every command. First, render the
+merged configuration so stale overrides are visible:
+
+```bash
+docker compose config
+```
+
+Remove any custom override that still declares `audio-analyzer-clap`. Then
+recreate the stack with orphan removal:
 
 ```bash
 docker compose up -d --remove-orphans
 ```
 
-Use the same `-f` arguments as your normal deployment if you select Compose
-files explicitly. The old torch image can be removed after the orphaned
-container is gone. Helm operators must replace
-`audioAnalyzerClap.enabled=true` with `vibeProviderDclap.enabled=true`; the DCLAP
-provider remains opt-in in individual Helm mode.
+Verify that no torch analyzer container remains. This command must print no
+container names:
 
-**Bare-metal or custom deployment:** run the provider with the music library
-mounted read-only, publish its HTTP port only where the backend and worker can
-reach it, and use the same internal secret on both sides. This example binds the
-provider to loopback for a backend on the same host:
+```bash
+docker ps --filter name=audio-analyzer-clap --format '{{.Names}}'
+```
+
+Lingering `CLAP_*` environment variables are inert and may be deleted. The old
+torch image can be removed after the orphaned container is gone. AIO operators
+may override `VIBE_PROVIDER_URL`, `MODEL_IDLE_TIMEOUT`, and
+`DCLAP_ONNX_INTRA_OP_THREADS` directly in the host environment. Use the AIO
+memory envelope in [DEPLOYMENT.md](DEPLOYMENT.md) when sizing the container.
+
+**Helm warning:** a 2.2 upgrade with `--reuse-values` carries the removed
+`audioAnalyzerClap.*` map forward and fails with the chart's migration message.
+Use `--reset-then-reuse-values` with Helm 3.14 or newer, or supply a clean
+values file that omits the legacy map. The guard runs during template or
+install/upgrade rendering. `helm lint` alone exits successfully and does not
+enforce it.
+
+This upgrade changes the track-embedding composite key while individual-mode
+Deployments may still run 2.2 pods. Scale the backend and backend-worker
+Deployments to zero before `helm upgrade`. Let the upgrade restore their
+configured replica counts. If you do not stop both workloads, accept a brief
+error window while 2.2 pods overlap the 2.3 migration. The chart exposes
+`backend.strategy.type` and `backendWorker.strategy.type`. Setting both to
+`Recreate` prevents old and new pods from overlapping within each Deployment,
+but it does not coordinate the two Deployments.
+
+**Bare-metal or custom deployment:** stop the backend and every worker before
+applying the 2.3 database migration. Run this command from the backend
+directory with the deployment's `DATABASE_URL`:
+
+```bash
+DATABASE_URL='postgresql://soundspan:password@database:5432/soundspan' npx prisma migrate deploy
+```
+
+Run the provider with the music library mounted read-only. Publish its HTTP port
+only where the backend and workers can reach it. Use the same internal secret
+on both sides. This example binds the provider to loopback for a backend on the
+same host:
 
 ```bash
 export INTERNAL_API_SECRET="replace-with-the-existing-soundspan-secret"
@@ -75,8 +116,9 @@ docker run -d \
 ```
 
 Set `VIBE_PROVIDER_URL=http://127.0.0.1:8092` on the backend and every worker
-process. A minimal systemd-managed Docker unit uses an environment file so the
-secret is not embedded in the unit:
+process. Start the provider first, then the backend, then the workers. A minimal
+systemd-managed Docker unit uses an environment file so the secret is not
+embedded in the unit:
 
 ```ini
 [Unit]

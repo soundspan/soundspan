@@ -88,7 +88,7 @@ Tracks added while a migration is running receive only the migrating-space vecto
 
 The producer and claim gate continuously admit `null` or `completed` tracks that lack a vector in the worker's target space, plus `pending` rebuild tracks whether or not an older target vector exists. Transient provider timeouts, connection failures, and 5xx responses return to `pending` under a three-attempt bound; content and contract failures remain terminal. This automatically heals migration and post-cutover tails. `POST /api/analysis/vibe/start` remains available as a break-glass way to enqueue missing active-space vectors immediately. Its force mode preserves serving vectors, resets track state, and uses the same bounded per-track reservation admission as the automatic producer.
 
-To abort before cutover, delete the migrating space's vectors first, then delete its registry row; `ON DELETE RESTRICT` enforces that order. To roll back after cutover but within grace, atomically return the new space to `migrating` or `retired` and restore the prior retired space to `active`. This release does not add an administration endpoint for either operation.
+To abandon the migration before cutover, unset `VIBE_PROVIDER_URL` on the backend and workers, then restart them. Provider registration, backfill, and lifecycle checks stop; the prior active space continues serving, and partial migrating-space vectors remain unused. This release has no administration endpoint for deleting that partial state or reversing a completed cutover. After cutover, release rollback requires the pre-upgrade database restore documented in `docs/UPGRADING.md`.
 
 ## Default provider: DCLAP student (ONNX)
 

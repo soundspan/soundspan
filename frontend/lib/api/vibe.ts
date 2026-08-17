@@ -1,4 +1,15 @@
-import { type ApiClientConstructor } from "./core";
+import { hasApiErrorStatus, type ApiClientConstructor } from "./core";
+
+/** Map Vibe API failures to concise operator or retry guidance. */
+export function vibeErrorMessage(error: unknown, fallback: string): string {
+    if (hasApiErrorStatus(error, 503)) {
+        return "Vibe matching is unavailable. Enable or check the DCLAP vibe provider, then try again.";
+    }
+    if (hasApiErrorStatus(error, 504)) {
+        return "Vibe matching timed out. Try again in a moment.";
+    }
+    return error instanceof Error ? error.message : fallback;
+}
 
 /** Add Vibe-domain operations to an API client base class. */
 export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {

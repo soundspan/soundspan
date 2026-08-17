@@ -68,6 +68,10 @@ services:
       - FEDERATION_ENABLED=${FEDERATION_ENABLED:-false}
       - FEDERATION_TOMBSTONE_RETENTION_DAYS=${FEDERATION_TOMBSTONE_RETENTION_DAYS:-90}
       - FEDERATION_SYNC_INTERVAL_MINUTES=${FEDERATION_SYNC_INTERVAL_MINUTES:-15}
+      # DCLAP provider routing, idle unloading, and ONNX CPU concurrency
+      - VIBE_PROVIDER_URL=${VIBE_PROVIDER_URL:-http://localhost:8092}
+      - MODEL_IDLE_TIMEOUT=${MODEL_IDLE_TIMEOUT:-300}
+      - DCLAP_ONNX_INTRA_OP_THREADS=${DCLAP_ONNX_INTRA_OP_THREADS:-1}
       # MusicCNN queue socket timeout; runtime enforces at least BRPOP timeout + 5s
       - AUDIO_REDIS_SOCKET_TIMEOUT=${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
       # Lidarr webhook callback URL - how Lidarr reaches soundspan when downloads complete

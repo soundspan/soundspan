@@ -27,6 +27,8 @@ import type {
     SegmentedStreamingSourceType,
 } from "@soundspan/media-metadata-contract";
 
+export { vibeErrorMessage } from "./api/vibe";
+
 // Mood Mix Types (Legacy - for old presets endpoint)
 export interface MoodPreset {
     id: string;

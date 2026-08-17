@@ -1,4 +1,4 @@
-{{- if hasKey .Values "audioAnalyzerClap" -}}
+{{- if and (hasKey .Values "audioAnalyzerClap") (not (kindIs "invalid" .Values.audioAnalyzerClap)) -}}
 {{- fail "audioAnalyzerClap values were removed; set vibeProviderDclap.enabled instead; see the 2.3.0 entry in docs/UPGRADING.md" -}}
 {{- end -}}
 {{- $vibeProviderDclapEnv := .Values.vibeProviderDclap.env | default (dict) -}}

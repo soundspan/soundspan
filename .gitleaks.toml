@@ -35,6 +35,17 @@ regexes = [
   # comparison; not real key material. Hit at commit ab0bfc44 (2 lines).
   '''a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4''',
 
+  # Dockerfile + services/vibe-provider-dclap/Dockerfile -- pinned SHA-256
+  # content digests of the six PUBLIC laion/clap-htsat-unfused tokenizer
+  # files both images verify after download (supply-chain integrity, not
+  # credentials). 64-hex assignments trip generic-api-key.
+  '''9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288''',
+  '''fe36cab26d4f4421ed725e10a2e9ddb7f799449c603a96e7f29b5a3c82a95862''',
+  '''06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f''',
+  '''4e105259baf1a26f1ed8b503ad09678d69d02b6be1c91faa55075a22d5bee148''',
+  '''377f91458f7729a4574a84c77bdce67dbc3c58c1a345a29bbf8c4eb1307948a3''',
+  '''ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e''',
+
   # services/vibe-provider-dclap/Dockerfile -- TOKENIZER_REVISION is the
   # public immutable Hugging Face git commit of laion/clap-htsat-unfused
   # that the build vendors tokenizer files from. A 40-hex assignment trips

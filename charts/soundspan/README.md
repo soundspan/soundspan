@@ -373,6 +373,19 @@ The provider mounts the shared music volume read-only and receives only
 `INTERNAL_API_SECRET` from the chart Secret; it does not receive PostgreSQL or
 Redis credentials.
 
+The removed `audioAnalyzerClap` value may be absent or explicitly `null`, since
+both configure nothing. Any non-null legacy value stops `helm template` and
+install/upgrade rendering with migration guidance. `helm lint` does not enforce
+this template guard and exits successfully, so render the chart before an
+upgrade.
+
+Warning: `helm upgrade --reuse-values` from 2.2 carries the removed
+`audioAnalyzerClap.*` map forward and triggers that guard. Use
+`--reset-then-reuse-values` with Helm 3.14 or newer, or supply a clean values
+file that omits the legacy map. See
+[`docs/UPGRADING.md`](../../docs/UPGRADING.md) for the 2.3 migration window and
+workload ordering.
+
 ### Feature Flags
 
 Coarse feature flags render on the backend, backend-worker, and AIO workloads.

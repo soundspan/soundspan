@@ -148,7 +148,7 @@ Cookie-session authentication has been removed. Each authenticated request now u
 | OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. Dedicated Subsonic and app-password credentials remain valid until changed, cleared, or revoked. | Change or clear the dedicated Subsonic password. Revoke an app password individually. Account password changes and administrator-set passwords clear the dedicated Subsonic password. |
 | External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
 | Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
-| Internal analyzer callbacks | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
+| Internal sidecar requests | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
 
 - Token refresh uses `/api/auth/refresh`.
 - `SESSION_SECRET` remains required as the JWT signing fallback when `JWT_SECRET` is unset.

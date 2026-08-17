@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Operators can now start a blue/green vibe embedding migration by pointing
   `VIBE_PROVIDER_URL` at a distinct provider space; Soundspan registers and
   backfills it, cuts over at configured coverage, retains the prior space's
-  vectors for a 2.3 space-level rollback during the grace period, and then
-  cleans them. This does not support downgrading 2.3 database state to 2.2
-  images; that rollback requires a pre-upgrade database backup and restore.
+  vectors during the grace period, and then cleans them. Before cutover, unset
+  the provider to abandon the migration while the prior space remains active.
+  Downgrading 2.3 database state to 2.2 images requires a pre-upgrade database
+  backup and restore.
 - Added read-only provider-fidelity validation tooling for real-library paired
   cosine, teacher-indexed neighbor overlap, text-query overlap, and inclusive
   same-space gate reports.
@@ -53,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VIBE_SPACE_CUTOVER_ALLOW_FAILED=true`.
 - Embedding-space lifecycle selection now follows the currently configured
   provider and retires abandoned migrations after the configured grace period.
+- Upgrade guidance now covers Helm reused values, the rolling migration window,
+  bare-metal stop/migrate/start order, and Compose transition verification.
 - Vibe migration coverage telemetry now exposes failed tracks at sampling and
   cutover, while retaining the actionable coverage denominator.
 - Migrating-space vibe text scans and lifecycle coverage reads are now bounded
@@ -116,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space, so migrated tracks receive the full provider retry budget.
 - Provider 5xx availability failures now return 503 from vibe search, provider
   contract and space mismatches return 502, and timeouts remain 504.
+- Helm accepts absent or null removed analyzer values while rejecting non-null
+  legacy configuration.
+- DCLAP tokenizer artifacts are byte-verified in both the standalone and AIO
+  images.
+- The Vibe UI now distinguishes provider-unavailable errors from transient
+  provider timeouts.
 - Force rebuilding vibe embeddings now preserves active-space vectors, and a
   durable space marker prevents wiped spaces from triggering fresh-install
   cutover behavior.

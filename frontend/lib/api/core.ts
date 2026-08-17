@@ -17,6 +17,19 @@ interface ApiError extends Error {
     data?: Record<string, unknown>;
 }
 
+/** Narrow an unknown failure to an API error with the requested HTTP status. */
+export function hasApiErrorStatus(
+    error: unknown,
+    status: number,
+): error is Error & { status: number } {
+    return (
+        error instanceof Error &&
+        "status" in error &&
+        typeof error.status === "number" &&
+        error.status === status
+    );
+}
+
 export interface ServiceTestResult {
     success?: boolean;
     version?: string;

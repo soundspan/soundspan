@@ -16,6 +16,14 @@ HEALTHCHECK = REPO_ROOT / "healthcheck-prod.js"
 COMPOSE_FILE = REPO_ROOT / "docker-compose.aio.yml"
 CHART_DEPLOYMENT = REPO_ROOT / "charts/soundspan/templates/aio/deployment.yaml"
 POSTGRES_CREDENTIALS = REPO_ROOT / "scripts/aio-postgres-credentials.sh"
+TOKENIZER_SHA256 = {
+    "config.json": "9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288",
+    "merges.txt": "fe36cab26d4f4421ed725e10a2e9ddb7f799449c603a96e7f29b5a3c82a95862",
+    "special_tokens_map.json": "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f",
+    "tokenizer.json": "4e105259baf1a26f1ed8b503ad09678d69d02b6be1c91faa55075a22d5bee148",
+    "tokenizer_config.json": "377f91458f7729a4574a84c77bdce67dbc3c58c1a345a29bbf8c4eb1307948a3",
+    "vocab.json": "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+}
 
 
 def _heredoc(dockerfile: str, target: str) -> str:
@@ -295,7 +303,10 @@ def test_analysis_tuning_env_is_parameterized() -> None:
         "8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a",
     ):
         assert pinned_value in dockerfile
-    assert dockerfile.count("sha256sum -c -") == 13
+    for filename, digest in TOKENIZER_SHA256.items():
+        path = f"/app/vibe-provider-dclap/tokenizer/{filename}"
+        assert f"{digest}  {path}" in dockerfile
+    assert dockerfile.count("sha256sum -c -") == 19
     assert "services/vibe-provider-dclap/LICENSE" in dockerfile
     assert "services/vibe-provider-dclap/NOTICE.md" in dockerfile
     assert 'TRANSFORMERS_OFFLINE="1"' in provider
@@ -309,6 +320,18 @@ def test_analysis_tuning_env_is_parameterized() -> None:
     assert "%(ENV_MUSIC_PATH)s" in provider
     assert "DATABASE_URL" not in provider
     assert "REDIS_URL" not in provider
+
+
+def test_aio_compose_exposes_provider_tuning_defaults() -> None:
+    """Allow host-level DCLAP tuning without a Compose override file."""
+    compose = COMPOSE_FILE.read_text(encoding="utf-8")
+    expected = (
+        "VIBE_PROVIDER_URL=${VIBE_PROVIDER_URL:-http://localhost:8092}",
+        "MODEL_IDLE_TIMEOUT=${MODEL_IDLE_TIMEOUT:-300}",
+        "DCLAP_ONNX_INTRA_OP_THREADS=${DCLAP_ONNX_INTRA_OP_THREADS:-1}",
+    )
+    for setting in expected:
+        assert setting in compose
 
 
 def test_every_supervisord_env_placeholder_is_exported() -> None:

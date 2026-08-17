@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/utils/cn";
-import { api } from "@/lib/api";
+import { api, vibeErrorMessage } from "@/lib/api";
 import { useFeatures } from "@/lib/features-context";
 import { useAudio } from "@/lib/audio-context";
 import { useAudioState } from "@/lib/audio-state-context";
@@ -19,10 +19,10 @@ import {
     Shuffle,
     X,
     AudioWaveform,
+    Map,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { VibeMapTab } from "@/components/vibe/VibeMapTab";
-import { Map } from "lucide-react";
 
 interface TrackFeatures {
     energy: number;
@@ -892,9 +892,7 @@ function VibePageContent() {
                 setSimilarTracks(similarWithFeatures);
             } catch (err) {
                 setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to load similar tracks",
+                    vibeErrorMessage(err, "Failed to load similar tracks"),
                 );
             } finally {
                 setIsLoading(false);
@@ -946,7 +944,7 @@ function VibePageContent() {
                 );
                 setSimilarTracks(tracksWithFeatures);
             } catch (err) {
-                setError(err instanceof Error ? err.message : "Search failed");
+                setError(vibeErrorMessage(err, "Search failed"));
             } finally {
                 setIsSearching(false);
             }
@@ -978,9 +976,7 @@ function VibePageContent() {
                 setSelectedMatch(null);
             } catch (err) {
                 setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to load similar tracks",
+                    vibeErrorMessage(err, "Failed to load similar tracks"),
                 );
             } finally {
                 setIsLoading(false);

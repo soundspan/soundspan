@@ -561,7 +561,14 @@ if ! line_match 'Vibe similarity: Inactive — set vibeProviderDclap.enabled=tru
   exit 1
 fi
 
-echo "[CHECK] reject removed audioAnalyzerClap values"
+echo "[CHECK] accept absent and explicitly null audioAnalyzerClap values"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  >"$tmp_dclap_default"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set audioAnalyzerClap=null \
+  >"$tmp_dclap_default"
+
+echo "[CHECK] reject non-null removed audioAnalyzerClap values"
 assert_template_rejected \
   "removed audioAnalyzerClap values" \
   "audioAnalyzerClap values were removed; set vibeProviderDclap.enabled instead; see the 2.3.0 entry in docs/UPGRADING.md" \

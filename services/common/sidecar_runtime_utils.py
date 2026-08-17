@@ -111,13 +111,10 @@ def register_error_handlers(app: FastAPI, logger: logging.Logger) -> None:
 def require_internal_secret(request: Request) -> None:
     """FastAPI dependency: authenticate machine-to-machine sidecar calls.
 
-    Mirrors the backend's ``middleware/internalAuth.ts`` guard (F30): the
-    ``/health`` path is exempt (k8s probes + the backend's own sidecar health
-    checks call it without the secret), and the guard **fails closed** — if
-    ``INTERNAL_API_SECRET`` is unset, empty, or equal to the repo-published
-    default every non-health request is rejected with 403 rather than allowed
-    through. The ``x-internal-secret`` header is compared in constant time via
-    ``hmac.compare_digest``.
+    The ``/health`` path is exempt for local and orchestrator probes. Every
+    other request fails closed with 403 when ``INTERNAL_API_SECRET`` is unset,
+    empty, set to the published default, or different from the constant-time
+    ``x-internal-secret`` header comparison.
     """
     if request.url.path == "/health":
         return
