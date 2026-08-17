@@ -15,10 +15,19 @@ const prisma = {
     },
     federationTombstone: { findMany: jest.fn() },
 };
+class MockNoActiveEmbeddingSpaceError extends Error {}
+const mockLog = { warn: jest.fn() };
 
 jest.mock("../../utils/db", () => ({ prisma }));
 jest.mock("../trackEmbeddings", () => ({
     fetchEmbeddingsByTrackIds: jest.fn(),
+}));
+jest.mock("../embeddingSpaces", () => ({
+    getActiveSpace: jest.fn(),
+    NoActiveEmbeddingSpaceError: MockNoActiveEmbeddingSpaceError,
+}));
+jest.mock("../../utils/logger", () => ({
+    logger: { child: jest.fn(() => mockLog) },
 }));
 jest.mock("../../config", () => ({
     config: {
@@ -29,6 +38,7 @@ jest.mock("../../config", () => ({
 }));
 
 import { fetchEmbeddingsByTrackIds } from "../trackEmbeddings";
+import { getActiveSpace } from "../embeddingSpaces";
 import {
     decodeFederationDeltaCursor,
     getFederationCatalogDelta,
@@ -38,6 +48,13 @@ import {
 } from "../federationCatalog";
 
 const at = new Date("2026-08-15T12:00:00.000Z");
+const activeSpace = {
+    id: "space_clap_music_audioset_v1",
+    family: "clap-music-audioset",
+    checkpointHash: "checkpoint-hash",
+    dim: 512,
+    preprocessing: {},
+};
 
 function artist(id: string) {
     return {
@@ -144,6 +161,7 @@ describe("federation catalog exports", () => {
             catalogEpoch: "epoch-1",
         });
         (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([]);
+        (getActiveSpace as jest.Mock).mockResolvedValue(activeSpace);
     });
 
     it("builds a manifest from visible local library counts", async () => {
@@ -197,7 +215,7 @@ describe("federation catalog exports", () => {
             includeEmbeddings: false,
         });
 
-        expect(podcasts.items[0]).toEqual({
+        expect(podcasts.body.items[0]).toEqual({
             id: "podcast-1",
             mediaType: "podcast",
             updatedAt: at,
@@ -206,7 +224,7 @@ describe("federation catalog exports", () => {
                 description: "Host description",
             }),
         });
-        expect(audiobooks.items[0]).toEqual({
+        expect(audiobooks.body.items[0]).toEqual({
             id: "audiobook-1",
             mediaType: "audiobook",
             updatedAt: at,
@@ -234,10 +252,30 @@ describe("federation catalog exports", () => {
             }),
         ).resolves.toEqual(
             expect.objectContaining({
-                id: "album-1",
-                mediaType: "album",
-                updatedAt: at,
+                body: expect.objectContaining({
+                    id: "album-1",
+                    mediaType: "album",
+                    updatedAt: at,
+                }),
             }),
+        );
+    });
+
+    it("tags a single exported track response when it carries an embedding", async () => {
+        prisma.track.findFirst.mockResolvedValue(track("track-1"));
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "track-1", embedding: [0.1, 0.2] },
+        ]);
+
+        const result = await getFederationCatalogItem({
+            mediaType: "track",
+            id: "track-1",
+            includeEmbeddings: true,
+        });
+
+        expect(result?.body.attributes).toHaveProperty("embedding", [0.1, 0.2]);
+        expect(result?.embeddingSpaceHeaderValue).toBe(
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
         );
     });
 
@@ -262,29 +300,31 @@ describe("federation catalog exports", () => {
             select: expect.any(Object),
         });
         expect(result).toEqual({
-            items: [
-                {
-                    id: "a1",
-                    mediaType: "artist",
-                    updatedAt: at,
-                    attributes: {
-                        name: "Artist a1",
-                        mbid: "mbid-a1",
-                        normalizedName: "artist a1",
+            body: {
+                items: [
+                    {
+                        id: "a1",
+                        mediaType: "artist",
+                        updatedAt: at,
+                        attributes: {
+                            name: "Artist a1",
+                            mbid: "mbid-a1",
+                            normalizedName: "artist a1",
+                        },
                     },
-                },
-                {
-                    id: "a2",
-                    mediaType: "artist",
-                    updatedAt: at,
-                    attributes: {
-                        name: "Artist a2",
-                        mbid: "mbid-a2",
-                        normalizedName: "artist a2",
+                    {
+                        id: "a2",
+                        mediaType: "artist",
+                        updatedAt: at,
+                        attributes: {
+                            name: "Artist a2",
+                            mbid: "mbid-a2",
+                            normalizedName: "artist a2",
+                        },
                     },
-                },
-            ],
-            nextCursor: "a2",
+                ],
+                nextCursor: "a2",
+            },
         });
     });
 
@@ -311,16 +351,22 @@ describe("federation catalog exports", () => {
             includeEmbeddings: true,
         });
 
-        expect(albumResult.items[0]).toEqual(
+        expect(albumResult.body.items[0]).toEqual(
             expect.objectContaining({ parentRef: "artist-1" }),
         );
-        expect(trackWithout.items[0]).toEqual(
+        expect(trackWithout.body.items[0]).toEqual(
             expect.objectContaining({ parentRef: "album-1" }),
         );
-        expect(trackWithout.items[0].attributes).not.toHaveProperty(
+        expect(trackWithout.body.items[0].attributes).not.toHaveProperty(
             "embedding",
         );
-        expect(trackWith.items[0].attributes).toEqual(
+        expect(trackWithout).not.toHaveProperty("embeddingSpaceHeaderValue");
+        expect(trackWithout.body).not.toHaveProperty("embeddingSpace");
+        expect(trackWith.embeddingSpaceHeaderValue).toBe(
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+        );
+        expect(trackWith.body).not.toHaveProperty("embeddingSpace");
+        expect(trackWith.body.items[0].attributes).toEqual(
             expect.objectContaining({
                 bpm: 123.5,
                 beatsCount: 456,
@@ -364,6 +410,35 @@ describe("federation catalog exports", () => {
             }),
         );
     });
+
+    it.each(["active-space lookup", "embedding fetch"])(
+        "degrades an embedding page when %s reports no active space",
+        async (failurePoint) => {
+            prisma.track.findMany.mockResolvedValue([track("track-1")]);
+            if (failurePoint === "active-space lookup") {
+                (getActiveSpace as jest.Mock).mockRejectedValueOnce(
+                    new MockNoActiveEmbeddingSpaceError(),
+                );
+            } else {
+                (fetchEmbeddingsByTrackIds as jest.Mock).mockRejectedValueOnce(
+                    new MockNoActiveEmbeddingSpaceError(),
+                );
+            }
+
+            const result = await getFederationCatalogItems({
+                mediaType: "track",
+                limit: 200,
+                includeEmbeddings: true,
+            });
+
+            expect(result.body.items[0].attributes).not.toHaveProperty(
+                "embedding",
+            );
+            expect(result).not.toHaveProperty("embeddingSpaceHeaderValue");
+            expect(result.body).not.toHaveProperty("embeddingSpace");
+            expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        },
+    );
 
     it("expresses non-transitive export filters for every catalog type", async () => {
         prisma.artist.findMany.mockResolvedValue([]);
@@ -447,8 +522,10 @@ describe("federation catalog exports", () => {
         });
 
         expect(result).toEqual({
-            kind: "epochMismatch",
-            currentEpoch: "epoch-1",
+            body: {
+                kind: "epochMismatch",
+                currentEpoch: "epoch-1",
+            },
         });
         expect(prisma.artist.findMany).not.toHaveBeenCalled();
     });
@@ -463,8 +540,10 @@ describe("federation catalog exports", () => {
         });
 
         expect(result).toEqual({
-            kind: "staleCursor",
-            currentEpoch: "epoch-1",
+            body: {
+                kind: "staleCursor",
+                currentEpoch: "epoch-1",
+            },
         });
         expect(prisma.artist.findMany).not.toHaveBeenCalled();
     });
@@ -483,24 +562,36 @@ describe("federation catalog exports", () => {
                 deletedAt: at,
             },
         ]);
+        (fetchEmbeddingsByTrackIds as jest.Mock).mockResolvedValue([
+            { trackId: "c1", embedding: [0.1, 0.2] },
+        ]);
 
         const result = await getFederationCatalogDelta({
             since: new Date("2026-08-15T11:00:00.000Z"),
             epoch: "epoch-1",
-            limit: 2,
-            includeEmbeddings: false,
+            limit: 3,
+            includeEmbeddings: true,
             now: new Date("2026-08-15T12:01:00.000Z"),
         });
 
-        expect(result.kind).toBe("ok");
-        if (result.kind !== "ok") throw new Error("expected delta payload");
-        expect(result.changes.length + result.tombstones.length).toBe(2);
-        expect(result.nextCursor).toEqual(expect.any(String));
-        expect(decodeFederationDeltaCursor(result.nextCursor!)).toEqual({
+        expect(result.body.kind).toBe("ok");
+        if (result.body.kind !== "ok")
+            throw new Error("expected delta payload");
+        expect(result.body.changes.length + result.body.tombstones.length).toBe(
+            3,
+        );
+        expect(result.body.nextCursor).toEqual(expect.any(String));
+        expect(decodeFederationDeltaCursor(result.body.nextCursor!)).toEqual({
             updatedAt: at,
-            id: "b1",
+            id: "c1",
         });
-        expect(result.nextSince).toEqual(new Date("2026-08-15T12:01:00.000Z"));
+        expect(result.body.nextSince).toEqual(
+            new Date("2026-08-15T12:01:00.000Z"),
+        );
+        expect(result.embeddingSpaceHeaderValue).toBe(
+            '{"family":"clap-music-audioset","checkpointHash":"checkpoint-hash","dim":512}',
+        );
+        expect(result.body).not.toHaveProperty("embeddingSpace");
         expect(prisma.artist.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
@@ -516,5 +607,30 @@ describe("federation catalog exports", () => {
                 orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
             }),
         );
+    });
+
+    it("omits the delta header when embeddings are excluded", async () => {
+        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockResolvedValue([track("track-1")]);
+        prisma.podcast.findMany.mockResolvedValue([]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        prisma.federationTombstone.findMany.mockResolvedValue([]);
+
+        const result = await getFederationCatalogDelta({
+            since: new Date("2026-08-15T11:00:00.000Z"),
+            epoch: "epoch-1",
+            limit: 200,
+            includeEmbeddings: false,
+            now: at,
+        });
+
+        expect(result.body.kind).toBe("ok");
+        if (result.body.kind !== "ok")
+            throw new Error("expected delta payload");
+        expect(result.body.changes[0].attributes).not.toHaveProperty(
+            "embedding",
+        );
+        expect(result).not.toHaveProperty("embeddingSpaceHeaderValue");
     });
 });

@@ -9,8 +9,17 @@ import type {
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
 import { ensureFederationIdentity } from "./federationPeers";
 import { fetchEmbeddingsByTrackIds } from "./trackEmbeddings";
+import { getActiveSpace, NoActiveEmbeddingSpaceError } from "./embeddingSpaces";
+import {
+    federationEmbeddingSpaceIdentity,
+    type FederationEmbeddingSpaceIdentity,
+} from "./federationEmbeddingSpace";
+import { encodeFederationEmbeddingSpaceHeader } from "./federationEmbeddingSpaceHeader";
+
+const log = logger.child("FederationCatalog");
 
 const EXPORTED_ALBUM_RELATION_WHERE = {
     location: "LIBRARY",
@@ -142,6 +151,31 @@ interface DeltaEvent {
     updatedAt: Date;
     envelope?: FederationMediaItemEnvelope;
     tombstone?: FederationCatalogTombstone;
+}
+
+interface DeltaRows {
+    artists: ArtistRow[];
+    albums: AlbumRow[];
+    tracks: TrackRow[];
+    podcasts: PodcastRow[];
+    audiobooks: AudiobookRow[];
+    tombstones: Array<{
+        id: string;
+        entityType: string;
+        entityId: string;
+        deletedAt: Date;
+    }>;
+}
+
+/** Internal response metadata kept outside the strict federation JSON body. */
+export interface FederationCatalogResponse<T> {
+    body: T;
+    embeddingSpaceHeaderValue?: string;
+}
+
+interface EmbeddingExport {
+    embeddings: ReadonlyMap<string, number[]>;
+    embeddingSpace?: FederationEmbeddingSpaceIdentity;
 }
 
 /** Encodes a stable, opaque delta event key for the next request. */
@@ -311,12 +345,32 @@ function audiobookEnvelope(row: AudiobookRow): FederationMediaItemEnvelope {
     };
 }
 
-async function embeddingMap(rows: readonly TrackRow[], include: boolean) {
-    if (!include || rows.length === 0) return new Map<string, number[]>();
-    const embeddings = await fetchEmbeddingsByTrackIds(
-        rows.map((row) => row.id),
-    );
-    return new Map(embeddings.map((row) => [row.trackId, row.embedding]));
+async function loadEmbeddingExport(
+    rows: readonly TrackRow[],
+    include: boolean,
+): Promise<EmbeddingExport> {
+    const empty = { embeddings: new Map<string, number[]>() };
+    if (!include || rows.length === 0) return empty;
+    try {
+        const embeddingSpace = federationEmbeddingSpaceIdentity(
+            await getActiveSpace(),
+        );
+        const embeddings = await fetchEmbeddingsByTrackIds(
+            rows.map((row) => row.id),
+        );
+        return {
+            embeddings: new Map(
+                embeddings.map((row) => [row.trackId, row.embedding]),
+            ),
+            embeddingSpace,
+        };
+    } catch (error) {
+        if (!(error instanceof NoActiveEmbeddingSpaceError)) throw error;
+        log.warn(
+            "Serving federation catalog metadata without embeddings because no active embedding space is configured",
+        );
+        return empty;
+    }
 }
 
 async function loadArtistItems(cursor: string | undefined, limit: number) {
@@ -388,6 +442,31 @@ function itemPage(items: FederationMediaItemEnvelope[], limit: number) {
     };
 }
 
+function carriesEmbeddings(
+    items: readonly FederationMediaItemEnvelope[],
+): boolean {
+    return items.some(
+        (item) =>
+            item.mediaType === "track" &&
+            item.attributes.embedding !== undefined,
+    );
+}
+
+function catalogResponse<T>(
+    body: T,
+    embeddingSpace?: FederationEmbeddingSpaceIdentity,
+): FederationCatalogResponse<T> {
+    return {
+        body,
+        ...(embeddingSpace
+            ? {
+                  embeddingSpaceHeaderValue:
+                      encodeFederationEmbeddingSpaceHeader(embeddingSpace),
+              }
+            : {}),
+    };
+}
+
 /** Returns one bounded id-keyset page in the generic federation envelope. */
 export async function getFederationCatalogItems(input: {
     mediaType: FederationMediaType;
@@ -397,25 +476,40 @@ export async function getFederationCatalogItems(input: {
 }) {
     if (input.mediaType === "artist") {
         const rows = await loadArtistItems(input.cursor, input.limit);
-        return itemPage(rows.map(artistEnvelope), input.limit);
+        return catalogResponse(itemPage(rows.map(artistEnvelope), input.limit));
     }
     if (input.mediaType === "album") {
         const rows = await loadAlbumItems(input.cursor, input.limit);
-        return itemPage(rows.map(albumEnvelope), input.limit);
+        return catalogResponse(itemPage(rows.map(albumEnvelope), input.limit));
     }
     if (input.mediaType === "podcast") {
         const rows = await loadPodcastItems(input.cursor, input.limit);
-        return itemPage(rows.map(podcastEnvelope), input.limit);
+        return catalogResponse(
+            itemPage(rows.map(podcastEnvelope), input.limit),
+        );
     }
     if (input.mediaType === "audiobook") {
         const rows = await loadAudiobookItems(input.cursor, input.limit);
-        return itemPage(rows.map(audiobookEnvelope), input.limit);
+        return catalogResponse(
+            itemPage(rows.map(audiobookEnvelope), input.limit),
+        );
     }
     const rows = await loadTrackItems(input.cursor, input.limit);
-    const embeddings = await embeddingMap(rows, input.includeEmbeddings);
-    return itemPage(
-        rows.map((row) => trackEnvelope(row, embeddings.get(row.id))),
+    const embeddingExport = await loadEmbeddingExport(
+        rows,
+        input.includeEmbeddings,
+    );
+    const body = itemPage(
+        rows.map((row) =>
+            trackEnvelope(row, embeddingExport.embeddings.get(row.id)),
+        ),
         input.limit,
+    );
+    return catalogResponse(
+        body,
+        carriesEmbeddings(body.items)
+            ? embeddingExport.embeddingSpace
+            : undefined,
     );
 }
 
@@ -424,42 +518,49 @@ export async function getFederationCatalogItem(input: {
     mediaType: FederationMediaType;
     id: string;
     includeEmbeddings: boolean;
-}): Promise<FederationMediaItemEnvelope | null> {
+}): Promise<FederationCatalogResponse<FederationMediaItemEnvelope> | null> {
     if (input.mediaType === "artist") {
         const row = await prisma.artist.findFirst({
             where: { id: input.id, ...EXPORTED_ARTIST_WHERE },
             select: artistSelect,
         });
-        return row ? artistEnvelope(row) : null;
+        return row ? catalogResponse(artistEnvelope(row)) : null;
     }
     if (input.mediaType === "album") {
         const row = await prisma.album.findFirst({
             where: { id: input.id, ...EXPORTED_ALBUM_WHERE },
             select: albumSelect,
         });
-        return row ? albumEnvelope(row) : null;
+        return row ? catalogResponse(albumEnvelope(row)) : null;
     }
     if (input.mediaType === "podcast") {
         const row = await prisma.podcast.findFirst({
             where: { id: input.id, ...EXPORTED_PODCAST_WHERE },
             select: podcastSelect,
         });
-        return row ? podcastEnvelope(row) : null;
+        return row ? catalogResponse(podcastEnvelope(row)) : null;
     }
     if (input.mediaType === "audiobook") {
         const row = await prisma.audiobook.findFirst({
             where: { id: input.id, ...EXPORTED_AUDIOBOOK_WHERE },
             select: audiobookSelect,
         });
-        return row ? audiobookEnvelope(row) : null;
+        return row ? catalogResponse(audiobookEnvelope(row)) : null;
     }
     const row = await prisma.track.findFirst({
         where: { id: input.id, ...EXPORTED_TRACK_WHERE },
         select: trackSelect,
     });
     if (!row) return null;
-    const embeddings = await embeddingMap([row], input.includeEmbeddings);
-    return trackEnvelope(row, embeddings.get(row.id));
+    const embeddingExport = await loadEmbeddingExport(
+        [row],
+        input.includeEmbeddings,
+    );
+    const body = trackEnvelope(row, embeddingExport.embeddings.get(row.id));
+    return catalogResponse(
+        body,
+        carriesEmbeddings([body]) ? embeddingExport.embeddingSpace : undefined,
+    );
 }
 
 /** Builds instance identity and visible local-library counts for federation v1. */
@@ -636,13 +737,61 @@ function compareDeltaEvents(left: DeltaEvent, right: DeltaEvent): number {
     return 0;
 }
 
+function mergeDeltaEvents(
+    rows: DeltaRows,
+    embeddingExport: EmbeddingExport,
+): DeltaEvent[] {
+    return [
+        ...rows.artists.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: artistEnvelope(row),
+        })),
+        ...rows.albums.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: albumEnvelope(row),
+        })),
+        ...rows.tracks.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: trackEnvelope(
+                row,
+                embeddingExport.embeddings.get(row.id),
+            ),
+        })),
+        ...rows.podcasts.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: podcastEnvelope(row),
+        })),
+        ...rows.audiobooks.map((row) => ({
+            id: row.id,
+            updatedAt: row.updatedAt,
+            envelope: audiobookEnvelope(row),
+        })),
+        ...rows.tombstones.map((row) => ({
+            id: row.id,
+            updatedAt: row.deletedAt,
+            tombstone: {
+                entityType: row.entityType as FederationMediaType,
+                entityId: row.entityId,
+                deletedAt: row.deletedAt,
+            },
+        })),
+    ].sort(compareDeltaEvents);
+}
+
 async function buildDeltaEvents(input: {
     since: Date;
     until: Date;
     cursor?: FederationDeltaCursor;
     limit: number;
     includeEmbeddings: boolean;
-}): Promise<DeltaEvent[]> {
+}): Promise<{
+    events: DeltaEvent[];
+    embeddingSpace?: FederationEmbeddingSpaceIdentity;
+}> {
     const take = input.limit + 1;
     const [artists, albums, tracks, podcasts, audiobooks, tombstones] =
         await Promise.all([
@@ -653,43 +802,15 @@ async function buildDeltaEvents(input: {
             loadAudiobookDelta(input.since, input.until, input.cursor, take),
             loadTombstoneDelta(input.since, input.until, input.cursor, take),
         ]);
-    const embeddings = await embeddingMap(tracks, input.includeEmbeddings);
-    return [
-        ...artists.map((row) => ({
-            id: row.id,
-            updatedAt: row.updatedAt,
-            envelope: artistEnvelope(row),
-        })),
-        ...albums.map((row) => ({
-            id: row.id,
-            updatedAt: row.updatedAt,
-            envelope: albumEnvelope(row),
-        })),
-        ...tracks.map((row) => ({
-            id: row.id,
-            updatedAt: row.updatedAt,
-            envelope: trackEnvelope(row, embeddings.get(row.id)),
-        })),
-        ...podcasts.map((row) => ({
-            id: row.id,
-            updatedAt: row.updatedAt,
-            envelope: podcastEnvelope(row),
-        })),
-        ...audiobooks.map((row) => ({
-            id: row.id,
-            updatedAt: row.updatedAt,
-            envelope: audiobookEnvelope(row),
-        })),
-        ...tombstones.map((row) => ({
-            id: row.id,
-            updatedAt: row.deletedAt,
-            tombstone: {
-                entityType: row.entityType as FederationMediaType,
-                entityId: row.entityId,
-                deletedAt: row.deletedAt,
-            },
-        })),
-    ].sort(compareDeltaEvents);
+    const embeddingExport = await loadEmbeddingExport(
+        tracks,
+        input.includeEmbeddings,
+    );
+    const events = mergeDeltaEvents(
+        { artists, albums, tracks, podcasts, audiobooks, tombstones },
+        embeddingExport,
+    );
+    return { events, embeddingSpace: embeddingExport.embeddingSpace };
 }
 
 /** Returns a bounded merged delta page, or a typed epoch mismatch result. */
@@ -703,10 +824,10 @@ export async function getFederationCatalogDelta(input: {
 }) {
     const identity = await ensureFederationIdentity();
     if (input.epoch !== identity.catalogEpoch) {
-        return {
+        return catalogResponse({
             kind: "epochMismatch" as const,
             currentEpoch: identity.catalogEpoch,
-        };
+        });
     }
     const snapshotAt = input.now ?? new Date();
     const retainedDays = Math.max(
@@ -717,15 +838,16 @@ export async function getFederationCatalogDelta(input: {
         snapshotAt.getTime() - retainedDays * 24 * 60 * 60 * 1_000,
     );
     if (input.since < oldestCursor) {
-        return {
+        return catalogResponse({
             kind: "staleCursor" as const,
             currentEpoch: identity.catalogEpoch,
-        };
+        });
     }
-    const events = await buildDeltaEvents({ ...input, until: snapshotAt });
+    const deltaExport = await buildDeltaEvents({ ...input, until: snapshotAt });
+    const events = deltaExport.events;
     const page = events.slice(0, input.limit);
     const last = page[page.length - 1];
-    return {
+    const body = {
         kind: "ok" as const,
         changes: page.flatMap((event) =>
             event.envelope ? [event.envelope] : [],
@@ -742,6 +864,12 @@ export async function getFederationCatalogDelta(input: {
                 : null,
         nextSince: snapshotAt,
     };
+    return catalogResponse(
+        body,
+        carriesEmbeddings(body.changes)
+            ? deltaExport.embeddingSpace
+            : undefined,
+    );
 }
 
 /** Finds an album only when it is eligible for direct host export. */

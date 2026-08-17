@@ -6,6 +6,7 @@ import {
     type VibeProviderEndpoint,
     type VibeProviderOutcome,
 } from "./providerMetrics";
+import type { FederationEmbeddingPageOutcome } from "../services/federationEmbeddingSpace";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -46,4 +47,11 @@ export function recordVibeProviderRequest(
     durationSeconds: number,
 ): void {
     providerMetrics.record(endpoint, outcome, durationSeconds);
+}
+
+/** Records one completed federation page carrying peer embeddings. */
+export function recordFederationEmbeddingPageOutcome(
+    outcome: FederationEmbeddingPageOutcome,
+): void {
+    domainMetrics.federationEmbeddingPages.inc({ outcome });
 }

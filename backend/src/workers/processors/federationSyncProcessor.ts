@@ -6,7 +6,6 @@ import {
     FederationEpochMismatchError,
     FederationHttpError,
     FederationStaleCursorError,
-    MAX_PAGE_ITEMS,
     type FederationEnvelope,
     type FederationManifest,
 } from "../../services/federationClient";
@@ -20,6 +19,34 @@ import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { clearTrackTranscodeCache } from "../../services/trackReplacement";
+import {
+    getActiveSpace,
+    NoActiveEmbeddingSpaceError,
+    type ActiveEmbeddingSpace,
+} from "../../services/embeddingSpaces";
+import {
+    decideFederationEmbeddingPage,
+    federationEmbeddingSpaceIdentity,
+    type FederationEmbeddingPageOutcome,
+    type ParsedFederationEmbeddingSpaceIdentity,
+} from "../../services/federationEmbeddingSpace";
+import {
+    createFederationPageState,
+    groupFederationPage,
+    syncedFederationTrackValues,
+    type AlbumEnvelope,
+    type ArtistEnvelope,
+    type AudiobookEnvelope,
+    type GroupedPage,
+    type PageState,
+    type PodcastEnvelope,
+    type RebindTrackRow,
+    type RemoteAlbumRow,
+    type RemoteArtistRow,
+    type RemoteTrackRow,
+    type TrackEnvelope,
+} from "./federationSyncPage";
+import { recordAppliedFederationEmbeddingOutcome } from "./federationEmbeddingPageMetrics";
 
 const log = logger.child("FederationSyncProcessor");
 const OVERLAP_MS = 5 * 60 * 1_000;
@@ -33,14 +60,6 @@ const jobDataSchema = z.strictObject({
 });
 
 type MediaType = FederationEnvelope["mediaType"];
-type ArtistEnvelope = Extract<FederationEnvelope, { mediaType: "artist" }>;
-type AlbumEnvelope = Extract<FederationEnvelope, { mediaType: "album" }>;
-type TrackEnvelope = Extract<FederationEnvelope, { mediaType: "track" }>;
-type PodcastEnvelope = Extract<FederationEnvelope, { mediaType: "podcast" }>;
-type AudiobookEnvelope = Extract<
-    FederationEnvelope,
-    { mediaType: "audiobook" }
->;
 type ParentMediaType = "artist" | "album";
 
 interface SyncCounts {
@@ -63,6 +82,8 @@ interface SyncContext {
     touchedArtistIds: Set<string>;
     skippedInvalid: number;
     skippedUnknownTombstones: number;
+    localEmbeddingSpace: ActiveEmbeddingSpace | null;
+    embeddingWarningEmitted: boolean;
 }
 
 /** Bounded summary of one completed peer sync. */
@@ -73,7 +94,11 @@ export interface FederationSyncResult extends SyncCounts {
     skippedUnknownTombstones: number;
 }
 
-function newSyncContext(peerId: string, scopes: string[]): SyncContext {
+function newSyncContext(
+    peerId: string,
+    scopes: string[],
+    localEmbeddingSpace: ActiveEmbeddingSpace | null,
+): SyncContext {
     return {
         peerId,
         scopes,
@@ -98,7 +123,24 @@ function newSyncContext(peerId: string, scopes: string[]): SyncContext {
         touchedArtistIds: new Set(),
         skippedInvalid: 0,
         skippedUnknownTombstones: 0,
+        localEmbeddingSpace,
+        embeddingWarningEmitted: localEmbeddingSpace === null,
     };
+}
+
+async function resolveLocalEmbeddingSpace(
+    peerId: string,
+): Promise<ActiveEmbeddingSpace | null> {
+    try {
+        return await getActiveSpace();
+    } catch (error) {
+        if (!(error instanceof NoActiveEmbeddingSpaceError)) throw error;
+        log.warn(
+            "Skipping federation embeddings because no local embedding space is active",
+            { peerId },
+        );
+        return null;
+    }
 }
 
 function incrementCount(context: SyncContext, mediaType: MediaType): void {
@@ -138,39 +180,6 @@ function warnParentRecovery(
 
 function isMissingExportedParent(error: unknown): boolean {
     return error instanceof FederationHttpError && error.status === 404;
-}
-
-type RemoteArtistRow = { id: string; remoteId: string; mbid: string };
-type RemoteAlbumRow = {
-    id: string;
-    remoteId: string;
-    rgMbid: string;
-    artistId: string;
-};
-type RemoteTrackRow = {
-    id: string;
-    remoteId: string;
-    audioHash: string | null;
-};
-type RebindTrackRow = {
-    id: string;
-    audioHash: string | null;
-    recordingMbid: string | null;
-    isrc: string | null;
-    albumId: string;
-    discNo: number;
-    trackNo: number;
-};
-
-interface PageState {
-    artists: Map<string, RemoteArtistRow>;
-    albums: Map<string, RemoteAlbumRow>;
-    tracks: Map<string, RemoteTrackRow>;
-    rebindTracks: Map<string, RebindTrackRow>;
-    artistCollisionRemoteIds: Set<string>;
-    albumCollisionRemoteIds: Set<string>;
-    loadedArtistMbids: Set<string>;
-    loadedAlbumRgMbids: Set<string>;
 }
 
 async function hasArtistCollision(
@@ -566,70 +575,20 @@ async function rebindFederatedTrack(
     return rebound;
 }
 
-function syncedAudioFeatures(attributes: TrackEnvelope["attributes"]) {
-    return {
-        bpm: attributes.bpm,
-        beatsCount: attributes.beatsCount,
-        key: attributes.key,
-        keyScale: attributes.keyScale,
-        keyStrength: attributes.keyStrength,
-        energy: attributes.energy,
-        loudness: attributes.loudness,
-        dynamicRange: attributes.dynamicRange,
-        danceability: attributes.danceability,
-        valence: attributes.valence,
-        arousal: attributes.arousal,
-        instrumentalness: attributes.instrumentalness,
-        acousticness: attributes.acousticness,
-        speechiness: attributes.speechiness,
-        moodHappy: attributes.moodHappy,
-        moodSad: attributes.moodSad,
-        moodRelaxed: attributes.moodRelaxed,
-        moodAggressive: attributes.moodAggressive,
-        moodParty: attributes.moodParty,
-        moodAcoustic: attributes.moodAcoustic,
-        moodElectronic: attributes.moodElectronic,
-        danceabilityMl: attributes.danceabilityMl,
-        moodTags: attributes.moodTags ?? [],
-        essentiaGenres: attributes.essentiaGenres ?? [],
-        lastfmTags: attributes.lastfmTags ?? [],
-    };
-}
-
-function syncedTrackValues(item: TrackEnvelope, albumId: string) {
-    const attributes = item.attributes;
-    return {
-        albumId,
-        title: attributes.title,
-        discNo: attributes.discNo,
-        trackNo: attributes.trackNo,
-        duration: attributes.duration,
-        mime: attributes.mime,
-        fileSize: attributes.fileSize,
-        fileModified: new Date(item.updatedAt),
-        recordingMbid: attributes.recordingMbid,
-        isrc: attributes.isrc,
-        audioHash: attributes.audioHash,
-        ...syncedAudioFeatures(attributes),
-        origin: "FEDERATED" as const,
-        filePath: null,
-        removedAt: null,
-    };
-}
-
 async function upsertTrack(
     context: SyncContext,
     item: TrackEnvelope,
     album: RemoteAlbumRow,
     existing: RemoteTrackRow | null,
     match: DedupMatch | null,
-): Promise<boolean> {
+    storeEmbedding: boolean,
+): Promise<void> {
     const attributes = item.attributes;
     const hashChanged =
         attributes.audioHash !== undefined &&
         existing !== null &&
         existing.audioHash !== attributes.audioHash;
-    const values = syncedTrackValues(item, album.id);
+    const values = syncedFederationTrackValues(item, album.id);
     const row = await prisma.track.upsert({
         where: {
             peerId_remoteId: { peerId: context.peerId, remoteId: item.id },
@@ -644,55 +603,10 @@ async function upsertTrack(
     });
     if (hashChanged) await clearTrackTranscodeCache(row.id);
     await applyTrackDedup(row.id, match);
-    if (attributes.embedding && context.scopes.includes("embeddings:read")) {
+    if (attributes.embedding && storeEmbedding) {
         await upsertTrackEmbedding(row.id, attributes.embedding);
     }
     context.touchedArtistIds.add(album.artistId);
-    return true;
-}
-
-interface GroupedPage {
-    artists: ArtistEnvelope[];
-    albums: AlbumEnvelope[];
-    tracks: TrackEnvelope[];
-    podcasts: PodcastEnvelope[];
-    audiobooks: AudiobookEnvelope[];
-}
-
-function groupPage(items: readonly FederationEnvelope[]): GroupedPage {
-    if (items.length > MAX_PAGE_ITEMS) {
-        throw new RangeError("Federation page exceeded the item bound");
-    }
-    const grouped: GroupedPage = {
-        artists: [],
-        albums: [],
-        tracks: [],
-        podcasts: [],
-        audiobooks: [],
-    };
-    for (let index = 0; index < MAX_PAGE_ITEMS; index += 1) {
-        const item = items[index];
-        if (!item) break;
-        if (item.mediaType === "artist") grouped.artists.push(item);
-        else if (item.mediaType === "album") grouped.albums.push(item);
-        else if (item.mediaType === "track") grouped.tracks.push(item);
-        else if (item.mediaType === "podcast") grouped.podcasts.push(item);
-        else grouped.audiobooks.push(item);
-    }
-    return grouped;
-}
-
-function newPageState(): PageState {
-    return {
-        artists: new Map(),
-        albums: new Map(),
-        tracks: new Map(),
-        rebindTracks: new Map(),
-        artistCollisionRemoteIds: new Set(),
-        albumCollisionRemoteIds: new Set(),
-        loadedArtistMbids: new Set(),
-        loadedAlbumRgMbids: new Set(),
-    };
 }
 
 async function loadArtistPageState(
@@ -886,7 +800,7 @@ async function loadPageState(
     context: SyncContext,
     grouped: GroupedPage,
 ): Promise<PageState> {
-    const state = newPageState();
+    const state = createFederationPageState();
     await Promise.all([
         loadArtistPageState(context, grouped, state),
         loadAlbumPageState(context, grouped, state),
@@ -960,6 +874,7 @@ async function applyTracks(
     items: readonly TrackEnvelope[],
     resolvedAlbums: ReadonlyMap<string, RemoteAlbumRow>,
     remember: boolean,
+    storeEmbeddings: boolean,
 ): Promise<void> {
     await loadTrackRebindPageState(context, state, items, resolvedAlbums);
     const albums = new Map(state.albums);
@@ -978,6 +893,7 @@ async function applyTracks(
             album,
             existing,
             findDedupMatch(dedup, item, album.rgMbid),
+            storeEmbeddings,
         );
         recordApplied(context, item, remember);
     }
@@ -1059,13 +975,52 @@ async function applyAudiobooks(
     }
 }
 
-async function applyOrderedChanges(
+function decidePageEmbeddingOutcome(
+    context: SyncContext,
+    grouped: GroupedPage,
+    pageTuple: ParsedFederationEmbeddingSpaceIdentity | undefined,
+): FederationEmbeddingPageOutcome | null {
+    const carriesScopedEmbeddings =
+        context.scopes.includes("embeddings:read") &&
+        grouped.tracks.some((item) => item.attributes.embedding !== undefined);
+    if (!carriesScopedEmbeddings) return null;
+    if (!context.localEmbeddingSpace) return "skipped_mismatch";
+    const outcome = decideFederationEmbeddingPage(
+        pageTuple,
+        context.localEmbeddingSpace,
+    );
+    if (outcome === "stored" || context.embeddingWarningEmitted) {
+        return outcome;
+    }
+    context.embeddingWarningEmitted = true;
+    log.warn(
+        "Skipping federation embeddings because the page space does not match the local active space",
+        {
+            peerId: context.peerId,
+            outcome,
+            remoteEmbeddingSpace:
+                pageTuple === undefined ? "legacy-absent" : pageTuple,
+            localEmbeddingSpace: federationEmbeddingSpaceIdentity(
+                context.localEmbeddingSpace,
+            ),
+        },
+    );
+    return outcome;
+}
+
+async function applyChanges(
     context: SyncContext,
     client: ReturnType<typeof createFederationClient>,
     items: readonly FederationEnvelope[],
     remember: boolean,
+    pageEmbeddingSpace?: ParsedFederationEmbeddingSpaceIdentity,
 ): Promise<void> {
-    const grouped = groupPage(items);
+    const grouped = groupFederationPage(items);
+    const embeddingOutcome = decidePageEmbeddingOutcome(
+        context,
+        grouped,
+        pageEmbeddingSpace,
+    );
     const state = await loadPageState(context, grouped);
     await applyArtists(context, state, grouped.artists, remember);
     await applyAlbums(context, state, client, grouped.albums, remember);
@@ -1079,9 +1034,17 @@ async function applyOrderedChanges(
     const validTracks = grouped.tracks.filter((item) =>
         resolvedAlbums.has(item.id),
     );
-    await applyTracks(context, state, validTracks, resolvedAlbums, remember);
+    await applyTracks(
+        context,
+        state,
+        validTracks,
+        resolvedAlbums,
+        remember,
+        embeddingOutcome === "stored",
+    );
     await applyPodcasts(context, grouped.podcasts, remember);
     await applyAudiobooks(context, grouped.audiobooks, remember);
+    recordAppliedFederationEmbeddingOutcome(embeddingOutcome, validTracks);
 }
 
 const fullProgressSchema = z.strictObject({
@@ -1150,7 +1113,13 @@ async function syncFullType(
     for (let page = 0; page < MAX_REMOTE_PAGES; page += 1) {
         const result = await client.getCatalogItems(progress.mediaType, cursor);
         context.skippedInvalid += result.skippedInvalid ?? 0;
-        await applyOrderedChanges(context, client, result.items, true);
+        await applyChanges(
+            context,
+            client,
+            result.items,
+            true,
+            result.embeddingSpace,
+        );
         const next: FullProgress = {
             ...progress,
             mediaType: result.nextCursor
@@ -1445,7 +1414,13 @@ async function runIncrementalSync(
         context.skippedInvalid += result.skippedInvalid ?? 0;
         context.skippedUnknownTombstones +=
             result.skippedUnknownTombstones ?? 0;
-        await applyOrderedChanges(context, client, result.changes, false);
+        await applyChanges(
+            context,
+            client,
+            result.changes,
+            false,
+            result.embeddingSpace,
+        );
         await applyTombstones(context, result.tombstones);
         nextSince = new Date(result.nextSince);
         if (!result.nextCursor) {
@@ -1486,7 +1461,8 @@ export async function processFederationSync(
     const startedAt = new Date();
     const client = createFederationClient(peer);
     const manifest = await client.getManifest();
-    const context = newSyncContext(peer.id, peer.scopes);
+    const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);
+    const context = newSyncContext(peer.id, peer.scopes, localEmbeddingSpace);
     const fullProgress = parseFullProgress(peer.lastSyncCursor);
     if (
         fullProgress &&

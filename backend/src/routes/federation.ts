@@ -22,7 +22,9 @@ import {
     getFederationCatalogItem,
     getFederationCatalogItems,
     getFederationManifest,
+    type FederationCatalogResponse,
 } from "../services/federationCatalog";
+import { FEDERATION_EMBEDDING_SPACE_HEADER } from "../services/federationEmbeddingSpaceHeader";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import {
     consumeFederationPairingRequest,
@@ -103,6 +105,19 @@ function includesEmbeddingScope(req: Request): boolean {
     return req.federationPeer?.scopes.includes("embeddings:read") ?? false;
 }
 
+function sendCatalogResponse(
+    res: Response,
+    response: FederationCatalogResponse<unknown>,
+): Response {
+    if (response.embeddingSpaceHeaderValue) {
+        res.setHeader(
+            FEDERATION_EMBEDDING_SPACE_HEADER,
+            response.embeddingSpaceHeaderValue,
+        );
+    }
+    return res.json(response.body);
+}
+
 /** @openapi
  * /api/federation/v1/pair:
  *   post:
@@ -159,7 +174,12 @@ router.get(
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
  *     responses:
- *       200: { description: Generic catalog envelope page }
+ *       200:
+ *         description: Generic catalog envelope page
+ *         headers:
+ *           X-Soundspan-Embedding-Space:
+ *             description: JSON embedding-space tuple when the body carries vectors
+ *             schema: { type: string }
  *       400: { description: Invalid query }
  *       429: { description: Federation peer rate limit exceeded }
  */
@@ -170,14 +190,13 @@ router.get(
     asyncHandler(async (req, res) => {
         const parsed = catalogItemsSchema.safeParse(req.query);
         if (!parsed.success) return validationError(res);
-        return res.json(
-            await getFederationCatalogItems({
-                mediaType: parsed.data.type,
-                cursor: parsed.data.cursor,
-                limit: parsed.data.limit,
-                includeEmbeddings: includesEmbeddingScope(req),
-            }),
-        );
+        const response = await getFederationCatalogItems({
+            mediaType: parsed.data.type,
+            cursor: parsed.data.cursor,
+            limit: parsed.data.limit,
+            includeEmbeddings: includesEmbeddingScope(req),
+        });
+        return sendCatalogResponse(res, response);
     }),
 );
 
@@ -188,7 +207,12 @@ router.get(
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
  *     responses:
- *       200: { description: Generic catalog item envelope }
+ *       200:
+ *         description: Generic catalog item envelope
+ *         headers:
+ *           X-Soundspan-Embedding-Space:
+ *             description: JSON embedding-space tuple when the body carries a vector
+ *             schema: { type: string }
  *       404: { description: Exported catalog item not found }
  *       429: { description: Federation peer rate limit exceeded }
  */
@@ -200,13 +224,14 @@ router.get(
         const params = catalogItemParamsSchema.safeParse(req.params);
         const query = emptyQuerySchema.safeParse(req.query);
         if (!params.success || !query.success) return validationError(res);
-        const item = await getFederationCatalogItem({
+        const response = await getFederationCatalogItem({
             mediaType: params.data.type,
             id: params.data.id,
             includeEmbeddings: includesEmbeddingScope(req),
         });
-        if (!item) return sendRouteError(res, 404, "Catalog item not found");
-        return res.json(item);
+        if (!response)
+            return sendRouteError(res, 404, "Catalog item not found");
+        return sendCatalogResponse(res, response);
     }),
 );
 
@@ -217,7 +242,12 @@ router.get(
  *     tags: [Federation]
  *     security: [{ federationPeerAuth: [] }]
  *     responses:
- *       200: { description: Bounded delta page }
+ *       200:
+ *         description: Bounded delta page
+ *         headers:
+ *           X-Soundspan-Embedding-Space:
+ *             description: JSON embedding-space tuple when the body carries vectors
+ *             schema: { type: string }
  *       409: { description: Catalog epoch mismatch; full resync required }
  *       429: { description: Federation peer rate limit exceeded }
  */
@@ -236,13 +266,14 @@ router.get(
         } catch (_error: unknown) {
             return validationError(res);
         }
-        const result = await getFederationCatalogDelta({
+        const response = await getFederationCatalogDelta({
             since: parsed.data.since,
             epoch: parsed.data.epoch,
             cursor,
             limit: parsed.data.limit,
             includeEmbeddings: includesEmbeddingScope(req),
         });
+        const result = response.body;
         if (result.kind === "epochMismatch") {
             return sendRouteError(
                 res,
@@ -265,7 +296,7 @@ router.get(
                 },
             );
         }
-        return res.json(result);
+        return sendCatalogResponse(res, response);
     }),
 );
 

@@ -19,6 +19,7 @@ class MockFederationHttpError extends Error {
         super(`http ${status}`);
     }
 }
+class MockNoActiveEmbeddingSpaceError extends Error {}
 
 const client = {
     getManifest: jest.fn(),
@@ -32,6 +33,8 @@ const upsertTrackEmbedding = jest.fn();
 const backfillAllArtistCounts = jest.fn();
 const updateArtistCountsInBatches = jest.fn();
 const clearTrackTranscodeCache = jest.fn();
+const getActiveSpace = jest.fn();
+const recordFederationEmbeddingPageOutcome = jest.fn();
 
 const mockLog = {
     debug: jest.fn(),
@@ -99,6 +102,13 @@ jest.mock("../../../services/trackMappingService", () => ({
 jest.mock("../../../services/trackEmbeddings", () => ({
     upsertTrackEmbedding,
 }));
+jest.mock("../../../services/embeddingSpaces", () => ({
+    getActiveSpace,
+    NoActiveEmbeddingSpaceError: MockNoActiveEmbeddingSpaceError,
+}));
+jest.mock("../../../metrics", () => ({
+    recordFederationEmbeddingPageOutcome,
+}));
 jest.mock("../../../services/artistCountsService", () => ({
     backfillAllArtistCounts,
     updateArtistCountsInBatches,
@@ -130,6 +140,16 @@ const manifest = {
     counts: { artists: 1, albums: 1, tracks: 1, podcasts: 1, audiobooks: 1 },
     embeddingsAvailable: true,
     serverTime: "2026-08-15T11:59:59.000Z",
+};
+const embeddingSpace = {
+    family: "clap-music-audioset",
+    checkpointHash: "checkpoint-hash",
+    dim: 512,
+};
+const activeSpace = {
+    id: "space_clap_music_audioset_v1",
+    ...embeddingSpace,
+    preprocessing: {},
 };
 
 const artist = {
@@ -236,10 +256,26 @@ function catalogPageFor(type: string) {
     if (type === "album")
         return { items: [album], nextCursor: null, skippedInvalid: 0 };
     if (type === "track")
-        return { items: [track], nextCursor: null, skippedInvalid: 0 };
+        return {
+            items: [track],
+            nextCursor: null,
+            skippedInvalid: 0,
+            embeddingSpace,
+        };
     if (type === "podcast")
         return { items: [podcast], nextCursor: null, skippedInvalid: 0 };
     return { items: [audiobook], nextCursor: null, skippedInvalid: 0 };
+}
+
+function legacyCatalogPageFor(type: string) {
+    const page = catalogPageFor(type);
+    return type === "track"
+        ? {
+              items: page.items,
+              nextCursor: page.nextCursor,
+              skippedInvalid: page.skippedInvalid,
+          }
+        : page;
 }
 
 describe("federation sync processor", () => {
@@ -335,6 +371,7 @@ describe("federation sync processor", () => {
             errors: 0,
         });
         clearTrackTranscodeCache.mockResolvedValue(undefined);
+        getActiveSpace.mockResolvedValue(activeSpace);
     });
 
     it("imports a full catalog in parent order and persists the final cursor", async () => {
@@ -661,6 +698,7 @@ describe("federation sync processor", () => {
                 items: type === "track" ? [track] : [],
                 nextCursor: null,
                 skippedInvalid: 0,
+                ...(type === "track" ? { embeddingSpace } : {}),
             }),
         );
         client.getCatalogItem.mockRejectedValueOnce(
@@ -674,6 +712,7 @@ describe("federation sync processor", () => {
             skippedInvalid: 1,
         });
         expect(prisma.track.upsert).not.toHaveBeenCalled();
+        expect(recordFederationEmbeddingPageOutcome).not.toHaveBeenCalled();
         expect(mockLog.warn).toHaveBeenCalledTimes(1);
         expect(mockLog.warn).toHaveBeenCalledWith(
             expect.stringContaining("missing parent album=remote-album-1"),
@@ -1462,13 +1501,173 @@ describe("federation sync processor", () => {
         );
     });
 
-    it("imports embeddings only when the persisted peer scope permits it", async () => {
+    it("stores embeddings from a matching page tuple", async () => {
         await processFederationSync(job());
+
         expect(upsertTrackEmbedding).toHaveBeenCalledWith(
             "fed-track-row",
             track.attributes.embedding,
         );
+        expect(getActiveSpace).toHaveBeenCalledTimes(1);
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "stored",
+        );
+    });
 
+    it("applies the parsed delta header tuple to incremental embeddings", async () => {
+        prisma.federationPeer.findUnique.mockResolvedValueOnce({
+            ...peer,
+            lastSyncCursor: "2026-08-15T12:10:00.000Z",
+        });
+        client.getCatalogDelta.mockResolvedValueOnce({
+            kind: "ok",
+            changes: [track],
+            tombstones: [],
+            nextCursor: null,
+            nextSince: "2026-08-15T12:12:00.000Z",
+            skippedInvalid: 0,
+            skippedUnknownTombstones: 0,
+            embeddingSpace: {
+                ...embeddingSpace,
+                checkpointHash: "other-checkpoint",
+            },
+        });
+
+        await processFederationSync(job());
+
+        expect(prisma.track.upsert).toHaveBeenCalled();
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_mismatch",
+        );
+    });
+
+    it("skips a mismatched embedding page without skipping track metadata", async () => {
+        const secondTrack = {
+            ...track,
+            id: "remote-track-2",
+            attributes: {
+                ...track.attributes,
+                title: "Track Two",
+                audioHash: "sha256:def",
+            },
+        };
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve(
+                type === "track"
+                    ? {
+                          ...catalogPageFor(type),
+                          items: [track, secondTrack],
+                          embeddingSpace: {
+                              ...embeddingSpace,
+                              checkpointHash: "other-checkpoint",
+                          },
+                      }
+                    : catalogPageFor(type),
+            ),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            tracks: 2,
+        });
+
+        expect(prisma.track.upsert).toHaveBeenCalledTimes(2);
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            "Skipping federation embeddings because the page space does not match the local active space",
+            {
+                peerId: "peer-1",
+                outcome: "skipped_mismatch",
+                remoteEmbeddingSpace: {
+                    ...embeddingSpace,
+                    checkpointHash: "other-checkpoint",
+                },
+                localEmbeddingSpace: embeddingSpace,
+            },
+        );
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_mismatch",
+        );
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledTimes(1);
+    });
+
+    it("stores a legacy page only while the canonical space is active", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve(legacyCatalogPageFor(type)),
+        );
+
+        await processFederationSync(job());
+
+        expect(upsertTrackEmbedding).toHaveBeenCalledWith(
+            "fed-track-row",
+            track.attributes.embedding,
+        );
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "stored",
+        );
+    });
+
+    it("skips a legacy page after the local active-space cutover", async () => {
+        getActiveSpace.mockResolvedValueOnce({
+            ...activeSpace,
+            id: "space-next",
+        });
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve(legacyCatalogPageFor(type)),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            tracks: 1,
+        });
+
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_legacy_strict",
+        );
+    });
+
+    it("treats a parsed malformed header as an embedding mismatch", async () => {
+        client.getCatalogItems.mockImplementation((type: string) =>
+            Promise.resolve(
+                type === "track"
+                    ? { ...catalogPageFor(type), embeddingSpace: null }
+                    : catalogPageFor(type),
+            ),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            tracks: 1,
+        });
+
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_mismatch",
+        );
+    });
+
+    it("completes metadata sync when no local embedding space is active", async () => {
+        getActiveSpace.mockRejectedValueOnce(
+            new MockNoActiveEmbeddingSpaceError(),
+        );
+
+        await expect(processFederationSync(job())).resolves.toMatchObject({
+            tracks: 1,
+        });
+
+        expect(prisma.track.upsert).toHaveBeenCalled();
+        expect(upsertTrackEmbedding).not.toHaveBeenCalled();
+        expect(mockLog.warn).toHaveBeenCalledTimes(1);
+        expect(mockLog.warn).toHaveBeenCalledWith(
+            "Skipping federation embeddings because no local embedding space is active",
+            { peerId: "peer-1" },
+        );
+        expect(recordFederationEmbeddingPageOutcome).toHaveBeenCalledWith(
+            "skipped_mismatch",
+        );
+    });
+
+    it("imports embeddings only when the persisted peer scope permits it", async () => {
         jest.clearAllMocks();
         prisma.federationPeer.findUnique.mockResolvedValue({
             ...peer,

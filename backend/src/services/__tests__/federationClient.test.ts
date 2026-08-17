@@ -176,6 +176,90 @@ describe("federation HTTP client", () => {
         });
     });
 
+    it("parses a loose page embedding header and downgrades malformed values", async () => {
+        const embeddingSpace = {
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+        };
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [trackEnvelope],
+                nextCursor: null,
+            },
+            headers: {
+                "x-soundspan-embedding-space": JSON.stringify({
+                    ...embeddingSpace,
+                    futureField: "ignored",
+                }),
+            },
+        });
+
+        const page =
+            await createFederationClient(peer).getCatalogItems("track");
+        expect(page.embeddingSpace).toEqual(embeddingSpace);
+
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [trackEnvelope],
+                nextCursor: null,
+            },
+            headers: {
+                "x-soundspan-embedding-space": "{not-json",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).resolves.toMatchObject({
+            items: [trackEnvelope],
+            embeddingSpace: null,
+        });
+
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [trackEnvelope],
+                nextCursor: null,
+            },
+            headers: {
+                "x-soundspan-embedding-space": JSON.stringify({
+                    family: "clap-music-audioset",
+                    checkpointHash: 42,
+                    dim: "512",
+                }),
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).resolves.toMatchObject({
+            items: [trackEnvelope],
+            embeddingSpace: null,
+        });
+    });
+
+    it("rejects the retired embedding tuple body field", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                items: [trackEnvelope],
+                nextCursor: null,
+                embeddingSpace: {
+                    family: "clap-music-audioset",
+                    checkpointHash: "checkpoint-hash",
+                    dim: 512,
+                },
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogItems("track"),
+        ).rejects.toBeInstanceOf(FederationResponseError);
+    });
+
     it("validates podcast and audiobook envelopes", async () => {
         const items = [
             {
@@ -320,6 +404,59 @@ describe("federation HTTP client", () => {
                 tombstones: [{ entityType: "artist" }],
                 nextCursor: null,
                 nextSince: "2026-08-15T12:02:00.000Z",
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-08-15T12:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).rejects.toBeInstanceOf(FederationResponseError);
+    });
+
+    it("propagates the embedding tuple from a delta response header", async () => {
+        const embeddingSpace = {
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+        };
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                kind: "ok",
+                changes: [trackEnvelope],
+                tombstones: [],
+                nextCursor: null,
+                nextSince: "2026-08-15T12:02:00.000Z",
+            },
+            headers: {
+                "x-soundspan-embedding-space": JSON.stringify(embeddingSpace),
+            },
+        });
+
+        await expect(
+            createFederationClient(peer).getCatalogDelta({
+                since: new Date("2026-08-15T12:00:00.000Z"),
+                epoch: "epoch-1",
+            }),
+        ).resolves.toMatchObject({ embeddingSpace });
+    });
+
+    it("rejects the retired delta embedding tuple body field", async () => {
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: {
+                kind: "ok",
+                changes: [],
+                tombstones: [],
+                nextCursor: null,
+                nextSince: "2026-08-15T12:02:00.000Z",
+                embeddingSpace: {
+                    family: "clap-music-audioset",
+                    checkpointHash: "checkpoint-hash",
+                    dim: 512,
+                },
             },
         });
 

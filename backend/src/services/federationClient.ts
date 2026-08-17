@@ -6,6 +6,11 @@ import {
     FEDERATION_SCOPE_VALUES,
     type FederationScope,
 } from "../utils/federationScopes";
+import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
+import {
+    FEDERATION_EMBEDDING_SPACE_HEADER,
+    parseFederationEmbeddingSpaceHeader,
+} from "./federationEmbeddingSpaceHeader";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ATTEMPTS = 3;
@@ -222,6 +227,7 @@ export interface FederationCatalogPage {
     items: FederationEnvelope[];
     nextCursor: string | null;
     skippedInvalid: number;
+    embeddingSpace?: ParsedFederationEmbeddingSpaceIdentity;
 }
 export interface FederationDelta {
     kind: "ok";
@@ -235,6 +241,7 @@ export interface FederationDelta {
     nextSince: z.infer<typeof dateTimeSchema>;
     skippedInvalid: number;
     skippedUnknownTombstones: number;
+    embeddingSpace?: ParsedFederationEmbeddingSpaceIdentity;
 }
 
 function isKnownMediaType(
@@ -350,13 +357,23 @@ function parseLenientItems<T>(
     return { items, skippedInvalid };
 }
 
-function parseCatalogPage(value: unknown): FederationCatalogPage {
+function parseCatalogPage(
+    value: unknown,
+    embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
+): FederationCatalogPage {
     const page = parseResponse(catalogPageShapeSchema, value);
     const parsed = parseLenientItems(page.items, federationEnvelopeSchema);
-    return { ...parsed, nextCursor: page.nextCursor };
+    return {
+        ...parsed,
+        nextCursor: page.nextCursor,
+        ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
+    };
 }
 
-function parseDeltaPage(value: unknown): FederationDelta {
+function parseDeltaPage(
+    value: unknown,
+    embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
+): FederationDelta {
     const page = parseResponse(deltaPageShapeSchema, value);
     const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
     const parsedTombstones = parseResponse(tombstonesSchema, page.tombstones);
@@ -375,7 +392,15 @@ function parseDeltaPage(value: unknown): FederationDelta {
         nextSince: page.nextSince,
         skippedInvalid: changes.skippedInvalid,
         skippedUnknownTombstones: parsedTombstones.length - tombstones.length,
+        ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
     };
+}
+
+function parseEmbeddingSpaceResponseHeader(
+    response: AxiosResponse,
+): ParsedFederationEmbeddingSpaceIdentity | undefined {
+    const name = FEDERATION_EMBEDDING_SPACE_HEADER.toLowerCase();
+    return parseFederationEmbeddingSpaceHeader(response.headers?.[name]);
 }
 
 function destroyStreamBody(response: AxiosResponse): void {
@@ -484,7 +509,10 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseCatalogPage(response.data);
+        return parseCatalogPage(
+            response.data,
+            parseEmbeddingSpaceResponseHeader(response),
+        );
     }
 
     async getCatalogItem(
@@ -531,7 +559,10 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseDeltaPage(response.data);
+        return parseDeltaPage(
+            response.data,
+            parseEmbeddingSpaceResponseHeader(response),
+        );
     }
 
     async getStream(input: {

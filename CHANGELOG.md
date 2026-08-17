@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Federation embedding sync now verifies the JSON-encoded
+  `X-Soundspan-Embedding-Space` response header before storing peer vectors,
+  while preserving strict catalog response bodies for released consumers.
 - Vibe embeddings are now tracked against a versioned embedding-space registry.
   The backend and audio-analyzer-clap images must be upgraded together for this
   release; older CLAP images cannot write embeddings against the new schema.

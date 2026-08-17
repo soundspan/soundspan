@@ -105,6 +105,11 @@ import router from "../federation";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 
 const app = createRouteTestApp("/api/federation/v1", router);
+const embeddingSpaceHeaderValue = JSON.stringify({
+    family: "clap-music-audioset",
+    checkpointHash: "checkpoint-hash",
+    dim: 512,
+});
 
 describe("federation host routes", () => {
     beforeEach(() => {
@@ -113,16 +118,17 @@ describe("federation host routes", () => {
             instanceId: "instance-1",
         });
         catalog.getFederationCatalogItems.mockResolvedValue({
-            items: [],
-            nextCursor: null,
+            body: { items: [], nextCursor: null },
         });
         catalog.getFederationCatalogItem.mockResolvedValue(null);
         catalog.getFederationCatalogDelta.mockResolvedValue({
-            kind: "ok",
-            changes: [],
-            tombstones: [],
-            nextCursor: null,
-            nextSince: new Date("2026-08-15T12:00:00.000Z"),
+            body: {
+                kind: "ok",
+                changes: [],
+                tombstones: [],
+                nextCursor: null,
+                nextSince: new Date("2026-08-15T12:00:00.000Z"),
+            },
         });
         catalog.decodeFederationDeltaCursor.mockReturnValue(undefined);
         getStreamFilePath.mockResolvedValue({
@@ -151,10 +157,14 @@ describe("federation host routes", () => {
         ["wrong", 403],
         ["library:read", 200],
     ])("enforces single-item scope matrix for %s", async (scopes, status) => {
-        catalog.getFederationCatalogItem.mockResolvedValueOnce({
-            id: "artist-1",
-            mediaType: "artist",
-        });
+        // Queue the once-value only when the request reaches the service —
+        // rejected requests would leave it stale for later tests
+        // (clearAllMocks does not drain once-queues).
+        if (status === 200) {
+            catalog.getFederationCatalogItem.mockResolvedValueOnce({
+                body: { id: "artist-1", mediaType: "artist" },
+            });
+        }
         let call = request(app).get(
             "/api/federation/v1/catalog/items/artist/artist-1",
         );
@@ -192,8 +202,7 @@ describe("federation host routes", () => {
 
     it("returns one directly addressed catalog item", async () => {
         catalog.getFederationCatalogItem.mockResolvedValueOnce({
-            id: "artist-1",
-            mediaType: "artist",
+            body: { id: "artist-1", mediaType: "artist" },
         });
         const response = await request(app)
             .get("/api/federation/v1/catalog/items/artist/artist-1")
@@ -208,10 +217,79 @@ describe("federation host routes", () => {
         });
     });
 
+    it("emits embedding-space headers without changing catalog bodies", async () => {
+        catalog.getFederationCatalogItems.mockResolvedValueOnce({
+            body: {
+                items: [{ id: "track-1", attributes: { embedding: [0.1] } }],
+                nextCursor: null,
+            },
+            embeddingSpaceHeaderValue,
+        });
+        catalog.getFederationCatalogItem.mockResolvedValueOnce({
+            body: { id: "track-1", attributes: { embedding: [0.1] } },
+            embeddingSpaceHeaderValue,
+        });
+        catalog.getFederationCatalogDelta.mockResolvedValueOnce({
+            body: {
+                kind: "ok",
+                changes: [{ id: "track-1", attributes: { embedding: [0.1] } }],
+                tombstones: [],
+                nextCursor: null,
+                nextSince: new Date("2026-08-15T12:00:00.000Z"),
+            },
+            embeddingSpaceHeaderValue,
+        });
+
+        const headers = {
+            Authorization: "Bearer valid",
+            "x-test-scopes": "library:read,embeddings:read",
+        };
+        const page = await request(app)
+            .get("/api/federation/v1/catalog/items?type=track")
+            .set(headers);
+        const item = await request(app)
+            .get("/api/federation/v1/catalog/items/track/track-1")
+            .set(headers);
+        const delta = await request(app)
+            .get(
+                "/api/federation/v1/catalog/delta?since=2026-08-15T11:00:00.000Z&epoch=epoch-1",
+            )
+            .set(headers);
+
+        for (const response of [page, item, delta]) {
+            expect(response.headers["x-soundspan-embedding-space"]).toBe(
+                embeddingSpaceHeaderValue,
+            );
+            expect(response.body).not.toHaveProperty("body");
+            expect(response.body).not.toHaveProperty("embeddingSpace");
+        }
+    });
+
+    it("omits embedding-space headers when track and delta embeddings are excluded", async () => {
+        const headers = {
+            Authorization: "Bearer valid",
+            "x-test-scopes": "library:read",
+        };
+        const page = await request(app)
+            .get("/api/federation/v1/catalog/items?type=track")
+            .set(headers);
+        const delta = await request(app)
+            .get(
+                "/api/federation/v1/catalog/delta?since=2026-08-15T11:00:00.000Z&epoch=epoch-1",
+            )
+            .set(headers);
+
+        expect(page.headers).not.toHaveProperty("x-soundspan-embedding-space");
+        expect(delta.headers).not.toHaveProperty("x-soundspan-embedding-space");
+        expect(page.status).toBe(200);
+        expect(delta.status).toBe(200);
+        expect(page.body).toEqual({ items: [], nextCursor: null });
+        expect(delta.body).toMatchObject({ kind: "ok", changes: [] });
+    });
+
     it("returns a typed 409 for a catalog epoch mismatch", async () => {
         catalog.getFederationCatalogDelta.mockResolvedValueOnce({
-            kind: "epochMismatch",
-            currentEpoch: "epoch-2",
+            body: { kind: "epochMismatch", currentEpoch: "epoch-2" },
         });
         const response = await request(app)
             .get(
@@ -230,8 +308,7 @@ describe("federation host routes", () => {
 
     it("returns a typed 409 for a stale catalog cursor", async () => {
         catalog.getFederationCatalogDelta.mockResolvedValueOnce({
-            kind: "staleCursor",
-            currentEpoch: "epoch-1",
+            body: { kind: "staleCursor", currentEpoch: "epoch-1" },
         });
         const response = await request(app)
             .get(
