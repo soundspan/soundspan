@@ -31,7 +31,6 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/notifications",
         "../routes/browse",
         "../routes/analysis",
-        "../routes/analysisInternal",
         "../routes/releases",
         "../routes/vibe",
         "../routes/system",
@@ -561,10 +560,6 @@ describe("api entrypoint runtime behavior", () => {
         require("../index");
         await flushPromises();
 
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const analysisInternalRouter =
-            require("../routes/analysisInternal").default;
-
         for (const prefix of [
             "/api/discover",
             "/api/recommendations",
@@ -585,14 +580,7 @@ describe("api entrypoint runtime behavior", () => {
                     ? "admin-surface-limiter"
                     : "api-limiter",
             );
-            if (prefix === "/api/analysis") {
-                // The CLAP analyzer machine callbacks stay reachable so
-                // in-flight analysis work can still report results.
-                expect(call).toHaveLength(4);
-                expect(call![2]).toBe(analysisInternalRouter);
-            } else {
-                expect(call).toHaveLength(3);
-            }
+            expect(call).toHaveLength(3);
 
             const handler = call![call!.length - 1] as (
                 req: any,

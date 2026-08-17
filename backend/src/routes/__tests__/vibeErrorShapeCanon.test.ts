@@ -36,10 +36,6 @@ jest.mock("../../services/vibeProvider", () => {
     };
 });
 
-jest.mock("crypto", () => ({
-    randomUUID: jest.fn(() => "req-123"),
-}));
-
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
@@ -69,13 +65,7 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-jest.mock("../../utils/redis", () => ({
-    blockingBlPop: jest.fn(),
-    redisClient: {
-        xAdd: jest.fn(),
-        del: jest.fn(),
-    },
-}));
+jest.mock("../../utils/redis", () => ({ redisClient: {} }));
 
 jest.mock("../../services/hybridSimilarity", () => ({
     findSimilarTracks: jest.fn(),
@@ -91,6 +81,7 @@ jest.mock("../../services/umapProjection", () => ({
 
 jest.mock("../../services/embeddingSpaces", () => ({
     getActiveSpace: (...args: unknown[]) => mockGetActiveSpace(...args),
+    findRegisteredProviderEmbeddingSpace: jest.fn(),
 }));
 
 jest.mock("../../utils/embedding", () => {
@@ -119,12 +110,8 @@ jest.mock("../../services/vibeVocabulary", () => ({
 }));
 
 import router from "../vibe";
-import { blockingBlPop, redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
 
-const mockRedisXAdd = redisClient.xAdd as jest.Mock;
-const mockBlockingBlPop = blockingBlPop as jest.Mock;
-const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
 
 function getGetHandler(path: string) {
@@ -172,10 +159,14 @@ describe("vibe canonical error response shape", () => {
     beforeEach(() => {
         invalidateTextEmbeddingProviderSpaceCache();
         jest.clearAllMocks();
-        mockVibeProviderUrl = undefined;
-        mockRedisXAdd.mockResolvedValue("1712345-0");
-        mockRedisDel.mockResolvedValue(1);
-        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
+        mockVibeProviderUrl = "http://vibe-provider:8090";
+        mockGetActiveSpace.mockResolvedValue({
+            id: "space-active",
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+            preprocessing: {},
+        });
     });
 
     it("returns only the canonical error field when no similar tracks exist", async () => {
@@ -194,8 +185,8 @@ describe("vibe canonical error response shape", () => {
         expect(res.body).not.toHaveProperty("message");
     });
 
-    it("returns only the canonical error field when text embedding times out", async () => {
-        mockBlockingBlPop.mockResolvedValue(null);
+    it("returns only the canonical error field when provider mode is off", async () => {
+        mockVibeProviderUrl = undefined;
         const req = {
             body: { query: "quiet focus" },
             user: { id: "user-1" },
@@ -232,7 +223,7 @@ describe("vibe canonical error response shape", () => {
             error: "Text embedding service unavailable",
         });
         expect(res.body).not.toHaveProperty("message");
-        expect(mockRedisXAdd).not.toHaveBeenCalled();
+        expect(mockProviderEmbedText).toHaveBeenCalledTimes(1);
     });
 
     it("keeps the canonical error shape when no embedding space is active", async () => {

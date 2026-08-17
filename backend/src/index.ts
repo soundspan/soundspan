@@ -317,13 +317,9 @@ if (config.features.audioAnalysis) {
     logger.info(
         "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); /api/analysis and /api/vibe return 404",
     );
-    // Keep the CLAP analyzer machine callbacks (/vibe/failure, /vibe/success)
-    // reachable so analyzers draining in-flight work (e.g. AIO deployments)
-    // can still report results while the feature is off.
     app.use(
         "/api/analysis",
         apiLimiter,
-        require("./routes/analysisInternal").default,
         createFeatureDisabledHandler(),
     );
 }

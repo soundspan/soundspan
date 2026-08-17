@@ -74,9 +74,7 @@ Invariants:
 
 When the active space contains zero vectors, the worker builds the target's partial ANN index and cuts over immediately without waiting for migration coverage. A fresh install may never deploy the teacher worker, and an empty active space protects no query results, so this closes the provider-only text-search dead window without sacrificing existing similarity results.
 
-Keep the torch CLAP sidecar and its Redis text-embedding handler running throughout a migration. While the configured provider's space is not active, text search falls back to that legacy text tower so queries remain in the active space. `CLAP_WORKERS=0` disables its audio workers without stopping the text handler.
-
-At the cutover boundary, a cached provider-space mismatch can keep text search on the legacy tower while ANN reads use the new active space for at most 60 seconds. This bounded cross-space window equals the provider/active-space verdict-cache TTL. The next verdict refresh sees that the configured provider now matches the active space and moves text encoding to that provider without operator action.
+While the configured provider serves a registered migrating space, text search embeds and queries in that provider space, returning partial results that grow with the backfill; the 60-second provider-space cache continues routing to the same space across cutover and then refreshes its active status.
 
 Migration exposes two intentional operational lenses. The vibe embedding coverage gauge measures the migrating worker target so operators can assess cutover readiness. Enrichment progress and feature detection continue to measure the active space because they describe the vectors currently serving user queries.
 
@@ -120,14 +118,14 @@ Prerequisites: start both provider sidecars with the same `INTERNAL_API_SECRET`,
 ```bash
 cd backend
 npx tsx scripts/validateProviderFidelity.ts \
-  --baseline-url http://audio-analyzer-clap:8091 \
+  --baseline-url http://current-vibe-provider:8092 \
   --candidate-url http://vibe-provider-dclap:8092 \
   --sample 1000 \
   --k 10 \
   --output ../provider-fidelity-report.md
 ```
 
-`--baseline-url` may be omitted; it defaults to `VIBE_PROVIDER_URL` when configured, then to `http://audio-analyzer-clap:8091`. The candidate URL is always explicit. The tool uses the vocabulary artifact's term names for text queries, writes the Markdown path plus an adjacent JSON report, and never registers a provider or mutates library data.
+`--baseline-url` may be omitted when `VIBE_PROVIDER_URL` is configured; otherwise the run fails with a clear requirement for one of those values. The candidate URL is always explicit. The tool uses the vocabulary artifact's term names for text queries, writes the Markdown path plus an adjacent JSON report, and never registers a provider or mutates library data.
 
 The audio comparison is cosine `a·b / (||a|| ||b||)` for each paired track. Neighbor recall is `|topK(A query, A index) ∩ topK(B query, A index)| / k`, excluding the query track. Text-query recall uses the same overlap formula against the baseline audio index. The gate uses inclusive comparisons: median paired cosine `>= 0.98` and mean top-10 neighbor overlap `>= 0.9`.
 

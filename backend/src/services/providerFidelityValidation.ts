@@ -18,7 +18,6 @@ import {
     type VibeProviderClient,
 } from "./vibeProvider";
 
-const DEFAULT_BASELINE_URL = "http://audio-analyzer-clap:8091";
 const DEFAULT_OUTPUT_PATH = "provider-fidelity-report.md";
 const PROVIDER_CONCURRENCY = 3;
 const MAX_EXCLUSION_RATE = 0.05;
@@ -176,6 +175,12 @@ export function parseProviderFidelityArgs(
     if (unknown) throw new TypeError(`unknown option ${unknown}`);
     const candidate = flags.get("--candidate-url");
     if (!candidate) throw new TypeError("--candidate-url is required");
+    const baseline = flags.get("--baseline-url") ?? configuredBaselineUrl;
+    if (!baseline) {
+        throw new TypeError(
+            "--baseline-url or VIBE_PROVIDER_URL is required",
+        );
+    }
     const sample = flags.has("--sample")
         ? parseIntegerFlag(flags.get("--sample"), "--sample")
         : DEFAULT_PROVIDER_FIDELITY_SAMPLE;
@@ -183,11 +188,7 @@ export function parseProviderFidelityArgs(
     requireSampleBounds(sample);
     requireKBounds(k, sample);
     return {
-        baselineUrl: normalizeProviderBaseUrl(
-            flags.get("--baseline-url") ??
-                configuredBaselineUrl ??
-                DEFAULT_BASELINE_URL,
-        ),
+        baselineUrl: normalizeProviderBaseUrl(baseline),
         candidateUrl: normalizeProviderBaseUrl(candidate),
         sample,
         k,

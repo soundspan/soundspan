@@ -232,19 +232,24 @@ describe("findNearestToEmbedding", () => {
 });
 
 describe("findTracksByTextEmbedding", () => {
-    it("routes the bounded text-search ANN query through runAnnQuery", async () => {
+    it("queries the requested provider space for text search", async () => {
         const rows = [{ id: "track-1", distance: 0.2 }];
         mockRunAnnQuery.mockResolvedValue(rows);
 
         await expect(
-            findTracksByTextEmbedding([0.25, 0.75], 0.8, 60),
+            findTracksByTextEmbedding(
+                [0.25, 0.75],
+                0.8,
+                60,
+                "space-migrating",
+            ),
         ).resolves.toBe(rows);
 
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
         const query = mockRunAnnQuery.mock.calls[0][0];
         expect(query.strings.join(" ")).toContain("FROM track_embeddings te");
         expect(query.strings.join(" ")).toContain("te.space_id =");
-        expect(query.values).toContain("space-active");
+        expect(query.values).toContain("space-migrating");
         const values = query.values as unknown[];
         // Pin binding positions so a maxDistance/candidateLimit swap cannot
         // pass: LIMIT binds last, preceded by the ORDER BY vector, preceded

@@ -1103,13 +1103,13 @@ router.post(
 
             // Query expansion with vocabulary
             const vocab = getVocabulary();
-            let searchEmbedding = textEmbedding;
+            let searchEmbedding = textEmbedding.embedding;
             let genreConfidence = 0;
             let matchedTerms: VocabTerm[] = [];
 
             if (vocab) {
                 const expansion = expandQueryWithVocabulary(
-                    textEmbedding,
+                    textEmbedding.embedding,
                     normalizedQuery,
                     vocab,
                 );
@@ -1130,6 +1130,7 @@ router.post(
                 searchEmbedding,
                 maxDistance,
                 candidateLimit,
+                textEmbedding.spaceId,
             );
 
             logger.info(

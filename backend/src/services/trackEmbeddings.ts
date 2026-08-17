@@ -240,8 +240,11 @@ export async function findTracksByTextEmbedding(
     searchEmbedding: number[],
     maxDistance: number,
     candidateLimit: number,
+    spaceId?: string,
 ): Promise<TextSearchResult[]> {
-    const activeSpace = await getActiveSpace();
+    const resolvedSpaceId = spaceId ?? (await getActiveSpace()).id;
+    // Migrating spaces have no ANN index before cutover, so pgvector uses an
+    // exact scan during this bounded migration window.
     return runAnnQuery<TextSearchResult[]>(Prisma.sql`
         SELECT
             t.id,
@@ -267,7 +270,7 @@ export async function findTracksByTextEmbedding(
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."removedAt" IS NULL
           AND ${TRACK_BROWSE_SQL}
-          AND te.space_id = ${activeSpace.id}
+          AND te.space_id = ${resolvedSpaceId}
           AND te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
         ORDER BY te.embedding <=> ${searchEmbedding}::vector
         LIMIT ${candidateLimit}

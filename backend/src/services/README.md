@@ -136,7 +136,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/spotifyImport/state.ts` | Shared Spotify import persistence, retry, cache, and logger state |
 | `backend/src/services/spotifyImport/types.ts` | Shared Spotify import contracts |
 | `backend/src/services/staleJobCleanup.ts` | Core |
-| `backend/src/services/textEmbedding.ts` | Config-selected provider or legacy Redis text-embedding transport |
+| `backend/src/services/textEmbedding.ts` | Provider-backed text embedding and registered search-space routing |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |

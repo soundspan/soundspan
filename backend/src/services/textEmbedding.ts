@@ -1,39 +1,34 @@
-import { randomUUID } from "crypto";
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { blockingBlPop, redisClient } from "../utils/redis";
-import { getActiveSpace } from "./embeddingSpaces";
+import {
+    findRegisteredProviderEmbeddingSpace,
+    getActiveSpace,
+} from "./embeddingSpaces";
 import {
     assertProviderMatchesActiveSpace,
     embedText,
     fetchProviderSpace,
+    type EmbeddingVectorSpace,
     VibeProviderError,
+    VibeProviderSpaceMismatchError,
     VibeProviderTimeoutError,
     VibeProviderUnavailableError,
 } from "./vibeProvider";
 
-const TEXT_EMBED_REQUEST_STREAM = "audio:text:embed:requests";
-const TEXT_EMBED_RESPONSE_PREFIX = "audio:text:embed:response:";
-const TEXT_EMBED_TIMEOUT_SECONDS = 30;
-const TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH = 100;
-const PROVIDER_SPACE_MATCH_TTL_MS = 60_000;
-// Several route suites stub the logger without .child; tolerate the partial
-// double like the other services that scope their logger at module init.
+const PROVIDER_SPACE_CACHE_TTL_MS = 60_000;
 const log =
     typeof (logger as { child?: unknown }).child === "function"
         ? logger.child("TextEmbedding")
         : logger;
 
-let cachedProviderMatchesActive = false;
-let providerMatchCacheExpiresAt = 0;
-let lastMismatchWarningAt = Number.NEGATIVE_INFINITY;
+let cachedProviderSearchSpace: EmbeddingVectorSpace | null = null;
+let providerSpaceCacheExpiresAt = 0;
+let lastUnregisteredWarningAt = Number.NEGATIVE_INFINITY;
 
-interface LegacyTextEmbedResponse {
-    requestId: string;
-    success: boolean;
-    embedding: number[] | null;
-    modelVersion: string;
-    error?: string;
+/** Text vector plus the registered space whose track vectors it can query. */
+export interface ResolvedTextEmbedding {
+    embedding: number[];
+    spaceId: string;
 }
 
 /** Stable timeout identity consumed by the vibe route error mapper. */
@@ -44,11 +39,7 @@ export class TextEmbeddingTimeoutError extends Error {
     }
 }
 
-/**
- * Stable non-timeout provider-failure identity. The route maps this before
- * any message inspection so provider-controlled error text can never steer
- * the HTTP status.
- */
+/** Stable non-timeout provider-failure identity for route error mapping. */
 export class TextEmbeddingProviderError extends Error {
     constructor(options?: ErrorOptions) {
         super("Text embedding provider request failed", options);
@@ -56,100 +47,94 @@ export class TextEmbeddingProviderError extends Error {
     }
 }
 
-function parseLegacyResponse(value: string): number[] {
-    let payload: LegacyTextEmbedResponse;
-    try {
-        payload = JSON.parse(value) as LegacyTextEmbedResponse;
-    } catch {
-        throw new Error("Invalid response from analyzer");
-    }
-    if (payload.error) throw new Error(payload.error);
-    if (!Array.isArray(payload.embedding)) {
-        throw new Error("Invalid response from analyzer");
-    }
-    return payload.embedding;
-}
-
-async function embedTextWithLegacyStream(text: string): Promise<number[]> {
-    const requestId = randomUUID();
-    const responseKey = `${TEXT_EMBED_RESPONSE_PREFIX}${requestId}`;
-    try {
-        await redisClient.xAdd(
-            TEXT_EMBED_REQUEST_STREAM,
-            "*",
-            { requestId, text, responseKey },
-            {
-                TRIM: {
-                    strategy: "MAXLEN",
-                    strategyModifier: "~",
-                    threshold: TEXT_EMBED_REQUEST_STREAM_MAX_LENGTH,
-                },
-            },
-        );
-        const response = await blockingBlPop(
-            responseKey,
-            TEXT_EMBED_TIMEOUT_SECONDS,
-        );
-        if (!response?.element) throw new TextEmbeddingTimeoutError();
-        return parseLegacyResponse(response.element);
-    } finally {
-        await redisClient.del(responseKey).catch(() => {});
-    }
-}
-
-async function providerMatchesActiveSpace(): Promise<boolean> {
-    if (Date.now() < providerMatchCacheExpiresAt) {
-        return cachedProviderMatchesActive;
-    }
-    try {
-        const [providerSpace, activeSpace] = await Promise.all([
-            fetchProviderSpace(),
-            getActiveSpace(),
-        ]);
-        assertProviderMatchesActiveSpace(providerSpace, activeSpace);
-        cachedProviderMatchesActive = true;
-    } catch {
-        cachedProviderMatchesActive = false;
-    }
-    providerMatchCacheExpiresAt = Date.now() + PROVIDER_SPACE_MATCH_TTL_MS;
-    return cachedProviderMatchesActive;
-}
-
-function warnProviderMismatch(): void {
+function warnUnregisteredProviderSpace(
+    family: string,
+    checkpointHash: string,
+): void {
     const now = Date.now();
-    if (now - lastMismatchWarningAt < PROVIDER_SPACE_MATCH_TTL_MS) return;
-    lastMismatchWarningAt = now;
-    log.warn(
-        "Vibe text provider does not match the active embedding space; using the legacy text tower",
-    );
+    if (
+        now - lastUnregisteredWarningAt <
+        PROVIDER_SPACE_CACHE_TTL_MS
+    )
+        return;
+    lastUnregisteredWarningAt = now;
+    log.warn("Vibe text provider space is not registered", {
+        family,
+        checkpointHash,
+    });
 }
 
-/** Clear process-local text-provider identity state after configuration changes. */
-export function invalidateTextEmbeddingProviderSpaceCache(): void {
-    cachedProviderMatchesActive = false;
-    providerMatchCacheExpiresAt = 0;
-    lastMismatchWarningAt = Number.NEGATIVE_INFINITY;
-}
-
-/** Resolve text embeddings through provider mode or the unchanged legacy stream. */
-export async function resolveTextEmbedding(text: string): Promise<number[]> {
-    if (!config.vibeProviderUrl) return embedTextWithLegacyStream(text);
-    if (!(await providerMatchesActiveSpace())) {
-        warnProviderMismatch();
-        return embedTextWithLegacyStream(text);
-    }
+async function loadProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
+    const [providerSpace, activeSpace] = await Promise.all([
+        fetchProviderSpace(),
+        getActiveSpace(),
+    ]);
     try {
-        return await embedText(text);
+        assertProviderMatchesActiveSpace(providerSpace, activeSpace);
+        return { id: activeSpace.id, dim: activeSpace.dim };
     } catch (error) {
-        if (
-            error instanceof VibeProviderTimeoutError ||
-            error instanceof VibeProviderUnavailableError
-        ) {
-            throw new TextEmbeddingTimeoutError({ cause: error });
-        }
-        if (error instanceof VibeProviderError) {
-            throw new TextEmbeddingProviderError({ cause: error });
-        }
-        throw error;
+        if (!(error instanceof VibeProviderSpaceMismatchError)) throw error;
+    }
+
+    const registeredSpace =
+        await findRegisteredProviderEmbeddingSpace(providerSpace);
+    if (!registeredSpace) {
+        warnUnregisteredProviderSpace(
+            providerSpace.family,
+            providerSpace.checkpointHash,
+        );
+        throw new VibeProviderSpaceMismatchError();
+    }
+    log.warn(
+        "Vibe text search is using the provider embedding space during migration",
+        { providerSpaceId: registeredSpace.id },
+    );
+    return { id: registeredSpace.id, dim: registeredSpace.dim };
+}
+
+async function getProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
+    if (!config.vibeProviderUrl) throw new VibeProviderUnavailableError();
+    if (
+        cachedProviderSearchSpace &&
+        Date.now() < providerSpaceCacheExpiresAt
+    ) {
+        return cachedProviderSearchSpace;
+    }
+    const searchSpace = await loadProviderSearchSpace();
+    cachedProviderSearchSpace = searchSpace;
+    providerSpaceCacheExpiresAt = Date.now() + PROVIDER_SPACE_CACHE_TTL_MS;
+    return searchSpace;
+}
+
+function mapProviderError(error: unknown): never {
+    if (
+        error instanceof VibeProviderTimeoutError ||
+        error instanceof VibeProviderUnavailableError
+    ) {
+        throw new TextEmbeddingTimeoutError({ cause: error });
+    }
+    if (error instanceof VibeProviderError) {
+        throw new TextEmbeddingProviderError({ cause: error });
+    }
+    throw error;
+}
+
+/** Clear process-local provider-space state after configuration changes. */
+export function invalidateTextEmbeddingProviderSpaceCache(): void {
+    cachedProviderSearchSpace = null;
+    providerSpaceCacheExpiresAt = 0;
+    lastUnregisteredWarningAt = Number.NEGATIVE_INFINITY;
+}
+
+/** Embed text with the provider and identify the registered search space. */
+export async function resolveTextEmbedding(
+    text: string,
+): Promise<ResolvedTextEmbedding> {
+    try {
+        const searchSpace = await getProviderSearchSpace();
+        const embedding = await embedText(text, searchSpace);
+        return { embedding, spaceId: searchSpace.id };
+    } catch (error) {
+        return mapProviderError(error);
     }
 }

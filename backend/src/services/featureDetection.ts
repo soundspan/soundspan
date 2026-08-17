@@ -3,19 +3,16 @@ import { config } from "../config";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { getActiveSpace } from "./embeddingSpaces";
 
-// Analyzer script paths in the Docker image
 const ESSENTIA_ANALYZER_PATH = "/app/audio-analyzer/analyzer.py";
-const CLAP_ANALYZER_PATH = "/app/audio-analyzer-clap/analyzer.py";
 
 export interface AvailableFeatures {
     musicCNN: boolean;
     vibeEmbeddings: boolean;
 }
 
-const HEARTBEAT_TTL = 300000; // 5 minutes
-const CACHE_TTL = 60000; // 60 seconds
+const HEARTBEAT_TTL = 300000;
+const CACHE_TTL = 60000;
 
 class FeatureDetectionService {
     private cache: AvailableFeatures | null = null;
@@ -23,43 +20,27 @@ class FeatureDetectionService {
 
     async getFeatures(): Promise<AvailableFeatures> {
         const now = Date.now();
-        if (this.cache && now - this.lastCheck < CACHE_TTL) {
-            return this.cache;
-        }
+        if (this.cache && now - this.lastCheck < CACHE_TTL) return this.cache;
 
-        const [musicCNN, vibeEmbeddings] = await Promise.all([
-            this.checkMusicCNN(),
-            this.checkCLAP(),
-        ]);
-
+        const musicCNN = await this.checkMusicCNN();
+        const vibeEmbeddings = Boolean(config.vibeProviderUrl);
         this.cache = { musicCNN, vibeEmbeddings };
         this.lastCheck = now;
-
         logger.debug(
             `[FEATURE-DETECTION] Features: musicCNN=${musicCNN}, vibeEmbeddings=${vibeEmbeddings}`,
         );
-
         return this.cache;
     }
 
     private async checkMusicCNN(): Promise<boolean> {
         try {
-            // Analyzer script bundled in image = feature is available
-            if (existsSync(ESSENTIA_ANALYZER_PATH)) {
-                return true;
-            }
-
+            if (existsSync(ESSENTIA_ANALYZER_PATH)) return true;
             const heartbeat = await redisClient.get("audio:worker:heartbeat");
             if (heartbeat) {
                 const timestamp = parseInt(heartbeat, 10);
-                if (
-                    !isNaN(timestamp) &&
-                    Date.now() - timestamp < HEARTBEAT_TTL
-                ) {
+                if (!isNaN(timestamp) && Date.now() - timestamp < HEARTBEAT_TTL)
                     return true;
-                }
             }
-
             const trackWithEnergy = await prisma.track.findFirst({
                 where: { energy: { not: null } },
                 select: { id: true },
@@ -67,39 +48,6 @@ class FeatureDetectionService {
             return trackWithEnergy !== null;
         } catch (error) {
             logger.error("[FEATURE-DETECTION] Error checking MusicCNN:", error);
-            return false;
-        }
-    }
-
-    private async checkCLAP(): Promise<boolean> {
-        try {
-            if (config.vibeProviderUrl) {
-                return true;
-            }
-
-            // Analyzer script bundled in image = feature is available
-            if (existsSync(CLAP_ANALYZER_PATH)) {
-                return true;
-            }
-
-            const heartbeat = await redisClient.get("clap:worker:heartbeat");
-            if (heartbeat) {
-                const timestamp = parseInt(heartbeat, 10);
-                if (
-                    !isNaN(timestamp) &&
-                    Date.now() - timestamp < HEARTBEAT_TTL
-                ) {
-                    return true;
-                }
-            }
-
-            const activeSpace = await getActiveSpace();
-            const embeddingCount = await prisma.trackEmbedding.count({
-                where: { spaceId: activeSpace.id },
-            });
-            return embeddingCount > 0;
-        } catch (error) {
-            logger.error("[FEATURE-DETECTION] Error checking CLAP:", error);
             return false;
         }
     }

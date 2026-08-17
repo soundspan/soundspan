@@ -396,16 +396,19 @@ async function embed(
     });
 }
 
-/** Embed text through the configured provider and active-space trust boundary. */
-export async function embedText(text: string): Promise<number[]> {
+/** Embed text through the configured provider and a registered-space boundary. */
+export async function embedText(
+    text: string,
+    targetSpace?: EmbeddingVectorSpace,
+): Promise<number[]> {
     const validatedText = parseWithContract(textInputSchema, text);
-    const activeSpace = await getActiveSpace();
+    const resolvedTargetSpace = targetSpace ?? (await getActiveSpace());
     return embed(
         "text",
         "/v1/embed/text",
         { text: validatedText },
         PROVIDER_TEXT_TIMEOUT_MS,
-        activeSpace,
+        resolvedTargetSpace,
     );
 }
 

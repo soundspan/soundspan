@@ -69,7 +69,6 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | `backend/src/routes/admin.ts`              | `/api/admin`                                                                                          |
 | `backend/src/routes/analysis.ts`           | `/api/analysis`                                                                                       |
-| `backend/src/routes/analysisInternal.ts`   | `/api/analysis` (machine callbacks, mounted via `analysis.ts` and directly when the flag is off)      |
 | `backend/src/routes/apiKeys.ts`            | `/api/api-keys`                                                                                       |
 | `backend/src/routes/artists.ts`            | `/api/artists`                                                                                        |
 | `backend/src/routes/audiobooks.ts`         | `/api/audiobooks`                                                                                     |
@@ -182,12 +181,6 @@ stays rate limited (`apiLimiter`) and returns
 - `DISCOVERY_ENABLED`: `/api/discover`, `/api/recommendations`
 - `AUTO_PLAYLISTS_ENABLED`: `/api/mixes`
 - `FEDERATION_ENABLED`: `/api/federation/v1`, `/api/federation/admin`, consumer sync/health jobs, and federated playback/cover branches
-
-Exception: the CLAP analyzer machine callbacks in
-`backend/src/routes/analysisInternal.ts` (`/api/analysis/vibe/failure`,
-`/api/analysis/vibe/success`) remain mounted even when
-`AUDIO_ANALYSIS_ENABLED=false`, so analyzers draining in-flight work can still
-report results.
 
 ## Conventions
 

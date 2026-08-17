@@ -3,6 +3,8 @@ import { invalidateTextEmbeddingProviderSpaceCache } from "../../services/textEm
 
 let mockVibeProviderUrl: string | undefined;
 const mockProviderEmbedText = jest.fn();
+const mockFetchProviderSpace = jest.fn();
+const mockFindRegisteredProviderSpace = jest.fn();
 
 jest.mock("../../config", () => ({
     config: {
@@ -14,30 +16,33 @@ jest.mock("../../config", () => ({
 
 jest.mock("../../services/vibeProvider", () => {
     class VibeProviderError extends Error {}
+    class VibeProviderSpaceMismatchError extends VibeProviderError {}
     return {
         embedText: (...args: unknown[]) => mockProviderEmbedText(...args),
-        fetchProviderSpace: jest.fn(async () => ({
-            family: "clap-music-audioset",
-            checkpointHash: "checkpoint-hash",
-            dim: 512,
-            sampleRateHz: 48000,
-            preprocessing: {},
-            revision: "test",
-            textTower: true,
-        })),
-        assertProviderMatchesActiveSpace: jest.fn(),
+        fetchProviderSpace: (...args: unknown[]) =>
+            mockFetchProviderSpace(...args),
+        assertProviderMatchesActiveSpace: jest.fn(
+            (
+                provider: { family: string; checkpointHash: string; dim: number },
+                active: { family: string; checkpointHash: string; dim: number },
+            ) => {
+                if (
+                    provider.family !== active.family ||
+                    provider.checkpointHash !== active.checkpointHash ||
+                    provider.dim !== active.dim
+                ) {
+                    throw new VibeProviderSpaceMismatchError();
+                }
+            },
+        ),
         VibeProviderError,
         VibeProviderTimeoutError: class VibeProviderTimeoutError extends VibeProviderError {},
         VibeProviderUnavailableError: class VibeProviderUnavailableError extends VibeProviderError {},
         VibeProviderAuthError: class VibeProviderAuthError extends VibeProviderError {},
         VibeProviderContractError: class VibeProviderContractError extends VibeProviderError {},
-        VibeProviderSpaceMismatchError: class VibeProviderSpaceMismatchError extends VibeProviderError {},
+        VibeProviderSpaceMismatchError,
     };
 });
-
-jest.mock("crypto", () => ({
-    randomUUID: jest.fn(() => "req-123"),
-}));
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
@@ -68,13 +73,7 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-jest.mock("../../utils/redis", () => ({
-    blockingBlPop: jest.fn(),
-    redisClient: {
-        xAdd: jest.fn(),
-        del: jest.fn(),
-    },
-}));
+jest.mock("../../utils/redis", () => ({ redisClient: {} }));
 
 jest.mock("../../services/hybridSimilarity", () => ({
     findSimilarTracks: jest.fn(),
@@ -93,7 +92,15 @@ jest.mock("../../services/umapProjection", () => ({
 }));
 
 jest.mock("../../services/embeddingSpaces", () => ({
-    getActiveSpace: jest.fn(async () => ({ id: "space-active" })),
+    getActiveSpace: jest.fn(async () => ({
+        id: "space-active",
+        family: "clap-music-audioset",
+        checkpointHash: "checkpoint-hash",
+        dim: 512,
+        preprocessing: {},
+    })),
+    findRegisteredProviderEmbeddingSpace: (...args: unknown[]) =>
+        mockFindRegisteredProviderSpace(...args),
 }));
 
 jest.mock("../../utils/embedding", () => {
@@ -123,7 +130,6 @@ jest.mock("../../services/vibeVocabulary", () => ({
 
 import router from "../vibe";
 import { prisma } from "../../utils/db";
-import { blockingBlPop, redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
 import { runAnnQuery } from "../../utils/annQuery";
 import { computeMapProjection } from "../../services/umapProjection";
@@ -138,9 +144,6 @@ const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
 const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
-const mockRedisXAdd = redisClient.xAdd as jest.Mock;
-const mockBlockingBlPop = blockingBlPop as jest.Mock;
-const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
 const mockRunAnnQuery = runAnnQuery as jest.Mock;
 const mockComputeMapProjection = computeMapProjection as jest.Mock;
@@ -194,11 +197,20 @@ describe("vibe search transport compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         invalidateTextEmbeddingProviderSpaceCache();
-        mockVibeProviderUrl = undefined;
+        mockVibeProviderUrl = "http://vibe-provider:8090";
         mockTrackCount.mockResolvedValue(0);
         mockTrackFindUnique.mockResolvedValue(null);
-        mockRedisXAdd.mockResolvedValue("1712345-0");
-        mockRedisDel.mockResolvedValue(1);
+        mockFetchProviderSpace.mockResolvedValue({
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+            dim: 512,
+            sampleRateHz: 48_000,
+            preprocessing: {},
+            revision: "test",
+            textTower: true,
+        });
+        mockFindRegisteredProviderSpace.mockResolvedValue(null);
+        mockProviderEmbedText.mockResolvedValue([0.6, 0.8]);
         mockQueryRaw.mockResolvedValue([]);
         mockRunAnnQuery.mockResolvedValue([]);
         mockLikedTrackFindMany.mockResolvedValue([]);
@@ -429,16 +441,7 @@ describe("vibe search transport compatibility", () => {
         });
     });
 
-    it("uses stream request + response list and returns search results", async () => {
-        mockBlockingBlPop.mockResolvedValue({
-            key: "audio:text:embed:response:req-123",
-            element: JSON.stringify({
-                requestId: "req-123",
-                success: true,
-                embedding: [0.25, 0.75],
-                modelVersion: "laion-clap-music-v1",
-            }),
-        });
+    it("uses the provider and active space for steady-state text search", async () => {
         mockRunAnnQuery.mockResolvedValue([
             {
                 id: "track-1",
@@ -485,36 +488,17 @@ describe("vibe search transport compatibility", () => {
                 ],
             }),
         );
-        expect(mockRedisXAdd).toHaveBeenCalledWith(
-            "audio:text:embed:requests",
-            "*",
-            expect.objectContaining({
-                requestId: "req-123",
-                text: "upbeat synthwave",
-                responseKey: "audio:text:embed:response:req-123",
-            }),
-            {
-                TRIM: {
-                    strategy: "MAXLEN",
-                    strategyModifier: "~",
-                    threshold: 100,
-                },
-            },
+        expect(mockProviderEmbedText).toHaveBeenCalledWith(
+            "upbeat synthwave",
+            { id: "space-active", dim: 512 },
         );
-        expect(mockBlockingBlPop).toHaveBeenCalledWith(
-            "audio:text:embed:response:req-123",
-            30,
+        expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
+            "space-active",
         );
-        expect(mockRedisDel).toHaveBeenCalledWith(
-            "audio:text:embed:response:req-123",
-        );
-        expect(mockProviderEmbedText).not.toHaveBeenCalled();
     });
 
-    describe("provider mode", () => {
+    describe("provider space routing", () => {
         beforeEach(() => {
-            mockVibeProviderUrl = "http://vibe-provider:8090";
-            mockProviderEmbedText.mockResolvedValue([0.6, 0.8]);
             mockRunAnnQuery.mockResolvedValue([
                 {
                     id: "track-provider",
@@ -538,7 +522,26 @@ describe("vibe search transport compatibility", () => {
             ]);
         });
 
-        it("drives vibe search without reaching the legacy Redis transport", async () => {
+        it("queries a registered migrating provider space", async () => {
+            mockFetchProviderSpace.mockResolvedValue({
+                family: "dclap-student",
+                checkpointHash: "student-checkpoint",
+                dim: 512,
+                sampleRateHz: 48_000,
+                preprocessing: {},
+                revision: "test",
+                textTower: true,
+            });
+            mockFindRegisteredProviderSpace.mockResolvedValue({
+                id: "space-migrating",
+                family: "dclap-student",
+                checkpointHash: "student-checkpoint",
+                dim: 512,
+                preprocessing: {},
+                status: "migrating",
+                retiredAt: null,
+                createdAt: new Date("2026-08-17T00:00:00.000Z"),
+            });
             const req = {
                 body: { query: "  quiet focus  ", limit: 10 },
                 user: { id: "user-1" },
@@ -554,10 +557,62 @@ describe("vibe search transport compatibility", () => {
                     tracks: [expect.objectContaining({ id: "track-provider" })],
                 }),
             );
-            expect(mockProviderEmbedText).toHaveBeenCalledWith("quiet focus");
-            expect(mockRedisXAdd).not.toHaveBeenCalled();
-            expect(mockBlockingBlPop).not.toHaveBeenCalled();
-            expect(mockRedisDel).not.toHaveBeenCalled();
+            expect(mockProviderEmbedText).toHaveBeenCalledWith(
+                "quiet focus",
+                { id: "space-migrating", dim: 512 },
+            );
+            expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
+                "space-migrating",
+            );
+        });
+
+        it("rejects an unregistered provider space", async () => {
+            mockFetchProviderSpace.mockResolvedValue({
+                family: "unknown-provider",
+                checkpointHash: "unknown-checkpoint",
+                dim: 512,
+                sampleRateHz: 48_000,
+                preprocessing: {},
+                revision: "test",
+                textTower: true,
+            });
+            mockFindRegisteredProviderSpace.mockResolvedValue(null);
+            const res = createRes();
+
+            await searchHandler(
+                {
+                    body: { query: "quiet focus" },
+                    user: { id: "user-1" },
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({
+                error: "Failed to search tracks by vibe",
+            });
+            expect(mockProviderEmbedText).not.toHaveBeenCalled();
+            expect(mockRunAnnQuery).not.toHaveBeenCalled();
+        });
+
+        it("reports the feature unavailable when provider mode is off", async () => {
+            mockVibeProviderUrl = undefined;
+            const res = createRes();
+
+            await searchHandler(
+                {
+                    body: { query: "quiet focus" },
+                    user: { id: "user-1" },
+                } as any,
+                res,
+            );
+
+            expect(res.statusCode).toBe(504);
+            expect(res.body).toEqual({
+                error: "Text embedding service unavailable",
+            });
+            expect(mockFetchProviderSpace).not.toHaveBeenCalled();
+            expect(mockProviderEmbedText).not.toHaveBeenCalled();
         });
 
         it("maps an unavailable provider to the canonical 504 response", async () => {
@@ -579,7 +634,7 @@ describe("vibe search transport compatibility", () => {
             expect(res.body).toEqual({
                 error: "Text embedding service unavailable",
             });
-            expect(mockRedisXAdd).not.toHaveBeenCalled();
+            expect(mockRunAnnQuery).not.toHaveBeenCalled();
         });
 
         it.each([
@@ -605,50 +660,11 @@ describe("vibe search transport compatibility", () => {
             expect(res.body).toEqual({
                 error: "Failed to search tracks by vibe",
             });
-            expect(mockRedisXAdd).not.toHaveBeenCalled();
+            expect(mockRunAnnQuery).not.toHaveBeenCalled();
         });
     });
 
-    it("returns 504 when no embedding response arrives before timeout", async () => {
-        mockBlockingBlPop.mockResolvedValue(null);
-
-        const req = {
-            body: {
-                query: "melancholic piano",
-            },
-            user: { id: "user-1" },
-        } as any;
-        const res = createRes();
-
-        await searchHandler(req, res);
-
-        expect(res.statusCode).toBe(504);
-        expect(res.body).toEqual({
-            error: "Text embedding service unavailable",
-        });
-        expect(mockRedisXAdd).toHaveBeenCalledWith(
-            "audio:text:embed:requests",
-            "*",
-            expect.objectContaining({
-                requestId: "req-123",
-                text: "melancholic piano",
-                responseKey: "audio:text:embed:response:req-123",
-            }),
-            {
-                TRIM: {
-                    strategy: "MAXLEN",
-                    strategyModifier: "~",
-                    threshold: 100,
-                },
-            },
-        );
-        expect(mockRedisDel).toHaveBeenCalledWith(
-            "audio:text:embed:response:req-123",
-        );
-        expect(mockRunAnnQuery).not.toHaveBeenCalled();
-    });
-
-    it("validates query length and handles analyzer payload errors", async () => {
+    it("validates query length before provider work", async () => {
         const badReq = { body: { query: "a" }, user: { id: "user-1" } } as any;
         const badRes = createRes();
         await searchHandler(badReq, badRes);
@@ -656,65 +672,10 @@ describe("vibe search transport compatibility", () => {
         expect(badRes.body).toEqual({
             error: "Query must be at least 2 characters",
         });
-
-        mockBlockingBlPop.mockResolvedValueOnce({
-            key: "audio:text:embed:response:req-123",
-            element: "not-json",
-        });
-        const parseReq = {
-            body: { query: "valid query" },
-            user: { id: "user-1" },
-        } as any;
-        const parseRes = createRes();
-        await searchHandler(parseReq, parseRes);
-        expect(parseRes.statusCode).toBe(500);
-        expect(parseRes.body).toEqual({
-            error: "Failed to search tracks by vibe",
-        });
-
-        mockBlockingBlPop.mockResolvedValueOnce({
-            key: "audio:text:embed:response:req-123",
-            element: JSON.stringify({
-                requestId: "req-123",
-                success: false,
-                embedding: null,
-                modelVersion: "v1",
-                error: "analyzer rejected query",
-            }),
-        });
-        const payloadErrReq = {
-            body: { query: "valid query" },
-            user: { id: "user-1" },
-        } as any;
-        const payloadErrRes = createRes();
-        await searchHandler(payloadErrReq, payloadErrRes);
-        expect(payloadErrRes.statusCode).toBe(500);
-        expect(payloadErrRes.body).toEqual({
-            error: "Failed to search tracks by vibe",
-        });
-
-        mockBlockingBlPop.mockResolvedValueOnce({
-            key: "audio:text:embed:response:req-123",
-            element: JSON.stringify({
-                requestId: "req-123",
-                success: true,
-                embedding: "invalid-shape",
-                modelVersion: "v1",
-            }),
-        });
-        const invalidEmbedReq = {
-            body: { query: "valid query" },
-            user: { id: "user-1" },
-        } as any;
-        const invalidEmbedRes = createRes();
-        await searchHandler(invalidEmbedReq, invalidEmbedRes);
-        expect(invalidEmbedRes.statusCode).toBe(500);
-        expect(invalidEmbedRes.body).toEqual({
-            error: "Failed to search tracks by vibe",
-        });
+        expect(mockProviderEmbedText).not.toHaveBeenCalled();
     });
 
-    it("rejects over-long search queries before admitting Redis work", async () => {
+    it("rejects over-long search queries before provider work", async () => {
         const req = {
             body: { query: "q".repeat(513) },
             user: { id: "user-1" },
@@ -727,20 +688,11 @@ describe("vibe search transport compatibility", () => {
         expect(res.body).toEqual({
             error: "Query must be at most 512 characters",
         });
-        expect(mockRedisXAdd).not.toHaveBeenCalled();
-        expect(mockBlockingBlPop).not.toHaveBeenCalled();
+        expect(mockProviderEmbedText).not.toHaveBeenCalled();
     });
 
     it("expands and reranks vibe search results when vocabulary matches exist", async () => {
-        mockBlockingBlPop.mockResolvedValueOnce({
-            key: "audio:text:embed:response:req-123",
-            element: JSON.stringify({
-                requestId: "req-123",
-                success: true,
-                embedding: [0.5, 0.25],
-                modelVersion: "laion-clap-music-v1",
-            }),
-        });
+        mockProviderEmbedText.mockResolvedValueOnce([0.5, 0.25]);
         mockGetVocabulary.mockReturnValueOnce({ id: "mock-vocab" });
         mockExpandQueryWithVocabulary.mockReturnValueOnce({
             embedding: [0.6, 0.3],

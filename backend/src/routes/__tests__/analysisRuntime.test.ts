@@ -64,12 +64,10 @@ jest.mock("../../utils/systemSettings", () => ({
 
 jest.mock("../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: {
-        recordFailure: jest.fn(),
         clearAllFailures: jest.fn(),
         clearFailure: jest.fn(),
         getFailures: jest.fn(),
         resetRetryCount: jest.fn(),
-        resolveByEntity: jest.fn(),
     },
 }));
 
@@ -85,7 +83,6 @@ jest.mock("../../services/embeddingSpaces", () => ({
 }));
 
 import router from "../analysis";
-import { requireInternalSecret } from "../../middleware/internalAuth";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { getSystemSettings } from "../../utils/systemSettings";
@@ -110,15 +107,12 @@ const mockRedisRPush = redisClient.rPush as jest.Mock;
 const mockRedisPublish = redisClient.publish as jest.Mock;
 
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
-const mockRecordFailure = enrichmentFailureService.recordFailure as jest.Mock;
 const mockClearAllFailures =
     enrichmentFailureService.clearAllFailures as jest.Mock;
 const mockClearFailure = enrichmentFailureService.clearFailure as jest.Mock;
 const mockGetFailures = enrichmentFailureService.getFailures as jest.Mock;
 const mockResetRetryCount =
     enrichmentFailureService.resetRetryCount as jest.Mock;
-const mockResolveByEntity =
-    enrichmentFailureService.resolveByEntity as jest.Mock;
 const mockCountEmbeddedLocalTracks = countEmbeddedLocalTracks as jest.Mock;
 
 function findRouteLayer(
@@ -130,8 +124,7 @@ function findRouteLayer(
         if (entry.route?.path === path && entry.route?.methods?.[method]) {
             return entry;
         }
-        // Recurse into nested routers (e.g. the analysisInternal machine
-        // callbacks mounted via router.use).
+        // Recurse into any nested route module.
         if (entry.handle?.stack) {
             const nested = findRouteLayer(entry.handle.stack, method, path);
             if (nested) return nested;
@@ -171,20 +164,6 @@ async function invokeRouteStack(
     }
 }
 
-// The internal vibe endpoints are guarded by the per-route
-// requireInternalSecret middleware. getHandler() returns only the final route
-// handler, so compose the real middleware in front of it to exercise the full
-// production chain (the handler runs only if the middleware calls next()).
-async function callInternal(handler: any, req: any, res: any) {
-    let passed = false;
-    requireInternalSecret(req, res, () => {
-        passed = true;
-    });
-    if (passed) {
-        await handler(req, res);
-    }
-}
-
 function createRes() {
     const res: any = {
         statusCode: 200,
@@ -217,12 +196,8 @@ describe("analysis routes runtime", () => {
     const getFeatures = getHandler("get", "/features");
     const getWorkers = getHandler("get", "/workers");
     const putWorkers = getHandler("put", "/workers");
-    const getClapWorkers = getHandler("get", "/clap-workers");
-    const putClapWorkers = getHandler("put", "/clap-workers");
-    const postVibeFailure = getHandler("post", "/vibe/failure");
     const postVibeStart = getHandler("post", "/vibe/start");
     const postVibeRetry = getHandler("post", "/vibe/retry");
-    const postVibeSuccess = getHandler("post", "/vibe/success");
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -244,17 +219,13 @@ describe("analysis routes runtime", () => {
 
         mockGetSystemSettings.mockResolvedValue({
             audioAnalyzerWorkers: 2,
-            clapWorkers: 2,
         });
-        mockRecordFailure.mockResolvedValue({});
         mockClearAllFailures.mockResolvedValue({});
         mockClearFailure.mockResolvedValue({});
         mockGetFailures.mockResolvedValue({ failures: [] });
         mockResetRetryCount.mockResolvedValue({});
-        mockResolveByEntity.mockResolvedValue({});
         mockCountEmbeddedLocalTracks.mockResolvedValue(0);
 
-        process.env.INTERNAL_API_SECRET = "test-secret";
         jest.spyOn(os, "cpus").mockReturnValue(new Array(8).fill({}) as any);
     });
 
@@ -586,99 +557,6 @@ describe("analysis routes runtime", () => {
         expect(okRes.statusCode).toBe(200);
     });
 
-    it("gets and updates CLAP worker settings", async () => {
-        mockGetSystemSettings.mockResolvedValue({ clapWorkers: 5 });
-        const getReq = {} as any;
-        const getRes = createRes();
-        await getClapWorkers(getReq, getRes);
-        expect(getRes.body).toEqual(
-            expect.objectContaining({
-                workers: 5,
-                cpuCores: 8,
-                recommended: 4,
-            }),
-        );
-
-        const badReq = { body: { workers: 9 } } as any;
-        const badRes = createRes();
-        await putClapWorkers(badReq, badRes);
-        expect(badRes.statusCode).toBe(400);
-
-        const okReq = { body: { workers: 2 } } as any;
-        const okRes = createRes();
-        await putClapWorkers(okReq, okRes);
-        expect(mockSystemSettingsUpdate).toHaveBeenCalledWith({
-            where: { id: "default" },
-            data: { clapWorkers: 2 },
-        });
-        expect(mockRedisPublish).toHaveBeenCalledWith(
-            "audio:clap:control",
-            JSON.stringify({ command: "set_workers", count: 2 }),
-        );
-        expect(okRes.statusCode).toBe(200);
-    });
-
-    it("validates and records vibe failure endpoint", async () => {
-        const forbiddenReq = {
-            headers: { "x-internal-secret": "wrong" },
-            body: {},
-        } as any;
-        const forbiddenRes = createRes();
-        await callInternal(postVibeFailure, forbiddenReq, forbiddenRes);
-        expect(forbiddenRes.statusCode).toBe(403);
-
-        const missingReq = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: {},
-        } as any;
-        const missingRes = createRes();
-        await callInternal(postVibeFailure, missingReq, missingRes);
-        expect(missingRes.statusCode).toBe(400);
-
-        const req = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: { trackId: "t1", trackName: "Track", errorMessage: "bad" },
-        } as any;
-        const res = createRes();
-        await callInternal(postVibeFailure, req, res);
-        expect(mockRecordFailure).toHaveBeenCalledWith(
-            expect.objectContaining({
-                entityType: "vibe",
-                entityId: "t1",
-                entityName: "Track",
-                errorMessage: "bad",
-            }),
-        );
-        expect(res.statusCode).toBe(200);
-    });
-
-    it("fails closed on internal vibe endpoints when INTERNAL_API_SECRET is unset", async () => {
-        delete process.env.INTERNAL_API_SECRET;
-
-        const failureReq = { headers: {}, body: { trackId: "t1" } } as any;
-        const failureRes = createRes();
-        await callInternal(postVibeFailure, failureReq, failureRes);
-        expect(failureRes.statusCode).toBe(403);
-        expect(mockRecordFailure).not.toHaveBeenCalled();
-
-        const successReq = { headers: {}, body: { trackId: "t1" } } as any;
-        const successRes = createRes();
-        await callInternal(postVibeSuccess, successReq, successRes);
-        expect(successRes.statusCode).toBe(403);
-        expect(mockResolveByEntity).not.toHaveBeenCalled();
-    });
-
-    it("rejects internal vibe endpoints when the secret does not match", async () => {
-        const req = {
-            headers: { "x-internal-secret": "not-the-secret" },
-            body: { trackId: "t1" },
-        } as any;
-        const res = createRes();
-        await callInternal(postVibeSuccess, req, res);
-        expect(res.statusCode).toBe(403);
-        expect(mockResolveByEntity).not.toHaveBeenCalled();
-    });
-
     it("queues vibe embedding jobs in force mode and clears failures", async () => {
         const pipeline = createPipeline();
         mockRedisMulti.mockReturnValue(pipeline);
@@ -773,33 +651,6 @@ describe("analysis routes runtime", () => {
         });
     });
 
-    it("validates and resolves vibe success endpoint", async () => {
-        const forbiddenReq = {
-            headers: { "x-internal-secret": "bad" },
-            body: {},
-        } as any;
-        const forbiddenRes = createRes();
-        await callInternal(postVibeSuccess, forbiddenReq, forbiddenRes);
-        expect(forbiddenRes.statusCode).toBe(403);
-
-        const missingReq = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: {},
-        } as any;
-        const missingRes = createRes();
-        await callInternal(postVibeSuccess, missingReq, missingRes);
-        expect(missingRes.statusCode).toBe(400);
-
-        const req = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: { trackId: "track-77" },
-        } as any;
-        const res = createRes();
-        await callInternal(postVibeSuccess, req, res);
-        expect(mockResolveByEntity).toHaveBeenCalledWith("vibe", "track-77");
-        expect(res.body).toEqual({ message: "Stale failures resolved" });
-    });
-
     it("returns 500 when start fails", async () => {
         mockTrackFindMany.mockRejectedValue(new Error("start failed"));
         const req = { user: { id: "admin" }, body: {} } as any;
@@ -887,50 +738,6 @@ describe("analysis routes runtime", () => {
         });
     });
 
-    it("returns 500 when getting CLAP worker configuration fails", async () => {
-        mockGetSystemSettings.mockRejectedValue(
-            new Error("clap workers read failed"),
-        );
-        const getReq = {} as any;
-        const getRes = createRes();
-
-        await getClapWorkers(getReq, getRes);
-
-        expect(getRes.statusCode).toBe(500);
-        expect(getRes.body).toEqual({
-            error: "Failed to get CLAP worker configuration",
-        });
-    });
-
-    it("returns 500 when updating CLAP worker configuration fails", async () => {
-        mockSystemSettingsUpdate.mockRejectedValue(
-            new Error("clap workers update failed"),
-        );
-        const req = { body: { workers: 2 } } as any;
-        const res = createRes();
-
-        await putClapWorkers(req, res);
-
-        expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({
-            error: "Failed to update CLAP worker configuration",
-        });
-    });
-
-    it("returns 500 when recording vibe failure catch branch is hit", async () => {
-        mockRecordFailure.mockRejectedValue(new Error("vibe failure failed"));
-        const req = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: { trackId: "t1", trackName: "Track", errorMessage: "bad" },
-        } as any;
-        const res = createRes();
-
-        await postVibeFailure(req, res);
-
-        expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to record failure" });
-    });
-
     it("returns 500 when starting vibe embedding catch branch is hit", async () => {
         mockTrackFindMany.mockRejectedValue(new Error("vibe start failed"));
         const req = { body: {} } as any;
@@ -953,17 +760,4 @@ describe("analysis routes runtime", () => {
         expect(res.body).toEqual({ error: "Failed to retry vibe failures" });
     });
 
-    it("returns 500 when resolving vibe success catch branch is hit", async () => {
-        mockResolveByEntity.mockRejectedValue(new Error("vibe success failed"));
-        const req = {
-            headers: { "x-internal-secret": "test-secret" },
-            body: { trackId: "track-77" },
-        } as any;
-        const res = createRes();
-
-        await postVibeSuccess(req, res);
-
-        expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to resolve failures" });
-    });
 });

@@ -213,6 +213,23 @@ async function loadProviderSpaceAfterConflict(
     return row;
 }
 
+/** Look up a provider tuple without registering an unknown embedding space. */
+export async function findRegisteredProviderEmbeddingSpace(
+    providerSpace: ProviderEmbeddingSpaceIdentity,
+): Promise<UsableEmbeddingSpace | null> {
+    const existing = await prisma.embeddingSpace.findUnique({
+        where: {
+            family_checkpointHash: {
+                family: providerSpace.family,
+                checkpointHash: providerSpace.checkpointHash,
+            },
+        },
+        select: providerSpaceSelect,
+    });
+    if (!existing) return null;
+    return resolveRegisteredProviderSpace(existing, providerSpace);
+}
+
 /** Resolve a provider tuple, registering an unseen tuple as migrating. */
 export async function resolveProviderEmbeddingSpace(
     providerSpace: ProviderEmbeddingSpaceIdentity,
@@ -269,7 +286,7 @@ export function clearVibeEmbeddingTargetSpaceId(): void {
     workerTargetSpaceId = null;
 }
 
-/** Return the resolved worker target, or the active space in legacy mode. */
+/** Return the resolved worker target, or the active space before resolution. */
 export async function getVibeEmbeddingTargetSpaceId(): Promise<string> {
     return workerTargetSpaceId ?? (await getActiveSpace()).id;
 }

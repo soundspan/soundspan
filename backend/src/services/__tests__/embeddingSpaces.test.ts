@@ -26,6 +26,7 @@ jest.mock("../../utils/logger", () => ({
 
 import {
     EmbeddingSpaceDimensionMismatchError,
+    findRegisteredProviderEmbeddingSpace,
     getActiveSpace,
     invalidateActiveSpaceCache,
     NoActiveEmbeddingSpaceError,
@@ -204,6 +205,24 @@ describe("provider embedding-space resolution", () => {
     };
 
     beforeEach(() => jest.clearAllMocks());
+
+    it("returns a registered provider space without creating one", async () => {
+        mockFindUnique.mockResolvedValue(registrySpace);
+
+        await expect(
+            findRegisteredProviderEmbeddingSpace(providerSpace),
+        ).resolves.toEqual(registrySpace);
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it("returns null for an unregistered provider without creating one", async () => {
+        mockFindUnique.mockResolvedValue(null);
+
+        await expect(
+            findRegisteredProviderEmbeddingSpace(providerSpace),
+        ).resolves.toBeNull();
+        expect(mockCreate).not.toHaveBeenCalled();
+    });
 
     it.each(["active", "migrating"] as const)(
         "uses a matching %s registry row",

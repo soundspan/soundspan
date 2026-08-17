@@ -10,7 +10,6 @@ import {
     missingActiveEmbeddingWhere,
 } from "../services/trackEmbeddings";
 import { getActiveSpace } from "../services/embeddingSpaces";
-import analysisInternalRoutes from "./analysisInternal";
 import os from "os";
 import {
     LOCAL_TRACK_WHERE,
@@ -632,123 +631,6 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
 
 /**
  * @openapi
- * /api/analysis/clap-workers:
- *   get:
- *     summary: Get CLAP analyzer worker configuration
- *     tags: [Analysis]
- *     security:
- *       - apiKeyAuth: []
- *     responses:
- *       200:
- *         description: Current CLAP worker count, CPU cores, and recommended configuration
- *       401:
- *         description: Not authenticated
- *       403:
- *         description: Admin access required
- */
-/**
- * GET /api/analysis/clap-workers
- * Get current CLAP analyzer worker configuration
- */
-router.get("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const settings = await getSystemSettings();
-        const cpuCores = os.cpus().length;
-        const currentWorkers = settings?.clapWorkers || 2;
-
-        const recommended = Math.max(1, Math.min(8, Math.floor(cpuCores / 2)));
-
-        res.json({
-            workers: currentWorkers,
-            cpuCores,
-            recommended,
-            description: `Using ${currentWorkers} of ${cpuCores} available CPU cores`,
-        });
-    } catch (error: any) {
-        logger.error("Get CLAP workers config error:", error);
-        res.status(500).json({
-            error: "Failed to get CLAP worker configuration",
-        });
-    }
-});
-
-/**
- * @openapi
- * /api/analysis/clap-workers:
- *   put:
- *     summary: Update CLAP analyzer worker count
- *     tags: [Analysis]
- *     security:
- *       - apiKeyAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [workers]
- *             properties:
- *               workers:
- *                 type: integer
- *                 minimum: 1
- *                 maximum: 8
- *     responses:
- *       200:
- *         description: CLAP worker count updated successfully
- *       400:
- *         description: CLAP workers must be a number between 1 and 8
- *       401:
- *         description: Not authenticated
- *       403:
- *         description: Admin access required
- */
-/**
- * PUT /api/analysis/clap-workers
- * Update CLAP analyzer worker count
- */
-router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const { workers } = req.body;
-
-        if (typeof workers !== "number" || workers < 1 || workers > 8) {
-            return res.status(400).json({
-                error: "CLAP workers must be a number between 1 and 8",
-            });
-        }
-
-        // Update SystemSettings
-        await prisma.systemSettings.update({
-            where: { id: "default" },
-            data: { clapWorkers: workers },
-        });
-
-        // Publish control signal to Redis for CLAP analyzer to pick up
-        await redisClient.publish(
-            "audio:clap:control",
-            JSON.stringify({ command: "set_workers", count: workers }),
-        );
-
-        const cpuCores = os.cpus().length;
-        const recommended = Math.max(1, Math.min(8, Math.floor(cpuCores / 2)));
-
-        logger.info(`CLAP analyzer workers updated to ${workers}`);
-
-        res.json({
-            workers,
-            cpuCores,
-            recommended,
-            description: `Using ${workers} of ${cpuCores} available CPU cores`,
-        });
-    } catch (error: any) {
-        logger.error("Update CLAP workers config error:", error);
-        res.status(500).json({
-            error: "Failed to update CLAP worker configuration",
-        });
-    }
-});
-
-/**
- * @openapi
  * /api/analysis/vibe/start:
  *   post:
  *     summary: Queue tracks for vibe embedding generation
@@ -844,7 +726,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        // Queue tracks for CLAP embedding
+        // Queue tracks for provider-backed vibe embedding.
         const pipeline = redisClient.multi();
         for (const track of tracks) {
             pipeline.rPush(
@@ -928,10 +810,5 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
         res.status(500).json({ error: "Failed to retry vibe failures" });
     }
 });
-
-// Machine callbacks from the CLAP analyzer (/vibe/failure, /vibe/success)
-// live in a separate router that index.ts keeps mounted even when the
-// audioAnalysis feature flag is off.
-router.use(analysisInternalRoutes);
 
 export default router;

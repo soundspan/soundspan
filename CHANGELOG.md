@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- During a vibe embedding-space migration, text search now embeds and queries
+  in the provider's registered space, returning partial results that grow with
+  the backfill instead of using the removed legacy analyzer stream.
 - The AIO image now embeds the DCLAP ONNX provider as its vibe embedding
   engine, wired to the backend through `VIBE_PROVIDER_URL`.
 - Enabling the Helm DCLAP provider now wires the backend to it automatically
@@ -45,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed the backend's CLAP Redis-stream text-embedding integration and its
+  analyzer-only callbacks, worker-control configuration, and detection signals.
 - Removed the torch CLAP stack and 2.35 GB checkpoint download from the AIO
   image, substantially reducing its size; existing libraries migrate
   automatically through the backend's blue/green embedding-space migration.
