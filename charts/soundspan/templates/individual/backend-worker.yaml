@@ -110,6 +110,7 @@ spec:
             "METRICS_PUBLIC" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
+            "VIBE_PROVIDER_URL" true
             "ALLOWED_ORIGINS" true
             "LOG_LEVEL" true
             "DOCS_PUBLIC" true
@@ -325,6 +326,13 @@ spec:
             {{- else }}
             - name: YTMUSIC_STREAMER_URL
               value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "VIBE_PROVIDER_URL" }}
+            - name: VIBE_PROVIDER_URL
+              value: {{ index $backendWorkerEnv "VIBE_PROVIDER_URL" | quote }}
+            {{- else if .Values.vibeProviderDclap.enabled }}
+            - name: VIBE_PROVIDER_URL
+              value: {{ printf "http://%s-vibe-provider-dclap:%v" (include "soundspan.fullname" .) .Values.vibeProviderDclap.port | quote }}
             {{- end }}
             {{- if hasKey $backendWorkerEnv "ALLOWED_ORIGINS" }}
             - name: ALLOWED_ORIGINS

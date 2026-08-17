@@ -11,7 +11,7 @@ const TARGET_IMAGE_SECTIONS = [
     "tidalSidecar",
     "ytmusicStreamer",
     "audioAnalyzer",
-    "audioAnalyzerClap",
+    "vibeProviderDclap",
 ];
 
 function fail(message) {

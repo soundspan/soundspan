@@ -64,6 +64,43 @@ assert_deployment_image() {
   fi
 }
 
+assert_deployment_env_value() {
+  local deployment_name="$1"
+  local env_name="$2"
+  local env_value="$3"
+  local manifest_file="$4"
+
+  if ! DEPLOYMENT_NAME="$deployment_name" ENV_NAME="$env_name" ENV_VALUE="$env_value" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          my @keys = $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\b/sg;
+          exit 0 if scalar @keys == 1
+              && $doc =~ /name:\s+\Q$ENV{ENV_NAME}\E\s+value:\s+"\Q$ENV{ENV_VALUE}\E"/s;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${deployment_name} missing unique ${env_name}=${env_value}" >&2
+    exit 1
+  fi
+}
+
+assert_deployment_env_absent() {
+  local deployment_name="$1"
+  local env_name="$2"
+  local manifest_file="$3"
+
+  if ! DEPLOYMENT_NAME="$deployment_name" ENV_NAME="$env_name" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc !~ /name:\s+\Q$ENV{ENV_NAME}\E\b/;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${deployment_name} unexpectedly renders ${env_name}" >&2
+    exit 1
+  fi
+}
+
 assert_oidc_env() {
   local deployment_name="$1"
   local manifest_file="$2"
@@ -124,13 +161,16 @@ tmp_individual_reserved_labels="$(mktemp)"
 tmp_individual_oidc="$(mktemp)"
 tmp_global_env="$(mktemp)"
 tmp_sidecars="$(mktemp)"
-tmp_dclap="$(mktemp)"
+tmp_dclap_default="$(mktemp)"
+tmp_dclap_aio="$(mktemp)"
+tmp_dclap_enabled="$(mktemp)"
+tmp_dclap_override="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
 tmp_metrics="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -328,7 +368,7 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set tidalSidecar.enabled=true \
   --set ytmusicStreamer.enabled=true \
   --set audioAnalyzer.enabled=true \
-  --set audioAnalyzerClap.enabled=true \
+  --set vibeProviderDclap.enabled=true \
   --set-string 'global.labels.app\.kubernetes\.io/name=user-name' \
   --set-string 'global.labels.app\.kubernetes\.io/instance=user-instance' \
   --set-string 'global.labels.app\.kubernetes\.io/component=user-component' \
@@ -342,7 +382,6 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set-string secrets.postgresPassword='p@ss:w/rd' \
   --set backendWorker.enabled=true \
   --set audioAnalyzer.enabled=true \
-  --set audioAnalyzerClap.enabled=true \
   >"$tmp_individual_component_database"
 
 if ! line_match '^  POSTGRES_PASSWORD: "p@ss:w/rd"$' "$tmp_individual_component_database"; then
@@ -357,8 +396,7 @@ POSTGRES_USER='user@tenant' \
   "$tmp_individual_component_database" \
   "${RELEASE_NAME}-backend" \
   "${RELEASE_NAME}-backend-worker" \
-  "${RELEASE_NAME}-audio-analyzer" \
-  "${RELEASE_NAME}-audio-analyzer-clap"
+  "${RELEASE_NAME}-audio-analyzer"
 
 echo "[CHECK] preserve external DATABASE_URL across individual workloads"
 external_database_url='postgresql://external-user:literal%2Fpassword@database.example.com:5432/soundspan?sslmode=require'
@@ -368,7 +406,6 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set secrets.existingSecret=core-only-secret \
   --set backendWorker.enabled=true \
   --set audioAnalyzer.enabled=true \
-  --set audioAnalyzerClap.enabled=true \
   >"$tmp_individual_external_database"
 
 EXPECTED_DATABASE_URL="$external_database_url" assert_database_urls \
@@ -376,8 +413,7 @@ EXPECTED_DATABASE_URL="$external_database_url" assert_database_urls \
   "$tmp_individual_external_database" \
   "${RELEASE_NAME}-backend" \
   "${RELEASE_NAME}-backend-worker" \
-  "${RELEASE_NAME}-audio-analyzer" \
-  "${RELEASE_NAME}-audio-analyzer-clap"
+  "${RELEASE_NAME}-audio-analyzer"
 
 digest_aio="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 digest_backend="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -386,7 +422,6 @@ digest_frontend="sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 digest_tidal="sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 digest_ytmusic="sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 digest_analyzer="sha256:1111111111111111111111111111111111111111111111111111111111111111"
-digest_clap="sha256:2222222222222222222222222222222222222222222222222222222222222222"
 digest_dclap="sha256:3333333333333333333333333333333333333333333333333333333333333333"
 
 echo "[CHECK] render AIO application image by digest"
@@ -406,7 +441,6 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set tidalSidecar.enabled=true \
   --set ytmusicStreamer.enabled=true \
   --set audioAnalyzer.enabled=true \
-  --set audioAnalyzerClap.enabled=true \
   --set vibeProviderDclap.enabled=true \
   --set backend.image.digest="$digest_backend" \
   --set backendWorker.image.digest="$digest_worker" \
@@ -414,7 +448,6 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set tidalSidecar.image.digest="$digest_tidal" \
   --set ytmusicStreamer.image.digest="$digest_ytmusic" \
   --set audioAnalyzer.image.digest="$digest_analyzer" \
-  --set audioAnalyzerClap.image.digest="$digest_clap" \
   --set vibeProviderDclap.image.digest="$digest_dclap" \
   >"$tmp_individual_digests"
 
@@ -424,8 +457,12 @@ assert_deployment_image "frontend Deployment" "$tmp_individual_digests" "${RELEA
 assert_deployment_image "TIDAL Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-tidal" "ghcr.io/soundspan/soundspan-tidal-downloader@${digest_tidal}"
 assert_deployment_image "YT Music Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-ytmusic" "ghcr.io/soundspan/soundspan-ytmusic-streamer@${digest_ytmusic}"
 assert_deployment_image "audio analyzer Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-audio-analyzer" "ghcr.io/soundspan/soundspan-audio-analyzer@${digest_analyzer}"
-assert_deployment_image "CLAP analyzer Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-audio-analyzer-clap" "ghcr.io/soundspan/soundspan-audio-analyzer-clap@${digest_clap}"
 assert_deployment_image "DCLAP provider Deployment" "$tmp_individual_digests" "${RELEASE_NAME}-vibe-provider-dclap" "ghcr.io/soundspan/soundspan-vibe-provider-dclap@${digest_dclap}"
+legacy_clap_name='audio-analyzer''-clap'
+if line_match "$legacy_clap_name" "$tmp_individual_digests"; then
+  echo "[ERROR] individual render references the removed CLAP analyzer" >&2
+  exit 1
+fi
 
 echo "[CHECK] reject malformed application image digests"
 if helm template "$RELEASE_NAME" "$CHART_PATH" --set aio.image.digest=sha256:not-a-digest >/dev/null 2>&1; then
@@ -488,28 +525,32 @@ assert_service_selectors_isolated "individual with HTTP sidecars" "$tmp_sidecars
 echo "[CHECK] render default-off DCLAP provider in individual mode"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set deploymentMode=individual \
-  >"$tmp_dclap"
-if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap"; then
+  >"$tmp_dclap_default"
+if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap_default"; then
   echo "[ERROR] DCLAP provider must be disabled by default" >&2
   exit 1
 fi
+assert_deployment_env_absent "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "$tmp_dclap_default"
 
 echo "[CHECK] keep the DCLAP provider individual-mode-only"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set vibeProviderDclap.enabled=true \
-  >"$tmp_dclap"
-if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap"; then
+  >"$tmp_dclap_aio"
+if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap_aio"; then
   echo "[ERROR] DCLAP provider must not render in AIO mode" >&2
   exit 1
 fi
+assert_deployment_env_absent "$RELEASE_NAME" "VIBE_PROVIDER_URL" "$tmp_dclap_aio"
 
-echo "[CHECK] render enabled DCLAP provider without data-plane credentials"
+echo "[CHECK] render enabled DCLAP provider with automatic backend wiring"
 helm template "$RELEASE_NAME" "$CHART_PATH" \
   --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
   --set vibeProviderDclap.enabled=true \
+  --set vibeProviderDclap.port=8199 \
   --set vibeProviderDclap.replicas=2 \
   --set-string vibeProviderDclap.env.MODEL_IDLE_TIMEOUT=600 \
-  >"$tmp_dclap"
+  >"$tmp_dclap_enabled"
 
 for kind in Deployment Service; do
   if ! RESOURCE_KIND="$kind" RESOURCE_NAME="${RELEASE_NAME}-vibe-provider-dclap" perl -0777 -ne '
@@ -517,11 +558,15 @@ for kind in Deployment Service; do
           next unless $doc =~ /^kind: \Q$ENV{RESOURCE_KIND}\E$/m;
           exit 0 if $doc =~ /^  name: \Q$ENV{RESOURCE_NAME}\E$/m;
       }
-      exit 1' "$tmp_dclap"; then
+      exit 1' "$tmp_dclap_enabled"; then
     echo "[ERROR] enabled DCLAP provider missing ${kind}" >&2
     exit 1
   fi
 done
+
+dclap_url="http://${RELEASE_NAME}-vibe-provider-dclap:8199"
+assert_deployment_env_value "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "$dclap_url" "$tmp_dclap_enabled"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_PROVIDER_URL" "$dclap_url" "$tmp_dclap_enabled"
 
 if ! DEPLOYMENT_NAME="${RELEASE_NAME}-vibe-provider-dclap" SECRET_NAME="$RELEASE_NAME" perl -0777 -ne '
     for my $doc (split /^---/m, $_) {
@@ -529,10 +574,10 @@ if ! DEPLOYMENT_NAME="${RELEASE_NAME}-vibe-provider-dclap" SECRET_NAME="$RELEASE
         next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
         exit 1 if $doc =~ /name:\s+(?:DATABASE_URL|REDIS_URL|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB)\b/;
         exit 0 if $doc =~ /^  replicas:\s+2$/m
-            && $doc =~ /containerPort:\s+8091\b/
+            && $doc =~ /containerPort:\s+8199\b/
             && $doc =~ /tcpSocket:\s+port:\s+http/s
             && $doc =~ /name:\s+MUSIC_PATH\s+value:\s+\/music/s
-            && $doc =~ /name:\s+DCLAP_HTTP_PORT\s+value:\s+"8091"/s
+            && $doc =~ /name:\s+DCLAP_HTTP_PORT\s+value:\s+"8199"/s
             && $doc =~ /name:\s+DCLAP_ONNX_INTRA_OP_THREADS\s+value:\s+"1"/s
             && $doc =~ /name:\s+MODEL_IDLE_TIMEOUT\s+value:\s+"600"/s
             && $doc =~ /mountPath:\s+\/music\s+readOnly:\s+true/s
@@ -540,11 +585,19 @@ if ! DEPLOYMENT_NAME="${RELEASE_NAME}-vibe-provider-dclap" SECRET_NAME="$RELEASE
             && $doc =~ /requests:\s+memory:\s+1Gi/s
             && $doc =~ /name:\s+INTERNAL_API_SECRET\s+valueFrom:\s+secretKeyRef:\s+name:\s+\Q$ENV{SECRET_NAME}\E\s+key:\s+INTERNAL_API_SECRET/s;
     }
-    exit 1' "$tmp_dclap"; then
+    exit 1' "$tmp_dclap_enabled"; then
   echo "[ERROR] DCLAP provider wiring, overrides, probes, or credential isolation are invalid" >&2
   exit 1
 fi
-assert_service_selectors_isolated "individual with DCLAP provider" "$tmp_dclap"
+assert_service_selectors_isolated "individual with DCLAP provider" "$tmp_dclap_enabled"
+
+echo "[CHECK] preserve explicit backend VIBE_PROVIDER_URL override"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set vibeProviderDclap.enabled=true \
+  --set-string backend.env.VIBE_PROVIDER_URL=https://vibe-provider.example \
+  >"$tmp_dclap_override"
+assert_deployment_env_value "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "https://vibe-provider.example" "$tmp_dclap_override"
 
 # Secret generation (F22): the stable-lookup template must still render a
 # complete Secret on first install / dry-run (where `lookup` returns nil and the

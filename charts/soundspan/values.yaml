@@ -99,8 +99,8 @@ aio:
     preStopSleepSeconds: 8
 
   # -- Resource limits for the AIO container. The AIO image bundles the backend,
-  #    frontend, Postgres, Redis, and (by default) the Essentia + CLAP analyzers
-  #    in one container; the analyzer models alone peak well above 4Gi. Lower
+  #    frontend, Postgres, Redis, and built-in analysis workloads in one
+  #    container; the analyzer models alone peak well above 4Gi. Lower
   #    limits.memory only if you disable analysis (config.features.audioAnalysis).
   resources:
     requests:
@@ -564,67 +564,13 @@ audioAnalyzer:
     count: 1
     runtimeClassName: ""
 
-audioAnalyzerClap:
-  enabled: false
-  replicas: 1
-  image:
-    repository: ghcr.io/soundspan/soundspan-audio-analyzer-clap
-    tag: 2.2.0
-    # -- Immutable sha256 digest. When set, takes precedence over tag.
-    digest: ""
-    pullPolicy: Always
-  resources:
-    requests:
-      memory: 1Gi
-    limits:
-      memory: 5Gi
-  # Exec liveness/readiness: the analyzer is a Redis queue-consumer loop with no
-  # HTTP server, so we check the worker process is alive (mirrors the compose
-  # healthcheck). Set either probe to null to disable.
-  livenessProbe:
-    exec:
-      command: ["pgrep", "-f", "python.*analyzer"]
-    initialDelaySeconds: 60
-    periodSeconds: 30
-    timeoutSeconds: 10
-    failureThreshold: 3
-  readinessProbe:
-    exec:
-      command: ["pgrep", "-f", "python.*analyzer"]
-    initialDelaySeconds: 15
-    periodSeconds: 30
-    timeoutSeconds: 10
-    failureThreshold: 3
-  env:
-    SLEEP_INTERVAL: "5"
-    CLAP_REDIS_SOCKET_TIMEOUT: "10"
-    NUM_WORKERS: "2"
-    THREADS_PER_WORKER: "1"
-    MODEL_IDLE_TIMEOUT: "300"
-  # -- Additional environment variable sources for CLAP analyzer container.
-  # Example:
-  # envFrom:
-  #   - secretRef:
-  #       name: soundspan-audio-analyzer-clap-extra-env
-  envFrom: []
-  # Optional service-specific scheduling overrides (fallback to global values when empty)
-  nodeSelector: {}
-  tolerations: []
-  # Supports full Kubernetes affinity schema, including:
-  # - nodeAffinity
-  # - podAffinity
-  # - podAntiAffinity
-  affinity: {}
-  gpu:
-    enabled: false
-    count: 1
-    runtimeClassName: ""
-
 # =============================================================================
 # VIBE PROVIDERS (optional, individual mode only)
 # =============================================================================
 
-# -- Disabled by default; Gate 2 / migration target for DCLAP embeddings.
+# -- The vibe embedding provider. Disabled by default to preserve the previous
+#    analyzer's opt-in posture. Enable it to activate vibe similarity features;
+#    the chart then wires backend workloads to the provider automatically.
 vibeProviderDclap:
   enabled: false
   replicas: 1
@@ -818,12 +764,10 @@ config:
   #    AUTO_PLAYLISTS_ENABLED / FEDERATION_ENABLED on the backend,
   #    backend-worker, and AIO workloads.
   features:
-    # -- Backend queueing/consumption of audio analysis work (Essentia + CLAP),
-    #    mood-bucket worker, /api/analysis and /api/vibe routes.
-    #    Note: the analyzers' Deployments are still controlled by
-    #    audioAnalyzer.enabled / audioAnalyzerClap.enabled; setting this false
-    #    stops the backend from queueing analysis work, so the analyzer
-    #    sidecars should also be disabled.
+    # -- Backend queueing/consumption of audio analysis work, mood-bucket
+    #    worker, /api/analysis and /api/vibe routes. The Essentia analyzer
+    #    Deployment remains controlled by audioAnalyzer.enabled. Vibe embedding
+    #    is provided by vibeProviderDclap when that component is enabled.
     audioAnalysis: true
     # -- Discover Weekly cron/processor, /api/discover and /api/recommendations
     #    routes, and the discovery auto-download lifecycle.

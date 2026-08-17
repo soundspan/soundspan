@@ -65,15 +65,16 @@ Images are published to GHCR.
 | Backend Worker (individual mode) | `ghcr.io/soundspan/soundspan-backend-worker:latest`      | —    |
 | Frontend                         | `ghcr.io/soundspan/soundspan-frontend:latest`            | 3030 |
 | Audio Analyzer                   | `ghcr.io/soundspan/soundspan-audio-analyzer:latest`      | —    |
-| Audio Analyzer CLAP              | `ghcr.io/soundspan/soundspan-audio-analyzer-clap:latest` | —    |
-| DCLAP Vibe Provider              | `ghcr.io/soundspan/soundspan-vibe-provider-dclap:latest` | 8091 |
+| Vibe Embedding Provider (DCLAP)  | `ghcr.io/soundspan/soundspan-vibe-provider-dclap:latest` | 8091 |
 | TIDAL Sidecar                    | `ghcr.io/soundspan/soundspan-tidal-downloader:latest`    | 8585 |
 | YT Music Streamer                | `ghcr.io/soundspan/soundspan-ytmusic-streamer:latest`    | 8586 |
 
 Notes:
 
 - The backend worker image is only used in `deploymentMode: individual`.
-- The default-off DCLAP provider is only used in `deploymentMode: individual`.
+- The DCLAP provider is the individual-mode vibe embedding engine. It remains
+  default-off; set `vibeProviderDclap.enabled=true` to enable it and automatic
+  backend wiring.
 - AIO mode still uses the single `ghcr.io/soundspan/soundspan` image.
 
 ## Storage Class Guidance (RWX vs RWO)
@@ -125,8 +126,7 @@ non-root.
 | TIDAL Sidecar                    | Yes          | `GET /health`                                                                      |
 | YT Music Streamer                | Yes          | `GET /health`                                                                      |
 | Audio Analyzer                   | No           | Process check                                                                      |
-| Audio Analyzer CLAP              | No           | Import check                                                                       |
-| DCLAP Vibe Provider              | No           | TCP socket on `:8091` (`/health` requires internal authentication)                 |
+| Vibe Embedding Provider (DCLAP)  | No           | TCP socket on `:8091` (`/health` requires internal authentication)                 |
 | AIO                              | Yes          | `GET /` on `:3030`                                                                 |
 
 ## Prometheus Scraping
@@ -171,7 +171,7 @@ and process resources.
 | TIDAL Sidecar       | 100m                    | 2000m                 | 128Mi          | 512Mi        |
 | YT Music Streamer   | 100m                    | 1000m                 | 128Mi          | 512Mi        |
 | Audio Analyzer      | 500m                    | 4000m                 | 256Mi          | 1536Mi       |
-| Audio Analyzer CLAP | 500m                    | 4000m                 | 1Gi            | 5Gi          |
+| DCLAP Vibe Provider | —                       | —                     | 1Gi            | 2560Mi       |
 | AIO (all-in-one)    | —                       | —                     | 2Gi            | 8Gi          |
 
 Treat these as baseline estimates, then tune per library size and workload. The

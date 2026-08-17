@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The AIO image now embeds the DCLAP ONNX provider as its vibe embedding
   engine, wired to the backend through `VIBE_PROVIDER_URL`.
+- Enabling the Helm DCLAP provider now wires the backend to it automatically
+  through `VIBE_PROVIDER_URL`. It replaces the removed torch analyzer while
+  keeping the same opt-in default.
 - Federation embedding sync now verifies the JSON-encoded
   `X-Soundspan-Embedding-Space` response header before storing peer vectors,
   while preserving strict catalog response bodies for released consumers.
@@ -47,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the torch CLAP stack and 2.35 GB checkpoint download from the AIO
   image, substantially reducing its size; existing libraries migrate
   automatically through the backend's blue/green embedding-space migration.
+- Removed the `audioAnalyzerClap` Helm component, so the multi-GB torch image is
+  no longer deployed. Libraries with the DCLAP provider enabled migrate
+  automatically.
 
 ### Fixed
 

@@ -33,7 +33,7 @@ const RELEASE_IMAGE_SECTIONS = [
     "tidalSidecar",
     "ytmusicStreamer",
     "audioAnalyzer",
-    "audioAnalyzerClap",
+    "vibeProviderDclap",
 ];
 
 function fail(message) {

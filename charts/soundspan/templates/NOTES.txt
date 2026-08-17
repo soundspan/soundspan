@@ -32,9 +32,6 @@ Individual mode — each service runs in its own pod:
 {{- if .Values.audioAnalyzer.enabled }}
   • Analyzer:   {{ $fullName }}-audio-analyzer
 {{- end }}
-{{- if .Values.audioAnalyzerClap.enabled }}
-  • CLAP:       {{ $fullName }}-audio-analyzer-clap
-{{- end }}
 {{- if .Values.vibeProviderDclap.enabled }}
   • DCLAP:      {{ $fullName }}-vibe-provider-dclap
 {{- end }}

@@ -5,6 +5,18 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## 2.3.0
+
+- **Helm: replace the torch CLAP analyzer with DCLAP.** A Helm upgrade removes
+  the torch analyzer Deployment. Operators who previously set
+  `audioAnalyzerClap.enabled=true` should set
+  `vibeProviderDclap.enabled=true` instead. The chart wires the backend and an
+  enabled backend worker automatically, and the library re-embeds itself
+  through the backend's blue/green space migration. All
+  `audioAnalyzerClap.*` values are dead and should be deleted.
+
+---
+
 ## ⚠️ Breaking: frontend image runtime UID changed from 1001 to 1000
 
 **Who this affects:** operators who bind-mount or persist frontend paths that

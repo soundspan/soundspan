@@ -337,32 +337,36 @@ Notes:
 ```yaml
 audioAnalyzer:
   enabled: true
-
-audioAnalyzerClap:
-  enabled: true
 ```
 
-> Unlike the sidecars above, these analyzer deployments are only used in Individual mode.
+> Unlike the sidecars above, this analyzer Deployment is only used in Individual mode.
 > In AIO mode, audio analysis is built into the single AIO container.
 
-### DCLAP Vibe Provider (Individual Mode Only)
+### Vibe Similarity with DCLAP (Individual Mode Only)
 
-The DCLAP provider is shipped but disabled by default. It is the Gate 2
-migration target for opt-in DCLAP embeddings.
+The DCLAP provider is the vibe embedding engine. It remains disabled by default,
+matching the opt-in posture of the analyzer it replaces. Enable it to activate
+vibe similarity features:
 
 ```yaml
 vibeProviderDclap:
   enabled: true
-
-backend:
-  env:
-    VIBE_PROVIDER_URL: http://soundspan-vibe-provider-dclap:8091
 ```
 
-Replace `soundspan` in the service hostname when using a different Helm release
-name. If `backendWorker.enabled=true`, set the same `VIBE_PROVIDER_URL` under
-`backendWorker.env` so worker-owned embedding jobs use the provider. The provider
-mounts the shared music volume read-only and receives only
+The chart automatically sets `VIBE_PROVIDER_URL` on the backend and on an
+enabled backend worker. The generated URL uses the Helm release name and
+`vibeProviderDclap.port`. Set a component env value only when routing through a
+different provider endpoint:
+
+```yaml
+backend:
+  env:
+    VIBE_PROVIDER_URL: https://vibe-provider.example
+```
+
+An explicit `backend.env.VIBE_PROVIDER_URL` or
+`backendWorker.env.VIBE_PROVIDER_URL` takes precedence over the generated URL.
+The provider mounts the shared music volume read-only and receives only
 `INTERNAL_API_SECRET` from the chart Secret; it does not receive PostgreSQL or
 Redis credentials.
 
@@ -375,7 +379,7 @@ Existing ML/recommendation flags default to `true`. Federation defaults to
 ```yaml
 config:
   features:
-    audioAnalysis: true   # audio analysis queueing (Essentia + CLAP), mood buckets, /api/analysis, /api/vibe
+    audioAnalysis: true   # audio analysis queueing, mood buckets, /api/analysis, /api/vibe
     discovery: true       # Discover Weekly cron/processor, /api/discover, /api/recommendations
     autoPlaylists: true   # Made For You mixes, /api/mixes
     federation: false     # scoped peer credentials and /api/federation host API
@@ -388,13 +392,14 @@ routes (they return `404` with `code: FEATURE_DISABLED`) and skips the
 matching background workers.
 
 > `config.features.audioAnalysis` only controls the backend side (queueing and
-> consumption of analysis work). The analyzer Deployments are still controlled
-> by `audioAnalyzer.enabled` / `audioAnalyzerClap.enabled` — when setting
-> `config.features.audioAnalysis=false`, also disable the analyzer sidecars
-> since no new work will be queued for them.
+> consumption of analysis work). The Essentia analyzer Deployment is controlled
+> by `audioAnalyzer.enabled`, and vibe embeddings are controlled by
+> `vibeProviderDclap.enabled`. When setting
+> `config.features.audioAnalysis=false`, also disable those components since no
+> new work is queued for them.
 >
-> In AIO mode the analyzers run inside the all-in-one container and are not
-> controlled by `audioAnalyzer.enabled` / `audioAnalyzerClap.enabled`; with
+> In AIO mode analysis runs inside the all-in-one container and is not
+> controlled by `audioAnalyzer.enabled` or `vibeProviderDclap.enabled`; with
 > `config.features.audioAnalysis=false` they stay up and drain any leftover
 > queued work. The analyzer machine callbacks (`/api/analysis/vibe/failure`,
 > `/api/analysis/vibe/success`) remain mounted even when the flag is off so
@@ -475,11 +480,6 @@ audioAnalyzer:
     - secretRef:
         name: soundspan-audio-analyzer-extra-env
 
-audioAnalyzerClap:
-  envFrom:
-    - secretRef:
-        name: soundspan-audio-analyzer-clap-extra-env
-
 vibeProviderDclap:
   envFrom:
     - secretRef:
@@ -532,7 +532,6 @@ This applies to:
 - `backendWorker.env`
 - `frontend.env`
 - `audioAnalyzer.env`
-- `audioAnalyzerClap.env`
 - `vibeProviderDclap.env`
 - `tidalSidecar.env`
 - `ytmusicStreamer.env`
@@ -659,11 +658,6 @@ audioAnalyzer:
     count: 1
     runtimeClassName: ""
 
-audioAnalyzerClap:
-  gpu:
-    enabled: true
-    count: 1
-    runtimeClassName: ""
 ```
 
 ## All Values
