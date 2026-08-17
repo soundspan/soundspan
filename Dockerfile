@@ -130,8 +130,8 @@ WORKDIR /app/audio-analyzer-clap
 # above from the merged requirements-aio.lock — jointly resolved with the Essentia
 # analyzer deps into this one shared Python 3.11 site-packages (roadmap F50).
 
-# Copy CLAP analyzer script
-COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
+# Copy CLAP analyzer script and its provider HTTP module
+COPY services/audio-analyzer-clap/analyzer.py services/audio-analyzer-clap/http_server.py /app/audio-analyzer-clap/
 
 # Pre-download CLAP model (~2.35 GB / 2,352,471,003 bytes) during build to avoid runtime download
 # The analyzer expects the model at /app/models/music_audioset_epoch_15_esc_90.14.pt

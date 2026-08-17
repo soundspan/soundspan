@@ -62,3 +62,26 @@ def test_redis_floor_is_satisfied_by_all_runtime_locks() -> None:
 
     assert service_pin >= redis_floor
     assert aio_pin >= redis_floor
+
+
+def test_http_runtime_lock_satisfies_manifest_floors() -> None:
+    """Both CLAP image locks must include the HTTP runtime dependencies."""
+    service_root = Path(__file__).resolve().parents[1]
+    repository_root = service_root.parents[1]
+    manifest = (service_root / "requirements.txt").read_text(encoding="utf-8")
+    locks = (
+        (service_root / "requirements.lock").read_text(encoding="utf-8"),
+        (repository_root / "requirements-aio.lock").read_text(encoding="utf-8"),
+    )
+
+    for distribution in ("fastapi", "uvicorn"):
+        floor = _version(
+            manifest,
+            rf"^{distribution}>=(\d+)\.(\d+)\.(\d+)$",
+        )
+        for lock in locks:
+            locked = _version(
+                lock,
+                rf"^{distribution}==(\d+)\.(\d+)\.(\d+) \\$",
+            )
+            assert locked >= floor

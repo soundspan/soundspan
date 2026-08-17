@@ -93,6 +93,7 @@ REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(
 NUM_WORKERS = get_int_env("NUM_WORKERS", 2)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:3006")
 MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
+CLAP_HTTP_PORT = get_int_env("CLAP_HTTP_PORT", 8091)
 IDLE_POLL_SECONDS = 5
 ACTIVE_SPACE_CACHE_TTL_SECONDS = 300
 
@@ -108,6 +109,16 @@ CONTROL_CHANNEL = "audio:clap:control"
 
 # Model version identifier
 MODEL_VERSION = "laion-clap-music-v1"
+EMBEDDING_SPACE_FAMILY = "clap-music-audioset"
+EMBEDDING_CHECKPOINT_HASH = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd"
+EMBEDDING_DIM = 512
+EMBEDDING_PREPROCESSING = {
+    "sampleRateHz": 48000,
+    "mono": True,
+    "maxDurationSeconds": 60,
+    "window": "middle",
+    "loader": "librosa",
+}
 
 # Audio processing: extract middle segment for consistent, efficient embedding
 # 60 seconds captures the "vibe" without intros/outros and reduces memory usage
@@ -173,6 +184,9 @@ def _resolve_music_path(file_path: str) -> str | None:
     except (OSError, ValueError):
         return None
     return resolved_path
+
+
+resolve_music_path = _resolve_music_path
 
 
 class CLAPAnalyzer:
@@ -1097,6 +1111,18 @@ def _start_threads(
     control_thread.start()
     threads.append(control_thread)
     logger.info("Started control handler thread")
+
+    from http_server import run_http_server
+
+    http_thread = threading.Thread(
+        target=run_http_server,
+        args=(analyzer, stop_event),
+        name="ClapHttpServer",
+        daemon=True,
+    )
+    http_thread.start()
+    threads.append(http_thread)
+    logger.info(f"Started CLAP HTTP provider thread on port {CLAP_HTTP_PORT}")
     return threads
 
 
@@ -1112,11 +1138,15 @@ def _log_startup_configuration():
     logger.info(f"  Sleep interval: {SLEEP_INTERVAL}s")
     logger.info(f"  Redis socket timeout: {REDIS_SOCKET_TIMEOUT}s")
     logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
+    logger.info(f"  HTTP port: {CLAP_HTTP_PORT}")
     logger.info("=" * 60)
 
 
 def main():
     """Start and supervise the CLAP analyzer service until shutdown."""
+    # Keep the script entrypoint and the HTTP module on one analyzer module
+    # instance when this file is launched as ``python analyzer.py``.
+    sys.modules["analyzer"] = sys.modules[__name__]
     _log_startup_configuration()
     analyzer = CLAPAnalyzer()
     analyzer.load_model()

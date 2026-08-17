@@ -72,6 +72,7 @@ services:
       - AUDIO_REDIS_SOCKET_TIMEOUT=${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
       # CLAP queue socket timeout; runtime enforces at least poll interval + 5s
       - CLAP_REDIS_SOCKET_TIMEOUT=${CLAP_REDIS_SOCKET_TIMEOUT:-10}
+      - CLAP_HTTP_PORT=${CLAP_HTTP_PORT:-8091}
       # Lidarr webhook callback URL - how Lidarr reaches soundspan when downloads complete
       # Default uses host.docker.internal which works on most setups with extra_hosts below
       # Override if using custom Docker networks: e.g., http://192.168.0.20:3030

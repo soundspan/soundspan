@@ -47,6 +47,7 @@ RUN python -c "import laion_clap; model = laion_clap.CLAP_Module(enable_fusion=F
 
 # Copy application code
 COPY services/audio-analyzer-clap/analyzer.py /app/analyzer.py
+COPY services/audio-analyzer-clap/http_server.py /app/http_server.py
 COPY services/common /app/services/common
 
 # Create non-root user
@@ -55,8 +56,13 @@ RUN useradd -m -u 1000 analyzer && \
 
 USER analyzer
 
-# Health check that imports laion_clap
+# EXPOSE is documentation-only; CLAP_HTTP_PORT overrides this default at runtime.
+EXPOSE 8091
+
+# Check both the model package and the HTTP provider layer.
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-    CMD python -c "import laion_clap; print('OK')" || exit 1
+    CMD python -c "import laion_clap" && curl -fsS \
+        -H "X-Internal-Secret: ${INTERNAL_API_SECRET:-}" \
+        "http://localhost:${CLAP_HTTP_PORT:-8091}/health" || exit 1
 
 CMD ["python", "analyzer.py"]

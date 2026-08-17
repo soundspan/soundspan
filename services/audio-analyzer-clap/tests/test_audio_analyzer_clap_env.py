@@ -178,6 +178,15 @@ def test_worker_applies_bounded_socket_timeout_to_queue_client(
     assert redis_calls == [((module.REDIS_URL,), {"socket_timeout": 23})]
 
 
+def test_clap_http_port_honors_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read the provider port from the shared analyzer configuration."""
+    monkeypatch.setenv("CLAP_HTTP_PORT", "8191")
+
+    module = _load_analyzer_with_recording_redis(monkeypatch, [], [])
+
+    assert module.CLAP_HTTP_PORT == 8191
+
+
 def test_clap_analyzer_builds_database_url_from_encoded_components(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

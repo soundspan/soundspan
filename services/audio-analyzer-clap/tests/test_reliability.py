@@ -332,6 +332,61 @@ def test_find_dead_threads_reports_only_finished_threads(
     assert not alive_thread.is_alive()
 
 
+def test_start_threads_registers_http_server_for_supervision(
+    loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Start the HTTP server as a daemon in the supervised thread list."""
+    module, _ = loaded_analyzer
+    release = threading.Event()
+    http_started = threading.Event()
+    received_analyzers: list[Any] = []
+    received_stop_events: list[threading.Event] = []
+
+    class BlockingHandler:
+        def __init__(self, *_args: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            assert release.wait(timeout=5)
+
+    http_server_stub = ModuleType("http_server")
+
+    def run_http_server(analyzer: Any, stop_event: threading.Event) -> None:
+        received_analyzers.append(analyzer)
+        received_stop_events.append(stop_event)
+        http_started.set()
+        assert release.wait(timeout=5)
+
+    http_server_stub.run_http_server = run_http_server  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "http_server", http_server_stub)
+    monkeypatch.setattr(module, "Worker", BlockingHandler)
+    monkeypatch.setattr(module, "TextEmbedHandler", BlockingHandler)
+    monkeypatch.setattr(module, "ControlHandler", BlockingHandler)
+    monkeypatch.setattr(module, "NUM_WORKERS", 1)
+    analyzer = object()
+    stop_event = threading.Event()
+
+    threads = module._start_threads(analyzer, stop_event)
+    try:
+        assert http_started.wait(timeout=5)
+        assert [thread.name for thread in threads] == [
+            "Worker-0",
+            "TextEmbedHandler",
+            "ControlHandler",
+            "ClapHttpServer",
+        ]
+        assert all(thread.daemon for thread in threads)
+        assert received_analyzers == [analyzer]
+        assert received_stop_events == [stop_event]
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+
+
 def test_run_idle_monitor_stops_and_reports_when_a_thread_dies(
     loaded_analyzer: tuple[ModuleType, list[tuple[Any, ...]]],
 ) -> None:
