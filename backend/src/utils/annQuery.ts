@@ -7,13 +7,33 @@ interface AnnQueryOptions {
     timeoutMessage: string;
 }
 
+const STATEMENT_TIMEOUT_SQLSTATE = "57014";
+
+function readNestedCode(candidate: unknown): string | undefined {
+    if (typeof candidate !== "object" || candidate === null) return undefined;
+    const record = candidate as Record<string, unknown>;
+    return typeof record.code === "string" ? record.code : undefined;
+}
+
+/**
+ * Recognize a PostgreSQL statement-timeout (SQLSTATE 57014) in every envelope
+ * Prisma produces: a driver-level error with a direct `code`, the classic
+ * P2010 envelope carrying `meta.code`, and the Prisma 7 driver-adapter
+ * envelope nesting it at `meta.driverAdapterError.cause.code` (verified
+ * against a live pgvector PostgreSQL 16).
+ */
 function isStatementTimeout(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "57014"
-    );
+    if (typeof error !== "object" || error === null) return false;
+    const record = error as Record<string, unknown>;
+    if (readNestedCode(record) === STATEMENT_TIMEOUT_SQLSTATE) return true;
+    const meta = record.meta;
+    if (typeof meta !== "object" || meta === null) return false;
+    const metaRecord = meta as Record<string, unknown>;
+    if (readNestedCode(metaRecord) === STATEMENT_TIMEOUT_SQLSTATE) return true;
+    const adapterError = metaRecord.driverAdapterError;
+    if (typeof adapterError !== "object" || adapterError === null) return false;
+    const cause = (adapterError as Record<string, unknown>).cause;
+    return readNestedCode(cause) === STATEMENT_TIMEOUT_SQLSTATE;
 }
 
 /**

@@ -82,6 +82,20 @@ describe("vibe embed metrics", () => {
         );
     });
 
+    it("emits bounded vocabulary space mismatch reasons", async () => {
+        const registry = new Registry();
+        const { metrics } = createMetrics(registry);
+
+        metrics.recordVocabularySpaceMismatch("missing_identity");
+        metrics.recordVocabularySpaceMismatch("space_mismatch");
+
+        const exposition = await registry.metrics();
+        expect(exposition).toContain(
+            'soundspan_vibe_vocabulary_space_mismatches_total{reason="missing_identity"} 1',
+        );
+        expect(exposition).toContain('reason="space_mismatch"} 1');
+    });
+
     it("collects raw provider queue depth only on the scrape cadence", async () => {
         const registry = new Registry();
         const { getProviderQueueDepth } = createMetrics(registry, 7);

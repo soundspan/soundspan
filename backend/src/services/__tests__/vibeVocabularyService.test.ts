@@ -10,6 +10,7 @@ describe("vibe vocabulary service behavior", () => {
             warn: jest.fn(),
             error: jest.fn(),
         };
+        const recordVibeVocabularySpaceMismatch = jest.fn();
 
         jest.doMock("fs", () => ({
             existsSync,
@@ -18,11 +19,20 @@ describe("vibe vocabulary service behavior", () => {
         jest.doMock("../../utils/logger", () => ({
             logger,
         }));
+        jest.doMock("../../metrics", () => ({
+            recordVibeVocabularySpaceMismatch,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod =
             require("../vibeVocabulary") as typeof import("../vibeVocabulary");
-        return { mod, existsSync, readFileSync, logger };
+        return {
+            mod,
+            existsSync,
+            readFileSync,
+            logger,
+            recordVibeVocabularySpaceMismatch,
+        };
     }
 
     afterEach(() => {
@@ -53,9 +63,9 @@ describe("vibe vocabulary service behavior", () => {
 
         expect(loaded).toEqual(cached);
         expect(readFileSync).toHaveBeenCalledTimes(1);
-        expect(logger.info).toHaveBeenCalledWith(
-            "[VIBE-VOCAB] Loaded 1 vocabulary terms",
-        );
+        expect(logger.info).toHaveBeenCalledWith("Vibe vocabulary loaded", {
+            termCount: 1,
+        });
     });
 
     it("returns null when vocabulary file is missing or unreadable", () => {
@@ -63,7 +73,7 @@ describe("vibe vocabulary service behavior", () => {
         missingCase.existsSync.mockReturnValue(false);
         expect(missingCase.mod.loadVocabulary()).toBeNull();
         expect(missingCase.logger.warn).toHaveBeenCalledWith(
-            "[VIBE-VOCAB] Vocabulary file not found. Run generateVibeVocabulary script.",
+            "Vibe vocabulary file not found. Run generateVibeVocabulary script.",
         );
 
         const parseErrorCase = loadModule();
@@ -71,8 +81,8 @@ describe("vibe vocabulary service behavior", () => {
         parseErrorCase.readFileSync.mockReturnValue("{bad-json");
         expect(parseErrorCase.mod.loadVocabulary()).toBeNull();
         expect(parseErrorCase.logger.error).toHaveBeenCalledWith(
-            "[VIBE-VOCAB] Failed to load vocabulary:",
-            expect.any(Error),
+            "Vibe vocabulary load failed",
+            { error: expect.any(Error) },
         );
     });
 
@@ -82,6 +92,74 @@ describe("vibe vocabulary service behavior", () => {
         expect(mod.cosineSimilarity([1, 0], [1, 0])).toBe(1);
         expect(mod.cosineSimilarity([1, 2], [3])).toBe(0);
         expect(mod.cosineSimilarity([0, 0], [0, 0])).toBe(0);
+    });
+
+    it("selects a vocabulary whose identity matches the searched space", () => {
+        const { mod, logger, recordVibeVocabularySpaceMismatch } = loadModule();
+        const vocab: import("../vibeVocabulary").Vocabulary = {
+            terms: {},
+            version: "v1",
+            generatedAt: "2026-01-01T00:00:00.000Z",
+            spaceIdentities: [
+                { family: "teacher", checkpointHash: "teacher-hash" },
+            ],
+        };
+
+        expect(
+            mod.selectVocabularyForSpace(vocab, {
+                family: "teacher",
+                checkpointHash: "teacher-hash",
+            }),
+        ).toBe(vocab);
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(recordVibeVocabularySpaceMismatch).not.toHaveBeenCalled();
+    });
+
+    it("skips mismatched vocabulary with a rate-limited warning and bounded metric", () => {
+        const { mod, logger, recordVibeVocabularySpaceMismatch } = loadModule();
+        const vocab: import("../vibeVocabulary").Vocabulary = {
+            terms: {},
+            version: "v1",
+            generatedAt: "2026-01-01T00:00:00.000Z",
+            spaceIdentities: [
+                { family: "teacher", checkpointHash: "teacher-hash" },
+            ],
+        };
+        const searchedSpace = {
+            family: "student",
+            checkpointHash: "student-hash",
+        };
+
+        expect(mod.selectVocabularyForSpace(vocab, searchedSpace)).toBeNull();
+        expect(mod.selectVocabularyForSpace(vocab, searchedSpace)).toBeNull();
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Vibe vocabulary does not match the searched embedding space",
+            { reason: "space_mismatch" },
+        );
+        expect(recordVibeVocabularySpaceMismatch).toHaveBeenCalledTimes(2);
+        expect(recordVibeVocabularySpaceMismatch).toHaveBeenCalledWith(
+            "space_mismatch",
+        );
+    });
+
+    it("treats a legacy artifact without identity as a mismatch", () => {
+        const { mod, recordVibeVocabularySpaceMismatch } = loadModule();
+        const legacy: import("../vibeVocabulary").Vocabulary = {
+            terms: {},
+            version: "v1",
+            generatedAt: "2026-01-01T00:00:00.000Z",
+        };
+
+        expect(
+            mod.selectVocabularyForSpace(legacy, {
+                family: "teacher",
+                checkpointHash: "teacher-hash",
+            }),
+        ).toBeNull();
+        expect(recordVibeVocabularySpaceMismatch).toHaveBeenCalledWith(
+            "missing_identity",
+        );
     });
 
     it("blends embeddings using weighted averages", () => {

@@ -1,7 +1,8 @@
 import type { VocabTermDefinition } from "../config/featureProfiles";
-import type { Vocabulary } from "./vibeVocabulary";
+import type { Vocabulary, VocabularySpaceIdentity } from "./vibeVocabulary";
 
 interface GenerateVocabularyOptions {
+    spaceIdentities: readonly VocabularySpaceIdentity[];
     termNames: readonly string[];
     definitions: Readonly<Record<string, VocabTermDefinition>>;
     embed(text: string): Promise<number[]>;
@@ -49,7 +50,7 @@ export async function generateVibeVocabulary(
                 type: definition.type,
                 embedding,
                 featureProfile: definition.featureProfile,
-                related: definition.related,
+                ...(definition.related ? { related: definition.related } : {}),
             };
             succeeded += 1;
         } catch {
@@ -59,8 +60,9 @@ export async function generateVibeVocabulary(
 
     return {
         vocabulary: {
-            version: "1.0.0",
+            version: "1.1.0",
             generatedAt: options.generatedAt ?? new Date().toISOString(),
+            spaceIdentities: [...options.spaceIdentities],
             terms,
         },
         succeeded,

@@ -69,10 +69,12 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 import {
+    ANN_INDEX_MIN_VECTOR_COUNT,
     MAX_RETIREMENT_DELETE_BATCHES,
     RETIREMENT_DELETE_BATCH_SIZE,
     retirementDue,
     runEmbeddingSpaceLifecycleCheck,
+    shouldBuildAnnIndex,
     shouldCutOver,
     shouldCutOverEmptyActiveSpace,
 } from "../embeddingSpaceLifecycle";
@@ -115,6 +117,15 @@ describe("embedding-space lifecycle decisions", () => {
         ).toBe(false);
         expect(retirementDue(null, 7, now)).toBe(false);
     });
+
+    it.each([
+        [0, false],
+        [ANN_INDEX_MIN_VECTOR_COUNT - 1, false],
+        [ANN_INDEX_MIN_VECTOR_COUNT, true],
+        [ANN_INDEX_MIN_VECTOR_COUNT + 1, true],
+    ])("builds an ANN index for %s vectors: %s", (vectorCount, expected) => {
+        expect(shouldBuildAnnIndex(vectorCount)).toBe(expected);
+    });
 });
 
 describe("embedding-space lifecycle effects", () => {
@@ -124,6 +135,7 @@ describe("embedding-space lifecycle effects", () => {
         mockFindManySpaces.mockResolvedValue([]);
         mockFindFirst.mockResolvedValue(null);
         mockQueryRaw.mockResolvedValue([]);
+        mockEmbeddingCount.mockResolvedValue(0);
         mockLoadCoverage.mockResolvedValue({
             embedded: 0,
             pending: 1,
@@ -152,10 +164,11 @@ describe("embedding-space lifecycle effects", () => {
         const order: string[] = [];
         mockFindFirst.mockResolvedValue(migrating);
         mockLoadCoverage.mockResolvedValue({
-            embedded: 95,
+            embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 5,
             failed: 20,
         });
+        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockExecuteRawUnsafe.mockImplementation(async () => {
             order.push("index");
             return 0;
@@ -187,15 +200,18 @@ describe("embedding-space lifecycle effects", () => {
             "Embedding-space migration coverage sampled",
             {
                 spaceId: "space_student_1",
-                coveragePercent: 95,
+                coveragePercent:
+                    (ANN_INDEX_MIN_VECTOR_COUNT /
+                        (ANN_INDEX_MIN_VECTOR_COUNT + 5)) *
+                    100,
                 thresholdPercent: 95,
-                embedded: 95,
+                embedded: ANN_INDEX_MIN_VECTOR_COUNT,
                 pending: 5,
                 failed: 20,
             },
         );
         expect(mockSetCoverage).toHaveBeenCalledWith({
-            embedded: 95,
+            embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 5,
             failed: 20,
         });
@@ -216,7 +232,9 @@ describe("embedding-space lifecycle effects", () => {
             "Embedding-space cutover completed",
             {
                 spaceId: "space_student_1",
-                coverage: 0.95,
+                coverage:
+                    ANN_INDEX_MIN_VECTOR_COUNT /
+                    (ANN_INDEX_MIN_VECTOR_COUNT + 5),
                 failed: 20,
             },
         );
@@ -225,10 +243,11 @@ describe("embedding-space lifecycle effects", () => {
     it("keeps an existing valid partial index", async () => {
         mockFindFirst.mockResolvedValue(migrating);
         mockLoadCoverage.mockResolvedValue({
-            embedded: 1,
+            embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 0,
             failed: 0,
         });
+        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockQueryRaw.mockResolvedValue([{ isValid: true }]);
 
         await runEmbeddingSpaceLifecycleCheck({
@@ -303,9 +322,7 @@ describe("embedding-space lifecycle effects", () => {
             "space_teacher_1",
         );
         expect(mockLoadCoverage).toHaveBeenCalledWith("space_student_1");
-        expect(mockExecuteRawUnsafe).toHaveBeenCalledWith(
-            expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
-        );
+        expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
         expect(mockTransaction).toHaveBeenCalledTimes(1);
         expect(mockInvalidate).toHaveBeenCalledTimes(1);
         expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
@@ -356,10 +373,11 @@ describe("embedding-space lifecycle effects", () => {
     it("drops and rebuilds an existing invalid partial index once", async () => {
         mockFindFirst.mockResolvedValue(migrating);
         mockLoadCoverage.mockResolvedValue({
-            embedded: 1,
+            embedded: ANN_INDEX_MIN_VECTOR_COUNT,
             pending: 0,
             failed: 0,
         });
+        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
         mockQueryRaw.mockResolvedValue([{ isValid: false }]);
 
         await runEmbeddingSpaceLifecycleCheck({
@@ -377,6 +395,36 @@ describe("embedding-space lifecycle effects", () => {
             2,
             expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
         );
+    });
+
+    it("builds a missing ANN index after the active space crosses the floor", async () => {
+        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
+
+        await runEmbeddingSpaceLifecycleCheck({
+            threshold: 0.95,
+            retirementGraceDays: 7,
+            now: () => now,
+        });
+
+        expect(mockEmbeddingCount).toHaveBeenCalledWith({
+            where: { spaceId: "space_teacher_1" },
+        });
+        expect(mockExecuteRawUnsafe).toHaveBeenCalledWith(
+            expect.stringContaining("CREATE INDEX CONCURRENTLY IF NOT EXISTS"),
+        );
+    });
+
+    it("keeps an active space exact below the ANN index floor", async () => {
+        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT - 1);
+
+        await runEmbeddingSpaceLifecycleCheck({
+            threshold: 0.95,
+            retirementGraceDays: 7,
+            now: () => now,
+        });
+
+        expect(mockQueryRaw).not.toHaveBeenCalled();
+        expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
     });
 
     it("keeps retirement deletion bounded when every batch is full", async () => {

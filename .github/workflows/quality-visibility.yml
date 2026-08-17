@@ -76,6 +76,50 @@ jobs:
             backend/coverage/
           if-no-files-found: warn
 
+  backend-postgres-integration:
+    name: Backend PostgreSQL Integration
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+      INTEGRATION_DATABASE_URL: postgresql://soundspan:soundspan@127.0.0.1:5432/soundspan
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        env:
+          POSTGRES_USER: soundspan
+          POSTGRES_PASSWORD: soundspan
+          POSTGRES_DB: soundspan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soundspan -d soundspan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        run: npm run test:integration
+
   frontend-quality-visibility:
     name: Frontend Quality Visibility
     runs-on: ubuntu-latest

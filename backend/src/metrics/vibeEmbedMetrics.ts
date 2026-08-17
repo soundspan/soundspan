@@ -17,6 +17,11 @@ export type VibeSpaceTransition = "registered" | "cutover" | "retired_cleaned";
 /** Closed provider configuration error vocabulary. */
 export type VibeProviderConfigErrorReason = "preprocessing_mismatch";
 
+/** Closed vocabulary compatibility failure vocabulary. */
+export type VibeVocabularySpaceMismatchReason =
+    | "missing_identity"
+    | "space_mismatch";
+
 /** Worker target-space coverage values exposed by the worker process. */
 export interface VibeEmbeddingCoverage {
     embedded: number;
@@ -30,10 +35,14 @@ export interface VibeEmbedMetrics {
     coverage: Gauge<"state">;
     spaceTransitions: Counter<"transition">;
     providerConfigErrors: Counter<"reason">;
+    vocabularySpaceMismatches: Counter<"reason">;
     providerQueueDepth: Gauge;
     recordJob(outcome: VibeEmbedJobOutcome): void;
     recordSpaceTransition(transition: VibeSpaceTransition): void;
     recordProviderConfigError(reason: VibeProviderConfigErrorReason): void;
+    recordVocabularySpaceMismatch(
+        reason: VibeVocabularySpaceMismatchReason,
+    ): void;
     setCoverage(values: VibeEmbeddingCoverage): void;
 }
 
@@ -71,6 +80,12 @@ export function createVibeEmbedMetrics(
         labelNames: ["reason"] as const,
         registers: [registry],
     });
+    const vocabularySpaceMismatches = new Counter({
+        name: "soundspan_vibe_vocabulary_space_mismatches_total",
+        help: "Skipped vibe vocabulary blends by bounded compatibility reason.",
+        labelNames: ["reason"] as const,
+        registers: [registry],
+    });
     const providerQueueDepth = new Gauge({
         name: "soundspan_vibe_provider_queue_depth",
         help: "Raw Redis job depth for the backend vibe provider queue.",
@@ -85,6 +100,7 @@ export function createVibeEmbedMetrics(
         coverage,
         spaceTransitions,
         providerConfigErrors,
+        vocabularySpaceMismatches,
         providerQueueDepth,
         recordJob(outcome): void {
             jobs.inc({ outcome });
@@ -94,6 +110,9 @@ export function createVibeEmbedMetrics(
         },
         recordProviderConfigError(reason): void {
             providerConfigErrors.inc({ reason });
+        },
+        recordVocabularySpaceMismatch(reason): void {
+            vocabularySpaceMismatches.inc({ reason });
         },
         setCoverage(values): void {
             coverage.set({ state: "embedded" }, values.embedded);

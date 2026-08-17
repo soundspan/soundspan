@@ -21,7 +21,7 @@ const log =
         ? logger.child("TextEmbedding")
         : logger;
 
-let cachedProviderSearchSpace: EmbeddingVectorSpace | null = null;
+let cachedProviderSearchSpace: ProviderSearchSpace | null = null;
 let providerSpaceCacheExpiresAt = 0;
 let lastUnregisteredWarningAt = Number.NEGATIVE_INFINITY;
 
@@ -29,6 +29,13 @@ let lastUnregisteredWarningAt = Number.NEGATIVE_INFINITY;
 export interface ResolvedTextEmbedding {
     embedding: number[];
     spaceId: string;
+    family: string;
+    checkpointHash: string;
+}
+
+interface ProviderSearchSpace extends EmbeddingVectorSpace {
+    family: string;
+    checkpointHash: string;
 }
 
 /** Stable timeout identity consumed by the vibe route error mapper. */
@@ -68,14 +75,19 @@ function warnUnregisteredProviderSpace(
     });
 }
 
-async function loadProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
+async function loadProviderSearchSpace(): Promise<ProviderSearchSpace> {
     const [providerSpace, activeSpace] = await Promise.all([
         fetchProviderSpace(),
         getActiveSpace(),
     ]);
     try {
         assertProviderMatchesActiveSpace(providerSpace, activeSpace);
-        return { id: activeSpace.id, dim: activeSpace.dim };
+        return {
+            id: activeSpace.id,
+            dim: activeSpace.dim,
+            family: activeSpace.family,
+            checkpointHash: activeSpace.checkpointHash,
+        };
     } catch (error) {
         if (!(error instanceof VibeProviderSpaceMismatchError)) throw error;
     }
@@ -93,10 +105,15 @@ async function loadProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
         "Vibe text search is using the provider embedding space during migration",
         { providerSpaceId: registeredSpace.id },
     );
-    return { id: registeredSpace.id, dim: registeredSpace.dim };
+    return {
+        id: registeredSpace.id,
+        dim: registeredSpace.dim,
+        family: registeredSpace.family,
+        checkpointHash: registeredSpace.checkpointHash,
+    };
 }
 
-async function getProviderSearchSpace(): Promise<EmbeddingVectorSpace> {
+async function getProviderSearchSpace(): Promise<ProviderSearchSpace> {
     if (!config.vibeProviderUrl) throw new VibeProviderUnavailableError();
     if (cachedProviderSearchSpace && Date.now() < providerSpaceCacheExpiresAt) {
         return cachedProviderSearchSpace;
@@ -134,7 +151,12 @@ export async function resolveTextEmbedding(
     try {
         const searchSpace = await getProviderSearchSpace();
         const embedding = await embedText(text, searchSpace);
-        return { embedding, spaceId: searchSpace.id };
+        return {
+            embedding,
+            spaceId: searchSpace.id,
+            family: searchSpace.family,
+            checkpointHash: searchSpace.checkpointHash,
+        };
     } catch (error) {
         return mapProviderError(error);
     }

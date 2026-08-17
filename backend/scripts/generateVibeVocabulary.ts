@@ -7,7 +7,7 @@ import {
     VOCAB_DEFINITIONS,
     VOCABULARY_TERMS,
 } from "../src/config/featureProfiles";
-import { embedText } from "../src/services/vibeProvider";
+import { embedText, fetchProviderSpace } from "../src/services/vibeProvider";
 import {
     generateVibeVocabulary,
     requireVibeProviderUrl,
@@ -18,10 +18,21 @@ async function main() {
     console.log(
         `Generating embeddings for ${VOCABULARY_TERMS.length} terms...`,
     );
+    const providerSpace = await fetchProviderSpace();
     const result = await generateVibeVocabulary({
+        spaceIdentities: [
+            {
+                family: providerSpace.family,
+                checkpointHash: providerSpace.checkpointHash,
+            },
+        ],
         termNames: VOCABULARY_TERMS,
         definitions: VOCAB_DEFINITIONS,
-        embed: embedText,
+        embed: (text) =>
+            embedText(text, {
+                id: "vocabulary-generation",
+                dim: providerSpace.dim,
+            }),
     });
 
     const outputPath = join(__dirname, "../src/config/vibe-vocabulary.json");

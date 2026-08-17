@@ -109,6 +109,8 @@ describe("text embedding space routing", () => {
         await expect(resolveTextEmbedding("quiet focus")).resolves.toEqual({
             embedding: [1, 0],
             spaceId: "space-migrating",
+            family: "student",
+            checkpointHash: "sha256:student",
         });
 
         expect(mockFindRegisteredProviderSpace).toHaveBeenCalledWith(
@@ -117,6 +119,8 @@ describe("text embedding space routing", () => {
         expect(mockEmbedText).toHaveBeenCalledWith("quiet focus", {
             id: "space-migrating",
             dim: 2,
+            family: "student",
+            checkpointHash: "sha256:student",
         });
         expect(mockWarn).toHaveBeenCalledWith(
             "Vibe text search is using the provider embedding space during migration",
@@ -140,10 +144,14 @@ describe("text embedding space routing", () => {
         expect(mockEmbedText).toHaveBeenNthCalledWith(1, "first", {
             id: "space-active",
             dim: 2,
+            family: "teacher",
+            checkpointHash: "sha256:teacher",
         });
         expect(mockEmbedText).toHaveBeenNthCalledWith(2, "second", {
             id: "space-active",
             dim: 2,
+            family: "teacher",
+            checkpointHash: "sha256:teacher",
         });
     });
 

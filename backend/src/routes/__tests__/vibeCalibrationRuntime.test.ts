@@ -88,6 +88,7 @@ jest.mock("../../utils/embedding", () => {
 jest.mock("../../services/vibeVocabulary", () => ({
     loadVocabulary: jest.fn(),
     getVocabulary: jest.fn(() => null),
+    getVocabularyForSpace: jest.fn(() => null),
     expandQueryWithVocabulary: jest.fn((embedding: number[]) => ({
         embedding,
         genreConfidence: 0,

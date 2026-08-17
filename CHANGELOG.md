@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumer group, heartbeat, and non-expiring legacy queue reservations.
 - Added a scrape-time gauge for raw provider job depth in
   `audio:clap:queue`.
+- Added a real-PostgreSQL integration suite for vibe registry migrations, ANN
+  index lifecycle, statement timeouts, and retired-vector cleanup.
 - Added starter Grafana panels for provider failures, migration coverage and
   failures, provider queue depth, and suppressed federation exports.
 
@@ -80,6 +82,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The legacy global ANN index is now dropped, so space-scoped vector queries
+  cannot lose results through cross-space approximation.
+- ANN indexes now build only after a space crosses a size floor, and the active
+  lifecycle creates a missing index after backfill to heal fresh-install recall.
+- Vibe vocabulary blending is now checked against the searched embedding-space
+  identity; incompatible or legacy artifacts are skipped with bounded telemetry.
 - Force rebuilding vibe embeddings now preserves active-space vectors, and a
   durable space marker prevents wiped spaces from triggering fresh-install
   cutover behavior.

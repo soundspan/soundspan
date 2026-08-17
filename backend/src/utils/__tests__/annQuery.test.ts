@@ -161,4 +161,47 @@ describe("runAnnQuery (F14 ivfflat.probes helper)", () => {
             }),
         ).rejects.toThrow("Vibe text search query timed out");
     });
+
+    it("maps a Prisma P2010 envelope carrying PostgreSQL 57014", async () => {
+        mockTransaction.mockRejectedValueOnce(
+            Object.assign(new Error("Raw query failed"), {
+                code: "P2010",
+                meta: {
+                    code: "57014",
+                    message: "canceling statement due to statement timeout",
+                },
+            }),
+        );
+
+        await expect(
+            runAnnQuery(Prisma.sql`SELECT pg_sleep(1)`, undefined, {
+                statementTimeoutMs: 1,
+                timeoutMessage: "Vibe text search query timed out",
+            }),
+        ).rejects.toThrow("Vibe text search query timed out");
+    });
+});
+
+describe("statement-timeout envelope recognition", () => {
+    it("recognizes the Prisma 7 driver-adapter envelope", async () => {
+        const error = Object.assign(new Error("Raw query failed"), {
+            code: "P2010",
+            meta: {
+                driverAdapterError: {
+                    name: "DriverAdapterError",
+                    cause: { kind: "postgres", code: "57014" },
+                },
+            },
+        });
+        mockQueryRaw.mockImplementation((...args: unknown[]) => ({
+            __sqlArgs: args,
+        }));
+        mockTransaction.mockRejectedValueOnce(error);
+        await expect(
+            runAnnQuery(Prisma.sql`SELECT 1`, 8, {
+                statementTimeoutMs: 5,
+                timeoutMessage: "bounded timeout",
+            }),
+        ).rejects.toMatchObject({ message: "bounded timeout" });
+    });
 });

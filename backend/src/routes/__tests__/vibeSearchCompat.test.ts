@@ -123,7 +123,7 @@ jest.mock("../../utils/embedding", () => {
 
 jest.mock("../../services/vibeVocabulary", () => ({
     loadVocabulary: jest.fn(),
-    getVocabulary: jest.fn(() => null),
+    getVocabularyForSpace: jest.fn(() => null),
     expandQueryWithVocabulary: jest.fn((embedding: number[]) => ({
         embedding,
         genreConfidence: 0,
@@ -138,7 +138,7 @@ import { findSimilarTracks } from "../../services/hybridSimilarity";
 import { runAnnQuery } from "../../utils/annQuery";
 import { computeMapProjection } from "../../services/umapProjection";
 import {
-    getVocabulary,
+    getVocabularyForSpace,
     expandQueryWithVocabulary,
     rerankWithFeatures,
 } from "../../services/vibeVocabulary";
@@ -151,7 +151,7 @@ const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
 const mockRunAnnQuery = runAnnQuery as jest.Mock;
 const mockComputeMapProjection = computeMapProjection as jest.Mock;
-const mockGetVocabulary = getVocabulary as jest.Mock;
+const mockGetVocabularyForSpace = getVocabularyForSpace as jest.Mock;
 const mockExpandQueryWithVocabulary = expandQueryWithVocabulary as jest.Mock;
 const mockRerankWithFeatures = rerankWithFeatures as jest.Mock;
 
@@ -225,7 +225,7 @@ describe("vibe search transport compatibility", () => {
             trackCount: 0,
             computedAt: "2026-03-14T00:00:00.000Z",
         });
-        mockGetVocabulary.mockReturnValue(null);
+        mockGetVocabularyForSpace.mockReturnValue(null);
         mockExpandQueryWithVocabulary.mockImplementation(
             (embedding: number[]) => ({
                 embedding,
@@ -495,6 +495,8 @@ describe("vibe search transport compatibility", () => {
         expect(mockProviderEmbedText).toHaveBeenCalledWith("upbeat synthwave", {
             id: "space-active",
             dim: 512,
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
         });
         expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
             "space-active",
@@ -564,6 +566,8 @@ describe("vibe search transport compatibility", () => {
             expect(mockProviderEmbedText).toHaveBeenCalledWith("quiet focus", {
                 id: "space-migrating",
                 dim: 512,
+                family: "dclap-student",
+                checkpointHash: "student-checkpoint",
             });
             expect(mockRunAnnQuery.mock.calls[0][0].values).toContain(
                 "space-migrating",
@@ -717,7 +721,7 @@ describe("vibe search transport compatibility", () => {
 
     it("expands and reranks vibe search results when vocabulary matches exist", async () => {
         mockProviderEmbedText.mockResolvedValueOnce([0.5, 0.25]);
-        mockGetVocabulary.mockReturnValueOnce({ id: "mock-vocab" });
+        mockGetVocabularyForSpace.mockReturnValueOnce({ id: "mock-vocab" });
         mockExpandQueryWithVocabulary.mockReturnValueOnce({
             embedding: [0.6, 0.3],
             genreConfidence: 0.8,
@@ -790,6 +794,10 @@ describe("vibe search transport compatibility", () => {
                 }),
             }),
         );
+        expect(mockGetVocabularyForSpace).toHaveBeenCalledWith({
+            family: "clap-music-audioset",
+            checkpointHash: "checkpoint-hash",
+        });
         expect(mockExpandQueryWithVocabulary).toHaveBeenCalled();
         expect(mockRerankWithFeatures).toHaveBeenCalled();
     });

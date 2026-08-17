@@ -3,11 +3,8 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { logger } from "../utils/logger";
-import {
-    VOCAB_DEFINITIONS,
-    FeatureProfile,
-    TermType,
-} from "../config/featureProfiles";
+import { recordVibeVocabularySpaceMismatch } from "../metrics";
+import { FeatureProfile, TermType } from "../config/featureProfiles";
 
 export interface VocabTerm {
     name: string;
@@ -17,10 +14,17 @@ export interface VocabTerm {
     related?: string[];
 }
 
+/** Model identity whose text vectors are compatible with an artifact. */
+export interface VocabularySpaceIdentity {
+    family: string;
+    checkpointHash: string;
+}
+
 export interface Vocabulary {
     terms: Record<string, VocabTerm>;
     version: string;
     generatedAt: string;
+    spaceIdentities?: VocabularySpaceIdentity[];
 }
 
 export interface QueryExpansionResult {
@@ -31,6 +35,48 @@ export interface QueryExpansionResult {
 }
 
 let vocabulary: Vocabulary | null = null;
+const VOCABULARY_WARNING_INTERVAL_MS = 60_000;
+let lastSpaceMismatchWarningAt = Number.NEGATIVE_INFINITY;
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("VibeVocabulary")
+        : logger;
+
+function vocabularyMismatchReason(
+    vocab: Vocabulary,
+    searchedSpace: VocabularySpaceIdentity,
+): "missing_identity" | "space_mismatch" | null {
+    if (!vocab.spaceIdentities || vocab.spaceIdentities.length === 0) {
+        return "missing_identity";
+    }
+    const matches = vocab.spaceIdentities.some(
+        (identity) =>
+            identity.family === searchedSpace.family &&
+            identity.checkpointHash === searchedSpace.checkpointHash,
+    );
+    return matches ? null : "space_mismatch";
+}
+
+/** Return a vocabulary only when its text vectors match the searched space. */
+export function selectVocabularyForSpace(
+    vocab: Vocabulary,
+    searchedSpace: VocabularySpaceIdentity,
+): Vocabulary | null {
+    const reason = vocabularyMismatchReason(vocab, searchedSpace);
+    if (!reason) return vocab;
+    recordVibeVocabularySpaceMismatch(reason);
+    const now = Date.now();
+    if (now - lastSpaceMismatchWarningAt >= VOCABULARY_WARNING_INTERVAL_MS) {
+        lastSpaceMismatchWarningAt = now;
+        log.warn(
+            "Vibe vocabulary does not match the searched embedding space",
+            {
+                reason,
+            },
+        );
+    }
+    return null;
+}
 
 /**
  * Load vocabulary from JSON file. Call at startup.
@@ -45,22 +91,22 @@ export function loadVocabulary(): Vocabulary | null {
     const vocabPath = possiblePaths.find((p) => existsSync(p));
 
     if (!vocabPath) {
-        logger.warn(
-            "[VIBE-VOCAB] Vocabulary file not found. Run generateVibeVocabulary script.",
+        log.warn(
+            "Vibe vocabulary file not found. Run generateVibeVocabulary script.",
         );
-        logger.warn("[VIBE-VOCAB] Searched paths:", possiblePaths);
+        log.warn("Vibe vocabulary search paths", { possiblePaths });
         return null;
     }
 
     try {
         const data = JSON.parse(readFileSync(vocabPath, "utf-8"));
         vocabulary = data as Vocabulary;
-        logger.info(
-            `[VIBE-VOCAB] Loaded ${Object.keys(vocabulary.terms).length} vocabulary terms`,
-        );
+        log.info("Vibe vocabulary loaded", {
+            termCount: Object.keys(vocabulary.terms).length,
+        });
         return vocabulary;
     } catch (error) {
-        logger.error("[VIBE-VOCAB] Failed to load vocabulary:", error);
+        log.error("Vibe vocabulary load failed", { error });
         return null;
     }
 }
@@ -73,6 +119,14 @@ export function getVocabulary(): Vocabulary | null {
         return loadVocabulary();
     }
     return vocabulary;
+}
+
+/** Load and select the cached vocabulary for one searched space. */
+export function getVocabularyForSpace(
+    searchedSpace: VocabularySpaceIdentity,
+): Vocabulary | null {
+    const loaded = getVocabulary();
+    return loaded ? selectVocabularyForSpace(loaded, searchedSpace) : null;
 }
 
 /**

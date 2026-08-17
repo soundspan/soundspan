@@ -14,6 +14,7 @@ import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1_000;
 const RETIRED_SPACE_SCAN_LIMIT = 10;
 const SPACE_ID_PATTERN = /^[A-Za-z0-9_]{1,48}$/;
+const ANN_INDEX_LISTS = 224;
 const log =
     typeof (logger as { child?: unknown }).child === "function"
         ? logger.child("EmbeddingSpaceLifecycle")
@@ -23,6 +24,11 @@ const log =
 export const RETIREMENT_DELETE_BATCH_SIZE = 500;
 /** Fixed per-run bound so a large retired space resumes on the next tick. */
 export const MAX_RETIREMENT_DELETE_BATCHES = 20;
+/**
+ * Conservative training floor for the retained 224-list IVFFlat shape.
+ * This supplies at least four vectors per list and bounds exact scans at 999.
+ */
+export const ANN_INDEX_MIN_VECTOR_COUNT = 1_000;
 
 interface LifecycleConfig {
     threshold: number;
@@ -48,6 +54,14 @@ export function shouldCutOverEmptyActiveSpace(
     // Pending active-space work does not protect query results and may have no
     // deployed teacher worker capable of completing it on a fresh install.
     return !activeHasVectors && !activeHadVectors;
+}
+
+/** Decide whether a space is large enough to train its partial ANN index. */
+export function shouldBuildAnnIndex(vectorCount: number): boolean {
+    return (
+        Number.isInteger(vectorCount) &&
+        vectorCount >= ANN_INDEX_MIN_VECTOR_COUNT
+    );
 }
 
 /** Decide whether a retired space has reached its cleanup boundary. */
@@ -93,8 +107,18 @@ async function buildPartialAnnIndex(spaceId: string): Promise<void> {
     await prisma.$executeRawUnsafe(
         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${indexName}" ` +
             `ON track_embeddings USING ivfflat (embedding vector_cosine_ops) ` +
-            `WITH (lists = 224) WHERE space_id = '${validatedId}'`,
+            `WITH (lists = ${ANN_INDEX_LISTS}) WHERE space_id = '${validatedId}'`,
     );
+}
+
+/** Build a valid partial ANN index once a space reaches its training floor. */
+export async function ensureSpaceAnnIndex(spaceId: string): Promise<boolean> {
+    const vectorCount = await prisma.trackEmbedding.count({
+        where: { spaceId },
+    });
+    if (!shouldBuildAnnIndex(vectorCount)) return false;
+    await buildPartialAnnIndex(spaceId);
+    return true;
 }
 
 async function flipActiveSpace(
@@ -146,7 +170,7 @@ async function completeCutover(
     migratingSpaceId: string,
     retiredAt: Date,
 ): Promise<void> {
-    await buildPartialAnnIndex(migratingSpaceId);
+    await ensureSpaceAnnIndex(migratingSpaceId);
     await flipActiveSpace(migratingSpaceId, retiredAt);
     invalidateActiveSpaceCache();
     recordVibeSpaceTransition("cutover");
@@ -172,9 +196,9 @@ async function cutOverEmptyActiveSpace(
 
 async function cutOverIfReady(
     space: LifecycleSpace,
+    activeSpace: Awaited<ReturnType<typeof getActiveSpace>>,
     config: LifecycleConfig,
-): Promise<void> {
-    const activeSpace = await getActiveSpace();
+): Promise<boolean> {
     const activeVectorState = await loadVibeSpaceVectorState(activeSpace.id);
     const coverage = await sampleCoverage(space.id, config.threshold);
     if (
@@ -189,15 +213,16 @@ async function cutOverIfReady(
             config.now(),
             coverage.failed,
         );
-        return;
+        return true;
     }
-    if (!shouldCutOver(coverage.ratio, config.threshold)) return;
+    if (!shouldCutOver(coverage.ratio, config.threshold)) return false;
     await completeCutover(space.id, config.now());
     log.info("Embedding-space cutover completed", {
         spaceId: space.id,
         coverage: coverage.ratio,
         failed: coverage.failed,
     });
+    return true;
 }
 
 async function spaceStillRetired(space: LifecycleSpace): Promise<boolean> {
@@ -284,11 +309,17 @@ async function cleanDueRetiredSpaces(config: LifecycleConfig): Promise<void> {
 export async function runEmbeddingSpaceLifecycleCheck(
     config: LifecycleConfig,
 ): Promise<void> {
-    const migrating = await prisma.embeddingSpace.findFirst({
-        where: { status: "migrating" },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true, retiredAt: true },
-    });
-    if (migrating) await cutOverIfReady(migrating, config);
+    const [migrating, activeSpace] = await Promise.all([
+        prisma.embeddingSpace.findFirst({
+            where: { status: "migrating" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            select: { id: true, retiredAt: true },
+        }),
+        getActiveSpace(),
+    ]);
+    const cutOver = migrating
+        ? await cutOverIfReady(migrating, activeSpace, config)
+        : false;
+    if (!cutOver) await ensureSpaceAnnIndex(activeSpace.id);
     await cleanDueRetiredSpaces(config);
 }

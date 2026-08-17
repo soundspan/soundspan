@@ -2,6 +2,7 @@ import {
     generateVibeVocabulary,
     requireVibeProviderUrl,
 } from "../vibeVocabularyGenerator";
+import vocabulary from "../../config/vibe-vocabulary.json";
 
 describe("vibe vocabulary generator", () => {
     it("transforms provider embeddings into the existing vocabulary schema", async () => {
@@ -11,6 +12,9 @@ describe("vibe vocabulary generator", () => {
             .mockResolvedValueOnce([0, 1]);
 
         const result = await generateVibeVocabulary({
+            spaceIdentities: [
+                { family: "teacher", checkpointHash: "teacher-hash" },
+            ],
             termNames: ["ambient", "energetic"],
             definitions: {
                 ambient: {
@@ -29,8 +33,11 @@ describe("vibe vocabulary generator", () => {
 
         expect(result).toEqual({
             vocabulary: {
-                version: "1.0.0",
+                version: "1.1.0",
                 generatedAt: "2026-08-16T12:00:00.000Z",
+                spaceIdentities: [
+                    { family: "teacher", checkpointHash: "teacher-hash" },
+                ],
                 terms: {
                     ambient: {
                         name: "ambient",
@@ -59,6 +66,9 @@ describe("vibe vocabulary generator", () => {
             .mockResolvedValueOnce([0, 1]);
 
         const result = await generateVibeVocabulary({
+            spaceIdentities: [
+                { family: "teacher", checkpointHash: "teacher-hash" },
+            ],
             termNames: ["ambient", "energetic"],
             definitions: {
                 ambient: { type: "genre", featureProfile: {} },
@@ -77,5 +87,20 @@ describe("vibe vocabulary generator", () => {
         expect(() => requireVibeProviderUrl(undefined)).toThrow(
             "VIBE_PROVIDER_URL is required to generate the vibe vocabulary",
         );
+    });
+
+    it("declares both spaces that share the checked-in teacher text tower", () => {
+        expect(vocabulary.spaceIdentities).toEqual([
+            {
+                family: "clap-music-audioset",
+                checkpointHash:
+                    "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd",
+            },
+            {
+                family: "clap-music-audioset-dclap-student",
+                checkpointHash:
+                    "c892c7a8666dfa5adec5f0b76ecdd9b5394f5afa925d1362750309b6b9b96639",
+            },
+        ]);
     });
 });

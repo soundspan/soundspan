@@ -6,7 +6,7 @@ import {
 import { resolveTextEmbedding } from "./textEmbedding";
 import {
     expandQueryWithVocabulary,
-    getVocabulary,
+    getVocabularyForSpace,
     rerankWithFeatures,
     type VocabTerm,
 } from "./vibeVocabulary";
@@ -70,8 +70,9 @@ export function parseVibeSearchRequest(body: unknown): VibeSearchRequestResult {
 function expandSearch(
     embedding: number[],
     normalizedQuery: string,
+    spaceIdentity: { family: string; checkpointHash: string },
 ): SearchExpansion {
-    const vocabulary = getVocabulary();
+    const vocabulary = getVocabularyForSpace(spaceIdentity);
     if (!vocabulary) {
         return { embedding, genreConfidence: 0, matchedTerms: [] };
     }
@@ -140,6 +141,10 @@ export async function executeVibeSearch(input: ParsedVibeSearchRequest) {
     const expansion = expandSearch(
         textEmbedding.embedding,
         input.normalizedQuery,
+        {
+            family: textEmbedding.family,
+            checkpointHash: textEmbedding.checkpointHash,
+        },
     );
     const maxDistance = 2 * (1 - input.similarityThreshold);
     const candidates = await findTracksByTextEmbedding(

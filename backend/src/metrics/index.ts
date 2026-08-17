@@ -16,6 +16,7 @@ import {
     type VibeEmbeddingCoverage,
     type VibeProviderConfigErrorReason,
     type VibeSpaceTransition,
+    type VibeVocabularySpaceMismatchReason,
 } from "./vibeEmbedMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 
@@ -85,6 +86,13 @@ export function recordVibeProviderConfigError(
     reason: VibeProviderConfigErrorReason,
 ): void {
     vibeEmbedMetrics.recordProviderConfigError(reason);
+}
+
+/** Records one skipped vocabulary blend due to space incompatibility. */
+export function recordVibeVocabularySpaceMismatch(
+    reason: VibeVocabularySpaceMismatchReason,
+): void {
+    vibeEmbedMetrics.recordVocabularySpaceMismatch(reason);
 }
 
 /** Replaces the worker target-space audio embedding coverage gauge values. */
