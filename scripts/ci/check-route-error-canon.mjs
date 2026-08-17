@@ -126,6 +126,8 @@ const LEAK_BASELINE = Object.freeze({
     // moodBucketService.ts remaining 1: error-classification const (~L185), never a response body; frozen under the slice-E scope guard.
     // moodBucketService.ts +1: Redis retry classification's ternary-consequent error.message (~L193); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/moodBucketService.ts": 2,
+    // vibeProvider.ts remaining 1: the provider's {error} body string becomes the typed VibeProvider*Error message for logs and cause chains (~parseErrorBody); routes map every provider error to canonical response text via the TextEmbeddingProviderError guard before responding, so the string never reaches a client body.
+    "backend/src/services/vibeProvider.ts": 1,
     // musicScanner.ts remaining 1: per-file scan-error detail stored in scan progress/health records (~L211); server-side scan state, admin-only surface.
     "backend/src/services/musicScanner.ts": 1,
     // podcastCache.ts remaining 2: cover-sync failure strings recorded server-side (~L90, ~L172); frozen under the slice-E scope guard.
