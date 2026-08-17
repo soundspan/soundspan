@@ -146,9 +146,18 @@ async function markFailedWithMessage(
     dependencies: VibeEmbedJobDependencies,
     track: TrackSnapshot,
     errorMessage: string,
-): Promise<void> {
-    await dependencies.prisma.track.update({
-        where: { id: track.id },
+): Promise<boolean> {
+    // Guarded like claimTrack so a stray or duplicate job can never demote a
+    // track another consumer already completed or failed.
+    const updated = await dependencies.prisma.track.updateMany({
+        where: {
+            ...activeTrackWhere(track.id),
+            OR: [
+                { vibeAnalysisStatus: null },
+                { vibeAnalysisStatus: "pending" },
+                { vibeAnalysisStatus: "processing" },
+            ],
+        },
         data: {
             vibeAnalysisStatus: "failed",
             vibeAnalysisError: errorMessage,
@@ -156,6 +165,12 @@ async function markFailedWithMessage(
             vibeAnalysisStatusUpdatedAt: dependencies.now(),
         },
     });
+    if (updated.count === 0) {
+        jobLog.debug("Skipped failure write for a settled track", {
+            trackId: track.id,
+        });
+        return false;
+    }
     await dependencies.failureService.recordFailure({
         entityType: "vibe",
         entityId: track.id,
@@ -163,6 +178,7 @@ async function markFailedWithMessage(
         errorMessage,
         errorCode: "VIBE_EMBEDDING_FAILED",
     });
+    return true;
 }
 
 async function markFailed(

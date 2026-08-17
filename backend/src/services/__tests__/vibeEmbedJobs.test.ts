@@ -142,8 +142,17 @@ describe("vibe embed job processor", () => {
         ).resolves.toBe("embed_failed");
 
         const truncated = longMessage.slice(0, 500);
-        expect(harness.prisma.track.update).toHaveBeenCalledWith({
-            where: { id: "track-2" },
+        expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: "track-2",
+                origin: "LOCAL",
+                removedAt: null,
+                OR: [
+                    { vibeAnalysisStatus: null },
+                    { vibeAnalysisStatus: "pending" },
+                    { vibeAnalysisStatus: "processing" },
+                ],
+            },
             data: {
                 vibeAnalysisStatus: "failed",
                 vibeAnalysisError: truncated,
@@ -202,8 +211,17 @@ describe("vibe embed job processor", () => {
                 ),
             ).resolves.toBe("invalid_payload");
 
-            expect(harness.prisma.track.update).toHaveBeenCalledWith({
-                where: { id: "track-3" },
+            expect(harness.prisma.track.updateMany).toHaveBeenCalledWith({
+                where: {
+                    id: "track-3",
+                    origin: "LOCAL",
+                    removedAt: null,
+                    OR: [
+                        { vibeAnalysisStatus: null },
+                        { vibeAnalysisStatus: "pending" },
+                        { vibeAnalysisStatus: "processing" },
+                    ],
+                },
                 data: {
                     vibeAnalysisStatus: "failed",
                     vibeAnalysisError: "Invalid vibe embedding job payload",
@@ -228,6 +246,22 @@ describe("vibe embed job processor", () => {
         },
     );
 
+    it("never demotes a settled track on an invalid payload", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-3",
+            title: "Track Three",
+        });
+        harness.prisma.track.updateMany.mockResolvedValue({ count: 0 });
+
+        await expect(
+            harness.processJob(JSON.stringify({ trackId: "track-3" })),
+        ).resolves.toBe("invalid_payload");
+
+        expect(harness.recordFailure).not.toHaveBeenCalled();
+        expect(harness.releaseReservation).toHaveBeenCalledWith("track-3");
+    });
+
     it.each(["../x", "/music/x", "..\\x", "artist/\0x"])(
         "rejects unsafe file path %p before calling the provider",
         async (filePath) => {
@@ -244,7 +278,12 @@ describe("vibe embed job processor", () => {
             ).resolves.toBe("invalid_payload");
 
             expect(harness.embedAudio).not.toHaveBeenCalled();
-            expect(harness.prisma.track.updateMany).not.toHaveBeenCalled();
+            expect(harness.recordFailure).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    entityId: "track-path",
+                    errorMessage: "Invalid vibe embedding job payload",
+                }),
+            );
             expect(harness.releaseReservation).toHaveBeenCalledWith(
                 "track-path",
             );

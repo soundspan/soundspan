@@ -614,20 +614,33 @@ class Worker:
         except Exception as error:
             logger.warning(f"Failed to release vibe queue reservation: {error}")
 
+    _COMPLETED_STATUS_SQL = """
+        UPDATE "Track"
+        SET
+            "vibeAnalysisStatus" = %s,
+            "vibeAnalysisError" = NULL,
+            "vibeAnalysisStartedAt" = NULL,
+            "vibeAnalysisStatusUpdatedAt" = %s
+        WHERE id = %s
+    """
+    _STATUS_ONLY_SQL = """
+        UPDATE "Track"
+        SET
+            "vibeAnalysisStatus" = %s,
+            "vibeAnalysisStatusUpdatedAt" = %s
+        WHERE id = %s
+    """
+
     def _update_track_status(self, track_id: str, status: str):
         """Update the track's vibe analysis status (CLAP embeddings)"""
+        # Stale error/start fields are cleared only on completion; other
+        # statuses own those fields elsewhere (claim sets startedAt,
+        # failure sets the error text).
+        update_sql = self._COMPLETED_STATUS_SQL if status == "completed" else self._STATUS_ONLY_SQL
         cursor = self.db.get_cursor()
         try:
             cursor.execute(
-                """
-                UPDATE "Track"
-                SET
-                    "vibeAnalysisStatus" = %s,
-                    "vibeAnalysisError" = NULL,
-                    "vibeAnalysisStartedAt" = NULL,
-                    "vibeAnalysisStatusUpdatedAt" = %s
-                WHERE id = %s
-            """,
+                update_sql,
                 (status, datetime.now(UTC), track_id),
             )
             self.db.commit()
