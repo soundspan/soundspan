@@ -319,22 +319,33 @@ describe("encryption utils", () => {
             expect(decrypt(legacy)).toBe("legacy-truncation");
         });
 
-        it("throws ERR_OSSL_BAD_DECRYPT when legacy ciphertext uses the wrong key", async () => {
+        it("never round-trips legacy ciphertext under the wrong key", async () => {
             const legacy = legacyEncrypt("wrong-key-check", KEY_A);
 
             const { decrypt } = await loadEncryptionModule({
                 settingsKey: KEY_B,
             });
 
+            // Wrong-key CBC decryption usually fails PKCS#7 padding and
+            // throws ERR_OSSL_BAD_DECRYPT, but garbage plaintext passes the
+            // padding check with probability ~1/256 (the IV is random per
+            // encryption). The security property is that the wrong key can
+            // never recover the plaintext - assert that deterministically
+            // instead of pinning the probabilistic throw.
             let thrown: unknown;
+            let result: string | undefined;
             try {
-                decrypt(legacy);
+                result = decrypt(legacy);
             } catch (error) {
                 thrown = error;
             }
-            expect((thrown as NodeJS.ErrnoException)?.code).toBe(
-                "ERR_OSSL_BAD_DECRYPT",
-            );
+            if (thrown !== undefined) {
+                expect((thrown as NodeJS.ErrnoException)?.code).toBe(
+                    "ERR_OSSL_BAD_DECRYPT",
+                );
+            } else {
+                expect(result).not.toBe("wrong-key-check");
+            }
         });
 
         it("returns original plaintext when input is not in any encrypted format", async () => {
