@@ -277,6 +277,8 @@ describe("plays routes integration", () => {
                         id: "album-1",
                         title: "Local Album",
                         coverArt: "native:albums/album-1.jpg",
+                        albumLoudnessLufs: null,
+                        albumTruePeakDb: null,
                         artist: {
                             id: "artist-1",
                             name: "Local Artist",

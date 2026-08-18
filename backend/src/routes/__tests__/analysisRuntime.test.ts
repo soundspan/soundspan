@@ -456,6 +456,8 @@ describe("analysis routes runtime", () => {
             id: "t2",
             title: "Track Two",
             analysisStatus: "failed",
+            loudnessLufs: -20.4,
+            truePeakDb: -2.1,
             analysisError:
                 "ffmpeg failed at /srv/soundspan/music/private/track.flac",
         };
@@ -474,6 +476,8 @@ describe("analysis routes runtime", () => {
             id: "t2",
             title: "Track Two",
             analysisStatus: "failed",
+            loudnessLufs: -20.4,
+            truePeakDb: -2.1,
         });
         expect(JSON.stringify(res.body)).not.toContain("/srv/soundspan");
     });

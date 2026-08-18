@@ -6,6 +6,8 @@ import type {
 export type AlbumSource = "library" | "discovery";
 
 export interface Album {
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     id: string;
     title: string;
     artist?: {
@@ -31,6 +33,8 @@ export interface Album {
 }
 
 export interface Track {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     id: string;
     title: string;
     duration: number;

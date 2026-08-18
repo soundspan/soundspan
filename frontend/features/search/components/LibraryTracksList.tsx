@@ -73,7 +73,11 @@ export function LibraryTracksList({
                         id: t.album.id,
                         title: t.album.title,
                         coverArt: t.album.coverUrl,
+                        albumLoudnessLufs: t.album.albumLoudnessLufs ?? null,
+                        albumTruePeakDb: t.album.albumTruePeakDb ?? null,
                     },
+                    loudnessLufs: t.loudnessLufs ?? null,
+                    truePeakDb: t.truePeakDb ?? null,
                     source: t.source,
                     peer: t.peer,
                 }));

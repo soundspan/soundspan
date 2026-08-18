@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the OpenSubsonic ReplayGain extension, a configurable server loudness
   target, and per-user normalization-mode groundwork. Web-player application
   lands next.
+- **Volume leveling is now on by default.** The web player levels playback
+  loudness using the analyzer's EBU R128 measurements: loud tracks are
+  turned down toward the server target (default -18 LUFS) and quiet tracks
+  get at most +3 dB of boost, never past their true-peak headroom, so
+  nothing clips. The default `Automatic` mode preserves album dynamics when
+  an album plays in order and levels per track in shuffle, radio, and mixed
+  queues. Change or disable it per user under Settings -> Playback ->
+  Volume leveling. Tracks without measurements play untouched until the
+  background backfill measures them.
+
 - The Subsonic-compatible `/rest` surface now accepts form-encoded POST
   requests (OpenSubsonic `formPost`), fixing playback with Music Assistant
   and other POST-first clients. Read endpoints route POST through a

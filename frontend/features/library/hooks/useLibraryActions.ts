@@ -18,7 +18,11 @@ const formatTrackForAudio = (track: Track) => ({
         id: track.album?.id,
         title: track.album?.title || "Unknown Album",
         coverArt: track.album?.coverArt,
+        albumLoudnessLufs: track.album?.albumLoudnessLufs ?? null,
+        albumTruePeakDb: track.album?.albumTruePeakDb ?? null,
     },
+    loudnessLufs: track.loudnessLufs ?? null,
+    truePeakDb: track.truePeakDb ?? null,
 });
 
 /**
@@ -61,6 +65,8 @@ export function useLibraryActions() {
                             id: album.id,
                             title: album.title,
                             coverArt: album.coverArt || album.coverUrl,
+                            albumLoudnessLufs: album.albumLoudnessLufs ?? null,
+                            albumTruePeakDb: album.albumTruePeakDb ?? null,
                         },
                         artist: {
                             id: album.artist?.id,

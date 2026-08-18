@@ -30,6 +30,8 @@ export interface SystemFeatures {
     autoPlaylists: boolean;
     federation: boolean;
     vibe: VibeSystemStatus;
+    /** Loudness normalization reference in LUFS (LOUDNESS_TARGET_LUFS). */
+    loudnessTargetLufs?: number;
 }
 
 /** Add settings-domain operations to an API client base class. */

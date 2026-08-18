@@ -195,6 +195,8 @@ function transformSearchResults(serviceResults: SearchResults) {
             albumId: track.albumId,
             duration: track.duration,
             trackNo: 0,
+            loudnessLufs: track.loudnessLufs ?? null,
+            truePeakDb: track.truePeakDb ?? null,
             source: track.source,
             peer: track.peer,
             album: {
@@ -202,6 +204,8 @@ function transformSearchResults(serviceResults: SearchResults) {
                 title: track.albumTitle,
                 artistId: track.artistId,
                 coverUrl: null,
+                albumLoudnessLufs: track.albumLoudnessLufs ?? null,
+                albumTruePeakDb: track.albumTruePeakDb ?? null,
                 artist: {
                     id: track.artistId,
                     name: track.artistName,

@@ -8,12 +8,8 @@
  * Design references: Jellyfin SyncPlay, Syncplay, Synctube.
  */
 
-import type {
-    CanonicalMediaProviderIdentity,
-    CanonicalMediaSource,
-    RemoteMediaSource,
-    ResolvedMediaSource,
-} from "@soundspan/media-metadata-contract";
+import type {} from "@soundspan/media-metadata-contract";
+import type { SyncQueueItem } from "./listenTogetherQueueItem";
 import { logger } from "../utils/logger";
 
 const log = logger.child("ListenTogetherManager");
@@ -22,25 +18,7 @@ const log = logger.child("ListenTogetherManager");
 // Types
 // ---------------------------------------------------------------------------
 
-export interface SyncQueueItem {
-    id: string;
-    title: string;
-    duration: number;
-    artist: { id: string; name: string };
-    album: { id: string; title: string; coverArt: string | null };
-    mediaSource?: CanonicalMediaSource;
-    provider?: CanonicalMediaProviderIdentity;
-    streamSource?: RemoteMediaSource;
-    tidalTrackId?: number;
-    youtubeVideoId?: string;
-    /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
-    youtubeAudioFormat?: "mp4" | "webm";
-    localTrackId?: string;
-    trackTidalId?: string;
-    trackYtMusicId?: string;
-    trackMappingId?: string;
-    originSource?: ResolvedMediaSource;
-}
+export type { SyncQueueItem } from "./listenTogetherQueueItem";
 
 export interface GroupMember {
     userId: string;

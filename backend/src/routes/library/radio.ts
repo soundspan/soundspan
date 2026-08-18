@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { prisma, Prisma } from "../../utils/db";
+import { transformRadioTrack } from "./radioTrackResponse";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { allocateTracksWithArtistWeighting } from "../../services/artistSlotAllocation";
@@ -1875,44 +1876,9 @@ export async function handleGetRadio(req: Request, res: Response) {
         logger.debug("=".repeat(100) + "\n");
     }
 
-    // Transform to match frontend Track interface
-    const transformedTracks = orderedTracks.map((track) => ({
-        id: track.id,
-        title: track.title,
-        duration: track.duration,
-        trackNo: track.trackNo,
-        filePath: track.filePath,
-        artist: {
-            id: track.album.artist.id,
-            name: track.album.artist.name,
-        },
-        album: {
-            id: track.album.id,
-            title: track.album.title,
-            coverArt: track.album.coverUrl,
-        },
-        // Include audio features for vibe mode visualization (if available)
-        ...(vibeSourceFeatures && {
-            audioFeatures: {
-                bpm: track.bpm,
-                energy: track.energy,
-                valence: track.valence,
-                arousal: track.arousal,
-                danceability: track.danceability,
-                keyScale: track.keyScale,
-                instrumentalness: track.instrumentalness,
-                analysisMode: track.analysisMode,
-                // ML Mood predictions for enhanced visualization
-                moodHappy: track.moodHappy,
-                moodSad: track.moodSad,
-                moodRelaxed: track.moodRelaxed,
-                moodAggressive: track.moodAggressive,
-                moodParty: track.moodParty,
-                moodAcoustic: track.moodAcoustic,
-                moodElectronic: track.moodElectronic,
-            },
-        }),
-    }));
+    const transformedTracks = orderedTracks.map((track) =>
+        transformRadioTrack(track, vibeSourceFeatures),
+    );
 
     // Keep deterministic ordering for vibe/liked queues. Shuffle all other radio queues.
     const finalTracks = preserveInputOrder

@@ -1,4 +1,8 @@
 export interface DiscoverTrack {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     id: string;
     title: string;
     artist: string;

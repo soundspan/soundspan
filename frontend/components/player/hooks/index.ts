@@ -21,4 +21,5 @@ export { useSegmentedHeartbeat } from "./useSegmentedHeartbeat";
 export { useSegmentedPrewarm } from "./useSegmentedPrewarm";
 export { useSegmentedSessionRecovery } from "./useSegmentedSessionRecovery";
 export { useSegmentedStartupCallbacks } from "./useSegmentedStartupCallbacks";
+export { useLoudnessNormalization } from "./useLoudnessNormalization";
 export { useTrackRecovery } from "./useTrackRecovery";

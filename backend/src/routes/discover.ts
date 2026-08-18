@@ -18,6 +18,7 @@ import { safeResolvePath } from "../utils/safeResolvePath";
 import { lidarrService } from "../services/lidarr";
 import { discoveryRecommendationsService } from "../services/discovery";
 import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
+import { buildDiscoveryTrackPayload } from "./discoverTrackPayload";
 
 const router = Router();
 const isLegacyDiscoveryMode = config.discover.mode === "legacy";
@@ -356,21 +357,21 @@ router.get("/current", async (req, res) => {
                             ? trackMap.get(dt.trackId)
                             : null;
                         if (track) {
-                            tracks.push({
-                                id: track.id,
-                                title: track.title,
-                                artist: discoveryAlbum.artistName,
-                                artistId: track.album?.artist?.id ?? null,
-                                album: discoveryAlbum.albumTitle,
-                                albumId: discoveryAlbum.rgMbid,
-                                isLiked: discoveryAlbum.status === "LIKED",
-                                likedAt: discoveryAlbum.likedAt,
-                                similarity: discoveryAlbum.similarity,
-                                tier: discoveryAlbum.tier,
-                                coverUrl: track.album?.coverUrl,
-                                available: true,
-                                duration: track.duration,
-                            });
+                            tracks.push(
+                                buildDiscoveryTrackPayload(
+                                    discoveryAlbum,
+                                    track,
+                                    {
+                                        artistId:
+                                            track.album?.artist?.id ?? null,
+                                        coverUrl: track.album?.coverUrl,
+                                        albumLoudnessLufs:
+                                            track.album.albumLoudnessLufs,
+                                        albumTruePeakDb:
+                                            track.album.albumTruePeakDb,
+                                    },
+                                ),
+                            );
                         }
                     }
                 }
@@ -398,21 +399,14 @@ router.get("/current", async (req, res) => {
 
                 if (album && album.tracks.length > 0) {
                     const track = album.tracks[0];
-                    tracks.push({
-                        id: track.id,
-                        title: track.title,
-                        artist: discoveryAlbum.artistName,
-                        artistId: album.artist?.id ?? null,
-                        album: discoveryAlbum.albumTitle,
-                        albumId: discoveryAlbum.rgMbid,
-                        isLiked: discoveryAlbum.status === "LIKED",
-                        likedAt: discoveryAlbum.likedAt,
-                        similarity: discoveryAlbum.similarity,
-                        tier: discoveryAlbum.tier,
-                        coverUrl: album.coverUrl,
-                        available: true,
-                        duration: track.duration,
-                    });
+                    tracks.push(
+                        buildDiscoveryTrackPayload(discoveryAlbum, track, {
+                            artistId: album.artist?.id ?? null,
+                            coverUrl: album.coverUrl,
+                            albumLoudnessLufs: album.albumLoudnessLufs,
+                            albumTruePeakDb: album.albumTruePeakDb,
+                        }),
+                    );
                 } else {
                     // Album not in library yet (downloading/pending)
                     tracks.push({

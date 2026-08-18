@@ -9,6 +9,7 @@ export interface UserSettings {
     displayName?: string | null;
     hasProfilePicture?: boolean;
     playbackQuality: "original" | "high" | "medium" | "low";
+    loudnessMode: "off" | "track" | "album" | "auto";
     shareOnlinePresence: boolean;
     shareListeningStatus: boolean;
     wifiOnly: boolean;

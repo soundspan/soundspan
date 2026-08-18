@@ -192,11 +192,15 @@ export async function validateQueueTracks(
                 title: true,
                 duration: true,
                 filePath: true,
+                loudnessLufs: true,
+                truePeakDb: true,
                 album: {
                     select: {
                         id: true,
                         title: true,
                         coverUrl: true,
+                        albumLoudnessLufs: true,
+                        albumTruePeakDb: true,
                         artist: { select: { id: true, name: true } },
                     },
                 },
@@ -213,6 +217,8 @@ export async function validateQueueTracks(
                 id: track.id,
                 title: track.title,
                 duration: track.duration,
+                loudnessLufs: track.loudnessLufs,
+                truePeakDb: track.truePeakDb,
                 artist: {
                     id: track.album.artist.id,
                     name: track.album.artist.name,
@@ -221,6 +227,8 @@ export async function validateQueueTracks(
                     id: track.album.id,
                     title: track.album.title,
                     coverArt: track.album.coverUrl,
+                    albumLoudnessLufs: track.album.albumLoudnessLufs,
+                    albumTruePeakDb: track.album.albumTruePeakDb,
                 },
                 mediaSource: "local",
                 provider: { source: "local" },

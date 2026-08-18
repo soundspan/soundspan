@@ -64,10 +64,14 @@ export interface Audiobook {
 }
 
 export interface LibraryTrack {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     id: string;
     title: string;
     duration: number;
     album: {
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
         id: string;
         title: string;
         coverUrl?: string | null;

@@ -127,4 +127,68 @@ describe("vibe search decisions", () => {
             "space-student",
         );
     });
+
+    it("serializes measured and unmeasured loudness fields", async () => {
+        mockFindTracksByTextEmbedding.mockResolvedValueOnce([
+            {
+                id: "track-measured",
+                title: "Measured",
+                duration: 183,
+                trackNo: 2,
+                distance: 0.2,
+                albumId: "album-1",
+                albumTitle: "Album One",
+                albumCoverUrl: null,
+                artistId: "artist-1",
+                artistName: "Artist One",
+                loudnessLufs: -17.3,
+                truePeakDb: -1.1,
+                albumLoudnessLufs: -18.4,
+                albumTruePeakDb: -0.7,
+            },
+            {
+                id: "track-unmeasured",
+                title: "Unmeasured",
+                duration: 191,
+                trackNo: 3,
+                distance: 0.3,
+                albumId: "album-2",
+                albumTitle: "Album Two",
+                albumCoverUrl: null,
+                artistId: "artist-2",
+                artistName: "Artist Two",
+                loudnessLufs: null,
+                truePeakDb: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+            },
+        ]);
+
+        const result = await executeVibeSearch({
+            normalizedQuery: "measured focus",
+            limit: 20,
+            similarityThreshold: 0.6,
+        });
+
+        expect(result.tracks).toEqual([
+            expect.objectContaining({
+                id: "track-measured",
+                loudnessLufs: -17.3,
+                truePeakDb: -1.1,
+                album: expect.objectContaining({
+                    albumLoudnessLufs: -18.4,
+                    albumTruePeakDb: -0.7,
+                }),
+            }),
+            expect.objectContaining({
+                id: "track-unmeasured",
+                loudnessLufs: null,
+                truePeakDb: null,
+                album: expect.objectContaining({
+                    albumLoudnessLufs: null,
+                    albumTruePeakDb: null,
+                }),
+            }),
+        ]);
+    });
 });

@@ -423,8 +423,12 @@ describe("discover legacy-mode runtime behavior", () => {
                 id: "track-1",
                 title: "Song One",
                 duration: 180,
+                loudnessLufs: -17.1,
+                truePeakDb: -1.2,
                 album: {
                     coverUrl: "https://cover/one.jpg",
+                    albumLoudnessLufs: -18.2,
+                    albumTruePeakDb: -0.6,
                     artist: { name: "Artist One" },
                 },
             },
@@ -515,6 +519,10 @@ describe("discover legacy-mode runtime behavior", () => {
                 id: "track-1",
                 title: "Song One",
                 available: true,
+                loudnessLufs: -17.1,
+                truePeakDb: -1.2,
+                albumLoudnessLufs: -18.2,
+                albumTruePeakDb: -0.6,
             }),
         );
         expect(res.body.tracks[1]).toEqual(

@@ -155,6 +155,10 @@ export default function SettingsPage() {
                 onChange={(quality) =>
                     updateUserSettings({ playbackQuality: quality })
                 }
+                loudnessMode={userSettings.loudnessMode}
+                onLoudnessModeChange={(mode) =>
+                    updateUserSettings({ loudnessMode: mode })
+                }
             />
 
             {/* Integrations (YouTube Music + TIDAL — visible to all users) */}

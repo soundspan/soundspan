@@ -124,12 +124,16 @@ function serializeTrack(row: RankedSearchTrack) {
         title: row.title,
         duration: row.duration,
         trackNo: row.trackNo,
+        loudnessLufs: row.loudnessLufs ?? null,
+        truePeakDb: row.truePeakDb ?? null,
         distance: row.distance,
         similarity: searchSimilarity(row),
         album: {
             id: row.albumId,
             title: row.albumTitle,
             coverUrl: row.albumCoverUrl,
+            albumLoudnessLufs: row.albumLoudnessLufs ?? null,
+            albumTruePeakDb: row.albumTruePeakDb ?? null,
         },
         artist: { id: row.artistId, name: row.artistName },
     };

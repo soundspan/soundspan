@@ -65,6 +65,10 @@ interface CurrentPlaylistTrack {
     available: boolean;
     duration: number;
     sourceType: "local";
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
 }
 
 interface CurrentPlaylistResponse {
@@ -921,6 +925,10 @@ export class DiscoveryRecommendationsService {
                     available: true,
                     duration: track.duration,
                     sourceType: "local",
+                    loudnessLufs: track.loudnessLufs,
+                    truePeakDb: track.truePeakDb,
+                    albumLoudnessLufs: track.album.albumLoudnessLufs,
+                    albumTruePeakDb: track.album.albumTruePeakDb,
                 });
             }
         }

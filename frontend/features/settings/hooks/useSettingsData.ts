@@ -11,6 +11,7 @@ const logger = createFrontendLogger("Settings.useSettingsData");
 export const defaultSettings: UserSettings = {
     displayName: "",
     playbackQuality: "original",
+    loudnessMode: "auto",
     shareOnlinePresence: false,
     shareListeningStatus: false,
     wifiOnly: false,

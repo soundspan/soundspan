@@ -38,6 +38,10 @@ export interface NearestTrackRow {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     energy: number | null;
     valence: number | null;
     danceability: number | null;
@@ -56,6 +60,10 @@ export interface TextSearchResult {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     // Audio features for re-ranking
     energy: number | null;
     valence: number | null;
@@ -307,6 +315,8 @@ export async function findNearestToEmbedding(
                 te.embedding <=> ${embedding}::vector AS distance,
                 a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
                 ar.id AS "artistId", ar.name AS "artistName",
+                t."loudnessLufs", t."truePeakDb",
+                a."albumLoudnessLufs", a."albumTruePeakDb",
                 t.energy, t.valence, t.danceability, t.arousal
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
@@ -326,6 +336,8 @@ export async function findNearestToEmbedding(
             te.embedding <=> ${embedding}::vector AS distance,
             a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
             ar.id AS "artistId", ar.name AS "artistName",
+            t."loudnessLufs", t."truePeakDb",
+            a."albumLoudnessLufs", a."albumTruePeakDb",
             t.energy, t.valence, t.danceability, t.arousal
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
@@ -363,6 +375,10 @@ export async function findTracksByTextEmbedding(
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
             ar.name as "artistName",
+            t."loudnessLufs",
+            t."truePeakDb",
+            a."albumLoudnessLufs",
+            a."albumTruePeakDb",
             t.energy,
             t.valence,
             t.danceability,

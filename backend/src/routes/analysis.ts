@@ -472,6 +472,8 @@ router.get<{ trackId: string }>(
                     keyStrength: true,
                     energy: true,
                     loudness: true,
+                    loudnessLufs: true,
+                    truePeakDb: true,
                     dynamicRange: true,
                     danceability: true,
                     valence: true,

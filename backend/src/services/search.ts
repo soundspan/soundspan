@@ -60,6 +60,10 @@ export interface TrackSearchResult {
     artistId: string;
     artistName: string;
     duration: number;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     rank: number;
     source?: "local" | "federated";
     peer?: SearchPeerResult | null;
@@ -470,10 +474,14 @@ export class SearchService {
                 title: true,
                 albumId: true,
                 duration: true,
+                loudnessLufs: true,
+                truePeakDb: true,
                 album: {
                     select: {
                         title: true,
                         artistId: true,
+                        albumLoudnessLufs: true,
+                        albumTruePeakDb: true,
                         artist: {
                             select: {
                                 name: true,
@@ -501,6 +509,10 @@ export class SearchService {
             artistId: r.album.artistId,
             artistName: r.album.artist.name,
             duration: r.duration,
+            loudnessLufs: r.loudnessLufs,
+            truePeakDb: r.truePeakDb,
+            albumLoudnessLufs: r.album.albumLoudnessLufs,
+            albumTruePeakDb: r.album.albumTruePeakDb,
             rank: 0,
             ...(r.origin === "FEDERATED" && r.federationPeer
                 ? {
@@ -539,7 +551,11 @@ export class SearchService {
           t.title,
           t."albumId",
           t.duration,
+          t."loudnessLufs",
+          t."truePeakDb",
           a.title as "albumTitle",
+          a."albumLoudnessLufs",
+          a."albumTruePeakDb",
           a."artistId",
           ar.name as "artistName",
           CASE WHEN t.origin = ${"FEDERATED"}::"TrackOrigin" THEN 'federated' ELSE 'local' END AS source,

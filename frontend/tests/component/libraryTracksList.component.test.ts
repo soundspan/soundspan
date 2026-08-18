@@ -154,7 +154,15 @@ test("applies limit to rendered rows but play action still queues all tracks", a
         source: undefined,
         peer: undefined,
         artist: { id: "artist-1", name: "Artist 1" },
-        album: { id: "album-1", title: "Album 1", coverArt: null },
+        album: {
+            id: "album-1",
+            title: "Album 1",
+            coverArt: null,
+            albumLoudnessLufs: null,
+            albumTruePeakDb: null,
+        },
+        loudnessLufs: null,
+        truePeakDb: null,
     });
     assert.equal(controlCalls.pause, 0);
     assert.equal(controlCalls.resume, 0);

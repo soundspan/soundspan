@@ -167,10 +167,14 @@ function formatNearestTrack(row: NearestTrackRow) {
         title: row.title,
         distance: row.distance,
         similarity: Math.max(0, 1 - row.distance / 2),
+        loudnessLufs: row.loudnessLufs ?? null,
+        truePeakDb: row.truePeakDb ?? null,
         album: {
             id: row.albumId,
             title: row.albumTitle,
             coverUrl: row.albumCoverUrl,
+            albumLoudnessLufs: row.albumLoudnessLufs ?? null,
+            albumTruePeakDb: row.albumTruePeakDb ?? null,
         },
         artist: { id: row.artistId, name: row.artistName },
         // Mirrors GET /api/vibe/similar/:trackId's audioFeatures shape so the
@@ -381,10 +385,14 @@ async function resolveTrackDestination(
                 title: destinationTrack.title,
                 distance: 0,
                 similarity: 1,
+                loudnessLufs: destinationTrack.loudnessLufs,
+                truePeakDb: destinationTrack.truePeakDb,
                 album: {
                     id: destinationTrack.album.id,
                     title: destinationTrack.album.title,
                     coverUrl: destinationTrack.album.coverUrl,
+                    albumLoudnessLufs: destinationTrack.album.albumLoudnessLufs,
+                    albumTruePeakDb: destinationTrack.album.albumTruePeakDb,
                 },
                 artist: {
                     id: destinationTrack.album.artist.id,
@@ -842,10 +850,14 @@ function formatSimilarTrack(track: SimilarTrack) {
         duration: track.duration,
         distance: track.distance,
         similarity: track.similarity,
+        loudnessLufs: track.loudnessLufs ?? null,
+        truePeakDb: track.truePeakDb ?? null,
         album: {
             id: track.albumId,
             title: track.albumTitle,
             coverUrl: track.albumCoverUrl,
+            albumLoudnessLufs: track.albumLoudnessLufs ?? null,
+            albumTruePeakDb: track.albumTruePeakDb ?? null,
         },
         artist: { id: track.artistId, name: track.artistName },
         audioFeatures: {

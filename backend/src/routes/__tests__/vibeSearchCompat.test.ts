@@ -357,6 +357,10 @@ describe("vibe search transport compatibility", () => {
                 albumCoverUrl: null,
                 artistId: "ar-1",
                 artistName: "Artist 1",
+                loudnessLufs: -16.8,
+                truePeakDb: -1.2,
+                albumLoudnessLufs: -17.9,
+                albumTruePeakDb: -0.8,
             },
         ]);
         const okReq = {
@@ -376,9 +380,13 @@ describe("vibe search transport compatibility", () => {
                         title: "Related",
                         distance: 0.2,
                         similarity: 0.9,
+                        loudnessLufs: -16.8,
+                        truePeakDb: -1.2,
                         album: expect.objectContaining({
                             id: "a-1",
                             title: "Album 1",
+                            albumLoudnessLufs: -17.9,
+                            albumTruePeakDb: -0.8,
                         }),
                         artist: expect.objectContaining({
                             id: "ar-1",

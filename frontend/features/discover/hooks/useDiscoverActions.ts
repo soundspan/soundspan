@@ -7,6 +7,8 @@ import { DiscoverPlaylist } from "../types";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface PlaybackQueueTrack {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     id: string;
     title: string;
     artist: { name: string; id?: string };
@@ -14,6 +16,8 @@ interface PlaybackQueueTrack {
         id: string;
         title: string;
         coverArt?: string;
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
     };
     duration: number;
     streamSource?: "tidal" | "youtube";
@@ -35,8 +39,12 @@ export function mapDiscoverTrackToPlaybackTrack(
             id: track.albumId,
             title: track.album,
             coverArt: track.coverUrl || undefined,
+            albumLoudnessLufs: track.albumLoudnessLufs ?? null,
+            albumTruePeakDb: track.albumTruePeakDb ?? null,
         },
         duration: track.duration || 0,
+        loudnessLufs: track.loudnessLufs ?? null,
+        truePeakDb: track.truePeakDb ?? null,
         ...(track.streamSource === "tidal" &&
             track.tidalTrackId && {
                 streamSource: "tidal" as const,

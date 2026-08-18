@@ -105,7 +105,13 @@ export interface Track {
     id: string;
     title: string;
     artist: { name: string; id?: string; mbid?: string };
-    album: { title: string; coverArt?: string | null; id?: string };
+    album: {
+        title: string;
+        coverArt?: string | null;
+        id?: string;
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
+    };
     duration: number;
     filePath?: string;
     // Streaming source fields
@@ -123,6 +129,12 @@ export interface Track {
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
     streamBitrate?: number;
+    // EBU R128 loudness measurements for playback normalization (#526).
+    // Album values ride each track so album-mode gain needs no extra fetch.
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     // Audio features for vibe mode visualization
     audioFeatures?: {
         bpm?: number | null;

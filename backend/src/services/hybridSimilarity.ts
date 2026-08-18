@@ -21,6 +21,10 @@ export interface SimilarTrack {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     // Audio features for vibe match visualization
     energy: number | null;
     valence: number | null;
@@ -193,6 +197,10 @@ async function findSimilarHybrid(
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
             ar.name as "artistName",
+            t."loudnessLufs",
+            t."truePeakDb",
+            a."albumLoudnessLufs",
+            a."albumTruePeakDb",
             t.energy,
             t.valence,
             t.danceability,
@@ -238,6 +246,10 @@ async function findSimilarClapOnly(
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
             ar.name as "artistName",
+            t."loudnessLufs",
+            t."truePeakDb",
+            a."albumLoudnessLufs",
+            a."albumTruePeakDb",
             t.energy,
             t.valence,
             t.danceability,
@@ -289,6 +301,10 @@ async function findSimilarFeaturesOnly(
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
             ar.name as "artistName",
+            t."loudnessLufs",
+            t."truePeakDb",
+            a."albumLoudnessLufs",
+            a."albumTruePeakDb",
             t.energy,
             t.valence,
             t.danceability,

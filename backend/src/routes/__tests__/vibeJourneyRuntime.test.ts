@@ -155,6 +155,10 @@ function nearestRow(overrides: Partial<Record<string, unknown>> = {}) {
         albumCoverUrl: null,
         artistId: "artist-id",
         artistName: "Artist",
+        loudnessLufs: null,
+        truePeakDb: null,
+        albumLoudnessLufs: null,
+        albumTruePeakDb: null,
         energy: null,
         valence: null,
         danceability: null,
@@ -325,6 +329,8 @@ describe("vibe journey + moods runtime", () => {
             mockTrackFindUnique.mockResolvedValueOnce({
                 id: "dest-1",
                 title: "Destination Song",
+                loudnessLufs: -17.7,
+                truePeakDb: -1.3,
                 energy: 0.9,
                 valence: 0.4,
                 danceability: 0.6,
@@ -333,6 +339,8 @@ describe("vibe journey + moods runtime", () => {
                     id: "album-dest",
                     title: "Album Dest",
                     coverUrl: null,
+                    albumLoudnessLufs: -18.5,
+                    albumTruePeakDb: -0.9,
                     artist: { id: "artist-dest", name: "Artist Dest" },
                 },
             });
@@ -344,6 +352,10 @@ describe("vibe journey + moods runtime", () => {
                     valence: null,
                     danceability: 0.7,
                     arousal: null,
+                    loudnessLufs: -16.4,
+                    truePeakDb: -1.6,
+                    albumLoudnessLufs: -17.2,
+                    albumTruePeakDb: -0.6,
                 }),
             ]);
 
@@ -361,6 +373,16 @@ describe("vibe journey + moods runtime", () => {
                 danceability: 0.7,
                 arousal: null,
             });
+            expect(res.body.waypoints[0]).toEqual(
+                expect.objectContaining({
+                    loudnessLufs: -16.4,
+                    truePeakDb: -1.6,
+                    album: expect.objectContaining({
+                        albumLoudnessLufs: -17.2,
+                        albumTruePeakDb: -0.6,
+                    }),
+                }),
+            );
             // The literal destination waypoint (built from prisma.track.findUnique,
             // not the ANN row) carries the destination track's own columns.
             expect(res.body.waypoints[1].audioFeatures).toEqual({
@@ -369,6 +391,16 @@ describe("vibe journey + moods runtime", () => {
                 danceability: 0.6,
                 arousal: 0.5,
             });
+            expect(res.body.waypoints[1]).toEqual(
+                expect.objectContaining({
+                    loudnessLufs: -17.7,
+                    truePeakDb: -1.3,
+                    album: expect.objectContaining({
+                        albumLoudnessLufs: -18.5,
+                        albumTruePeakDb: -0.9,
+                    }),
+                }),
+            );
         });
 
         it("returns 404 when the destination track is deleted between the embedding lookup and the track fetch (TOCTOU)", async () => {

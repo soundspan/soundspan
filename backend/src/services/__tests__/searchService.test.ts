@@ -195,6 +195,10 @@ describe("search service", () => {
                     artistId: "artist-1",
                     artistName: "Artist 1",
                     duration: 220,
+                    loudnessLufs: -17.8,
+                    truePeakDb: -1.2,
+                    albumLoudnessLufs: -18.4,
+                    albumTruePeakDb: -0.7,
                     rank: 0.88,
                 },
             ]);
@@ -205,7 +209,15 @@ describe("search service", () => {
 
         await expect(
             searchService.searchTracks({ query: "track", limit: 3, offset: 0 }),
-        ).resolves.toEqual([expect.objectContaining({ id: "track-1" })]);
+        ).resolves.toEqual([
+            expect.objectContaining({
+                id: "track-1",
+                loudnessLufs: -17.8,
+                truePeakDb: -1.2,
+                albumLoudnessLufs: -18.4,
+                albumTruePeakDb: -0.7,
+            }),
+        ]);
 
         prisma.$queryRaw.mockRejectedValueOnce(new Error("album fts failed"));
         prisma.album.findMany.mockResolvedValueOnce([
@@ -242,9 +254,13 @@ describe("search service", () => {
                 title: "Track Fallback",
                 albumId: "album-2",
                 duration: 180,
+                loudnessLufs: null,
+                truePeakDb: null,
                 album: {
                     title: "Album Fallback",
                     artistId: "artist-2",
+                    albumLoudnessLufs: null,
+                    albumTruePeakDb: null,
                     artist: { name: "Artist 2" },
                 },
             },
@@ -260,6 +276,10 @@ describe("search service", () => {
                 artistId: "artist-2",
                 artistName: "Artist 2",
                 duration: 180,
+                loudnessLufs: null,
+                truePeakDb: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
                 rank: 0,
             },
         ]);

@@ -11,8 +11,16 @@ export interface UnifiedTrackResponse {
     title: string;
     duration: number;
     trackNo: number | null;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     artist: { id: string | null; name: string };
-    album: { id: string | null; title: string; coverArt: string | null };
+    album: {
+        id: string | null;
+        title: string;
+        coverArt: string | null;
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
+    };
     source: UnifiedTrackSource;
     peer?: FederatedTrackPeer;
     provider: {
@@ -29,6 +37,8 @@ export interface UnifiedLocalTrackRecord {
     duration: number;
     trackNo?: number | null;
     trackNumber?: number | null;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     filePath?: string | null;
     displayTitle?: string | null;
     removedAt?: Date | null;
@@ -43,6 +53,8 @@ export interface UnifiedLocalTrackRecord {
         title: string;
         coverUrl?: string | null;
         coverArt?: string | null;
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
         artist: {
             name: string;
             id?: string | null;
@@ -138,6 +150,8 @@ export function normalizeLocalTrack(
                 : typeof track.trackNumber === "number"
                   ? track.trackNumber
                   : null,
+        loudnessLufs: track.loudnessLufs ?? null,
+        truePeakDb: track.truePeakDb ?? null,
         artist: {
             id:
                 typeof track.album.artist.id === "string"
@@ -149,6 +163,8 @@ export function normalizeLocalTrack(
             id: typeof track.album.id === "string" ? track.album.id : null,
             title: track.album.title || "Unknown Album",
             coverArt: track.album.coverUrl ?? track.album.coverArt ?? null,
+            albumLoudnessLufs: track.album.albumLoudnessLufs ?? null,
+            albumTruePeakDb: track.album.albumTruePeakDb ?? null,
         },
         ...federated,
         provider: {

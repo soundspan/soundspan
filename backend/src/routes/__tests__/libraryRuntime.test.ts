@@ -596,6 +596,8 @@ function createRadioTrack(id: string, overrides?: Partial<any>) {
         title: `Track ${id}`,
         duration: 180,
         trackNo: 1,
+        loudnessLufs: null,
+        truePeakDb: null,
         filePath: `/music/${id}.flac`,
         bpm: 120,
         energy: 0.6,
@@ -617,6 +619,8 @@ function createRadioTrack(id: string, overrides?: Partial<any>) {
             id: `album-${id}`,
             title: `Album ${id}`,
             coverUrl: `cover-${id}.jpg`,
+            albumLoudnessLufs: null,
+            albumTruePeakDb: null,
             artist: {
                 id: `artist-${id}`,
                 name: `Artist ${id}`,
@@ -2420,10 +2424,14 @@ describe("library catalog list runtime coverage", () => {
                         {
                             id: "track-1",
                             title: "Song One",
+                            loudnessLufs: -16.7,
+                            truePeakDb: -1.1,
                             album: {
                                 id: "album-db-1",
                                 title: "Owned Album",
                                 coverUrl: "db-cover.jpg",
+                                albumLoudnessLufs: -17.5,
+                                albumTruePeakDb: -0.7,
                             },
                         },
                     ],
@@ -2564,6 +2572,12 @@ describe("library catalog list runtime coverage", () => {
                         id: "track-1",
                         title: "Song One",
                         userPlayCount: 6,
+                        loudnessLufs: -16.7,
+                        truePeakDb: -1.1,
+                        album: expect.objectContaining({
+                            albumLoudnessLufs: -17.5,
+                            albumTruePeakDb: -0.7,
+                        }),
                     }),
                 ]),
                 similarArtists: expect.arrayContaining([
@@ -3983,10 +3997,14 @@ describe("library catalog list runtime coverage", () => {
                 id: "track-1",
                 title: "Track 1",
                 duration: 201,
+                loudnessLufs: -19.2,
+                truePeakDb: -2.4,
                 album: {
                     id: "album-1",
                     title: "Album 1",
                     coverUrl: "cover-1.jpg",
+                    albumLoudnessLufs: -18.6,
+                    albumTruePeakDb: -1.8,
                     artist: { id: "artist-1", name: "Artist 1" },
                 },
             })
@@ -4004,8 +4022,16 @@ describe("library catalog list runtime coverage", () => {
         expect(okRes.body).toEqual({
             id: "track-1",
             title: "Track 1",
+            loudnessLufs: -19.2,
+            truePeakDb: -2.4,
             artist: { name: "Artist 1", id: "artist-1" },
-            album: { title: "Album 1", coverArt: "cover-1.jpg", id: "album-1" },
+            album: {
+                title: "Album 1",
+                coverArt: "cover-1.jpg",
+                id: "album-1",
+                albumLoudnessLufs: -18.6,
+                albumTruePeakDb: -1.8,
+            },
             duration: 201,
         });
 
@@ -6651,7 +6677,21 @@ describe("library catalog list runtime coverage", () => {
             { trackId: "liked-1" },
         ]);
         mockTrackFindMany.mockResolvedValueOnce([
-            createRadioTrack("liked-1"),
+            createRadioTrack("liked-1", {
+                loudnessLufs: -17.2,
+                truePeakDb: -1.4,
+                album: {
+                    id: "album-liked-1",
+                    title: "Album liked-1",
+                    coverUrl: "cover-liked-1.jpg",
+                    albumLoudnessLufs: -18.3,
+                    albumTruePeakDb: -0.9,
+                    artist: {
+                        id: "artist-liked-1",
+                        name: "Artist liked-1",
+                    },
+                },
+            }),
             createRadioTrack("liked-2"),
         ]);
 
@@ -6676,6 +6716,16 @@ describe("library catalog list runtime coverage", () => {
             "liked-2",
             "liked-1",
         ]);
+        expect(res.body.tracks[1]).toEqual(
+            expect.objectContaining({
+                loudnessLufs: -17.2,
+                truePeakDb: -1.4,
+                album: expect.objectContaining({
+                    albumLoudnessLufs: -18.3,
+                    albumTruePeakDb: -0.9,
+                }),
+            }),
+        );
         expect(mockShuffleArray).not.toHaveBeenCalled();
     });
 

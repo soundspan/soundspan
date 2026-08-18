@@ -15,6 +15,10 @@ type QueryRow = {
     artistId: string;
     albumId: string;
     coverUrl: string | null;
+    loudnessLufs: number | null;
+    truePeakDb: number | null;
+    albumLoudnessLufs: number | null;
+    albumTruePeakDb: number | null;
     energy: number | null;
     valence: number | null;
     moodHappy: number | null;
@@ -132,8 +136,8 @@ jest.mock("worker_threads", () => ({
     Worker: MockWorker,
 }));
 
-const PROJECTION_KEY = "vibe:map:v4:projection:space-active";
-const TRACK_IDS_KEY = "vibe:map:v4:track_ids:space-active";
+const PROJECTION_KEY = "vibe:map:v5:projection:space-active";
+const TRACK_IDS_KEY = "vibe:map:v5:track_ids:space-active";
 
 function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
     return {
@@ -143,6 +147,10 @@ function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
         artistId: `artist-${index}`,
         albumId: `album-${index}`,
         coverUrl: index % 2 === 0 ? `cover-${index}.jpg` : null,
+        loudnessLufs: null,
+        truePeakDb: null,
+        albumLoudnessLufs: null,
+        albumTruePeakDb: null,
         energy: Number((index / 10).toFixed(2)),
         valence: Number((1 - index / 10).toFixed(2)),
         moodHappy: 0.1,
@@ -293,7 +301,14 @@ describe("computeMapProjection", () => {
 
     it("uses the circular fallback layout for datasets smaller than five tracks", async () => {
         mockQueryRaw.mockResolvedValueOnce([
-            makeRow(1, { moodElectronic: 0.95, moodParty: 0.3 }),
+            makeRow(1, {
+                moodElectronic: 0.95,
+                moodParty: 0.3,
+                loudnessLufs: -17.6,
+                truePeakDb: -1.4,
+                albumLoudnessLufs: -18.2,
+                albumTruePeakDb: -0.7,
+            }),
             makeRow(2, {
                 moodHappy: null,
                 moodSad: null,
@@ -320,12 +335,20 @@ describe("computeMapProjection", () => {
                 id: "track-1",
                 dominantMood: "moodElectronic",
                 moodScore: 0.95,
+                loudnessLufs: -17.6,
+                truePeakDb: -1.4,
+                albumLoudnessLufs: -18.2,
+                albumTruePeakDb: -0.7,
             }),
             expect.objectContaining({
                 id: "track-2",
                 dominantMood: "neutral",
                 moodScore: 0,
                 moods: {},
+                loudnessLufs: null,
+                truePeakDb: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
             }),
             expect.objectContaining({
                 id: "track-3",

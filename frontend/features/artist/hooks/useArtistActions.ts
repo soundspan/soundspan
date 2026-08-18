@@ -103,8 +103,13 @@ export function useArtistActions() {
                         title: track.album?.title || "Unknown Album",
                         coverArt: track.album?.coverArt,
                         id: track.album?.id,
+                        albumLoudnessLufs:
+                            track.album?.albumLoudnessLufs ?? null,
+                        albumTruePeakDb: track.album?.albumTruePeakDb ?? null,
                     },
                     duration: track.duration,
+                    loudnessLufs: track.loudnessLufs ?? null,
+                    truePeakDb: track.truePeakDb ?? null,
                 };
 
                 playTrackFromContext(formattedTrack);

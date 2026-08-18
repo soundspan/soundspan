@@ -8,6 +8,7 @@ import {
 } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
+import { useLoudnessNormalization } from "./useLoudnessNormalization";
 
 interface UsePlaybackControlSyncOptions {
     refs: PlaybackOrchestratorRefs;
@@ -57,6 +58,13 @@ export function usePlaybackControlSync({
         trackEndWatchdogRef,
         outputStateRef,
     } = refs;
+
+    // Volume leveling (#526): keeps the gain factor applied by
+    // applyCurrentOutputState in sync with the current track and user mode.
+    useLoudnessNormalization({
+        loudnessGainFactorRef: refs.loudnessGainFactorRef,
+        applyCurrentOutputState,
+    });
 
     // Check podcast cache status and control canSeek
     useEffect(() => {

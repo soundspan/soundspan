@@ -46,18 +46,10 @@ import {
 } from "../../utils/libraryDeletion";
 
 /**
- * Router segment for artists routes registered at this position.
+ * Router segments for artists routes registered at their mount positions.
  */
 export const artistsListRouter = Router();
-
-/**
- * Router segment for artists routes registered at this position.
- */
 export const artistsDetailRouter = Router();
-
-/**
- * Router segment for artists routes registered at this position.
- */
 export const artistsDeletionRouter = Router();
 /**
  * @openapi
@@ -481,6 +473,8 @@ export async function handleGetArtist(
                                 id: true,
                                 title: true,
                                 coverUrl: true,
+                                albumLoudnessLufs: true,
+                                albumTruePeakDb: true,
                             },
                         },
                     },

@@ -151,11 +151,31 @@ describe("listenTogether service", () => {
                 title: "Track 1",
                 duration: 120,
                 filePath: "/music/t1.mp3",
+                loudnessLufs: -17.2,
+                truePeakDb: -1.1,
                 album: {
                     id: "a1",
                     title: "Album 1",
                     coverUrl: "cover.jpg",
+                    albumLoudnessLufs: -18.1,
+                    albumTruePeakDb: -0.7,
                     artist: { id: "ar1", name: "Artist 1" },
+                },
+            },
+            {
+                id: "t2",
+                title: "Track 2",
+                duration: 125,
+                filePath: "/music/t2.mp3",
+                loudnessLufs: null,
+                truePeakDb: null,
+                album: {
+                    id: "a2",
+                    title: "Album 2",
+                    coverUrl: null,
+                    albumLoudnessLufs: null,
+                    albumTruePeakDb: null,
+                    artist: { id: "ar2", name: "Artist 2" },
                 },
             },
         ]);
@@ -176,7 +196,7 @@ describe("listenTogether service", () => {
 
         await expect(
             listenTogether.createGroup("host-1", "Host", {
-                queueTrackIds: ["t1", "missing"],
+                queueTrackIds: ["t1", "t2", "missing"],
                 currentTrackId: "t1",
                 isPlaying: true,
                 currentTimeMs: 1000,
@@ -191,6 +211,21 @@ describe("listenTogether service", () => {
                     expect.objectContaining({
                         id: "t1",
                         title: "Track 1",
+                        loudnessLufs: -17.2,
+                        truePeakDb: -1.1,
+                        album: expect.objectContaining({
+                            albumLoudnessLufs: -18.1,
+                            albumTruePeakDb: -0.7,
+                        }),
+                    }),
+                    expect.objectContaining({
+                        id: "t2",
+                        loudnessLufs: null,
+                        truePeakDb: null,
+                        album: expect.objectContaining({
+                            albumLoudnessLufs: null,
+                            albumTruePeakDb: null,
+                        }),
                     }),
                 ],
                 isPlaying: true,

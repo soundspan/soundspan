@@ -53,6 +53,10 @@ export function usePlaybackOrchestratorRefs({
         volume,
         isMuted,
     });
+    // Loudness-normalization factor composited into the engine volume by
+    // applyCurrentOutputState. Kept separate from outputStateRef because
+    // that object is replaced wholesale by its writers.
+    const loudnessGainFactorRef = useRef<number>(1);
     const loadIdRef = useRef<number>(0);
     const desiredLoadPlayRef = useRef<DesiredLoadPlayIntent | null>(null);
     const cancelledLoadPlayIdRef = useRef<number | null>(null);
@@ -310,6 +314,7 @@ export function usePlaybackOrchestratorRefs({
         isUserInitiatedRef,
         isLoadingRef,
         outputStateRef,
+        loudnessGainFactorRef,
         loadIdRef,
         desiredLoadPlayRef,
         cancelledLoadPlayIdRef,

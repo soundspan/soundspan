@@ -23,6 +23,8 @@ interface FeaturesState {
     autoPlaylists: boolean;
     federation: boolean;
     vibe: VibeSystemStatus;
+    /** Server-configured loudness normalization reference (LUFS). */
+    loudnessTargetLufs: number;
     showVersion: boolean;
     loading: boolean;
 }
@@ -47,6 +49,7 @@ const defaultState: FeaturesState = {
         activeSpace: null,
         migration: null,
     },
+    loudnessTargetLufs: -18,
     showVersion: false,
     loading: true,
 };
@@ -74,6 +77,10 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                 autoPlaylists: features.autoPlaylists ?? true,
                 federation: features.federation ?? false,
                 vibe: features.vibe,
+                loudnessTargetLufs:
+                    typeof features.loudnessTargetLufs === "number"
+                        ? features.loudnessTargetLufs
+                        : -18,
                 showVersion: uiSettings.showVersion,
                 loading: false,
             });
@@ -89,6 +96,7 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                           autoPlaylists: true,
                           federation: false,
                           vibe: defaultState.vibe,
+                          loudnessTargetLufs: -18,
                           showVersion: false,
                           loading: false,
                       }

@@ -58,6 +58,8 @@ export interface Album {
 }
 
 export interface Track {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     id: string;
     title: string;
     duration: number;
@@ -67,6 +69,8 @@ export interface Track {
     userPlayCount?: number;
     listeners?: number;
     album?: {
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
         id?: string;
         title?: string;
         coverArt?: string | null;

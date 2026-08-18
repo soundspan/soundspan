@@ -33,6 +33,10 @@ Configure stream/transcode quality and cache behavior in Settings.
 
 Player quality badges show active source details (codec/bitrate or bit depth/sample rate).
 
+### Volume Leveling
+
+Volume leveling evens out loudness differences between songs so you do not reach for the volume knob between a quiet 90s master and a modern loud one. It is on by default in `Automatic` mode: albums played front-to-back keep their intended dynamics, while shuffle, radio, and mixed queues are leveled per song. Set it to `By track`, `By album`, or `Off` under `Settings -> Playback -> Volume leveling`. Leveling only turns loud songs down and gives quiet songs a small, clip-safe boost; songs the analyzer has not measured yet play unchanged until the background measurement catches up.
+
 ## Social and History
 
 - Activity panel `Social` tab lists users who are online and sharing presence.

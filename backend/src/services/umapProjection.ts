@@ -13,8 +13,8 @@ const MIN_TRACKS_FOR_UMAP = 5;
 const MAX_EMBEDDINGS = 15000;
 // Space-scoped keys: a cutover to a new embedding space starts writing to
 // fresh keys instead of serving the retired space's projection for a day.
-const CACHE_KEY_PREFIX = "vibe:map:v4:projection";
-const TRACK_IDS_KEY_PREFIX = "vibe:map:v4:track_ids";
+const CACHE_KEY_PREFIX = "vibe:map:v5:projection";
+const TRACK_IDS_KEY_PREFIX = "vibe:map:v5:track_ids";
 const CACHE_TTL_SECONDS = 86400;
 const EMPTY_CACHE_TTL_SECONDS = 300;
 const UMAP_TIMEOUT_MS = 15 * 60 * 1000;
@@ -41,6 +41,10 @@ export interface VibeMapTrack {
     artistId: string;
     albumId: string;
     coverUrl: string | null;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    albumLoudnessLufs?: number | null;
+    albumTruePeakDb?: number | null;
     dominantMood: string;
     moodScore: number;
     moods: Record<string, number>;
@@ -62,6 +66,10 @@ type TrackRow = {
     artistId: string;
     albumId: string;
     coverUrl: string | null;
+    loudnessLufs: number | null;
+    truePeakDb: number | null;
+    albumLoudnessLufs: number | null;
+    albumTruePeakDb: number | null;
     energy: number | null;
     valence: number | null;
     moodHappy: number | null;
@@ -181,6 +189,10 @@ function buildMapTrack(row: TrackRow, x: number, y: number): VibeMapTrack {
         artistId: row.artistId,
         albumId: row.albumId,
         coverUrl: row.coverUrl,
+        loudnessLufs: row.loudnessLufs,
+        truePeakDb: row.truePeakDb,
+        albumLoudnessLufs: row.albumLoudnessLufs,
+        albumTruePeakDb: row.albumTruePeakDb,
         dominantMood: dominant.mood,
         moodScore: dominant.score,
         moods: getMoodScores(row as Record<string, unknown>),
@@ -350,6 +362,10 @@ async function doCompute(): Promise<VibeMapResponse> {
             ar.id as "artistId",
             a.id as "albumId",
             a."coverUrl",
+            t."loudnessLufs",
+            t."truePeakDb",
+            a."albumLoudnessLufs",
+            a."albumTruePeakDb",
             t.energy,
             t.valence,
             t."moodHappy",

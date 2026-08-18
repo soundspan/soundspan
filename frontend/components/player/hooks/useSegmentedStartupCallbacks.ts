@@ -38,6 +38,7 @@ export function useSegmentedStartupCallbacks({
         segmentedStartupFallbackTimeoutRef,
         segmentedManifestNudgeTimeoutsRef,
         outputStateRef,
+        loudnessGainFactorRef,
         segmentedStartupStabilityRef,
         segmentedUnexpectedStopStartupGuardRef,
         segmentedPrewarmRetryTimeoutsRef,
@@ -226,7 +227,9 @@ export function useSegmentedStartupCallbacks({
     const applyCurrentOutputState = useCallback(() => {
         const { volume: currentVolume, isMuted: currentMuted } =
             outputStateRef.current;
-        audioEngine.setVolume(currentVolume);
+        // User volume and loudness-normalization gain form one multiplicative
+        // chain; the engine clamps the composite into its 0..1 range.
+        audioEngine.setVolume(currentVolume * loudnessGainFactorRef.current);
         audioEngine.setMuted(currentMuted);
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
     }, []);

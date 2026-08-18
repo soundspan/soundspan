@@ -66,6 +66,7 @@ import {
     parseLibraryOrigin,
     trackBrowseWhere,
 } from "../../utils/librarySorting";
+import { loadActiveFederationStreamPeer } from "./federationStreamPeer";
 import {
     PersistedTrackDeletionPath,
     resolvePersistedTrackDeletionPath,
@@ -975,33 +976,6 @@ async function streamFederatedTrack(
     }
 }
 
-async function loadActiveFederationStreamPeer(peerId: string | null) {
-    if (!peerId) return null;
-    const peer = await prisma.federationPeer.findUnique({
-        where: { id: peerId },
-        select: {
-            id: true,
-            name: true,
-            baseUrl: true,
-            outboundToken: true,
-            outboundStatus: true,
-        },
-    });
-    if (
-        !peer ||
-        peer.outboundStatus !== "ACTIVE" ||
-        !peer.baseUrl ||
-        !peer.outboundToken
-    ) {
-        return null;
-    }
-    return {
-        ...peer,
-        baseUrl: peer.baseUrl,
-        outboundToken: peer.outboundToken,
-    };
-}
-
 export async function handleStreamTrack(
     req: Request<{ id: string }>,
     res: Response,
@@ -1508,8 +1482,12 @@ export async function handleGetTrack(
             title: track.album?.title || "Unknown Album",
             coverArt: track.album?.coverUrl,
             id: track.album?.id,
+            albumLoudnessLufs: track.album?.albumLoudnessLufs ?? null,
+            albumTruePeakDb: track.album?.albumTruePeakDb ?? null,
         },
         duration: track.duration,
+        loudnessLufs: track.loudnessLufs,
+        truePeakDb: track.truePeakDb,
     };
 
     res.json(formattedTrack);
