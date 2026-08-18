@@ -251,6 +251,12 @@ export interface LibraryHealthResponse {
     trackRemovalRetentionDays: number;
 }
 
+/** Typed response from POST /api/admin/library-health/purge-removed. */
+export interface PurgeRemovedTracksResponse {
+    enqueued: boolean;
+    matched: number;
+}
+
 export interface ShareLinkRecord {
     id: string;
     token: string;

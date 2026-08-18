@@ -15,7 +15,9 @@ export function LibraryHealthSection() {
     const [trackRemovalRetentionDays, setTrackRemovalRetentionDays] =
         useState(0);
     const [isLoading, setIsLoading] = useState(true);
+    const [isPurging, setIsPurging] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [purgeNotice, setPurgeNotice] = useState<string | null>(null);
 
     const loadRecords = useCallback(() => {
         void api
@@ -42,6 +44,28 @@ export function LibraryHealthSection() {
         setIsLoading(true);
         setError(null);
         loadRecords();
+    };
+
+    const handlePurgeAll = async () => {
+        setIsPurging(true);
+        setError(null);
+        setPurgeNotice(null);
+        try {
+            const result = await api.purgeRemovedTracks();
+            setPurgeNotice(
+                result.enqueued
+                    ? `Purge started for ${result.matched} removed track` +
+                          `${result.matched === 1 ? "" : "s"}. Records ` +
+                          `disappear as the purge completes; refresh to ` +
+                          `follow progress.`
+                    : "No removed tracks to purge.",
+            );
+            loadRecords();
+        } catch {
+            setError("Failed to start the purge");
+        } finally {
+            setIsPurging(false);
+        }
     };
 
     const handleDismiss = async (recordId: string) => {
@@ -76,9 +100,12 @@ export function LibraryHealthSection() {
                 removedPendingPurgeCount={removedPendingPurgeCount}
                 trackRemovalRetentionDays={trackRemovalRetentionDays}
                 isLoading={isLoading}
+                isPurging={isPurging}
                 error={error}
+                purgeNotice={purgeNotice}
                 onRefresh={handleRefresh}
                 onDismiss={(recordId) => void handleDismiss(recordId)}
+                onPurgeAll={() => void handlePurgeAll()}
             />
         </SettingsSection>
     );

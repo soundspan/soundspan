@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an admin control to immediately enqueue a hard purge of all
+  soft-removed local tracks without waiting for the retention window.
+
 ### Changed
 
 ### Fixed

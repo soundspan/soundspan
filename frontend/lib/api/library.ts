@@ -3,6 +3,7 @@ import type {
     AlbumPreferenceResponse,
     LibraryHealthResponse,
     LikedPlaylistResponse,
+    PurgeRemovedTracksResponse,
     TrackPreferenceResponse,
     TrackPreferenceSignal,
 } from "../api";
@@ -325,6 +326,13 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             return this.request<{ success: boolean }>(
                 `/admin/library-health/${recordId}`,
                 { method: "DELETE" },
+            );
+        }
+
+        async purgeRemovedTracks() {
+            return this.request<PurgeRemovedTracksResponse>(
+                "/admin/library-health/purge-removed",
+                { method: "POST" },
             );
         }
 
