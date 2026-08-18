@@ -309,6 +309,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
         const result = await prisma.track.updateMany({
             where: {
                 analysisStatus: "failed",
+                removedAt: null,
                 ...LOCAL_TRACK_WHERE,
             },
             data: {

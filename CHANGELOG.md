@@ -44,6 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constraint. The Library Health section now shows live purge progress
   (remaining count while the sweep runs) and surfaces a stopped purge's
   failure reason with a retry hint instead of failing silently.
+- Modernized the Cache & Automation settings section: enrichment cards now
+  share the app's status palette (success/warning/error plus the AI accent
+  for background stages), a stage that finished with failures shows a
+  warning state instead of a green check, the header pill names the analysis
+  actually outstanding (audio, vibe embeddings, or both), Re-run and
+  Re-enrich controls carry explanatory tooltips, and Re-enrich All asks for
+  confirmation before starting an hours-long rebuild.
+
+### Fixed
+
+- Enrichment progress, failure counts, and completion no longer include
+  soft-removed tracks, so cleared or purged tracks stop showing as failed
+  analysis and the live status no longer sticks on "Processing podcasts"
+  after a cycle. Retry Failed Analysis skips removed tracks instead of
+  re-queueing files that no longer exist.
 
 ## [2.3.1] - 2026-08-18
 

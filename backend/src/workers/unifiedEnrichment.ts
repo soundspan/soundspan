@@ -30,7 +30,13 @@ import { featureDetection } from "../services/featureDetection";
 import { moodBucketService } from "../services/moodBucketService";
 import pLimit from "p-limit";
 import { enqueueReservedWork } from "./enrichmentQueue";
-import { LOCAL_TRACK_WHERE } from "../utils/librarySorting";
+import { filterMoodTags } from "./enrichmentMoodTags";
+import { withTimeout } from "./enrichmentTimeout";
+import { repointBackgroundPhase } from "./enrichmentCycleState";
+import {
+    ENRICHABLE_TRACK_WHERE,
+    LOCAL_TRACK_WHERE,
+} from "../utils/librarySorting";
 import { getActiveSpace } from "../services/embeddingSpaces";
 import { findLocalTracksNeedingActiveEmbedding } from "../services/trackEmbeddings";
 
@@ -74,114 +80,6 @@ let currentBatchFailures: BatchFailures = {
 
 // Session-level failure counter (accumulates across cycles, reset on enrichment start)
 let sessionFailureCount = { artists: 0, tracks: 0, audio: 0 };
-
-// Mood tags to extract from Last.fm
-const MOOD_TAGS = new Set([
-    // Energy/Activity
-    "chill",
-    "relax",
-    "relaxing",
-    "calm",
-    "peaceful",
-    "ambient",
-    "energetic",
-    "upbeat",
-    "hype",
-    "party",
-    "dance",
-    "workout",
-    "gym",
-    "running",
-    "exercise",
-    "motivation",
-    // Emotions
-    "sad",
-    "melancholy",
-    "melancholic",
-    "depressing",
-    "heartbreak",
-    "happy",
-    "feel good",
-    "feel-good",
-    "joyful",
-    "uplifting",
-    "angry",
-    "aggressive",
-    "intense",
-    "romantic",
-    "love",
-    "sensual",
-    // Time/Setting
-    "night",
-    "late night",
-    "evening",
-    "morning",
-    "summer",
-    "winter",
-    "rainy",
-    "sunny",
-    "driving",
-    "road trip",
-    "travel",
-    // Activity
-    "study",
-    "focus",
-    "concentration",
-    "work",
-    "sleep",
-    "sleeping",
-    "bedtime",
-    // Vibe
-    "dreamy",
-    "atmospheric",
-    "ethereal",
-    "spacey",
-    "groovy",
-    "funky",
-    "smooth",
-    "dark",
-    "moody",
-    "brooding",
-    "epic",
-    "cinematic",
-    "dramatic",
-    "nostalgic",
-    "throwback",
-]);
-
-/**
- * Timeout wrapper to prevent operations from hanging indefinitely
- * If an operation takes longer than the timeout, it will fail and move to the next item
- */
-async function withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    errorMessage: string,
-): Promise<T> {
-    let timer: NodeJS.Timeout;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-    });
-    return Promise.race([promise, timeoutPromise]).finally(() =>
-        clearTimeout(timer),
-    );
-}
-
-/**
- * Filter tags to only include mood-relevant ones
- */
-function filterMoodTags(tags: string[]): string[] {
-    return tags
-        .map((t) => t.toLowerCase().trim())
-        .filter((t) => {
-            if (MOOD_TAGS.has(t)) return true;
-            for (const mood of MOOD_TAGS) {
-                if (t.includes(mood)) return true;
-            }
-            return false;
-        })
-        .slice(0, 10);
-}
 
 /**
  * Initialize Redis connection for audio analysis queue
@@ -568,7 +466,7 @@ export async function runFullEnrichment(options?: {
     });
 
     await prisma.track.updateMany({
-        where: LOCAL_TRACK_WHERE,
+        where: ENRICHABLE_TRACK_WHERE,
         data: {
             lastfmTags: [],
             analysisStatus: "pending",
@@ -576,7 +474,11 @@ export async function runFullEnrichment(options?: {
     });
 
     if (forceVibeRebuild) {
-        await invalidateVibeAnalysis(prisma, LOCAL_TRACK_WHERE, new Date());
+        await invalidateVibeAnalysis(
+            prisma,
+            ENRICHABLE_TRACK_WHERE,
+            new Date(),
+        );
 
         await enrichmentFailureService.clearAllFailures("vibe");
 
@@ -627,7 +529,7 @@ export async function resetMoodTagsOnly(): Promise<{ count: number }> {
     log.debug("Resetting ONLY mood tags...");
 
     const result = await prisma.track.updateMany({
-        where: LOCAL_TRACK_WHERE,
+        where: ENRICHABLE_TRACK_WHERE,
         data: { lastfmTags: [] },
     });
 
@@ -878,6 +780,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                     );
                 }
             }
+        }
+
+        if (!progress.isFullyComplete) {
+            await repointBackgroundPhase(progress);
         }
 
         if (progress.isFullyComplete) {
@@ -1643,16 +1549,17 @@ export async function getEnrichmentProgress() {
                     by: ["enrichmentStatus"],
                     _count: true,
                 }),
-                prisma.track.count({ where: LOCAL_TRACK_WHERE }),
+                prisma.track.count({ where: ENRICHABLE_TRACK_WHERE }),
                 prisma.$queryRaw<{ count: bigint }[]>`
                 SELECT COUNT(*) as count
                 FROM "Track"
                 WHERE "filePath" IS NOT NULL
                   AND origin = ${"LOCAL"}::"TrackOrigin"
+                  AND "removedAt" IS NULL
             `,
                 prisma.track.count({
                     where: {
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                         AND: [
                             { NOT: { lastfmTags: { equals: [] } } },
                             { NOT: { lastfmTags: { equals: null } } },
@@ -1662,42 +1569,45 @@ export async function getEnrichmentProgress() {
                 prisma.track.count({
                     where: {
                         analysisStatus: "completed",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
                 prisma.track.count({
                     where: {
                         analysisStatus: "pending",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
                 prisma.track.count({
                     where: {
                         analysisStatus: "processing",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
                 prisma.track.count({
                     where: {
                         analysisStatus: "failed",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
                 prisma.$queryRaw<{ count: bigint }[]>`
                 SELECT COUNT(*) as count
                 FROM track_embeddings te
+                JOIN "Track" t ON te.track_id = t.id
                 WHERE te.space_id = ${activeSpace.id}
+                  AND t.origin = ${"LOCAL"}::"TrackOrigin"
+                  AND t."removedAt" IS NULL
             `,
                 prisma.track.count({
                     where: {
                         vibeAnalysisStatus: "processing",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
                 prisma.track.count({
                     where: {
                         vibeAnalysisStatus: "failed",
-                        ...LOCAL_TRACK_WHERE,
+                        ...ENRICHABLE_TRACK_WHERE,
                     },
                 }),
             ]);
@@ -1888,7 +1798,7 @@ export async function reRunAudioAnalysisOnly(): Promise<number> {
     await audioAnalysisCleanupService.cleanupStaleProcessing();
 
     const tracks = await prisma.track.findMany({
-        where: { analysisStatus: "pending", ...LOCAL_TRACK_WHERE },
+        where: { analysisStatus: "pending", ...ENRICHABLE_TRACK_WHERE },
         select: { id: true },
     });
 
