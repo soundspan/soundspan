@@ -309,6 +309,24 @@ describe("trackRemovalPurgeProcessor", () => {
         },
     );
 
+    it.each([
+        {
+            startAfterId: "track-100",
+            deletedSoFar: 100,
+        },
+        {
+            cutoffAt: "2026-05-16T12:00:00.000Z",
+            deletedSoFar: 100,
+        },
+    ])("rejects incomplete continuation data %#", async (data) => {
+        const { module, prisma } = loadProcessor([]);
+
+        await expect(
+            module.processTrackRemovalPurge(buildJob(data)),
+        ).rejects.toBeDefined();
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+    });
+
     it("refreshes the catalog once after a multi-page sweep and logs the cumulative count", async () => {
         const firstPage = Array.from({ length: 101 }, (_, index) => ({
             id: `track-${index.toString().padStart(3, "0")}`,

@@ -43,6 +43,7 @@ export function LibraryHealthSection() {
     const handleRefresh = () => {
         setIsLoading(true);
         setError(null);
+        setPurgeNotice(null);
         loadRecords();
     };
 

@@ -9,7 +9,6 @@ import {
 } from "../utils/encryptedColumns";
 import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
 import { config } from "../config";
-import { asyncHandler } from "../middleware/asyncHandler";
 import { handlePurgeRemovedTracksNow } from "./adminLibraryHealthPurge";
 
 const router = Router();
@@ -182,10 +181,7 @@ router.get("/library-health", async (_req, res) => {
  *       500:
  *         description: Purge sweep could not be enqueued
  */
-router.post(
-    "/library-health/purge-removed",
-    asyncHandler(handlePurgeRemovedTracksNow),
-);
+router.post("/library-health/purge-removed", handlePurgeRemovedTracksNow);
 
 /**
  * @openapi

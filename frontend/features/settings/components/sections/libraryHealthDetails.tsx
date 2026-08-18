@@ -47,6 +47,8 @@ interface LibraryHealthDetailsProps {
     isPurging: boolean;
     error: string | null;
     purgeNotice: string | null;
+    /** Initial expansion state of the record list; collapsed by default. */
+    defaultExpanded?: boolean;
     onRefresh: () => void;
     onDismiss: (recordId: string) => void;
     onPurgeAll: () => void;
@@ -87,6 +89,7 @@ function RemovedTrackSummary({
                     </p>
                 </div>
                 <button
+                    type="button"
                     onClick={onPurgeAll}
                     disabled={isPurging}
                     className="flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 text-xs font-medium text-red-400 border border-red-400/40 rounded-md hover:bg-red-400/10 transition-colors disabled:opacity-50"
@@ -156,8 +159,10 @@ function LibraryHealthRecordRow({
     );
 }
 
+const RECORD_LIST_ID = "library-health-record-list";
+
 /** Renders the full record list; mounted only while expanded. */
-export function LibraryHealthRecordList({
+function LibraryHealthRecordList({
     records,
     onDismiss,
 }: Readonly<{
@@ -165,7 +170,10 @@ export function LibraryHealthRecordList({
     onDismiss: (recordId: string) => void;
 }>) {
     return (
-        <div className="rounded-lg border border-white/5 overflow-hidden divide-y divide-white/5">
+        <div
+            id={RECORD_LIST_ID}
+            className="rounded-lg border border-white/5 overflow-hidden divide-y divide-white/5"
+        >
             {records.map((record) => (
                 <LibraryHealthRecordRow
                     key={record.id}
@@ -185,8 +193,10 @@ function RecordListToggle({
     const Chevron = isExpanded ? ChevronDown : ChevronRight;
     return (
         <button
+            type="button"
             onClick={onToggle}
             aria-expanded={isExpanded}
+            aria-controls={RECORD_LIST_ID}
             className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
         >
             <Chevron className="w-3.5 h-3.5" />
@@ -216,11 +226,12 @@ export function LibraryHealthDetails({
     isPurging,
     error,
     purgeNotice,
+    defaultExpanded = false,
     onRefresh,
     onDismiss,
     onPurgeAll,
 }: LibraryHealthDetailsProps) {
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
     const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
     return (
         <div className="space-y-3">

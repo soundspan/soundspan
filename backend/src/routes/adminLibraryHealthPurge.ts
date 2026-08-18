@@ -24,12 +24,35 @@ async function countRemovedLocalTracks(): Promise<number> {
     });
 }
 
-async function enqueuePurgeAt(cutoff: Date): Promise<void> {
+async function addPurgeAt(cutoff: Date): Promise<void> {
     await schedulerQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
         { cutoffAt: cutoff.toISOString() },
         PURGE_NOW_JOB_OPTIONS,
     );
+}
+
+async function enqueuePurgeAt(cutoff: Date): Promise<void> {
+    const existingJob = await schedulerQueue.getJob(PURGE_NOW_JOB_ID);
+    if (!existingJob) {
+        await addPurgeAt(cutoff);
+        return;
+    }
+
+    const state = await existingJob.getState();
+    if (state === "active") {
+        // The running sweep covers removals before its cutoff; a residual
+        // window after that cutoff requires a later purge request.
+        return;
+    }
+
+    try {
+        await existingJob.remove();
+        await addPurgeAt(cutoff);
+    } catch (error) {
+        log.warn("Purge-now replacement raced job state; retrying add:", error);
+        await addPurgeAt(cutoff);
+    }
 }
 
 /** Enqueues one singleton sweep that purges all currently removed local tracks. */

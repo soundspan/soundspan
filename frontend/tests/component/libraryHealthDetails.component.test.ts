@@ -120,17 +120,19 @@ test("library health surfaces purge notices", async () => {
     assert.match(html, /Purge started for 1 removed track\./);
 });
 
-test("library health record list distinguishes removed tracks pending purge", async () => {
-    const { LibraryHealthRecordList } =
+test("library health expanded list distinguishes removed tracks pending purge", async () => {
+    const { LibraryHealthDetails } =
         await import("../../features/settings/components/sections/libraryHealthDetails");
 
     const html = renderToStaticMarkup(
-        React.createElement(LibraryHealthRecordList, {
-            records: RECORDS,
-            onDismiss: () => undefined,
+        React.createElement(LibraryHealthDetails, {
+            ...DETAILS_PROPS,
+            defaultExpanded: true,
         }),
     );
 
+    assert.match(html, /aria-expanded="true"/);
+    assert.match(html, /Hide records/);
     assert.match(html, /Removed, pending purge/);
     assert.match(html, />Missing</);
     assert.match(html, /\/music\/removed\.flac/);

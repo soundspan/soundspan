@@ -35,6 +35,7 @@ jest.mock("../../utils/db", () => ({
 jest.mock("../../workers/queues", () => ({
     schedulerQueue: {
         add: jest.fn(),
+        getJob: jest.fn(),
     },
 }));
 
@@ -51,6 +52,7 @@ const mockCount = prisma.libraryHealthRecord.count as jest.Mock;
 const mockDelete = prisma.libraryHealthRecord.delete as jest.Mock;
 const mockRemovedTrackCount = prisma.track.count as jest.Mock;
 const mockSchedulerAdd = schedulerQueue.add as jest.Mock;
+const mockSchedulerGetJob = schedulerQueue.getJob as jest.Mock;
 
 function getHandler(path: string, method: "get" | "post" | "delete") {
     const layer = (router as any).stack.find(
@@ -117,6 +119,7 @@ describe("admin library health routes", () => {
         mockDelete.mockResolvedValue({ id: "record-1" });
         mockRemovedTrackCount.mockResolvedValue(3);
         mockSchedulerAdd.mockResolvedValue({ id: "purge-now" });
+        mockSchedulerGetJob.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -234,6 +237,66 @@ describe("admin library health routes", () => {
             { cutoffAt: now.toISOString() },
             expect.any(Object),
         );
+    });
+
+    it.each(["failed", "waiting"])(
+        "replaces a %s purge-now job with a freshly pinned sweep",
+        async (state) => {
+            const now = new Date("2026-08-18T15:30:00.000Z");
+            jest.useFakeTimers().setSystemTime(now);
+            const remove = jest.fn().mockResolvedValue(undefined);
+            const getState = jest.fn().mockResolvedValue(state);
+            mockSchedulerGetJob.mockResolvedValueOnce({ getState, remove });
+            const res = createRes();
+
+            await purgeRemovedTracksHandler({} as any, res);
+
+            expect(mockSchedulerGetJob).toHaveBeenCalledWith(
+                "scheduler:track-removal-purge:purge-now",
+            );
+            expect(getState).toHaveBeenCalledTimes(1);
+            expect(remove).toHaveBeenCalledTimes(1);
+            expect(mockSchedulerAdd).toHaveBeenCalledWith(
+                "track-removal-purge",
+                { cutoffAt: now.toISOString() },
+                expect.objectContaining({
+                    jobId: "scheduler:track-removal-purge:purge-now",
+                }),
+            );
+            expect(res.body).toEqual({ enqueued: true, matched: 3 });
+        },
+    );
+
+    it("leaves an active purge-now job in place", async () => {
+        const remove = jest.fn();
+        mockSchedulerGetJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("active"),
+            remove,
+        });
+        const res = createRes();
+
+        await purgeRemovedTracksHandler({} as any, res);
+
+        expect(remove).not.toHaveBeenCalled();
+        expect(mockSchedulerAdd).not.toHaveBeenCalled();
+        expect(res.body).toEqual({ enqueued: true, matched: 3 });
+    });
+
+    it("falls back to add when replacing a purge-now job races its state", async () => {
+        const remove = jest
+            .fn()
+            .mockRejectedValue(new Error("job is already active"));
+        mockSchedulerGetJob.mockResolvedValueOnce({
+            getState: jest.fn().mockResolvedValue("waiting"),
+            remove,
+        });
+        const res = createRes();
+
+        await purgeRemovedTracksHandler({} as any, res);
+
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(mockSchedulerAdd).toHaveBeenCalledTimes(1);
+        expect(res.body).toEqual({ enqueued: true, matched: 3 });
     });
 
     it("returns a safe error when the purge-now job cannot be enqueued", async () => {
