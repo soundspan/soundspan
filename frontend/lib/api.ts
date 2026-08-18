@@ -257,6 +257,13 @@ export interface PurgeRemovedTracksResponse {
     matched: number;
 }
 
+/** Typed response from GET /api/admin/library-health/purge-status. */
+export interface PurgeRemovedStatusResponse {
+    remaining: number;
+    purging: boolean;
+    lastFailure: string | null;
+}
+
 export interface ShareLinkRecord {
     id: string;
     token: string;

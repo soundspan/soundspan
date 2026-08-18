@@ -36,6 +36,8 @@ jest.mock("../../workers/queues", () => ({
     schedulerQueue: {
         add: jest.fn(),
         getJob: jest.fn(),
+        getJobs: jest.fn(),
+        getFailed: jest.fn(),
     },
 }));
 
@@ -53,6 +55,8 @@ const mockDelete = prisma.libraryHealthRecord.delete as jest.Mock;
 const mockRemovedTrackCount = prisma.track.count as jest.Mock;
 const mockSchedulerAdd = schedulerQueue.add as jest.Mock;
 const mockSchedulerGetJob = schedulerQueue.getJob as jest.Mock;
+const mockSchedulerGetJobs = (schedulerQueue as any).getJobs as jest.Mock;
+const mockSchedulerGetFailed = (schedulerQueue as any).getFailed as jest.Mock;
 
 function getHandler(path: string, method: "get" | "post" | "delete") {
     const layer = (router as any).stack.find(
@@ -120,6 +124,8 @@ describe("admin library health routes", () => {
         mockRemovedTrackCount.mockResolvedValue(3);
         mockSchedulerAdd.mockResolvedValue({ id: "purge-now" });
         mockSchedulerGetJob.mockResolvedValue(undefined);
+        mockSchedulerGetJobs.mockResolvedValue([]);
+        mockSchedulerGetFailed.mockResolvedValue([]);
     });
 
     afterEach(() => {
@@ -310,6 +316,91 @@ describe("admin library health routes", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to enqueue removed track purge",
+        });
+    });
+
+    describe("purge status", () => {
+        const purgeStatusHandler = getHandler(
+            "/library-health/purge-status",
+            "get",
+        );
+
+        it("reports an idle purge with no failures", async () => {
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.body).toEqual({
+                remaining: 3,
+                purging: false,
+                lastFailure: null,
+            });
+        });
+
+        it("reports an in-flight purge via queued continuation jobs", async () => {
+            mockSchedulerGetJobs.mockResolvedValue([
+                { name: "track-removal-purge" },
+            ]);
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.body).toEqual({
+                remaining: 3,
+                purging: true,
+                lastFailure: null,
+            });
+        });
+
+        it("reports a recent purge failure with a bounded first-line reason", async () => {
+            mockSchedulerGetFailed.mockResolvedValue([
+                { name: "other-job", failedReason: "irrelevant" },
+                {
+                    name: "track-removal-purge",
+                    finishedOn: Date.now() - 60_000,
+                    failedReason:
+                        "\nInvalid `prisma.track.deleteMany()` invocation:\n" +
+                        `Database error 23514 ${"x".repeat(400)}`,
+                },
+            ]);
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.body.remaining).toBe(3);
+            expect(res.body.purging).toBe(false);
+            expect(res.body.lastFailure).toMatch(
+                /^Invalid `prisma\.track\.deleteMany\(\)` invocation:$/,
+            );
+        });
+
+        it("ignores purge failures older than the reporting window", async () => {
+            mockSchedulerGetFailed.mockResolvedValue([
+                {
+                    name: "track-removal-purge",
+                    finishedOn: Date.now() - 7 * 60 * 60 * 1000,
+                    failedReason: "ancient failure",
+                },
+            ]);
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.body.lastFailure).toBeNull();
+        });
+
+        it("returns a safe error when the status read fails", async () => {
+            mockRemovedTrackCount.mockRejectedValueOnce(
+                new Error("db details must stay internal"),
+            );
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({
+                error: "Failed to read purge status",
+            });
         });
     });
 });

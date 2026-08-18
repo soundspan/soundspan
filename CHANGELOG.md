@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out-of-memory instead of crashing. The projection cache is also scoped to
   the active embedding space, so a space cutover no longer serves the retired
   space's map for up to a day.
+- The removed-track purge no longer stalls when a purged track is the only
+  linkage of a TIDAL/YouTube track mapping: linkage-only mappings are deleted
+  with the track instead of tripping the mapping table's requires-linkage
+  constraint. The Library Health section now shows live purge progress
+  (remaining count while the sweep runs) and surfaces a stopped purge's
+  failure reason with a retry hint instead of failing silently.
 
 ## [2.3.1] - 2026-08-18
 
