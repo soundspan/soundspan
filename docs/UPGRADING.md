@@ -34,6 +34,7 @@ data volume while the container is stopped.
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
+| **2.3.2** | None — plain rolling update; database changes apply automatically. Heads-up: volume leveling is new and on by default; each listener can turn it off under Settings → Playback. |
 | **2.3.0** | Usually automatic. AIO: the standard down/pull/up above is the whole upgrade. Split-stack Compose and Helm: read the section — old analyzer containers must be fully stopped. Back up the database first: no image-only downgrade after this one. |
 | **2.0.0** | **Yes — follow the [dedicated 2.0.0 guide](UPGRADING_TO_2.0.0.md).** Required secrets, client re-auth, and more. |
 | **1.9.0** | Only if you run the YouTube Music/TIDAL sidecars with a custom setup, or build from source (Node 24). |
