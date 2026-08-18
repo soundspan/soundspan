@@ -108,6 +108,7 @@ describe("api entrypoint runtime behavior", () => {
         };
         const expressFn = jest.fn(() => app);
         (expressFn as any).json = jest.fn(() => "json-middleware");
+        (expressFn as any).urlencoded = jest.fn(() => "urlencoded-middleware");
         (expressFn as any).Router = jest.fn(() => router);
 
         const sessionMiddleware = jest.fn(() => "session-middleware");
@@ -736,7 +737,7 @@ describe("api entrypoint runtime behavior", () => {
                 "admin-surface-limiter",
                 route("../routes/federationAdmin"),
             ],
-            "/rest": [route("../routes/subsonic")],
+            "/rest": ["urlencoded-middleware", route("../routes/subsonic")],
         };
 
         for (const [prefix, chain] of Object.entries(expectedMounts)) {
