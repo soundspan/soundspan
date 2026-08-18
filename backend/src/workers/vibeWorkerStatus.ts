@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { logger } from "../utils/logger";
 
+function registryErrorClass(error: unknown): string {
+    if (error instanceof Error && error.name.trim().length > 0) {
+        return error.name.slice(0, 128);
+    }
+    return "UnknownError";
+}
+
 /** Namespace for TTL-bound per-worker provider status keys. */
 export const VIBE_WORKER_STATUS_KEY_PREFIX = "soundspan:vibe-worker-status:v2:";
 /** Exact-key registry used to discover TTL-bound worker snapshots. */
@@ -101,7 +108,7 @@ async function removeDeadRegistryKeys(
         await redis.sRem(VIBE_WORKER_STATUS_REGISTRY_KEY, keys);
     } catch (error) {
         log.warn("Vibe worker status registry cleanup failed", {
-            errorClass: error instanceof Error ? error.name : typeof error,
+            errorClass: registryErrorClass(error),
         });
     }
 }
