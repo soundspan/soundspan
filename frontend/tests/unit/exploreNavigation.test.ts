@@ -5,8 +5,8 @@ import {
     MOBILE_QUICK_LINKS,
 } from "../../components/layout/socialNavigation";
 
-test("sidebar navigation has 6 items", () => {
-    assert.equal(SIDEBAR_NAVIGATION.length, 6);
+test("sidebar navigation has 7 items", () => {
+    assert.equal(SIDEBAR_NAVIGATION.length, 7);
 });
 
 test("sidebar navigation starts with Home then Explore", () => {

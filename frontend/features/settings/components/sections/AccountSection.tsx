@@ -8,7 +8,6 @@ import { useTwoFactor } from "../../hooks/useTwoFactor";
 import { Modal } from "@/components/ui/Modal";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import Image from "next/image";
-import { SubsonicRows } from "./SubsonicSection";
 import { UserSettings } from "../../types";
 
 interface AccountSectionProps {
@@ -486,9 +485,6 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                         </div>
                     </div>
                 )}
-
-                {/* Subsonic App Password */}
-                <SubsonicRows />
             </SettingsSection>
 
             {/* Recovery Codes Modal */}

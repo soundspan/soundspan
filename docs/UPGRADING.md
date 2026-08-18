@@ -1,7 +1,46 @@
-# Upgrading soundspan
+# Upgrading Soundspan
 
-Operator-facing notes for upgrades that need action. Newest first. If a release
-isn't listed here, the upgrade is drop-in.
+This file lists the upgrades that need something from you. Most releases are
+not listed here — for those, upgrading is just pulling the new image and
+restarting.
+
+**How to use this file:**
+
+1. Find the version you are running now (Settings → About, or your image tag).
+2. Read every section below for versions **newer** than yours. Sections are
+   ordered newest first.
+3. If none of those sections mention your setup, the upgrade is drop-in.
+
+**Coming from 1.x?** The jump across 2.0.0 has its own step-by-step guide:
+[Upgrading to 2.0.0](UPGRADING_TO_2.0.0.md). Follow that first, then come back
+here for anything newer.
+
+## The short version for most installs
+
+Most people run the **All-in-One (AIO) image** with docker compose. For almost
+every release, the whole upgrade is:
+
+```bash
+docker compose -f docker-compose.aio.yml down
+docker compose -f docker-compose.aio.yml pull
+docker compose -f docker-compose.aio.yml up -d
+```
+
+Before any upgrade that this file marks **Breaking**, also back up your
+database first. For the AIO image, the simplest full backup is copying the
+data volume while the container is stopped.
+
+## Which versions need action?
+
+| Upgrading across | Action needed? |
+| ---------------- | -------------- |
+| **2.3.0** | Usually automatic. AIO: the standard down/pull/up above is the whole upgrade. Split-stack Compose and Helm: read the section — old analyzer containers must be fully stopped. Back up the database first: no image-only downgrade after this one. |
+| **2.0.0** | **Yes — follow the [dedicated 2.0.0 guide](UPGRADING_TO_2.0.0.md).** Required secrets, client re-auth, and more. |
+| **1.9.0** | Only if you run the YouTube Music/TIDAL sidecars with a custom setup, or build from source (Node 24). |
+| **1.8.0** | None to adopt. Only act if you want to keep the old playback engine. |
+| **1.6.0** | Mostly automatic hardening. Recommended follow-ups for Lidarr and Helm users. |
+
+Anything not listed: drop-in.
 
 ---
 
@@ -44,8 +83,28 @@ the prior active space keeps serving, and partial migrating-space vectors
 remain unused. After cutover, use the database restore and 2.2.0 image redeploy
 described above.
 
-**Compose warning:** Compose does not stop a service removed from the file; the
-old analyzer container becomes an orphan. A surviving analyzer writes with the
+### AIO Compose (`docker-compose.aio.yml`) — most installs
+
+Back up your database, then the standard down/pull/up is the whole upgrade.
+The file exposes a single `soundspan` service; the 2.3 entrypoint runs the
+schema migration before any process serves, and no 2.2 process survives a
+`down`:
+
+```bash
+docker compose -f docker-compose.aio.yml down
+docker compose -f docker-compose.aio.yml pull
+docker compose -f docker-compose.aio.yml up -d
+```
+
+Lingering `CLAP_*` environment variables are inert and may be deleted. AIO
+operators may override `VIBE_PROVIDER_URL`, `MODEL_IDLE_TIMEOUT`, and
+`DCLAP_ONNX_INTRA_OP_THREADS` directly in the host environment. Use the AIO
+memory envelope in [DEPLOYMENT.md](DEPLOYMENT.md) when sizing the container.
+
+### Split-stack Compose (`docker-compose.yml`)
+
+**Warning:** Compose does not stop a service removed from the file; the old
+analyzer container becomes an orphan. A surviving analyzer writes with the
 removed single-space contract, so every embedding store against the new
 composite schema fails and can leave tracks permanently failed. Use the same
 `-f` arguments as your normal deployment for every command. First, render the
@@ -55,11 +114,9 @@ merged configuration so stale overrides are visible:
 docker compose config
 ```
 
-Remove any custom override that still declares `audio-analyzer-clap`.
-
-**Split-stack Compose** (`docker-compose.yml`): fully stop every backend API
-and worker container. Stop any surviving torch analyzer before a 2.3
-entrypoint can run the migration:
+Remove any custom override that still declares `audio-analyzer-clap`. Then
+fully stop every backend API and worker container. Stop any surviving torch
+analyzer before a 2.3 entrypoint can run the migration:
 
 ```bash
 docker compose stop backend backend-worker
@@ -82,25 +139,11 @@ no container names:
 docker ps --filter name=audio-analyzer-clap --format '{{.Names}}'
 ```
 
-**AIO Compose** (`docker-compose.aio.yml`): the file exposes a single
-`soundspan` service, so the split-stack service names above do not apply.
-Stop the whole container, then pull and start; the 2.3 entrypoint runs the
-schema migration before any process serves, and no 2.2 process survives a
-`down`:
+The old torch image can be removed after the orphaned container is gone.
 
-```bash
-docker compose -f docker-compose.aio.yml down
-docker compose -f docker-compose.aio.yml pull
-docker compose -f docker-compose.aio.yml up -d
-```
+### Helm
 
-Lingering `CLAP_*` environment variables are inert and may be deleted. The old
-torch image can be removed after the orphaned container is gone. AIO operators
-may override `VIBE_PROVIDER_URL`, `MODEL_IDLE_TIMEOUT`, and
-`DCLAP_ONNX_INTRA_OP_THREADS` directly in the host environment. Use the AIO
-memory envelope in [DEPLOYMENT.md](DEPLOYMENT.md) when sizing the container.
-
-**Helm warning:** a 2.2 upgrade with `--reuse-values` carries the removed
+**Warning:** a 2.2 upgrade with `--reuse-values` carries the removed
 `audioAnalyzerClap.*` map forward and fails with the chart's migration message.
 Use `--reset-then-reuse-values` with Helm 3.14 or newer, or supply a clean
 values file that omits the legacy map. The guard runs during template or
@@ -169,7 +212,9 @@ if [ "$worker_present" = true ]; then
 fi
 ```
 
-**Bare-metal or custom deployment:** stop the backend and every worker before
+### Bare-metal or custom deployment
+
+Stop the backend and every worker before
 applying the 2.3 database migration. Confirm that every process has fully exited;
 do not rely on readiness or shutdown initiation alone. Run this command from
 the backend directory with the deployment's `DATABASE_URL`:
@@ -229,7 +274,15 @@ curl --fail \
 
 ---
 
-## ⚠️ Breaking: frontend image runtime UID changed from 1001 to 1000
+## 2.0.0: security overhaul (action required)
+
+Everything in this block shipped in **2.0.0**. If you are upgrading across
+2.0.0, don't start here — follow the step-by-step
+[Upgrading to 2.0.0](UPGRADING_TO_2.0.0.md) guide, which walks through the
+required actions in order. The subsections below are the detailed reference
+behind those steps.
+
+### ⚠️ Breaking: frontend image runtime UID changed from 1001 to 1000
 
 **Who this affects:** operators who bind-mount or persist frontend paths that
 were created by the previous production image's UID/GID 1001 user.
@@ -251,7 +304,7 @@ override invoked `tsx`, in which case switch it to `node dist/index.js`.
 
 ---
 
-## ⚠️ Breaking: Subsonic account passwords are no longer stored reversibly (token-auth clients re-authenticate once)
+### ⚠️ Breaking: Subsonic account passwords are no longer stored reversibly (token-auth clients re-authenticate once)
 
 **Who this affects:** users whose OpenSubsonic/Subsonic client authenticates with
 **token auth** (`t`+`s`, i.e. `md5(password + salt)`) using their **soundspan
@@ -280,7 +333,7 @@ password change.
 
 ---
 
-## Optional: fail-closed legacy decryption (`SETTINGS_DECRYPT_FAIL_CLOSED`)
+### Optional: fail-closed legacy decryption (`SETTINGS_DECRYPT_FAIL_CLOSED`)
 
 **Who this affects:** operators completing the v1 (AES-256-CBC) → v2 (AES-256-GCM)
 at-rest cipher migration who want to guarantee no legacy/plaintext-passthrough
@@ -300,7 +353,7 @@ complete.
 
 ---
 
-## Helm chart hardening (pod security, API-key Secret refs, AIO memory, frontend UID)
+### Helm chart hardening (pod security, API-key Secret refs, AIO memory, frontend UID)
 
 **Who this affects:** Helm chart users. No action is required for a default
 install, but review the notes below if you use `secrets.existingSecret`, pin
@@ -349,7 +402,7 @@ tight resource quotas, run custom sidecars in chart pods, or have GPU nodes.
 
 ---
 
-## ⚠️ Breaking: no more shipped default secrets; fail-fast startup; Postgres/Redis bound to loopback
+### ⚠️ Breaking: no more shipped default secrets; fail-fast startup; Postgres/Redis bound to loopback
 
 **Who this affects:** every split-stack (`docker-compose.yml`) deployment that relied on
 the shipped defaults for `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, or
@@ -437,7 +490,7 @@ binding, which also works. Set a strong `POSTGRES_PASSWORD` before exposing 5432
 
 ---
 
-## All-in-One (AIO) image hardening: non-root services, generated Postgres password, honored secrets
+### All-in-One (AIO) image hardening: non-root services, generated Postgres password, honored secrets
 
 Routine upgrades need **no manual steps**. Existing named volumes are migrated
 automatically on startup, and the Helm chart already supplies the required
@@ -472,12 +525,12 @@ readiness enforcement begins.
 
 ---
 
-## ⚠️ Breaking: CORS is deny-by-default and the Lidarr webhook fails closed
+### ⚠️ Breaking: CORS is deny-by-default and the Lidarr webhook fails closed
 
 Two authorization hardening changes ship secure-by-default with explicit env
 opt-outs for deployments that need the old behavior.
 
-### 1. CORS: unset `ALLOWED_ORIGINS` no longer allows every origin
+#### 1. CORS: unset `ALLOWED_ORIGINS` no longer allows every origin
 
 **Who this affects:** production deployments where the browser loads the
 frontend from a DIFFERENT origin than the backend API (e.g. `app.example.com`
@@ -497,7 +550,7 @@ is allowlisted.
 (e.g. `ALLOWED_ORIGINS=https://app.example.com`). To knowingly restore the
 legacy allow-all behavior instead, set `CORS_ALLOW_ALL=true`.
 
-### 2. Lidarr webhook rejects requests when no secret is configured
+#### 2. Lidarr webhook rejects requests when no secret is configured
 
 **Who this affects:** deployments using the Lidarr integration that never
 configured a webhook secret in System Settings.
@@ -522,7 +575,7 @@ discovery/preview endpoints require authentication.
 
 ---
 
-## TIDAL token header migration + ytmusic-streamer entrypoint change
+### TIDAL token header migration + ytmusic-streamer entrypoint change
 
 **Who this affects:** deployments that pin backend and `tidal-downloader` image
 versions independently, or customize the `ytmusic-streamer` container user or
@@ -554,7 +607,9 @@ also confirm that their `/data` volume is writable by the configured UID.
 
 ---
 
-## ⚠️ Breaking: HTTP sidecars now require `INTERNAL_API_SECRET` (F31)
+## 1.9.0: sidecar authentication and Node 24
+
+### ⚠️ Breaking: HTTP sidecars now require `INTERNAL_API_SECRET`
 
 **Who this affects:** any deployment that uses the YouTube Music (`ytmusic-streamer`)
 or TIDAL (`tidal-downloader`) FastAPI sidecars — i.e. YouTube URL/library streaming
@@ -586,7 +641,7 @@ AIO persists at `/data/secrets/internal_api_secret`.
 
 ---
 
-## Node 24 everywhere — images and CI (F53)
+### Node 24 everywhere — images and CI
 
 **Who this affects:** operators running the published `ghcr.io/soundspan/*`
 images — no action; self-builders and anyone running the backend/frontend
@@ -604,7 +659,7 @@ shared-contract packages now declare `engines.node: ">=24.0.0"`; source
 installs on Node 20–23 are no longer supported. Use the repository's `.nvmrc`
 to select the same runtime as CI and the published images.
 
-## Native `<audio>`-element engine is now the default playback engine (1.8.0)
+## 1.8.0: native `<audio>`-element engine is now the default playback engine
 
 **Who this affects:** every deployment that does not explicitly set `STREAMING_ENGINE_MODE`.
 
@@ -628,7 +683,12 @@ in AIO mode) and restart the frontend/AIO container.
 
 ---
 
-## Lidarr webhook hardening — set a webhook secret (F32)
+## 1.6.0: security hardening wave
+
+Everything in this block shipped in **1.6.0**. It is mostly automatic;
+the Lidarr and Helm notes below are the ones worth acting on.
+
+### Lidarr webhook hardening — set a webhook secret
 
 **Who this affects:** anyone using the Lidarr integration.
 
@@ -651,7 +711,7 @@ throttled.
 
 ---
 
-## Session cookie `secure` defaults to true in production (F35)
+### Session cookie `secure` defaults to true in production
 
 **Who this affects:** deploys running with `NODE_ENV=production` **over plain
 HTTP** that did **not** set `SECURE_COOKIES`.
@@ -677,7 +737,7 @@ keep working. Both vars can be passed via the Helm chart's `global.env`.
 
 ---
 
-## API keys hashed at rest (F28)
+### API keys hashed at rest
 
 **Who this affects:** everyone — transparent, **no immediate action**, no
 re-pairing of existing devices.
@@ -726,7 +786,7 @@ keys (after which the plaintext-lookup fallback can be dropped):
 
 ---
 
-## Settings encryption: authenticated AES-256-GCM + versioned envelope (F29)
+### Settings encryption: authenticated AES-256-GCM + versioned envelope
 
 **Who this affects:** everyone — but the upgrade is transparent and needs **no
 immediate action**.
@@ -770,7 +830,7 @@ legacy cipher (so the legacy read path can eventually be dropped):
 
 ---
 
-## Helm: chart-managed secrets are now stable across upgrades (F22)
+### Helm: chart-managed secrets are now stable across upgrades
 
 **Who this affects:** Helm installs that let the chart auto-generate secrets —
 i.e. you did **not** set `secrets.existingSecret` and did **not** pin every

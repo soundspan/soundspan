@@ -101,6 +101,16 @@ body {
     line-height: 1;
 }
 
+/* AI-blue glow for the Vibe navigation entry */
+.nav-vibe-glow {
+    color: var(--color-ai-hover);
+    text-shadow: 0 0 12px color-mix(in srgb, var(--color-ai) 65%, transparent);
+}
+
+.nav-vibe-glow:hover {
+    color: var(--color-brand-light);
+}
+
 /* Make all buttons have pointer cursor */
 button {
     cursor: pointer;

@@ -34,13 +34,14 @@ const purgeJobDataSchema = z
     .superRefine((data, context) => {
         const hasStartAfterId = Boolean(data.startAfterId);
         const hasCutoffAt = Boolean(data.cutoffAt);
-        if (hasStartAfterId !== hasCutoffAt) {
+        if (hasStartAfterId && !hasCutoffAt) {
             context.addIssue({
                 code: "custom",
-                message: "Track removal purge cursor and cutoff must be paired",
+                path: ["cutoffAt"],
+                message: "Track removal purge continuation requires a cutoff",
             });
         }
-        const hasContinuation = hasStartAfterId && hasCutoffAt;
+        const hasContinuation = hasStartAfterId;
         if (hasContinuation !== (data.deletedSoFar !== undefined)) {
             context.addIssue({
                 code: "custom",
@@ -54,7 +55,7 @@ const purgeJobDataSchema = z
 /** Bull job name for expired soft-removed track purge pages. */
 export const TRACK_REMOVAL_PURGE_JOB_NAME = "track-removal-purge";
 
-/** Persisted data for one bounded purge page or its continuation. */
+/** Persisted data for a scheduled purge, explicit-cutoff sweep, or continuation. */
 export interface TrackRemovalPurgeJobData {
     mode?: "startup" | "repeat";
     startAfterId?: string;

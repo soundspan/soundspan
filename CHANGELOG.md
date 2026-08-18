@@ -8,7 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an admin control to immediately enqueue a hard purge of all
+  soft-removed local tracks without waiting for the retention window.
+- Added a Vibe entry to the main navigation (sidebar and mobile quick links)
+  with an AI-blue glow accent, so the vibe map is reachable without going
+  through a track's context menu.
+
 ### Changed
+
+### Deprecated
+
+- The dedicated per-user "Subsonic password" is deprecated in favor of app
+  passwords (Settings → Sign-in & Security). The settings field for it has
+  been removed; existing Subsonic passwords keep authenticating token-mode
+  clients until the legacy credential is removed in a future release.
+- Restructured the upgrade guides: UPGRADING.md sections are now grouped by
+  release version with a plain-language index and AIO-Compose-first
+  procedures, and the 2.0.0 guide explains which steps the AIO image handles
+  automatically.
 
 ### Fixed
 

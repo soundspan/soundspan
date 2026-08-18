@@ -35,6 +35,13 @@ const mockPrisma = {
         count: jest.fn(),
         delete: jest.fn(),
     },
+    track: {
+        count: jest.fn(),
+    },
+};
+
+const mockSchedulerQueue = {
+    add: jest.fn(),
 };
 
 const mockLogger = {
@@ -42,7 +49,9 @@ const mockLogger = {
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    child: jest.fn(),
 };
+mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: mockRequireAuth,
@@ -57,6 +66,10 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
+jest.mock("../../workers/queues", () => ({
+    schedulerQueue: mockSchedulerQueue,
+}));
+
 jest.mock("../../config", () => ({
     config: { workers: { trackRemovalRetentionDays: 90 } },
 }));
@@ -66,6 +79,8 @@ import router from "../admin";
 const mockFindMany = mockPrisma.libraryHealthRecord.findMany as jest.Mock;
 const mockCount = mockPrisma.libraryHealthRecord.count as jest.Mock;
 const mockDelete = mockPrisma.libraryHealthRecord.delete as jest.Mock;
+const mockRemovedTrackCount = mockPrisma.track.count as jest.Mock;
+const mockSchedulerAdd = mockSchedulerQueue.add as jest.Mock;
 const mockLoggerError = mockLogger.error as jest.Mock;
 
 function createApp() {
@@ -126,6 +141,8 @@ describe("admin routes", () => {
         ]);
         mockCount.mockResolvedValue(2);
         mockDelete.mockResolvedValue({ id: "record-1" });
+        mockRemovedTrackCount.mockResolvedValue(2);
+        mockSchedulerAdd.mockResolvedValue({ id: "purge-now" });
     });
 
     it("GET /api/admin/library-health returns records with track details and total count", async () => {
@@ -241,6 +258,11 @@ describe("admin routes", () => {
             "delete",
             "/api/admin/library-health/record-1",
         ],
+        [
+            "POST /api/admin/library-health/purge-removed",
+            "post",
+            "/api/admin/library-health/purge-removed",
+        ],
     ] as const)(
         "%s requires admin middleware",
         async (_label, method, path) => {
@@ -257,6 +279,8 @@ describe("admin routes", () => {
             expect(mockFindMany).not.toHaveBeenCalled();
             expect(mockCount).not.toHaveBeenCalled();
             expect(mockDelete).not.toHaveBeenCalled();
+            expect(mockRemovedTrackCount).not.toHaveBeenCalled();
+            expect(mockSchedulerAdd).not.toHaveBeenCalled();
 
             jest.clearAllMocks();
             mockAuthFailureState.mode = "forbidden";
@@ -270,6 +294,8 @@ describe("admin routes", () => {
             expect(mockFindMany).not.toHaveBeenCalled();
             expect(mockCount).not.toHaveBeenCalled();
             expect(mockDelete).not.toHaveBeenCalled();
+            expect(mockRemovedTrackCount).not.toHaveBeenCalled();
+            expect(mockSchedulerAdd).not.toHaveBeenCalled();
         },
     );
 });

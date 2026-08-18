@@ -9,9 +9,10 @@ describe("trackRemovalPurgeProcessor", () => {
         candidates: Array<{
             id: string;
             origin?: "LOCAL" | "FEDERATED";
+            removedAt?: Date | null;
         }>,
         retentionDays = 90,
-        deletedCount = candidates.length,
+        deletedCount?: number,
         federationEnabled = false,
     ) {
         const logger = {
@@ -26,16 +27,20 @@ describe("trackRemovalPurgeProcessor", () => {
         let prisma: any;
         prisma = {
             track: {
-                findMany: jest.fn(
-                    async (args: { where?: { origin?: string } }) =>
-                        args.where?.origin === "LOCAL"
-                            ? candidates.filter(
-                                  (track) => track.origin !== "FEDERATED",
-                              )
-                            : candidates,
+                findMany: jest.fn(async (args: any) =>
+                    candidates.filter((track) => {
+                        const isLocal = track.origin !== "FEDERATED";
+                        const isBeforeCutoff =
+                            track.removedAt === undefined ||
+                            (track.removedAt !== null &&
+                                track.removedAt < args.where.removedAt.lt);
+                        const isAfterCursor =
+                            !args.where.id?.gt || track.id > args.where.id.gt;
+                        return isLocal && isBeforeCutoff && isAfterCursor;
+                    }),
                 ),
-                deleteMany: jest.fn(async (_args: unknown) => ({
-                    count: deletedCount,
+                deleteMany: jest.fn(async (args: any) => ({
+                    count: deletedCount ?? args.where.id.in.length,
                 })),
             },
             federationTombstone: {
@@ -91,7 +96,7 @@ describe("trackRemovalPurgeProcessor", () => {
         return { id: "track-removal-purge-1", data } as any;
     }
 
-    it("purges only tracks older than the retention boundary and runs cleanup", async () => {
+    it("derives the legacy retention cutoff when the payload is absent", async () => {
         jest.useFakeTimers().setSystemTime(
             new Date("2026-08-14T12:00:00.000Z"),
         );
@@ -103,7 +108,7 @@ describe("trackRemovalPurgeProcessor", () => {
         } = loadProcessor([{ id: "track-old" }]);
 
         await expect(
-            module.processTrackRemovalPurge(buildJob({ mode: "startup" })),
+            module.processTrackRemovalPurge(buildJob()),
         ).resolves.toEqual({ deleted: 1, continued: false });
 
         expect(prisma.track.findMany).toHaveBeenCalledWith({
@@ -124,6 +129,35 @@ describe("trackRemovalPurgeProcessor", () => {
         });
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
         expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses an explicit initial cutoff and never purges tracks without removedAt", async () => {
+        const cutoff = new Date("2026-08-18T12:00:00.000Z");
+        const { module, prisma } = loadProcessor([
+            {
+                id: "track-before-cutoff",
+                removedAt: new Date("2026-08-18T11:59:59.999Z"),
+            },
+            { id: "track-active", removedAt: null },
+            {
+                id: "track-at-cutoff",
+                removedAt: new Date("2026-08-18T12:00:00.000Z"),
+            },
+        ]);
+
+        await expect(
+            module.processTrackRemovalPurge(
+                buildJob({ cutoffAt: cutoff.toISOString() }),
+            ),
+        ).resolves.toEqual({ deleted: 1, continued: false });
+
+        expect(prisma.track.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["track-before-cutoff"] },
+                origin: "LOCAL",
+                removedAt: { lt: cutoff },
+            },
+        });
     });
 
     it("writes track tombstones and cleans expired tombstones on a federation terminal page", async () => {
@@ -274,6 +308,24 @@ describe("trackRemovalPurgeProcessor", () => {
             expect(prisma.track.findMany).not.toHaveBeenCalled();
         },
     );
+
+    it.each([
+        {
+            startAfterId: "track-100",
+            deletedSoFar: 100,
+        },
+        {
+            cutoffAt: "2026-05-16T12:00:00.000Z",
+            deletedSoFar: 100,
+        },
+    ])("rejects incomplete continuation data %#", async (data) => {
+        const { module, prisma } = loadProcessor([]);
+
+        await expect(
+            module.processTrackRemovalPurge(buildJob(data)),
+        ).rejects.toBeDefined();
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+    });
 
     it("refreshes the catalog once after a multi-page sweep and logs the cumulative count", async () => {
         const firstPage = Array.from({ length: 101 }, (_, index) => ({

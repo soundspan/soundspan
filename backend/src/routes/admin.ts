@@ -9,6 +9,7 @@ import {
 } from "../utils/encryptedColumns";
 import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
 import { config } from "../config";
+import { handlePurgeRemovedTracksNow } from "./adminLibraryHealthPurge";
 
 const router = Router();
 
@@ -150,6 +151,37 @@ router.get("/library-health", async (_req, res) => {
         });
     }
 });
+
+/**
+ * @openapi
+ * /api/admin/library-health/purge-removed:
+ *   post:
+ *     summary: Immediately purge all soft-removed local tracks
+ *     tags: [Admin]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Purge sweep enqueue result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [enqueued, matched]
+ *               properties:
+ *                 enqueued:
+ *                   type: boolean
+ *                 matched:
+ *                   type: integer
+ *                   minimum: 0
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Purge sweep could not be enqueued
+ */
+router.post("/library-health/purge-removed", handlePurgeRemovedTracksNow);
 
 /**
  * @openapi
