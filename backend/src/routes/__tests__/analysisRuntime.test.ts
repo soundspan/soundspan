@@ -348,7 +348,11 @@ describe("analysis routes runtime", () => {
         await postRetryFailed(req, res);
 
         expect(mockTrackUpdateMany).toHaveBeenCalledWith({
-            where: { analysisStatus: "failed", origin: "LOCAL" },
+            where: {
+                analysisStatus: "failed",
+                removedAt: null,
+                origin: "LOCAL",
+            },
             data: {
                 analysisStatus: "pending",
                 analysisError: null,
