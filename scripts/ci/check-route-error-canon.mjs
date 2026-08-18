@@ -21,7 +21,8 @@ const BASELINE = Object.freeze({
     "backend/src/routes/auth/localCredentials.ts": 1,
     "backend/src/routes/browse.ts": 16,
     "backend/src/routes/deviceLink.ts": 6,
-    "backend/src/routes/discover.ts": 5,
+    "backend/src/routes/discover/exclusions.ts": 1,
+    "backend/src/routes/discover/shared.ts": 4,
     "backend/src/routes/downloads.ts": 3,
     "backend/src/routes/enrichment.ts": 30,
     "backend/src/routes/homepage.ts": 2,
@@ -63,9 +64,9 @@ const BASELINE = Object.freeze({
 const LEAK_BASELINE = Object.freeze({
     // auth/adminUserInvites.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L479 and ~L897); code-owned schema messages, not raw errors.
     "backend/src/routes/auth/adminUserInvites.ts": 2,
-    // discover.ts +1: cleanup-loop detail const used only by logger.error (~L2267); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
-    // discover.ts +1: the same logger-only cleanup detail's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/routes/discover.ts": 2,
+    // discover/legacy/maintenance.ts +1: cleanup-loop detail const used only by logger.error; server-side only; frozen with deprecated legacy discovery.
+    // discover/legacy/maintenance.ts +1: the same logger-only cleanup detail's ternary-consequent error.message; frozen with deprecated legacy discovery.
+    "backend/src/routes/discover/legacy/maintenance.ts": 2,
     "backend/src/routes/downloads.ts": 0,
     // library/artists.ts remaining 1: admin-only Lidarr deletion diagnostics (lidarrError = err?.message) returned to the initiating admin, not a general-user 500 leak.
     "backend/src/routes/library/artists.ts": 1,

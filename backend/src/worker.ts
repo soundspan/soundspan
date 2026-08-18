@@ -9,6 +9,7 @@ import { metricsRegistry } from "./metrics";
 import { isMetricsRequestAuthorized } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
 import { backfillFederationOutboundTokens } from "./services/federationCredentials";
+import { warnIfLegacyDiscoveryMode } from "./utils/legacyDiscoveryDeprecation";
 
 const log = logger.child("WorkerStartup");
 
@@ -37,6 +38,7 @@ function resolveWorkerProcessRole(): WorkerProcessRole {
 }
 
 const workerProcessRole = resolveWorkerProcessRole();
+warnIfLegacyDiscoveryMode("Worker");
 let isShuttingDown = false;
 let workersInitialized = false;
 let isStartupComplete = false;

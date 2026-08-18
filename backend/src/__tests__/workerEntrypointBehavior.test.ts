@@ -28,6 +28,7 @@ describe("worker entrypoint behavior", () => {
         shutdownWorkersImpl,
         processExitImpl,
         metricsRegistryOverride,
+        discoveryMode = "recommendation",
     }: {
         envOverrides?: Record<string, string>;
         dependencyProbeImpl?: () => Promise<any>;
@@ -45,6 +46,7 @@ describe("worker entrypoint behavior", () => {
             contentType: string;
             metrics(): Promise<string>;
         };
+        discoveryMode?: "legacy" | "recommendation";
     } = {}) {
         process.env = {
             ...originalEnv,
@@ -137,6 +139,7 @@ describe("worker entrypoint behavior", () => {
                     sampleIntervalMs: 5000,
                 },
                 metrics: { token: "metrics-token", publicAccess: false },
+                discover: { mode: discoveryMode },
             },
             initializeMusicConfig: jest.fn(
                 initializeMusicConfigImpl || (async () => undefined),
@@ -246,6 +249,22 @@ describe("worker entrypoint behavior", () => {
         expect(redisClient.ping).toHaveBeenCalled();
         expect(createDependencyReadinessTracker).toHaveBeenCalledWith("worker");
         expect(exitMock).not.toHaveBeenCalled();
+    });
+
+    it("warns once when the worker starts in legacy discovery mode", async () => {
+        const { logger } = setupWorkerRuntime({ discoveryMode: "legacy" });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../worker");
+        await flushWorkerTicks();
+
+        const deprecatedWarnings = logger.warn.mock.calls.filter(([message]) =>
+            String(message).includes("deprecated"),
+        );
+        expect(deprecatedWarnings).toHaveLength(1);
+        expect(String(deprecatedWarnings[0][0])).toContain(
+            "migrate by unsetting DISCOVERY_MODE",
+        );
     });
 
     it('fails fast when BACKEND_PROCESS_ROLE="api" is used on worker entrypoint', async () => {

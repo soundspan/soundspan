@@ -87,6 +87,7 @@ import { httpMetricsMiddleware, metricsRegistry } from "./metrics";
 import { createMetricsRouter } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
 import { backfillFederationOutboundTokens } from "./services/federationCredentials";
+import { warnIfLegacyDiscoveryMode } from "./utils/legacyDiscoveryDeprecation";
 
 const app = express();
 
@@ -143,6 +144,8 @@ if (backendProcessRole === "worker") {
     );
     process.exit(1);
 }
+
+warnIfLegacyDiscoveryMode("API");
 
 // Middleware
 app.use(

@@ -84,6 +84,9 @@ describe("api entrypoint runtime behavior", () => {
             redisUrl?: string;
             docsPublic?: boolean;
             adminResetPassword?: string;
+            discover?: {
+                mode: "legacy" | "recommendation";
+            };
             features?: {
                 audioAnalysis?: boolean;
                 discovery?: boolean;
@@ -224,6 +227,7 @@ describe("api entrypoint runtime behavior", () => {
             docsPublic: false,
             metrics: { token: "metrics-token", publicAccess: false },
             adminResetPassword: undefined,
+            discover: { mode: "recommendation" },
             ...(configOverrides || {}),
             features: {
                 audioAnalysis: true,
@@ -487,6 +491,11 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.setupListenTogetherSocket).toHaveBeenCalledWith(
             mocks.server,
         );
+        expect(
+            mocks.logger.warn.mock.calls.filter(([message]) =>
+                String(message).includes("deprecated"),
+            ),
+        ).toHaveLength(0);
         expect(mocks.server.on).toHaveBeenCalledWith(
             "connection",
             expect.any(Function),
@@ -509,6 +518,30 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(processOnSpy).toHaveBeenCalled();
         expect(setIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("warns once when the API starts in legacy discovery mode", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks({
+            configOverrides: { discover: { mode: "legacy" } },
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const deprecatedWarnings = mocks.logger.warn.mock.calls.filter(
+            ([message]) => String(message).includes("deprecated"),
+        );
+        expect(deprecatedWarnings).toHaveLength(1);
+        expect(String(deprecatedWarnings[0][0])).toContain(
+            "migrate by unsetting DISCOVERY_MODE",
+        );
     });
 
     it("does not mount cookie-session middleware", async () => {

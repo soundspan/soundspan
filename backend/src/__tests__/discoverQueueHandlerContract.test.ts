@@ -1,65 +1,84 @@
-import fs from "fs";
-import path from "path";
+const discoverQueue = {
+    getJob: jest.fn(),
+    add: jest.fn(),
+};
+
+const prisma = {
+    userDiscoverConfig: {
+        findMany: jest.fn(),
+    },
+};
+
+jest.mock("../workers/queues", () => ({ discoverQueue }));
+jest.mock("../utils/db", () => ({ prisma }));
+jest.mock("../utils/logger", () => ({
+    logger: {
+        debug: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+    },
+}));
+jest.mock("../config", () => ({
+    config: { discover: { mode: "recommendation" } },
+}));
+
+import { handleModernGenerate } from "../routes/discover/generation";
+import { processDiscoverCronTick } from "../workers/discoverCron";
+
+function createResponse() {
+    const response: any = {
+        body: undefined as unknown,
+        status: jest.fn(() => response),
+        json: jest.fn((body: unknown) => {
+            response.body = body;
+            return response;
+        }),
+    };
+    return response;
+}
 
 describe("discover queue handler contract", () => {
-    it("registers a processor for recommendation-mode named jobs", () => {
-        const workersPath = path.resolve(__dirname, "../workers/index.ts");
-        const workersSource = fs.readFileSync(workersPath, "utf8");
-
-        expect(workersSource).toContain(
-            `discoverQueue.process("discover-recommendation", processDiscoverWeekly);`,
-        );
+    beforeEach(() => {
+        jest.clearAllMocks();
     });
 
-    it("keeps legacy unnamed discover processor registration", () => {
-        const workersPath = path.resolve(__dirname, "../workers/index.ts");
-        const workersSource = fs.readFileSync(workersPath, "utf8");
-
-        expect(workersSource).toContain(
-            "discoverQueue.process(processDiscoverWeekly);",
-        );
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
-    it("enqueues recommendation mode discovery job with matching name", () => {
-        const discoverRoutePath = path.resolve(
-            __dirname,
-            "../routes/discover.ts",
-        );
-        const discoverRouteSource = fs.readFileSync(discoverRoutePath, "utf8");
+    it("enqueues recommendation-mode manual jobs with a deterministic id", async () => {
+        discoverQueue.getJob.mockResolvedValueOnce(null);
+        discoverQueue.add.mockResolvedValueOnce({ id: "job-1" });
+        const response = createResponse();
 
-        expect(discoverRouteSource).toContain(
-            'const job = await discoverQueue.add(\n                "discover-recommendation",',
+        await handleModernGenerate({ user: { id: "user-1" } } as any, response);
+
+        expect(discoverQueue.add).toHaveBeenCalledWith(
+            "discover-recommendation",
+            { userId: "user-1" },
+            { jobId: "discover:manual:user-1" },
         );
+        expect(response.body).toEqual({
+            message: "Discover Weekly recommendation generation started",
+            jobId: "job-1",
+        });
     });
 
-    it("uses deterministic manual job ids to dedupe generate requests", () => {
-        const discoverRoutePath = path.resolve(
-            __dirname,
-            "../routes/discover.ts",
+    it("enqueues cron jobs through the recommendation processor name", async () => {
+        jest.useFakeTimers().setSystemTime(
+            new Date("2026-08-17T12:00:00.000Z"),
         );
-        const discoverRouteSource = fs.readFileSync(discoverRoutePath, "utf8");
+        prisma.userDiscoverConfig.findMany.mockResolvedValueOnce([
+            { userId: "user-1", playlistSize: 25 },
+        ]);
+        discoverQueue.add.mockResolvedValueOnce(undefined);
 
-        expect(discoverRouteSource).toContain(
-            "const manualJobId = `discover:manual:${userId}`;",
-        );
-        expect(discoverRouteSource).toContain(
-            "const existingJob = await discoverQueue.getJob(manualJobId);",
-        );
-        expect(discoverRouteSource).toContain("jobId: manualJobId,");
-    });
+        await processDiscoverCronTick();
 
-    it("uses recommendation-mode jobs and weekly idempotent ids in cron", () => {
-        const discoverCronPath = path.resolve(
-            __dirname,
-            "../workers/discoverCron.ts",
+        expect(discoverQueue.add).toHaveBeenCalledWith(
+            "discover-recommendation",
+            { userId: "user-1" },
+            { jobId: "discover:cron:2026-08-17:user-1" },
         );
-        const discoverCronSource = fs.readFileSync(discoverCronPath, "utf8");
-
-        expect(discoverCronSource).toContain("await discoverQueue.add(");
-        expect(discoverCronSource).toContain('"discover-recommendation"');
-        expect(discoverCronSource).toContain(
-            "return `discover:cron:${weekKey}:${userId}`;",
-        );
-        expect(discoverCronSource).toContain("jobId,");
     });
 });

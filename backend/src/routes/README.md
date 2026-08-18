@@ -75,7 +75,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/auth.ts`               | `/api/auth` (compatibility re-export of `auth/index.ts`)                                              |
 | `backend/src/routes/browse.ts`             | `/api/browse`                                                                                         |
 | `backend/src/routes/deviceLink.ts`         | `/api/device-link`                                                                                    |
-| `backend/src/routes/discover.ts`           | `/api/discover`                                                                                       |
+| `backend/src/routes/discover/index.ts`     | `/api/discover`                                                                                       |
 | `backend/src/routes/downloads.ts`          | `/api/downloads`                                                                                      |
 | `backend/src/routes/enrichment.ts`         | `/api/enrichment`                                                                                     |
 | `backend/src/routes/federation.ts`         | `/api/federation/v1`                                                                                  |
