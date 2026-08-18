@@ -1,0 +1,120 @@
+name: Scale Smoke
+
+# Production-volume checks are release evidence, not per-merge feedback. Keep
+# them in their own workflow so ordinary PRs do not show permanently skipped
+# heavy jobs in quality-visibility.yml. A pushed chore/release-** staging
+# branch is this repository's pre-release moment; workflow_dispatch also lets
+# maintainers run the tier before an exceptional release or infrastructure
+# change.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["chore/release-**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scale-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-scale:
+    name: Backend Scale Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+      INTEGRATION_DATABASE_URL: postgresql://soundspan:soundspan@127.0.0.1:5432/soundspan
+      INTEGRATION_REDIS_URL: redis://127.0.0.1:6379/13
+      DATABASE_POOL_SIZE: "4"
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+        env:
+          POSTGRES_USER: soundspan
+          POSTGRES_PASSWORD: soundspan
+          POSTGRES_DB: soundspan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soundspan -d soundspan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Typecheck scale integration suites
+        working-directory: backend
+        run: npm run pretest:scale && npx tsc --noEmit -p tsconfig.integration.json
+
+      - name: Run backend scale smoke
+        run: npm --prefix backend run test:scale
+
+  python-scale:
+    name: Python Long-Audio Scale Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SCALE_TESTS: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            services/audio-analyzer/requirements-test.txt
+            services/vibe-provider-dclap/requirements-test.txt
+            services/vibe-provider-dclap/requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install scale-test dependencies
+        # Ordinary DCLAP tests fake decoding. The scale tier adds only the
+        # real librosa decoder/mel dependency; NumPy is in requirements-test.
+        run: |
+          pip install \
+            -r services/audio-analyzer/requirements-test.txt \
+            -r services/vibe-provider-dclap/requirements-test.txt \
+            "librosa>=0.11.0,<1.0"
+
+      - name: Run long-audio scale smoke
+        run: npm run verify:scale:python

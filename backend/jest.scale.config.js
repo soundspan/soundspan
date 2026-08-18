@@ -9,10 +9,9 @@ module.exports = {
     },
     testEnvironment: "node",
     roots: ["<rootDir>/tests-integration"],
-    testMatch: ["**/*.integration.test.ts"],
-    testPathIgnorePatterns: ["\\.scale\\.integration\\.test\\.ts$"],
+    testMatch: ["**/*.scale.integration.test.ts"],
     setupFiles: ["<rootDir>/tests-integration/setupEnv.ts"],
     clearMocks: true,
     maxWorkers: 1,
-    testTimeout: 120_000,
+    testTimeout: 480_000,
 };

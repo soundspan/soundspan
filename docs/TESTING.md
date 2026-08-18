@@ -21,7 +21,8 @@ It defines:
 
 ### Backend (automated Jest tests)
 
-The backend uses colocated `__tests__` directories under `backend/src/`.
+The ordinary backend suite uses colocated `__tests__` directories under
+`backend/src/`. Real-boundary suites live under `backend/tests-integration/`.
 
 | Path                                                  | Scope                                                             |
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
@@ -38,6 +39,8 @@ The backend uses colocated `__tests__` directories under `backend/src/`.
 | `backend/src/jobs/__tests__/`                         | background job modules                                            |
 | `backend/src/middleware/__tests__/`                   | middleware auth/rate-limit behavior                               |
 | `backend/src/utils/__tests__/`                        | utility-level tests                                               |
+| `backend/tests-integration/*.integration.test.ts`     | real-PostgreSQL correctness tests                                 |
+| `backend/tests-integration/*.scale.integration.test.ts` | release-gated PostgreSQL and Redis volume tests                  |
 
 ### Backend (manual/diagnostic scripts, not part of Jest suite)
 
@@ -159,6 +162,67 @@ pip install \
 npm run verify:python
 npm run verify:python-quality
 ```
+
+### Scale smoke tier
+
+The scale smoke tier exercises real boundaries at production-like volume. It
+runs real PostgreSQL through the repository's migrations, real Redis against a
+dedicated logical database, and real ffmpeg-generated 45-minute audio. It is a
+pre-release tier, not a per-merge tier. `.github/workflows/scale-smoke.yml` runs
+on `chore/release-**` staging-branch pushes and by manual dispatch; it is not
+part of `quality-visibility.yml`, `npm run verify`, or `npm run verify:ci`.
+
+This tier exists because every production incident reviewed from 2.0.0 through
+HEAD crossed a scale boundary that the ordinary suites did not simulate:
+
+- the index-probe lifecycle entered a deadlock loop;
+- a Redis keyspace scan failed around 14,000 keys;
+- DCLAP exhausted memory on a 73-minute track.
+
+The backend lane seeds 1,000 artists, 8,000 albums, 100,000 active tracks,
+20,000 soft-removed tracks, 50,000 embeddings in one space, and 25,000 Redis
+status/reservation keys. It checks keyset backfills, bounded removed-track
+purging, Library Health list/count behavior, vibe and loudness coverage,
+registry-based worker status, the shared rate-limit store, and full-queue
+admission. Database query-shape ceilings are 5-10 seconds. Redis operation
+ceilings are 2 seconds. These broad ceilings catch pathological plans and
+keyspace scans; they are not micro-benchmarks. The analyzer has a five-minute
+measurement deadline. DCLAP has a ten-minute processing deadline and a 2 GiB
+peak-RSS ceiling chosen to catch a return to whole-file processing.
+
+Start the local real dependencies, then run the backend lane against the +1
+ports from `docker-compose.local.yml`:
+
+```bash
+docker compose -f docker-compose.local.yml up -d postgres-local redis-local
+INTEGRATION_DATABASE_URL=postgresql://soundspan:soundspan@127.0.0.1:5433/soundspan \
+INTEGRATION_REDIS_URL=redis://127.0.0.1:6380/13 \
+DATABASE_POOL_SIZE=4 \
+npm --prefix backend run test:scale
+```
+
+Install ffmpeg plus the two service test manifests and the DCLAP scale test's
+only extra runtime dependency, `librosa`, before running the long-audio lane:
+
+```bash
+pip install \
+  -r services/audio-analyzer/requirements-test.txt \
+  -r services/vibe-provider-dclap/requirements-test.txt \
+  "librosa>=0.11.0,<1.0"
+SCALE_TESTS=1 npm run verify:scale:python
+```
+
+`npm run verify:scale` chains both lanes. Without the integration URLs, backend
+suites self-skip. Without `SCALE_TESTS=1`, long-audio suites self-skip. Each
+long-audio test also self-skips when ffmpeg is unavailable.
+
+> **Warning:** Use throwaway local infrastructure only. The PostgreSQL suite
+> creates and force-drops a uniquely named database on the server named by
+> `INTEGRATION_DATABASE_URL`. The Redis suite flushes the logical database
+> selected by `INTEGRATION_REDIS_URL` before and after the run. It refuses URLs
+> without an explicit `/db-index` suffix and refuses database 0 unless
+> `ALLOW_SCALE_TEST_REDIS_DB_ZERO=1` is set deliberately. The release workflow
+> uses database 13. Never point either URL at shared or production services.
 
 ### Frontend E2E on host-run +1 ports (recommended)
 
@@ -316,6 +380,14 @@ Python sidecar `pytest` suites exist for all four sidecars:
 - `services/vibe-provider-dclap/tests/`
 - `services/tidal-downloader/tests/`
 - `services/ytmusic-streamer/tests/`
+
+Release-gated long-audio suites live separately under:
+
+- `services/audio-analyzer/tests-scale/`
+- `services/vibe-provider-dclap/tests-scale/`
+
+The ordinary `verify:python` command points only at `tests/` and does not
+collect `tests-scale/`.
 
 Counts drift; see CI output for current totals.
 

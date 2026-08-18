@@ -1,4 +1,5 @@
 const integrationDatabaseUrl = process.env.INTEGRATION_DATABASE_URL;
+const integrationRedisUrl = process.env.INTEGRATION_REDIS_URL;
 
 if (integrationDatabaseUrl) {
     // Prisma 7 driver adapters ignore the Prisma-native `?schema=` URL
@@ -11,6 +12,10 @@ if (integrationDatabaseUrl) {
     runtimeUrl.pathname = `/${databaseName}`;
     process.env.DATABASE_URL = runtimeUrl.toString();
     process.env.VIBE_INTEGRATION_DATABASE = databaseName;
+}
+
+if (integrationRedisUrl) {
+    process.env.REDIS_URL = integrationRedisUrl;
 }
 
 process.env.DATABASE_URL ??= "postgresql://unused:unused@127.0.0.1:1/unused";

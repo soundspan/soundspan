@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a pre-release scale smoke tier that checks production-volume PostgreSQL
+  and Redis query paths plus 45-minute analyzer and DCLAP audio processing
+  against real dependencies without extending per-merge verification.
 - Added the OpenSubsonic ReplayGain extension, a configurable server loudness
   target, and per-user normalization-mode groundwork. Web-player application
   lands next.
