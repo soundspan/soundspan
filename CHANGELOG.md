@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed embedding-space index checks so existing matching indexes are not
+  rebuilt on every lifecycle tick.
+- Fixed vibe worker status reads on large Redis keyspaces by using a bounded
+  worker registry and removing expired entries.
+
 ## [2.3.0] - 2026-08-17
 
 ### Added

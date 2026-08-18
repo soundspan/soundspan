@@ -112,11 +112,52 @@ interface AnnIndexState {
     lists: number | null;
 }
 
-function parseIndexLists(options: readonly string[] | null): number | null {
-    const value = options?.find((option) => option.startsWith("lists="));
-    if (!value) return null;
-    const lists = Number.parseInt(value.slice("lists=".length), 10);
+const MAX_INDEX_OPTION_COUNT = 16;
+const RECOVERABLE_INDEX_CREATE_SQLSTATES = new Set([
+    "40P01", // deadlock_detected
+    "42P07", // duplicate_table (indexes are relations)
+    "42710", // duplicate_object
+    "23505", // concurrent pg_class uniqueness race
+]);
+
+function parseIndexLists(value: unknown): number | null {
+    let serialized = value;
+    if (Array.isArray(value)) {
+        if (value.length > MAX_INDEX_OPTION_COUNT) return null;
+        serialized = value.find(
+            (option) =>
+                typeof option === "string" && option.startsWith("lists="),
+        );
+    }
+    if (typeof serialized !== "string") return null;
+    const match = serialized
+        .trim()
+        .match(/^(?:\{)?(?:lists=)?([1-9]\d*)(?:\})?$/);
+    if (!match) return null;
+    const lists = Number(match[1]);
     return Number.isSafeInteger(lists) && lists > 0 ? lists : null;
+}
+
+function postgresErrorCode(error: unknown): string | null {
+    if (typeof error !== "object" || error === null) return null;
+    const record = error as Record<string, unknown>;
+    const meta =
+        typeof record.meta === "object" && record.meta !== null
+            ? (record.meta as Record<string, unknown>)
+            : null;
+    const adapter =
+        typeof meta?.driverAdapterError === "object" &&
+        meta.driverAdapterError !== null
+            ? (meta.driverAdapterError as Record<string, unknown>)
+            : null;
+    const cause =
+        typeof adapter?.cause === "object" && adapter.cause !== null
+            ? (adapter.cause as Record<string, unknown>)
+            : null;
+    for (const candidate of [record, meta, cause]) {
+        if (typeof candidate?.code === "string") return candidate.code;
+    }
+    return null;
 }
 
 async function loadPartialAnnIndex(
@@ -125,22 +166,28 @@ async function loadPartialAnnIndex(
     const validatedId = validatedSpaceId(spaceId);
     const indexName = partialIndexName(validatedId);
     const rows = await prisma.$queryRaw<
-        Array<{ isValid: boolean; options: string[] | null }>
+        Array<{ isValid: boolean; lists: unknown }>
     >`
         SELECT index_row.indisvalid AS "isValid",
-               index_class.reloptions AS options
+               (
+                   SELECT option_value
+                   FROM pg_catalog.pg_options_to_table(index_class.reloptions)
+                   WHERE option_name = 'lists'
+                   LIMIT 1
+               ) AS lists
         FROM pg_catalog.pg_index index_row
         INNER JOIN pg_catalog.pg_class index_class
             ON index_class.oid = index_row.indexrelid
-        INNER JOIN pg_catalog.pg_namespace namespace
-            ON namespace.oid = index_class.relnamespace
+        INNER JOIN pg_catalog.pg_class table_class
+            ON table_class.oid = index_row.indrelid
         WHERE index_class.relname = ${indexName}
-          AND namespace.nspname = current_schema()
+          AND index_class.relnamespace = table_class.relnamespace
+          AND table_class.oid = pg_catalog.to_regclass('track_embeddings')
         LIMIT 1
     `;
     const row = rows[0];
     return row
-        ? { isValid: row.isValid, lists: parseIndexLists(row.options) }
+        ? { isValid: row.isValid, lists: parseIndexLists(row.lists) }
         : null;
 }
 
@@ -173,7 +220,16 @@ export async function ensureSpaceAnnIndex(spaceId: string): Promise<boolean> {
     }
     if (current?.isValid && current.lists === desiredLists) return true;
     if (current) await dropPartialAnnIndex(spaceId);
-    await createPartialAnnIndex(spaceId, desiredLists);
+    try {
+        await createPartialAnnIndex(spaceId, desiredLists);
+    } catch (error) {
+        const code = postgresErrorCode(error);
+        if (!code || !RECOVERABLE_INDEX_CREATE_SQLSTATES.has(code)) {
+            throw error;
+        }
+        const reprobed = await loadPartialAnnIndex(spaceId);
+        if (!reprobed?.isValid || reprobed.lists !== desiredLists) throw error;
+    }
     return true;
 }
 

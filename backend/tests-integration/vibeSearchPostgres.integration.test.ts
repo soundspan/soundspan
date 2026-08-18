@@ -317,6 +317,24 @@ describeWithPostgres("vibe search PostgreSQL correctness", () => {
         expect(
             indexes.some((index) => index.name.includes("space_empty")),
         ).toBe(false);
+
+        const adapterRows = await prisma.$queryRaw<Array<{ options: unknown }>>`
+            SELECT reloptions AS options
+            FROM pg_catalog.pg_class
+            WHERE relname = ${indexName}
+            LIMIT 1
+        `;
+        expect(adapterRows).toEqual([{ options: ["lists=40"] }]);
+
+        const executeRawSpy = jest.spyOn(prisma, "$executeRawUnsafe");
+        try {
+            await expect(ensureSpaceAnnIndex(TEACHER_SPACE_ID)).resolves.toBe(
+                true,
+            );
+            expect(executeRawSpy).not.toHaveBeenCalled();
+        } finally {
+            executeRawSpy.mockRestore();
+        }
     });
 
     it("matches exact and ANN top-k at the first size band", async () => {

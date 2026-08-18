@@ -77,6 +77,7 @@ import {
     MAX_RETIREMENT_DELETE_BATCHES,
     RETIREMENT_DELETE_BATCH_SIZE,
     annIndexListsForVectorCount,
+    ensureSpaceAnnIndex,
     retirementDue,
     runEmbeddingSpaceLifecycleCheck,
     shouldBuildAnnIndex,
@@ -309,30 +310,56 @@ describe("embedding-space lifecycle effects", () => {
         expect(mockRecordTransition).toHaveBeenCalledWith("cutover");
     });
 
-    it("keeps an existing valid partial index", async () => {
-        mockFindFirst.mockResolvedValue(migrating);
-        mockLoadCoverage.mockResolvedValue({
-            embedded: ANN_INDEX_MIN_VECTOR_COUNT,
-            pending: 0,
-            failed: 0,
-        });
-        mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
-        mockQueryRaw.mockResolvedValue([
-            { isValid: true, options: ["lists=40"] },
-        ]);
+    it.each([
+        ["array", ["lists=40"]],
+        ["PostgreSQL array string", "{lists=40}"],
+    ])(
+        "keeps an existing valid partial index from the %s adapter representation",
+        async (_representation, lists) => {
+            mockFindFirst.mockResolvedValue(migrating);
+            mockLoadCoverage.mockResolvedValue({
+                embedded: ANN_INDEX_MIN_VECTOR_COUNT,
+                pending: 0,
+                failed: 0,
+            });
+            mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
+            mockQueryRaw.mockResolvedValue([
+                { isValid: true, options: lists, lists },
+            ]);
 
-        await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
+            await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
-        expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
-        expect(mockUpdateMany).toHaveBeenCalledWith({
-            where: {
-                id: "space_student_1",
-                status: "migrating",
-                cleaningAt: null,
-            },
-            data: { status: "active", retiredAt: null, cleaningAt: null },
-        });
-    });
+            expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
+            expect(mockUpdateMany).toHaveBeenCalledWith({
+                where: {
+                    id: "space_student_1",
+                    status: "migrating",
+                    cleaningAt: null,
+                },
+                data: { status: "active", retiredAt: null, cleaningAt: null },
+            });
+        },
+    );
+
+    it.each(["40P01", "42P07", "42710", "23505"])(
+        "re-probes after recoverable CREATE INDEX SQLSTATE %s",
+        async (code) => {
+            mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
+            mockQueryRaw
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([{ isValid: true, lists: "40" }]);
+            mockExecuteRawUnsafe.mockRejectedValueOnce({
+                meta: { driverAdapterError: { cause: { code } } },
+            });
+
+            await expect(ensureSpaceAnnIndex("space_teacher_1")).resolves.toBe(
+                true,
+            );
+
+            expect(mockQueryRaw).toHaveBeenCalledTimes(2);
+            expect(mockExecuteRawUnsafe).toHaveBeenCalledTimes(1);
+        },
+    );
 
     it("keeps a sub-threshold migration when the active space has vectors", async () => {
         mockFindFirst.mockResolvedValue(migrating);
@@ -437,9 +464,7 @@ describe("embedding-space lifecycle effects", () => {
             failed: 0,
         });
         mockEmbeddingCount.mockResolvedValue(ANN_INDEX_MIN_VECTOR_COUNT);
-        mockQueryRaw.mockResolvedValue([
-            { isValid: false, options: ["lists=40"] },
-        ]);
+        mockQueryRaw.mockResolvedValue([{ isValid: false, lists: "40" }]);
 
         await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
@@ -478,9 +503,7 @@ describe("embedding-space lifecycle effects", () => {
 
     it("rebuilds at most once when the active space crosses a list band", async () => {
         mockEmbeddingCount.mockResolvedValue(2_500);
-        mockQueryRaw.mockResolvedValue([
-            { isValid: true, options: ["lists=40"] },
-        ]);
+        mockQueryRaw.mockResolvedValue([{ isValid: true, lists: "40" }]);
 
         await runEmbeddingSpaceLifecycleCheck(lifecycleConfig);
 
