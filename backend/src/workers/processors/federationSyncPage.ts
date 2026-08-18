@@ -119,6 +119,8 @@ function syncedAudioFeatures(attributes: TrackEnvelope["attributes"]) {
         keyStrength: attributes.keyStrength,
         energy: attributes.energy,
         loudness: attributes.loudness,
+        loudnessLufs: attributes.loudnessLufs,
+        truePeakDb: attributes.truePeakDb,
         dynamicRange: attributes.dynamicRange,
         danceability: attributes.danceability,
         valence: attributes.valence,

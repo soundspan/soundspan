@@ -332,6 +332,8 @@ model Album {
   originalYear     Int?
   peerId           String?
   remoteId         String?
+  albumLoudnessLufs Float?
+  albumTruePeakDb   Float?
   artist           Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   federationPeer   FederationPeer?          @relation(fields: [peerId], references: [id], onDelete: Cascade)
   tracks           Track[]
@@ -372,6 +374,8 @@ model Track {
   keyStrength        Float?
   energy             Float?
   loudness           Float?
+  loudnessLufs       Float?
+  truePeakDb         Float?
   dynamicRange       Float?
   danceability       Float?
   valence            Float?

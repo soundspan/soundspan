@@ -12,10 +12,13 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ANALYZER_PATH = Path(__file__).resolve().parents[1] / "analyzer.py"
+ANALYZER_DIR = Path(__file__).resolve().parents[1]
+ANALYZER_PATH = ANALYZER_DIR / "analyzer.py"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(ANALYZER_DIR) not in sys.path:
+    sys.path.insert(0, str(ANALYZER_DIR))
 
 
 class Json:

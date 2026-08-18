@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   respond with empty compatibility stubs, album payloads carry a real
   `created` timestamp, and the `getOpenSubsonicExtensions` and
   `getAlbumInfo2` response envelopes now match the published spec.
+- Added per-track EBU R128 integrated loudness and true-peak measurement
+  groundwork, album rollups, federation propagation, and coverage metrics;
+  playback behavior is unchanged until a later rollout step.
 - Added an admin control to immediately enqueue a hard purge of all
   soft-removed local tracks without waiting for the retention window.
 - Added a Vibe entry to the main navigation (sidebar and mobile quick links)
@@ -40,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The DCLAP provider no longer exhausts memory on very long tracks because
+  audio decoding is capped and mel segments stream through inference.
 - Purge status no longer reports a purge as running when only the daily
   scheduled sweep is parked in the queue.
 - The vibe map no longer fails permanently on memory-constrained deployments:

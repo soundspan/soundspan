@@ -86,6 +86,8 @@ export interface FederationTrackAudioFeatures {
     keyStrength?: number | null;
     energy?: number | null;
     loudness?: number | null;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     dynamicRange?: number | null;
     danceability?: number | null;
     valence?: number | null;

@@ -90,6 +90,8 @@ const trackSelect = {
     keyStrength: true,
     energy: true,
     loudness: true,
+    loudnessLufs: true,
+    truePeakDb: true,
     dynamicRange: true,
     danceability: true,
     valence: true,
@@ -275,6 +277,11 @@ function trackAudioFeatures(
         keyStrength: row.keyStrength,
         energy: row.energy,
         loudness: row.loudness,
+        // Old peers reject unknown keys, so omit new fields from unmeasured tracks.
+        ...(row.loudnessLufs !== null
+            ? { loudnessLufs: row.loudnessLufs }
+            : {}),
+        ...(row.truePeakDb !== null ? { truePeakDb: row.truePeakDb } : {}),
         dynamicRange: row.dynamicRange,
         danceability: row.danceability,
         valence: row.valence,

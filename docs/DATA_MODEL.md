@@ -313,10 +313,15 @@ Federated rows are available to the web library, search, playlists, normal
 stream resolution, intelligence surfaces, metadata-based lyrics lookup, and
 Subsonic. The track catalog envelope carries optional nullable analyzer fields:
 `bpm`, `beatsCount`, `key`, `keyScale`, `keyStrength`, `energy`, `loudness`,
-`dynamicRange`, `danceability`, `valence`, `arousal`, `instrumentalness`,
-`acousticness`, `speechiness`, seven mood scores, `danceabilityMl`, `moodTags`,
-`essentiaGenres`, and `lastfmTags`, plus the scoped optional embedding. The
-consumer validates finite numbers and bounded arrays/entries before upsert.
+`loudnessLufs`, `truePeakDb`, `dynamicRange`, `danceability`, `valence`,
+`arousal`, `instrumentalness`, `acousticness`, `speechiness`, seven mood scores,
+`danceabilityMl`, `moodTags`, `essentiaGenres`, and `lastfmTags`, plus the scoped
+optional embedding. `Track.loudness` remains the Essentia Steven's-law value;
+`loudnessLufs` and `truePeakDb` are EBU R128 integrated LUFS and dBTP measured
+over the full native stream. `Album.albumLoudnessLufs` stores the local
+duration-weighted energy mean, and `Album.albumTruePeakDb` stores the maximum
+member track true peak; neither album value is federated. The consumer
+validates finite numbers and bounded arrays/entries before upsert.
 Denormalized artist counts, local file analysis/enrichment, imports,
 acquisition/offline downloads, and share links remain local-only. Complete
 peer streams may use `TranscodedFile`; audio-hash changes and peer deletion

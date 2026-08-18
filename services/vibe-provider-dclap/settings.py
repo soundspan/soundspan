@@ -20,6 +20,21 @@ MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
 ONNX_INTRA_OP_THREADS = get_int_env("DCLAP_ONNX_INTRA_OP_THREADS", 1)
 MODEL_DIRECTORY = os.getenv("DCLAP_MODEL_PATH", "/app/models")
 TOKENIZER_DIRECTORY = os.getenv("DCLAP_TOKENIZER_PATH", "/app/tokenizer")
+MAX_AUDIO_SECONDS_DEFAULT = 1800
+MAX_AUDIO_SECONDS_FLOOR = 60
+MAX_AUDIO_SECONDS_CEILING = 7200
+
+
+def _max_audio_seconds() -> int:
+    """Read the bounded operational audio decode limit."""
+    try:
+        configured = get_int_env("DCLAP_MAX_AUDIO_SECONDS", MAX_AUDIO_SECONDS_DEFAULT)
+    except ValueError:
+        return MAX_AUDIO_SECONDS_DEFAULT
+    return min(MAX_AUDIO_SECONDS_CEILING, max(MAX_AUDIO_SECONDS_FLOOR, configured))
+
+
+MAX_AUDIO_SECONDS = _max_audio_seconds()
 
 if HTTP_PORT <= 0 or HTTP_PORT > 65535:
     raise ValueError("DCLAP_HTTP_PORT must be between 1 and 65535")

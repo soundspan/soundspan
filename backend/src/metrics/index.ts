@@ -1,6 +1,7 @@
 import { collectDefaultMetrics, Registry } from "prom-client";
 import { createDomainMetrics } from "./domainMetrics";
 import { createHttpRequestMetrics } from "./httpMetrics";
+import { createLoudnessMetrics } from "./loudnessMetrics";
 import {
     createProviderMetrics,
     type VibeProviderEndpoint,
@@ -19,6 +20,7 @@ import {
     type VibeVocabularySpaceMismatchReason,
 } from "./vibeEmbedMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
+import { prisma } from "../utils/db";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -31,6 +33,7 @@ collectDefaultMetrics({
 const httpMetrics = createHttpRequestMetrics(metricsRegistry);
 const domainMetrics = createDomainMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
+createLoudnessMetrics(metricsRegistry, prisma);
 const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
     // Resolved at scrape time: importing the client eagerly would pull the
     // validated runtime config into every module that imports metrics.
