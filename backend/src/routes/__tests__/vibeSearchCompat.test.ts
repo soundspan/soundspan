@@ -270,25 +270,28 @@ describe("vibe search transport compatibility", () => {
 
     it("returns vibe map projection data and handles projection errors", async () => {
         mockComputeMapProjection.mockResolvedValueOnce({
-            tracks: [
-                {
-                    id: "track-1",
-                    x: 0.25,
-                    y: 0.75,
-                    title: "Track One",
-                    artist: "Artist One",
-                    artistId: "artist-1",
-                    albumId: "album-1",
-                    coverUrl: null,
-                    dominantMood: "moodHappy",
-                    moodScore: 0.9,
-                    moods: { moodHappy: 0.9 },
-                    energy: 0.8,
-                    valence: 0.7,
-                },
-            ],
-            trackCount: 1,
-            computedAt: "2026-03-14T12:00:00.000Z",
+            status: "ready",
+            data: {
+                tracks: [
+                    {
+                        id: "track-1",
+                        x: 0.25,
+                        y: 0.75,
+                        title: "Track One",
+                        artist: "Artist One",
+                        artistId: "artist-1",
+                        albumId: "album-1",
+                        coverUrl: null,
+                        dominantMood: "moodHappy",
+                        moodScore: 0.9,
+                        moods: { moodHappy: 0.9 },
+                        energy: 0.8,
+                        valence: 0.7,
+                    },
+                ],
+                trackCount: 1,
+                computedAt: "2026-03-14T12:00:00.000Z",
+            },
         });
 
         const req = { user: { id: "user-1" } } as any;
@@ -320,6 +323,15 @@ describe("vibe search transport compatibility", () => {
         expect(errRes.body).toEqual({
             error: "Failed to compute map projection",
         });
+
+        mockComputeMapProjection.mockResolvedValueOnce({
+            status: "building",
+        });
+        const buildingRes = createRes();
+        await mapHandler(req, buildingRes);
+
+        expect(buildingRes.statusCode).toBe(202);
+        expect(buildingRes.body).toEqual({ building: true });
     });
 
     it("handles similar-track route success, empty, and error branches", async () => {
