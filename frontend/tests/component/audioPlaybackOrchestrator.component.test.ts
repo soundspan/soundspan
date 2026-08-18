@@ -1259,6 +1259,18 @@ mock.module("@tanstack/react-query", {
         useQueryClient: () => ({
             prefetchQuery: async () => undefined,
         }),
+        // Loudness normalization reads user settings via useQuery; an
+        // unfetched result keeps its mode "off" so orchestrator tests see
+        // pass-through volume behavior.
+        useQuery: () => ({ data: undefined, isFetched: false }),
+    },
+});
+
+mock.module("@/lib/features-context", {
+    exports: {
+        // Loudness normalization reads the server target from features;
+        // the real hook throws without a provider.
+        useFeatures: () => ({ loudnessTargetLufs: -18 }),
     },
 });
 
