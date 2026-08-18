@@ -34,6 +34,7 @@ data volume while the container is stopped.
 
 | Upgrading across | Action needed? |
 | ---------------- | -------------- |
+| **2.3.3** | None — plain rolling update; a small database change applies automatically. If you are on 2.3.2, upgrade promptly: its audio-analyzer container could not start, so loudness measurement was paused until this release. |
 | **2.3.2** | None — plain rolling update; database changes apply automatically. Heads-up: volume leveling is new and on by default; each listener can turn it off under Settings → Playback. |
 | **2.3.0** | Usually automatic. AIO: the standard down/pull/up above is the whole upgrade. Split-stack Compose and Helm: read the section — old analyzer containers must be fully stopped. Back up the database first: no image-only downgrade after this one. |
 | **2.0.0** | **Yes — follow the [dedicated 2.0.0 guide](UPGRADING_TO_2.0.0.md).** Required secrets, client re-auth, and more. |
