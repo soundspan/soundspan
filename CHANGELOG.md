@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+- The dedicated per-user "Subsonic password" is deprecated in favor of app
+  passwords (Settings → Sign-in & Security). The settings field for it has
+  been removed; existing Subsonic passwords keep authenticating token-mode
+  clients until the legacy credential is removed in a future release.
+
 ### Fixed
 
 ## [2.3.1] - 2026-08-18

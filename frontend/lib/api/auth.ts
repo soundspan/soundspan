@@ -321,33 +321,6 @@ export function WithAuth<TBase extends ApiClientConstructor>(Base: TBase) {
             }>("/auth/me");
         }
 
-        async getSubsonicPasswordStatus(): Promise<{ hasPassword: boolean }> {
-            return this.request<{ hasPassword: boolean }>(
-                "/auth/subsonic-password",
-            );
-        }
-
-        async setSubsonicPassword(
-            password: string,
-        ): Promise<{ success: boolean }> {
-            return this.request<{ success: boolean }>(
-                "/auth/subsonic-password",
-                {
-                    method: "POST",
-                    body: JSON.stringify({ password }),
-                },
-            );
-        }
-
-        async clearSubsonicPassword(): Promise<{ success: boolean }> {
-            return this.request<{ success: boolean }>(
-                "/auth/subsonic-password",
-                {
-                    method: "DELETE",
-                },
-            );
-        }
-
         async createApiKey(deviceName: string): Promise<{
             apiKey: string;
             name: string;

@@ -57,10 +57,6 @@ mock.module("../../features/settings/hooks/useTwoFactor", {
     },
 });
 
-mock.module("../../features/settings/components/sections/SubsonicSection", {
-    namedExports: { SubsonicRows: () => null },
-});
-
 mock.module("next/image", { defaultExport: () => null });
 
 after(() => {

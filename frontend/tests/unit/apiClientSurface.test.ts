@@ -24,7 +24,6 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "clearNotification",
     "clearPlayHistory",
     "clearPlaybackState",
-    "clearSubsonicPassword",
     "clearTidalStreamingAuth",
     "clearToken",
     "clearYtMusicAuth",
@@ -146,7 +145,6 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getSoulseekResults",
     "getStreamUrl",
     "getStreamingAuthToken",
-    "getSubsonicPasswordStatus",
     "getSystemSettings",
     "getTidalBrowseImageUrl",
     "getTidalBrowseMix",
@@ -264,7 +262,6 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "searchTidalStreaming",
     "searchYtMusic",
     "setAlbumPreference",
-    "setSubsonicPassword",
     "setToken",
     "setTrackPreference",
     "startOidcLink",
@@ -311,5 +308,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 291);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 288);
 });

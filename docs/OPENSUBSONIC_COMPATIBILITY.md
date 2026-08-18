@@ -21,7 +21,7 @@ This document defines the current `/rest` compatibility contract implemented in 
 ## Supported Auth Modes
 
 - `u` + `p` (plain and `enc:` hex password forms). `p` accepts a local password or an active app password.
-- `u` + `t` + `s` token mode (`t = md5(secret + salt)`). `secret` can be the user's Subsonic password or an active app password.
+- `u` + `t` + `s` token mode (`t = md5(secret + salt)`). `secret` is an active app password (Settings → Sign-in & Security → App Passwords). Accounts that set a dedicated Subsonic password before it was deprecated keep working until that legacy credential is removed in a future release.
 - `apiKey` query auth (OpenSubsonic extension), with optional `u` username consistency check
 - Required protocol params: one auth mode, `v`, `c` (`u` required for password/token auth, optional for `apiKey`)
 - Response formats: JSON, XML, JSONP (`f` + optional `callback`)
