@@ -108,6 +108,13 @@ def test_space_is_the_distinct_pinned_student_space() -> None:
     response = _request(StubProvider(), "GET", "/v1/space")
 
     assert response.status_code == 200
+    assert response.content == (
+        b'{"family":"clap-music-audioset-dclap-student","checkpointHash":"c892c7a8666dfa5adec5f0b76ecdd9b5394f5afa925d1362750309b6b9b96639","dim":512,"sampleRateHz":48000,'
+        b'"preprocessing":{"sampleRateHz":48000,"mono":true,"int16RoundTrip":true,"clip":[-1.0,1.0],"segmentSamples":480000,"hopSamples":240000,'
+        b'"mel":{"nFft":2048,"hopLength":480,"winLength":2048,"nMels":128,"fminHz":0,"fmaxHz":14000,"window":"hann","center":true,"padMode":"reflect","power":2.0,'
+        b'"powerToDb":{"ref":1.0,"amin":1e-10,"topDb":null},"tensorLayout":"(1,1,128,time)"},"aggregation":"mean+l2-normalize","normalizationEpsilon":1e-9},'
+        b'"revision":"dclap-student-v1","textTower":true}'
+    )
     assert response.json() == {
         "family": "clap-music-audioset-dclap-student",
         "checkpointHash": "c892c7a8666dfa5adec5f0b76ecdd9b5394f5afa925d1362750309b6b9b96639",

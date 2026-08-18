@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The DCLAP provider no longer exhausts memory on very long tracks because
+  audio decoding is capped and mel segments stream through inference.
 - Purge status no longer reports a purge as running when only the daily
   scheduled sweep is parked in the queue.
 - The vibe map no longer fails permanently on memory-constrained deployments:
