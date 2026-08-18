@@ -20,43 +20,12 @@ export function usePurgeProgress(
     const [progress, setProgress] = useState<PurgeRemovedStatusResponse | null>(
         null,
     );
-    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pollsRef = useRef(0);
-    const activeRef = useRef(false);
+    const [tracking, setTracking] = useState(false);
     const settledRef = useRef(onSettled);
-    settledRef.current = onSettled;
 
-    const stop = useCallback(() => {
-        activeRef.current = false;
-        if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = null;
-    }, []);
-
-    const poll = useCallback(async (): Promise<void> => {
-        let status: PurgeRemovedStatusResponse;
-        try {
-            status = await api.getPurgeRemovedStatus();
-        } catch {
-            stop();
-            return;
-        }
-        if (!activeRef.current) return;
-        setProgress(status);
-        pollsRef.current += 1;
-        if (!status.purging || pollsRef.current >= POLL_LIMIT) {
-            stop();
-            settledRef.current(status);
-            return;
-        }
-        timerRef.current = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-    }, [stop]);
-
-    const startTracking = useCallback(() => {
-        if (activeRef.current) return;
-        activeRef.current = true;
-        pollsRef.current = 0;
-        void poll();
-    }, [poll]);
+    useEffect(() => {
+        settledRef.current = onSettled;
+    }, [onSettled]);
 
     useEffect(() => {
         let cancelled = false;
@@ -65,14 +34,49 @@ export function usePurgeProgress(
             .then((status) => {
                 if (cancelled) return;
                 setProgress(status);
-                if (status.purging) startTracking();
+                if (status.purging) setTracking(true);
             })
             .catch(() => undefined);
         return () => {
             cancelled = true;
-            stop();
         };
-    }, [startTracking, stop]);
+    }, []);
+
+    useEffect(() => {
+        if (!tracking) return;
+        let cancelled = false;
+        let polls = 0;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+
+        const poll = async (): Promise<void> => {
+            let status: PurgeRemovedStatusResponse;
+            try {
+                status = await api.getPurgeRemovedStatus();
+            } catch {
+                if (!cancelled) setTracking(false);
+                return;
+            }
+            if (cancelled) return;
+            setProgress(status);
+            polls += 1;
+            if (!status.purging || polls >= POLL_LIMIT) {
+                setTracking(false);
+                settledRef.current(status);
+                return;
+            }
+            timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+        };
+
+        void poll();
+        return () => {
+            cancelled = true;
+            if (timer) clearTimeout(timer);
+        };
+    }, [tracking]);
+
+    const startTracking = useCallback(() => {
+        setTracking(true);
+    }, []);
 
     return { progress, startTracking };
 }
