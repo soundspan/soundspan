@@ -113,6 +113,7 @@ Only **Enforcement Gates** and **Python Quality** block a PR on every run; the r
 Notes:
 
 - **The frontend has two type-check gates.** `next build` checks the Next build graph (`app/`, `lib/`, `components/`, `hooks/`, `features/`), while `npm run typecheck` checks the complete frontend TypeScript project, including standalone `tests/**` files, without reusing incremental state. `npm run lint` and the `node --test`/`tsx` runners transpile without type-checking.
+- **Frontend component tests:** run `npm --prefix frontend run test:component` or `npm --prefix frontend run test:component:coverage`. Both commands require Node.js 24 from `.nvmrc` and fail fast with upgrade guidance on an older runtime.
 - **RAM:** per the targeted-testing rule above, iterate with `npm --prefix backend test -- <file>`; run the full `test:coverage` once before opening the PR.
 - **No Node ≥ 24 handy?** Type-checking still requires the repository's supported Node/npm toolchain and installed frontend dependencies; use `npm --prefix frontend run typecheck` for the standalone gate.
 

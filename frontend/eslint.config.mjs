@@ -44,6 +44,28 @@ const eslintConfig = defineConfig([
         },
     },
     {
+        files: ["components/player/hooks/**/*.{ts,tsx}"],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: [
+                        {
+                            name: "@tanstack/react-query",
+                            message:
+                                "Direct React Query imports cannot be mocked by the component harness. Route the dependency through an app-alias module instead.",
+                        },
+                        {
+                            name: "react-query",
+                            message:
+                                "Direct React Query imports cannot be mocked by the component harness. Route the dependency through an app-alias module instead.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
         files: [
             "components/player/SeekSlider.tsx",
             "components/vibe/MapCanvas.tsx",

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Changed
+
+- Frontend component-test commands now fail fast with Node.js 24 upgrade
+  guidance, and player hooks reject direct React Query imports that the harness
+  cannot mock.
+
 ## [2.3.2] - 2026-08-18
 
 ### Added

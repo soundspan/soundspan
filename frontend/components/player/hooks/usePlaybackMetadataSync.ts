@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import type { QueryClient } from "@tanstack/react-query";
 import type { Audiobook, Podcast, Track } from "@/lib/audio-state-context";
 import {
     fetchLyrics,
@@ -7,9 +6,10 @@ import {
     type LyricsLookupMetadata,
 } from "@/hooks/useLyrics";
 import { LYRICS_QUERY_STALE_TIME } from "@/lib/lyrics-cache-policy";
+import type { getQueryClient } from "@/lib/query-client";
 
 interface UsePlaybackMetadataSyncOptions {
-    queryClient: QueryClient;
+    queryClient: ReturnType<typeof getQueryClient>;
     playbackType: "track" | "audiobook" | "podcast" | null;
     currentTrack: Track | null;
     currentAudiobook: Audiobook | null;

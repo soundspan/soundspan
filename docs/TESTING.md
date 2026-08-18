@@ -88,6 +88,7 @@ These scripts intentionally run outside Jest because they are operator diagnosti
 ### Frontend component tests
 
 - `*.component.test.ts` under `frontend/tests/component/`.
+- Run `npm --prefix frontend run test:component` with Node.js 24 from `.nvmrc`; the command fails fast with upgrade guidance on an older runtime.
 - Use Node test runner with module-mock support and the existing `tsx` loader path.
 - For social-surface changed-line coverage gating, use:
     - `npm --prefix frontend run test:component:coverage:changed`
