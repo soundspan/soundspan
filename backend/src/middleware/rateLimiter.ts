@@ -76,7 +76,7 @@ export const shareLinkLimiter = rateLimit({
         );
         res.status(options.statusCode).send(options.message);
     },
-    ...createRedisRateLimitOptions("share-link"),
+    ...createRedisRateLimitOptions("share-link", { fallback: "memory" }),
     ...trustProxyValidation,
 });
 
@@ -104,7 +104,7 @@ export const authLimiter = rateLimit({
         logger.warn(`Auth rate limit exceeded: ${req.ip}`);
         res.status(options.statusCode).send(options.message);
     },
-    ...createRedisRateLimitOptions("auth"),
+    ...createRedisRateLimitOptions("auth", { fallback: "memory" }),
     ...trustProxyValidation,
 });
 
@@ -119,7 +119,7 @@ export const oidcFlowLimiter = rateLimit({
         logger.warn(`OIDC flow rate limit exceeded: ${req.ip}`);
         res.status(options.statusCode).send(options.message);
     },
-    ...createRedisRateLimitOptions("oidc-flow"),
+    ...createRedisRateLimitOptions("oidc-flow", { fallback: "memory" }),
     ...trustProxyValidation,
 });
 
@@ -214,7 +214,7 @@ export const webhookLimiter = rateLimit({
     message: "Too many webhook requests, please try again later.",
     standardHeaders: true,
     legacyHeaders: false,
-    ...createRedisRateLimitOptions("webhook"),
+    ...createRedisRateLimitOptions("webhook", { fallback: "memory" }),
     ...trustProxyValidation,
 });
 
@@ -238,6 +238,8 @@ export const federationPairingLimiter = rateLimit({
     message: "Too many federation pairing attempts. Please try again later.",
     standardHeaders: true,
     legacyHeaders: false,
-    ...createRedisRateLimitOptions("federation-pairing"),
+    ...createRedisRateLimitOptions("federation-pairing", {
+        fallback: "memory",
+    }),
     ...trustProxyValidation,
 });

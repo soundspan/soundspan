@@ -458,5 +458,5 @@ export const subsonicRateLimiter = rateLimit({
         const username = typeof req.query.u === "string" ? req.query.u : "";
         return `subsonic:${ip}:${username}`;
     },
-    ...createRedisRateLimitOptions("subsonic-auth"),
+    ...createRedisRateLimitOptions("subsonic-auth", { fallback: "memory" }),
 });

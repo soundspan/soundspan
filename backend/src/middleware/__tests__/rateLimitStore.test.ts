@@ -170,7 +170,10 @@ describe("Redis rate-limit store", () => {
             client: redis,
         });
         const store = configuredStore as Store;
-        store.init?.({ windowMs: 60_000 } as ExpressRateLimitOptions);
+        store.init?.({
+            windowMs: 60_000,
+            limit: 2,
+        } as ExpressRateLimitOptions);
 
         await expect(store.increment("client-1")).resolves.toMatchObject({
             totalHits: 1,
@@ -226,31 +229,208 @@ describe("Redis rate-limit store", () => {
         ]);
     });
 
-    it("fails open and rate-limits warning logs when Redis rejects commands", async () => {
+    it("uses the memory fallback to enforce the configured limit when Redis rejects commands", async () => {
         const client: RateLimitRedisClient = {
             isReady: true,
             sendCommand: jest.fn().mockRejectedValue(new Error("Redis down")),
         };
         const { root, scoped } = createMockLogger();
         const app = express();
+        const storeOptions = {
+            client,
+            logger: root,
+            fallback: "memory" as const,
+        };
+        app.use(
+            rateLimit({
+                windowMs: 60_000,
+                max: 2,
+                ...createRedisRateLimitOptions("auth", storeOptions),
+            }),
+        );
+        await expect(invokeApp(app)).resolves.toBe(204);
+        await expect(invokeApp(app)).resolves.toBe(204);
+        await expect(invokeApp(app)).resolves.toBe(429);
+
+        expect(scoped.warn).toHaveBeenCalledTimes(1);
+        expect(scoped.warn).toHaveBeenCalledWith(
+            "Redis rate-limit store unavailable; using memory fallback",
+            expect.objectContaining({
+                limiter: "auth",
+                fallback: "memory",
+                error: "Error: Redis down",
+            }),
+        );
+    });
+
+    it("returns to Redis-only counters after Redis recovers", async () => {
+        let redisReady = false;
+        const sendCommand = jest.fn().mockResolvedValue([1, 60_000]);
+        const client: RateLimitRedisClient = {
+            get isReady() {
+                return redisReady;
+            },
+            sendCommand,
+        };
+        const { root } = createMockLogger();
+        const storeOptions = {
+            client,
+            fallback: "memory" as const,
+            logger: root,
+        };
+        const memoryOptions = createRedisRateLimitOptions("auth", storeOptions);
+        const { store: configuredStore } = memoryOptions;
+        const store = configuredStore as Store;
+        store.init?.({
+            windowMs: 60_000,
+            limit: 2,
+        } as ExpressRateLimitOptions);
+
+        expect(memoryOptions.passOnStoreError).toBe(false);
+
+        await expect(store.increment("client-1")).resolves.toMatchObject({
+            totalHits: 1,
+        });
+        redisReady = true;
+        await expect(store.increment("client-1")).resolves.toMatchObject({
+            totalHits: 1,
+        });
+
+        expect(sendCommand).toHaveBeenCalledTimes(1);
+        expect(sendCommand).toHaveBeenCalledWith(
+            expect.arrayContaining(["rl:auth:client-1"]),
+            expect.any(Object),
+        );
+    });
+
+    it("evicts the least-recently-used fallback key at the 10,000-key cap", async () => {
+        const client: RateLimitRedisClient = {
+            isReady: false,
+            sendCommand: jest.fn(),
+        };
+        const { root } = createMockLogger();
+        const storeOptions = {
+            client,
+            fallback: "memory" as const,
+            logger: root,
+        };
+        const { store: configuredStore } = createRedisRateLimitOptions(
+            "auth",
+            storeOptions,
+        );
+        const store = configuredStore as Store;
+        store.init?.({
+            windowMs: 60_000,
+            limit: 2,
+        } as ExpressRateLimitOptions);
+
+        await store.increment("oldest");
+        for (let index = 0; index < 9_999; index += 1) {
+            await store.increment(`client-${index}`);
+        }
+        await store.increment("overflow");
+
+        await expect(store.increment("oldest")).resolves.toMatchObject({
+            totalHits: 1,
+        });
+    });
+
+    it("expires fallback counters at the configured window", async () => {
+        let currentTime = 1_000;
+        const client: RateLimitRedisClient = {
+            isReady: false,
+            sendCommand: jest.fn(),
+        };
+        const { root } = createMockLogger();
+        const storeOptions = {
+            client,
+            fallback: "memory" as const,
+            logger: root,
+            now: () => currentTime,
+        };
+        const { store: configuredStore } = createRedisRateLimitOptions(
+            "auth",
+            storeOptions,
+        );
+        const store = configuredStore as Store;
+        store.init?.({
+            windowMs: 60_000,
+            limit: 2,
+        } as ExpressRateLimitOptions);
+
+        await store.increment("client-1");
+        await expect(store.increment("client-1")).resolves.toMatchObject({
+            totalHits: 2,
+        });
+        currentTime += 60_000;
+
+        await expect(store.increment("client-1")).resolves.toMatchObject({
+            totalHits: 1,
+        });
+    });
+
+    it("retains only hits inside the sliding window", async () => {
+        let currentTime = 1_000;
+        const client: RateLimitRedisClient = {
+            isReady: false,
+            sendCommand: jest.fn(),
+        };
+        const { root } = createMockLogger();
+        const storeOptions = {
+            client,
+            fallback: "memory" as const,
+            logger: root,
+            now: () => currentTime,
+        };
+        const { store: configuredStore } = createRedisRateLimitOptions(
+            "auth",
+            storeOptions,
+        );
+        const store = configuredStore as Store;
+        store.init?.({
+            windowMs: 60_000,
+            limit: 2,
+        } as ExpressRateLimitOptions);
+
+        await store.increment("client-1");
+        currentTime += 50_000;
+        await store.increment("client-1");
+        currentTime += 11_000;
+
+        await expect(store.increment("client-1")).resolves.toMatchObject({
+            totalHits: 2,
+        });
+    });
+
+    it("keeps the default open fallback unchanged", async () => {
+        const client: RateLimitRedisClient = {
+            isReady: true,
+            sendCommand: jest.fn().mockRejectedValue(new Error("Redis down")),
+        };
+        const { root, scoped } = createMockLogger();
+        const app = express();
+        const openOptions = createRedisRateLimitOptions("auth", {
+            client,
+            logger: root,
+        });
         app.use(
             rateLimit({
                 windowMs: 60_000,
                 max: 1,
-                ...createRedisRateLimitOptions("auth", {
-                    client,
-                    logger: root,
-                }),
+                ...openOptions,
             }),
         );
+
+        expect(openOptions.passOnStoreError).toBe(true);
         await expect(invokeApp(app)).resolves.toBe(204);
         await expect(invokeApp(app)).resolves.toBe(204);
 
         expect(scoped.warn).toHaveBeenCalledTimes(1);
         expect(scoped.warn).toHaveBeenCalledWith(
-            "Redis rate-limit store unavailable; allowing request",
+            "Redis rate-limit store unavailable; using open fallback",
             expect.objectContaining({
                 limiter: "auth",
+                fallback: "open",
                 error: "Error: Redis down",
             }),
         );
@@ -300,9 +480,10 @@ describe("Redis rate-limit store", () => {
         await expect(invokeApp(app)).resolves.toBe(204);
 
         expect(scoped.warn).toHaveBeenCalledWith(
-            "Redis rate-limit store unavailable; allowing request",
+            "Redis rate-limit store unavailable; using open fallback",
             expect.objectContaining({
                 limiter: "auth",
+                fallback: "open",
                 error: "Error: Redis rate-limit command timed out after 20ms",
             }),
         );

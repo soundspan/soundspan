@@ -32,6 +32,13 @@ type RateLimitHandlerResponse = {
 
 const mockRateLimit = jest.fn((options: RateLimitOptions) => options);
 const mockRateLimiterLoggerWarn = jest.fn();
+const mockCreateRedisRateLimitOptions = jest.fn(
+    (name: string, options?: { fallback?: "memory" | "open" }) => ({
+        store: `redis:${name}`,
+        passOnStoreError: true,
+        fallback: options?.fallback,
+    }),
+);
 
 jest.mock("../../utils/logger", () => ({
     logger: {
@@ -44,16 +51,14 @@ describe("rateLimiter middleware config", () => {
         jest.resetModules();
         mockRateLimit.mockClear();
         mockRateLimiterLoggerWarn.mockClear();
+        mockCreateRedisRateLimitOptions.mockClear();
 
         jest.doMock("express-rate-limit", () => ({
             __esModule: true,
             default: (options: RateLimitOptions) => mockRateLimit(options),
         }));
         jest.doMock("../rateLimitStore", () => ({
-            createRedisRateLimitOptions: (name: string) => ({
-                store: `redis:${name}`,
-                passOnStoreError: true,
-            }),
+            createRedisRateLimitOptions: mockCreateRedisRateLimitOptions,
         }));
 
         return import("../rateLimiter");
@@ -127,6 +132,29 @@ describe("rateLimiter middleware config", () => {
 
         expect(getOptions(index).store).toBe(`redis:${name}`);
     });
+
+    it.each([
+        "share-link",
+        "auth",
+        "oidc-flow",
+        "webhook",
+        "federation-pairing",
+    ])("uses the memory fallback for the %s credential guard", async (name) => {
+        await loadRateLimiterModule();
+
+        expect(mockCreateRedisRateLimitOptions).toHaveBeenCalledWith(name, {
+            fallback: "memory",
+        });
+    });
+
+    it.each(["admin-surface", "federation-peer"])(
+        "keeps the %s shared limiter availability-first",
+        async (name) => {
+            await loadRateLimiterModule();
+
+            expect(mockCreateRedisRateLimitOptions).toHaveBeenCalledWith(name);
+        },
+    );
 
     it.each([
         ["general API", 0],

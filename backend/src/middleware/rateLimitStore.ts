@@ -24,6 +24,9 @@ function loadDefaultRedisClient(): RateLimitRedisClient {
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 250;
 const DEFAULT_WARNING_INTERVAL_MS = 60_000;
+const DEFAULT_MEMORY_MAX_HITS = 1_000_000;
+// Each opt-in limiter retains at most this many keys in each backend process.
+const DEFAULT_MEMORY_MAX_ENTRIES = 10_000;
 const LIMITER_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const INCREMENT_SCRIPT = `
 local windowMs = tonumber(ARGV[1])
@@ -50,6 +53,9 @@ export interface RateLimitRedisClient {
     ): Promise<unknown>;
 }
 
+/** Redis outage policy for one rate limiter. */
+export type RateLimitFallback = "memory" | "open";
+
 /** Dependencies and deadlines for a Redis-backed rate-limit store. */
 export type RedisRateLimitOptions = Readonly<{
     client?: RateLimitRedisClient;
@@ -57,6 +63,7 @@ export type RedisRateLimitOptions = Readonly<{
     commandTimeoutMs?: number;
     warningIntervalMs?: number;
     now?: () => number;
+    fallback?: RateLimitFallback;
 }>;
 
 type FailureReporter = (error: unknown) => void;
@@ -66,6 +73,11 @@ type ResolvedRateLimitOptions = Readonly<{
     warningIntervalMs: number;
     now: () => number;
     logger: Logger;
+    fallback: RateLimitFallback;
+}>;
+
+type MemoryWindow = Readonly<{
+    hits: number[];
 }>;
 
 function requirePositiveInteger(value: number, name: string): number {
@@ -73,6 +85,24 @@ function requirePositiveInteger(value: number, name: string): number {
         throw new RangeError(`${name} must be a positive integer`);
     }
     return value;
+}
+
+function requireMemoryLimit(limit: ExpressRateLimitOptions["limit"]): number {
+    if (typeof limit !== "number") {
+        throw new TypeError("memory fallback requires a static numeric limit");
+    }
+    const resolved = requirePositiveInteger(limit, "limit");
+    if (resolved >= DEFAULT_MEMORY_MAX_HITS) {
+        throw new RangeError("memory fallback limit exceeds its hit capacity");
+    }
+    return resolved;
+}
+
+function memoryEntryCap(limit: number): number {
+    return Math.min(
+        DEFAULT_MEMORY_MAX_ENTRIES,
+        Math.floor(DEFAULT_MEMORY_MAX_HITS / (limit + 1)),
+    );
 }
 
 function normalizeReplyInteger(value: unknown, field: string): number {
@@ -127,6 +157,7 @@ function resolveRateLimitOptions(
         ),
         now: options.now ?? Date.now,
         logger: scopedLogger(options.logger ?? rootLogger),
+        fallback: options.fallback ?? "open",
     };
 }
 
@@ -135,14 +166,17 @@ function createFailureReporter(
     logger: Logger,
     warningIntervalMs: number,
     now: () => number,
+    fallback: RateLimitFallback,
 ): FailureReporter {
     let lastWarningAt = Number.NEGATIVE_INFINITY;
+    const message = `Redis rate-limit store unavailable; using ${fallback} fallback`;
     return (error: unknown): void => {
         const currentTime = now();
         if (currentTime - lastWarningAt < warningIntervalMs) return;
         lastWarningAt = currentTime;
-        logger.warn("Redis rate-limit store unavailable; allowing request", {
+        logger.warn(message, {
             limiter: limiterName,
+            fallback,
             error: describeError(error),
         });
     };
@@ -169,51 +203,135 @@ function createExpressRateLimitLogger(
     };
 }
 
+class BoundedMemorySlidingWindowStore {
+    private readonly entries = new Map<string, MemoryWindow>();
+
+    constructor(
+        private readonly maxEntries: number,
+        private readonly maxHitsPerKey: number,
+        private readonly now: () => number,
+    ) {}
+
+    increment(key: string, windowMs: number): IncrementResponse {
+        const currentTime = this.now();
+        const hits = this.activeHits(key, currentTime - windowMs);
+        hits.push(currentTime);
+        if (hits.length > this.maxHitsPerKey) hits.shift();
+        this.setRecentlyUsed(key, { hits });
+        const oldestHit = hits[0] ?? currentTime;
+        return {
+            totalHits: hits.length,
+            resetTime: new Date(oldestHit + windowMs),
+        };
+    }
+
+    decrement(key: string, windowMs: number): void {
+        const hits = this.activeHits(key, this.now() - windowMs);
+        hits.pop();
+        if (hits.length > 0) this.setRecentlyUsed(key, { hits });
+    }
+
+    resetKey(key: string): void {
+        this.entries.delete(key);
+    }
+
+    private activeHits(key: string, cutoff: number): number[] {
+        const current = this.entries.get(key);
+        if (!current) return [];
+        this.entries.delete(key);
+        return current.hits.filter((hit) => hit > cutoff);
+    }
+
+    private setRecentlyUsed(key: string, value: MemoryWindow): void {
+        const existed = this.entries.delete(key);
+        if (!existed && this.entries.size >= this.maxEntries) {
+            const oldestKey = this.entries.keys().next().value as
+                | string
+                | undefined;
+            if (oldestKey !== undefined) this.entries.delete(oldestKey);
+        }
+        this.entries.set(key, value);
+    }
+}
+
 class RedisRateLimitStore implements Store {
     private windowMs: number | null = null;
+    private memoryStore: BoundedMemorySlidingWindowStore | null = null;
 
     constructor(
         private readonly client: () => RateLimitRedisClient,
         readonly prefix: string,
         private readonly commandTimeoutMs: number,
         private readonly reportFailure: FailureReporter,
+        private readonly fallback: RateLimitFallback,
+        private readonly now: () => number,
     ) {}
 
     init(options: ExpressRateLimitOptions): void {
         this.windowMs = requirePositiveInteger(options.windowMs, "windowMs");
+        if (this.fallback === "memory") {
+            const limit = requireMemoryLimit(options.limit);
+            this.memoryStore = new BoundedMemorySlidingWindowStore(
+                memoryEntryCap(limit),
+                limit + 1,
+                this.now,
+            );
+        }
     }
 
     async increment(key: string): Promise<IncrementResponse> {
         if (this.windowMs === null) {
             throw new Error("Redis rate-limit store was not initialized");
         }
-        const reply = await this.execute([
-            "EVAL",
-            INCREMENT_SCRIPT,
-            "1",
-            this.prefixKey(key),
-            String(this.windowMs),
-        ]);
-        return parseIncrementReply(reply);
+        const prefixedKey = this.prefixKey(key);
+        try {
+            const reply = await this.execute([
+                "EVAL",
+                INCREMENT_SCRIPT,
+                "1",
+                prefixedKey,
+                String(this.windowMs),
+            ]);
+            // Recovery immediately returns to Redis-only decisions. Fallback
+            // state is neither merged nor synchronized and expires locally.
+            return parseIncrementReply(reply);
+        } catch (error) {
+            if (!this.memoryStore) throw error;
+            this.reportFailure(error);
+            return this.memoryStore.increment(prefixedKey, this.windowMs);
+        }
     }
 
     async decrement(key: string): Promise<void> {
-        await this.executeBestEffort(["DECR", this.prefixKey(key)]);
+        const prefixedKey = this.prefixKey(key);
+        const windowMs = this.windowMs;
+        await this.executeBestEffort(["DECR", prefixedKey], () =>
+            windowMs === null
+                ? undefined
+                : this.memoryStore?.decrement(prefixedKey, windowMs),
+        );
     }
 
     async resetKey(key: string): Promise<void> {
-        await this.executeBestEffort(["DEL", this.prefixKey(key)]);
+        const prefixedKey = this.prefixKey(key);
+        await this.executeBestEffort(["DEL", prefixedKey], () =>
+            this.memoryStore?.resetKey(prefixedKey),
+        );
     }
 
     private prefixKey(key: string): string {
         return `${this.prefix}${key}`;
     }
 
-    private async executeBestEffort(args: readonly string[]): Promise<void> {
+    private async executeBestEffort(
+        args: readonly string[],
+        fallback: () => void,
+    ): Promise<void> {
         try {
             await this.execute(args);
         } catch (error) {
             this.reportFailure(error);
+            fallback();
         }
     }
 
@@ -250,7 +368,10 @@ class RedisRateLimitStore implements Store {
 
 /**
  * Builds the shared-store options for one named express-rate-limit instance.
- * Redis failures pass requests through and emit at most one warning per minute.
+ * Redis failures use the selected fallback and emit at most one warning per
+ * minute. Memory fallback counters are capped at 10,000 keys and one million
+ * retained hit timestamps per limiter per process; multi-replica deployments
+ * therefore enforce independently while Redis is unavailable.
  */
 export function createRedisRateLimitOptions(
     limiterName: string,
@@ -265,6 +386,7 @@ export function createRedisRateLimitOptions(
         resolved.logger,
         resolved.warningIntervalMs,
         resolved.now,
+        resolved.fallback,
     );
     const rateLimitLogger = createExpressRateLimitLogger(
         resolved.logger,
@@ -276,8 +398,10 @@ export function createRedisRateLimitOptions(
             `rl:${limiterName}:`,
             resolved.commandTimeoutMs,
             reportFailure,
+            resolved.fallback,
+            resolved.now,
         ),
-        passOnStoreError: true,
+        passOnStoreError: resolved.fallback === "open",
         logger: rateLimitLogger,
     };
 }

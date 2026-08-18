@@ -90,6 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a cycle. Retry Failed Analysis skips removed tracks instead of
   re-queueing files that no longer exist.
 
+### Security
+
+- Credential-guarding rate limiters now use bounded per-process memory windows
+  during Redis outages instead of allowing unlimited authentication attempts.
+
 ## [2.3.1] - 2026-08-18
 
 ### Added

@@ -171,9 +171,13 @@ authentication and account-management, admin and invite-management, OIDC,
 OpenSubsonic authentication, share-link, webhook, and federation limits common
 to every backend replica and preserves them across backend restarts. Redis keys
 are separated by limiter name. A Redis command has a 250 ms deadline. If Redis
-is disconnected or a command fails or times out, the affected request is
-allowed and the backend emits a rate-limited warning. This fail-open behavior
-keeps an infrastructure outage from blocking authentication and administration.
+is disconnected or a command fails or times out, credential-guarding limits
+fall back to an in-process sliding window of up to 10,000 keys and one million
+retained hit timestamps per limiter, while other
+Redis-backed limits remain availability-first and allow the request. The
+fallback is per backend process during an outage, so replicas enforce separate
+budgets until Redis recovers; each fallback decision emits a rate-limited
+warning.
 
 The general high-ceiling API limiter and high-volume playback, image, download,
 lyrics, and provider-request limiters remain per-process and in memory. They are

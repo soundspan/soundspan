@@ -19,6 +19,12 @@ const mockRateLimit = jest.fn((options: RateLimitOptions) => {
 });
 
 const mockIpKeyGenerator = jest.fn((ip: string) => `ip:${ip}`);
+const mockCreateRedisRateLimitOptions = jest.fn(
+    (_name: string, options?: { fallback?: "memory" | "open" }) => ({
+        store: "redis-shared-store",
+        fallback: options?.fallback,
+    }),
+);
 
 jest.mock("express-rate-limit", () => ({
     __esModule: true,
@@ -27,7 +33,7 @@ jest.mock("express-rate-limit", () => ({
 }));
 
 jest.mock("../rateLimitStore", () => ({
-    createRedisRateLimitOptions: () => ({ store: "redis-shared-store" }),
+    createRedisRateLimitOptions: mockCreateRedisRateLimitOptions,
 }));
 
 jest.mock("../../utils/db", () => ({
@@ -929,6 +935,7 @@ describe("requireSubsonicAuth", () => {
         expect((subsonicRateLimiter as any).__options.store).toBe(
             "redis-shared-store",
         );
+        expect((subsonicRateLimiter as any).__options.fallback).toBe("memory");
     });
 
     it("rejects when apiKey and password/token auth are both provided", async () => {
