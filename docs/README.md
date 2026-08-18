@@ -84,6 +84,7 @@ This index is the central navigation page for all project documentation under `d
 | Document                                                                                                     | Status       | Purpose                                                                         |
 | ------------------------------------------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------- |
 | [`designs/loudness-and-transitions.md`](designs/loudness-and-transitions.md)                                 | Design phase | Loudness normalization (LUFS/ReplayGain) and analysis-driven smart transitions  |
+| [`designs/federation-protocol-compat.md`](designs/federation-protocol-compat.md)                             | Approved     | Tolerant envelope parsing and capability advertisement for additive federation fields |
 | [`designs/natural-language-music.md`](designs/natural-language-music.md)                                     | Design phase | Local-LLM natural-language playlists: compile-not-generate trust boundary       |
 | [`designs/blends-and-federated-discovery.md`](designs/blends-and-federated-discovery.md)                     | Design phase | Taste vectors, max-min fairness Blends, peer catalogs as discovery surface      |
 | [`designs/vibe-embedding-provider.md`](designs/vibe-embedding-provider.md)                                   | Design phase | Pluggable vibe embedding provider, versioned embedding spaces, DCLAP default    |

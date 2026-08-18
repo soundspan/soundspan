@@ -37,6 +37,11 @@ function buildContentSecurityPolicy(nonce: string): {
     const directives = [
         "default-src 'self'",
         `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${developmentEval}`,
+        // Deliberate compromise: Next.js and the styling pipeline inject
+        // inline style attributes/tags that cannot carry nonces, so styles
+        // allow 'unsafe-inline'. Script injection stays fully nonce-gated
+        // above, which is where the XSS risk actually lives; revisit only
+        // if the framework gains nonce-able style emission.
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "media-src 'self' blob:",
