@@ -76,6 +76,8 @@ const trackEnvelope = {
         keyStrength: 0.8,
         energy: 0.7,
         loudness: -9.5,
+        loudnessLufs: -16.8,
+        truePeakDb: -0.9,
         dynamicRange: 8.1,
         danceability: 0.6,
         valence: 0.4,

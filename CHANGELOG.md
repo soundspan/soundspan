@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added per-track EBU R128 integrated loudness and true-peak measurement
+  groundwork, album rollups, federation propagation, and coverage metrics;
+  playback behavior is unchanged until a later rollout step.
 - Added an admin control to immediately enqueue a hard purge of all
   soft-removed local tracks without waiting for the retention window.
 - Added a Vibe entry to the main navigation (sidebar and mobile quick links)

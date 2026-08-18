@@ -76,6 +76,8 @@ const trackAttributesSchema = z.strictObject({
     keyStrength: optionalFiniteNumberSchema,
     energy: optionalFiniteNumberSchema,
     loudness: optionalFiniteNumberSchema,
+    loudnessLufs: optionalFiniteNumberSchema,
+    truePeakDb: optionalFiniteNumberSchema,
     dynamicRange: optionalFiniteNumberSchema,
     danceability: optionalFiniteNumberSchema,
     valence: optionalFiniteNumberSchema,

@@ -10,9 +10,9 @@ Playback volume varies wildly across a mixed library (quiet 90s masters next to 
 
 ### Measurement
 
-- `services/audio-analyzer` gains an EBU R128 pass emitting **integrated LUFS** and **true peak (dBTP)** per track. Implementation candidate order: ffmpeg `loudnorm` in analysis mode (already in the image, print_format json) over Essentia's `LoudnessEBUR128` — pick by benchmarking both on the analyzer's decode path; record the choice and why here when implemented.
-- Album aggregation: album gain computed per EBU R128 over the concatenated program (approximated as duration-weighted energy mean of track measurements — exact concatenation is not worth a second decode pass; note the approximation).
-- Schema: nullable `loudnessLufs`, `truePeakDb` on Track; `albumLoudnessLufs` on Album. Backfill through the existing re-analysis queue at low priority; coverage gauge on the metrics registry.
+- `services/audio-analyzer` gains an EBU R128 pass emitting **integrated LUFS** and **true peak (dBTP)** per track; ffmpeg `loudnorm` over the full native stream is used because the existing Essentia decode path truncates to 90 seconds and downmixes to mono 44.1 kHz, which disqualifies it for whole-program integrated loudness and native-stream true peak.
+- Album aggregation: album gain computed per EBU R128 over the concatenated program (approximated as duration-weighted energy mean of track measurements — exact concatenation is not worth a second decode pass; note the approximation), and album true peak is the maximum of member track peaks. The analyzer recomputes the aggregate after every successful measured track save. The album aggregate is not federated; receiving peers compute it locally from the federated per-track measurements.
+- Schema: nullable `loudnessLufs`, `truePeakDb` on Track; `albumLoudnessLufs` on Album. Coverage is exposed through a scrape-time gauge on the metrics registry. The low-priority backfill ships in a separate PR after measurement lands.
 
 ### Application (client-side)
 
@@ -50,7 +50,7 @@ Requires beat-grid phase data the analyzer does not store; explicitly out of sco
 
 ## Rollout and testing
 
-1. Loudness measurement + backfill (no playback change) → 2. player gain + modes + Subsonic extension → 3. T1 silence → 4. T2 crossfade.
+1. Loudness measurement (no playback change) → 2. low-priority backfill → 3. player gain + modes + Subsonic extension → 4. T1 silence → 5. T2 crossfade.
 - Policy modules: pure unit fixtures (the campaign pattern). Engines: component-harness cases for gain compositing and dual-voice fallback. Measurement: golden-file tests with generated tones (known LUFS) through the analyzer pass.
 - Metrics: histogram of applied gain (bounded buckets) to observe real-library spread; counter of clamped boosts.
 

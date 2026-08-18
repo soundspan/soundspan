@@ -20,6 +20,8 @@ def _analysis_features() -> dict[str, Any]:
         "keyStrength": 0.9,
         "energy": 0.8,
         "loudness": -8.0,
+        "loudnessLufs": -18.4,
+        "truePeakDb": -1.2,
         "dynamicRange": 6.0,
         "danceability": 0.7,
         "valence": 0.6,
@@ -62,11 +64,14 @@ def test_save_results_resolves_unresolved_audio_failures(
 
     worker._save_results(track_id, "/music/a.flac", features)
 
-    assert len(database.cursor.executions) == 2
+    assert len(database.cursor.executions) == 3
     result_sql, result_params = database.cursor.executions[0]
-    failure_sql, failure_params = database.cursor.executions[1]
+    rollup_sql, rollup_params = database.cursor.executions[1]
+    failure_sql, failure_params = database.cursor.executions[2]
     assert 'UPDATE "Track"' in result_sql
     assert result_params == loaded_analyzer._analysis_result_values(track_id, features)
+    assert 'UPDATE "Album"' in rollup_sql
+    assert rollup_params == (track_id,)
     assert 'UPDATE "EnrichmentFailure"' in failure_sql
     assert "\"entityType\" = 'audio'" in failure_sql
     assert '"entityId" = %s' in failure_sql

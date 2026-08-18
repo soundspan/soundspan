@@ -18,6 +18,13 @@ for _root in _POTENTIAL_PROJECT_ROOTS:
             sys.path.insert(0, _root)
         break
 
+from loudness import (
+    ALBUM_LOUDNESS_ROLLUP_SQL,
+    LOUDNESS_MEASURE_TIMEOUT_SECONDS,
+    measure_loudness,
+)
+from model_paths import MODEL_DIR, MODELS
+
 from services.common.analyzer_env import (
     configure_thread_env,
     get_blocking_socket_timeout,
@@ -319,6 +326,8 @@ _SAVE_ANALYSIS_RESULTS_SQL = """
         "keyStrength" = %s,
         energy = %s,
         loudness = %s,
+        "loudnessLufs" = %s,
+        "truePeakDb" = %s,
         "dynamicRange" = %s,
         danceability = %s,
         valence = %s,
@@ -367,6 +376,8 @@ def _analysis_result_values(track_id: str, features: dict[str, Any]) -> tuple[An
         features["keyStrength"],
         features["energy"],
         features["loudness"],
+        features.get("loudnessLufs"),
+        features.get("truePeakDb"),
         features["dynamicRange"],
         features["danceability"],
         features["valence"],
@@ -390,28 +401,6 @@ def _analysis_result_values(track_id: str, features: dict[str, Any]) -> tuple[An
         track_id,
     )
 
-
-# Model paths (pre-packaged in Docker image)
-MODEL_DIR = "/app/models"
-
-# MusiCNN model file paths (official Essentia models from essentia.upf.edu/models/)
-# Note: Valence and arousal are derived from mood models (no direct models exist)
-MODELS = {
-    # Base MusiCNN embedding model (for auto-tagging)
-    "musicnn": os.path.join(MODEL_DIR, "msd-musicnn-1.pb"),
-    "musicnn_metadata": os.path.join(MODEL_DIR, "msd-musicnn-1.json"),
-    # Mood classification heads (MusiCNN architecture)
-    # Correct filenames: {task}-msd-musicnn-1.pb
-    "mood_happy": os.path.join(MODEL_DIR, "mood_happy-msd-musicnn-1.pb"),
-    "mood_sad": os.path.join(MODEL_DIR, "mood_sad-msd-musicnn-1.pb"),
-    "mood_relaxed": os.path.join(MODEL_DIR, "mood_relaxed-msd-musicnn-1.pb"),
-    "mood_aggressive": os.path.join(MODEL_DIR, "mood_aggressive-msd-musicnn-1.pb"),
-    "mood_party": os.path.join(MODEL_DIR, "mood_party-msd-musicnn-1.pb"),
-    "mood_acoustic": os.path.join(MODEL_DIR, "mood_acoustic-msd-musicnn-1.pb"),
-    "mood_electronic": os.path.join(MODEL_DIR, "mood_electronic-msd-musicnn-1.pb"),
-    "danceability": os.path.join(MODEL_DIR, "danceability-msd-musicnn-1.pb"),
-    "voice_instrumental": os.path.join(MODEL_DIR, "voice_instrumental-msd-musicnn-1.pb"),
-}
 
 # Now that MODELS is defined, check if model files exist on disk
 TF_MODELS_AVAILABLE = os.path.exists(MODELS["musicnn"])
@@ -623,6 +612,8 @@ class AudioAnalyzer:
             "keyStrength": None,
             "energy": None,
             "loudness": None,
+            "loudnessLufs": None,
+            "truePeakDb": None,
             "dynamicRange": None,
             "danceability": None,
             "valence": None,
@@ -642,6 +633,12 @@ class AudioAnalyzer:
             "essentiaGenres": [],
             "analysisMode": "standard",
         }
+        loudness_measurement = measure_loudness(
+            file_path,
+            LOUDNESS_MEASURE_TIMEOUT_SECONDS,
+        )
+        if loudness_measurement is not None:
+            result.update(loudness_measurement)
 
         if not ESSENTIA_AVAILABLE:
             logger.error("Essentia not available - cannot analyze audio files")
@@ -2122,6 +2119,9 @@ class AnalysisWorker:
                 _SAVE_ANALYSIS_RESULTS_SQL,
                 _analysis_result_values(track_id, features),
             )
+
+            if features.get("loudnessLufs") is not None:
+                cursor.execute(ALBUM_LOUDNESS_ROLLUP_SQL, (track_id,))
 
             # Successful analysis should clear stale unresolved audio failures
             # for this track so UI failure counts remain accurate across reruns.

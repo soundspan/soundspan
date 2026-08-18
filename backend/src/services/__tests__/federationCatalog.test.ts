@@ -109,6 +109,8 @@ function track(id: string) {
         keyStrength: 0.81,
         energy: 0.72,
         loudness: -8.4,
+        loudnessLufs: -17.2,
+        truePeakDb: -1.1,
         dynamicRange: 9.2,
         danceability: 0.67,
         valence: 0.44,
@@ -384,6 +386,8 @@ describe("federation catalog exports", () => {
                 keyStrength: 0.81,
                 energy: 0.72,
                 loudness: -8.4,
+                loudnessLufs: -17.2,
+                truePeakDb: -1.1,
                 dynamicRange: 9.2,
                 danceability: 0.67,
                 valence: 0.44,
@@ -418,6 +422,42 @@ describe("federation catalog exports", () => {
                 }),
             }),
         );
+    });
+
+    it("omits unmeasured loudness attributes from exported tracks", async () => {
+        prisma.track.findMany.mockResolvedValue([
+            {
+                ...track("track-unmeasured"),
+                loudnessLufs: null,
+                truePeakDb: null,
+            },
+        ]);
+
+        const result = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: false,
+        });
+        const attributes = result.body.items[0].attributes;
+
+        expect("loudnessLufs" in attributes).toBe(false);
+        expect("truePeakDb" in attributes).toBe(false);
+    });
+
+    it("includes measured loudness attributes in exported tracks", async () => {
+        prisma.track.findMany.mockResolvedValue([track("track-measured")]);
+
+        const result = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: false,
+        });
+        const attributes = result.body.items[0].attributes;
+
+        expect("loudnessLufs" in attributes).toBe(true);
+        expect(attributes.loudnessLufs).toBe(-17.2);
+        expect("truePeakDb" in attributes).toBe(true);
+        expect(attributes.truePeakDb).toBe(-1.1);
     });
 
     it("serves embeddings to a headerless peer while the teacher space is active", async () => {

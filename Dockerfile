@@ -116,8 +116,8 @@ RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
     echo "ML models downloaded successfully" && \
     ls -lh /app/models/
 
-# Copy audio analyzer script
-COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
+# Copy audio analyzer modules
+COPY services/audio-analyzer/analyzer.py services/audio-analyzer/loudness.py services/audio-analyzer/model_paths.py /app/audio-analyzer/
 # Shared sidecar logging helpers (used by analyzer services)
 COPY services/common /app/services/common
 
