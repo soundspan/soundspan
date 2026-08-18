@@ -14,6 +14,7 @@ import {
     Settings,
     Shield,
     Users,
+    Waves,
     X,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
@@ -89,6 +90,7 @@ export function MobileSidebar({
         "/import": Download,
         "/playlist/my-liked": Heart,
         "/radio": Radio,
+        "/vibe": Waves,
         "/listen-together": Users,
     };
 

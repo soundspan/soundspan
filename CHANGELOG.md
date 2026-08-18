@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added an admin control to immediately enqueue a hard purge of all
   soft-removed local tracks without waiting for the retention window.
+- Added a Vibe entry to the main navigation (sidebar and mobile quick links)
+  with an AI-blue glow accent, so the vibe map is reachable without going
+  through a track's context menu.
 
 ### Changed
 

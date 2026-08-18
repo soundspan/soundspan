@@ -299,6 +299,7 @@ export function Sidebar() {
                     const isActive = pathname === item.href;
                     const badge = "badge" in item ? item.badge : null;
                     const isListenTogether = item.href === "/listen-together";
+                    const hasVibeAccent = item.accent === "vibe" && !isActive;
 
                     return (
                         <Link
@@ -321,6 +322,8 @@ export function Sidebar() {
                                             ? "text-base"
                                             : "text-sm",
                                         isActive && "text-white",
+                                        hasVibeAccent &&
+                                            "nav-vibe-glow font-bold",
                                     )}
                                 >
                                     {item.name}

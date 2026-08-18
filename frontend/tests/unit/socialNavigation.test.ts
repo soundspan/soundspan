@@ -68,3 +68,13 @@ test("MOBILE_QUICK_LINKS does not include /import", () => {
     );
     assert.equal(importItem, undefined, "Import should not be in mobile links");
 });
+
+test("sidebar and quick links expose the vibe map destination", () => {
+    const vibeItem = SIDEBAR_NAVIGATION.find((item) => item.href === "/vibe");
+    assert.notEqual(vibeItem, undefined, "Vibe should be in sidebar");
+    assert.equal(vibeItem?.accent, "vibe");
+    assert.equal(
+        MOBILE_QUICK_LINKS.some((link) => link.href === "/vibe"),
+        true,
+    );
+});
