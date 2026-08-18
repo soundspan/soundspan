@@ -207,7 +207,8 @@ describe("subsonic core compatibility handlers", () => {
                 expect.objectContaining({
                     artist: expect.arrayContaining([
                         expect.objectContaining({ id: "ar-artist-1" }),
-                ]),
+                    ]),
+                }),
             ]),
         );
     });

@@ -34,8 +34,6 @@ export function handleGetLicense(req: Request, res: Response): void {
         callback,
     );
 }
-
-
 /**
  * Executes handleGetOpenSubsonicExtensions.
  */
@@ -71,8 +69,14 @@ export function handleGetPodcasts(req: Request, res: Response): void {
 
 export function handleGetNewestPodcasts(req: Request, res: Response): void {
     const { format, callback } = getRequestContext(req);
-    sendSubsonicSuccess(res, { newestPodcasts: { episode: [] } }, format, callback);
+    sendSubsonicSuccess(
+        res,
+        { newestPodcasts: { episode: [] } },
+        format,
+        callback,
+    );
 }
+
 /**
  * Executes handleTokenInfo.
  */

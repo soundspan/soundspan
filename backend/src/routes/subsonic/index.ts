@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { appendSubsonicBodyParamsToUrl } from "../../middleware/subsonicRequestParams";
+import { mergeSubsonicBodyParamsIntoQuery } from "../../middleware/subsonicRequestParams";
 import { config } from "../../config";
 import {
     requireSubsonicAuth,
@@ -82,7 +82,7 @@ import { getRequestContext } from "./shared";
 const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 
-router.use(appendSubsonicBodyParamsToUrl);
+router.use(mergeSubsonicBodyParamsIntoQuery);
 
 if (SUBSONIC_TRACE_LOGS) {
     router.use((req, res, next) => {
@@ -128,31 +128,65 @@ if (SUBSONIC_TRACE_LOGS) {
 router.use(subsonicRateLimiter);
 router.use(requireSubsonicAuth);
 
-const SUBSONIC_POST_MUTATION_ENDPOINTS = new Set([
-    "savePlayQueue",
-    "savePlayQueueByIndex",
-    "createBookmark",
-    "deleteBookmark",
-    "setRating",
-    "createPlaylist",
-    "updatePlaylist",
-    "deletePlaylist",
-    "scrobble",
-    "startScan",
-    "star",
-    "unstar",
+const SUBSONIC_FORM_POST_READ_ENDPOINTS = new Set([
+    "getLicense",
+    "getPodcasts",
+    "getNewestPodcasts",
+    "getOpenSubsonicExtensions",
+    "tokenInfo",
+    "getMusicFolders",
+    "getMusicDirectory",
+    "getIndexes",
+    "getArtists",
+    "getArtist",
+    "getArtistInfo2",
+    "getAlbum",
+    "getAlbumInfo2",
+    "getSong",
+    "getTopSongs",
+    "getSimilarSongs",
+    "getSimilarSongs2",
+    "getAlbumList",
+    "getAlbumList2",
+    "getGenres",
+    "getSongsByGenre",
+    "getRandomSongs",
+    "stream",
+    "download",
+    "getCoverArt",
+    "getLyrics",
+    "getLyricsBySongId",
+    "search",
+    "search2",
+    "search3",
+    "getPlaylists",
+    "getPlaylist",
+    "getPlayQueue",
+    "getPlayQueueByIndex",
+    "getBookmarks",
+    "getNowPlaying",
+    "getUser",
+    "getAvatar",
+    "getStarred",
+    "getStarred2",
+    "getScanStatus",
 ]);
 
 // Clients such as Music Assistant send form-encoded POST requests for read
-// endpoints. Reuse the existing GET handlers after authentication, while
-// preserving the explicitly supported mutating POST endpoints.
+// endpoints. Reuse the existing GET handlers after authentication, but only
+// for an explicit read-only allowlist so unknown or mutating POST endpoints
+// retain their normal routing semantics.
 router.use((req, _res, next) => {
     const endpoint = req.path.replace(/^\//, "").replace(/\.view$/, "");
-    if (req.method === "POST" && !SUBSONIC_POST_MUTATION_ENDPOINTS.has(endpoint)) {
+    if (
+        req.method === "POST" &&
+        SUBSONIC_FORM_POST_READ_ENDPOINTS.has(endpoint)
+    ) {
         req.method = "GET";
     }
     next();
 });
+
 function endpointAliases(endpoint: string): string[] {
     return [
         `/${endpoint}`,

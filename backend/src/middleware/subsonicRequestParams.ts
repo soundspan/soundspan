@@ -1,7 +1,16 @@
 import { NextFunction, Request, Response } from "express";
 
-/** Makes form-encoded OpenSubsonic POST parameters available to query-based handlers. */
-export function appendSubsonicBodyParamsToUrl(
+/**
+ * Makes form-encoded OpenSubsonic POST parameters available to query-based
+ * handlers. This must run before any other Subsonic middleware reads
+ * `req.query`: Express parses that value lazily, so this middleware pins the
+ * merged query object on the request for all subsequent middleware and routes.
+ *
+ * Body parameters do not replace same-named URL query parameters. In
+ * particular, credentials remain in-process request data and are never copied
+ * into `req.url`, which can be logged by other middleware.
+ */
+export function mergeSubsonicBodyParamsIntoQuery(
     req: Request,
     _res: Response,
     next: NextFunction,
@@ -10,18 +19,18 @@ export function appendSubsonicBodyParamsToUrl(
         next();
         return;
     }
-    const queryIndex = req.url.indexOf("?");
-    const existingParams = new URLSearchParams(queryIndex === -1 ? "" : req.url.slice(queryIndex + 1));
-    const bodyParams = new URLSearchParams();
+    const query = req.query as Record<string, unknown>;
     for (const [key, value] of Object.entries(req.body)) {
-        if (existingParams.has(key)) continue;
-        if (typeof value === "string") bodyParams.append(key, value);
-        else if (Array.isArray(value)) {
-            for (const item of value) if (typeof item === "string") bodyParams.append(key, item);
+        if (Object.hasOwn(query, key)) continue;
+        if (typeof value === "string") query[key] = value;
+        else if (
+            Array.isArray(value) &&
+            value.every((item) => typeof item === "string")
+        ) {
+            query[key] = value;
         }
     }
-    const serialized = bodyParams.toString();
-    if (serialized) req.url += `${queryIndex === -1 ? "?" : "&"}${serialized}`;
+    Object.defineProperty(req, "query", { configurable: true, value: query });
     next();
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
