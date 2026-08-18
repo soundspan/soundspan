@@ -16,6 +16,25 @@ const dockerfilePaths = [
     "services/vibe-provider-dclap/Dockerfile",
 ];
 
+const serviceDockerfilePaths = [
+    "Dockerfile",
+    ...fs
+        .readdirSync(path.join(repoRoot, "services"), { withFileTypes: true })
+        .filter(
+            (entry) =>
+                entry.isDirectory() &&
+                fs.existsSync(
+                    path.join(repoRoot, "services", entry.name, "Dockerfile"),
+                ),
+        )
+        .map((entry) => `services/${entry.name}/Dockerfile`)
+        .sort(),
+];
+
+// Keys use "Dockerfile path:Python source path". Add only documented cases
+// where a top-level sidecar module must intentionally remain outside an image.
+const pythonSidecarCopyExclusions = new Set();
+
 const chartComponentDockerfiles = new Map([
     ["aio", "Dockerfile"],
     ["backend", "backend/Dockerfile"],
@@ -198,13 +217,50 @@ function componentDockerfile(componentName) {
 }
 
 function dockerCopySources(stage) {
-    return stage.split(/\r?\n/).flatMap((line) => {
-        const match = line.match(/^\s*COPY\s+(.+)$/i);
-        if (!match) return [];
-        const tokens = match[1].trim().split(/\s+/);
-        const operands = tokens.filter((token) => !token.startsWith("--"));
-        return operands.slice(0, -1);
-    });
+    return stage
+        .replace(/\\\r?\n\s*/g, " ")
+        .split(/\r?\n/)
+        .flatMap((line) => {
+            const match = line.match(/^\s*COPY\s+(.+)$/i);
+            if (!match) return [];
+            const tokens = match[1].trim().split(/\s+/);
+            const operands = tokens.filter((token) => !token.startsWith("--"));
+            return operands.slice(0, -1);
+        });
+}
+
+function copiedPythonSidecarDirectories(sources) {
+    return [
+        ...new Set(
+            sources.flatMap((source) => {
+                const normalizedSource = path.posix.normalize(source);
+                const match = normalizedSource.match(
+                    /^services\/([^/]+)\/(?:[^/]+\.py|\*\.py)$/,
+                );
+                return match ? [match[1]] : [];
+            }),
+        ),
+    ].sort();
+}
+
+function topLevelPythonFiles(serviceDirectory) {
+    const relativeDirectory = `services/${serviceDirectory}`;
+    return fs
+        .readdirSync(path.join(repoRoot, relativeDirectory), {
+            withFileTypes: true,
+        })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".py"))
+        .map((entry) => `${relativeDirectory}/${entry.name}`)
+        .sort();
+}
+
+function sourceCopiesPythonFile(source, relativePath) {
+    const normalizedSource = path.posix.normalize(source);
+    const normalizedPath = path.posix.normalize(relativePath);
+    return (
+        normalizedSource === normalizedPath ||
+        normalizedSource === `${path.posix.dirname(normalizedPath)}/*.py`
+    );
 }
 
 function sourceCopiesFile(source, relativePath) {
@@ -645,4 +701,33 @@ test("13. Helm exec probe binaries exist in component runtime images", () => {
             `charts/soundspan/values.yaml: ${reference.component}.${reference.probeName} exec binary "${reference.binary}" is not proven present in ${relativePath}; install ${packageName ?? "a mapped provider package"} in the runtime image or document a base-image family assumption`,
         );
     }
+});
+
+test("14. sidecar images copy every top-level Python module", () => {
+    const missingFiles = [];
+
+    for (const relativePath of serviceDockerfilePaths) {
+        const sources = dockerCopySources(readRepoFile(relativePath));
+        const serviceDirectories = copiedPythonSidecarDirectories(sources);
+
+        for (const serviceDirectory of serviceDirectories) {
+            for (const pythonFile of topLevelPythonFiles(serviceDirectory)) {
+                const exclusionKey = `${relativePath}:${pythonFile}`;
+                if (pythonSidecarCopyExclusions.has(exclusionKey)) continue;
+                if (
+                    !sources.some((source) =>
+                        sourceCopiesPythonFile(source, pythonFile),
+                    )
+                ) {
+                    missingFiles.push(`${relativePath}: ${pythonFile}`);
+                }
+            }
+        }
+    }
+
+    assert.deepEqual(
+        missingFiles,
+        [],
+        `Dockerfile COPY instructions omit top-level sidecar modules:\n${missingFiles.join("\n")}`,
+    );
 });

@@ -95,7 +95,7 @@ RUN echo "Models downloaded:" && ls -lh /app/models/
 # above (this formerly-inline install was converted to the lock — roadmap F50).
 
 # Copy application code
-COPY services/audio-analyzer/analyzer.py services/audio-analyzer/loudness.py services/audio-analyzer/model_paths.py /app/
+COPY services/audio-analyzer/*.py /app/
 COPY services/common /app/services/common
 
 # Create non-root user
