@@ -58,6 +58,10 @@ import {
     processAudioHashBackfill,
 } from "./processors/audioHashBackfillProcessor";
 import {
+    LOUDNESS_BACKFILL_JOB_NAME,
+    processLoudnessBackfill,
+} from "./processors/loudnessBackfillProcessor";
+import {
     processTrackRemovalPurge,
     TRACK_REMOVAL_PURGE_JOB_NAME,
 } from "./processors/trackRemovalPurgeProcessor";
@@ -294,6 +298,7 @@ const SCHEDULER_JOB_TYPES = {
     artistCountsBackfill: "artist-counts-backfill-startup",
     imageBackfill: "image-backfill-startup",
     audioHashBackfill: AUDIO_HASH_BACKFILL_JOB_NAME,
+    loudnessBackfill: LOUDNESS_BACKFILL_JOB_NAME,
     trackRemovalPurge: TRACK_REMOVAL_PURGE_JOB_NAME,
     trackMappingReconcile: "track-mapping-reconcile",
     remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
@@ -314,6 +319,7 @@ const SCHEDULER_JOB_IDS = {
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
     audioHashBackfillStartup: "scheduler:audio-hash-backfill:startup",
+    loudnessBackfillStartup: "scheduler:loudness-backfill:startup",
     trackRemovalPurgeStartup: "scheduler:track-removal-purge:startup",
     trackRemovalPurgeRepeat: "scheduler:track-removal-purge:repeat",
     trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
@@ -942,6 +948,21 @@ async function registerSchedulerJobs(): Promise<void> {
             },
         },
         {
+            type: SCHEDULER_JOB_TYPES.loudnessBackfill,
+            data: {
+                mode: "startup",
+                sweepStartedAt: new Date().toISOString(),
+            },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.loudnessBackfillStartup,
+                delay: 55_000,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
             type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
             data: { mode: "startup" },
             opts: {
@@ -1079,6 +1100,9 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
             break;
         case SCHEDULER_JOB_TYPES.audioHashBackfill:
             await processAudioHashBackfill(job);
+            break;
+        case SCHEDULER_JOB_TYPES.loudnessBackfill:
+            await processLoudnessBackfill(job);
             break;
         case SCHEDULER_JOB_TYPES.trackRemovalPurge:
             await processTrackRemovalPurge(job);

@@ -18,10 +18,15 @@ for _root in _POTENTIAL_PROJECT_ROOTS:
             sys.path.insert(0, _root)
         break
 
+from audio_paths import resolve_music_path
 from loudness import (
     ALBUM_LOUDNESS_ROLLUP_SQL,
     LOUDNESS_MEASURE_TIMEOUT_SECONDS,
     measure_loudness,
+)
+from loudness_backfill import (
+    partition_analysis_jobs,
+    process_loudness_backfill_jobs,
 )
 from model_paths import MODEL_DIR, MODELS
 
@@ -171,23 +176,7 @@ BATCH_ANALYSIS_TIMEOUT_SECONDS = get_int_env("BATCH_ANALYSIS_TIMEOUT_SECONDS", 9
 
 def _resolve_music_path(file_path: str) -> str | None:
     """Resolve a relative queue path beneath the configured music library."""
-    if not isinstance(file_path, str) or "\x00" in file_path:
-        return None
-
-    normalized_path = file_path.replace("\\", "/")
-    if os.path.isabs(normalized_path):
-        return None
-    if any(segment in {".", ".."} for segment in normalized_path.split("/")):
-        return None
-
-    try:
-        music_root = os.path.realpath(MUSIC_PATH)
-        resolved_path = os.path.realpath(os.path.join(music_root, normalized_path))
-        if os.path.commonpath((music_root, resolved_path)) != music_root:
-            return None
-    except (OSError, ValueError):
-        return None
-    return resolved_path
+    return resolve_music_path(MUSIC_PATH, file_path)
 
 
 class DatabaseConnection:
@@ -1913,16 +1902,26 @@ class AnalysisWorker:
 
         _, first_job_data = result
         first_job = json.loads(first_job_data)
-        queued_jobs = [(first_job["trackId"], first_job.get("filePath", ""))]
+        queued_jobs = [first_job]
 
         while len(queued_jobs) < BATCH_SIZE:
             job_data = self.redis.lpop(ANALYSIS_QUEUE)
             if not job_data:
                 break
             job = json.loads(job_data)
-            queued_jobs.append((job["trackId"], job.get("filePath", "")))
+            queued_jobs.append(job)
 
-        self._process_tracks_parallel(queued_jobs)
+        normal_jobs, loudness_jobs = partition_analysis_jobs(queued_jobs)
+        if normal_jobs:
+            self._process_tracks_parallel(normal_jobs)
+        process_loudness_backfill_jobs(
+            loudness_jobs,
+            database=self.db,
+            release_reservations=self._release_queue_reservations,
+            resolve_path=_resolve_music_path,
+            max_file_size_mb=MAX_FILE_SIZE_MB,
+            timeout_seconds=LOUDNESS_MEASURE_TIMEOUT_SECONDS,
+        )
         return True
 
     def _claim_tracks_for_processing(

@@ -160,6 +160,21 @@ const vibeEmbedConcurrencyEnvSchema = z
     })
     .optional();
 
+const loudnessBackfillBatchSizeEnvSchema = z
+    .string()
+    .regex(/^-?\d+$/, {
+        message: "LOUDNESS_BACKFILL_BATCH_SIZE must be an integer",
+    })
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message: "LOUDNESS_BACKFILL_BATCH_SIZE must be a safe integer",
+    })
+    .optional();
+const loudnessBackfillBatchSizeSchema = z
+    .number()
+    .int()
+    .safe()
+    .transform((value) => Math.max(1, Math.min(200, value)));
+
 const vibeMapWorkerMemoryMbEnvSchema = z
     .string()
     .refine(
@@ -384,6 +399,7 @@ const envSchema = z
         INTERNAL_API_SECRET: z.string().optional(),
         VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
         VIBE_EMBED_CONCURRENCY: vibeEmbedConcurrencyEnvSchema,
+        LOUDNESS_BACKFILL_BATCH_SIZE: loudnessBackfillBatchSizeEnvSchema,
         VIBE_MAP_WORKER_MEMORY_MB: vibeMapWorkerMemoryMbEnvSchema,
         VIBE_SPACE_CUTOVER_THRESHOLD: vibeSpaceCutoverThresholdEnvSchema,
         VIBE_SPACE_CUTOVER_ALLOW_FAILED: z.string().optional(),
@@ -482,6 +498,9 @@ const transcodeTimeoutMs = boundedPositiveIntEnvOr(
 );
 
 const allowedOriginsFromEnv = parseEnvCsv(process.env.ALLOWED_ORIGINS);
+const loudnessBackfillBatchSize = loudnessBackfillBatchSizeSchema.parse(
+    Number(process.env.LOUDNESS_BACKFILL_BATCH_SIZE ?? "25"),
+);
 
 // Reverse-proxy hop count for client-IP resolution. A non-negative
 // TRUST_PROXY_HOPS makes X-Forwarded-For spoofing past that many hops untrusted
@@ -740,6 +759,7 @@ export const config = {
     // Keep analyzer queues short enough that waiting work is not mistaken for
     // active processing. Per-track reservations suppress repeated producers.
     analysisQueues: {
+        loudnessBackfillBatchSize,
         audioMaxDepth: boundedPositiveIntEnvOr(
             process.env.AUDIO_ANALYSIS_QUEUE_MAX_DEPTH,
             100,

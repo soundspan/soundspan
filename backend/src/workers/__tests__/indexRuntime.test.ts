@@ -65,6 +65,14 @@ describe("workers runtime behavior", () => {
             deleted: 0,
             continued: false,
         }));
+        const processLoudnessBackfill = jest.fn(async () => ({
+            processed: 0,
+            queued: 0,
+            duplicates: 0,
+            skipped: 0,
+            continued: false,
+            capacityLimited: false,
+        }));
         const finalizeGenericImportQueueFailure = jest.fn(
             async () => undefined,
         );
@@ -202,6 +210,10 @@ describe("workers runtime behavior", () => {
             TRACK_REMOVAL_PURGE_JOB_NAME: "track-removal-purge",
             processTrackRemovalPurge,
         }));
+        jest.doMock("../processors/loudnessBackfillProcessor", () => ({
+            LOUDNESS_BACKFILL_JOB_NAME: "track-loudness-backfill",
+            processLoudnessBackfill,
+        }));
         jest.doMock("../../services/genericImportJobRunner", () => ({
             genericImportJobRunner: {
                 registerRecoveryJobs,
@@ -294,6 +306,7 @@ describe("workers runtime behavior", () => {
             stopDiscoverWeeklyCron,
             processGenericImport,
             processTrackRemovalPurge,
+            processLoudnessBackfill,
             finalizeGenericImportQueueFailure,
             registerRecoveryJobs,
             registerFederationProcessors,
@@ -376,6 +389,17 @@ describe("workers runtime behavior", () => {
             }),
         );
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "track-loudness-backfill",
+            {
+                mode: "startup",
+                sweepStartedAt: expect.any(String),
+            },
+            expect.objectContaining({
+                jobId: "scheduler:loudness-backfill:startup",
+                delay: 55_000,
+            }),
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
             { mode: "startup" },
             {
@@ -433,6 +457,31 @@ describe("workers runtime behavior", () => {
         await schedulerHandler(job);
 
         expect(mocks.processTrackRemovalPurge).toHaveBeenCalledWith(job);
+    });
+
+    it("dispatches loudness backfill jobs through the scheduler", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*",
+        )?.[1];
+        const job = {
+            id: "loudness-backfill-1",
+            name: "track-loudness-backfill",
+            data: {
+                mode: "startup",
+                sweepStartedAt: "2026-08-18T12:00:00.000Z",
+            },
+        };
+
+        await schedulerHandler(job);
+
+        expect(mocks.processLoudnessBackfill).toHaveBeenCalledWith(job);
     });
 
     it("removes the persisted Discover Weekly repeatable job and reports backlog when discovery is disabled", async () => {

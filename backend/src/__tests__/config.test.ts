@@ -229,6 +229,31 @@ describe("config module", () => {
     });
 
     it.each([
+        [undefined, 25],
+        ["0", 1],
+        ["1", 1],
+        ["75", 75],
+        ["200", 200],
+        ["201", 200],
+    ])("clamps LOUDNESS_BACKFILL_BATCH_SIZE %s", async (raw, expected) => {
+        const { config } = await loadConfigModule({
+            LOUDNESS_BACKFILL_BATCH_SIZE: raw,
+        });
+
+        expect(config.analysisQueues.loudnessBackfillBatchSize).toBe(expected);
+    });
+
+    it.each(["", "1.5", "not-a-number"])(
+        "rejects invalid LOUDNESS_BACKFILL_BATCH_SIZE %s",
+        async (raw) => {
+            await expectStartupValidationFailure(
+                { LOUDNESS_BACKFILL_BATCH_SIZE: raw },
+                "LOUDNESS_BACKFILL_BATCH_SIZE must be an integer",
+            );
+        },
+    );
+
+    it.each([
         ["1", 1],
         ["4", 4],
         ["8", 8],

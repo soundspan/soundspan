@@ -12,7 +12,7 @@ Playback volume varies wildly across a mixed library (quiet 90s masters next to 
 
 - `services/audio-analyzer` gains an EBU R128 pass emitting **integrated LUFS** and **true peak (dBTP)** per track; ffmpeg `loudnorm` over the full native stream is used because the existing Essentia decode path truncates to 90 seconds and downmixes to mono 44.1 kHz, which disqualifies it for whole-program integrated loudness and native-stream true peak.
 - Album aggregation: album gain computed per EBU R128 over the concatenated program (approximated as duration-weighted energy mean of track measurements — exact concatenation is not worth a second decode pass; note the approximation), and album true peak is the maximum of member track peaks. The analyzer recomputes the aggregate after every successful measured track save. The album aggregate is not federated; receiving peers compute it locally from the federated per-track measurements.
-- Schema: nullable `loudnessLufs`, `truePeakDb` on Track; `albumLoudnessLufs` on Album. Coverage is exposed through a scrape-time gauge on the metrics registry. The low-priority backfill ships in a separate PR after measurement lands.
+- Schema: nullable `loudnessLufs`, `truePeakDb` on Track; `albumLoudnessLufs` on Album. Coverage is exposed through a scrape-time gauge on the metrics registry. A scheduler sweep sends existing completed tracks through loudness-only queue jobs that leave analysis status columns untouched.
 
 ### Application (client-side)
 

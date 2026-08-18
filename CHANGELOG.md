@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   respond with empty compatibility stubs, album payloads carry a real
   `created` timestamp, and the `getOpenSubsonicExtensions` and
   `getAlbumInfo2` response envelopes now match the published spec.
+- Existing libraries now backfill loudness measurements in the background
+  without re-running audio analysis.
 - Added per-track EBU R128 integrated loudness and true-peak measurement
   groundwork, album rollups, federation propagation, and coverage metrics;
   playback behavior is unchanged until a later rollout step.
