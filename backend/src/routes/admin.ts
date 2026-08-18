@@ -9,7 +9,10 @@ import {
 } from "../utils/encryptedColumns";
 import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
 import { config } from "../config";
-import { handlePurgeRemovedTracksNow } from "./adminLibraryHealthPurge";
+import {
+    handlePurgeRemovedStatus,
+    handlePurgeRemovedTracksNow,
+} from "./adminLibraryHealthPurge";
 
 const router = Router();
 
@@ -182,6 +185,40 @@ router.get("/library-health", async (_req, res) => {
  *         description: Purge sweep could not be enqueued
  */
 router.post("/library-health/purge-removed", handlePurgeRemovedTracksNow);
+
+/**
+ * @openapi
+ * /api/admin/library-health/purge-status:
+ *   get:
+ *     summary: Report progress of the removed-track purge
+ *     tags: [Admin]
+ *     security:
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Purge progress snapshot
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [remaining, purging]
+ *               properties:
+ *                 remaining:
+ *                   type: integer
+ *                   minimum: 0
+ *                 purging:
+ *                   type: boolean
+ *                 lastFailure:
+ *                   type: string
+ *                   nullable: true
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Purge status could not be read
+ */
+router.get("/library-health/purge-status", handlePurgeRemovedStatus);
 
 /**
  * @openapi

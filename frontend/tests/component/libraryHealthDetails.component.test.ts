@@ -59,10 +59,46 @@ const DETAILS_PROPS = {
     isPurging: false,
     error: null,
     purgeNotice: null,
+    purgeProgress: null,
     onRefresh: () => undefined,
     onDismiss: () => undefined,
     onPurgeAll: () => undefined,
 };
+
+test("library health shows live purge progress while a sweep runs", async () => {
+    const { LibraryHealthDetails } =
+        await import("../../features/settings/components/sections/libraryHealthDetails");
+
+    const html = renderToStaticMarkup(
+        React.createElement(LibraryHealthDetails, {
+            ...DETAILS_PROPS,
+            purgeProgress: {
+                remaining: 1786,
+                purging: true,
+                lastFailure: null,
+            },
+        }),
+    );
+    assert.match(html, /Purging — 1786 tracks remaining/);
+});
+
+test("library health surfaces a stopped purge with its failure reason", async () => {
+    const { LibraryHealthDetails } =
+        await import("../../features/settings/components/sections/libraryHealthDetails");
+
+    const html = renderToStaticMarkup(
+        React.createElement(LibraryHealthDetails, {
+            ...DETAILS_PROPS,
+            purgeProgress: {
+                remaining: 2186,
+                purging: false,
+                lastFailure: "Database error. Code: 23514.",
+            },
+        }),
+    );
+    assert.match(html, /Purge stopped: Database error\. Code: 23514\./);
+    assert.match(html, /press Delete all now to retry/);
+});
 
 test("library health summarizes removed tracks and collapses the record list by default", async () => {
     const { LibraryHealthDetails } =

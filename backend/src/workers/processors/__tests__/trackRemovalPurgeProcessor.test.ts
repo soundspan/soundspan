@@ -43,6 +43,9 @@ describe("trackRemovalPurgeProcessor", () => {
                     count: deletedCount ?? args.where.id.in.length,
                 })),
             },
+            trackMapping: {
+                deleteMany: jest.fn(async () => ({ count: 0 })),
+            },
             federationTombstone: {
                 createMany: jest.fn(async () => ({ count: deletedCount })),
                 deleteMany: jest.fn(async () => ({ count: 0 })),
@@ -158,6 +161,39 @@ describe("trackRemovalPurgeProcessor", () => {
                 removedAt: { lt: cutoff },
             },
         });
+    });
+
+    it("deletes track-only mappings before the track rows so the linkage check cannot fail", async () => {
+        const cutoff = new Date("2026-08-18T12:00:00.000Z");
+        const { module, prisma } = loadProcessor([
+            {
+                id: "track-mapped",
+                removedAt: new Date("2026-08-18T11:00:00.000Z"),
+            },
+        ]);
+
+        await expect(
+            module.processTrackRemovalPurge(
+                buildJob({ cutoffAt: cutoff.toISOString() }),
+            ),
+        ).resolves.toEqual({ deleted: 1, continued: false });
+
+        expect(prisma.trackMapping.deleteMany).toHaveBeenCalledWith({
+            where: {
+                track: {
+                    id: { in: ["track-mapped"] },
+                    origin: "LOCAL",
+                    removedAt: { lt: cutoff },
+                },
+                trackTidalId: null,
+                trackYtMusicId: null,
+            },
+        });
+        const mappingOrder = (prisma.trackMapping.deleteMany as jest.Mock).mock
+            .invocationCallOrder[0];
+        const trackOrder = (prisma.track.deleteMany as jest.Mock).mock
+            .invocationCallOrder[0];
+        expect(mappingOrder).toBeLessThan(trackOrder);
     });
 
     it("writes track tombstones and cleans expired tombstones on a federation terminal page", async () => {

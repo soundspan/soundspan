@@ -160,6 +160,20 @@ const vibeEmbedConcurrencyEnvSchema = z
     })
     .optional();
 
+const vibeMapWorkerMemoryMbEnvSchema = z
+    .string()
+    .refine(
+        (value) => {
+            const parsed = Number(value);
+            return Number.isInteger(parsed) && parsed >= 128 && parsed <= 4096;
+        },
+        {
+            message:
+                "VIBE_MAP_WORKER_MEMORY_MB must be an integer from 128 through 4096",
+        },
+    )
+    .optional();
+
 const vibeSpaceCutoverThresholdEnvSchema = z
     .string()
     .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/, {
@@ -370,6 +384,7 @@ const envSchema = z
         INTERNAL_API_SECRET: z.string().optional(),
         VIBE_PROVIDER_URL: vibeProviderUrlEnvSchema,
         VIBE_EMBED_CONCURRENCY: vibeEmbedConcurrencyEnvSchema,
+        VIBE_MAP_WORKER_MEMORY_MB: vibeMapWorkerMemoryMbEnvSchema,
         VIBE_SPACE_CUTOVER_THRESHOLD: vibeSpaceCutoverThresholdEnvSchema,
         VIBE_SPACE_CUTOVER_ALLOW_FAILED: z.string().optional(),
         VIBE_SPACE_RETIREMENT_GRACE_DAYS: vibeSpaceRetirementGraceDaysEnvSchema,
@@ -520,6 +535,11 @@ export const config = {
     // provider-backed text search and audio embedding consumption.
     vibeProviderUrl: normalizeVibeProviderUrl(process.env.VIBE_PROVIDER_URL),
     vibeEmbedConcurrency: Number(process.env.VIBE_EMBED_CONCURRENCY ?? "1"),
+    // Heap ceiling for the UMAP projection worker thread. The map compute
+    // degrades its sample size instead of crashing when this is exceeded.
+    vibeMapWorkerMemoryMb: Number(
+        process.env.VIBE_MAP_WORKER_MEMORY_MB ?? "512",
+    ),
     vibeSpaceCutoverThreshold: Number(
         process.env.VIBE_SPACE_CUTOVER_THRESHOLD ?? "0.95",
     ),

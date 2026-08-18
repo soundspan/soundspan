@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, type ElementType } from "react";
-import type { LibraryHealthRecord } from "@/lib/api";
+import type {
+    LibraryHealthRecord,
+    PurgeRemovedStatusResponse,
+} from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
     AlertTriangle,
@@ -47,11 +50,36 @@ interface LibraryHealthDetailsProps {
     isPurging: boolean;
     error: string | null;
     purgeNotice: string | null;
+    purgeProgress: PurgeRemovedStatusResponse | null;
     /** Initial expansion state of the record list; collapsed by default. */
     defaultExpanded?: boolean;
     onRefresh: () => void;
     onDismiss: (recordId: string) => void;
     onPurgeAll: () => void;
+}
+
+function PurgeProgressLine({
+    progress,
+}: Readonly<{ progress: PurgeRemovedStatusResponse | null }>) {
+    if (!progress) return null;
+    if (progress.purging) {
+        return (
+            <div className="flex items-center gap-2 py-2 text-sm text-gray-300">
+                <Loader2 className="w-4 h-4 animate-spin text-brand" />
+                Purging — {progress.remaining} track
+                {progress.remaining === 1 ? "" : "s"} remaining
+            </div>
+        );
+    }
+    if (progress.lastFailure && progress.remaining > 0) {
+        return (
+            <p className="text-sm text-red-400 py-2">
+                Purge stopped: {progress.lastFailure} — press Delete all now to
+                retry.
+            </p>
+        );
+    }
+    return null;
 }
 
 function statusForRecord(record: LibraryHealthRecord): StatusConfig {
@@ -226,6 +254,7 @@ export function LibraryHealthDetails({
     isPurging,
     error,
     purgeNotice,
+    purgeProgress,
     defaultExpanded = false,
     onRefresh,
     onDismiss,
@@ -256,6 +285,7 @@ export function LibraryHealthDetails({
                 isPurging={isPurging}
                 onPurgeAll={() => setShowPurgeConfirm(true)}
             />
+            <PurgeProgressLine progress={purgeProgress} />
             {error && <p className="text-sm text-red-400 py-2">{error}</p>}
             {purgeNotice && (
                 <p className="text-sm text-gray-300 py-2">{purgeNotice}</p>

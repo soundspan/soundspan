@@ -6,6 +6,16 @@ export const TRACK_VISIBLE_WHERE = {
 } satisfies Prisma.TrackWhereInput;
 
 /** Shared predicate for tracks physically owned by this soundspan instance. */
+/**
+ * Local tracks that still exist on disk — the enrichment-eligible set.
+ * Soft-removed tracks have no file, so counting or resetting them inflates
+ * pending/failed totals and blocks completion.
+ */
+export const ENRICHABLE_TRACK_WHERE = {
+    origin: "LOCAL",
+    removedAt: null,
+} satisfies Prisma.TrackWhereInput;
+
 export const LOCAL_TRACK_WHERE = {
     origin: "LOCAL",
 } satisfies Prisma.TrackWhereInput;

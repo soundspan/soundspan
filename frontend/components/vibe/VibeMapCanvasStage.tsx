@@ -111,8 +111,14 @@ function ReadyMap({ model }: { model: VibeMapViewModel }) {
 function MapStatus({ model }: { model: VibeMapViewModel }) {
     if (model.data.loading) {
         return (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
                 <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
+                {model.data.building && (
+                    <p className="text-gray-400 text-sm text-center px-4">
+                        Building the vibe map — the first load after a library
+                        change can take a few minutes
+                    </p>
+                )}
             </div>
         );
     }

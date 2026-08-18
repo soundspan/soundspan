@@ -92,25 +92,29 @@ export function WithVibe<TBase extends ApiClientConstructor>(Base: TBase) {
         }
 
         async getVibeMap() {
-            return this.request<{
-                tracks: Array<{
-                    id: string;
-                    x: number;
-                    y: number;
-                    title: string;
-                    artist: string;
-                    artistId: string;
-                    albumId: string;
-                    coverUrl: string | null;
-                    dominantMood: string;
-                    moodScore: number;
-                    moods: Record<string, number>;
-                    energy: number | null;
-                    valence: number | null;
-                }>;
-                trackCount: number;
-                computedAt: string;
-            }>("/vibe/map");
+            return this.request<
+                | {
+                      tracks: Array<{
+                          id: string;
+                          x: number;
+                          y: number;
+                          title: string;
+                          artist: string;
+                          artistId: string;
+                          albumId: string;
+                          coverUrl: string | null;
+                          dominantMood: string;
+                          moodScore: number;
+                          moods: Record<string, number>;
+                          energy: number | null;
+                          valence: number | null;
+                      }>;
+                      trackCount: number;
+                      computedAt: string;
+                      building?: undefined;
+                  }
+                | { building: true }
+            >("/vibe/map");
         }
 
         async getVibePath(fromId: string, toId: string, steps = 5) {

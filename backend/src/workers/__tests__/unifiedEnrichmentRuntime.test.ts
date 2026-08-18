@@ -15,7 +15,11 @@ describe("unified enrichment runtime behavior", () => {
         const trackCountMock = jest.fn(async (args?: { where?: any }) => {
             const where = args?.where;
             if (!where) return 10;
-            if (where.origin === "LOCAL" && Object.keys(where).length === 1)
+            if (
+                where.origin === "LOCAL" &&
+                where.removedAt === null &&
+                Object.keys(where).length === 2
+            )
                 return 10;
             if (where.AND) return 6;
             if (where.analysisStatus === "completed") return 4;
@@ -479,7 +483,7 @@ describe("unified enrichment runtime behavior", () => {
         );
         expect(prisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
-            where: { origin: "LOCAL" },
+            where: { origin: "LOCAL", removedAt: null },
             data: expect.objectContaining({
                 vibeAnalysisStatus: "pending",
                 vibeAnalysisGeneration: { increment: 1 },
@@ -753,7 +757,7 @@ describe("unified enrichment runtime behavior", () => {
         const result = await enrichment.reRunMoodTagsOnly();
 
         expect(prisma.track.updateMany).toHaveBeenCalledWith({
-            where: { origin: "LOCAL" },
+            where: { origin: "LOCAL", removedAt: null },
             data: { lastfmTags: [] },
         });
         expect(claimRedisPrimary.set).toHaveBeenCalledTimes(1);

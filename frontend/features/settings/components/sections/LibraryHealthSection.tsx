@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type LibraryHealthRecord } from "@/lib/api";
 import { SettingsSection } from "../ui";
 import { LibraryHealthDetails } from "./libraryHealthDetails";
+import { usePurgeProgress } from "./usePurgeProgress";
 
 /**
  * Admin section showing library health records for corrupt or missing tracks.
@@ -40,6 +41,18 @@ export function LibraryHealthSection() {
         loadRecords();
     }, [loadRecords]);
 
+    const { progress: purgeProgress, startTracking } = usePurgeProgress(
+        (finalStatus) => {
+            setPurgeNotice(
+                finalStatus.remaining === 0
+                    ? "Purge complete."
+                    : `Purge stopped with ${finalStatus.remaining} track` +
+                          `${finalStatus.remaining === 1 ? "" : "s"} remaining.`,
+            );
+            loadRecords();
+        },
+    );
+
     const handleRefresh = () => {
         setIsLoading(true);
         setError(null);
@@ -53,14 +66,11 @@ export function LibraryHealthSection() {
         setPurgeNotice(null);
         try {
             const result = await api.purgeRemovedTracks();
-            setPurgeNotice(
-                result.enqueued
-                    ? `Purge started for ${result.matched} removed track` +
-                          `${result.matched === 1 ? "" : "s"}. Records ` +
-                          `disappear as the purge completes; refresh to ` +
-                          `follow progress.`
-                    : "No removed tracks to purge.",
-            );
+            if (result.enqueued) {
+                startTracking();
+            } else {
+                setPurgeNotice("No removed tracks to purge.");
+            }
             loadRecords();
         } catch {
             setError("Failed to start the purge");
@@ -104,6 +114,7 @@ export function LibraryHealthSection() {
                 isPurging={isPurging}
                 error={error}
                 purgeNotice={purgeNotice}
+                purgeProgress={purgeProgress}
                 onRefresh={handleRefresh}
                 onDismiss={(recordId) => void handleDismiss(recordId)}
                 onPurgeAll={() => void handlePurgeAll()}

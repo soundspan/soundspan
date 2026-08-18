@@ -26,6 +26,7 @@ import {
     Waves,
 } from "lucide-react";
 import { EnrichmentFailuresModal } from "@/components/EnrichmentFailuresModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const logger = createFrontendLogger("Settings.CacheSection");
 
@@ -61,6 +62,22 @@ function ProgressBar({
     );
 }
 
+/** Name the analysis still outstanding so the pill matches reality. */
+function backgroundAnalysisLabel(progress: {
+    audioAnalysis: { pending: number; processing: number };
+    clapEmbeddings: { pending: number; processing: number };
+}): string {
+    const audioBusy =
+        progress.audioAnalysis.pending + progress.audioAnalysis.processing > 0;
+    const vibeBusy =
+        progress.clapEmbeddings.pending + progress.clapEmbeddings.processing >
+        0;
+    if (audioBusy && vibeBusy)
+        return "Audio analysis & vibe embeddings running";
+    if (vibeBusy) return "Vibe embeddings running";
+    return "Audio analysis running";
+}
+
 // Enrichment stage component
 function EnrichmentStage({
     icon: Icon,
@@ -84,20 +101,30 @@ function EnrichmentStage({
     processing?: number;
 }) {
     const unresolved = Math.max(0, total - (completed + failed));
-    const isComplete = unresolved === 0 && processing === 0;
     const hasActivity = processing > 0;
+    // Semantic states share the app's status tokens: success when everything
+    // resolved cleanly, warning when the stage finished but left failures.
+    const isSettled = unresolved === 0 && processing === 0;
+    const isComplete = isSettled && failed === 0;
+    const settledWithFailures = isSettled && failed > 0;
 
     return (
         <div className="flex items-start gap-3 py-2">
             <div
                 className={`mt-0.5 p-1.5 rounded-lg ${
-                    isComplete ? "bg-green-500/20" : "bg-white/5"
+                    isComplete
+                        ? "bg-success/20"
+                        : settledWithFailures
+                          ? "bg-warning/20"
+                          : "bg-white/5"
                 }`}
             >
                 {isComplete ? (
-                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <CheckCircle className="w-4 h-4 text-success" />
                 ) : hasActivity ? (
                     <Loader2 className="w-4 h-4 text-brand animate-spin" />
+                ) : settledWithFailures ? (
+                    <AlertTriangle className="w-4 h-4 text-warning" />
                 ) : (
                     <Icon className="w-4 h-4 text-white/40" />
                 )}
@@ -119,10 +146,12 @@ function EnrichmentStage({
                         progress={progress}
                         color={
                             isComplete
-                                ? "bg-green-500"
-                                : isBackground
-                                  ? "bg-ai"
-                                  : "bg-brand"
+                                ? "bg-success"
+                                : settledWithFailures
+                                  ? "bg-warning"
+                                  : isBackground
+                                    ? "bg-ai"
+                                    : "bg-brand"
                         }
                     />
                 </div>
@@ -136,7 +165,7 @@ function EnrichmentStage({
                         </span>
                     )}
                     {failed > 0 && (
-                        <span className="text-red-400">{failed} failed</span>
+                        <span className="text-error">{failed} failed</span>
                     )}
                 </div>
             </div>
@@ -174,6 +203,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         assigned: number;
     } | null>(null);
     const [retryingFailed, setRetryingFailed] = useState(false);
+    const [showReEnrichConfirm, setShowReEnrichConfirm] = useState(false);
     const [retryResult, setRetryResult] = useState<{ reset: number } | null>(
         null,
     );
@@ -586,7 +616,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     </div>
                 ) : isProgressError && !enrichmentProgress ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-red-500/20 flex items-center justify-between">
-                        <span className="text-sm text-red-400">
+                        <span className="text-sm text-error">
                             Failed to load enrichment status
                         </span>
                         <button
@@ -604,13 +634,15 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </h3>
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
-                                    <span className="text-xs text-ai-hover flex items-center gap-1">
+                                    <span className="text-xs text-brand flex items-center gap-1">
                                         <Loader2 className="w-3 h-3 animate-spin" />
-                                        Audio analysis running
+                                        {backgroundAnalysisLabel(
+                                            enrichmentProgress,
+                                        )}
                                     </span>
                                 )}
                             {enrichmentProgress.isFullyComplete && (
-                                <span className="text-xs text-green-400 flex items-center gap-1">
+                                <span className="text-xs text-success flex items-center gap-1">
                                     <CheckCircle className="w-3 h-3" />
                                     Complete
                                 </span>
@@ -639,6 +671,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 </div>
                                 <button
                                     onClick={handleResetArtists}
+                                    title="Reset artist metadata for the whole library and fetch it again in the background."
                                     disabled={
                                         resettingArtists ||
                                         syncing ||
@@ -676,6 +709,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 </div>
                                 <button
                                     onClick={handleResetMoodTags}
+                                    title="Clear all mood tags and fetch them again in the background."
                                     disabled={
                                         resettingMoodTags ||
                                         syncing ||
@@ -724,6 +758,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     </div>
                                     <button
                                         onClick={handleResetAudioAnalysis}
+                                        title="Reset audio analysis for every track and re-run it in the background. Can take a long time on large libraries."
                                         disabled={
                                             resettingAudio ||
                                             syncing ||
@@ -819,6 +854,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                                 progress={
                                                                     migrationPercent
                                                                 }
+                                                                color="bg-ai"
                                                             />
                                                         </div>
                                                         <p className="mt-1 text-[10px] text-white/40">
@@ -830,10 +866,19 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                                 migrationCoverage.pending
                                                             }{" "}
                                                             pending ·{" "}
-                                                            {
-                                                                migrationCoverage.failed
-                                                            }{" "}
-                                                            failed
+                                                            <span
+                                                                className={
+                                                                    migrationCoverage.failed >
+                                                                    0
+                                                                        ? "text-error"
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                {
+                                                                    migrationCoverage.failed
+                                                                }{" "}
+                                                                failed
+                                                            </span>
                                                         </p>
                                                     </>
                                                 ) : (
@@ -855,6 +900,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     </div>
                                     <button
                                         onClick={handleResetVibeEmbeddings}
+                                        title="Rebuild vibe embeddings for every track in the background. Can take hours on large libraries."
                                         disabled={
                                             resettingVibe ||
                                             syncing ||
@@ -897,18 +943,20 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         reEnriching ||
                                         isEnrichmentActive
                                     }
+                                    title="Enrich only items that are new or missing data. Safe to run any time; usually finishes quickly."
                                     className="px-3 py-1.5 text-xs bg-white text-black font-medium rounded-full
                                     hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                                 >
                                     {syncing ? "Syncing..." : "Sync New"}
                                 </button>
                                 <button
-                                    onClick={handleFullEnrichment}
+                                    onClick={() => setShowReEnrichConfirm(true)}
                                     disabled={
                                         syncing ||
                                         reEnriching ||
                                         isEnrichmentActive
                                     }
+                                    title="Re-run metadata enrichment for the entire library in the background. Can take hours on large libraries."
                                     className="px-3 py-1.5 text-xs bg-white text-black font-medium rounded-full
                                     hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                                 >
@@ -924,8 +972,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         "running" ? (
                                             <button
                                                 onClick={handlePause}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-yellow-600 text-white rounded-full
-                                                hover:bg-yellow-700 transition-colors"
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-warning text-black rounded-full
+                                                hover:opacity-85 transition-opacity"
                                             >
                                                 <Pause className="w-3 h-3" />
                                                 Pause
@@ -933,8 +981,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         ) : (
                                             <button
                                                 onClick={handleResume}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-600 text-white rounded-full
-                                                hover:bg-green-700 transition-colors"
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-success text-black rounded-full
+                                                hover:opacity-85 transition-opacity"
                                             >
                                                 <Play className="w-3 h-3" />
                                                 Resume
@@ -942,8 +990,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         )}
                                         <button
                                             onClick={handleStop}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-600 text-white rounded-full
-                                            hover:bg-red-700 transition-colors"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-error text-white rounded-full
+                                            hover:opacity-85 transition-opacity"
                                         >
                                             <StopCircle className="w-3 h-3" />
                                             Stop
@@ -957,8 +1005,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         onClick={() =>
                                             setShowFailuresModal(true)
                                         }
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded-full
-                                        hover:bg-red-500/30 transition-colors ml-auto"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-error/20 text-error border border-error/30 rounded-full
+                                        hover:bg-error/30 transition-colors ml-auto"
                                     >
                                         <AlertTriangle className="w-3 h-3" />
                                         View Failures ({totalFailures})
@@ -1027,7 +1075,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         )}
                                         {enrichmentState.status ===
                                             "stopping" && (
-                                            <StopCircle className="w-3 h-3 text-red-400 animate-pulse" />
+                                            <StopCircle className="w-3 h-3 text-error animate-pulse" />
                                         )}
                                         <span className="text-white/70">
                                             {enrichmentState.status ===
@@ -1302,19 +1350,19 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             : "Backfill Mood Buckets"}
                     </button>
                     {retryResult && (
-                        <p className="text-sm text-green-400">
+                        <p className="text-sm text-success">
                             Reset {retryResult.reset} failed tracks to pending
                         </p>
                     )}
                     {moodBucketBackfillResult && (
-                        <p className="text-sm text-green-400">
+                        <p className="text-sm text-success">
                             Mood bucket backfill complete: processed{" "}
                             {moodBucketBackfillResult.processed}, assigned{" "}
                             {moodBucketBackfillResult.assigned}
                         </p>
                     )}
                     {cleanupResult && cleanupResult.totalCleaned > 0 && (
-                        <p className="text-sm text-green-400">
+                        <p className="text-sm text-success">
                             Cleaned:{" "}
                             {cleanupResult.cleaned.discoveryBatches.cleaned}{" "}
                             batches,{" "}
@@ -1330,13 +1378,23 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             No stale jobs found
                         </p>
                     )}
-                    {error && <p className="text-sm text-red-400">{error}</p>}
+                    {error && <p className="text-sm text-error">{error}</p>}
                 </div>
             </SettingsSection>
 
             <EnrichmentFailuresModal
                 isOpen={showFailuresModal}
                 onClose={() => setShowFailuresModal(false)}
+            />
+
+            <ConfirmDialog
+                isOpen={showReEnrichConfirm}
+                onClose={() => setShowReEnrichConfirm(false)}
+                onConfirm={() => void handleFullEnrichment()}
+                title="Re-enrich the entire library?"
+                message="This re-runs metadata enrichment for every artist and track in the background, plus vibe embeddings and mood buckets if their checkboxes are enabled below. On large libraries this can take hours. Playback keeps working while it runs."
+                confirmText="Re-enrich All"
+                variant="warning"
             />
         </>
     );

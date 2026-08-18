@@ -141,9 +141,25 @@ async function deleteTrackRows(
     batch: readonly { id: string }[],
     cutoff: Date,
 ): Promise<number> {
+    const trackIds = batch.map((track) => track.id);
+    // TrackMapping.trackId is ON DELETE SET NULL, but the table's
+    // requires-linkage check rejects rows with no linkage at all. Delete
+    // mappings whose only linkage is a purged track before the track delete,
+    // or the whole page fails on 23514.
+    await client.trackMapping.deleteMany({
+        where: {
+            track: {
+                id: { in: trackIds },
+                origin: "LOCAL",
+                removedAt: { lt: cutoff },
+            },
+            trackTidalId: null,
+            trackYtMusicId: null,
+        },
+    });
     const result = await client.track.deleteMany({
         where: {
-            id: { in: batch.map((track) => track.id) },
+            id: { in: trackIds },
             origin: "LOCAL",
             removedAt: { lt: cutoff },
         },
