@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, type MutableRefObject } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState, type MutableRefObject } from "react";
 import { api } from "@/lib/api";
-import { useFeatures } from "@/lib/features-context";
 import {
+    DEFAULT_LOUDNESS_TARGET_LUFS,
     LOUDNESS_MODES,
     isAlbumOrderedQueue,
     resolveLoudnessGain,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/audio-engine/loudnessGainPolicy";
 import { useAudioState } from "@/lib/audio-state-context";
 import { isEpisodeQueueItem } from "@/lib/queue-item";
+import { USER_SETTINGS_UPDATED_EVENT } from "@/lib/userSettingsEvents";
 
 function parseLoudnessMode(value: unknown): LoudnessMode | null {
     return LOUDNESS_MODES.includes(value as LoudnessMode)
@@ -24,6 +24,73 @@ interface UseLoudnessNormalizationOptions {
     applyCurrentOutputState: () => void;
 }
 
+interface LoudnessPrefs {
+    mode: LoudnessMode;
+    targetLufs: number;
+}
+
+/**
+ * Reads the user's loudness mode and the server target directly from the
+ * API (deliberately not through react-query or the features context: this
+ * hook mounts inside the playback orchestrator, whose component harness
+ * provides neither). Refreshes when the settings page announces a save.
+ */
+function useLoudnessPrefs(): LoudnessPrefs {
+    // Mode stays "off" until the stored preference loads, so gain is never
+    // applied speculatively.
+    const [prefs, setPrefs] = useState<LoudnessPrefs>({
+        mode: "off",
+        targetLufs: DEFAULT_LOUDNESS_TARGET_LUFS,
+    });
+
+    useEffect(() => {
+        let cancelled = false;
+        const load = () => {
+            Promise.resolve()
+                .then(() => api.getSettings?.())
+                .then((settings) => {
+                    if (cancelled || !settings) return;
+                    const stored = (settings as { loudnessMode?: unknown })
+                        .loudnessMode;
+                    const mode = parseLoudnessMode(stored) ?? "auto";
+                    setPrefs((prev) =>
+                        prev.mode === mode ? prev : { ...prev, mode },
+                    );
+                })
+                .catch(() => undefined);
+            Promise.resolve()
+                .then(() => api.getFeatures?.())
+                .then((features) => {
+                    if (cancelled || !features) return;
+                    const target = (
+                        features as { loudnessTargetLufs?: unknown }
+                    ).loudnessTargetLufs;
+                    if (typeof target !== "number" || !Number.isFinite(target))
+                        return;
+                    setPrefs((prev) =>
+                        prev.targetLufs === target
+                            ? prev
+                            : { ...prev, targetLufs: target },
+                    );
+                })
+                .catch(() => undefined);
+        };
+        load();
+        if (typeof window === "undefined") {
+            return () => {
+                cancelled = true;
+            };
+        }
+        window.addEventListener(USER_SETTINGS_UPDATED_EVENT, load);
+        return () => {
+            cancelled = true;
+            window.removeEventListener(USER_SETTINGS_UPDATED_EVENT, load);
+        };
+    }, []);
+
+    return prefs;
+}
+
 /**
  * Keeps the loudness-normalization gain factor in sync with the current
  * track, the user's mode (Settings → Playback), and the server target
@@ -31,23 +98,14 @@ interface UseLoudnessNormalizationOptions {
  * applyCurrentOutputState; this hook only recomputes it and re-applies the
  * output state when the applied gain actually changes.
  *
- * The mode stays "off" until the settings query resolves, so gain is never
- * applied speculatively; audiobooks and podcasts are never normalized.
+ * Audiobooks and podcasts are never normalized.
  */
 export function useLoudnessNormalization({
     loudnessGainFactorRef,
     applyCurrentOutputState,
 }: UseLoudnessNormalizationOptions): void {
     const { currentTrack, playbackType, queue, isShuffle } = useAudioState();
-    const { loudnessTargetLufs } = useFeatures();
-    const { data, isFetched } = useQuery<{ loudnessMode?: string }>({
-        queryKey: ["user-settings"],
-        queryFn: () => api.getSettings(),
-        staleTime: 5 * 60 * 1000,
-    });
-    const mode: LoudnessMode = isFetched
-        ? (parseLoudnessMode(data?.loudnessMode) ?? "auto")
-        : "off";
+    const { mode, targetLufs } = useLoudnessPrefs();
 
     useEffect(() => {
         // A queue containing podcast episodes is never an album context.
@@ -57,7 +115,7 @@ export function useLoudnessNormalization({
             isAlbumOrderedQueue(trackItems, isShuffle);
         const decision = resolveLoudnessGain({
             mode,
-            targetLufs: loudnessTargetLufs,
+            targetLufs,
             isAlbumContext,
             track: playbackType === "track" ? currentTrack : null,
         });
@@ -66,7 +124,7 @@ export function useLoudnessNormalization({
         applyCurrentOutputState();
     }, [
         mode,
-        loudnessTargetLufs,
+        targetLufs,
         currentTrack,
         playbackType,
         queue,

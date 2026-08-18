@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { createFrontendLogger } from "@/lib/logger";
+import { emitUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { UserSettings } from "../types";
 import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
 
@@ -110,6 +111,9 @@ export function useSettingsData() {
             setSettings(newSettings);
             // Invalidate shared settings query so other consumers (e.g. Explore page) pick up changes immediately
             queryClient.invalidateQueries({ queryKey: ["user-settings"] });
+            // Long-lived surfaces outside the query cache (the audio
+            // player's volume leveling) refresh through this event.
+            emitUserSettingsUpdated();
             // No toast - caller shows inline status
         } catch (error) {
             logger.error("Failed to save user settings", { error });
