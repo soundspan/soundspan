@@ -26,8 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release version with a plain-language index and AIO-Compose-first
   procedures, and the 2.0.0 guide explains which steps the AIO image handles
   automatically.
+- The vibe map endpoint now answers immediately with a building status while
+  the projection is computed in the background, and the map page shows build
+  progress instead of timing out on first load.
 
 ### Fixed
+
+- The vibe map no longer fails permanently on memory-constrained deployments:
+  the UMAP projection worker runs under an explicit heap ceiling
+  (`VIBE_MAP_WORKER_MEMORY_MB`, default 512) and halves its track sample on
+  out-of-memory instead of crashing. The projection cache is also scoped to
+  the active embedding space, so a space cutover no longer serves the retired
+  space's map for up to a day.
 
 ## [2.3.1] - 2026-08-18
 

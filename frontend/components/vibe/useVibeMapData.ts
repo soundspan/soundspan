@@ -11,32 +11,61 @@ import type { MapTrack } from "./types";
 export interface VibeMapData {
     tracks: MapTrack[];
     loading: boolean;
+    building: boolean;
     error: string | null;
     quantiles: readonly number[] | null;
 }
 
+const BUILDING_POLL_MS = 5000;
+const BUILDING_POLL_LIMIT = 120;
+
 function useMapTracks() {
     const [tracks, setTracks] = useState<MapTrack[]>([]);
     const [loading, setLoading] = useState(true);
+    const [building, setBuilding] = useState(false);
     const [error, setError] = useState<string | null>(null);
     useEffect(() => {
         let cancelled = false;
-        void api
-            .getVibeMap()
-            .then((data) => {
-                if (!cancelled) setTracks(data.tracks);
-            })
-            .catch(() => {
-                if (!cancelled) setError("Failed to load vibe map data");
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
+        let attempts = 0;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+
+        const load = () => {
+            void api
+                .getVibeMap()
+                .then((data) => {
+                    if (cancelled) return;
+                    if (data.building) {
+                        attempts += 1;
+                        if (attempts > BUILDING_POLL_LIMIT) {
+                            setBuilding(false);
+                            setLoading(false);
+                            setError(
+                                "The map is still being built — try again in a few minutes",
+                            );
+                            return;
+                        }
+                        setBuilding(true);
+                        timer = setTimeout(load, BUILDING_POLL_MS);
+                        return;
+                    }
+                    setBuilding(false);
+                    setTracks(data.tracks);
+                    setLoading(false);
+                })
+                .catch(() => {
+                    if (cancelled) return;
+                    setBuilding(false);
+                    setLoading(false);
+                    setError("Failed to load vibe map data");
+                });
+        };
+        load();
         return () => {
             cancelled = true;
+            if (timer) clearTimeout(timer);
         };
     }, []);
-    return { tracks, loading, error };
+    return { tracks, loading: loading || building, building, error };
 }
 
 function useCalibration(): readonly number[] | null {

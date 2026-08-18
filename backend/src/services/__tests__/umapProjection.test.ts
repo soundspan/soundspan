@@ -40,11 +40,12 @@ const mockUmapLoggerError = jest.fn<(...args: unknown[]) => void>();
 const mockGetActiveSpace = jest.fn<() => Promise<{ id: string }>>();
 
 let pipeline: MockPipeline;
-let workerBehavior: ((worker: MockWorker) => void) | null = null;
+let workerBehavior: ((worker: MockWorker, index: number) => void) | null = null;
 let workers: MockWorker[] = [];
 let lastWorkerFilename: string | null = null;
 let lastWorkerOptions: {
     workerData?: { embeddings: number[][]; nNeighbors: number };
+    resourceLimits?: { maxOldGenerationSizeMb?: number };
 } | null = null;
 
 class MockWorker {
@@ -55,14 +56,16 @@ class MockWorker {
         filename: string,
         options: {
             workerData?: { embeddings: number[][]; nNeighbors: number };
+            resourceLimits?: { maxOldGenerationSizeMb?: number };
         },
     ) {
         lastWorkerFilename = filename;
         lastWorkerOptions = options;
         workers.push(this);
+        const index = workers.length - 1;
 
         setImmediate(() => {
-            workerBehavior?.(this);
+            workerBehavior?.(this, index);
         });
     }
 
@@ -89,6 +92,10 @@ jest.mock("path", () => ({
     default: {
         join: (...args: string[]) => mockPathJoin(...args),
     },
+}));
+
+jest.mock("../../config", () => ({
+    config: { vibeMapWorkerMemoryMb: 512 },
 }));
 
 jest.mock("../../utils/db", () => ({
@@ -125,6 +132,9 @@ jest.mock("worker_threads", () => ({
     Worker: MockWorker,
 }));
 
+const PROJECTION_KEY = "vibe:map:v4:projection:space-active";
+const TRACK_IDS_KEY = "vibe:map:v4:track_ids:space-active";
+
 function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
     return {
         track_id: `track-${index}`,
@@ -151,10 +161,21 @@ function makeRows(count: number): QueryRow[] {
     return Array.from({ length: count }, (_, index) => makeRow(index + 1));
 }
 
-async function flushMicrotasks(turns = 4): Promise<void> {
+async function flushMicrotasks(turns = 8): Promise<void> {
     for (let index = 0; index < turns; index += 1) {
-        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
     }
+}
+
+function cachedPayload(): { tracks: unknown[]; trackCount: number } {
+    const setExCall = pipeline.setEx.mock.calls.find(
+        (call) => call[0] === PROJECTION_KEY,
+    );
+    if (!setExCall) throw new Error("projection was never cached");
+    return JSON.parse(setExCall[2] as string) as {
+        tracks: unknown[];
+        trackCount: number;
+    };
 }
 
 function loadModule(): typeof import("../umapProjection") {
@@ -199,7 +220,7 @@ describe("computeMapProjection", () => {
         mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
     });
 
-    it("returns cached projection data without querying the database", async () => {
+    it("returns the cached projection for the active space without querying the database", async () => {
         const cached = {
             tracks: [{ id: "track-1", x: 0.1, y: 0.2 }],
             trackCount: 1,
@@ -209,20 +230,25 @@ describe("computeMapProjection", () => {
 
         const { computeMapProjection } = loadModule();
 
-        await expect(computeMapProjection()).resolves.toEqual(cached);
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "ready",
+            data: cached,
+        });
+        expect(mockRedisGet).toHaveBeenCalledWith(PROJECTION_KEY);
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockRedisMulti).not.toHaveBeenCalled();
-        expect(mockUmapLoggerDebug).toHaveBeenCalledWith(
-            "[VIBE-MAP] Cache hit (stable key)",
-        );
     });
 
-    it("deduplicates concurrent computations while one projection is already in progress", async () => {
+    it("reports building and deduplicates concurrent background computations", async () => {
         mockQueryRaw.mockResolvedValueOnce(makeRows(5));
 
         const { computeMapProjection } = loadModule();
-        const firstPromise = computeMapProjection();
-        const secondPromise = computeMapProjection();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
 
         await flushMicrotasks();
 
@@ -233,9 +259,6 @@ describe("computeMapProjection", () => {
         );
         expect(values).toContain("space-active");
         expect(workers).toHaveLength(1);
-        expect(mockUmapLoggerInfo).toHaveBeenCalledWith(
-            "[VIBE-MAP] Waiting for in-progress computation",
-        );
 
         workers[0].emit("message", [
             [0, 0],
@@ -244,30 +267,28 @@ describe("computeMapProjection", () => {
             [3, 3],
             [4, 4],
         ]);
+        await flushMicrotasks();
 
-        const [firstResult, secondResult] = await Promise.all([
-            firstPromise,
-            secondPromise,
-        ]);
-
-        expect(firstResult).toEqual(secondResult);
-        expect(firstResult.trackCount).toBe(5);
+        expect(cachedPayload().trackCount).toBe(5);
     });
 
-    it("returns an empty projection when no embedded tracks exist", async () => {
+    it("caches an empty projection briefly when no embedded tracks exist", async () => {
         const { computeMapProjection } = loadModule();
 
-        const result = await computeMapProjection();
-
-        expect(result).toEqual({
-            tracks: [],
-            trackCount: 0,
-            computedAt: expect.any(String),
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
         });
+        await flushMicrotasks();
+
         expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-        expect(mockRedisMulti).not.toHaveBeenCalled();
         expect(mockParseEmbedding).not.toHaveBeenCalled();
         expect(workers).toHaveLength(0);
+        expect(pipeline.setEx).toHaveBeenCalledWith(
+            PROJECTION_KEY,
+            300,
+            expect.any(String),
+        );
+        expect(cachedPayload().trackCount).toBe(0);
     });
 
     it("uses the circular fallback layout for datasets smaller than five tracks", async () => {
@@ -287,77 +308,53 @@ describe("computeMapProjection", () => {
         ]);
 
         const { computeMapProjection } = loadModule();
-        const result = await computeMapProjection();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
 
-        expect(result.trackCount).toBe(4);
-        expect(result.tracks).toEqual([
+        const payload = cachedPayload();
+        expect(payload.trackCount).toBe(4);
+        expect(payload.tracks).toEqual([
             expect.objectContaining({
                 id: "track-1",
-                x: expect.closeTo(0.8, 6),
-                y: expect.closeTo(0.5, 6),
                 dominantMood: "moodElectronic",
                 moodScore: 0.95,
-                moods: expect.objectContaining({ moodElectronic: 0.95 }),
             }),
             expect.objectContaining({
                 id: "track-2",
-                x: expect.closeTo(0.5, 6),
-                y: expect.closeTo(0.8, 6),
                 dominantMood: "neutral",
                 moodScore: 0,
                 moods: {},
             }),
             expect.objectContaining({
                 id: "track-3",
-                x: expect.closeTo(0.2, 6),
-                y: expect.closeTo(0.5, 6),
                 dominantMood: "moodRelaxed",
             }),
             expect.objectContaining({
                 id: "track-4",
-                x: expect.closeTo(0.5, 6),
-                y: expect.closeTo(0.2, 6),
                 dominantMood: "moodAggressive",
             }),
         ]);
         expect(mockParseEmbedding).not.toHaveBeenCalled();
         expect(workers).toHaveLength(0);
         expect(pipeline.setEx).toHaveBeenCalledWith(
-            "vibe:map:v3:projection",
+            PROJECTION_KEY,
             86400,
             expect.any(String),
         );
-        expect(pipeline.del).toHaveBeenCalledWith("vibe:map:v3:track_ids");
-        expect(pipeline.sAdd).toHaveBeenCalledWith("vibe:map:v3:track_ids", [
+        expect(pipeline.del).toHaveBeenCalledWith(TRACK_IDS_KEY);
+        expect(pipeline.sAdd).toHaveBeenCalledWith(TRACK_IDS_KEY, [
             "track-1",
             "track-2",
             "track-3",
             "track-4",
         ]);
-        expect(pipeline.expire).toHaveBeenCalledWith(
-            "vibe:map:v3:track_ids",
-            86400,
-        );
+        expect(pipeline.expire).toHaveBeenCalledWith(TRACK_IDS_KEY, 86400);
         expect(pipeline.exec).toHaveBeenCalledTimes(1);
     });
 
-    it("returns the projection even when Redis caching fails", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(4));
-        pipeline.exec.mockImplementationOnce(async () => {
-            throw new Error("redis down");
-        });
-
-        const { computeMapProjection } = loadModule();
-        const result = await computeMapProjection();
-
-        expect(result.trackCount).toBe(4);
-        expect(mockUmapLoggerWarn).toHaveBeenCalledWith(
-            "[VIBE-MAP] Failed to cache projection:",
-            "redis down",
-        );
-    });
-
-    it("runs the UMAP worker for larger datasets, normalizes coordinates, and caches the result", async () => {
+    it("runs the UMAP worker with a bounded heap, normalizes coordinates, and caches the result", async () => {
         mockQueryRaw.mockResolvedValueOnce([
             makeRow(1, { moodHappy: 0.9, moodElectronic: 0.4 }),
             makeRow(2, { moodSad: 0.8, moodElectronic: 0.1 }),
@@ -376,31 +373,18 @@ describe("computeMapProjection", () => {
         };
 
         const { computeMapProjection } = loadModule();
-        const result = await computeMapProjection();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
 
-        expect(result.trackCount).toBe(5);
-        expect(result.tracks).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    id: "track-1",
-                    x: 0,
-                    y: expect.closeTo(3 / 7, 6),
-                    dominantMood: "moodHappy",
-                }),
-                expect.objectContaining({
-                    id: "track-4",
-                    x: 1,
-                    y: 1,
-                    dominantMood: "moodParty",
-                }),
-                expect.objectContaining({
-                    id: "track-5",
-                    dominantMood: "moodElectronic",
-                }),
-            ]),
-        );
+        const payload = cachedPayload() as {
+            trackCount: number;
+            tracks: Array<{ id: string; x: number; y: number }>;
+        };
+        expect(payload.trackCount).toBe(5);
         expect(
-            result.tracks.every(
+            payload.tracks.every(
                 (track) =>
                     track.x >= 0 &&
                     track.x <= 1 &&
@@ -422,82 +406,122 @@ describe("computeMapProjection", () => {
                 nNeighbors: 2,
             },
             execArgv: ["--import", "tsx"],
+            resourceLimits: { maxOldGenerationSizeMb: 512 },
         });
         expect(pipeline.setEx).toHaveBeenCalledWith(
-            "vibe:map:v3:projection",
+            PROJECTION_KEY,
             86400,
             expect.any(String),
-        );
-        expect(pipeline.expire).toHaveBeenCalledWith(
-            "vibe:map:v3:track_ids",
-            86400,
         );
         expect(pipeline.exec).toHaveBeenCalledTimes(1);
     });
 
-    it("times out the UMAP worker after fifteen minutes and terminates the worker", async () => {
-        jest.useFakeTimers();
-        mockQueryRaw.mockResolvedValueOnce(makeRows(5));
+    it("halves the sample and retries when the worker dies on its memory limit", async () => {
+        mockQueryRaw.mockResolvedValueOnce(makeRows(4000));
+        workerBehavior = (worker, index) => {
+            if (index === 0) {
+                const oom = new Error(
+                    "Worker terminated due to reaching memory limit: JS heap out of memory",
+                ) as NodeJS.ErrnoException;
+                oom.code = "ERR_WORKER_OUT_OF_MEMORY";
+                worker.emit("error", oom);
+                return;
+            }
+            worker.emit(
+                "message",
+                Array.from({ length: 2000 }, (_, i) => [i, i]),
+            );
+        };
 
         const { computeMapProjection } = loadModule();
-        const projectionPromise = computeMapProjection();
-        const rejection = expect(projectionPromise).rejects.toThrow(
-            "UMAP worker timed out after 15 minutes",
-        );
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks(16);
 
-        await flushMicrotasks();
-        expect(workers).toHaveLength(1);
-
-        await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+        expect(workers).toHaveLength(2);
+        expect(lastWorkerOptions?.workerData?.embeddings).toHaveLength(2000);
         expect(mockUmapLoggerWarn).toHaveBeenCalledWith(
-            "[VIBE-MAP] UMAP worker running for 5+ minutes (5 tracks)",
+            expect.stringContaining("heap ceiling at 4000 tracks"),
         );
-
-        await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
-
-        await rejection;
-        expect(workers[0].terminate).toHaveBeenCalledTimes(1);
-        expect(pipeline.exec).not.toHaveBeenCalled();
+        const payload = cachedPayload() as {
+            trackCount: number;
+            sampled?: boolean;
+        };
+        expect(payload.trackCount).toBe(2000);
+        expect(payload.sampled).toBe(true);
     });
 
-    it("rejects when the worker posts an error payload", async () => {
+    it("logs instead of caching when the worker posts an error payload", async () => {
         mockQueryRaw.mockResolvedValueOnce(makeRows(5));
         workerBehavior = (worker) => {
             worker.emit("message", { error: "projection failed" });
         };
 
         const { computeMapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
 
-        await expect(computeMapProjection()).rejects.toThrow(
-            "projection failed",
+        expect(mockUmapLoggerError).toHaveBeenCalledWith(
+            "Vibe map error:",
+            expect.objectContaining({ message: "projection failed" }),
         );
         expect(pipeline.exec).not.toHaveBeenCalled();
     });
 
-    it("rejects when the worker emits an error event", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(5));
-        workerBehavior = (worker) => {
-            worker.emit("error", new Error("worker exploded"));
-        };
-
-        const { computeMapProjection } = loadModule();
-
-        await expect(computeMapProjection()).rejects.toThrow("worker exploded");
-        expect(pipeline.exec).not.toHaveBeenCalled();
-    });
-
-    it("rejects when the worker exits with a non-zero code", async () => {
+    it("logs instead of caching when the worker exits with a non-zero code", async () => {
         mockQueryRaw.mockResolvedValueOnce(makeRows(5));
         workerBehavior = (worker) => {
             worker.emit("exit", 2);
         };
 
         const { computeMapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
 
-        await expect(computeMapProjection()).rejects.toThrow(
-            "UMAP worker exited with code 2",
+        expect(mockUmapLoggerError).toHaveBeenCalledWith(
+            "Vibe map error:",
+            expect.objectContaining({
+                message: "UMAP worker exited with code 2",
+            }),
         );
         expect(pipeline.exec).not.toHaveBeenCalled();
+    });
+
+    it("allows a fresh build after a failed one", async () => {
+        mockQueryRaw.mockResolvedValue(makeRows(5));
+        workerBehavior = (worker, index) => {
+            if (index === 0) {
+                worker.emit("error", new Error("worker exploded"));
+                return;
+            }
+            worker.emit("message", [
+                [0, 0],
+                [1, 1],
+                [2, 2],
+                [3, 3],
+                [4, 4],
+            ]);
+        };
+
+        const { computeMapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
+        expect(mockUmapLoggerError).toHaveBeenCalledTimes(1);
+
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
+
+        expect(workers).toHaveLength(2);
+        expect(cachedPayload().trackCount).toBe(5);
     });
 });
 

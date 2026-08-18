@@ -131,13 +131,15 @@ async function buildTrackPreferenceScoreMapForUser(
  * /api/vibe/map:
  *   get:
  *     summary: Get vibe map projection data
- *     description: Returns cached or computed 2D projection data for tracks with CLAP embeddings.
+ *     description: Returns the cached 2D projection for the active embedding space, or 202 while a background build is in progress.
  *     tags: [Vibe]
  *     security:
  *       - apiKeyAuth: []
  *     responses:
  *       200:
  *         description: 2D vibe map projection payload
+ *       202:
+ *         description: Projection build in progress; retry shortly
  *       401:
  *         description: Not authenticated
  */
@@ -146,8 +148,12 @@ router.get(
     requireAuth,
     asyncHandler(async (_req, res) => {
         try {
-            const mapData = await computeMapProjection();
-            res.json(mapData);
+            const projection = await computeMapProjection();
+            if (projection.status === "building") {
+                res.status(202).json({ building: true });
+                return;
+            }
+            res.json(projection.data);
         } catch (error: any) {
             logger.error("Vibe map error:", error);
             sendInternalRouteError(res, "Failed to compute map projection");
