@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Purge status no longer reports a purge as running when only the daily
+  scheduled sweep is parked in the queue.
 - The vibe map no longer fails permanently on memory-constrained deployments:
   the UMAP projection worker runs under an explicit heap ceiling
   (`VIBE_MAP_WORKER_MEMORY_MB`, default 512) and halves its track sample on

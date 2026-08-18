@@ -337,7 +337,45 @@ describe("admin library health routes", () => {
             });
         });
 
-        it("reports an in-flight purge via queued continuation jobs", async () => {
+        it("reports a waiting purge-now singleton as in flight", async () => {
+            mockSchedulerGetJob.mockResolvedValue({
+                getState: jest.fn().mockResolvedValue("waiting"),
+            });
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(mockSchedulerGetJobs).not.toHaveBeenCalled();
+            expect(res.body).toEqual({
+                remaining: 3,
+                purging: true,
+                lastFailure: null,
+            });
+        });
+
+        it("ignores a delayed scheduled purge", async () => {
+            mockSchedulerGetJobs.mockImplementation(async (states: string[]) =>
+                states.includes("delayed")
+                    ? [{ name: "track-removal-purge", state: "delayed" }]
+                    : [],
+            );
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(mockSchedulerGetJobs).toHaveBeenCalledWith(
+                ["active"],
+                0,
+                50,
+            );
+            expect(res.body).toEqual({
+                remaining: 3,
+                purging: false,
+                lastFailure: null,
+            });
+        });
+
+        it("reports an active scheduled purge as in flight", async () => {
             mockSchedulerGetJobs.mockResolvedValue([
                 { name: "track-removal-purge" },
             ]);
@@ -345,6 +383,11 @@ describe("admin library health routes", () => {
 
             await purgeStatusHandler({} as any, res);
 
+            expect(mockSchedulerGetJobs).toHaveBeenCalledWith(
+                ["active"],
+                0,
+                50,
+            );
             expect(res.body).toEqual({
                 remaining: 3,
                 purging: true,

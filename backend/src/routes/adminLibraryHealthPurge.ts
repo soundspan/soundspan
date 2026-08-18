@@ -90,7 +90,7 @@ async function isPurgeInFlight(): Promise<boolean> {
         if (PURGE_STATES_IN_FLIGHT.has(state)) return true;
     }
     const active = await schedulerQueue.getJobs(
-        ["waiting", "delayed", "active"],
+        ["active"],
         0,
         FAILED_SCAN_LIMIT,
     );
