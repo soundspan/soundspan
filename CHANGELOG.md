@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passwords (Settings → Sign-in & Security). The settings field for it has
   been removed; existing Subsonic passwords keep authenticating token-mode
   clients until the legacy credential is removed in a future release.
+- Restructured the upgrade guides: UPGRADING.md sections are now grouped by
+  release version with a plain-language index and AIO-Compose-first
+  procedures, and the 2.0.0 guide explains which steps the AIO image handles
+  automatically.
 
 ### Fixed
 
