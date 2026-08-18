@@ -198,6 +198,21 @@ const vibeSpaceRetirementGraceDaysEnvSchema = z
     })
     .optional();
 
+const loudnessTargetLufsEnvSchema = z
+    .string()
+    .trim()
+    .refine(
+        (value) => {
+            const parsed = parseEnvFloat(value, Number.NaN);
+            return Number.isFinite(parsed) && parsed >= -30 && parsed <= -10;
+        },
+        {
+            message:
+                "LOUDNESS_TARGET_LUFS must be a number from -30 through -10",
+        },
+    )
+    .optional();
+
 function normalizeVibeProviderUrl(
     value: string | undefined,
 ): string | undefined {
@@ -388,6 +403,7 @@ const envSchema = z
         VIBE_SPACE_CUTOVER_THRESHOLD: vibeSpaceCutoverThresholdEnvSchema,
         VIBE_SPACE_CUTOVER_ALLOW_FAILED: z.string().optional(),
         VIBE_SPACE_RETIREMENT_GRACE_DAYS: vibeSpaceRetirementGraceDaysEnvSchema,
+        LOUDNESS_TARGET_LUFS: loudnessTargetLufsEnvSchema,
         METRICS_TOKEN: z.string().optional(),
         METRICS_PUBLIC: z.string().optional(),
         PORT: z.string().optional(),
@@ -521,6 +537,7 @@ export const config = {
         return process.env.PODCAST_DEBUG === "1";
     },
     subsonicTraceLogs: process.env.SUBSONIC_TRACE_LOGS === "true",
+    loudnessTargetLufs: parseEnvFloat(process.env.LOUDNESS_TARGET_LUFS, -18),
     get soundspanCallbackUrl(): string {
         return process.env.SOUNDSPAN_CALLBACK_URL || "http://backend:3006";
     },

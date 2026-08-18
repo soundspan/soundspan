@@ -54,6 +54,7 @@ jest.mock("../../services/lyrics", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        loudnessTargetLufs: -18,
         music: {
             musicPath: "/music",
             transcodeCachePath: "/tmp/soundspan-cache",
@@ -389,7 +390,7 @@ describe("subsonic entity compatibility handlers", () => {
         );
     });
 
-    it("returns song payload for library track", async () => {
+    it("returns exact ReplayGain values for a measured library track and album", async () => {
         mockTrackFindFirst.mockResolvedValueOnce({
             id: "track-1",
             title: "Song One",
@@ -399,6 +400,8 @@ describe("subsonic entity compatibility handlers", () => {
             fileSize: 2048,
             mime: "audio/mpeg",
             filePath: "Artist One/Album One/01 Song One.mp3",
+            loudnessLufs: -9.5,
+            truePeakDb: 1,
             album: {
                 id: "album-1",
                 title: "Album One",
@@ -406,6 +409,8 @@ describe("subsonic entity compatibility handlers", () => {
                 coverUrl: "https://example.test/cover.jpg",
                 genres: ["indie"],
                 userGenres: null,
+                albumLoudnessLufs: -12,
+                albumTruePeakDb: -2,
                 artist: {
                     id: "artist-1",
                     name: "Artist One",
@@ -427,11 +432,86 @@ describe("subsonic entity compatibility handlers", () => {
                     id: "tr-track-1",
                     albumId: "al-album-1",
                     artistId: "ar-artist-1",
+                    replayGain: {
+                        trackGain: -8.5,
+                        albumGain: -6,
+                        trackPeak: 1.122018,
+                        albumPeak: 0.794328,
+                    },
                 }),
             }),
             "json",
             undefined,
         );
+    });
+
+    it("omits ReplayGain when neither the track nor album is measured", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "track-1",
+            title: "Song One",
+            trackNo: 1,
+            discNo: 1,
+            duration: 180,
+            fileSize: 2048,
+            mime: "audio/mpeg",
+            filePath: "Artist One/Album One/01 Song One.mp3",
+            loudnessLufs: null,
+            truePeakDb: null,
+            album: {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                coverUrl: null,
+                genres: [],
+                userGenres: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                artist: { id: "artist-1", name: "Artist One" },
+            },
+        });
+
+        await handleGetSong(buildReq({ id: "tr-track-1" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            song: Record<string, unknown>;
+        };
+        expect(payload.song).not.toHaveProperty("replayGain");
+    });
+
+    it("returns only track ReplayGain members when album measurements are absent", async () => {
+        mockTrackFindFirst.mockResolvedValueOnce({
+            id: "track-1",
+            title: "Song One",
+            trackNo: 1,
+            discNo: 1,
+            duration: 180,
+            fileSize: 2048,
+            mime: "audio/mpeg",
+            filePath: "Artist One/Album One/01 Song One.mp3",
+            loudnessLufs: -9.5,
+            truePeakDb: 1,
+            album: {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                coverUrl: null,
+                genres: [],
+                userGenres: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                artist: { id: "artist-1", name: "Artist One" },
+            },
+        });
+
+        await handleGetSong(buildReq({ id: "tr-track-1" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            song: Record<string, unknown>;
+        };
+        expect(payload.song.replayGain).toEqual({
+            trackGain: -8.5,
+            trackPeak: 1.122018,
+        });
     });
 
     it("returns generic error when song lookup fails", async () => {

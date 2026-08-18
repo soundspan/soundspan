@@ -228,6 +228,35 @@ describe("config module", () => {
         expect(config.vibeEmbedConcurrency).toBe(1);
     });
 
+    it("defaults the loudness target to the ReplayGain 2 reference", async () => {
+        const { config } = await loadConfigModule({
+            LOUDNESS_TARGET_LUFS: undefined,
+        });
+
+        expect(config.loudnessTargetLufs).toBe(-18);
+    });
+
+    it.each(["-30", "-18.5", "-10"])(
+        "accepts the bounded loudness target %s LUFS",
+        async (loudnessTargetLufs) => {
+            const { config } = await loadConfigModule({
+                LOUDNESS_TARGET_LUFS: loudnessTargetLufs,
+            });
+
+            expect(config.loudnessTargetLufs).toBe(Number(loudnessTargetLufs));
+        },
+    );
+
+    it.each(["", "-30.1", "-9.9", "not-a-number"])(
+        "rejects invalid loudness target %s",
+        async (loudnessTargetLufs) => {
+            await expectStartupValidationFailure(
+                { LOUDNESS_TARGET_LUFS: loudnessTargetLufs },
+                "LOUDNESS_TARGET_LUFS",
+            );
+        },
+    );
+
     it.each([
         ["1", 1],
         ["4", 4],

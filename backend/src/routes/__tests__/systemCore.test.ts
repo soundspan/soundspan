@@ -46,6 +46,7 @@ jest.mock("../../utils/db", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        loudnessTargetLufs: -18,
         features: {
             audioAnalysis: true,
             discovery: false,
@@ -115,6 +116,7 @@ describe("system routes integration", () => {
             discovery: false,
             autoPlaylists: true,
             federation: true,
+            loudnessTargetLufs: -18,
         });
         expect(mockGetFeatures).toHaveBeenCalledTimes(1);
     });
@@ -135,6 +137,7 @@ describe("system routes integration", () => {
             discovery: false,
             autoPlaylists: true,
             federation: true,
+            loudnessTargetLufs: -18,
         });
     });
 

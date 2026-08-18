@@ -27,6 +27,7 @@ jest.mock("../../utils/db", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        loudnessTargetLufs: -18,
         features: {
             audioAnalysis: true,
             discovery: true,
@@ -95,6 +96,7 @@ describe("system routes runtime", () => {
             audioAnalysis: true,
             discovery: true,
             autoPlaylists: true,
+            loudnessTargetLufs: -18,
         });
     });
 

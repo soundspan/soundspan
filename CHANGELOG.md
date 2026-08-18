@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the OpenSubsonic ReplayGain extension, a configurable server loudness
+  target, and per-user normalization-mode groundwork. Web-player application
+  lands next.
 - The Subsonic-compatible `/rest` surface now accepts form-encoded POST
   requests (OpenSubsonic `formPost`), fixing playback with Music Assistant
   and other POST-first clients. Read endpoints route POST through a

@@ -14,6 +14,8 @@ import {
     getRequiredQueryString,
     parseTrackIdsFromQueryValues,
     PLAYLIST_TRACK_WHERE,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
 } from "./shared";
 
 async function getPlaylistDurations(
@@ -194,6 +196,7 @@ export async function handleGetPlaylist(
                                 fileSize: true,
                                 mime: true,
                                 filePath: true,
+                                ...SONG_LOUDNESS_TRACK_SELECT,
                                 album: {
                                     select: {
                                         id: true,
@@ -202,6 +205,7 @@ export async function handleGetPlaylist(
                                         coverUrl: true,
                                         genres: true,
                                         userGenres: true,
+                                        ...SONG_LOUDNESS_ALBUM_SELECT,
                                         artist: {
                                             select: {
                                                 id: true,

@@ -36,6 +36,15 @@ const PLAYLIST_TRACK_WHERE = {
     ...TRACK_BROWSE_WHERE,
 } satisfies Prisma.TrackWhereInput;
 
+const SONG_LOUDNESS_TRACK_SELECT = {
+    loudnessLufs: true,
+    truePeakDb: true,
+} as const;
+const SONG_LOUDNESS_ALBUM_SELECT = {
+    albumLoudnessLufs: true,
+    albumTruePeakDb: true,
+} as const;
+
 const LIBRARY_ALBUM_WHERE = {
     location: SUBSONIC_ALBUM_LOCATION_WHERE,
     tracks: { some: LIBRARY_TRACK_WHERE },
@@ -676,6 +685,8 @@ function formatSongForSubsonic(song: {
     mime: string | null;
     filePath: string | null;
     genre?: string | null;
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
     album: {
         id: string;
         title: string;
@@ -683,6 +694,8 @@ function formatSongForSubsonic(song: {
         coverUrl: string | null;
         genres?: unknown;
         userGenres?: unknown;
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
         artist: {
             id: string;
             name: string;
@@ -728,7 +741,53 @@ function formatSongForSubsonic(song: {
         formatted.genre = genre;
     }
 
+    const replayGain = formatReplayGain(song);
+    if (replayGain) {
+        formatted.replayGain = replayGain;
+    }
+
     return formatted;
+}
+
+type ReplayGainSongInput = {
+    loudnessLufs?: number | null;
+    truePeakDb?: number | null;
+    album: {
+        albumLoudnessLufs?: number | null;
+        albumTruePeakDb?: number | null;
+    };
+};
+
+function formatReplayGain(
+    song: ReplayGainSongInput,
+): Record<string, number> | null {
+    const replayGain = {
+        ...(song.loudnessLufs == null
+            ? {}
+            : { trackGain: formatGain(song.loudnessLufs) }),
+        ...(song.album.albumLoudnessLufs == null
+            ? {}
+            : { albumGain: formatGain(song.album.albumLoudnessLufs) }),
+        ...(song.truePeakDb == null
+            ? {}
+            : { trackPeak: formatPeak(song.truePeakDb) }),
+        ...(song.album.albumTruePeakDb == null
+            ? {}
+            : { albumPeak: formatPeak(song.album.albumTruePeakDb) }),
+    };
+    return Object.keys(replayGain).length > 0 ? replayGain : null;
+}
+
+function formatGain(measuredLufs: number): number {
+    return roundDecimal(config.loudnessTargetLufs - measuredLufs, 2);
+}
+
+function formatPeak(truePeakDb: number): number {
+    return roundDecimal(10 ** (truePeakDb / 20), 6);
+}
+
+function roundDecimal(value: number, decimalPlaces: number): number {
+    return Number(value.toFixed(decimalPlaces));
 }
 
 function formatBookmarkForSubsonic(
@@ -766,6 +825,7 @@ const bookmarkTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
     fileSize: true,
     mime: true,
     filePath: true,
+    ...SONG_LOUDNESS_TRACK_SELECT,
     album: {
         select: {
             id: true,
@@ -774,6 +834,7 @@ const bookmarkTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
             coverUrl: true,
             genres: true,
             userGenres: true,
+            ...SONG_LOUDNESS_ALBUM_SELECT,
             artist: {
                 select: {
                     id: true,
@@ -935,6 +996,8 @@ export {
     SEARCH_ALBUM_MAX_COUNT,
     SEARCH_ARTIST_MAX_COUNT,
     SEARCH_SONG_MAX_COUNT,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     shuffleInPlace,
     SUBSONIC_ALBUM_LOCATION_WHERE,
     SUBSONIC_COVER_CACHE_CONTROL,

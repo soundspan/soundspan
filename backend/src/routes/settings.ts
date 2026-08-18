@@ -31,6 +31,7 @@ const displayNameSchema = z
 
 const settingsSchema = z.object({
     playbackQuality: z.enum(["original", "high", "medium", "low"]).optional(),
+    loudnessMode: z.enum(["off", "track", "album", "auto"]).optional(),
     shareOnlinePresence: z.boolean().optional(),
     shareListeningStatus: z.boolean().optional(),
     wifiOnly: z.boolean().optional(),
@@ -129,6 +130,9 @@ router.get("/", async (req, res) => {
  *               playbackQuality:
  *                 type: string
  *                 enum: [original, high, medium, low]
+ *               loudnessMode:
+ *                 type: string
+ *                 enum: [off, track, album, auto]
  *               shareOnlinePresence:
  *                 type: boolean
  *               shareListeningStatus:

@@ -25,6 +25,8 @@ import {
     parseOffsetParam,
     parseYearParam,
     shuffleInPlace,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
     SUBSONIC_MUSIC_FOLDER_ID,
     type AlbumListRecord,
@@ -354,6 +356,7 @@ export async function handleGetSongsByGenre(
                           fileSize: true,
                           mime: true,
                           filePath: true,
+                          ...SONG_LOUDNESS_TRACK_SELECT,
                           album: {
                               select: {
                                   id: true,
@@ -362,6 +365,7 @@ export async function handleGetSongsByGenre(
                                   coverUrl: true,
                                   genres: true,
                                   userGenres: true,
+                                  ...SONG_LOUDNESS_ALBUM_SELECT,
                                   artist: {
                                       select: {
                                           id: true,
@@ -480,6 +484,7 @@ export async function handleGetRandomSongs(
                 fileSize: true,
                 mime: true,
                 filePath: true,
+                ...SONG_LOUDNESS_TRACK_SELECT,
                 album: {
                     select: {
                         id: true,
@@ -488,6 +493,7 @@ export async function handleGetRandomSongs(
                         coverUrl: true,
                         genres: true,
                         userGenres: true,
+                        ...SONG_LOUDNESS_ALBUM_SELECT,
                         artist: {
                             select: {
                                 id: true,
@@ -584,6 +590,7 @@ async function buildStarredPayload(userId: string): Promise<{
                     fileSize: true,
                     mime: true,
                     filePath: true,
+                    ...SONG_LOUDNESS_TRACK_SELECT,
                     album: {
                         select: {
                             id: true,
@@ -592,6 +599,7 @@ async function buildStarredPayload(userId: string): Promise<{
                             coverUrl: true,
                             genres: true,
                             userGenres: true,
+                            ...SONG_LOUDNESS_ALBUM_SELECT,
                             artist: {
                                 select: {
                                     id: true,

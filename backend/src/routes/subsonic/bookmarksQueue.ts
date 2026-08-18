@@ -19,6 +19,8 @@ import {
     parseBookmarkPositionOrError,
     parseEntityIdOrNotFound,
     parseTrackIdsPreserveOrder,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
 
@@ -131,6 +133,7 @@ export async function handleGetPlayQueue(
                           fileSize: true,
                           mime: true,
                           filePath: true,
+                          ...SONG_LOUDNESS_TRACK_SELECT,
                           album: {
                               select: {
                                   id: true,
@@ -139,6 +142,7 @@ export async function handleGetPlayQueue(
                                   coverUrl: true,
                                   genres: true,
                                   userGenres: true,
+                                  ...SONG_LOUDNESS_ALBUM_SELECT,
                                   artist: {
                                       select: {
                                           id: true,

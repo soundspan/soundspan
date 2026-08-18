@@ -24,7 +24,7 @@ Playback volume varies wildly across a mixed library (quiet 90s masters next to 
 
 ### Subsonic surface
 
-- Implement the OpenSubsonic **ReplayGain extension**: `replayGain` object (trackGain, albumGain, trackPeak, albumPeak) on song child elements; advertise in `getOpenSubsonicExtensions`. Update `docs/OPENSUBSONIC_COMPATIBILITY.md`. This alone upgrades Symfonium-class clients.
+- [x] Implement the OpenSubsonic **ReplayGain extension**: `replayGain` object (trackGain, albumGain, trackPeak, albumPeak) on song child elements; advertise in `getOpenSubsonicExtensions`. Update `docs/OPENSUBSONIC_COMPATIBILITY.md`. This alone upgrades Symfonium-class clients (shipped).
 
 ## Part 2 — Smart transitions
 

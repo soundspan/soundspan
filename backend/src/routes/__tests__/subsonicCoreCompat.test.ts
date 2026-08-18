@@ -54,6 +54,7 @@ jest.mock("../../services/audioStreaming", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        loudnessTargetLufs: -18,
         music: {
             musicPath: "/music",
             transcodeCachePath: "/tmp/soundspan-cache",
@@ -319,6 +320,16 @@ describe("subsonic core compatibility handlers", () => {
                         location: { in: ["LIBRARY", "FEDERATED"] },
                     },
                 },
+                select: expect.objectContaining({
+                    loudnessLufs: true,
+                    truePeakDb: true,
+                    album: expect.objectContaining({
+                        select: expect.objectContaining({
+                            albumLoudnessLufs: true,
+                            albumTruePeakDb: true,
+                        }),
+                    }),
+                }),
                 take: 5000,
             }),
         );
@@ -617,6 +628,7 @@ describe("subsonic core compatibility handlers", () => {
                     expect.objectContaining({
                         name: "apiKeyAuthentication",
                     }),
+                    { name: "replayGain", versions: [1] },
                 ]),
             }),
             "json",

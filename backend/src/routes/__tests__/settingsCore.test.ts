@@ -190,6 +190,7 @@ const mockClearUserQualityCache =
 const existingSettings = {
     userId: "user-1",
     playbackQuality: "high",
+    loudnessMode: "auto",
     shareOnlinePresence: true,
     shareListeningStatus: false,
     wifiOnly: true,
@@ -210,6 +211,7 @@ describe("settings routes integration", () => {
         mockUserSettingsFindUnique.mockResolvedValue(existingSettings);
         mockUserSettingsCreate.mockImplementation(async ({ data }) => ({
             id: "settings-created",
+            loudnessMode: "auto",
             ...data,
         }));
         mockUserSettingsUpsert.mockImplementation(
@@ -247,6 +249,7 @@ describe("settings routes integration", () => {
             hasProfilePicture: true,
         });
         expect(mockUserSettingsCreate).not.toHaveBeenCalled();
+        expect(res.body.loudnessMode).toBe("auto");
         expect(mockUserFindUnique).toHaveBeenCalledWith({
             where: { id: "user-1" },
             select: { displayName: true, profilePicture: false },
@@ -279,6 +282,7 @@ describe("settings routes integration", () => {
             expect.objectContaining({
                 userId: "user-1",
                 playbackQuality: "medium",
+                loudnessMode: "auto",
                 displayName: null,
                 hasProfilePicture: false,
             }),

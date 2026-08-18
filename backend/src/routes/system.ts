@@ -55,6 +55,11 @@ const router = Router();
  *                             pending: { type: integer, minimum: 0 }
  *                             failed: { type: integer, minimum: 0 }
  *                         cutoverThreshold: { type: number, minimum: 0, maximum: 1 }
+ *                 loudnessTargetLufs:
+ *                   type: number
+ *                   minimum: -30
+ *                   maximum: -10
+ *                   description: Server reference loudness used for normalization metadata.
  *       401:
  *         description: Not authenticated
  */
@@ -67,6 +72,7 @@ router.get("/features", requireAuth, async (req, res) => {
             discovery: config.features.discovery,
             autoPlaylists: config.features.autoPlaylists,
             federation: config.features.federation,
+            loudnessTargetLufs: config.loudnessTargetLufs,
         });
     } catch (error: any) {
         logger.error("Feature detection error:", error);

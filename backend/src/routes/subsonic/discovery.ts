@@ -16,6 +16,8 @@ import {
     LIBRARY_TRACK_WHERE,
     parseCountParam,
     parseEntityIdOrNotFound,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
     SUBSONIC_MUSIC_FOLDER_ID,
 } from "./shared";
@@ -117,6 +119,7 @@ const similarSongTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
     fileSize: true,
     mime: true,
     filePath: true,
+    ...SONG_LOUDNESS_TRACK_SELECT,
     album: {
         select: {
             id: true,
@@ -125,6 +128,7 @@ const similarSongTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
             coverUrl: true,
             genres: true,
             userGenres: true,
+            ...SONG_LOUDNESS_ALBUM_SELECT,
             artist: {
                 select: {
                     id: true,
@@ -626,6 +630,7 @@ export async function handleGetTopSongs(
                 fileSize: true,
                 mime: true,
                 filePath: true,
+                ...SONG_LOUDNESS_TRACK_SELECT,
                 album: {
                     select: {
                         id: true,
@@ -634,6 +639,7 @@ export async function handleGetTopSongs(
                         coverUrl: true,
                         genres: true,
                         userGenres: true,
+                        ...SONG_LOUDNESS_ALBUM_SELECT,
                         artist: {
                             select: {
                                 id: true,

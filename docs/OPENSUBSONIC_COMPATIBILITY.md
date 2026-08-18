@@ -34,6 +34,7 @@ Create app passwords under **Settings > Sign-in & Security**. Each generated sec
 
 - `apiKeyAuthentication`
 - `formPost`
+- `replayGain`
 - `songLyrics`
 - `transcodeOffset`
 - `songPlayedDate`
@@ -48,6 +49,11 @@ through their existing routes; read endpoints route POST through an explicit
 read-only allowlist. Form-body parameters never override same-named URL query
 parameters, and credentials submitted in the body are never copied into the
 request URL (so they cannot reach URL-based logging).
+
+`replayGain` gains are computed against the server's configurable
+`LOUDNESS_TARGET_LUFS` (default `-18` LUFS, the ReplayGain 2 reference).
+Tracks analyzed before the loudness rollout omit the object until the backfill
+measures them. Peaks are linear true-peak amplitudes.
 
 ## Implemented Endpoint Surface
 

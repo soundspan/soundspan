@@ -48,6 +48,7 @@ export function handleGetOpenSubsonicExtensions(
             openSubsonicExtensions: [
                 { name: "apiKeyAuthentication", versions: [1] },
                 { name: "formPost", versions: [1] },
+                { name: "replayGain", versions: [1] },
                 { name: "songLyrics", versions: [1] },
                 { name: "transcodeOffset", versions: [1] },
                 { name: "songPlayedDate", versions: [1] },

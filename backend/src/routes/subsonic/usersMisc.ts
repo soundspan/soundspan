@@ -10,6 +10,8 @@ import {
     formatSongForSubsonic,
     getRequestContext,
     LIBRARY_TRACK_WHERE,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
 
@@ -81,6 +83,7 @@ export async function handleGetNowPlaying(
                 fileSize: true,
                 mime: true,
                 filePath: true,
+                ...SONG_LOUDNESS_TRACK_SELECT,
                 album: {
                     select: {
                         id: true,
@@ -89,6 +92,7 @@ export async function handleGetNowPlaying(
                         coverUrl: true,
                         genres: true,
                         userGenres: true,
+                        ...SONG_LOUDNESS_ALBUM_SELECT,
                         artist: {
                             select: {
                                 id: true,

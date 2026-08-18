@@ -100,6 +100,7 @@ describe("settings displayName compatibility", () => {
         mockUserSettingsFindUnique.mockResolvedValue({
             userId: "user-1",
             playbackQuality: "high",
+            loudnessMode: "auto",
             shareOnlinePresence: false,
             shareListeningStatus: false,
             wifiOnly: false,
@@ -120,9 +121,55 @@ describe("settings displayName compatibility", () => {
             expect.objectContaining({
                 userId: "user-1",
                 displayName: "Jane Doe",
+                loudnessMode: "auto",
             }),
         );
         expect(mockUserSettingsCreate).not.toHaveBeenCalled();
+    });
+
+    it.each(["off", "track", "album", "auto"])(
+        "accepts the %s loudness mode",
+        async (loudnessMode) => {
+            mockUserSettingsUpsert.mockResolvedValue({
+                userId: "user-1",
+                loudnessMode,
+            });
+            mockUserFindUnique.mockResolvedValue({ displayName: "Jane Doe" });
+            const req = {
+                user: { id: "user-1" },
+                body: { loudnessMode },
+            } as any;
+            const res = createRes();
+
+            await updateSettingsHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(mockUserSettingsUpsert).toHaveBeenCalledWith({
+                where: { userId: "user-1" },
+                create: { userId: "user-1", loudnessMode },
+                update: { loudnessMode },
+            });
+            expect(res.body).toEqual(expect.objectContaining({ loudnessMode }));
+        },
+    );
+
+    it("rejects an unsupported loudness mode", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: { loudnessMode: "playlist" },
+        } as any;
+        const res = createRes();
+
+        await updateSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                error: "Invalid settings",
+                details: expect.any(Array),
+            }),
+        );
+        expect(mockUserSettingsUpsert).not.toHaveBeenCalled();
     });
 
     it("creates default settings when settings are missing", async () => {

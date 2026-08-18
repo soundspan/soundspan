@@ -20,6 +20,8 @@ import {
     SEARCH_ALBUM_MAX_COUNT,
     SEARCH_ARTIST_MAX_COUNT,
     SEARCH_SONG_MAX_COUNT,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
 
@@ -210,6 +212,7 @@ export async function handleSearch3(
                     fileSize: true,
                     mime: true,
                     filePath: true,
+                    ...SONG_LOUDNESS_TRACK_SELECT,
                     album: {
                         select: {
                             id: true,
@@ -218,6 +221,7 @@ export async function handleSearch3(
                             coverUrl: true,
                             genres: true,
                             userGenres: true,
+                            ...SONG_LOUDNESS_ALBUM_SELECT,
                             artist: {
                                 select: {
                                     id: true,
@@ -459,6 +463,7 @@ async function handleSearchLike(
                     fileSize: true,
                     mime: true,
                     filePath: true,
+                    ...SONG_LOUDNESS_TRACK_SELECT,
                     album: {
                         select: {
                             id: true,
@@ -467,6 +472,7 @@ async function handleSearchLike(
                             coverUrl: true,
                             genres: true,
                             userGenres: true,
+                            ...SONG_LOUDNESS_ALBUM_SELECT,
                             artist: {
                                 select: {
                                     id: true,

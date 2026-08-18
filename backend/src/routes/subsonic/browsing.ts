@@ -22,6 +22,8 @@ import {
     LIBRARY_TRACK_WHERE,
     parseEntityIdOrNotFound,
     parseTimestampParam,
+    SONG_LOUDNESS_ALBUM_SELECT,
+    SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
     SUBSONIC_MUSIC_FOLDER_ID,
 } from "./shared";
@@ -383,6 +385,7 @@ export async function handleGetAlbum(
                 coverUrl: true,
                 genres: true,
                 userGenres: true,
+                ...SONG_LOUDNESS_ALBUM_SELECT,
                 artist: {
                     select: {
                         id: true,
@@ -400,6 +403,7 @@ export async function handleGetAlbum(
                         fileSize: true,
                         mime: true,
                         filePath: true,
+                        ...SONG_LOUDNESS_TRACK_SELECT,
                     },
                     orderBy: [{ discNo: "asc" }, { trackNo: "asc" }],
                 },
@@ -512,6 +516,7 @@ export async function handleGetSong(
                 fileSize: true,
                 mime: true,
                 filePath: true,
+                ...SONG_LOUDNESS_TRACK_SELECT,
                 album: {
                     select: {
                         id: true,
@@ -520,6 +525,7 @@ export async function handleGetSong(
                         coverUrl: true,
                         genres: true,
                         userGenres: true,
+                        ...SONG_LOUDNESS_ALBUM_SELECT,
                         artist: {
                             select: {
                                 id: true,
@@ -871,6 +877,7 @@ async function getAlbumMusicDirectory(
             coverUrl: true,
             genres: true,
             userGenres: true,
+            ...SONG_LOUDNESS_ALBUM_SELECT,
             artist: {
                 select: {
                     id: true,
@@ -888,6 +895,7 @@ async function getAlbumMusicDirectory(
                     fileSize: true,
                     mime: true,
                     filePath: true,
+                    ...SONG_LOUDNESS_TRACK_SELECT,
                 },
                 orderBy: [{ discNo: "asc" }, { trackNo: "asc" }, { id: "asc" }],
             },
