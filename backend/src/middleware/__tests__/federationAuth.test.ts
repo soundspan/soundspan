@@ -47,6 +47,7 @@ function peer(overrides: Record<string, unknown> = {}) {
         name: "Peer One",
         direction: "HOST",
         scopes: ["library:read", "stream:read"],
+        capabilities: ["track-attrs-loudness", "future-capability"],
         inboundStatus: "ACTIVE",
         lastSeenAt: new Date("2026-08-15T10:00:00.000Z"),
         maxConcurrentStreams: null,
@@ -200,6 +201,7 @@ describe("requireFederationPeer", () => {
             id: "peer-1",
             name: "Peer One",
             scopes: ["library:read", "stream:read"],
+            capabilities: ["track-attrs-loudness"],
             maxConcurrentStreams: null,
             maxStreamKbps: null,
         });

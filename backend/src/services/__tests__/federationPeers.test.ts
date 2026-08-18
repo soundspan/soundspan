@@ -98,6 +98,7 @@ const manifest = {
     mediaTypes: ["artist", "album", "track"],
     counts: { artists: 1, albums: 2, tracks: 3 },
     embeddingsAvailable: true,
+    capabilities: ["track-attrs-loudness"],
 };
 
 describe("federation peer credentials", () => {
@@ -334,6 +335,7 @@ describe("federation consumer peers", () => {
                 inboundStatus: null,
                 outboundStatus: "ACTIVE",
                 catalogEpoch: "epoch-9",
+                capabilities: ["track-attrs-loudness"],
                 createdById: "admin-1",
                 lastSeenAt: expect.any(Date),
             }),
@@ -719,6 +721,39 @@ describe("federation pairing codes", () => {
             data: { usedAt: new Date("2026-08-15T12:00:00.000Z") },
         });
         expect(result?.token).toMatch(/^[0-9a-f]{64}$/);
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ capabilities: [] }),
+            }),
+        );
+    });
+
+    it("persists capabilities advertised while consuming a pairing code", async () => {
+        prisma.federationPairingCode.findUnique.mockResolvedValue({
+            id: "code-1",
+            code: "ABCDEFGH",
+            createdById: "admin-1",
+            scopes: ["library:read"],
+            expiresAt: new Date(Date.now() + 60_000),
+            usedAt: null,
+        });
+
+        await consumePairingCode(
+            {
+                code: "ABCDEFGH",
+                name: "Peer",
+                capabilities: ["track-attrs-loudness"],
+            },
+            new Date("2026-08-15T12:00:00.000Z"),
+        );
+
+        expect(prisma.federationPeer.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    capabilities: ["track-attrs-loudness"],
+                }),
+            }),
+        );
     });
 
     it("does not mint a token when another request consumed the code first", async () => {

@@ -5,7 +5,9 @@ import type {
     FederationMediaType,
     FederationPodcastAttributes,
     FederationTrackAttributes,
+    FederationCapability,
 } from "@soundspan/media-metadata-contract";
+import { FEDERATION_CAPABILITY_VALUES } from "@soundspan/media-metadata-contract";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { recordFederationEmbeddingExportOutcome } from "../metrics";
@@ -253,6 +255,7 @@ function albumEnvelope(row: AlbumRow): FederationMediaItemEnvelope {
 
 function trackAudioFeatures(
     row: TrackRow,
+    peerCapabilities: readonly FederationCapability[],
 ): Pick<
     FederationTrackAttributes,
     keyof Omit<
@@ -269,6 +272,7 @@ function trackAudioFeatures(
         | "embedding"
     >
 > {
+    const acceptsLoudness = peerCapabilities.includes("track-attrs-loudness");
     return {
         bpm: row.bpm,
         beatsCount: row.beatsCount,
@@ -277,11 +281,12 @@ function trackAudioFeatures(
         keyStrength: row.keyStrength,
         energy: row.energy,
         loudness: row.loudness,
-        // Old peers reject unknown keys, so omit new fields from unmeasured tracks.
-        ...(row.loudnessLufs !== null
+        ...(acceptsLoudness && row.loudnessLufs !== null
             ? { loudnessLufs: row.loudnessLufs }
             : {}),
-        ...(row.truePeakDb !== null ? { truePeakDb: row.truePeakDb } : {}),
+        ...(acceptsLoudness && row.truePeakDb !== null
+            ? { truePeakDb: row.truePeakDb }
+            : {}),
         dynamicRange: row.dynamicRange,
         danceability: row.danceability,
         valence: row.valence,
@@ -306,6 +311,7 @@ function trackAudioFeatures(
 function trackEnvelope(
     row: TrackRow,
     embedding?: number[],
+    peerCapabilities: readonly FederationCapability[] = [],
 ): FederationMediaItemEnvelope {
     return {
         id: row.id,
@@ -322,7 +328,7 @@ function trackEnvelope(
             recordingMbid: row.recordingMbid,
             isrc: row.isrc,
             audioHash: row.audioHash,
-            ...trackAudioFeatures(row),
+            ...trackAudioFeatures(row, peerCapabilities),
             ...(embedding ? { embedding } : {}),
         } satisfies FederationTrackAttributes,
     };
@@ -522,6 +528,7 @@ export async function getFederationCatalogItems(input: {
     includeEmbeddings: boolean;
     peerId?: string;
     acceptsEmbeddingSpace?: boolean;
+    peerCapabilities?: readonly FederationCapability[];
 }) {
     if (input.mediaType === "artist") {
         const rows = await loadArtistItems(input.cursor, input.limit);
@@ -551,7 +558,11 @@ export async function getFederationCatalogItems(input: {
     });
     const body = itemPage(
         rows.map((row) =>
-            trackEnvelope(row, embeddingExport.embeddings.get(row.id)),
+            trackEnvelope(
+                row,
+                embeddingExport.embeddings.get(row.id),
+                input.peerCapabilities,
+            ),
         ),
         input.limit,
     );
@@ -570,6 +581,7 @@ export async function getFederationCatalogItem(input: {
     includeEmbeddings: boolean;
     peerId?: string;
     acceptsEmbeddingSpace?: boolean;
+    peerCapabilities?: readonly FederationCapability[];
 }): Promise<FederationCatalogResponse<FederationMediaItemEnvelope> | null> {
     if (input.mediaType === "artist") {
         const row = await prisma.artist.findFirst({
@@ -609,7 +621,11 @@ export async function getFederationCatalogItem(input: {
         peerId: input.peerId,
         acceptsEmbeddingSpace: input.acceptsEmbeddingSpace,
     });
-    const body = trackEnvelope(row, embeddingExport.embeddings.get(row.id));
+    const body = trackEnvelope(
+        row,
+        embeddingExport.embeddings.get(row.id),
+        input.peerCapabilities,
+    );
     return catalogResponse(
         body,
         carriesEmbeddings([body]) ? embeddingExport.embeddingSpace : undefined,
@@ -643,6 +659,7 @@ export async function getFederationManifest(
         ] as FederationMediaType[],
         counts: { artists, albums, tracks, podcasts, audiobooks },
         embeddingsAvailable,
+        capabilities: [...FEDERATION_CAPABILITY_VALUES],
         serverTime: now,
     };
 }
@@ -793,6 +810,7 @@ function compareDeltaEvents(left: DeltaEvent, right: DeltaEvent): number {
 function mergeDeltaEvents(
     rows: DeltaRows,
     embeddingExport: EmbeddingExport,
+    peerCapabilities: readonly FederationCapability[],
 ): DeltaEvent[] {
     return [
         ...rows.artists.map((row) => ({
@@ -811,6 +829,7 @@ function mergeDeltaEvents(
             envelope: trackEnvelope(
                 row,
                 embeddingExport.embeddings.get(row.id),
+                peerCapabilities,
             ),
         })),
         ...rows.podcasts.map((row) => ({
@@ -843,6 +862,7 @@ async function buildDeltaEvents(input: {
     includeEmbeddings: boolean;
     peerId?: string;
     acceptsEmbeddingSpace?: boolean;
+    peerCapabilities?: readonly FederationCapability[];
 }): Promise<{
     events: DeltaEvent[];
     embeddingSpace?: FederationEmbeddingSpaceIdentity;
@@ -865,6 +885,7 @@ async function buildDeltaEvents(input: {
     const events = mergeDeltaEvents(
         { artists, albums, tracks, podcasts, audiobooks, tombstones },
         embeddingExport,
+        input.peerCapabilities ?? [],
     );
     return { events, embeddingSpace: embeddingExport.embeddingSpace };
 }
@@ -878,6 +899,7 @@ export async function getFederationCatalogDelta(input: {
     includeEmbeddings: boolean;
     peerId?: string;
     acceptsEmbeddingSpace?: boolean;
+    peerCapabilities?: readonly FederationCapability[];
     now?: Date;
 }) {
     const identity = await ensureFederationIdentity();

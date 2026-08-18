@@ -29,6 +29,10 @@ import {
     FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
     FEDERATION_EMBEDDING_SPACE_HEADER,
 } from "../services/federationEmbeddingSpaceHeader";
+import {
+    federationCapabilitiesSchema,
+    FEDERATION_CAPABILITY_VALUES,
+} from "../services/federationCapabilities";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import {
     consumeFederationPairingRequest,
@@ -89,6 +93,7 @@ const pairingSchema = z
         reciprocalPairingCode: pairingCodeValueSchema.optional(),
         reciprocalScopes: pairingScopesSchema.optional(),
         requestedScopes: pairingScopesSchema.optional(),
+        capabilities: federationCapabilitiesSchema,
     })
     .refine(
         (value) =>
@@ -115,6 +120,7 @@ function embeddingExportRequest(req: Request) {
     return {
         includeEmbeddings: includesEmbeddingScope(req),
         peerId: peer.id,
+        peerCapabilities: peer.capabilities,
         acceptsEmbeddingSpace: acceptsFederationEmbeddingSpace(
             req.headers[FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER.toLowerCase()],
         ),
@@ -154,7 +160,10 @@ router.post(
         const result = await consumeFederationPairingRequest(parsed.data);
         if (!result)
             return sendRouteError(res, 400, "Invalid or expired pairing code");
-        return res.status(201).json(result);
+        return res.status(201).json({
+            ...result,
+            capabilities: [...FEDERATION_CAPABILITY_VALUES],
+        });
     }),
 );
 

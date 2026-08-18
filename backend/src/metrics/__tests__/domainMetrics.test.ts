@@ -2,6 +2,19 @@ import { Registry } from "prom-client";
 import { createDomainMetrics } from "../domainMetrics";
 
 describe("domain metrics", () => {
+    it("registers the closed federation sync skip reason", async () => {
+        const registry = new Registry();
+        const metrics = createDomainMetrics(registry);
+
+        metrics.federationSyncSkips.inc({ reason: "unknown_key_stripped" }, 2);
+
+        const exposition = await registry.metrics();
+        expect(exposition).toContain(
+            "# HELP soundspan_federation_sync_skips_total",
+        );
+        expect(exposition).toContain('reason="unknown_key_stripped"} 2');
+    });
+
     it("registers bounded federation embedding page outcomes", async () => {
         const registry = new Registry();
         const metrics = createDomainMetrics(registry);

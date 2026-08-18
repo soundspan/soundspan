@@ -67,6 +67,13 @@ export interface CanonicalMediaSearchResult {
 export type FederationMediaType =
     "artist" | "album" | "track" | "podcast" | "audiobook";
 
+/** Complete bounded vocabulary of federation protocol capabilities. */
+export const FEDERATION_CAPABILITY_VALUES = ["track-attrs-loudness"] as const;
+
+/** Federation protocol capability understood by this release. */
+export type FederationCapability =
+    (typeof FEDERATION_CAPABILITY_VALUES)[number];
+
 /** Source discriminator emitted by unified track response serializers. */
 export type UnifiedTrackSource = "local" | "tidal" | "youtube" | "federated";
 

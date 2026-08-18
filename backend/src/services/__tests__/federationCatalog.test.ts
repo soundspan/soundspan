@@ -196,6 +196,7 @@ describe("federation catalog exports", () => {
                 audiobooks: 6,
             },
             embeddingsAvailable: true,
+            capabilities: ["track-attrs-loudness"],
             serverTime: at,
         });
         expect(prisma.track.count).toHaveBeenCalledWith({
@@ -360,6 +361,7 @@ describe("federation catalog exports", () => {
             mediaType: "track",
             limit: 200,
             includeEmbeddings: true,
+            peerCapabilities: ["track-attrs-loudness"],
         });
 
         expect(albumResult.body.items[0]).toEqual(
@@ -437,6 +439,7 @@ describe("federation catalog exports", () => {
             mediaType: "track",
             limit: 200,
             includeEmbeddings: false,
+            peerCapabilities: ["track-attrs-loudness"],
         });
         const attributes = result.body.items[0].attributes;
 
@@ -444,20 +447,27 @@ describe("federation catalog exports", () => {
         expect("truePeakDb" in attributes).toBe(false);
     });
 
-    it("includes measured loudness attributes in exported tracks", async () => {
+    it("gates measured loudness attributes on the peer capability", async () => {
         prisma.track.findMany.mockResolvedValue([track("track-measured")]);
 
-        const result = await getFederationCatalogItems({
+        const withoutCapability = await getFederationCatalogItems({
             mediaType: "track",
             limit: 200,
             includeEmbeddings: false,
         });
-        const attributes = result.body.items[0].attributes;
+        const withCapability = await getFederationCatalogItems({
+            mediaType: "track",
+            limit: 200,
+            includeEmbeddings: false,
+            peerCapabilities: ["track-attrs-loudness"],
+        });
+        const legacyAttributes = withoutCapability.body.items[0].attributes;
+        const capableAttributes = withCapability.body.items[0].attributes;
 
-        expect("loudnessLufs" in attributes).toBe(true);
-        expect(attributes.loudnessLufs).toBe(-17.2);
-        expect("truePeakDb" in attributes).toBe(true);
-        expect(attributes.truePeakDb).toBe(-1.1);
+        expect("loudnessLufs" in legacyAttributes).toBe(false);
+        expect("truePeakDb" in legacyAttributes).toBe(false);
+        expect(capableAttributes.loudnessLufs).toBe(-17.2);
+        expect(capableAttributes.truePeakDb).toBe(-1.1);
     });
 
     it("serves embeddings to a headerless peer while the teacher space is active", async () => {

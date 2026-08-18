@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frontend component-test commands now fail fast with Node.js 24 upgrade
   guidance, and player hooks reject direct React Query imports that the harness
   cannot mock.
+- Federation now tolerates fields from newer peers and only sends fields that
+  each peer advertises it understands.
 
 ## [2.3.2] - 2026-08-18
 

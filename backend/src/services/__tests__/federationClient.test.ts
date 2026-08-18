@@ -2,6 +2,8 @@ process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY || "federation-client-test-key-123456";
 
 const axiosRequest = jest.fn();
+const recordFederationSyncSkip = jest.fn();
+const log = { warn: jest.fn() };
 
 jest.mock("axios", () => ({
     __esModule: true,
@@ -17,6 +19,11 @@ jest.mock("axios", () => ({
 jest.mock("../../utils/encryption", () => ({
     encrypt: jest.fn((value: string) => `v2:${value}`),
     decrypt: jest.fn((value: string) => value.replace(/^v2:/, "")),
+}));
+
+jest.mock("../../metrics", () => ({ recordFederationSyncSkip }));
+jest.mock("../../utils/logger", () => ({
+    logger: { child: jest.fn(() => log) },
 }));
 
 import {
@@ -43,6 +50,7 @@ const manifest = {
     mediaTypes: ["artist", "album", "track"],
     counts: { artists: 1, albums: 2, tracks: 3 },
     embeddingsAvailable: false,
+    capabilities: [],
     serverTime: "2026-08-15T12:00:00.000Z",
 };
 
@@ -212,6 +220,31 @@ describe("federation HTTP client", () => {
             mediaTypes: ["artist", "album", "track"],
             counts: { artists: 1, albums: 2, tracks: 3 },
         });
+    });
+
+    it("round-trips known capabilities and ignores unknown capability names", async () => {
+        const { capabilities: _capabilities, ...legacyManifest } = manifest;
+        axiosRequest
+            .mockResolvedValueOnce({
+                status: 200,
+                data: {
+                    ...manifest,
+                    capabilities: [
+                        "track-attrs-loudness",
+                        "future-track-attrs",
+                    ],
+                },
+            })
+            .mockResolvedValueOnce({ status: 200, data: legacyManifest });
+
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).resolves.toMatchObject({
+            capabilities: ["track-attrs-loudness"],
+        });
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).resolves.toMatchObject({ capabilities: [] });
     });
 
     it("fetches one catalog item by type and encoded id", async () => {
@@ -450,6 +483,49 @@ describe("federation HTTP client", () => {
             ],
             skippedInvalid: 0,
         });
+    });
+
+    it("strips and counts unknown track attributes without skipping the envelope", async () => {
+        const forwardPeer = { ...peer, id: "forward-compatible-peer" };
+        const item = {
+            ...trackEnvelope,
+            attributes: {
+                ...trackEnvelope.attributes,
+                futureTrackScore: 0.75,
+            },
+        };
+        axiosRequest
+            .mockResolvedValueOnce({
+                status: 200,
+                data: { items: [item], nextCursor: null },
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                data: { items: [item], nextCursor: null },
+            });
+
+        const client = createFederationClient(forwardPeer);
+        const first = await client.getCatalogItems("track");
+        await client.getCatalogItems("track");
+
+        expect(first.skippedInvalid).toBe(0);
+        expect(first.items).toHaveLength(1);
+        expect(first.items[0].attributes).not.toHaveProperty(
+            "futureTrackScore",
+        );
+        expect(recordFederationSyncSkip).toHaveBeenCalledTimes(2);
+        expect(recordFederationSyncSkip).toHaveBeenCalledWith(
+            "unknown_key_stripped",
+            1,
+        );
+        expect(log.warn).toHaveBeenCalledTimes(1);
+        expect(log.warn).toHaveBeenCalledWith(
+            "Stripped unknown federation track attribute keys",
+            {
+                peerId: "forward-compatible-peer",
+                keys: ["futureTrackScore"],
+            },
+        );
     });
 
     it.each([
@@ -789,6 +865,7 @@ describe("federation HTTP client", () => {
                 },
                 token: "paired-token",
                 reciprocalPeerId: "peer-3",
+                capabilities: ["track-attrs-loudness", "future-capability"],
             },
         });
 
@@ -803,11 +880,15 @@ describe("federation HTTP client", () => {
                 options: { retryDelayMs: 0 },
             }),
         ).resolves.toEqual(
-            expect.objectContaining({ reciprocalPeerId: "peer-3" }),
+            expect.objectContaining({
+                reciprocalPeerId: "peer-3",
+                capabilities: ["track-attrs-loudness"],
+            }),
         );
         expect(axiosRequest).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({
+                    capabilities: ["track-attrs-loudness"],
                     reciprocalPairingCode: "HGFEDCBA",
                     reciprocalScopes: ["library:read", "stream:read"],
                 }),

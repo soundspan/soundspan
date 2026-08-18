@@ -12,13 +12,20 @@ interface HealthCounts {
     offline: number;
 }
 
-async function markPeerActive(peer: {
-    id: string;
-    outboundStatus: string | null;
-}): Promise<void> {
+async function markPeerActive(
+    peer: {
+        id: string;
+        outboundStatus: string | null;
+    },
+    capabilities: readonly string[],
+): Promise<void> {
     await prisma.federationPeer.updateMany({
         where: { id: peer.id, outboundStatus: { not: "REVOKED" } },
-        data: { outboundStatus: "ACTIVE", lastSeenAt: new Date() },
+        data: {
+            outboundStatus: "ACTIVE",
+            lastSeenAt: new Date(),
+            capabilities: [...capabilities],
+        },
     });
     if (peer.outboundStatus !== "ACTIVE") {
         log.info(
@@ -66,10 +73,10 @@ export async function processFederationHealth(): Promise<HealthCounts> {
         if (!peer) break;
         counts.checked += 1;
         try {
-            await createFederationClient(peer, {
+            const manifest = await createFederationClient(peer, {
                 allowPrivatePeers: config.federation.allowPrivatePeers,
             }).getManifest();
-            await markPeerActive(peer);
+            await markPeerActive(peer, manifest.capabilities);
             counts.online += 1;
         } catch (_error: unknown) {
             await markPeerOffline(peer);

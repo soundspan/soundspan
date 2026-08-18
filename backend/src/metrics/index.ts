@@ -1,5 +1,8 @@
 import { collectDefaultMetrics, Registry } from "prom-client";
-import { createDomainMetrics } from "./domainMetrics";
+import {
+    createDomainMetrics,
+    type FederationSyncSkipReason,
+} from "./domainMetrics";
 import { createHttpRequestMetrics } from "./httpMetrics";
 import { createLoudnessMetrics } from "./loudnessMetrics";
 import {
@@ -68,6 +71,14 @@ export function recordFederationSyncOutcome(
     outcome: "success" | "failure",
 ): void {
     domainMetrics.federationSyncs.inc({ outcome });
+}
+
+/** Records bounded federation data discarded during compatibility parsing. */
+export function recordFederationSyncSkip(
+    reason: FederationSyncSkipReason,
+    count = 1,
+): void {
+    domainMetrics.federationSyncSkips.inc({ reason }, count);
 }
 
 /** Records one final vibe-provider request outcome and duration. */

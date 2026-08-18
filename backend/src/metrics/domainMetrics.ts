@@ -1,10 +1,14 @@
 import { Counter, type Registry } from "prom-client";
 
+/** Closed reason vocabulary for federation items not ingested as received. */
+export type FederationSyncSkipReason = "unknown_key_stripped";
+
 /** Domain counters owned by a process-local Prometheus registry. */
 export interface DomainMetrics {
     browseImageCacheRequests: Counter<"result">;
     transcodeCacheRequests: Counter<"result">;
     federationSyncs: Counter<"outcome">;
+    federationSyncSkips: Counter<"reason">;
     federationEmbeddingPages: Counter<"outcome">;
     federationEmbeddingExports: Counter<"outcome">;
 }
@@ -28,6 +32,12 @@ export function createDomainMetrics(registry: Registry): DomainMetrics {
             name: "soundspan_federation_syncs_total",
             help: "Federation peer sync processor runs by outcome.",
             labelNames: ["outcome"] as const,
+            registers: [registry],
+        }),
+        federationSyncSkips: new Counter({
+            name: "soundspan_federation_sync_skips_total",
+            help: "Federation sync fields or items not ingested as received.",
+            labelNames: ["reason"] as const,
             registers: [registry],
         }),
         federationEmbeddingPages: new Counter({

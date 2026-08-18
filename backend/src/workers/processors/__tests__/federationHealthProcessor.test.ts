@@ -40,7 +40,10 @@ describe("federation peer health processor", () => {
         jest.clearAllMocks();
         prisma.federationPeer.findMany.mockResolvedValue([{ ...peer }]);
         prisma.federationPeer.updateMany.mockResolvedValue({ count: 1 });
-        getManifest.mockResolvedValue({ catalogEpoch: "epoch-1" });
+        getManifest.mockResolvedValue({
+            catalogEpoch: "epoch-1",
+            capabilities: ["track-attrs-loudness"],
+        });
     });
 
     it("marks successful peers active and refreshes lastSeenAt", async () => {
@@ -51,7 +54,11 @@ describe("federation peer health processor", () => {
         });
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
-            data: { outboundStatus: "ACTIVE", lastSeenAt: expect.any(Date) },
+            data: {
+                outboundStatus: "ACTIVE",
+                lastSeenAt: expect.any(Date),
+                capabilities: ["track-attrs-loudness"],
+            },
         });
         expect(log.info).not.toHaveBeenCalled();
     });
@@ -93,7 +100,11 @@ describe("federation peer health processor", () => {
         );
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
-            data: { outboundStatus: "ACTIVE", lastSeenAt: expect.any(Date) },
+            data: {
+                outboundStatus: "ACTIVE",
+                lastSeenAt: expect.any(Date),
+                capabilities: ["track-attrs-loudness"],
+            },
         });
         expect(prisma.federationPeer.updateMany).not.toHaveBeenCalledWith(
             expect.objectContaining({

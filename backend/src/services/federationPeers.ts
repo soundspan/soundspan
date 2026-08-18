@@ -19,6 +19,7 @@ import {
     decryptFederationOutboundToken,
     encryptFederationOutboundToken,
 } from "./federationCredentialCipher";
+import type { FederationCapability } from "./federationCapabilities";
 import { removeReplacementCacheFiles } from "./trackReplacement";
 
 export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
@@ -62,6 +63,7 @@ export interface CreateHostPeerInput {
     createdById: string;
     scopes: FederationScope[];
     baseUrl?: string;
+    capabilities?: FederationCapability[];
 }
 
 /** Validated administrator-controlled peer behavior settings. */
@@ -77,6 +79,7 @@ export interface PairingConsumeInput {
     name: string;
     baseUrl?: string;
     requestedScopes?: FederationScope[];
+    capabilities?: FederationCapability[];
 }
 
 /** A normalized active consumer URL is already linked. */
@@ -178,6 +181,7 @@ async function createPeerWithClient(
             baseUrl: input.baseUrl,
             credentialHash: credential.credentialHash,
             scopes: input.scopes,
+            capabilities: input.capabilities ?? [],
             inboundStatus: "ACTIVE",
             outboundStatus: null,
             createdById: input.createdById,
@@ -331,6 +335,7 @@ async function persistConsumerLink(
         outboundStatus: "ACTIVE" as const,
         lastSeenAt: new Date(),
         catalogEpoch: manifest.catalogEpoch,
+        capabilities: manifest.capabilities,
     };
     if (upgrade) {
         return prisma.federationPeer.update({
@@ -408,6 +413,7 @@ export async function createBothFederationPeer(
             outboundStatus: "ACTIVE",
             lastSeenAt: new Date(),
             catalogEpoch: manifest.catalogEpoch,
+            capabilities: manifest.capabilities,
             createdById: input.createdById,
         },
         select: publicPeerSelect,
@@ -582,6 +588,7 @@ export async function consumePairingCode(
             baseUrl: input.baseUrl,
             createdById: code.createdById,
             scopes,
+            capabilities: input.capabilities,
         });
     });
 }

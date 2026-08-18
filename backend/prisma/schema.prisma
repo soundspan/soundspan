@@ -493,6 +493,7 @@ model FederationPeer {
   /// AES-GCM v2 envelope; startup backfill encrypts legacy non-v2 plaintext.
   outboundToken  String?
   scopes         String[]
+  capabilities   String[]      @default([])
   inboundStatus  PeerStatus?
   outboundStatus PeerStatus?
   lastSeenAt     DateTime?

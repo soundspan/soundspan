@@ -7,6 +7,10 @@ import {
 import { hashApiKey } from "../utils/apiKeyHash";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import {
+    federationCapabilitiesSchema,
+    type FederationCapability,
+} from "../services/federationCapabilities";
 
 const authLogger = logger.child("FederationAuth");
 const LAST_SEEN_THROTTLE_MS = 60_000;
@@ -19,6 +23,7 @@ declare global {
                 id: string;
                 name: string;
                 scopes: string[];
+                capabilities: FederationCapability[];
                 maxConcurrentStreams: number | null;
                 maxStreamKbps: number | null;
             };
@@ -31,6 +36,7 @@ type AuthPeer = {
     name: string;
     direction: string;
     scopes: FederationScope[];
+    capabilities: FederationCapability[];
     inboundStatus: string | null;
     lastSeenAt: Date | null;
     maxConcurrentStreams: number | null;
@@ -52,6 +58,7 @@ async function resolvePeer(token: string): Promise<AuthPeer | null> {
             name: true,
             direction: true,
             scopes: true,
+            capabilities: true,
             inboundStatus: true,
             lastSeenAt: true,
             maxConcurrentStreams: true,
@@ -60,7 +67,12 @@ async function resolvePeer(token: string): Promise<AuthPeer | null> {
     });
     if (!peer) return null;
     const scopes = parseFederationScopes(peer.scopes);
-    return scopes ? { ...peer, scopes } : null;
+    const capabilities = federationCapabilitiesSchema.safeParse(
+        peer.capabilities,
+    );
+    return scopes && capabilities.success
+        ? { ...peer, scopes, capabilities: capabilities.data }
+        : null;
 }
 
 async function updateLastSeen(peer: AuthPeer, now: Date): Promise<void> {
@@ -108,6 +120,7 @@ export function requireFederationPeer(
             id: peer.id,
             name: peer.name,
             scopes: peer.scopes,
+            capabilities: peer.capabilities,
             maxConcurrentStreams: peer.maxConcurrentStreams,
             maxStreamKbps: peer.maxStreamKbps,
         };

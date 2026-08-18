@@ -2,12 +2,18 @@ import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { BlockList, isIP } from "node:net";
 import pLimit from "p-limit";
 import { z } from "zod";
+import { recordFederationSyncSkip } from "../metrics";
+import { logger } from "../utils/logger";
 import {
     FEDERATION_SCOPE_VALUES,
     type FederationScope,
 } from "../utils/federationScopes";
 import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
 import { decryptFederationOutboundToken } from "./federationCredentialCipher";
+import {
+    federationCapabilitiesSchema,
+    FEDERATION_CAPABILITY_VALUES,
+} from "./federationCapabilities";
 import {
     FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
     FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
@@ -23,7 +29,10 @@ const MAX_CONCURRENT_REQUESTS = 8;
 export const MAX_PAGE_ITEMS = 500;
 const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
+const UNKNOWN_KEY_WARNING_INTERVAL_MS = 60_000;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
+const log = logger.child("FederationClient");
+const unknownKeyWarningAt = new Map<string, number>();
 const disallowedPeerAddresses = new BlockList();
 disallowedPeerAddresses.addSubnet("10.0.0.0", 8, "ipv4");
 disallowedPeerAddresses.addSubnet("172.16.0.0", 12, "ipv4");
@@ -69,7 +78,10 @@ const optionalFeatureArraySchema = z
     .max(64)
     .nullable()
     .optional();
-const trackAttributesSchema = z.strictObject({
+// This compatibility reader intentionally strips additive keys. Ingest stays
+// a whitelist because federationSyncPage.syncedFederationTrackValues maps only
+// the validated fields declared here into persistence.
+const trackAttributesSchema = z.object({
     title: z.string().min(1).max(2_000),
     discNo: z.number().int().min(0).max(10_000),
     trackNo: z.number().int().min(0).max(100_000),
@@ -108,6 +120,9 @@ const trackAttributesSchema = z.strictObject({
     lastfmTags: optionalFeatureArraySchema,
     embedding: embeddingSchema.optional(),
 });
+const knownTrackAttributeKeys = new Set(
+    Object.keys(trackAttributesSchema.shape),
+);
 
 const artistEnvelopeSchema = z.strictObject({
     id: z.string().min(1).max(128),
@@ -182,6 +197,7 @@ export const federationManifestSchema = z.looseObject({
         audiobooks: z.number().int().nonnegative().optional(),
     }),
     embeddingsAvailable: z.boolean(),
+    capabilities: federationCapabilitiesSchema,
     serverTime: dateTimeSchema.optional(),
 });
 const catalogPageShapeSchema = z.strictObject({
@@ -235,6 +251,7 @@ const pairedPeerSchema = z.strictObject({
         updatedAt: dateTimeSchema,
     }),
     token: z.string().min(1).max(4_096),
+    capabilities: federationCapabilitiesSchema,
     reciprocalPeerId: z.string().min(1).max(128).optional(),
     warning: z.string().min(1).max(500).optional(),
 });
@@ -266,6 +283,44 @@ function isKnownMediaType(
     value: string,
 ): value is z.infer<typeof mediaTypeSchema> {
     return KNOWN_MEDIA_TYPES.some((known) => known === value);
+}
+
+function unknownTrackAttributeKeys(value: unknown): string[] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const envelope = value as Record<string, unknown>;
+    if (envelope.mediaType !== "track") return [];
+    const attributes = envelope.attributes;
+    if (
+        !attributes ||
+        typeof attributes !== "object" ||
+        Array.isArray(attributes)
+    ) {
+        return [];
+    }
+    return Object.keys(attributes).filter(
+        (key) => !knownTrackAttributeKeys.has(key),
+    );
+}
+
+function reportUnknownTrackAttributeKeys(
+    peerId: string,
+    keys: readonly string[],
+): void {
+    if (keys.length === 0) return;
+    recordFederationSyncSkip("unknown_key_stripped", keys.length);
+    const now = Date.now();
+    const previous = unknownKeyWarningAt.get(peerId);
+    if (
+        previous !== undefined &&
+        now - previous < UNKNOWN_KEY_WARNING_INTERVAL_MS
+    ) {
+        return;
+    }
+    unknownKeyWarningAt.set(peerId, now);
+    log.warn("Stripped unknown federation track attribute keys", {
+        peerId,
+        keys: [...new Set(keys)].sort(),
+    });
 }
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
@@ -392,8 +447,9 @@ function parseResponse<T>(schema: z.ZodType<T>, value: unknown): T {
 function parseLenientItems<T>(
     values: readonly unknown[],
     schema: z.ZodType<T>,
-): { items: T[]; skippedInvalid: number } {
+): { items: T[]; skippedInvalid: number; strippedUnknownKeys: string[] } {
     const items: T[] = [];
+    const strippedUnknownKeys: string[] = [];
     let skippedInvalid = 0;
     for (
         let index = 0;
@@ -401,29 +457,37 @@ function parseLenientItems<T>(
         index += 1
     ) {
         const parsed = schema.safeParse(values[index]);
-        if (parsed.success) items.push(parsed.data);
-        else skippedInvalid += 1;
+        if (!parsed.success) {
+            skippedInvalid += 1;
+            continue;
+        }
+        items.push(parsed.data);
+        strippedUnknownKeys.push(...unknownTrackAttributeKeys(values[index]));
     }
-    return { items, skippedInvalid };
+    return { items, skippedInvalid, strippedUnknownKeys };
 }
 
 function parseCatalogPage(
     value: unknown,
     embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
-): FederationCatalogPage {
+): { page: FederationCatalogPage; strippedUnknownKeys: string[] } {
     const page = parseResponse(catalogPageShapeSchema, value);
     const parsed = parseLenientItems(page.items, federationEnvelopeSchema);
     return {
-        ...parsed,
-        nextCursor: page.nextCursor,
-        ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
+        page: {
+            items: parsed.items,
+            skippedInvalid: parsed.skippedInvalid,
+            nextCursor: page.nextCursor,
+            ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
+        },
+        strippedUnknownKeys: parsed.strippedUnknownKeys,
     };
 }
 
 function parseDeltaPage(
     value: unknown,
     embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
-): FederationDelta {
+): { delta: FederationDelta; strippedUnknownKeys: string[] } {
     const page = parseResponse(deltaPageShapeSchema, value);
     const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
     const parsedTombstones = parseResponse(tombstonesSchema, page.tombstones);
@@ -435,14 +499,18 @@ function parseDeltaPage(
         } => isKnownMediaType(item.entityType),
     );
     return {
-        kind: "ok",
-        changes: changes.items,
-        tombstones,
-        nextCursor: page.nextCursor,
-        nextSince: page.nextSince,
-        skippedInvalid: changes.skippedInvalid,
-        skippedUnknownTombstones: parsedTombstones.length - tombstones.length,
-        ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
+        delta: {
+            kind: "ok",
+            changes: changes.items,
+            tombstones,
+            nextCursor: page.nextCursor,
+            nextSince: page.nextSince,
+            skippedInvalid: changes.skippedInvalid,
+            skippedUnknownTombstones:
+                parsedTombstones.length - tombstones.length,
+            ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
+        },
+        strippedUnknownKeys: changes.strippedUnknownKeys,
     };
 }
 
@@ -459,6 +527,7 @@ function destroyStreamBody(response: AxiosResponse): void {
 }
 
 class FederationClient {
+    private readonly peerId: string;
     private readonly baseUrl: URL;
     private readonly token: string;
     private readonly timeoutMs: number;
@@ -466,6 +535,7 @@ class FederationClient {
     private readonly retryDelayMs: number;
 
     constructor(peer: FederationClientPeer, options: FederationClientOptions) {
+        this.peerId = peer.id;
         this.baseUrl = resolveBaseUrl(
             peer.baseUrl,
             options.allowPrivatePeers ?? false,
@@ -517,6 +587,7 @@ class FederationClient {
         path: string,
         schema: z.ZodType<T>,
         config: AxiosRequestConfig = {},
+        inspectAccepted?: (value: unknown) => void,
     ): Promise<T> {
         const response = await this.request({
             method: "GET",
@@ -535,7 +606,9 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseResponse(schema, response.data);
+        const parsed = parseResponse(schema, response.data);
+        inspectAccepted?.(response.data);
+        return parsed;
     }
 
     async getManifest(signal?: AbortSignal): Promise<FederationManifest> {
@@ -566,10 +639,15 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseCatalogPage(
+        const parsed = parseCatalogPage(
             response.data,
             parseEmbeddingSpaceResponseHeader(response),
         );
+        reportUnknownTrackAttributeKeys(
+            this.peerId,
+            parsed.strippedUnknownKeys,
+        );
+        return parsed.page;
     }
 
     async getCatalogItem(
@@ -581,6 +659,11 @@ class FederationClient {
             `/api/federation/v1/catalog/items/${mediaType}/${encodeURIComponent(id)}`,
             federationEnvelopeSchema,
             { signal },
+            (value) =>
+                reportUnknownTrackAttributeKeys(
+                    this.peerId,
+                    unknownTrackAttributeKeys(value),
+                ),
         );
     }
 
@@ -617,10 +700,15 @@ class FederationClient {
                 response.status >= 500,
             );
         }
-        return parseDeltaPage(
+        const parsed = parseDeltaPage(
             response.data,
             parseEmbeddingSpaceResponseHeader(response),
         );
+        reportUnknownTrackAttributeKeys(
+            this.peerId,
+            parsed.strippedUnknownKeys,
+        );
+        return parsed.delta;
     }
 
     async getStream(input: {
@@ -787,6 +875,7 @@ export async function pairFederationPeer(input: {
             data: {
                 code: input.code,
                 name: input.name,
+                capabilities: [...FEDERATION_CAPABILITY_VALUES],
                 ...(input.consumerBaseUrl
                     ? { baseUrl: input.consumerBaseUrl }
                     : {}),

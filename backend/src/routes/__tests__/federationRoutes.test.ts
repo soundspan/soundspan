@@ -49,6 +49,7 @@ jest.mock("../../middleware/federationAuth", () => ({
                 id: "peer-1",
                 name: "Peer",
                 scopes: granted,
+                capabilities: ["track-attrs-loudness"],
                 maxConcurrentStreams: req.headers["x-test-max-concurrent"]
                     ? Number(req.headers["x-test-max-concurrent"])
                     : null,
@@ -192,6 +193,7 @@ describe("federation host routes", () => {
             limit: 500,
             includeEmbeddings: true,
             peerId: "peer-1",
+            peerCapabilities: ["track-attrs-loudness"],
             acceptsEmbeddingSpace: false,
         });
 
@@ -217,6 +219,7 @@ describe("federation host routes", () => {
             id: "artist-1",
             includeEmbeddings: false,
             peerId: "peer-1",
+            peerCapabilities: ["track-attrs-loudness"],
             acceptsEmbeddingSpace: false,
         });
     });
@@ -357,17 +360,20 @@ describe("federation host routes", () => {
                 code: "ABCDEFGH",
                 name: "Peer",
                 baseUrl: "https://peer.example",
+                capabilities: ["track-attrs-loudness", "future-capability"],
             });
 
         expect(response.status).toBe(201);
         expect(response.body).toEqual({
             peer: { id: "peer-1" },
             token: "token-once",
+            capabilities: ["track-attrs-loudness"],
         });
         expect(peers.consumeFederationPairingRequest).toHaveBeenCalledWith({
             code: "ABCDEFGH",
             name: "Peer",
             baseUrl: "https://peer.example",
+            capabilities: ["track-attrs-loudness"],
         });
     });
 
