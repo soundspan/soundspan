@@ -1,6 +1,6 @@
 # OpenSubsonic Compatibility (Current Fork Status)
 
-Last updated: 2026-08-15
+Last updated: 2026-08-18
 
 ## Scope
 
@@ -41,6 +41,13 @@ Create app passwords under **Settings > Sign-in & Security**. Each generated sec
 
 `transcodeOffset` is supported. It is distinct from the missing
 `getTranscodeDecision` and `getTranscodeStream` endpoint extensions.
+
+`formPost` is honored across the surface: `/rest` accepts form-encoded POST
+requests (validated with Music Assistant). Mutating endpoints serve POST
+through their existing routes; read endpoints route POST through an explicit
+read-only allowlist. Form-body parameters never override same-named URL query
+parameters, and credentials submitted in the body are never copied into the
+request URL (so they cannot reach URL-based logging).
 
 ## Implemented Endpoint Surface
 
@@ -232,15 +239,17 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - `getLyrics` currently resolves by best-match library track (artist/title query), then returns plain lyrics or synced lyrics flattened to plain text lines.
 - Auth middleware now supports `u/p`, `u/t/s`, and `apiKey`; bearer-token style OpenSubsonic auth variants remain unsupported.
 - `getAlbumInfo2` `notes` currently use mapped library metadata (album title fallback) because soundspan does not maintain dedicated album notes fields.
+- `getPodcasts` / `getNewestPodcasts` are empty-response compatibility stubs: soundspan's native podcast domain is not exposed over `/rest`, and stub responses keep probing clients (Music Assistant) from failing.
+- Album payload `created` reports `Album.lastSynced` — the same timestamp `getAlbumList type=newest` orders by — not the release date; `year` carries release metadata.
 - Some optional query keys outside the validated client matrix may still be ignored.
 
 ## Missing Subsonic/OpenSubsonic API Surface (Exhaustive)
 
 Spec coverage snapshot (current):
 
-- Implemented endpoints: `52`
+- Implemented endpoints: `54` (2 of these are empty-response podcast stubs)
 - Catalog endpoints tracked for compatibility: `84`
-- Missing endpoints: `32`
+- Missing endpoints: `30`
 
 ### System (missing)
 
@@ -279,8 +288,9 @@ Spec coverage snapshot (current):
 
 ### Podcast (missing)
 
-- `getPodcasts`
-- `getNewestPodcasts`
+`getPodcasts` and `getNewestPodcasts` are implemented as empty-response
+compatibility stubs (see Implementation Gaps above). Still missing:
+
 - `refreshPodcasts`
 - `createPodcastChannel`
 - `deletePodcastChannel`

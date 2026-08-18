@@ -68,7 +68,9 @@ import {
     sendSubsonicSuccess,
 } from "../../utils/subsonicResponse";
 import {
+    handleGetNewestPodcasts,
     handleGetOpenSubsonicExtensions,
+    handleGetPodcasts,
     handleGetUser,
     handleTokenInfo,
     handleGetIndexes,
@@ -420,6 +422,7 @@ describe("subsonic core compatibility handlers", () => {
                 id: "album-1",
                 title: "Album One",
                 year: 2024,
+                lastSynced: new Date("2025-12-15T12:34:56.789Z"),
                 coverUrl: null,
                 genres: ["rock"],
                 userGenres: null,
@@ -467,6 +470,7 @@ describe("subsonic core compatibility handlers", () => {
                             id: "al-album-1",
                             songCount: 1,
                             duration: 120,
+                            created: "2025-12-15T12:34:56.789Z",
                         }),
                     ]),
                 }),
@@ -504,6 +508,7 @@ describe("subsonic core compatibility handlers", () => {
                 id: "album-1",
                 title: "Best Album",
                 year: 2024,
+                lastSynced: new Date("2025-12-15T00:00:00.000Z"),
                 coverUrl: null,
                 genres: [],
                 userGenres: [],
@@ -517,6 +522,7 @@ describe("subsonic core compatibility handlers", () => {
                 id: "album-2",
                 title: "Other Album",
                 year: 2023,
+                lastSynced: new Date("2025-12-14T00:00:00.000Z"),
                 coverUrl: null,
                 genres: [],
                 userGenres: [],
@@ -613,6 +619,28 @@ describe("subsonic core compatibility handlers", () => {
                     }),
                 ]),
             }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("returns an empty podcasts compatibility envelope", () => {
+        handleGetPodcasts(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            { podcasts: { channel: [] } },
+            "json",
+            undefined,
+        );
+    });
+
+    it("returns an empty newest podcasts compatibility envelope", () => {
+        handleGetNewestPodcasts(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            { newestPodcasts: { episode: [] } },
             "json",
             undefined,
         );

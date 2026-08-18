@@ -190,6 +190,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
     id: true,
     title: true,
     year: true,
+    lastSynced: true,
     coverUrl: true,
     genres: true,
     userGenres: true,
@@ -240,6 +241,7 @@ function mapAlbumsForSubsonic(
             id: album.id,
             title: album.title,
             year: album.year,
+            lastSynced: album.lastSynced,
             coverUrl: album.coverUrl,
             genres: album.genres,
             userGenres: album.userGenres,
@@ -620,6 +622,7 @@ function formatAlbumForSubsonic(album: {
     id: string;
     title: string;
     year: number | null;
+    lastSynced: Date;
     coverUrl: string | null;
     genres?: unknown;
     userGenres?: unknown;
@@ -641,7 +644,8 @@ function formatAlbumForSubsonic(album: {
         artistId: toSubsonicId("artist", album.artist.id),
         songCount: album.songCount,
         duration: album.duration,
-        created: new Date(Date.UTC(album.year ?? 1970, 0, 1)).toISOString(),
+        // Consistent with getAlbumList "newest" ordering, which sorts on lastSynced.
+        created: album.lastSynced.toISOString(),
     };
 
     if (album.year !== null) {

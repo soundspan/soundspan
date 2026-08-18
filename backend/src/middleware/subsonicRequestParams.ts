@@ -21,6 +21,13 @@ export function mergeSubsonicBodyParamsIntoQuery(
     }
     const query = req.query as Record<string, unknown>;
     for (const [key, value] of Object.entries(req.body)) {
+        if (
+            key === "__proto__" ||
+            key === "constructor" ||
+            key === "prototype"
+        ) {
+            continue;
+        }
         if (Object.hasOwn(query, key)) continue;
         if (typeof value === "string") query[key] = value;
         else if (

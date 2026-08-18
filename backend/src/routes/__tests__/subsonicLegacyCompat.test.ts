@@ -104,6 +104,7 @@ describe("subsonic legacy compatibility handlers", () => {
                 id: "album-1",
                 title: "Album One",
                 year: 2020,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
                 artist: {
                     id: "artist-1",
@@ -168,6 +169,7 @@ describe("subsonic legacy compatibility handlers", () => {
                 id: "album-1",
                 title: "Album One",
                 year: 2020,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
                 artist: {
                     id: "artist-1",

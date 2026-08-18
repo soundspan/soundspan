@@ -674,6 +674,7 @@ describe("subsonic Tier B handlers", () => {
                 id: "album-1",
                 title: "Album One",
                 year: 2024,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
                 artist: {
                     id: "artist-1",
@@ -1809,6 +1810,7 @@ describe("subsonic Tier B handlers", () => {
                 id: "album-1",
                 title: "Album One",
                 year: 2020,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: null,
                 genres: [],
                 userGenres: [],

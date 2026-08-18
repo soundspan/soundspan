@@ -177,7 +177,9 @@ const SUBSONIC_FORM_POST_READ_ENDPOINTS = new Set([
 // for an explicit read-only allowlist so unknown or mutating POST endpoints
 // retain their normal routing semantics.
 router.use((req, _res, next) => {
-    const endpoint = req.path.replace(/^\//, "").replace(/\.view$/, "");
+    const endpoint = req.path
+        .replace(/^\/(?:rest\/)?/, "")
+        .replace(/\.view$/, "");
     if (
         req.method === "POST" &&
         SUBSONIC_FORM_POST_READ_ENDPOINTS.has(endpoint)

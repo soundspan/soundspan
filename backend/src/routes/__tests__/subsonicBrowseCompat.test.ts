@@ -123,6 +123,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "album-1",
                 title: "A Album",
                 year: 2024,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
                 genres: ["synthwave"],
                 userGenres: null,
@@ -294,6 +295,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "album-2",
                 title: "B Album",
                 year: 2023,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover2.jpg",
                 genres: ["Rock"],
                 userGenres: null,
@@ -483,6 +485,7 @@ describe("subsonic browse compatibility handlers", () => {
                     id: "album-1",
                     title: "A Album",
                     year: 2024,
+                    lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                     coverUrl: "https://example.test/cover.jpg",
                     tracks: [{ duration: 120 }, { duration: 140 }],
                 },
@@ -760,6 +763,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "album-1",
                 title: "A Album",
                 year: 2024,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
                 artist: {
                     id: "artist-1",
@@ -846,6 +850,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "album-1",
                 title: "A Album",
                 year: 2024,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
                 artist: {
                     id: "artist-1",
@@ -970,6 +975,7 @@ describe("subsonic browse compatibility handlers", () => {
                 id: "album-1",
                 title: "A Album",
                 year: 2024,
+                lastSynced: new Date("2026-01-01T00:00:00.000Z"),
                 coverUrl: "https://example.test/cover.jpg",
                 artist: {
                     id: "artist-1",

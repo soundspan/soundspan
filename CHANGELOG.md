@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Subsonic-compatible `/rest` surface now accepts form-encoded POST
+  requests (OpenSubsonic `formPost`), fixing playback with Music Assistant
+  and other POST-first clients. Read endpoints route POST through a
+  read-only allowlist; body parameters never override URL parameters and
+  are never copied into loggable URLs. `getPodcasts`/`getNewestPodcasts`
+  respond with empty compatibility stubs, album payloads carry a real
+  `created` timestamp, and the `getOpenSubsonicExtensions` and
+  `getAlbumInfo2` response envelopes now match the published spec.
 - Added an admin control to immediately enqueue a hard purge of all
   soft-removed local tracks without waiting for the retention window.
 - Added a Vibe entry to the main navigation (sidebar and mobile quick links)
