@@ -35,6 +35,7 @@ export function handleGetLicense(req: Request, res: Response): void {
     );
 }
 
+
 /**
  * Executes handleGetOpenSubsonicExtensions.
  */
@@ -46,22 +47,32 @@ export function handleGetOpenSubsonicExtensions(
     sendSubsonicSuccess(
         res,
         {
-            openSubsonicExtensions: {
-                openSubsonicExtension: [
-                    { name: "apiKeyAuthentication", versions: [1] },
-                    { name: "formPost", versions: [1] },
-                    { name: "songLyrics", versions: [1] },
-                    { name: "transcodeOffset", versions: [1] },
-                    { name: "songPlayedDate", versions: [1] },
-                    { name: "albumPlayedDate", versions: [1] },
-                ],
-            },
+            openSubsonicExtensions: [
+                { name: "apiKeyAuthentication", versions: [1] },
+                { name: "formPost", versions: [1] },
+                { name: "songLyrics", versions: [1] },
+                { name: "transcodeOffset", versions: [1] },
+                { name: "songPlayedDate", versions: [1] },
+                { name: "albumPlayedDate", versions: [1] },
+            ],
         },
         format,
         callback,
     );
 }
 
+/**
+ * Returns empty podcast responses until podcast feeds are supported.
+ */
+export function handleGetPodcasts(req: Request, res: Response): void {
+    const { format, callback } = getRequestContext(req);
+    sendSubsonicSuccess(res, { podcasts: { channel: [] } }, format, callback);
+}
+
+export function handleGetNewestPodcasts(req: Request, res: Response): void {
+    const { format, callback } = getRequestContext(req);
+    sendSubsonicSuccess(res, { newestPodcasts: { episode: [] } }, format, callback);
+}
 /**
  * Executes handleTokenInfo.
  */

@@ -335,7 +335,11 @@ app.use("/api/import", apiLimiter, playlistImportRoutes);
 app.use("/api/streaming", apiLimiter, streamingRoutes);
 app.use("/api/lyrics", lyricsLimiter, lyricsRoutes);
 app.use("/api/listen-together", apiLimiter, listenTogetherRoutes);
-app.use("/rest", subsonicRoutes);
+app.use(
+    "/rest",
+    express.urlencoded({ extended: false, limit: "1mb" }),
+    subsonicRoutes,
+);
 
 function buildHealthPayload() {
     return {

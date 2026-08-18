@@ -641,6 +641,7 @@ function formatAlbumForSubsonic(album: {
         artistId: toSubsonicId("artist", album.artist.id),
         songCount: album.songCount,
         duration: album.duration,
+        created: new Date(Date.UTC(album.year ?? 1970, 0, 1)).toISOString(),
     };
 
     if (album.year !== null) {

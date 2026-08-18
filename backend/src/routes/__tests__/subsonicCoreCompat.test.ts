@@ -207,8 +207,7 @@ describe("subsonic core compatibility handlers", () => {
                 expect.objectContaining({
                     artist: expect.arrayContaining([
                         expect.objectContaining({ id: "ar-artist-1" }),
-                    ]),
-                }),
+                ]),
             ]),
         );
     });
@@ -607,13 +606,11 @@ describe("subsonic core compatibility handlers", () => {
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
-                openSubsonicExtensions: expect.objectContaining({
-                    openSubsonicExtension: expect.arrayContaining([
-                        expect.objectContaining({
-                            name: "apiKeyAuthentication",
-                        }),
-                    ]),
-                }),
+                openSubsonicExtensions: expect.arrayContaining([
+                    expect.objectContaining({
+                        name: "apiKeyAuthentication",
+                    }),
+                ]),
             }),
             "json",
             undefined,

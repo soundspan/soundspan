@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { appendSubsonicBodyParamsToUrl } from "../../middleware/subsonicRequestParams";
 import { config } from "../../config";
 import {
     requireSubsonicAuth,
@@ -11,6 +12,8 @@ import {
 } from "../../utils/subsonicResponse";
 import {
     handleGetOpenSubsonicExtensions,
+    handleGetPodcasts,
+    handleGetNewestPodcasts,
     handleGetLicense,
     handleGetScanStatus,
     handlePing,
@@ -79,6 +82,8 @@ import { getRequestContext } from "./shared";
 const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
 
+router.use(appendSubsonicBodyParamsToUrl);
+
 if (SUBSONIC_TRACE_LOGS) {
     router.use((req, res, next) => {
         const startMs = Date.now();
@@ -122,6 +127,32 @@ if (SUBSONIC_TRACE_LOGS) {
 
 router.use(subsonicRateLimiter);
 router.use(requireSubsonicAuth);
+
+const SUBSONIC_POST_MUTATION_ENDPOINTS = new Set([
+    "savePlayQueue",
+    "savePlayQueueByIndex",
+    "createBookmark",
+    "deleteBookmark",
+    "setRating",
+    "createPlaylist",
+    "updatePlaylist",
+    "deletePlaylist",
+    "scrobble",
+    "startScan",
+    "star",
+    "unstar",
+]);
+
+// Clients such as Music Assistant send form-encoded POST requests for read
+// endpoints. Reuse the existing GET handlers after authentication, while
+// preserving the explicitly supported mutating POST endpoints.
+router.use((req, _res, next) => {
+    const endpoint = req.path.replace(/^\//, "").replace(/\.view$/, "");
+    if (req.method === "POST" && !SUBSONIC_POST_MUTATION_ENDPOINTS.has(endpoint)) {
+        req.method = "GET";
+    }
+    next();
+});
 function endpointAliases(endpoint: string): string[] {
     return [
         `/${endpoint}`,
@@ -134,6 +165,8 @@ function endpointAliases(endpoint: string): string[] {
 router.get(endpointAliases("ping"), handlePing);
 router.post(endpointAliases("ping"), handlePing);
 router.get(endpointAliases("getLicense"), handleGetLicense);
+router.get(endpointAliases("getPodcasts"), handleGetPodcasts);
+router.get(endpointAliases("getNewestPodcasts"), handleGetNewestPodcasts);
 router.get(
     endpointAliases("getOpenSubsonicExtensions"),
     handleGetOpenSubsonicExtensions,

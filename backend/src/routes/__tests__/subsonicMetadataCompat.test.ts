@@ -183,7 +183,7 @@ describe("subsonic metadata compatibility handlers", () => {
         );
     });
 
-    it("returns albumInfo2 payload", async () => {
+    it("returns albumInfo payload", async () => {
         mockAlbumFindFirst.mockResolvedValue({
             rgMbid: "mbid-album-1",
             title: "Album One",
@@ -200,7 +200,7 @@ describe("subsonic metadata compatibility handlers", () => {
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
-                albumInfo2: expect.objectContaining({
+                albumInfo: expect.objectContaining({
                     musicBrainzId: "mbid-album-1",
                     notes: "Album One",
                 }),

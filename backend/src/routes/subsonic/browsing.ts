@@ -725,7 +725,7 @@ export async function handleGetAlbumInfo2(
         sendSubsonicSuccess(
             res,
             {
-                albumInfo2: {
+                albumInfo: {
                     notes: album.title,
                     musicBrainzId: album.rgMbid,
                     smallImageUrl: album.coverUrl ?? undefined,
