@@ -1367,7 +1367,7 @@ describe("library stream runtime coverage", () => {
             id: "peer-1",
             name: "Peer One",
             baseUrl: "https://peer.example",
-            outboundToken: "encrypted-token",
+            outboundToken: "v2:encrypted-token",
             outboundStatus: "ACTIVE",
         });
     });
@@ -1682,7 +1682,7 @@ describe("library stream runtime coverage", () => {
                 id: "peer-1",
                 name: "Peer One",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
             remoteId: "remote-track-1",
@@ -1710,7 +1710,7 @@ describe("library stream runtime coverage", () => {
                 id: "peer-1",
                 name: "Peer One",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 status,
             });
             const res = createRes();
@@ -5476,7 +5476,7 @@ describe("library catalog list runtime coverage", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
             artist: { name: "Remote Artist" },
@@ -5496,7 +5496,7 @@ describe("library catalog list runtime coverage", () => {
             peer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
             remoteId: "remote-album-1",
@@ -5516,7 +5516,7 @@ describe("library catalog list runtime coverage", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "OFFLINE",
             },
             artist: { name: "Remote Artist" },

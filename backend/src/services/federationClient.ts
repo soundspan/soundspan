@@ -1,12 +1,13 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
+import { BlockList, isIP } from "node:net";
 import pLimit from "p-limit";
 import { z } from "zod";
-import { decrypt } from "../utils/encryption";
 import {
     FEDERATION_SCOPE_VALUES,
     type FederationScope,
 } from "../utils/federationScopes";
 import type { ParsedFederationEmbeddingSpaceIdentity } from "./federationEmbeddingSpace";
+import { decryptFederationOutboundToken } from "./federationCredentialCipher";
 import {
     FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER,
     FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
@@ -23,6 +24,15 @@ export const MAX_PAGE_ITEMS = 500;
 const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
+const disallowedPeerAddresses = new BlockList();
+disallowedPeerAddresses.addSubnet("10.0.0.0", 8, "ipv4");
+disallowedPeerAddresses.addSubnet("172.16.0.0", 12, "ipv4");
+disallowedPeerAddresses.addSubnet("192.168.0.0", 16, "ipv4");
+disallowedPeerAddresses.addSubnet("127.0.0.0", 8, "ipv4");
+disallowedPeerAddresses.addSubnet("169.254.0.0", 16, "ipv4");
+disallowedPeerAddresses.addAddress("::1", "ipv6");
+disallowedPeerAddresses.addSubnet("fc00::", 7, "ipv6");
+disallowedPeerAddresses.addSubnet("fe80::", 10, "ipv6");
 const embeddingSpaceAcceptHeaders = {
     [FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER]:
         FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
@@ -307,12 +317,44 @@ interface FederationClientOptions {
     timeoutMs?: number;
     attempts?: number;
     retryDelayMs?: number;
+    allowPrivatePeers?: boolean;
 }
 
-function resolveBaseUrl(value: string | null): URL {
+/** Pure hostname policy for literal private addresses and localhost. */
+export function isDisallowedPeerHost(hostname: string): boolean {
+    const normalized = hostname
+        .replace(/^\[|\]$/g, "")
+        .replace(/\.$/, "")
+        .toLowerCase();
+    if (normalized === "localhost") return true;
+    const family = isIP(normalized);
+    if (family === 0) return false;
+    return disallowedPeerAddresses.check(
+        normalized,
+        family === 4 ? "ipv4" : "ipv6",
+    );
+}
+
+/** Resolves an HTTPS peer origin under the literal-address SSRF policy. */
+export function resolveBaseUrl(
+    value: string | null,
+    allowPrivatePeers = false,
+): URL {
     if (!value) throw new Error("Federation peer base URL is missing");
-    const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password) {
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        throw new Error("Federation peer base URL is invalid");
+    }
+    // DNS resolution and rebinding checks are out of scope for this literal-host
+    // guard. Deployment egress policy remains the network-level backstop.
+    if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        (!allowPrivatePeers && isDisallowedPeerHost(url.hostname))
+    ) {
         throw new Error("Federation peer base URL is invalid");
     }
     return url;
@@ -424,8 +466,13 @@ class FederationClient {
     private readonly retryDelayMs: number;
 
     constructor(peer: FederationClientPeer, options: FederationClientOptions) {
-        this.baseUrl = resolveBaseUrl(peer.baseUrl);
-        this.token = peer.outboundToken ? decrypt(peer.outboundToken) : "";
+        this.baseUrl = resolveBaseUrl(
+            peer.baseUrl,
+            options.allowPrivatePeers ?? false,
+        );
+        this.token = peer.outboundToken
+            ? decryptFederationOutboundToken(peer.outboundToken)
+            : "";
         if (!this.token) throw new Error("Federation peer token is missing");
         this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
         this.attempts = options.attempts ?? DEFAULT_ATTEMPTS;
@@ -454,13 +501,10 @@ class FederationClient {
                     destroyStreamBody(response);
                 }
             } catch (error) {
-                if (
-                    !isTransientNetworkError(error) ||
-                    attempt + 1 === this.attempts
-                ) {
-                    if (isTransientNetworkError(error)) {
-                        throw new FederationHttpError(null, true);
-                    }
+                const transient = isTransientNetworkError(error);
+                if (!transient || attempt + 1 === this.attempts) {
+                    if (axios.isAxiosError(error))
+                        throw new FederationHttpError(null, transient);
                     throw error;
                 }
             }
@@ -708,10 +752,10 @@ async function requestPairWithRetry(
                 return response;
             }
         } catch (error) {
-            if (!isTransientNetworkError(error) || attempt + 1 === attempts) {
-                if (isTransientNetworkError(error)) {
-                    throw new FederationHttpError(null, true);
-                }
+            const transient = isTransientNetworkError(error);
+            if (!transient || attempt + 1 === attempts) {
+                if (axios.isAxiosError(error))
+                    throw new FederationHttpError(null, transient);
                 throw error;
             }
         }
@@ -731,8 +775,11 @@ export async function pairFederationPeer(input: {
     requestedScopes?: FederationScope[];
     options?: FederationClientOptions;
 }): Promise<z.infer<typeof pairedPeerSchema>> {
-    const baseUrl = resolveBaseUrl(input.baseUrl);
     const options = input.options ?? {};
+    const baseUrl = resolveBaseUrl(
+        input.baseUrl,
+        options.allowPrivatePeers ?? false,
+    );
     const response = await requestPairWithRetry(
         {
             method: "POST",

@@ -490,6 +490,7 @@ model FederationPeer {
   direction      PeerDirection
   baseUrl        String?
   credentialHash String?       @unique
+  /// AES-GCM v2 envelope; startup backfill encrypts legacy non-v2 plaintext.
   outboundToken  String?
   scopes         String[]
   inboundStatus  PeerStatus?

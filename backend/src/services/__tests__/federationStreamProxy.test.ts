@@ -53,6 +53,7 @@ jest.mock("../../config", () => ({
             transcodeCachePath: "/cache",
             transcodeCacheMaxGb: 2,
         },
+        federation: { allowPrivatePeers: false },
     },
 }));
 
@@ -89,7 +90,7 @@ function createResponse() {
 const peer = {
     id: "peer-1",
     baseUrl: "https://peer.example",
-    outboundToken: "encrypted-token",
+    outboundToken: "v2:encrypted-token",
 };
 
 describe("federated stream proxy", () => {

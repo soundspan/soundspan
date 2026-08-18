@@ -86,6 +86,7 @@ import { BRAND_API_DOCS_TITLE, BRAND_NAME } from "./config/brand";
 import { httpMetricsMiddleware, metricsRegistry } from "./metrics";
 import { createMetricsRouter } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
+import { backfillFederationOutboundTokens } from "./services/federationCredentials";
 
 const app = express();
 
@@ -542,6 +543,10 @@ if (runApiRole) {
 httpServer.listen(config.port, "0.0.0.0", async () => {
     // Verify database connections before proceeding
     await checkPostgresConnection();
+    await backfillFederationOutboundTokens().catch(() => {
+        logger.error("Federation outbound token encryption backfill failed");
+        process.exit(1);
+    });
     await checkRedisConnection();
     if (isSecretsDbOnlyEnabled()) {
         // Lazy import keeps the entrypoint free of the settings/encryption

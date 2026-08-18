@@ -3,7 +3,6 @@ import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { hashApiKey } from "../utils/apiKeyHash";
 import { prisma } from "../utils/db";
-import { decrypt, encrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
 import {
     FEDERATION_SCOPE_VALUES,
@@ -13,8 +12,13 @@ import {
 import {
     createFederationClient,
     pairFederationPeer,
+    resolveBaseUrl,
     type FederationManifest,
 } from "./federationClient";
+import {
+    decryptFederationOutboundToken,
+    encryptFederationOutboundToken,
+} from "./federationCredentialCipher";
 import { removeReplacementCacheFiles } from "./trackReplacement";
 
 export { FEDERATION_SCOPE_VALUES } from "../utils/federationScopes";
@@ -263,11 +267,11 @@ export async function revokeFederationPeer(peerId: string): Promise<boolean> {
 }
 
 function normalizeConsumerBaseUrl(value: string): string {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-        throw new Error("Federation peer base URL is invalid");
-    }
-    return parsed.origin;
+    return resolveBaseUrl(value, config.federation.allowPrivatePeers).origin;
+}
+
+function outboundClientOptions() {
+    return { allowPrivatePeers: config.federation.allowPrivatePeers };
 }
 
 function consumerScopes(embeddingsAvailable: boolean): FederationScope[] {
@@ -358,12 +362,11 @@ export async function linkConsumerFederationPeer(
         ? null
         : await findDuplicateConsumerPeer(baseUrl);
     if (duplicate) throw new FederationPeerConflictError();
-    const outboundToken = encrypt(input.token);
-    const manifest = await createFederationClient({
-        id: "pending-link",
-        baseUrl,
-        outboundToken,
-    }).getManifest();
+    const outboundToken = encryptFederationOutboundToken(input.token);
+    const manifest = await createFederationClient(
+        { id: "pending-link", baseUrl, outboundToken },
+        outboundClientOptions(),
+    ).getManifest();
     return persistConsumerLink(input, baseUrl, outboundToken, manifest);
 }
 
@@ -381,12 +384,11 @@ export async function createBothFederationPeer(
         select: { id: true },
     });
     if (duplicate) throw new FederationPeerConflictError();
-    const encryptedToken = encrypt(input.outboundToken);
-    const manifest = await createFederationClient({
-        id: "pending-link",
-        baseUrl,
-        outboundToken: encryptedToken,
-    }).getManifest();
+    const encryptedToken = encryptFederationOutboundToken(input.outboundToken);
+    const manifest = await createFederationClient(
+        { id: "pending-link", baseUrl, outboundToken: encryptedToken },
+        outboundClientOptions(),
+    ).getManifest();
     const outboundScopes = consumerScopes(manifest.embeddingsAvailable);
     const scopes = input.scopes.filter((scope) =>
         outboundScopes.includes(scope),
@@ -445,6 +447,7 @@ export async function pairAndLinkConsumerFederationPeer(input: {
                   reciprocalScopes: scopes,
               }
             : {}),
+        options: outboundClientOptions(),
     });
     const linkedScopes = paired.reciprocalPeerId
         ? mutualScopes(paired.peer.scopes, scopes)
@@ -481,7 +484,10 @@ export async function getConsumerPeerConnection(peerId: string) {
         },
     });
     if (!peer?.outboundToken) return null;
-    return { ...peer, outboundToken: decrypt(peer.outboundToken) };
+    return {
+        ...peer,
+        outboundToken: decryptFederationOutboundToken(peer.outboundToken),
+    };
 }
 
 /** Permanently deletes a peer record selected by an administrator. */
@@ -598,7 +604,7 @@ async function upgradeReciprocalPeer(input: {
         data: {
             direction: "BOTH",
             baseUrl: normalizeConsumerBaseUrl(input.baseUrl),
-            outboundToken: encrypt(input.token),
+            outboundToken: encryptFederationOutboundToken(input.token),
             outboundStatus: "ACTIVE",
             scopes: input.scopes,
             lastSeenAt: new Date(),
@@ -636,6 +642,7 @@ export async function consumeFederationPairingRequest(
             name: config.federation.instanceName,
             consumerBaseUrl,
             requestedScopes: scopes,
+            options: outboundClientOptions(),
         });
         reciprocalPeerId = paired.peer.id;
         const peer = await upgradeReciprocalPeer({
@@ -645,8 +652,8 @@ export async function consumeFederationPairingRequest(
             scopes,
         });
         return { peer, token: initial.token, reciprocalPeerId };
-    } catch (error: unknown) {
-        log.warn("Reciprocal federation pairing failed", error);
+    } catch (_error: unknown) {
+        log.warn("Reciprocal federation pairing failed");
         return { ...initial, reciprocalPeerId, warning: RECIPROCAL_WARNING };
     }
 }

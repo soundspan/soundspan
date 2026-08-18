@@ -178,6 +178,7 @@ describe("config module", () => {
             "http://localhost:5173",
         ]);
         expect(config.features.federation).toBe(false);
+        expect(config.federation.allowPrivatePeers).toBe(false);
         expect(config.workers.federationTombstoneRetentionDays).toBe(90);
         expect(config.workers.federationSyncIntervalMinutes).toBe(15);
     });
@@ -975,6 +976,7 @@ describe("config module", () => {
             TRACK_RECONCILIATION_MAX_ROWS: "10001",
             TRACK_RECONCILIATION_TIMEOUT_MS: "600001",
             FEDERATION_ENABLED: "true",
+            FEDERATION_ALLOW_PRIVATE_PEERS: "true",
             FEDERATION_TOMBSTONE_RETENTION_DAYS: "30",
             FEDERATION_SYNC_INTERVAL_MINUTES: "7",
         });
@@ -1000,6 +1002,14 @@ describe("config module", () => {
             federationSyncIntervalMinutes: 7,
         });
         expect(config.features.federation).toBe(true);
+        expect(config.federation.allowPrivatePeers).toBe(true);
+    });
+
+    it("rejects an ambiguous private-federation boolean", async () => {
+        await expectStartupValidationFailure(
+            { FEDERATION_ALLOW_PRIVATE_PEERS: "yes" },
+            "FEDERATION_ALLOW_PRIVATE_PEERS",
+        );
     });
 
     it("preserves migrated value defaults and literal flag parsing", async () => {

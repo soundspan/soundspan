@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Security
+
+- Federation consumer tokens are now encrypted at rest with an automatic,
+  idempotent startup backfill, and outbound peer URLs reject literal localhost,
+  private, loopback, and link-local addresses by default. Internal peer
+  deployments can opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
+
 ### Deprecated
 
 - The dedicated per-user "Subsonic password" is deprecated in favor of app

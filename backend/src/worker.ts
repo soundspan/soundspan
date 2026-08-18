@@ -8,6 +8,7 @@ import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 import { metricsRegistry } from "./metrics";
 import { isMetricsRequestAuthorized } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
+import { backfillFederationOutboundTokens } from "./services/federationCredentials";
 
 const log = logger.child("WorkerStartup");
 
@@ -234,6 +235,7 @@ async function checkRedisConnection() {
 
 async function startWorkerRuntime() {
     await checkPostgresConnection();
+    await backfillFederationOutboundTokens();
     await checkRedisConnection();
     if (isSecretsDbOnlyEnabled()) {
         // Lazy import keeps the entrypoint free of the settings/encryption

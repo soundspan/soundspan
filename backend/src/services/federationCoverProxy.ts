@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Request, Response } from "express";
+import { config } from "../config";
 import { createFederationClient } from "./federationClient";
 
 const COVER_HEADERS = [
@@ -45,10 +46,9 @@ export async function proxyFederatedCover(input: {
     input.req.once("aborted", onDisconnect);
     input.res.once("close", onDisconnect);
     try {
-        const response = await createFederationClient(input.peer).getCover(
-            input.remoteId,
-            controller.signal,
-        );
+        const response = await createFederationClient(input.peer, {
+            allowPrivatePeers: config.federation.allowPrivatePeers,
+        }).getCover(input.remoteId, controller.signal);
         if (response.status === 404) {
             const body = response.data as { destroy?: () => void };
             body.destroy?.();

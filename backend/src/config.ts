@@ -117,6 +117,7 @@ const positiveIntegerEnvSchema = z
         message: "must be a safe integer",
     })
     .optional();
+const booleanEnvSchema = z.enum(["true", "false"]).optional();
 const federationTombstoneRetentionEnvSchema = z
     .string()
     .regex(/^[1-9]\d*$/, "must be an integer greater than or equal to 3")
@@ -429,6 +430,7 @@ const envSchema = z
         FEDERATION_TOMBSTONE_RETENTION_DAYS:
             federationTombstoneRetentionEnvSchema,
         FEDERATION_SYNC_INTERVAL_MINUTES: positiveIntegerEnvSchema,
+        FEDERATION_ALLOW_PRIVATE_PEERS: booleanEnvSchema,
         LOCAL_LOGIN_ENABLED: z.string().optional(),
         OIDC_ENABLED: z.string().optional(),
         OIDC_ISSUER_URL: z.string().optional(),
@@ -771,6 +773,11 @@ export const config = {
         // SystemSettings has no instance-name field today. Container/host name
         // is the established deployment identity fallback for federation v1.
         instanceName: process.env.HOSTNAME || "soundspan",
+        // Unsafe opt-in for administrators whose peers use literal LAN/VPN IPs.
+        allowPrivatePeers: parseEnvBool(
+            process.env.FEDERATION_ALLOW_PRIVATE_PEERS,
+            false,
+        ),
     },
 
     // Keep analyzer queues short enough that waiting work is not mistaken for

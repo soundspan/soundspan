@@ -83,7 +83,9 @@ async function loadPeerStream(
     headers: Record<string, unknown>;
     data: Readable;
 }> {
-    const response = await createFederationClient(input.peer).getStream({
+    const response = await createFederationClient(input.peer, {
+        allowPrivatePeers: config.federation.allowPrivatePeers,
+    }).getStream({
         remoteId: input.remoteId,
         quality: input.quality,
         range,

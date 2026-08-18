@@ -1,6 +1,7 @@
 import type { Job } from "bull";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { config } from "../../config";
 import {
     createFederationClient,
     FederationEpochMismatchError,
@@ -58,7 +59,6 @@ const MAX_SEEN_ITEMS = 2_000_000;
 const jobDataSchema = z.strictObject({
     peerId: z.string().trim().min(1).max(128),
 });
-
 type MediaType = FederationEnvelope["mediaType"];
 type ParentMediaType = "artist" | "album";
 
@@ -1444,7 +1444,9 @@ export async function processFederationSync(
     const data = jobDataSchema.parse(job.data);
     const peer = await getAvailableConsumerPeer(data.peerId);
     const startedAt = new Date();
-    const client = createFederationClient(peer);
+    const client = createFederationClient(peer, {
+        allowPrivatePeers: config.federation.allowPrivatePeers,
+    });
     const manifest = await client.getManifest();
     const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);
     const context = newSyncContext(peer.id, peer.scopes, localEmbeddingSpace);

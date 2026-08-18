@@ -24,6 +24,9 @@ jest.mock("../../utils/logger", () => ({
         child: jest.fn(() => ({ info: jest.fn() })),
     },
 }));
+jest.mock("../../config", () => ({
+    config: { federation: { allowPrivatePeers: false } },
+}));
 
 import { proxyFederatedAudiobookStream } from "../federationAudiobookProxy";
 
@@ -59,7 +62,7 @@ function createResponse() {
 const peer = {
     id: "peer-1",
     baseUrl: "https://peer.example",
-    outboundToken: "encrypted-token",
+    outboundToken: "v2:encrypted-token",
 };
 
 describe("federated audiobook proxy", () => {

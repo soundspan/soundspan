@@ -20,13 +20,16 @@ jest.mock("../../../utils/logger", () => ({ logger: log }));
 jest.mock("../../../services/federationClient", () => ({
     createFederationClient,
 }));
+jest.mock("../../../config", () => ({
+    config: { federation: { allowPrivatePeers: false } },
+}));
 
 import { processFederationHealth } from "../federationHealthProcessor";
 
 const peer = {
     id: "peer-1",
     baseUrl: "https://peer.example",
-    outboundToken: "encrypted-token",
+    outboundToken: "v2:encrypted-token",
     direction: "CONSUMER",
     inboundStatus: null,
     outboundStatus: "ACTIVE",

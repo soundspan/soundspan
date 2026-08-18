@@ -144,6 +144,9 @@ describe("worker entrypoint behavior", () => {
         }));
         jest.doMock("../utils/redis", () => ({ redisClient }));
         jest.doMock("../utils/db", () => ({ prisma }));
+        jest.doMock("../services/federationCredentials", () => ({
+            backfillFederationOutboundTokens: jest.fn().mockResolvedValue(0),
+        }));
         jest.doMock("../utils/logger", () => ({ logger }));
         jest.doMock("../utils/dependencyReadiness", () => ({
             createDependencyReadinessTracker,

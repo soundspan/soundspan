@@ -5,6 +5,9 @@ const getCover = jest.fn();
 jest.mock("../federationClient", () => ({
     createFederationClient: jest.fn(() => ({ getCover })),
 }));
+jest.mock("../../config", () => ({
+    config: { federation: { allowPrivatePeers: false } },
+}));
 
 import { proxyFederatedCover } from "../federationCoverProxy";
 
@@ -28,7 +31,7 @@ it("destroys a 404 upstream cover body", async () => {
             peer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
             remoteId: "album-1",

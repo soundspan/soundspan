@@ -3,6 +3,7 @@ import { pipeline } from "node:stream/promises";
 import type { Request, Response } from "express";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import {
     createFederationClient,
     FederationHttpError,
@@ -87,9 +88,9 @@ export async function proxyFederatedAudiobookStream(input: {
     );
     try {
         const range = input.req.headers.range;
-        const response = await createFederationClient(
-            input.peer,
-        ).getAudiobookStream({
+        const response = await createFederationClient(input.peer, {
+            allowPrivatePeers: config.federation.allowPrivatePeers,
+        }).getAudiobookStream({
             remoteId: input.remoteId,
             range: typeof range === "string" ? range : undefined,
             signal: controller.signal,
@@ -131,9 +132,9 @@ export async function proxyFederatedAudiobookCover(input: {
         () => upstream,
     );
     try {
-        const response = await createFederationClient(
-            input.peer,
-        ).getAudiobookCover(input.remoteId, controller.signal);
+        const response = await createFederationClient(input.peer, {
+            allowPrivatePeers: config.federation.allowPrivatePeers,
+        }).getAudiobookCover(input.remoteId, controller.signal);
         if (response.status === 404) {
             if (response.data instanceof Readable) response.data.destroy();
             return false;

@@ -206,16 +206,14 @@ See the [`OIDC_SSO.md` topology matrix](OIDC_SSO.md#deployment-topology) for sup
 - Each credential grants an explicit subset of `library:read`, `stream:read`, and `embeddings:read`. Embedding access also requires library access.
 - `library:read` includes the instance's complete subscribed podcast-feed catalog. Treat linked peers as trusted recipients of feed URLs and podcast metadata.
 - Revocation clears credential material and changes the peer to `REVOKED`. Deleting a peer also cascades its consumer-side mirrored catalog rows.
-- Consumer outbound tokens are encrypted and decrypted through the settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. API and admin responses exclude both outbound tokens and credential hashes.
-- Peer base URLs must use HTTPS. The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it.
+- Consumer outbound tokens are encrypted at rest through the authenticated AES-256-GCM settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. The `v2:` prefix marks the current cipher envelope. On startup, an idempotent backfill treats any non-null outbound token without that marker as legacy plaintext and encrypts it before the process becomes ready. Compare-and-set updates make concurrent API and worker starts safe; plaintext reader compatibility exists only during that rolling-startup window. API and admin responses exclude both outbound tokens and credential hashes.
+- Peer base URLs must use HTTPS and contain no URL credentials. By default, literal `localhost` and literal addresses in `10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7`, and `fe80::/10` are rejected. Administrators who intentionally federate over a private LAN or VPN can set `FEDERATION_ALLOW_PRIVATE_PEERS=true`; this unsafe opt-in does not relax HTTPS or URL-credential checks.
+- The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it. Redirects are disabled, and Axios failures are converted to safe federation errors before callers can log them.
 
-Federation intentionally permits HTTPS peer URLs on private, LAN, and VPN
-networks. Private addressing is a primary self-hosted deployment model, and
-peer configuration is restricted to administrators. Outbound federation calls
-disable redirects and use bounded timeouts and response sizes, but they do not
-apply the public-address-only SSRF policy used for untrusted user-supplied
-URLs. Administrators must therefore treat a linked peer as trusted and limit
-admin access accordingly.
+The literal-host guard does not resolve DNS and does not prevent DNS rebinding.
+Network egress policy remains the defense-in-depth control for resolved peer
+addresses. Administrators must treat a linked peer as trusted and limit admin
+access accordingly.
 
 ## Webhook and Admin Security
 

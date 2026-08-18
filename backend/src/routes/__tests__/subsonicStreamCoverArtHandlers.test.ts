@@ -186,7 +186,7 @@ describe("handleStream", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
         };
@@ -222,7 +222,7 @@ describe("handleStream", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
         });
@@ -254,7 +254,7 @@ describe("handleStream", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "ACTIVE",
             },
         });
@@ -282,7 +282,7 @@ describe("handleStream", () => {
             federationPeer: {
                 id: "peer-1",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
                 outboundStatus: "OFFLINE",
             },
         });
@@ -495,7 +495,7 @@ describe("handleGetCoverArt", () => {
         const peer = {
             id: "peer-1",
             baseUrl: "https://peer.example",
-            outboundToken: "encrypted-token",
+            outboundToken: "v2:encrypted-token",
             outboundStatus: "ACTIVE",
         };
         mockAlbumFindFirst

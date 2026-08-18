@@ -96,6 +96,9 @@ jest.mock("../../../services/federationClient", () => ({
     FederationStaleCursorError: MockStaleCursorError,
     FederationHttpError: MockFederationHttpError,
 }));
+jest.mock("../../../config", () => ({
+    config: { federation: { allowPrivatePeers: false } },
+}));
 jest.mock("../../../services/trackMappingService", () => ({
     trackMappingService: { createMapping },
 }));
@@ -127,7 +130,7 @@ const peer = {
     id: "peer-1",
     direction: "CONSUMER",
     baseUrl: "https://peer.example",
-    outboundToken: "encrypted-token",
+    outboundToken: "v2:encrypted-token",
     scopes: ["library:read", "stream:read", "embeddings:read"],
     inboundStatus: null,
     outboundStatus: "ACTIVE",

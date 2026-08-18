@@ -244,7 +244,7 @@ describe("audiobooks advanced runtime", () => {
             name: "Peer One",
             outboundStatus: "ACTIVE",
             baseUrl: "https://peer.example",
-            outboundToken: "encrypted-token",
+            outboundToken: "v2:encrypted-token",
         };
         const book = {
             id: "fed:book-1",
@@ -361,7 +361,7 @@ describe("audiobooks advanced runtime", () => {
                 name: "Peer One",
                 outboundStatus: "ACTIVE",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
             },
         };
         prisma.audiobook.findUnique.mockResolvedValueOnce(row);
@@ -417,7 +417,7 @@ describe("audiobooks advanced runtime", () => {
                 id: "peer-1",
                 outboundStatus: "ACTIVE",
                 baseUrl: "https://peer.example",
-                outboundToken: "encrypted-token",
+                outboundToken: "v2:encrypted-token",
             },
         };
         prisma.audiobook.findUnique.mockResolvedValueOnce(row);

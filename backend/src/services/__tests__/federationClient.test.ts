@@ -15,7 +15,8 @@ jest.mock("axios", () => ({
 }));
 
 jest.mock("../../utils/encryption", () => ({
-    decrypt: jest.fn((value: string) => value.replace(/^enc:/, "")),
+    encrypt: jest.fn((value: string) => `v2:${value}`),
+    decrypt: jest.fn((value: string) => value.replace(/^v2:/, "")),
 }));
 
 import {
@@ -23,13 +24,15 @@ import {
     FederationHttpError,
     FederationResponseError,
     FederationStaleCursorError,
+    isDisallowedPeerHost,
     pairFederationPeer,
+    resolveBaseUrl,
 } from "../federationClient";
 
 const peer = {
     id: "peer-1",
     baseUrl: "https://peer.example/",
-    outboundToken: "enc:secret-token",
+    outboundToken: "v2:secret-token",
 };
 
 const manifest = {
@@ -123,6 +126,73 @@ describe("federation HTTP client", () => {
                 }),
             }),
         );
+    });
+
+    it.each([
+        "10.0.0.1",
+        "10.255.255.255",
+        "172.16.0.1",
+        "172.31.255.255",
+        "192.168.1.1",
+        "127.0.0.1",
+        "127.255.255.255",
+        "169.254.1.1",
+        "::1",
+        "fc00::1",
+        "fdff:ffff::1",
+        "fe80::1",
+        "febf:ffff::1",
+        "::ffff:127.0.0.1",
+        "localhost",
+        "localhost.",
+    ])("rejects the disallowed peer host %s", (host) => {
+        expect(isDisallowedPeerHost(host)).toBe(true);
+        const authority = host.includes(":") ? `[${host}]` : host;
+        expect(() => resolveBaseUrl(`https://${authority}`)).toThrow(
+            "Federation peer base URL is invalid",
+        );
+    });
+
+    it.each([
+        "peer.example",
+        "peer.internal.example",
+        "8.8.8.8",
+        "172.32.0.1",
+        "192.167.255.255",
+        "2001:4860:4860::8888",
+    ])("allows the public or unresolved peer host %s", (host) => {
+        expect(isDisallowedPeerHost(host)).toBe(false);
+        const authority = host.includes(":") ? `[${host}]` : host;
+        expect(resolveBaseUrl(`https://${authority}`).hostname).toBe(
+            authority.toLowerCase(),
+        );
+    });
+
+    it("allows private peers only through the explicit escape hatch", () => {
+        expect(resolveBaseUrl("https://10.0.0.8", true).hostname).toBe(
+            "10.0.0.8",
+        );
+        expect(() => resolveBaseUrl("http://10.0.0.8", true)).toThrow(
+            "Federation peer base URL is invalid",
+        );
+    });
+
+    it("never exposes a bearer token through an Axios error", async () => {
+        const axiosError = Object.assign(new Error("request failed"), {
+            isAxiosError: true,
+            code: "ERR_BAD_RESPONSE",
+            config: { headers: { Authorization: "Bearer secret-token" } },
+        });
+        axiosRequest.mockRejectedValueOnce(axiosError);
+
+        try {
+            await createFederationClient(peer, { attempts: 1 }).getManifest();
+            throw new Error("expected federation request to fail");
+        } catch (error) {
+            expect(error).toBeInstanceOf(FederationHttpError);
+            expect(String(error)).not.toContain("secret-token");
+            expect(JSON.stringify(error)).not.toContain("secret-token");
+        }
     });
 
     it("accepts additive manifest media types and count keys", async () => {
@@ -617,9 +687,12 @@ describe("federation HTTP client", () => {
         );
         axiosRequest.mockRejectedValueOnce(oversized);
 
-        await expect(createFederationClient(peer).getManifest()).rejects.toBe(
-            oversized,
-        );
+        await expect(
+            createFederationClient(peer).getManifest(),
+        ).rejects.toMatchObject({
+            name: "FederationHttpError",
+            transient: false,
+        });
         expect(axiosRequest).toHaveBeenCalledTimes(1);
     });
 
@@ -689,7 +762,10 @@ describe("federation HTTP client", () => {
         );
         await expect(
             createFederationClient(peer, { retryDelayMs: 0 }).getManifest(),
-        ).rejects.toThrow("aborted");
+        ).rejects.toMatchObject({
+            name: "FederationHttpError",
+            transient: false,
+        });
         expect(axiosRequest).toHaveBeenCalledTimes(1);
     });
 

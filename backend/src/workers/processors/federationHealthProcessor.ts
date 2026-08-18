@@ -1,4 +1,5 @@
 import { createFederationClient } from "../../services/federationClient";
+import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 
@@ -65,7 +66,9 @@ export async function processFederationHealth(): Promise<HealthCounts> {
         if (!peer) break;
         counts.checked += 1;
         try {
-            await createFederationClient(peer).getManifest();
+            await createFederationClient(peer, {
+                allowPrivatePeers: config.federation.allowPrivatePeers,
+            }).getManifest();
             await markPeerActive(peer);
             counts.online += 1;
         } catch (_error: unknown) {

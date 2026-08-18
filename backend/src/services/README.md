@@ -57,6 +57,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/fileValidator.ts` | Core |
 | `backend/src/services/federationCatalog.ts` | Host federation manifest, filtered catalog envelopes, and deltas |
 | `backend/src/services/federationClient.ts` | Bounded, validated consumer HTTP client for peer calls |
+| `backend/src/services/federationCredentialCipher.ts` | Federation outbound-token encryption and rolling-startup read compatibility |
+| `backend/src/services/federationCredentials.ts` | Bounded, idempotent federation outbound-token startup backfill |
 | `backend/src/services/federationCoverProxy.ts` | Backpressured consumer proxy for peer album covers |
 | `backend/src/services/federationEmbeddingSpace.ts` | Federation embedding-space identity and compatibility decisions |
 | `backend/src/services/federationEmbeddingSpaceHeader.ts` | Federation embedding-space response-header encoding and tolerant parsing |
