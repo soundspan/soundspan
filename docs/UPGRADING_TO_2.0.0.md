@@ -1,14 +1,33 @@
 # Upgrading to Soundspan 2.0.0
 
-This guide covers the required steps for the upgrade from any 1.x version to
-2.0.0. Soundspan 2.0.0 is a major release focused on security and
-reliability. The upgrade needs action from you: complete these steps before
-you start the new version.
+**Read this guide if you are on any 1.x version and moving to 2.0.0 or
+later.** Soundspan 2.0.0 is a major release focused on security and
+reliability, and it is the one upgrade that needs real action from you:
+complete these steps before you start the new version. Every release after
+2.0.0 is covered by the rolling [Upgrading](UPGRADING.md) file instead — after
+you finish this guide, check there for anything newer.
 
 For everything that changed in 2.0.0, see the
 [release notes](release-notes/RELEASE_NOTES_2.0.0.md).
 
-Work through these steps in order. Each step says what to do and why.
+## If you run the All-in-One (AIO) image
+
+Most installs use the AIO image with docker compose, and the AIO image does a
+lot of this work for you:
+
+- **Steps 1–3 (secrets):** the AIO image generates strong values for
+  `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `INTERNAL_API_SECRET`, and the
+  embedded Postgres password on first boot, and persists them under
+  `/data/secrets/`. You only act here if you set these values yourself in the
+  environment — then keep them stable.
+- **Step 9 (volume ownership):** the standard AIO volume paths repair their
+  own ownership at boot.
+- **Step 10:** Helm-only, skip it.
+- **Steps 4–8 and 11–13 still apply to you** — they are about clients, API
+  keys, and your library, not about how the server is packaged.
+
+Everyone else (split-stack docker-compose, Helm, bare-metal): work through all
+steps in order. Each step says what to do and why.
 
 ## 1. Set all required secrets
 
