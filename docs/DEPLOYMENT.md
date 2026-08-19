@@ -147,7 +147,7 @@ Notes:
 
 Segmented streaming documentation has been moved to a dedicated experimental guide:
 
-- [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)
+- [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) (deprecated)
 
 Use that guide for segmented runtime controls, rollout levels, observability, and primary-mode reversion procedures.
 

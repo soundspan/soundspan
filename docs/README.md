@@ -57,7 +57,7 @@ This index is the central navigation page for all project documentation under `d
 | [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md)                                 | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance                                                                                            |
 | [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md)                                         | Operators/maintainers    | Step-by-step migration runbook for moving a Lidify deployment to soundspan                                                                      |
 | [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md)                                             | Users/operators          | Native `<audio>`-element playback engine (default as of 1.8.0): selection precedence, platform pins, and how to opt back into the legacy engine |
-| [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)                   | Operators                | Segmented-streaming guidance (experimental feature)                                                                                             |
+| [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) (deprecated)      | Operators                | Segmented-streaming guidance (experimental feature)                                                                                             |
 | [`kima-hub-v1.6.3-to-v1.7.5-adoption-report.md`](kima-hub-v1.6.3-to-v1.7.5-adoption-report.md) | Maintainers              | Archival adoption report; retained for historical reference, not current work tracking                                                          |
 
 ## For Contributors and Maintainers

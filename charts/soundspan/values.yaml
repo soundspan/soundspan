@@ -310,7 +310,7 @@ frontend:
   # Frontend runtime knobs (effective without image rebuild), for example:
   # env:
   #   BACKEND_URL: http://my-release-backend:3006
-  #   STREAMING_ENGINE_MODE: native   # the default; howler = legacy fallback, videojs = segmented experimental (docs/NATIVE_AUDIO_ENGINE.md)
+  #   STREAMING_ENGINE_MODE: native   # default; howler = legacy fallback, videojs = deprecated segmented mode pending removal (docs/NATIVE_AUDIO_ENGINE.md)
   #   SEGMENTED_VHS_PROFILE: balanced
   #   SEGMENTED_SESSION_PREWARM_ENABLED: "true"
   #   SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "5000"

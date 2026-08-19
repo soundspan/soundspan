@@ -1,5 +1,7 @@
 # Experimental Segmented Streaming
 
+> **Deprecated:** Segmented/DASH streaming is deprecated as of the next release and is frozen with no further fixes. Removal is planned in [issue #534](https://github.com/soundspan/soundspan/issues/534). The rest of this document remains as historical reference.
+
 Segmented streaming is an experimental feature.
 
 - It is not part of the standard deployment path.

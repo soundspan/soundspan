@@ -52,7 +52,7 @@ Selection is explicit and unit-tested (`frontend/lib/audio-engine/engineSelectio
 
 Key behaviors:
 
-- **Native is a direct mode.** Segmented startup, session prewarm, and DASH handoff activate only under `videojs` (`isSegmentedModeEnabled()`); a bare `<audio>` element cannot play DASH manifests. Direct stream URLs are used exactly as in howler mode.
+- **Native is a direct mode.** Segmented startup, session prewarm, and DASH handoff activate only under `videojs` (`isSegmentedModeEnabled()`); that mode is deprecated, no longer receives fixes, and is planned for removal. A bare `<audio>` element cannot play DASH manifests. Direct stream URLs are used exactly as in howler mode.
 - **End detection** is the native `ended` event only — it is media-pipeline driven and fires under background timer throttling. No heartbeat/polling monitors; position updates come from `timeupdate` plus a 1 s ticker.
 - **Seeks** are direct `currentTime` assignments. A seek requested while loading is stored and applied on `loadedmetadata` (load-bearing for podcast/audiobook resume-at-position). A ~300 ms seek mark suppresses stale positions instead of lock flags and timers.
 - **Autoplay policy**: the native `play()` promise is used. `NotAllowedError` surfaces a user-gesture requirement and arms exactly one gesture retry — never a loop. Automatic retries are bounded and exhaust into an explicit error instead of showing "playing" while nothing plays.

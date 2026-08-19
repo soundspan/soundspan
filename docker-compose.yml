@@ -161,7 +161,7 @@ services:
             # IMPORTANT: "localhost" inside a container refers to itself, not the host.
             BACKEND_URL: ${BACKEND_URL:-http://backend:3006}
             # Runtime streaming-engine selector injected via /runtime-config.js.
-            # Keep unset for primary howler (direct). Set to videojs (segmented, experimental) only for explicit evaluation.
+            # Keep unset for default native playback. videojs enables deprecated segmented/DASH playback pending removal.
             STREAMING_ENGINE_MODE: ${STREAMING_ENGINE_MODE:-}
             # Exposed to the browser; leave empty by default so the app uses /api via rewrites.
             NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}

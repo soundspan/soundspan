@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `DISCOVERY_MODE=legacy` is deprecated, no longer receives fixes, and will be removed in a future release; unset `DISCOVERY_MODE` to migrate.
 - The Tauri desktop integration (the `tauri-native` engine mode and the desktop auto-upgrade path) is deprecated, no longer receives fixes, and will be removed in a future release; playback continues on the standard web engines.
+- `STREAMING_ENGINE_MODE=videojs` (segmented/DASH streaming) is deprecated, no longer receives fixes, and will be removed in a future release; unset `STREAMING_ENGINE_MODE` to migrate to the default native engine.
 
 ## [2.3.3] - 2026-08-18
 
