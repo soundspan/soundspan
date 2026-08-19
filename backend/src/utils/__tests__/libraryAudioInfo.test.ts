@@ -68,7 +68,12 @@ describe("buildFederatedAudioInfo", () => {
     );
 
     it.each([
-        [{ codec: "MPEG 1 Layer 3", container: "MPEG" }, "track.mp3", "MP3", false],
+        [
+            { codec: "MPEG 1 Layer 3", container: "MPEG" },
+            "track.mp3",
+            "MP3",
+            false,
+        ],
         [{ codec: "MPEG-1 layer 3" }, "track.m4a", "MP3", false],
         [{ codec: "MPEG-4/AAC" }, "track.m4a", "AAC", false],
         [{ codec: "AAC", container: "ADTS/MPEG-4" }, "track.aac", "AAC", false],
@@ -84,13 +89,59 @@ describe("buildFederatedAudioInfo", () => {
         [{ codec: "PCM", container: "WavPack" }, "track.wv", "PCM", true],
         [{ codec: "DSD", container: "WavPack" }, "track.wv", "DSD", true],
         [{ container: "WavPack" }, "track.wv", "WavPack", true],
-        [{ codec: "Windows Media Audio 9.2", container: "ASF/audio" }, "track.wma", "WMA", false],
+        [
+            { codec: "Windows Media Audio 9.2", container: "ASF/audio" },
+            "track.wma",
+            "WMA",
+            false,
+        ],
         [{ container: "ASF/audio" }, "track.wma", "WMA", false],
     ] as const)(
         "normalizes music-metadata producer label for %s",
         (format, filePath, expectedCodec, expectedLossless) => {
             const mime = deriveAudioFormatLabel(format, filePath);
 
+            expect(
+                buildFederatedAudioInfo({
+                    mime,
+                    fileSize: 30_000_000,
+                    duration: 240,
+                }),
+            ).toMatchObject({
+                codec: expectedCodec,
+                lossless: expectedLossless,
+            });
+        },
+    );
+
+    it.each([
+        [
+            { codec: "raw", container: "M4A", lossless: true },
+            "track.m4a",
+            "raw",
+            "PCM",
+            true,
+        ],
+        [
+            { codec: "Speex 1.2", container: "Ogg" },
+            "track.spx",
+            "Speex 1.2",
+            "Speex",
+            false,
+        ],
+        [
+            { codec: "PCM", container: "WavPack", lossless: false },
+            "track.wv",
+            "PCM",
+            "PCM",
+            true,
+        ],
+    ] as const)(
+        "normalizes remaining music-metadata producer label for %s",
+        (format, filePath, expectedLabel, expectedCodec, expectedLossless) => {
+            const mime = deriveAudioFormatLabel(format, filePath);
+
+            expect(mime).toBe(expectedLabel);
             expect(
                 buildFederatedAudioInfo({
                     mime,
@@ -126,6 +177,19 @@ describe("buildFederatedAudioInfo", () => {
                 codec: expectedCodec,
                 lossless: expectedLossless,
             });
+        },
+    );
+
+    it.each(["doggone", "Isaac", "landscape", "escape"])(
+        "does not infer a codec from an embedded family substring in %s",
+        (mime) => {
+            expect(
+                buildFederatedAudioInfo({
+                    mime,
+                    fileSize: 30_000_000,
+                    duration: 240,
+                }),
+            ).toMatchObject({ codec: null, lossless: false });
         },
     );
 
@@ -179,9 +243,7 @@ describe("buildFederatedAudioInfo", () => {
         { fileSize: 0, duration: 240 },
         { fileSize: 30_000_000, duration: 0 },
     ])("returns a null bitrate for invalid size or duration: %j", (input) => {
-        expect(
-            buildFederatedAudioInfo({ mime: "MP3", ...input }),
-        ).toEqual({
+        expect(buildFederatedAudioInfo({ mime: "MP3", ...input })).toEqual({
             codec: "MP3",
             bitrate: null,
             sampleRate: null,
