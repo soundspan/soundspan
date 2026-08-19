@@ -62,19 +62,27 @@ async function createSchema(database: Client): Promise<void> {
 }
 
 async function seedRows(database: Client): Promise<void> {
+    // Parameterized queries use the extended protocol, which allows exactly
+    // one command per statement — seed each table separately.
     await database.query(
-        `
-        INSERT INTO "Artist" (id, name) VALUES ('artist-1', 'Artist 1');
-        INSERT INTO "Album" (id, "artistId") VALUES ('album-1', 'artist-1');
+        `INSERT INTO "Artist" (id, name) VALUES ('artist-1', 'Artist 1')`,
+    );
+    await database.query(
+        `INSERT INTO "Album" (id, "artistId") VALUES ('album-1', 'artist-1')`,
+    );
+    await database.query(`
         INSERT INTO "Track" (id, "albumId", title, energy, valence)
         SELECT 'track-' || value, 'album-1', 'Track ' || value,
                value::double precision / 10,
                1 - value::double precision / 10
-        FROM generate_series(1, 6) AS value;
+        FROM generate_series(1, 6) AS value
+    `);
+    await database.query(
+        `
         INSERT INTO track_embeddings (track_id, space_id, embedding)
         SELECT 'track-' || value, $1,
                ('[' || value || ',' || (value + 1) || ',' || (value + 2) || ']')::vector
-        FROM generate_series(1, 6) AS value;
+        FROM generate_series(1, 6) AS value
     `,
         [SPACE_ID],
     );
