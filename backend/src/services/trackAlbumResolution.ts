@@ -10,7 +10,9 @@ const log = logger.child("TrackAlbumResolution");
 const OVERALL_BUDGET_MS = 10_000;
 const CACHE_OPERATION_BUDGET_MS = 250;
 const POSITIVE_TTL_SECONDS = 7 * 24 * 60 * 60;
-const NEGATIVE_TTL_SECONDS = 24 * 60 * 60;
+// Some provider adapters collapse transport failures into empty results. Keep
+// genuine misses short-lived to bound the residual false-negative risk.
+const NEGATIVE_TTL_SECONDS = 60 * 60;
 const CACHE_PREFIX = "track-album-resolution:";
 
 /** Provider rung that produced an external track album resolution. */
@@ -42,9 +44,22 @@ export interface ExternalTrackAlbumInput {
     albumTitle?: string;
 }
 
+/** Typed outcome of the bounded external track-album resolution ladder. */
+export type TrackAlbumResolutionOutcome =
+    | { status: "resolved"; resolution: ExternalTrackAlbumResolution }
+    | { status: "miss" }
+    | { status: "timeout" };
+
 type CacheLookup =
     | { found: false }
-    | { found: true; value: ExternalTrackAlbumResolution | null };
+    | {
+          found: true;
+          outcome: Exclude<TrackAlbumResolutionOutcome, { status: "timeout" }>;
+      };
+
+type RungResult =
+    | { status: "resolved"; resolution: ExternalTrackAlbumResolution }
+    | { status: "miss"; transient: boolean };
 
 class BudgetExpiredError extends Error {}
 
@@ -81,6 +96,8 @@ async function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number) {
     if (timeoutMs <= 0) throw new BudgetExpiredError("Budget expired");
     let timer: NodeJS.Timeout | undefined;
     try {
+        // The shared MusicBrainz limiter has no abort plumbing. This race bounds
+        // caller wait time, but timed-out provider work may settle afterward.
         return await Promise.race([
             operation(),
             new Promise<never>((_resolve, reject) => {
@@ -124,10 +141,15 @@ async function readCache(
             typeof parsed === "object" &&
             (parsed as { status?: unknown }).status === "miss"
         ) {
-            return { found: true, value: null };
+            return { found: true, outcome: { status: "miss" } };
         }
         const value = (parsed as { value?: unknown })?.value;
-        return isResolution(value) ? { found: true, value } : { found: false };
+        return isResolution(value)
+            ? {
+                  found: true,
+                  outcome: { status: "resolved", resolution: value },
+              }
+            : { found: false };
     } catch (error) {
         log.debug("Track album cache read failed", error);
         return { found: false };
@@ -168,12 +190,20 @@ function fromAlbumSearch(
     };
 }
 
+function resolvedRung(resolution: ExternalTrackAlbumResolution): RungResult {
+    return { status: "resolved", resolution };
+}
+
+function missedRung(transient = false): RungResult {
+    return { status: "miss", transient };
+}
+
 async function searchAlbumTitle(
     albumTitle: string,
     input: ExternalTrackAlbumInput,
     source: TrackAlbumResolutionSource,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<RungResult> {
     try {
         const album = await callWithinBudget(
             () =>
@@ -183,19 +213,20 @@ async function searchAlbumTitle(
                 ),
             deadlineMs,
         );
-        return fromAlbumSearch(album, input.artistName, source);
+        const resolution = fromAlbumSearch(album, input.artistName, source);
+        return resolution ? resolvedRung(resolution) : missedRung();
     } catch (error) {
         if (error instanceof BudgetExpiredError) throw error;
         log.debug(`Album lookup failed at ${source}`, error);
-        return null;
+        return missedRung(true);
     }
 }
 
 async function tryProvidedAlbum(
     input: ExternalTrackAlbumInput,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
-    if (isGenericAlbumTitle(input.albumTitle)) return null;
+): Promise<RungResult> {
+    if (isGenericAlbumTitle(input.albumTitle)) return missedRung();
     return searchAlbumTitle(
         input.albumTitle as string,
         input,
@@ -207,7 +238,7 @@ async function tryProvidedAlbum(
 async function tryRecording(
     input: ExternalTrackAlbumInput,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<RungResult> {
     try {
         const recording = await callWithinBudget(
             () =>
@@ -217,24 +248,24 @@ async function tryRecording(
                 ),
             deadlineMs,
         );
-        if (!recording?.albumMbid || !recording.albumName) return null;
-        return {
+        if (!recording?.albumMbid || !recording.albumName) return missedRung();
+        return resolvedRung({
             albumTitle: recording.albumName,
             rgMbid: recording.albumMbid,
             artistName: input.artistName,
             source: "musicbrainz-recording",
-        };
+        });
     } catch (error) {
         if (error instanceof BudgetExpiredError) throw error;
         log.debug("Recording lookup failed", error);
-        return null;
+        return missedRung(true);
     }
 }
 
 async function tryLastFm(
     input: ExternalTrackAlbumInput,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<RungResult> {
     try {
         const track = await callWithinBudget(
             () =>
@@ -243,19 +274,19 @@ async function tryLastFm(
         );
         const title = track?.album?.title;
         if (typeof title !== "string" || isGenericAlbumTitle(title))
-            return null;
+            return missedRung();
         return searchAlbumTitle(title, input, "lastfm", deadlineMs);
     } catch (error) {
         if (error instanceof BudgetExpiredError) throw error;
         log.debug("Last.fm track lookup failed", error);
-        return null;
+        return missedRung(true);
     }
 }
 
 async function tryDeezer(
     input: ExternalTrackAlbumInput,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<RungResult> {
     try {
         const trackAlbum = await callWithinBudget(
             () =>
@@ -264,45 +295,60 @@ async function tryDeezer(
         );
         const title = trackAlbum?.albumName;
         if (typeof title !== "string" || isGenericAlbumTitle(title))
-            return null;
+            return missedRung();
         return searchAlbumTitle(title, input, "deezer", deadlineMs);
     } catch (error) {
         if (error instanceof BudgetExpiredError) throw error;
         log.debug("Deezer track lookup failed", error);
-        return null;
+        return missedRung(true);
     }
 }
 
 async function runResolutionLadder(
     input: ExternalTrackAlbumInput,
     deadlineMs: number,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<RungResult> {
+    let transient = false;
     const supplied = await tryProvidedAlbum(input, deadlineMs);
-    if (supplied) return supplied;
+    if (supplied.status === "resolved") return supplied;
+    transient ||= supplied.transient;
+
     const recording = await tryRecording(input, deadlineMs);
-    if (recording) return recording;
+    if (recording.status === "resolved") return recording;
+    transient ||= recording.transient;
+
     const lastFm = await tryLastFm(input, deadlineMs);
-    if (lastFm) return lastFm;
-    return tryDeezer(input, deadlineMs);
+    if (lastFm.status === "resolved") return lastFm;
+    transient ||= lastFm.transient;
+
+    const deezer = await tryDeezer(input, deadlineMs);
+    if (deezer.status === "resolved") return deezer;
+    return missedRung(transient || deezer.transient);
 }
 
-/** Resolve an external track to a MusicBrainz release-group album. */
+/** Resolve an external track to a MusicBrainz release-group album outcome. */
 export async function resolveAlbumForExternalTrack(
     input: ExternalTrackAlbumInput,
-): Promise<ExternalTrackAlbumResolution | null> {
+): Promise<TrackAlbumResolutionOutcome> {
     const deadlineMs = Date.now() + OVERALL_BUDGET_MS;
     const cacheKey = buildCacheKey(input);
     const cached = await readCache(cacheKey, deadlineMs);
-    if (cached.found) return cached.value;
+    if (cached.found) return cached.outcome;
 
     try {
         const result = await runResolutionLadder(input, deadlineMs);
-        await writeCache(cacheKey, result, deadlineMs);
-        return result;
+        if (result.status === "resolved") {
+            await writeCache(cacheKey, result.resolution, deadlineMs);
+            return result;
+        }
+        if (!result.transient) {
+            await writeCache(cacheKey, null, deadlineMs);
+        }
+        return { status: "miss" };
     } catch (error) {
         if (error instanceof BudgetExpiredError) {
             log.debug("Track album resolution budget expired");
-            return null;
+            return { status: "timeout" };
         }
         throw error;
     }

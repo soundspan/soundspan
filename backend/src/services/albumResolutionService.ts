@@ -114,20 +114,28 @@ async function resolveGenericAlbum(
     track?: RemoteTrackAlbumContext,
 ): Promise<AlbumResolutionResult | null> {
     if (!track) return null;
+    const { resolveAlbumForExternalTrack } =
+        await import("./trackAlbumResolution");
+    const outcome = await resolveAlbumForExternalTrack({
+        artistName: track.artistName,
+        trackTitle: track.trackTitle,
+        albumTitle: rawAlbumTitle?.trim() || undefined,
+    });
+    if (outcome.status !== "resolved") return null;
+
     try {
-        const { resolveAlbumForExternalTrack } =
-            await import("./trackAlbumResolution");
-        const external = await resolveAlbumForExternalTrack({
-            artistName: track.artistName,
-            trackTitle: track.trackTitle,
-            albumTitle: rawAlbumTitle?.trim() || undefined,
-        });
-        return external
-            ? resolveExternalAlbum(external, artistId, provider)
-            : null;
+        return await resolveExternalAlbum(
+            outcome.resolution,
+            artistId,
+            provider,
+        );
     } catch (error) {
-        log.warn("External track album resolution failed", error);
-        return null;
+        log.warn("Failed to persist resolved remote album", {
+            artistId,
+            provider,
+            error,
+        });
+        throw error;
     }
 }
 
@@ -148,7 +156,8 @@ export function buildSyntheticRgMbid(
 }
 
 /**
- * Create a new Album entity with location=REMOTE and a synthetic rgMbid.
+ * Create a new REMOTE Album with a resolved rgMbid when supplied, otherwise a
+ * deterministic synthetic rgMbid.
  * Uses createMany(skipDuplicates) to avoid unique-constraint error races.
  */
 async function createRemoteAlbum(
@@ -196,29 +205,8 @@ async function resolveExternalAlbum(
     artistId: string,
     provider: "tidal" | "youtube",
 ): Promise<AlbumResolutionResult> {
-    const byMbid = await prisma.album.findUnique({
-        where: { rgMbid: external.rgMbid },
-        select: { id: true, title: true },
-    });
-    if (byMbid) return { ...byMbid, created: false };
-
-    const byTitle = await prisma.album.findFirst({
-        where: {
-            artistId,
-            title: { equals: external.albumTitle, mode: "insensitive" },
-        },
-        select: { id: true, title: true, rgMbid: true },
-    });
-    if (byTitle?.rgMbid.startsWith("remote:")) {
-        const updated = await prisma.album.update({
-            where: { id: byTitle.id },
-            data: { rgMbid: external.rgMbid },
-            select: { id: true, title: true },
-        });
-        return { ...updated, created: false };
-    }
-    if (byTitle)
-        return { id: byTitle.id, title: byTitle.title, created: false };
+    const existing = await findExistingAlbum(external.albumTitle, artistId);
+    if (existing) return existing;
 
     return createRemoteAlbum(
         external.albumTitle,

@@ -63,7 +63,9 @@ describe("GET /api/metadata/track-album", () => {
     });
 
     it("returns a clean 404 when the track album cannot be resolved", async () => {
-        mockResolveAlbumForExternalTrack.mockResolvedValueOnce(null);
+        mockResolveAlbumForExternalTrack.mockResolvedValueOnce({
+            status: "miss",
+        });
 
         const response = await authenticatedGet(
             "?artist=Radiohead&title=Paranoid%20Android",
@@ -76,6 +78,22 @@ describe("GET /api/metadata/track-album", () => {
         });
     });
 
+    it("returns 503 with a distinct code when resolution times out", async () => {
+        mockResolveAlbumForExternalTrack.mockResolvedValueOnce({
+            status: "timeout",
+        });
+
+        const response = await authenticatedGet(
+            "?artist=Radiohead&title=Paranoid%20Android",
+        );
+
+        expect(response.status).toBe(503);
+        expect(response.body).toEqual({
+            error: "Track album resolution timed out",
+            code: "RESOLUTION_TIMEOUT",
+        });
+    });
+
     it("returns the resolution and trims bounded query input", async () => {
         const resolution = {
             albumTitle: "OK Computer",
@@ -83,7 +101,10 @@ describe("GET /api/metadata/track-album", () => {
             artistName: "Radiohead",
             source: "musicbrainz-recording",
         };
-        mockResolveAlbumForExternalTrack.mockResolvedValueOnce(resolution);
+        mockResolveAlbumForExternalTrack.mockResolvedValueOnce({
+            status: "resolved",
+            resolution,
+        });
 
         const response = await authenticatedGet(
             "?artist=%20Radiohead%20&title=%20Paranoid%20Android%20&album=%20Unknown%20Album%20",

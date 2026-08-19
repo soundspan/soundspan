@@ -66,10 +66,13 @@ describe("resolveAlbumForExternalTrack", () => {
                 albumTitle: "OK Computer",
             }),
         ).resolves.toEqual({
-            albumTitle: "OK Computer",
-            rgMbid: "rg-ok-computer",
-            artistName: "Radiohead",
-            source: "musicbrainz-album",
+            status: "resolved",
+            resolution: {
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "musicbrainz-album",
+            },
         });
         expect(mockSearchAlbum).toHaveBeenCalledWith(
             "OK Computer",
@@ -92,10 +95,13 @@ describe("resolveAlbumForExternalTrack", () => {
                 albumTitle: "Unknown Album",
             }),
         ).resolves.toEqual({
-            albumTitle: "OK Computer",
-            rgMbid: "rg-ok-computer",
-            artistName: "Radiohead",
-            source: "musicbrainz-recording",
+            status: "resolved",
+            resolution: {
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "musicbrainz-recording",
+            },
         });
         expect(mockSearchAlbum).not.toHaveBeenCalled();
     });
@@ -113,7 +119,14 @@ describe("resolveAlbumForExternalTrack", () => {
             albumTitle: "Garbage Tag",
         });
 
-        expect(result?.source).toBe("musicbrainz-recording");
+        expect(result).toEqual(
+            expect.objectContaining({
+                status: "resolved",
+                resolution: expect.objectContaining({
+                    source: "musicbrainz-recording",
+                }),
+            }),
+        );
         expect(mockSearchAlbum).toHaveBeenNthCalledWith(
             1,
             "Garbage Tag",
@@ -131,10 +144,13 @@ describe("resolveAlbumForExternalTrack", () => {
         });
 
         await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual({
-            albumTitle: "OK Computer",
-            rgMbid: "rg-ok-computer",
-            artistName: "Radiohead",
-            source: "lastfm",
+            status: "resolved",
+            resolution: {
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "lastfm",
+            },
         });
         expect(mockGetTrackInfo).toHaveBeenCalledWith(
             "Radiohead",
@@ -157,10 +173,13 @@ describe("resolveAlbumForExternalTrack", () => {
         });
 
         await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual({
-            albumTitle: "OK Computer",
-            rgMbid: "rg-ok-computer",
-            artistName: "Radiohead",
-            source: "deezer",
+            status: "resolved",
+            resolution: {
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "deezer",
+            },
         });
         expect(mockGetTrackAlbum).toHaveBeenCalledWith(
             "Radiohead",
@@ -180,9 +199,10 @@ describe("resolveAlbumForExternalTrack", () => {
         };
         mockRedisGet.mockResolvedValue(JSON.stringify(cached));
 
-        await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual(
-            cached.value,
-        );
+        await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual({
+            status: "resolved",
+            resolution: cached.value,
+        });
         expect(mockSearchRecording).not.toHaveBeenCalled();
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
@@ -190,7 +210,9 @@ describe("resolveAlbumForExternalTrack", () => {
     it("returns a negative cache hit without calling providers", async () => {
         mockRedisGet.mockResolvedValue(JSON.stringify({ status: "miss" }));
 
-        await expect(resolveAlbumForExternalTrack(input)).resolves.toBeNull();
+        await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual({
+            status: "miss",
+        });
         expect(mockSearchRecording).not.toHaveBeenCalled();
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
@@ -219,7 +241,7 @@ describe("resolveAlbumForExternalTrack", () => {
         expect(mockRedisGet.mock.calls[0][0]).toBe(firstKey);
     });
 
-    it("caches successful results for seven days and misses for one day", async () => {
+    it("caches successful results for seven days and genuine misses for one hour", async () => {
         mockSearchRecording.mockResolvedValueOnce({
             albumName: "OK Computer",
             albumMbid: "rg-ok-computer",
@@ -243,9 +265,23 @@ describe("resolveAlbumForExternalTrack", () => {
         await resolveAlbumForExternalTrack(input);
         expect(mockRedisSetEx).toHaveBeenLastCalledWith(
             expect.stringMatching(/^track-album-resolution:/),
-            24 * 60 * 60,
+            60 * 60,
             JSON.stringify({ status: "miss" }),
         );
+    });
+
+    it("does not negative-cache an attempt when a provider rung throws", async () => {
+        mockSearchRecording.mockRejectedValueOnce(
+            new Error("MusicBrainz unavailable"),
+        );
+
+        await expect(resolveAlbumForExternalTrack(input)).resolves.toEqual({
+            status: "miss",
+        });
+
+        expect(mockGetTrackInfo).toHaveBeenCalled();
+        expect(mockGetTrackAlbum).toHaveBeenCalled();
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
     it("stops the ladder when the overall budget expires", async () => {
@@ -255,7 +291,7 @@ describe("resolveAlbumForExternalTrack", () => {
         try {
             const pending = resolveAlbumForExternalTrack(input);
             await jest.advanceTimersByTimeAsync(10_000);
-            await expect(pending).resolves.toBeNull();
+            await expect(pending).resolves.toEqual({ status: "timeout" });
             expect(mockGetTrackInfo).not.toHaveBeenCalled();
             expect(mockGetTrackAlbum).not.toHaveBeenCalled();
             expect(mockRedisSetEx).not.toHaveBeenCalled();

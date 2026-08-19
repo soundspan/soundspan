@@ -44,6 +44,7 @@ router.use(requireAuth);
  *       400: { description: Invalid query parameters }
  *       401: { description: Not authenticated }
  *       404: { description: Track album could not be resolved }
+ *       503: { description: Track album resolution timed out }
  *       500: { description: Track album resolution failed }
  */
 router.get(
@@ -62,12 +63,20 @@ router.get(
                 trackTitle: query.data.title,
                 albumTitle: query.data.album,
             });
-            if (!result) {
+            if (result.status === "miss") {
                 return sendRouteError(res, 404, "Track album not found", {
                     code: "TRACK_ALBUM_NOT_FOUND",
                 });
             }
-            return res.json(result);
+            if (result.status === "timeout") {
+                return sendRouteError(
+                    res,
+                    503,
+                    "Track album resolution timed out",
+                    { code: "RESOLUTION_TIMEOUT" },
+                );
+            }
+            return res.json(result.resolution);
         } catch (error) {
             log.error("Track album resolution failed", error);
             return sendInternalRouteError(res, "Failed to resolve track album");
