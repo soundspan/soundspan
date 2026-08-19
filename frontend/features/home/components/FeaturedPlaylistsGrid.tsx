@@ -1,13 +1,12 @@
 "use client";
 
-import { Music2, Loader2 } from "lucide-react";
+import { Music2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
     HorizontalCarousel,
     CarouselItem,
 } from "@/components/ui/HorizontalCarousel";
 import { memo, useCallback } from "react";
-import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import type { PlaylistPreview } from "@/hooks/useQueries";
 
 export type { PlaylistPreview };
@@ -27,10 +26,7 @@ const PlaylistCard = memo(function PlaylistCard({
     index,
     onClick,
 }: PlaylistCardProps) {
-    const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
-
     const handleClick = () => {
-        triggerPlayFeedback();
         onClick(playlist.id);
     };
 
@@ -55,22 +51,6 @@ const PlaylistCard = memo(function PlaylistCard({
                             <Music2 className="w-10 h-10 text-gray-400" />
                         </div>
                     )}
-                    {/* Play button on hover */}
-                    <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-200">
-                        <div className="w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
-                            {showSpinner ? (
-                                <Loader2 className="w-4 h-4 text-black animate-spin" />
-                            ) : (
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    className="w-4 h-4 text-black ml-0.5"
-                                    fill="currentColor"
-                                >
-                                    <path d="M8 5v14l11-7z" />
-                                </svg>
-                            )}
-                        </div>
-                    </div>
                 </div>
                 <h3 className="text-sm font-semibold text-white truncate">
                     {playlist.title}

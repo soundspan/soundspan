@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Popular Artists cards (home and Explore) now open the artist page directly, matching the Related Artists behavior, instead of running a name search.
+- Trending Community Playlists cards (home and Explore) no longer show a play-button overlay on hover; the cards only navigate to the playlist and never started playback.
 - The audio analyzer now reconnects to PostgreSQL after a server-side connection close instead of waiting for multiple worker failures, so loudness backfill jobs no longer spend retry budget on a stale connection.
 - OpenSubsonic `stream` requests now honor `timeOffset` for transcoded audio with fast ffmpeg input seeking. Offset work bypasses the reusable track-and-quality cache, shares the global ffmpeg concurrency cap, uses interval-gated stale sweeping that excludes active temporary files, and cancels and cleans up when clients disconnect (#624).
 - OpenSubsonic song and album responses now report the authenticated user's latest `played` timestamp across the shared browse, search, playlist, queue, bookmark, starred, discovery, and now-playing surfaces (#625).
