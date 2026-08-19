@@ -106,9 +106,7 @@ const minimalChangelog = `# Changelog
 `;
 
 test("ignores ambient Git repository environment", () => {
-    const decoyRoot = mkdtempSync(
-        path.join(repoRoot, ".release-notes-decoy-"),
-    );
+    const decoyRoot = mkdtempSync(path.join(repoRoot, ".release-notes-decoy-"));
     const previousGitDirectory = process.env.GIT_DIR;
     const previousGitWorkTree = process.env.GIT_WORK_TREE;
 
