@@ -22,19 +22,11 @@ export const TRACK_AUDIO_INFO_SELECT = {
     duration: true,
     mime: true,
     origin: true,
-    peerId: true,
 } satisfies Prisma.TrackSelect;
 
 /** Identifies tracks whose audio information must come from peer metadata. */
-export function isFederatedAudioInfoTrack(track: {
-    filePath: string | null;
-    origin: string;
-    peerId: string | null;
-}): boolean {
-    return (
-        track.origin === "FEDERATED" ||
-        (track.filePath === null && Boolean(track.peerId))
-    );
+export function isFederatedAudioInfoTrack(track: { origin: string }): boolean {
+    return track.origin === "FEDERATED";
 }
 
 /** Resolves the local file containing the requested playback representation. */

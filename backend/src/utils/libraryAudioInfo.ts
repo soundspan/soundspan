@@ -21,15 +21,25 @@ interface FederatedAudioInfoTrack {
     duration: number | null;
 }
 
-const AUDIO_CODEC_BY_MIME: Readonly<Record<string, string>> = {
+const AUDIO_CODEC_BY_FORMAT_VALUE: Readonly<Record<string, string>> = {
+    mp3: "MP3",
+    flac: "FLAC",
+    m4a: "AAC",
+    aac: "AAC",
+    ogg: "OGG",
+    opus: "Opus",
+    wav: "WAV",
+    wma: "WMA",
+    ape: "APE",
+    wavpack: "WavPack",
     "audio/aac": "AAC",
     "audio/alac": "ALAC",
     "audio/flac": "FLAC",
     "audio/mp3": "MP3",
-    "audio/mp4": "MP4",
+    "audio/mp4": "AAC",
     "audio/mpeg": "MP3",
     "audio/ogg": "OGG",
-    "audio/opus": "OPUS",
+    "audio/opus": "Opus",
     "audio/wav": "WAV",
     "audio/webm": "WEBM",
     "audio/x-flac": "FLAC",
@@ -37,7 +47,7 @@ const AUDIO_CODEC_BY_MIME: Readonly<Record<string, string>> = {
     "application/ogg": "OGG",
 };
 
-const LOSSLESS_CODECS = new Set(["FLAC", "ALAC", "WAV"]);
+const LOSSLESS_CODECS = new Set(["FLAC", "ALAC", "WAV", "APE", "WavPack"]);
 
 interface AudioInfoCacheEntry {
     expiresAt: number;
@@ -104,11 +114,11 @@ export const normalizeStreamingQuality = (
 export const buildFederatedAudioInfo = (
     track: FederatedAudioInfoTrack,
 ): AudioInfoResponsePayload => {
-    const normalizedMime =
+    const normalizedFormatValue =
         typeof track.mime === "string"
             ? track.mime.split(";", 1)[0].trim().toLowerCase()
             : "";
-    const codec = AUDIO_CODEC_BY_MIME[normalizedMime] ?? null;
+    const codec = AUDIO_CODEC_BY_FORMAT_VALUE[normalizedFormatValue] ?? null;
     const fileSize = track.fileSize;
     const duration = track.duration;
     const bitrate =

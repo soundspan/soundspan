@@ -4037,12 +4037,56 @@ describe("library catalog list runtime coverage", () => {
                 albumTruePeakDb: -1.8,
             },
             duration: 201,
+            source: "local",
         });
 
         const errReq = { params: { id: "err-track" } } as any;
         const errRes = createRes();
         await invokeWithErrorHandler(trackByIdHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
+    });
+
+    it("returns federated provenance when restoring a track by id", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce({
+            id: "federated-track-1",
+            title: "Federated Track",
+            trackNo: 2,
+            duration: 240,
+            filePath: null,
+            fileSize: 30_000_000,
+            origin: "FEDERATED",
+            loudnessLufs: null,
+            truePeakDb: null,
+            album: {
+                id: "federated-album-1",
+                title: "Federated Album",
+                coverUrl: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                artist: {
+                    id: "federated-artist-1",
+                    name: "Federated Artist",
+                },
+            },
+            federationPeer: {
+                id: "peer-1",
+                name: "Peer One",
+                outboundStatus: "ACTIVE",
+            },
+        });
+        const res = createRes();
+
+        await trackByIdHandler(
+            { params: { id: "federated-track-1" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({
+            id: "federated-track-1",
+            source: "federated",
+            peer: { id: "peer-1", name: "Peer One", online: true },
+        });
     });
 
     it("returns resolved thumbs preference state for a track", async () => {
@@ -4463,7 +4507,7 @@ describe("library catalog list runtime coverage", () => {
             fileModified: new Date("2026-08-19T00:00:00.000Z"),
             fileSize: 30_000_000,
             duration: 240,
-            mime: "audio/flac",
+            mime: "FLAC",
             origin: "FEDERATED",
             peerId: "peer-1",
         });
@@ -4494,14 +4538,14 @@ describe("library catalog list runtime coverage", () => {
         existsSpy.mockRestore();
     });
 
-    it("returns null estimates when federated size and duration are missing", async () => {
+    it("returns a null codec when federated mime is missing", async () => {
         mockTrackFindUnique.mockResolvedValueOnce({
             filePath: null,
             fileModified: new Date("2026-08-19T00:00:00.000Z"),
-            fileSize: null,
-            duration: null,
+            fileSize: 30_000_000,
+            duration: 240,
             mime: null,
-            origin: "LOCAL",
+            origin: "FEDERATED",
             peerId: "peer-1",
         });
         const res = createRes();
@@ -4518,7 +4562,7 @@ describe("library catalog list runtime coverage", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
             codec: null,
-            bitrate: null,
+            bitrate: 1000,
             sampleRate: null,
             bitDepth: null,
             lossless: false,
@@ -4534,7 +4578,7 @@ describe("library catalog list runtime coverage", () => {
             fileModified: new Date("2026-08-19T00:00:00.000Z"),
             fileSize: 30_000_000,
             duration: 240,
-            mime: "audio/flac",
+            mime: "M4A",
             origin: "FEDERATED",
             peerId: "peer-1",
         });
@@ -4551,11 +4595,11 @@ describe("library catalog list runtime coverage", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
-            codec: "FLAC",
+            codec: "AAC",
             bitrate: 1000,
             sampleRate: null,
             bitDepth: null,
-            lossless: true,
+            lossless: false,
             channels: null,
         });
         expect(mockUserSettingsFindUnique).not.toHaveBeenCalled();

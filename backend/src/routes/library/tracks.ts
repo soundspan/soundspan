@@ -1466,6 +1466,9 @@ export async function handleGetTrack(
                     },
                 },
             },
+            federationPeer: {
+                select: { id: true, name: true, outboundStatus: true },
+            },
         },
     });
 
@@ -1473,7 +1476,8 @@ export async function handleGetTrack(
         return sendRouteError(res, 404, "Track not found");
     }
 
-    // Transform to match frontend Track interface: artist at top level
+    const normalizedTrack = normalizeLocalTrack(track);
+    // Transform to match frontend Track interface: artist at top level.
     const formattedTrack = {
         id: track.id,
         title: track.title,
@@ -1491,6 +1495,8 @@ export async function handleGetTrack(
         duration: track.duration,
         loudnessLufs: track.loudnessLufs,
         truePeakDb: track.truePeakDb,
+        source: normalizedTrack.source,
+        ...(normalizedTrack.peer ? { peer: normalizedTrack.peer } : {}),
     };
 
     res.json(formattedTrack);
