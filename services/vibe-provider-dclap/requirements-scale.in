@@ -1,3 +1,4 @@
 # Dependencies for the release-gated DCLAP long-audio scale suite.
 -r requirements-test.txt
 librosa>=0.11.0,<1.0
+pytest-timeout==2.4.0

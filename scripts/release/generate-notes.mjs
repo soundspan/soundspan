@@ -345,66 +345,26 @@ function renderTemplate(templateText, replacements) {
     return rendered;
 }
 
-function main() {
-    const options = parseArgs(process.argv.slice(2));
-    const version = options.version ?? "";
-    const fromRef = options.from ?? "";
-    const releaseRef = version || "HEAD";
-    const toRef = options.to ?? releaseRef;
-    const outputPath = options.output;
-
-    if (!version) {
-        console.warn(
-            "Warning: no release version was provided; release links fall back to mutable HEAD.",
-        );
-    }
-    ensureReleaseVersion(version);
-    ensureRefExists(fromRef, "--from");
+function resolveReleaseLinks(options, version, fromRef) {
+    const toRef = options.to ?? version;
     if (options.to) {
         ensureRefExists(toRef, "--to");
     }
 
     const repoWebUrl = resolveRepoWebUrl();
-    const compareUrl = `${repoWebUrl}/compare/${encodeURIComponent(fromRef)}...${encodeURIComponent(toRef)}`;
-    const categorized = loadReleaseItemsFromChangelog(version);
-    const releaseDate =
-        categorized.releaseDate ?? new Date().toISOString().slice(0, 10);
-    const fullChangelogUrl = `${repoWebUrl}/blob/${encodeURIComponent(releaseRef)}/${CHANGELOG_PATH}`;
+    return {
+        toRef,
+        compareUrl: `${repoWebUrl}/compare/${encodeURIComponent(fromRef)}...${encodeURIComponent(toRef)}`,
+        fullChangelogUrl: `${repoWebUrl}/blob/${encodeURIComponent(version)}/${CHANGELOG_PATH}`,
+    };
+}
+
+function buildCategoryReplacements(categorized) {
     const fixedItems = [
         ...categorized.fixed,
         ...normalizeSecurityBullets(categorized.security),
     ];
-
-    const counts = {
-        fixed: categorized.fixed.length,
-        security: categorized.security.length,
-        added: categorized.added.length,
-        changed: categorized.changed.length,
-        accessibility: categorized.accessibility.length,
-        admin: categorized.admin.length,
-    };
-
-    const summary = buildReleaseSummary(counts, options.summary);
-    const knownIssues = formatBulletBlock(
-        options.knownIssues,
-        "None documented in this release.",
-    );
-    const compatibilityNotes = formatBulletBlock(
-        options.compatibilityNotes,
-        "No manual migration steps required for standard Docker and Helm deployments.",
-    );
-    const upgradeNotes = formatArgumentBulletBlock(
-        options.upgradeNotes,
-        "If you already run 2.0.x or later, no manual steps are required.",
-    );
-
-    const templateText = fs.readFileSync(TEMPLATE_PATH, "utf8");
-    const rendered = renderTemplate(templateText, {
-        "{{VERSION}}": version,
-        "{{RELEASE_DATE}}": releaseDate,
-        "{{COMPARE_URL}}": `[${fromRef}...${toRef}](${compareUrl})`,
-        "{{RELEASE_SUMMARY}}": summary,
-        "{{UPGRADE_NOTES}}": upgradeNotes,
+    return {
         "{{FIXED_ITEMS}}": formatBulletBlock(
             fixedItems,
             "No bug fixes documented in this release.",
@@ -433,11 +393,52 @@ function main() {
             categorized.breaking,
             "None documented in this release.",
         ),
-        "{{KNOWN_ISSUES}}": knownIssues,
-        "{{COMPATIBILITY_AND_MIGRATION}}": compatibilityNotes,
-        "{{FULL_CHANGELOG_URL}}": fullChangelogUrl,
-    });
+    };
+}
 
+function buildTemplateReplacements(
+    options,
+    version,
+    fromRef,
+    links,
+    categorized,
+) {
+    const releaseDate =
+        categorized.releaseDate ?? new Date().toISOString().slice(0, 10);
+    const releaseCounts = {
+        fixed: categorized.fixed.length,
+        security: categorized.security.length,
+        added: categorized.added.length,
+        changed: categorized.changed.length,
+        accessibility: categorized.accessibility.length,
+        admin: categorized.admin.length,
+    };
+    return {
+        "{{VERSION}}": version,
+        "{{RELEASE_DATE}}": releaseDate,
+        "{{COMPARE_URL}}": `[${fromRef}...${links.toRef}](${links.compareUrl})`,
+        "{{RELEASE_SUMMARY}}": buildReleaseSummary(
+            releaseCounts,
+            options.summary,
+        ),
+        "{{UPGRADE_NOTES}}": formatArgumentBulletBlock(
+            options.upgradeNotes,
+            "If you already run 2.0.x or later, no manual steps are required.",
+        ),
+        "{{KNOWN_ISSUES}}": formatBulletBlock(
+            options.knownIssues,
+            "None documented in this release.",
+        ),
+        "{{COMPATIBILITY_AND_MIGRATION}}": formatBulletBlock(
+            options.compatibilityNotes,
+            "No manual migration steps required for standard Docker and Helm deployments.",
+        ),
+        "{{FULL_CHANGELOG_URL}}": links.fullChangelogUrl,
+        ...buildCategoryReplacements(categorized),
+    };
+}
+
+function emitOutput(rendered, outputPath) {
     if (outputPath) {
         const outputAbsolutePath = path.resolve(outputPath);
         fs.writeFileSync(outputAbsolutePath, rendered, "utf8");
@@ -446,6 +447,26 @@ function main() {
     }
 
     process.stdout.write(`${rendered}\n`);
+}
+
+function main() {
+    const options = parseArgs(process.argv.slice(2));
+    const version = options.version ?? "";
+    const fromRef = options.from ?? "";
+    ensureReleaseVersion(version);
+    ensureRefExists(fromRef, "--from");
+
+    const links = resolveReleaseLinks(options, version, fromRef);
+    const categorized = loadReleaseItemsFromChangelog(version);
+    const replacements = buildTemplateReplacements(
+        options,
+        version,
+        fromRef,
+        links,
+        categorized,
+    );
+    const templateText = fs.readFileSync(TEMPLATE_PATH, "utf8");
+    emitOutput(renderTemplate(templateText, replacements), options.output);
 }
 
 main();

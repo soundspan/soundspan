@@ -1,0 +1,3 @@
+# Dependencies for the release-gated audio-analyzer long-audio scale suite.
+-r requirements-test.txt
+pytest-timeout==2.4.0

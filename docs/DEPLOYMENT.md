@@ -300,9 +300,13 @@ git push origin main
 node scripts/release/generate-notes.mjs \
   --version 1.6.0 \
   --from 1.5.0 \
-  --to main \
   --output /tmp/soundspan-1.6.0-release-notes.md
 ```
+
+The release version is the default comparison target and changelog ref, so both
+generated URLs remain immutable after the tag is published. Use `--to` only to
+override the comparison target for an exceptional workflow; it does not change
+the changelog ref.
 
 Helm release reference for notes and operator docs:
 

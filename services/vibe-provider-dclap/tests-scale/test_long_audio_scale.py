@@ -19,7 +19,12 @@ SCALE_TESTS_DISABLED = os.getenv("SCALE_TESTS") != "1"
 FFMPEG_UNAVAILABLE = shutil.which("ffmpeg") is None
 LONG_AUDIO_SECONDS = 45 * 60
 MAX_PEAK_RSS_BYTES = 2 * 1024 * 1024 * 1024
+GENERATION_BUDGET_SECONDS = 180
 PROCESSING_BUDGET_SECONDS = 600
+TIMEOUT_MARGIN_SECONDS = 120
+TEST_TIMEOUT_SECONDS = (
+    GENERATION_BUDGET_SECONDS + PROCESSING_BUDGET_SECONDS + TIMEOUT_MARGIN_SECONDS
+)
 
 for import_root in (SERVICE_ROOT, REPOSITORY_ROOT):
     if str(import_root) not in sys.path:
@@ -66,7 +71,7 @@ def generate_long_tone(target: Path) -> None:
         ],
         check=True,
         capture_output=True,
-        timeout=180,
+        timeout=GENERATION_BUDGET_SECONDS,
     )
 
 
@@ -87,6 +92,7 @@ def peak_rss_bytes() -> int:
 
 @pytest.mark.skipif(SCALE_TESTS_DISABLED, reason="set SCALE_TESTS=1 to run scale tests")
 @pytest.mark.skipif(FFMPEG_UNAVAILABLE, reason="ffmpeg is not installed")
+@pytest.mark.timeout(TEST_TIMEOUT_SECONDS, method="thread")
 def test_capped_dclap_preprocessing_streams_a_45_minute_tone(
     tmp_path: Path,
 ) -> None:

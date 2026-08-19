@@ -17,7 +17,10 @@ REPOSITORY_ROOT = SERVICE_ROOT.parents[1]
 SCALE_TESTS_DISABLED = os.getenv("SCALE_TESTS") != "1"
 FFMPEG_UNAVAILABLE = shutil.which("ffmpeg") is None
 LONG_AUDIO_SECONDS = 45 * 60
+GENERATION_BUDGET_SECONDS = 180
 LOUDNESS_TIMEOUT_SECONDS = 300
+TIMEOUT_MARGIN_SECONDS = 120
+TEST_TIMEOUT_SECONDS = GENERATION_BUDGET_SECONDS + LOUDNESS_TIMEOUT_SECONDS + TIMEOUT_MARGIN_SECONDS
 
 for import_root in (SERVICE_ROOT, REPOSITORY_ROOT):
     if str(import_root) not in sys.path:
@@ -47,12 +50,13 @@ def generate_long_tone(target: Path) -> None:
         ],
         check=True,
         capture_output=True,
-        timeout=180,
+        timeout=GENERATION_BUDGET_SECONDS,
     )
 
 
 @pytest.mark.skipif(SCALE_TESTS_DISABLED, reason="set SCALE_TESTS=1 to run scale tests")
 @pytest.mark.skipif(FFMPEG_UNAVAILABLE, reason="ffmpeg is not installed")
+@pytest.mark.timeout(TEST_TIMEOUT_SECONDS, method="thread")
 def test_measure_loudness_handles_a_45_minute_tone(tmp_path: Path) -> None:
     """Measure a production-length tone within the five-minute subprocess bound."""
     import loudness

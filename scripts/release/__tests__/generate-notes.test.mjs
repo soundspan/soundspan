@@ -17,7 +17,10 @@ const template = path.join(
     "docs/maintainers/RELEASE_NOTES_TEMPLATE.md",
 );
 
-function runGenerator(changelogContent, additionalArgs = []) {
+function runGenerator(
+    changelogContent,
+    { version = "9.9.9", additionalArgs = [] } = {},
+) {
     const fixtureRoot = mkdtempSync(
         path.join(repoRoot, ".release-notes-test-"),
     );
@@ -35,16 +38,10 @@ function runGenerator(changelogContent, additionalArgs = []) {
             path.join(fixtureTemplateDirectory, "RELEASE_NOTES_TEMPLATE.md"),
         );
 
+        const versionArgs = version === null ? [] : ["--version", version];
         return spawnSync(
             process.execPath,
-            [
-                generator,
-                "--version",
-                "9.9.9",
-                "--from",
-                "2.3.3",
-                ...additionalArgs,
-            ],
+            [generator, ...versionArgs, "--from", "2.3.3", ...additionalArgs],
             { cwd: fixtureRoot, encoding: "utf8" },
         );
     } finally {
@@ -72,12 +69,14 @@ test("always renders the standing upgrade warning and upgrade path", () => {
 });
 
 test("renders upgrade notes in argument order under Before you upgrade", () => {
-    const result = runGenerator(minimalChangelog, [
-        "--upgrade-note",
-        "Run the database backup first.",
-        "--upgrade-note",
-        "Restart the worker after deployment.",
-    ]);
+    const result = runGenerator(minimalChangelog, {
+        additionalArgs: [
+            "--upgrade-note",
+            "Run the database backup first.",
+            "--upgrade-note",
+            "Restart the worker after deployment.",
+        ],
+    });
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(
@@ -110,17 +109,79 @@ test("renders the standing sections in release-note order", () => {
     );
 });
 
-test("links the comparison and changelog to the staged release version", () => {
+test("uses exact immutable links for a stable release version", () => {
     const result = runGenerator(minimalChangelog);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(
-        result.stdout,
-        /\[2\.3\.3\.\.\.9\.9\.9\]\(https:\/\/github\.com\/soundspan\/soundspan\/compare\/2\.3\.3\.\.\.9\.9\.9\)/,
+    assert.ok(
+        result.stdout.includes(
+            "- Compare changes: [2.3.3...9.9.9](https://github.com/soundspan/soundspan/compare/2.3.3...9.9.9)",
+        ),
     );
-    assert.match(
-        result.stdout,
-        /https:\/\/github\.com\/soundspan\/soundspan\/blob\/9\.9\.9\/CHANGELOG\.md/,
+    assert.ok(
+        result.stdout.includes(
+            "- Full changelog: https://github.com/soundspan/soundspan/blob/9.9.9/CHANGELOG.md",
+        ),
+    );
+});
+
+test("uses exact immutable links for a prerelease version", () => {
+    const prereleaseChangelog = `# Changelog
+
+## [9.9.9-rc.1] - 2026-08-13
+`;
+    const result = runGenerator(prereleaseChangelog, {
+        version: "9.9.9-rc.1",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+        result.stdout.includes(
+            "- Compare changes: [2.3.3...9.9.9-rc.1](https://github.com/soundspan/soundspan/compare/2.3.3...9.9.9-rc.1)",
+        ),
+    );
+    assert.ok(
+        result.stdout.includes(
+            "- Full changelog: https://github.com/soundspan/soundspan/blob/9.9.9-rc.1/CHANGELOG.md",
+        ),
+    );
+});
+
+test("uses an explicit --to override only for the comparison", () => {
+    const result = runGenerator(minimalChangelog, {
+        additionalArgs: ["--to", "HEAD"],
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+        result.stdout.includes(
+            "- Compare changes: [2.3.3...HEAD](https://github.com/soundspan/soundspan/compare/2.3.3...HEAD)",
+        ),
+    );
+    assert.ok(
+        result.stdout.includes(
+            "- Full changelog: https://github.com/soundspan/soundspan/blob/9.9.9/CHANGELOG.md",
+        ),
+    );
+});
+
+test("rejects a v-prefixed release version", () => {
+    const result = runGenerator(minimalChangelog, { version: "v9.9.9" });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(
+        result.stderr.trim(),
+        'Invalid version "v9.9.9". Use semantic versions without a "v" prefix (for example 1.0.1).',
+    );
+});
+
+test("reports the hard error without a mutable-HEAD fallback warning", () => {
+    const result = runGenerator(minimalChangelog, { version: null });
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(
+        result.stderr.trim(),
+        "Release version is required (for example 1.0.1).",
     );
 });
 
