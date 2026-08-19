@@ -639,7 +639,7 @@ async function runSubsonicFullEmulation(
         {
             index: 2,
             id: track.id,
-            current: 0,
+            currentIndex: 0,
             position: 1234,
         },
     );

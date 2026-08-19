@@ -43,16 +43,16 @@ Verdict legend:
 
 | Feature | Server support | Symfonium | Tempo | DSub2000 | Ultrasonic | play:Sub |
 | --- | --- | --- | --- | --- | --- | --- |
-| Token auth (`t`/`s`) | Yes (app passwords) | Verified¹ | Expected | Verified¹ | Verified¹ | Expected |
+| Token auth (`t`/`s`) | Yes (app passwords) | Expected | Expected | Expected | Expected | Expected |
 | Password auth (`p`) | Yes | Expected | Expected | Expected | Expected | Expected |
 | API-key auth | Yes (extension) | Expected | Client N/A | Client N/A | Client N/A | Client N/A |
-| Browse (ID3: artists/albums/songs) | Yes | Verified¹ | Expected | Verified¹ | Verified¹ | Expected |
+| Browse (ID3: artists/albums/songs) | Yes | Verified¹ | Expected | Expected | Expected | Expected |
 | Browse (folder: `getMusicDirectory`) | Yes | Expected | Expected | Expected | Expected | Expected |
 | Search (`search2`/`search3`, empty-query full sync) | Yes | Verified¹ | Expected | Verified¹ | Expected | Expected |
-| Stream with Range/seek | Yes | Verified¹ | Expected | Expected | Expected | Expected |
+| Stream with Range/seek | Yes | Expected | Expected | Expected | Expected | Expected |
 | Transcoding (`maxBitRate`) | Yes (192/320 tiers) | Expected | Expected | Expected | Expected | Expected |
 | Seek in transcoded stream (`timeOffset`) | Yes (transcode tiers; raw ignores offset) | Expected | Client N/A | Client N/A | Client N/A | Client N/A |
-| Playlists (full CRUD) | Yes | Expected | Expected | Verified¹ | Expected | Expected |
+| Playlists (full CRUD) | Yes | Verified¹ | Expected | Expected | Expected | Expected |
 | Star / unstar / rating | Yes² (star state, 1-5 ratings, and play counts appear on every song payload) | Verified¹ | Expected | Expected | Expected | Expected |
 | Play-queue sync | Yes³ | Expected | Expected | Expected | Expected | Expected |
 | Indexed play queue (`…ByIndex`) | Yes (advertised, `currentIndex` contract) | Expected | Client N/A | Client N/A | Client N/A | Client N/A |
@@ -63,13 +63,13 @@ Verdict legend:
 | Last-played dates (`songPlayedDate`/`albumPlayedDate`) | Yes (per-user `played` on songs and albums) | Expected | Client N/A | Client N/A | Client N/A | Client N/A |
 | Offline cache / downloads (`download`) | Yes | Expected | Expected | Expected | Expected | Expected |
 | Scrobble / now playing | Yes | Verified¹ | Expected | Expected | Expected | Expected |
-| Jukebox control | No (out of scope) | Client N/A | Client N/A | Server gap | Server gap | Client N/A |
-| Podcasts over `/rest` | Empty stubs only⁷ | Client N/A | Client N/A | Server gap⁷ | Client N/A | Client N/A |
+| Jukebox control | No (out of scope) | Client N/A | Client N/A | Server gap | Server gap | Server gap |
+| Podcasts over `/rest` | Empty stubs only⁷ | Client N/A | Server gap⁷ | Server gap⁷ | Server gap⁷ | Server gap⁷ |
 | Shares | No (product decision pending) | Client N/A | Client N/A | Server gap | Client N/A | Client N/A |
 
 Notes:
 
-1. "Verified" cells rest on the curl-driven client-profile matrix and smoke harness runs recorded in [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) (profiles: `symfonium`, `dsub`, `ultrasonic`, `amperfy`, `substreamer`). They emulate each client's documented request patterns; full GUI-client certification on real devices remains open.
+1. "Verified" cells rest on feature-specific request-profile evidence recorded in [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md): a cell is Verified only when that client's profile exercised that feature (for example `symfonium` search3 full sync and playlist CRUD, `dsub` search2, `ultrasonic` getIndexes/scan, `substreamer` indexed queues). Everything else stays Expected until the profile or a real device exercises it; full GUI-client certification remains open.
 2. Album/artist star is projected onto matching tracks; there are no separate album/artist favorite tables.
 3. Queue state uses the legacy playback-state device bucket. `getPlayQueue` exchanges `current` as a song ID per the classic contract, and the ByIndex extension endpoints use `currentIndex`.
 4. Symfonium discovers capabilities via `getOpenSubsonicExtensions`; `indexBasedQueue` is advertised, so capability-driven clients can use the indexed queue endpoints.
