@@ -35,14 +35,15 @@ jest.mock("../../middleware/auth", () => ({
     },
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const channel = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+    };
+    return { logger: { ...channel, child: jest.fn(() => channel) } };
+});
 
 jest.mock("../../utils/db", () => ({
     prisma: {
