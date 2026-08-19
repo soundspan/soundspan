@@ -7,10 +7,6 @@ exports[`library route table matches the locked route surface 1`] = `
     "path": "(router-level)",
   },
   {
-    "middleware": "<anonymous>",
-    "path": "(router-level)",
-  },
-  {
     "method": "GET",
     "middleware": [],
     "path": "/delete-policy",
@@ -109,23 +105,17 @@ exports[`library route table matches the locked route surface 1`] = `
   },
   {
     "method": "GET",
-    "middleware": [
-      "imageLimiter",
-    ],
+    "middleware": [],
     "path": "/cover-art{/:id}",
   },
   {
     "method": "GET",
-    "middleware": [
-      "imageLimiter",
-    ],
+    "middleware": [],
     "path": "/album-cover/:mbid",
   },
   {
     "method": "GET",
-    "middleware": [
-      "imageLimiter",
-    ],
+    "middleware": [],
     "path": "/cover-art-colors",
   },
   {

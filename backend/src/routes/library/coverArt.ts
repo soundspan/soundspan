@@ -1,6 +1,5 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { imageLimiter, apiLimiter } from "../../middleware/rateLimiter";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
@@ -595,7 +594,6 @@ export async function handleGetCoverArt(
 
 coverArtRouter.get<{ id?: string }>(
     "/cover-art{/:id}",
-    imageLimiter,
     asyncHandler(handleGetCoverArt),
 );
 
@@ -660,7 +658,6 @@ export async function handleGetAlbumCover(
 
 coverArtRouter.get<{ mbid: string }>(
     "/album-cover/:mbid",
-    imageLimiter,
     asyncHandler(handleGetAlbumCover),
 );
 
@@ -813,8 +810,4 @@ export async function handleGetCoverArtColors(req: Request, res: Response) {
     res.json(colors);
 }
 
-coverArtRouter.get(
-    "/cover-art-colors",
-    imageLimiter,
-    asyncHandler(handleGetCoverArtColors),
-);
+coverArtRouter.get("/cover-art-colors", asyncHandler(handleGetCoverArtColors));

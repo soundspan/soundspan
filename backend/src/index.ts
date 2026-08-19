@@ -250,7 +250,7 @@ app.use("/api/api-keys", apiLimiter, apiKeysRoutes);
 // API keys, so it sits on the stricter authLimiter rather than the lenient
 // general apiLimiter.
 app.use("/api/device-link", authLimiter, deviceLinkRoutes);
-// NOTE: /api/library has its own rate limiting (imageLimiter for cover-art, apiLimiter for others)
+// Library routes classify metadata, cover art, and audio into separate limiter tiers.
 app.use("/api/library", libraryRoutes);
 app.use("/api/plays", apiLimiter, playsRoutes);
 app.use("/api/settings", apiLimiter, settingsRoutes);
@@ -278,7 +278,7 @@ if (config.features.discovery) {
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
 app.use("/api/webhooks", webhooksRoutes); // The Lidarr POST has its own webhookLimiter; GET /lidarr/verify stays unthrottled for Lidarr's test probe
-// NOTE: /api/audiobooks has its own rate limiting (imageLimiter for covers, apiLimiter for others)
+// Audiobook routes classify metadata, covers, and audio into separate limiter tiers.
 app.use("/api/audiobooks", audiobooksRoutes);
 app.use("/api/podcasts", apiLimiter, podcastsRoutes);
 app.use("/api/artists", apiLimiter, artistsRoutes);

@@ -75,7 +75,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(16);
+        expect(mockRateLimit).toHaveBeenCalledTimes(17);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.adminSurfaceLimiter).toBeDefined();
         expect(mod.shareLinkLimiter).toBeDefined();
@@ -84,6 +84,7 @@ describe("rateLimiter middleware config", () => {
         expect(mod.refreshLimiter).toBeDefined();
         expect(mod.oidcFlowLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
+        expect(mod.streamingLimiter).toBeDefined();
         expect(mod.downloadLimiter).toBeDefined();
         expect(mod.lyricsLimiter).toBeDefined();
         expect(mod.lyricsMutationLimiter).toBeDefined();
@@ -101,15 +102,16 @@ describe("rateLimiter middleware config", () => {
             { index: 4, windowMs: 900_000, max: 40 },
             { index: 5, windowMs: 300_000, max: 60 },
             { index: 6, windowMs: 900_000, max: 40 },
-            { index: 7, windowMs: 60_000, max: 500 },
-            { index: 8, windowMs: 60_000, max: 100 },
-            { index: 9, windowMs: 60_000, max: 120 },
-            { index: 10, windowMs: 900_000, max: 20 },
-            { index: 11, windowMs: 60_000, max: 30 },
-            { index: 12, windowMs: 60_000, max: 20 },
-            { index: 13, windowMs: 60_000, max: 60 },
-            { index: 14, windowMs: 60_000, max: 1000 },
-            { index: 15, windowMs: 900_000, max: 20 },
+            { index: 7, windowMs: 60_000, max: 5000 },
+            { index: 8, windowMs: 60_000, max: 10_000 },
+            { index: 9, windowMs: 60_000, max: 100 },
+            { index: 10, windowMs: 60_000, max: 120 },
+            { index: 11, windowMs: 900_000, max: 20 },
+            { index: 12, windowMs: 60_000, max: 30 },
+            { index: 13, windowMs: 60_000, max: 20 },
+            { index: 14, windowMs: 60_000, max: 60 },
+            { index: 15, windowMs: 60_000, max: 1000 },
+            { index: 16, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -132,9 +134,11 @@ describe("rateLimiter middleware config", () => {
         ["auth", 4],
         ["auth-refresh", 5],
         ["oidc-flow", 6],
-        ["webhook", 13],
-        ["federation-peer", 14],
-        ["federation-pairing", 15],
+        ["image-surface", 7],
+        ["streaming-surface", 8],
+        ["webhook", 14],
+        ["federation-peer", 15],
+        ["federation-pairing", 16],
     ])("uses the namespaced shared store for %s", async (name, index) => {
         await loadRateLimiterModule();
 
@@ -146,6 +150,8 @@ describe("rateLimiter middleware config", () => {
         "auth",
         "auth-refresh",
         "oidc-flow",
+        "image-surface",
+        "streaming-surface",
         "webhook",
         "federation-pairing",
     ])("uses the memory fallback for the %s credential guard", async (name) => {
@@ -168,12 +174,11 @@ describe("rateLimiter middleware config", () => {
     it.each([
         ["general API", 0],
         ["playback state", 3],
-        ["image", 7],
-        ["download", 8],
-        ["lyrics lookup", 9],
-        ["lyrics mutation", 10],
-        ["YouTube Music search", 11],
-        ["YouTube Music stream", 12],
+        ["download", 9],
+        ["lyrics lookup", 10],
+        ["lyrics mutation", 11],
+        ["YouTube Music search", 12],
+        ["YouTube Music stream", 13],
     ])("keeps the %s limiter in memory", async (_name, index) => {
         await loadRateLimiterModule();
 
@@ -182,7 +187,7 @@ describe("rateLimiter middleware config", () => {
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(14).keyGenerator!;
+        const keyGenerator = getOptions(15).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),

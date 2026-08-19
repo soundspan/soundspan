@@ -9,13 +9,20 @@ import { createRedisRateLimitOptions } from "./rateLimitStore";
 // is configured centrally; operators must set TRUST_PROXY_HOPS to their real
 // proxy depth so clients cannot select their own rate-limit key.
 const trustProxyValidation = { validate: { trustProxy: false } };
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const API_RATE_LIMIT_MAX = 5_000;
+// Five thousand covers fit a full large-library grid or offline-cache burst.
+const IMAGE_RATE_LIMIT_MAX = 5_000;
+// Ten thousand stream starts allow gapless prefetch and seek storms while
+// still bounding runaway players to about 167 new requests per second per IP.
+const STREAMING_RATE_LIMIT_MAX = 10_000;
 
 // General API rate limiter (5000 req/minute per IP)
 // This remains in-memory to avoid Redis latency on hot API paths. It provides
 // per-process bug and accidental-DOS containment, not distributed abuse control.
 export const apiLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 5000, // High ceiling for bug and accidental-loop containment
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: API_RATE_LIMIT_MAX, // High ceiling for bug and accidental-loop containment
     message: "Too many requests from this IP, please try again later.",
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
@@ -146,14 +153,29 @@ export const oidcFlowLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
-// Image/Cover art limiter (very high limit: 500 req/minute)
-// This is for image proxying - not a security risk, just bandwidth
+// Image and cover-art requests use a separate high-volume budget so large
+// grids and offline image caching cannot consume the metadata API budget.
 export const imageLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 500, // Allow 500 image requests per minute (high volume pages need this)
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: IMAGE_RATE_LIMIT_MAX,
     message: "Too many image requests, please slow down.",
     standardHeaders: true,
     legacyHeaders: false,
+    ...createRedisRateLimitOptions("image-surface", { fallback: "memory" }),
+    ...trustProxyValidation,
+});
+
+// Audio starts and range retries use their own generous budget. Gapless
+// players prefetch, and repeated seeking can open many short-lived requests.
+export const streamingLimiter = rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: STREAMING_RATE_LIMIT_MAX,
+    message: "Too many streaming requests, please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...createRedisRateLimitOptions("streaming-surface", {
+        fallback: "memory",
+    }),
     ...trustProxyValidation,
 });
 

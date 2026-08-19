@@ -10,7 +10,11 @@ import { audiobookshelfService } from "../services/audiobookshelf";
 import { audiobookCacheService } from "../services/audiobookCache";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
-import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
+import {
+    apiLimiter,
+    imageLimiter,
+    streamingLimiter,
+} from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
 import { buildSafeAudiobookCoverUrl } from "../services/audiobookCoverProxy";
 import {
@@ -275,73 +279,69 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
  *       401:
  *         description: Not authenticated
  */
-/**
- * GET /audiobooks/debug-series
- * Debug endpoint to see raw series data from Audiobookshelf
- */
-// Debug endpoint for series data
-router.get("/debug-series", requireAuthOrToken, async (req, res) => {
-    logger.debug("[Audiobooks] Debug series endpoint called");
-    try {
-        const { getSystemSettings } = await import("../utils/systemSettings");
-        const settings = await getSystemSettings();
+router.get(
+    "/debug-series",
+    requireAuthOrToken,
+    apiLimiter,
+    async (req, res) => {
+        logger.debug("[Audiobooks] Debug series endpoint called");
+        try {
+            const { getSystemSettings } =
+                await import("../utils/systemSettings");
+            const settings = await getSystemSettings();
 
-        if (!settings?.audiobookshelfEnabled) {
-            return res
-                .status(400)
-                .json({ error: "Audiobookshelf not enabled" });
+            if (!settings?.audiobookshelfEnabled) {
+                return res
+                    .status(400)
+                    .json({ error: "Audiobookshelf not enabled" });
+            }
+
+            const rawBooks = await audiobookshelfService.getAllAudiobooks();
+            logger.debug(
+                `[Audiobooks] Got ${rawBooks.length} books from Audiobookshelf`,
+            );
+
+            const booksWithSeries = rawBooks.filter((book: any) => {
+                const metadata = book.media?.metadata || book;
+                return metadata.series || metadata.seriesName;
+            });
+
+            logger.debug(
+                `[Audiobooks] Books with series data: ${booksWithSeries.length}`,
+            );
+
+            const allSeriesInfo = rawBooks.slice(0, 20).map((book: any) => {
+                const metadata = book.media?.metadata || book;
+                return {
+                    title: metadata.title || book.title,
+                    rawSeries: metadata.series,
+                    seriesName: metadata.seriesName,
+                    seriesSequence: metadata.seriesSequence,
+                    bookSeries: book.series,
+                };
+            });
+
+            let fullSample = null;
+            if (booksWithSeries.length > 0) {
+                const sampleBook = booksWithSeries[0];
+                fullSample = {
+                    id: sampleBook.id,
+                    media: sampleBook.media,
+                };
+            }
+
+            res.json({
+                totalBooks: rawBooks.length,
+                booksWithSeriesCount: booksWithSeries.length,
+                sampleSeriesData: allSeriesInfo,
+                fullSampleWithSeries: fullSample,
+            });
+        } catch (error: any) {
+            logger.error("[Audiobooks] Debug series error:", error);
+            res.status(500).json({ error: "Internal server error" });
         }
-
-        // Get raw data from Audiobookshelf
-        const rawBooks = await audiobookshelfService.getAllAudiobooks();
-        logger.debug(
-            `[Audiobooks] Got ${rawBooks.length} books from Audiobookshelf`,
-        );
-
-        // Find books with series data
-        const booksWithSeries = rawBooks.filter((book: any) => {
-            const metadata = book.media?.metadata || book;
-            return metadata.series || metadata.seriesName;
-        });
-
-        logger.debug(
-            `[Audiobooks] Books with series data: ${booksWithSeries.length}`,
-        );
-
-        // Extract series info from all books (first 20)
-        const allSeriesInfo = rawBooks.slice(0, 20).map((book: any) => {
-            const metadata = book.media?.metadata || book;
-            return {
-                title: metadata.title || book.title,
-                rawSeries: metadata.series,
-                seriesName: metadata.seriesName,
-                seriesSequence: metadata.seriesSequence,
-                // Also check if there's series in the top-level book object
-                bookSeries: book.series,
-            };
-        });
-
-        // Get a full sample of one book with series (if any)
-        let fullSample = null;
-        if (booksWithSeries.length > 0) {
-            const sampleBook = booksWithSeries[0];
-            fullSample = {
-                id: sampleBook.id,
-                media: sampleBook.media,
-            };
-        }
-
-        res.json({
-            totalBooks: rawBooks.length,
-            booksWithSeriesCount: booksWithSeries.length,
-            sampleSeriesData: allSeriesInfo,
-            fullSampleWithSeries: fullSample,
-        });
-    } catch (error: any) {
-        logger.error("[Audiobooks] Debug series error:", error);
-        res.status(500).json({ error: "Internal server error" });
-    }
-});
+    },
+);
 
 /**
  * @openapi
@@ -1153,6 +1153,7 @@ async function tryFederatedAudiobookStream(
 router.get<{ id: string }>(
     "/:id/stream",
     requireAuthOrToken,
+    streamingLimiter,
     async (req, res) => {
         try {
             logger.debug(

@@ -29,6 +29,8 @@ jest.mock("../../middleware/auth", () => ({
 jest.mock("../../middleware/rateLimiter", () => ({
     imageLimiter: (_req: Request, _res: Response, next: () => void) => next(),
     apiLimiter: (_req: Request, _res: Response, next: () => void) => next(),
+    streamingLimiter: (_req: Request, _res: Response, next: () => void) =>
+        next(),
 }));
 
 jest.mock("../../utils/logger", () => {
@@ -1779,9 +1781,9 @@ describe("library catalog list runtime coverage", () => {
     const tracksHandler = getHandler("get", "/tracks");
     const likedPlaylistHandler = getHandler("get", "/liked");
     const shuffleHandler = getHandler("get", "/tracks/shuffle");
-    const coverArtHandler = getHandler("get", "/cover-art{/:id}", 1);
-    const albumCoverHandler = getHandler("get", "/album-cover/:mbid", 1);
-    const coverArtColorsHandler = getHandler("get", "/cover-art-colors", 1);
+    const coverArtHandler = getFinalHandler("get", "/cover-art{/:id}");
+    const albumCoverHandler = getFinalHandler("get", "/album-cover/:mbid");
+    const coverArtColorsHandler = getFinalHandler("get", "/cover-art-colors");
     const trackPreferenceHandler = getHandler("get", "/tracks/:id/preference");
     const setTrackPreferenceHandler = getHandler(
         "post",
@@ -7058,7 +7060,7 @@ describe("library catalog list runtime coverage", () => {
 });
 
 describe("library album cover and media route edge coverage", () => {
-    const albumCoverHandler = getHandler("get", "/album-cover/:mbid", 1);
+    const albumCoverHandler = getFinalHandler("get", "/album-cover/:mbid");
     const audioInfoHandler = getHandler("get", "/tracks/:id/audio-info", 1);
     const trackStreamHandler = getHandler("get", "/tracks/:id/stream");
 

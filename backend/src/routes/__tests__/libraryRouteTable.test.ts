@@ -39,6 +39,13 @@ jest.mock("../../middleware/rateLimiter", () => ({
     ) {
         next();
     },
+    streamingLimiter: function streamingLimiter(
+        _req: Request,
+        _res: Response,
+        next: NextFunction,
+    ) {
+        next();
+    },
 }));
 
 jest.mock("../../middleware/asyncHandler", () => ({
@@ -132,6 +139,10 @@ interface RouteTableEntry {
     middleware: string[];
 }
 
+interface EffectiveRouteEntry extends RouteTableEntry {
+    inheritedMiddleware: string[];
+}
+
 interface RouterMiddlewareEntry {
     middleware: string;
     path: "(router-level)";
@@ -181,6 +192,42 @@ const getTerminalHandlerNames = (): string[] => {
     );
 };
 
+const buildEffectiveRouteTable = (): EffectiveRouteEntry[] => {
+    const routes: EffectiveRouteEntry[] = [];
+    const visit = (stack: RouteLayer[], inherited: string[]): void => {
+        const active = [...inherited];
+        for (const layer of stack) {
+            if (layer.route) {
+                const middleware = layer.route.stack
+                    .slice(0, -1)
+                    .map((routeLayer) => routeLayer.handle?.name)
+                    .filter(isNamedFunction);
+                for (const method of Object.keys(layer.route.methods)) {
+                    if (layer.route.methods[method]) {
+                        routes.push({
+                            method: method.toUpperCase(),
+                            path: layer.route.path,
+                            middleware,
+                            inheritedMiddleware: [...active],
+                        });
+                    }
+                }
+                continue;
+            }
+            if (layer.handle?.stack) {
+                visit(layer.handle.stack, active);
+                continue;
+            }
+            if (isNamedFunction(layer.handle?.name)) {
+                active.push(layer.handle.name);
+            }
+        }
+    };
+
+    visit(getRouterStack(), []);
+    return routes;
+};
+
 const handlerModules = [
     maintenance,
     artists,
@@ -220,5 +267,40 @@ describe("library route table", () => {
             true,
         );
         expect(new Set(exportedHandlerNames)).toEqual(new Set(handlerNames));
+    });
+
+    it("assigns every handler to exactly one rate-limit class", () => {
+        const limiterNames = new Set([
+            "apiLimiter",
+            "imageLimiter",
+            "streamingLimiter",
+        ]);
+        const coverPaths = new Set([
+            "/cover-art{/:id}",
+            "/album-cover/:mbid",
+            "/cover-art-colors",
+        ]);
+
+        for (const route of buildEffectiveRouteTable()) {
+            const appliedLimiters = [
+                ...route.inheritedMiddleware,
+                ...route.middleware,
+            ].filter((name) => limiterNames.has(name));
+            const expectedLimiter = coverPaths.has(route.path)
+                ? "imageLimiter"
+                : route.path === "/tracks/:id/stream"
+                  ? "streamingLimiter"
+                  : "apiLimiter";
+
+            expect({
+                method: route.method,
+                path: route.path,
+                appliedLimiters,
+            }).toEqual({
+                method: route.method,
+                path: route.path,
+                appliedLimiters: [expectedLimiter],
+            });
+        }
     });
 });

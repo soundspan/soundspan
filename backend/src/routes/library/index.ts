@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { requireAuthOrToken } from "../../middleware/auth";
-import { apiLimiter } from "../../middleware/rateLimiter";
+import {
+    apiLimiter,
+    imageLimiter,
+    streamingLimiter,
+} from "../../middleware/rateLimiter";
 import { maintenanceRouter } from "./maintenance";
 import {
     artistsListRouter,
@@ -29,44 +33,45 @@ import { radioRouter } from "./radio";
 import { radioPlaylistRouter } from "./radioPlaylists";
 
 const router = Router();
+const metadataBeforeMediaRouter = Router();
+const imageRouter = Router();
+const streamingRouter = Router();
+const metadataAfterMediaRouter = Router();
 
 // All routes require auth (session or API key)
 router.use(requireAuthOrToken);
 
-// Apply API rate limiter to routes that need it
-// Skip rate limiting for high-traffic endpoints (cover-art, streaming)
-router.use((req, res, next) => {
-    // Skip rate limiting for cover-art endpoint (handled by imageLimiter separately)
-    if (req.path.startsWith("/cover-art")) {
-        return next();
-    }
-    // Skip rate limiting for streaming endpoints - audio must not be interrupted
-    if (req.path.includes("/stream")) {
-        return next();
-    }
-    // Apply API rate limiter to all other routes
-    return apiLimiter(req, res, next);
-});
+metadataBeforeMediaRouter.use(apiLimiter);
+metadataBeforeMediaRouter.use(maintenanceRouter);
+metadataBeforeMediaRouter.use(artistsListRouter);
+metadataBeforeMediaRouter.use(artistCountsRouter);
+metadataBeforeMediaRouter.use(imageBackfillRouter);
+metadataBeforeMediaRouter.use(metadataBackfillRouter);
+metadataBeforeMediaRouter.use(artistsDetailRouter);
+metadataBeforeMediaRouter.use(albumsBrowseRouter);
+metadataBeforeMediaRouter.use(tracksBrowseRouter);
 
-router.use(maintenanceRouter);
-router.use(artistsListRouter);
-router.use(artistCountsRouter);
-router.use(imageBackfillRouter);
-router.use(metadataBackfillRouter);
-router.use(artistsDetailRouter);
-router.use(albumsBrowseRouter);
-router.use(tracksBrowseRouter);
-router.use(coverArtRouter);
-router.use(tracksStreamRouter);
-router.use(tracksPreferenceReadRouter);
-router.use(albumsPreferenceRouter);
-router.use(tracksPreferenceWriteRouter);
-router.use(remoteTracksRouter);
-router.use(tracksDetailRouter);
-router.use(tracksDeletionRouter);
-router.use(albumsDeletionRouter);
-router.use(artistsDeletionRouter);
-router.use(radioPlaylistRouter);
-router.use(radioRouter);
+imageRouter.use(imageLimiter);
+imageRouter.use(coverArtRouter);
+
+streamingRouter.use(streamingLimiter);
+streamingRouter.use(tracksStreamRouter);
+
+metadataAfterMediaRouter.use(apiLimiter);
+metadataAfterMediaRouter.use(tracksPreferenceReadRouter);
+metadataAfterMediaRouter.use(albumsPreferenceRouter);
+metadataAfterMediaRouter.use(tracksPreferenceWriteRouter);
+metadataAfterMediaRouter.use(remoteTracksRouter);
+metadataAfterMediaRouter.use(tracksDetailRouter);
+metadataAfterMediaRouter.use(tracksDeletionRouter);
+metadataAfterMediaRouter.use(albumsDeletionRouter);
+metadataAfterMediaRouter.use(artistsDeletionRouter);
+metadataAfterMediaRouter.use(radioPlaylistRouter);
+metadataAfterMediaRouter.use(radioRouter);
+
+router.use(metadataBeforeMediaRouter);
+router.use(imageRouter);
+router.use(streamingRouter);
+router.use(metadataAfterMediaRouter);
 
 export default router;
