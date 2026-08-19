@@ -38,7 +38,7 @@ The flag doubles as a live diagnostic: a user reporting double-play or backgroun
 Selection is explicit and unit-tested (`frontend/lib/audio-engine/engineSelectionPolicy.ts`), highest priority first:
 
 1. **Platform pins.** Android WebView is pinned to Howler even when the flag is `native` — Howler's Web Audio mode is the established fix for crackling/popping on track changes there.
-2. **The engine-mode flag.** `native` (the default when unset) selects the native element engine and fully suppresses the Tauri auto-upgrade path; `howler` selects the legacy engine with the Tauri platform upgrade allowed.
+2. **The engine-mode flag.** `native` (the default when unset) selects the native element engine and fully suppresses the Tauri auto-upgrade path; `howler` selects the legacy engine with the Tauri platform upgrade allowed. The Tauri desktop integration (the auto-upgrade path and the `tauri-native` mode) is deprecated and will be removed in a future release (issue #607).
 3. **Default.** Native (`DEFAULT_STREAMING_ENGINE_MODE` in `frontend/lib/audio-engine/types.ts`).
 
 ## Architecture
@@ -73,7 +73,7 @@ The bridge is gated to **iOS user agent AND `display-mode: standalone`** only, s
 All playback client metrics (`[Playback][ClientMetric]` log lines and the backend beacon) carry two engine tags:
 
 - `engineMode` — the deployment flag (`STREAMING_ENGINE_MODE` as resolved). Identifies the rollout cohort.
-- `activeEngine` — the engine actually driving playback at the moment of the event (`howler`, `native`, `tauri-native`, or `videojs`). Platform pins (Android WebView → howler), the Tauri upgrade, and per-source videojs routing make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
+- `activeEngine` — the engine actually driving playback at the moment of the event (`howler`, `native`, `tauri-native` (deprecated, issue #607), or `videojs`). Platform pins (Android WebView → howler), the Tauri upgrade, and per-source videojs routing make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
 
 For 2.0.0 log queries, `player.howler_startup` became
 `player.engine_startup`, and client-signal ingestion moved from
@@ -101,4 +101,4 @@ Those were the exit criteria for flipping the default (met during the 1.7.0 soak
 
 ## Rollout
 
-Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs).
+Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope at rollout time: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs). Since then, removal of the Tauri adapter (issue #607) and of the Video.js segmented engine (issue #534) has been planned via deprecation.

@@ -1,5 +1,8 @@
 /**
  * Check if running inside a Tauri application.
+ *
+ * @deprecated The Tauri desktop integration is deprecated and slated for
+ * removal (issue #607).
  */
 export function isTauriEnvironment(): boolean {
     return typeof window !== "undefined" && "__TAURI__" in window;

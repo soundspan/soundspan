@@ -4,6 +4,8 @@ export type StreamingEngineMode =
     | "videojs"
     | "howler"
     | "native"
+    // Deprecated (issue #607): the Tauri desktop integration is slated for
+    // removal; "tauri-native" will leave this union with it.
     | "tauri-native";
 
 // The native element engine is the default direct-playback engine as

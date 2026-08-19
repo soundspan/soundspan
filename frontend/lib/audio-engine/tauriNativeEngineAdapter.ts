@@ -1,3 +1,8 @@
+/**
+ * @deprecated The Tauri desktop integration is deprecated and slated for
+ * removal (issue #607); this adapter and its `@tauri-apps/*` dependencies
+ * go with it.
+ */
 import type {
     AudioEngine,
     AudioEngineBufferingPayload,
