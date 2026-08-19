@@ -25,7 +25,8 @@ export async function takePlaylistLock(
     return playlists[0] ?? null;
 }
 
-async function requirePlaylistMutationLock(
+/** Requires an owned Playlist row lock before a transaction mutates its items. */
+export async function requirePlaylistMutationLock(
     tx: Prisma.TransactionClient,
     playlistId: string,
     userId: string,

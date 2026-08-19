@@ -34,13 +34,14 @@ const ARTIST_ID = "artist-1";
 const ALBUM_ID = "album-1";
 const TRACK_COUNT = 100;
 const REPLACEMENT_TRACK_COUNT = 10;
+const ADD_INSERT_GATE_KEY = 71_905;
 const FIXED_FILE_MODIFIED = new Date("2026-01-01T00:00:00.000Z");
 
-type RemoveResponse = {
+type RouteResponse = {
     statusCode: number;
     body: unknown;
-    status(code: number): RemoveResponse;
-    json(body: unknown): RemoveResponse;
+    status(code: number): RouteResponse;
+    json(body: unknown): RouteResponse;
 };
 
 function tracks(prefix: string, count: number, start = 1) {
@@ -145,7 +146,7 @@ async function waitForPlaylistLock(database: Client): Promise<void> {
     );
 }
 
-function createRemoveResponse(): RemoveResponse {
+function createRouteResponse(): RouteResponse {
     return {
         statusCode: 200,
         body: undefined,
@@ -158,6 +159,25 @@ function createRemoveResponse(): RemoveResponse {
             return this;
         },
     };
+}
+
+function getOrdinaryAddHandler() {
+    type RouterLayer = {
+        route?: {
+            path?: string;
+            methods?: Record<string, boolean>;
+            stack?: Array<{ handle: (...args: never[]) => unknown }>;
+        };
+    };
+    const layers = (playlistRouter as unknown as { stack: RouterLayer[] })
+        .stack;
+    const route = layers.find(
+        (layer) =>
+            layer.route?.path === "/:id/items" && layer.route.methods?.post,
+    )?.route;
+    const handler = route?.stack?.at(-1)?.handle;
+    if (!handler) throw new Error("Ordinary playlist add handler not found");
+    return handler;
 }
 
 function getOrdinaryRemoveHandler() {
@@ -180,9 +200,25 @@ function getOrdinaryRemoveHandler() {
     return handler;
 }
 
+async function addPlaylistItemThroughRoute(
+    trackId: string,
+    response: RouteResponse,
+): Promise<void> {
+    const handler = getOrdinaryAddHandler();
+    await handler(
+        {
+            user: { id: USER_ID },
+            params: { id: PLAYLIST_ID },
+            body: { trackId },
+        } as never,
+        response as never,
+        (() => undefined) as never,
+    );
+}
+
 async function removePlaylistItemThroughRoute(
     itemId: string,
-    response: RemoveResponse,
+    response: RouteResponse,
 ): Promise<void> {
     const handler = getOrdinaryRemoveHandler();
     await handler(
@@ -193,6 +229,107 @@ async function removePlaylistItemThroughRoute(
         response as never,
         (() => undefined) as never,
     );
+}
+
+async function installAddInsertGate(database: Client): Promise<void> {
+    await database.query(`
+        CREATE FUNCTION hold_playlist_item_insert() RETURNS trigger AS $$
+        BEGIN
+            IF NEW."playlistId" = '${PLAYLIST_ID}' THEN
+                PERFORM set_config('deadlock_timeout', '50ms', true);
+                PERFORM pg_advisory_xact_lock(${ADD_INSERT_GATE_KEY});
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER hold_playlist_item_insert
+        AFTER INSERT ON "PlaylistItem"
+        FOR EACH ROW EXECUTE FUNCTION hold_playlist_item_insert()
+    `);
+}
+
+async function removeAddInsertGate(database: Client): Promise<void> {
+    await database.query(`
+        DROP TRIGGER IF EXISTS hold_playlist_item_insert ON "PlaylistItem";
+        DROP FUNCTION IF EXISTS hold_playlist_item_insert()
+    `);
+}
+
+async function runThreeWayMutations(blocker: Client, database: Client) {
+    const firstResponse = createRouteResponse();
+    const secondResponse = createRouteResponse();
+    let gateOpen = false;
+    const pendingOperations: Promise<unknown>[] = [];
+
+    try {
+        await blocker.query("SELECT pg_advisory_lock($1)", [
+            ADD_INSERT_GATE_KEY,
+        ]);
+        gateOpen = true;
+        const firstAdd = addPlaylistItemThroughRoute("track-11", firstResponse);
+        pendingOperations.push(firstAdd);
+        await waitForWaitingConnections(
+            database,
+            1,
+            "First ordinary add did not reach the insert gate",
+        );
+
+        const secondAdd = addPlaylistItemThroughRoute(
+            "track-12",
+            secondResponse,
+        );
+        const regenerate = regenerateRadioPlaylist(USER_ID, PLAYLIST_ID);
+        pendingOperations.push(secondAdd, regenerate);
+        await waitForWaitingConnections(
+            database,
+            3,
+            "Three-way playlist mutations did not reach their lock waits",
+        );
+        await blocker.query("SELECT pg_advisory_unlock($1)", [
+            ADD_INSERT_GATE_KEY,
+        ]);
+        gateOpen = false;
+        const results = await Promise.allSettled([
+            firstAdd,
+            secondAdd,
+            regenerate,
+        ]);
+        return { results, firstResponse, secondResponse };
+    } finally {
+        if (gateOpen) {
+            await blocker.query("SELECT pg_advisory_unlock($1)", [
+                ADD_INSERT_GATE_KEY,
+            ]);
+        }
+        await Promise.allSettled(pendingOperations);
+    }
+}
+
+async function expectConsistentThreeWayState(database: Client): Promise<void> {
+    const rows = await database.query<{ trackId: string; sort: number }>(`
+        SELECT "trackId", sort FROM "PlaylistItem"
+        WHERE "playlistId" = '${PLAYLIST_ID}' ORDER BY sort
+    `);
+    const trackIds = rows.rows.map((row) => row.trackId);
+    const replacementIds = tracks("replacement-1", REPLACEMENT_TRACK_COUNT).map(
+        (track) => track.id,
+    );
+
+    expect(rows.rows.length).toBeGreaterThanOrEqual(REPLACEMENT_TRACK_COUNT);
+    expect(rows.rows.length).toBeLessThanOrEqual(TRACK_COUNT);
+    expect(rows.rows.map((row) => row.sort)).toEqual(
+        Array.from({ length: rows.rows.length }, (_unused, index) => index),
+    );
+    expect(new Set(trackIds).size).toBe(rows.rows.length);
+    expect(replacementIds.every((id) => trackIds.includes(id))).toBe(true);
+    expect(
+        trackIds.every(
+            (id) =>
+                replacementIds.includes(id) ||
+                id === "track-11" ||
+                id === "track-12",
+        ),
+    ).toBe(true);
 }
 
 async function waitForFirstSelection(): Promise<void> {
@@ -321,7 +458,7 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
         mockSelectLibraryRadioStationTracks.mockResolvedValue({
             tracks: tracks("replacement-1", 10),
         });
-        const response = createRemoveResponse();
+        const response = createRouteResponse();
         let blockerOpen = false;
         const pendingOperations: Promise<unknown>[] = [];
 
@@ -371,6 +508,31 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
         } finally {
             if (blockerOpen) await blocker.query("ROLLBACK");
             await Promise.allSettled(pendingOperations);
+        }
+    });
+
+    it("serializes two ordinary adds with regeneration without deadlock", async () => {
+        await seedPlaylist(10);
+        await installAddInsertGate(database);
+        mockSelectLibraryRadioStationTracks.mockResolvedValue({
+            tracks: tracks("replacement-1", REPLACEMENT_TRACK_COUNT),
+        });
+
+        try {
+            const { results, firstResponse, secondResponse } =
+                await runThreeWayMutations(blocker, database);
+            expect(results.map((result) => result.status)).toEqual([
+                "fulfilled",
+                "fulfilled",
+                "fulfilled",
+            ]);
+            expect([
+                firstResponse.statusCode,
+                secondResponse.statusCode,
+            ]).toEqual([200, 200]);
+            await expectConsistentThreeWayState(database);
+        } finally {
+            await removeAddInsertGate(database);
         }
     });
 });
