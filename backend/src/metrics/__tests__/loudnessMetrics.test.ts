@@ -58,4 +58,35 @@ describe("loudness metrics", () => {
             'soundspan_loudness_backfill_outcomes_total{outcome="permanently_skipped"} 2',
         );
     });
+
+    it("keeps the scrape alive with last-good values when Redis rejects", async () => {
+        const count = jest
+            .fn<Promise<number>, [unknown]>()
+            .mockResolvedValue(1);
+        const registry = new Registry();
+        const getBackfillOutcomes = jest
+            .fn()
+            .mockResolvedValueOnce({
+                measured_success: 9,
+                transient_failure: 2,
+                permanently_skipped: 1,
+            })
+            .mockRejectedValueOnce(new Error("redis unavailable"));
+        createLoudnessMetrics(
+            registry,
+            { track: { count } } as LoudnessMetricsPrisma,
+            { getBackfillOutcomes },
+        );
+
+        await registry.metrics();
+        const degraded = await registry.metrics();
+        const next = await registry.metrics();
+
+        expect(degraded).toContain(
+            'soundspan_loudness_backfill_outcomes_total{outcome="measured_success"} 9',
+        );
+        expect(next).toContain(
+            'soundspan_loudness_collection_errors_total{collector="loudness_outcomes"} 1',
+        );
+    });
 });

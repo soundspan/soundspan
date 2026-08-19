@@ -38,6 +38,7 @@ export interface LoudnessMetricsDependencies {
 export interface LoudnessMetrics {
     coverage: Gauge<"state">;
     backfillOutcomes: Counter<"outcome">;
+    collectionErrors: Counter<"collector">;
 }
 
 /** Returns the Redis counter key for one bounded analyzer outcome. */
@@ -66,49 +67,90 @@ const COMMON_COVERAGE_FILTER = {
     analysisStatus: "completed",
 } satisfies Prisma.TrackWhereInput;
 
-/** Registers local-track loudness coverage collected at scrape time. */
-export function createLoudnessMetrics(
+function createCoverageGauge(
     registry: Registry,
     prisma: LoudnessMetricsPrisma,
-    dependencies: LoudnessMetricsDependencies,
-): LoudnessMetrics {
+    collectionErrors: Counter<"collector">,
+): Gauge<"state"> {
     const coverage = new Gauge({
         name: "soundspan_loudness_coverage",
         help: "Completed active local tracks by EBU R128 measurement state.",
         labelNames: ["state"] as const,
         registers: [registry],
         async collect() {
-            const [measured, unmeasured] = await Promise.all([
-                prisma.track.count({
-                    where: {
-                        ...COMMON_COVERAGE_FILTER,
-                        loudnessLufs: { not: null },
-                    },
-                }),
-                prisma.track.count({
-                    where: {
-                        ...COMMON_COVERAGE_FILTER,
-                        loudnessLufs: null,
-                    },
-                }),
-            ]);
-            this.reset();
-            this.set({ state: MEASURED_STATE }, measured);
-            this.set({ state: UNMEASURED_STATE }, unmeasured);
+            try {
+                const [measured, unmeasured] = await Promise.all([
+                    prisma.track.count({
+                        where: {
+                            ...COMMON_COVERAGE_FILTER,
+                            loudnessLufs: { not: null },
+                        },
+                    }),
+                    prisma.track.count({
+                        where: {
+                            ...COMMON_COVERAGE_FILTER,
+                            loudnessLufs: null,
+                        },
+                    }),
+                ]);
+                this.reset();
+                this.set({ state: MEASURED_STATE }, measured);
+                this.set({ state: UNMEASURED_STATE }, unmeasured);
+            } catch {
+                collectionErrors.inc({ collector: "loudness_coverage" });
+            }
         },
     });
+    coverage.set({ state: MEASURED_STATE }, 0);
+    coverage.set({ state: UNMEASURED_STATE }, 0);
+    return coverage;
+}
+
+function createBackfillOutcomeCounter(
+    registry: Registry,
+    dependencies: LoudnessMetricsDependencies,
+    collectionErrors: Counter<"collector">,
+): Counter<"outcome"> {
     const backfillOutcomes = new Counter({
         name: "soundspan_loudness_backfill_outcomes_total",
         help: "Loudness-only analyzer jobs by bounded final outcome.",
         labelNames: ["outcome"] as const,
         registers: [registry],
         async collect() {
-            const totals = await dependencies.getBackfillOutcomes();
-            this.reset();
-            for (const outcome of LOUDNESS_BACKFILL_OUTCOMES) {
-                this.inc({ outcome }, totals[outcome]);
+            try {
+                const totals = await dependencies.getBackfillOutcomes();
+                this.reset();
+                for (const outcome of LOUDNESS_BACKFILL_OUTCOMES) {
+                    this.inc({ outcome }, totals[outcome]);
+                }
+            } catch {
+                collectionErrors.inc({ collector: "loudness_outcomes" });
             }
         },
     });
-    return { coverage, backfillOutcomes };
+    for (const outcome of LOUDNESS_BACKFILL_OUTCOMES) {
+        backfillOutcomes.inc({ outcome }, 0);
+    }
+    return backfillOutcomes;
+}
+
+/** Registers local-track loudness coverage collected at scrape time. */
+export function createLoudnessMetrics(
+    registry: Registry,
+    prisma: LoudnessMetricsPrisma,
+    dependencies: LoudnessMetricsDependencies,
+): LoudnessMetrics {
+    const collectionErrors = new Counter({
+        name: "soundspan_loudness_collection_errors_total",
+        help: "Loudness scrape dependency failures by bounded collector.",
+        labelNames: ["collector"] as const,
+        registers: [registry],
+    });
+    const coverage = createCoverageGauge(registry, prisma, collectionErrors);
+    const backfillOutcomes = createBackfillOutcomeCounter(
+        registry,
+        dependencies,
+        collectionErrors,
+    );
+    return { coverage, backfillOutcomes, collectionErrors };
 }

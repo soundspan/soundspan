@@ -5,12 +5,13 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { invalidateVibeAnalysis } from "./vibeInvalidation";
+import { recomputeAlbumLoudness } from "./albumLoudness";
 
 const replacementLogger = logger.child("TrackReplacement");
 
 type ReplacementTransaction = Pick<
     Prisma.TransactionClient,
-    "album" | "track" | "trackEmbedding" | "transcodedFile"
+    "$executeRaw" | "$queryRaw" | "track" | "trackEmbedding" | "transcodedFile"
 >;
 
 type TrackUpdateData = Prisma.TrackUpdateManyMutationInput;
@@ -25,19 +26,6 @@ function replacementResetData() {
         loudnessLufs: null,
         truePeakDb: null,
     } satisfies TrackUpdateData;
-}
-
-/** Clears cached album loudness for every affected album in one store. */
-export async function clearAlbumLoudness(
-    store: Pick<Prisma.TransactionClient, "album">,
-    albumIds: readonly string[],
-): Promise<void> {
-    const uniqueAlbumIds = [...new Set(albumIds)];
-    if (uniqueAlbumIds.length === 0) return;
-    await store.album.updateMany({
-        where: { id: { in: uniqueAlbumIds } },
-        data: { albumLoudnessLufs: null, albumTruePeakDb: null },
-    });
 }
 
 /**
@@ -80,7 +68,7 @@ export async function applyTrackReplacement(
     if (replacedTrack === null) {
         throw new Error("Replaced track disappeared before album invalidation");
     }
-    await clearAlbumLoudness(transaction, [
+    await recomputeAlbumLoudness(transaction, [
         existingTrack.albumId,
         replacedTrack.albumId,
     ]);

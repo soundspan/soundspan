@@ -16,6 +16,8 @@ const LOUDNESS_SWEEP_LOCK_TTL_MS = 60 * 60_000;
 const LOUDNESS_SWEEP_LOCK_KEY = "scheduler:lock:loudness-backfill-sweep";
 const LOUDNESS_ATTEMPT_KEY_PREFIX = "audio:analysis:loudness:attempts:";
 const LOUDNESS_BACKFILL_MAX_FAILURES = 3;
+const LOUDNESS_ATTEMPT_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PERMANENT_FAILURE_MARKER = "permanent";
 const CONTINUATION_OPTIONS = {
     attempts: 3,
     backoff: { type: "exponential" as const, delay: 5_000 },
@@ -151,8 +153,11 @@ async function loadFailureCounts(
     return schedulerQueue.client.mget(...tracks.map(buildAttemptKey));
 }
 
-function parseFailureCount(value: string | null | undefined): number {
+type FailureState = number | typeof PERMANENT_FAILURE_MARKER;
+
+function parseFailureState(value: string | null | undefined): FailureState {
     if (value === null || value === undefined) return 0;
+    if (value === PERMANENT_FAILURE_MARKER) return value;
     if (!/^(0|[1-9]\d{0,15})$/.test(value)) {
         throw new Error("Loudness backfill failure count is invalid");
     }
@@ -230,17 +235,31 @@ async function processBackfillBatch(
     for (let index = 0; index < batch.length; index += 1) {
         const track = batch[index];
         if (!track) break;
-        const failureCount = parseFailureCount(failureCounts[index]);
-        if (failureCount >= LOUDNESS_BACKFILL_MAX_FAILURES) {
+        const attemptKey = buildAttemptKey(track);
+        const failureState = parseFailureState(failureCounts[index]);
+        if (failureState === PERMANENT_FAILURE_MARKER) {
+            result.processed += 1;
+            result.skipped += 1;
+            nextCursor = track.id;
+            await schedulerQueue.client.expire(
+                attemptKey,
+                LOUDNESS_ATTEMPT_TTL_SECONDS,
+            );
+            log.warn(
+                `Permanently skipping loudness backfill for track ${track.id} after a content failure`,
+            );
+            continue;
+        }
+        if (failureState >= LOUDNESS_BACKFILL_MAX_FAILURES) {
             result.processed += 1;
             result.skipped += 1;
             nextCursor = track.id;
             log.warn(
-                `Permanently skipping loudness backfill for track ${track.id} after ${failureCount} failures`,
+                `Cooling down loudness backfill for track ${track.id} after ${failureState} transient failures`,
             );
             continue;
         }
-        const admission = await enqueueTrack(track, buildAttemptKey(track));
+        const admission = await enqueueTrack(track, attemptKey);
         if (admission === "full") {
             result.capacityLimited = true;
             break;

@@ -7,7 +7,7 @@ import math
 import os
 import shutil
 import subprocess
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from services.common.logging_utils import configure_service_logger
 
@@ -27,6 +27,23 @@ class LoudnessMeasurement(TypedDict):
 
     loudnessLufs: float
     truePeakDb: float
+
+
+LoudnessFailureClass = Literal["permanent", "transient"]
+
+
+class LoudnessMeasurementResult(TypedDict):
+    """One measurement or a classified failure for backfill policy."""
+
+    measurement: LoudnessMeasurement | None
+    failure: LoudnessFailureClass | None
+
+
+ALBUM_LOUDNESS_LOCK_SQL = """
+    SELECT pg_advisory_xact_lock(hashtextextended("albumId", 0))
+    FROM "Track"
+    WHERE id = %s
+"""
 
 
 ALBUM_LOUDNESS_ROLLUP_SQL = """
@@ -126,11 +143,11 @@ def parse_loudnorm_output(output: str) -> LoudnessMeasurement | None:
     return {"loudnessLufs": integrated, "truePeakDb": true_peak}
 
 
-def measure_loudness(
+def measure_loudness_for_backfill(
     file_path: str,
     timeout_seconds: int,
-) -> LoudnessMeasurement | None:
-    """Measure a complete native audio stream, returning None on every failure."""
+) -> LoudnessMeasurementResult:
+    """Measure audio and classify content failures separately from infrastructure."""
     try:
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
             raise ValueError("timeout_seconds must be an integer")
@@ -141,7 +158,7 @@ def measure_loudness(
         ffmpeg_path = shutil.which("ffmpeg")
         if ffmpeg_path is None:
             logger.warning("ffmpeg is unavailable for loudness measurement")
-            return None
+            return {"measurement": None, "failure": "transient"}
         completed = subprocess.run(  # noqa: S603 -- fixed executable and arguments
             [
                 ffmpeg_path,
@@ -167,17 +184,29 @@ def measure_loudness(
                 "ffmpeg loudness measurement failed with exit code %s",
                 completed.returncode,
             )
-            return None
+            failure: LoudnessFailureClass = (
+                "permanent" if os.path.exists(file_path) else "transient"
+            )
+            return {"measurement": None, "failure": failure}
         measurement = parse_loudnorm_output(f"{completed.stdout}\n{completed.stderr}")
         if measurement is None:
             logger.warning("ffmpeg loudness output did not contain valid EBU R128 values")
-        return measurement
+            return {"measurement": None, "failure": "permanent"}
+        return {"measurement": measurement, "failure": None}
     except subprocess.TimeoutExpired:
         logger.warning(
             "ffmpeg loudness measurement timed out after %s seconds",
             timeout_seconds,
         )
-        return None
+        return {"measurement": None, "failure": "transient"}
     except Exception as error:  # The optional measurement must never fail track analysis.
         logger.warning("ffmpeg loudness measurement failed: %s", type(error).__name__)
-        return None
+        return {"measurement": None, "failure": "transient"}
+
+
+def measure_loudness(
+    file_path: str,
+    timeout_seconds: int,
+) -> LoudnessMeasurement | None:
+    """Measure a complete native audio stream for ordinary analyzer work."""
+    return measure_loudness_for_backfill(file_path, timeout_seconds)["measurement"]

@@ -18,11 +18,6 @@ import { backfillAllArtistCounts } from "./artistCountsService";
 import { processBatched } from "../utils/async";
 import { computeAudioStreamHash } from "./audioHash";
 import { matchTrackIdentities } from "./trackIdentityMatcher";
-import {
-    applyTrackReplacement,
-    clearAlbumLoudness,
-    removeReplacementCacheFiles,
-} from "./trackReplacement";
 import { cleanupOrphanedLibraryEntities } from "./libraryOrphanCleanup";
 import { config } from "../config";
 import { extractTrackIdentityTags } from "./trackIdentityTags";
@@ -31,7 +26,9 @@ import {
     federationDedupConfidence,
     type FederationDedupIdentity,
 } from "../utils/federationDedup";
-import { hasAudioReplacement, rebindMovedTrack } from "./trackRebinding";
+import { rebindMovedTrack } from "./trackRebinding";
+import { recomputeAlbumLoudness } from "./albumLoudness";
+import { persistScannedTrack } from "./scannedTrackPersistence";
 
 const scanLogger = logger.child("MusicScannerService");
 
@@ -245,7 +242,7 @@ export class MusicScannerService {
                 data: { removedAt: new Date() },
             });
             if (result.count > 0) {
-                await clearAlbumLoudness(
+                await recomputeAlbumLoudness(
                     transaction,
                     tracks.map((track) => track.albumId),
                 );
@@ -458,15 +455,23 @@ export class MusicScannerService {
                         existingTrack.fileModified < fileModified;
 
                     // Extract metadata and update database
+                    const removedTrack =
+                        existingTrack && isTrackRemoved(existingTrack);
+                    const contentChangeDetected = Boolean(
+                        existingTrack &&
+                        (removedTrack ||
+                            !existingTrack.fileModified ||
+                            existingTrack.fileModified < fileModified),
+                    );
                     await this.processAudioFile(
                         audioFile,
                         relativePath,
                         musicPath,
                         needsHash,
                         existingTrack?.audioHash ?? null,
-                        existingTrack && isTrackRemoved(existingTrack)
-                            ? existingTrack.albumId
-                            : null,
+                        existingTrack?.albumId ?? null,
+                        contentChangeDetected,
+                        Boolean(removedTrack),
                     );
                     if (!existingTrack) newTrackPaths.add(relativePath);
                 } catch (err: any) {
@@ -981,7 +986,11 @@ export class MusicScannerService {
     }
 
     /**
-     * Process a single audio file and update database
+     * Process a single audio file and update database.
+     *
+     * Cohesion exception: this pre-existing scanner unit performs one linear
+     * metadata-import workflow. Persistence and loudness decisions are kept
+     * in persistScannedTrack so this orchestration does not own those rules.
      */
     private async processAudioFile(
         absolutePath: string,
@@ -989,7 +998,9 @@ export class MusicScannerService {
         musicPath: string,
         computeHash = true,
         existingAudioHash: string | null = null,
-        revivalAlbumId: string | null = null,
+        previousAlbumId: string | null = null,
+        contentChangeDetected = false,
+        revival = false,
     ): Promise<void> {
         // Extract metadata in two stages. The cheap header-only parse yields
         // a duration for most formats (FLAC STREAMINFO, MP3 Xing, MP4 atoms).
@@ -1487,40 +1498,17 @@ export class MusicScannerService {
             },
         } satisfies Prisma.TrackUpsertArgs;
 
-        const replacement =
-            computeHash &&
-            hasAudioReplacement(existingAudioHash, computedAudioHash ?? null);
-        if (replacement) {
-            const committed = await prisma.$transaction(async (transaction) => {
-                const track = await transaction.track.upsert(trackUpsert);
-                const cachePaths = await applyTrackReplacement(
-                    transaction,
-                    track.id,
-                );
-                await transaction.libraryHealthRecord.deleteMany({
-                    where: { trackId: track.id },
-                });
-                return { track, cachePaths };
-            });
-            await removeReplacementCacheFiles(committed.cachePaths);
-            return;
-        }
-
-        if (revivalAlbumId !== null) {
-            await prisma.$transaction(async (transaction) => {
-                const track = await transaction.track.upsert(trackUpsert);
-                await clearAlbumLoudness(transaction, [
-                    revivalAlbumId,
-                    track.albumId,
-                ]);
-                await transaction.libraryHealthRecord.deleteMany({
-                    where: { trackId: track.id },
-                });
-            });
-            return;
-        }
-
-        const track = await prisma.track.upsert(trackUpsert);
-        await this.clearTrackHealthIssue(track.id);
+        await persistScannedTrack(
+            trackUpsert,
+            album.id,
+            {
+                contentChangeDetected,
+                storedAudioHash: existingAudioHash,
+                computedAudioHash,
+                previousAlbumId,
+                revival,
+            },
+            (trackId) => this.clearTrackHealthIssue(trackId),
+        );
     }
 }

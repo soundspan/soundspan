@@ -9,6 +9,8 @@ describe("loudnessBackfillProcessor", () => {
             id: string;
             filePath: string | null;
             duration: number;
+            fileModified?: Date;
+            fileSize?: number;
         }>,
         admissions: Array<"queued" | "duplicate" | "full"> = [],
         batchSize = 25,
@@ -16,8 +18,9 @@ describe("loudnessBackfillProcessor", () => {
     ) {
         const storedTracks = tracks.map((track) => ({
             ...track,
-            fileModified: new Date("2026-08-18T10:00:00.000Z"),
-            fileSize: 4_096,
+            fileModified:
+                track.fileModified ?? new Date("2026-08-18T10:00:00.000Z"),
+            fileSize: track.fileSize ?? 4_096,
         }));
         const logger = {
             debug: jest.fn(),
@@ -38,11 +41,13 @@ describe("loudnessBackfillProcessor", () => {
                 eval: jest.fn(async () => 1),
                 get: jest.fn(async () => null),
                 mget: jest.fn(async () => failureCounts),
+                expire: jest.fn(async () => 1),
                 set: jest.fn(async () => "OK"),
             },
         };
-        const enqueueReservedWork = jest.fn(async () =>
-            admissions.length > 0 ? admissions.shift() : "queued",
+        const enqueueReservedWork = jest.fn(
+            async (_client: unknown, _request: { payload: string }) =>
+                admissions.length > 0 ? admissions.shift() : "queued",
         );
 
         jest.doMock("../../../utils/logger", () => ({ logger }));
@@ -219,7 +224,7 @@ describe("loudnessBackfillProcessor", () => {
         expect(schedulerQueue.add).not.toHaveBeenCalled();
     });
 
-    it("does not enqueue a content revision after its bounded failure budget", async () => {
+    it("cools down a transiently exhausted revision", async () => {
         const { module, logger, enqueueReservedWork } = loadProcessor(
             [
                 {
@@ -247,6 +252,78 @@ describe("loudnessBackfillProcessor", () => {
         expect(enqueueReservedWork).not.toHaveBeenCalled();
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("track-failed"),
+        );
+    });
+
+    it("retries a transiently exhausted revision after its cooldown expires", async () => {
+        const track = {
+            id: "track-recovered",
+            filePath: "Artist/recovered.flac",
+            duration: 181,
+        };
+        const cooledDown = loadProcessor([track], [], 25, ["3"]);
+        await cooledDown.module.processLoudnessBackfill(buildJob());
+        expect(cooledDown.enqueueReservedWork).not.toHaveBeenCalled();
+
+        jest.resetModules();
+        const recovered = loadProcessor([track], [], 25, [null]);
+        await recovered.module.processLoudnessBackfill(buildJob());
+        expect(recovered.enqueueReservedWork).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps permanent content failures parked and refreshes their TTL", async () => {
+        const { module, schedulerQueue, enqueueReservedWork } = loadProcessor(
+            [
+                {
+                    id: "track-permanent",
+                    filePath: "Artist/unsupported.flac",
+                    duration: 181,
+                },
+            ],
+            [],
+            25,
+            ["permanent"],
+        );
+
+        await module.processLoudnessBackfill(buildJob());
+
+        expect(enqueueReservedWork).not.toHaveBeenCalled();
+        expect(schedulerQueue.client.expire).toHaveBeenCalledWith(
+            expect.stringMatching(/^audio:analysis:loudness:attempts:/),
+            30 * 24 * 60 * 60,
+        );
+    });
+
+    it("uses a new attempt key when the audio revision changes", async () => {
+        const first = loadProcessor([
+            {
+                id: "track-revision",
+                filePath: "Artist/revision.flac",
+                duration: 181,
+                fileModified: new Date("2026-08-18T10:00:00.000Z"),
+            },
+        ]);
+        await first.module.processLoudnessBackfill(buildJob());
+        const firstPayload = JSON.parse(
+            first.enqueueReservedWork.mock.calls[0][1].payload,
+        );
+
+        jest.resetModules();
+        const second = loadProcessor([
+            {
+                id: "track-revision",
+                filePath: "Artist/revision.flac",
+                duration: 181,
+                fileModified: new Date("2026-08-19T10:00:00.000Z"),
+            },
+        ]);
+        await second.module.processLoudnessBackfill(buildJob());
+        const secondPayload = JSON.parse(
+            second.enqueueReservedWork.mock.calls[0][1].payload,
+        );
+
+        expect(secondPayload.loudnessAttemptKey).not.toBe(
+            firstPayload.loudnessAttemptKey,
         );
     });
 

@@ -14,6 +14,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | --- | --- |
 | `backend/src/services/acquisitionService.ts` | Core |
 | `backend/src/services/albumResolutionService.ts` | Core |
+| `backend/src/services/albumLoudness.ts` | Transactional active-track loudness rollups and per-album serialization |
 | `backend/src/services/artistCountsService.ts` | Core |
 | `backend/src/services/artistResolutionService.ts` | Core |
 | `backend/src/services/artistSlotAllocation.ts` | Core |
@@ -125,6 +126,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |
 | `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
+| `backend/src/services/scannedTrackPersistence.ts` | Scanner track persistence, audio-change invalidation, and album loudness refresh |
 | `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
 | `backend/src/services/rssParser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
@@ -147,11 +149,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
+| `backend/src/services/trackDeletion.ts` | Transactional track deletion and former-album loudness refresh |
 | `backend/src/services/trackEmbeddings.ts` | Transactional vibe pgvector reads, writes, generation finalization, ANN queries, and embedding counts |
 | `backend/src/services/trackIdentityMatcher.ts` | Durable track move identity matching |
 | `backend/src/services/trackPreference.ts` | Core |
 | `backend/src/services/trackReconciliation.ts` | Core |
-| `backend/src/services/trackReplacement.ts` | Replacement analysis and transcode invalidation |
+| `backend/src/services/trackRebinding.ts` | Moved-track identity persistence and audio-change decisions |
+| `backend/src/services/trackReplacement.ts` | Replacement analysis, transcode invalidation, and loudness refresh |
 | `backend/src/services/umapProjection.ts` | Core |
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |

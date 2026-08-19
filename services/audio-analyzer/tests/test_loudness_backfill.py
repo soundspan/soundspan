@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any
@@ -11,7 +10,6 @@ from typing import Any
 import loudness_backfill
 import pytest
 from conftest import FakeDatabaseConnection, FakeRedis
-from loudness import ALBUM_LOUDNESS_ROLLUP_SQL
 
 
 class _Bookkeeping:
@@ -20,6 +18,8 @@ class _Bookkeeping:
     def __init__(self) -> None:
         self.attempts: dict[str, int] = {}
         self.outcomes: list[str] = []
+        self.permanent: set[str] = set()
+        self.cooldowns: list[str] = []
 
     def clear_failures(self, attempt_key: str) -> None:
         """Clear the current content revision's failures."""
@@ -35,12 +35,21 @@ class _Bookkeeping:
         """Record one bounded analyzer outcome."""
         self.outcomes.append(outcome)
 
+    def park_permanently(self, attempt_key: str) -> None:
+        """Record one permanently parked revision."""
+        self.permanent.add(attempt_key)
+
+    def start_transient_cooldown(self, attempt_key: str) -> None:
+        """Record one exhausted transient revision."""
+        self.cooldowns.append(attempt_key)
+
 
 class _BookkeepingRedis:
     """Apply Redis bookkeeping commands to an in-memory keyspace."""
 
     def __init__(self) -> None:
-        self.values: dict[str, int] = {}
+        self.values: dict[str, int | str] = {}
+        self.expirations: dict[str, int] = {}
 
     def delete(self, key: str) -> int:
         """Delete one counter and return whether it existed."""
@@ -48,88 +57,22 @@ class _BookkeepingRedis:
 
     def incr(self, key: str) -> int:
         """Increment and return one counter."""
-        value = self.values.get(key, 0) + 1
+        current = self.values.get(key, 0)
+        assert isinstance(current, int)
+        value = current + 1
         self.values[key] = value
         return value
 
+    def expire(self, key: str, seconds: int) -> int:
+        """Record one key expiry."""
+        self.expirations[key] = seconds
+        return 1
 
-class _ApplyingBackfillCursor:
-    """Apply loudness-only persistence to an in-memory catalog."""
-
-    def __init__(self, database: _ApplyingBackfillDatabase) -> None:
-        self.database = database
-        self.next_row: dict[str, Any] | None = None
-
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
-        assert params is not None
-        self.next_row = None
-        if sql == loudness_backfill._SELECT_TRACK_LOUDNESS_SQL:
-            track = self.database.tracks.get(params[0])
-            self.next_row = None if track is None else {"loudnessLufs": track["loudnessLufs"]}
-            return
-        if sql == loudness_backfill._SAVE_TRACK_LOUDNESS_SQL:
-            track = self.database.tracks.get(params[2])
-            if track is not None and track["loudnessLufs"] is None:
-                track["loudnessLufs"] = params[0]
-                track["truePeakDb"] = params[1]
-                self.next_row = {"id": params[2]}
-            return
-        if sql == ALBUM_LOUDNESS_ROLLUP_SQL:
-            self.database.roll_up_album(params[0])
-            return
-        raise AssertionError("unexpected loudness backfill operation")
-
-    def fetchone(self) -> dict[str, Any] | None:
-        """Return the row produced by the preceding operation."""
-        return self.next_row
-
-    def close(self) -> None:
-        """Close the in-memory cursor."""
-
-
-class _ApplyingBackfillDatabase:
-    """Model track loudness writes and active-sibling album aggregation."""
-
-    def __init__(self) -> None:
-        self.tracks: dict[str, dict[str, Any]] = {}
-        self.albums: dict[str, dict[str, float | None]] = {}
-        self.cursor = _ApplyingBackfillCursor(self)
-        self.commit_calls = 0
-        self.rollback_calls = 0
-
-    def get_cursor(self) -> _ApplyingBackfillCursor:
-        """Return the state-applying cursor."""
-        return self.cursor
-
-    def commit(self) -> None:
-        """Record a successful transaction."""
-        self.commit_calls += 1
-
-    def rollback(self) -> None:
-        """Record a failed transaction."""
-        self.rollback_calls += 1
-
-    def roll_up_album(self, saved_track_id: str) -> None:
-        """Recalculate an album from active measured siblings."""
-        album_id = self.tracks[saved_track_id]["albumId"]
-        siblings = [
-            track
-            for track in self.tracks.values()
-            if track["albumId"] == album_id
-            and track["removedAt"] is None
-            and track["loudnessLufs"] is not None
-            and track["duration"] > 0
-        ]
-        album = self.albums[album_id]
-        if not siblings:
-            album.update(albumLoudnessLufs=None, albumTruePeakDb=None)
-            return
-        duration = sum(track["duration"] for track in siblings)
-        power = sum(track["duration"] * 10 ** (track["loudnessLufs"] / 10) for track in siblings)
-        album["albumLoudnessLufs"] = 10 * math.log10(power / duration)
-        album["albumTruePeakDb"] = max(
-            track["truePeakDb"] for track in siblings if track["truePeakDb"] is not None
-        )
+    def set(self, key: str, value: str, *, ex: int) -> bool:
+        """Store one expiring marker."""
+        self.values[key] = value
+        self.expirations[key] = ex
+        return True
 
 
 def _job(track_id: str, loudness_only: bool = True) -> dict[str, Any]:
@@ -164,11 +107,29 @@ def test_redis_bookkeeping_persists_failures_and_outcomes() -> None:
 
     assert bookkeeping.increment_failures(attempt_key) == 1
     assert bookkeeping.increment_failures(attempt_key) == 2
+    assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_ATTEMPT_TTL_SECONDS
+    bookkeeping.start_transient_cooldown(attempt_key)
+    assert (
+        redis.expirations[attempt_key]
+        == loudness_backfill.LOUDNESS_TRANSIENT_COOLDOWN_SECONDS
+    )
     bookkeeping.increment_outcome("transient_failure")
     bookkeeping.clear_failures(attempt_key)
 
     assert attempt_key not in redis.values
     assert redis.values["audio:analysis:loudness:outcomes:transient_failure"] == 1
+
+
+def test_redis_bookkeeping_parks_permanent_revisions_with_a_ttl() -> None:
+    """Let superseded permanent revision keys expire when sweeps stop refreshing them."""
+    redis = _BookkeepingRedis()
+    bookkeeping = loudness_backfill.RedisLoudnessBackfillBookkeeping(redis)
+    attempt_key = "audio:analysis:loudness:attempts:permanent-revision"
+
+    bookkeeping.park_permanently(attempt_key)
+
+    assert redis.values[attempt_key] == loudness_backfill.PERMANENT_FAILURE_MARKER
+    assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_ATTEMPT_TTL_SECONDS
 
 
 @pytest.mark.parametrize("invalid_count", [True, 0, -1, "1"])
@@ -198,26 +159,9 @@ def test_partition_analysis_jobs_separates_loudness_only_from_normal_work() -> N
     assert loudness_only == [_job("backfill")]
 
 
-def test_loudness_job_persists_only_measurements_and_album_rollup() -> None:
-    """Persist a measurement and aggregate only eligible album siblings."""
-    database = _ApplyingBackfillDatabase()
-    database.tracks = {
-        "track-1": {
-            "albumId": "album-1",
-            "duration": 180,
-            "removedAt": None,
-            "loudnessLufs": None,
-            "truePeakDb": None,
-        },
-        "removed": {
-            "albumId": "album-1",
-            "duration": 180,
-            "removedAt": object(),
-            "loudnessLufs": -4.0,
-            "truePeakDb": 4.0,
-        },
-    }
-    database.albums = {"album-1": {"albumLoudnessLufs": -4.0, "albumTruePeakDb": 4.0}}
+def test_loudness_job_orchestrates_save_lock_and_rollup() -> None:
+    """Persist a measurement and serialize before invoking the shared rollup."""
+    database = FakeDatabaseConnection([[{"loudnessLufs": None}], [{"id": "track-1"}]])
     bookkeeping = _Bookkeeping()
     releases, release = _release_recorder()
 
@@ -230,19 +174,16 @@ def test_loudness_job_persists_only_measurements_and_album_rollup() -> None:
         timeout_seconds=120,
         bookkeeping=bookkeeping,
         measure=lambda _path, _timeout: {
-            "loudnessLufs": -18.2,
-            "truePeakDb": -1.1,
+            "measurement": {"loudnessLufs": -18.2, "truePeakDb": -1.1},
+            "failure": None,
         },
         path_exists=lambda _path: True,
         path_size=lambda _path: 1024,
     )
 
-    assert database.tracks["track-1"]["loudnessLufs"] == -18.2
-    assert database.tracks["track-1"]["truePeakDb"] == -1.1
-    assert database.albums["album-1"] == {
-        "albumLoudnessLufs": -18.2,
-        "albumTruePeakDb": -1.1,
-    }
+    assert len(database.cursor.executions) == 4
+    assert database.cursor.executions[2][0] == loudness_backfill.ALBUM_LOUDNESS_LOCK_SQL
+    assert database.cursor.executions[3][0] == loudness_backfill.ALBUM_LOUDNESS_ROLLUP_SQL
     assert database.commit_calls == 2
     assert database.rollback_calls == 0
     assert bookkeeping.outcomes == ["measured_success"]
@@ -263,7 +204,7 @@ def test_loudness_job_releases_reservation_after_measurement_failure() -> None:
         max_file_size_mb=500,
         timeout_seconds=120,
         bookkeeping=bookkeeping,
-        measure=lambda _path, _timeout: None,
+        measure=lambda _path, _timeout: {"measurement": None, "failure": "transient"},
         path_exists=lambda _path: True,
         path_size=lambda _path: 1024,
     )
@@ -301,8 +242,8 @@ def test_loudness_job_releases_reservation_after_unexpected_failure() -> None:
     assert bookkeeping.outcomes == ["transient_failure"]
 
 
-def test_third_consecutive_failure_is_permanently_skipped() -> None:
-    """Stop classifying a content revision as transient after three failures."""
+def test_transient_exhaustion_starts_a_recoverable_cooldown() -> None:
+    """Reset transient infrastructure failure budgets after the cooldown."""
     database = FakeDatabaseConnection(
         [[{"loudnessLufs": None}], [{"loudnessLufs": None}], [{"loudnessLufs": None}]]
     )
@@ -317,7 +258,7 @@ def test_third_consecutive_failure_is_permanently_skipped() -> None:
         max_file_size_mb=500,
         timeout_seconds=120,
         bookkeeping=bookkeeping,
-        measure=lambda _path, _timeout: None,
+        measure=lambda _path, _timeout: {"measurement": None, "failure": "transient"},
         path_exists=lambda _path: True,
         path_size=lambda _path: 1024,
     )
@@ -325,8 +266,33 @@ def test_third_consecutive_failure_is_permanently_skipped() -> None:
     assert bookkeeping.outcomes == [
         "transient_failure",
         "transient_failure",
-        "permanently_skipped",
+        "transient_failure",
     ]
+    assert bookkeeping.cooldowns == [_job("track-failed")["loudnessAttemptKey"]]
+
+
+def test_permanent_content_failure_stays_parked() -> None:
+    """Park an intact-file decode failure until the audio revision changes."""
+    database = FakeDatabaseConnection([[{"loudnessLufs": None}]])
+    bookkeeping = _Bookkeeping()
+    _releases, release = _release_recorder()
+
+    loudness_backfill.process_loudness_backfill_jobs(
+        [_job("unsupported")],
+        database=database,
+        release_reservations=release,
+        resolve_path=lambda _path: "/music/unsupported.flac",
+        max_file_size_mb=500,
+        timeout_seconds=120,
+        bookkeeping=bookkeeping,
+        measure=lambda _path, _timeout: {"measurement": None, "failure": "permanent"},
+        path_exists=lambda _path: True,
+        path_size=lambda _path: 1024,
+    )
+
+    attempt_key = _job("unsupported")["loudnessAttemptKey"]
+    assert bookkeeping.permanent == {attempt_key}
+    assert bookkeeping.outcomes == ["permanently_skipped"]
 
 
 def test_already_measured_track_skips_ffmpeg_and_update() -> None:

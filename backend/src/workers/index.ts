@@ -795,14 +795,37 @@ async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
     );
 }
 
+type SchedulerRegistration = {
+    type: (typeof SCHEDULER_JOB_TYPES)[keyof typeof SCHEDULER_JOB_TYPES];
+    data: { mode: "startup" | "repeat"; sweepStartedAt?: string };
+    opts: Bull.JobOptions;
+};
+
+function analysisBackfillStartupJob(
+    type: SchedulerRegistration["type"],
+    jobId: string,
+    delay: number,
+): SchedulerRegistration {
+    return {
+        type,
+        data: { mode: "startup", sweepStartedAt: new Date().toISOString() },
+        opts: {
+            jobId,
+            delay,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: true,
+            removeOnFail: 10,
+        },
+    };
+}
+
+// Cohesion exception: this pre-existing function is one declarative schedule
+// registry. Analysis backfill construction is extracted above for reviewability.
 async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
 
-    const schedulerJobs: Array<{
-        type: (typeof SCHEDULER_JOB_TYPES)[keyof typeof SCHEDULER_JOB_TYPES];
-        data: { mode: "startup" | "repeat"; sweepStartedAt?: string };
-        opts: Bull.JobOptions;
-    }> = [
+    const schedulerJobs: SchedulerRegistration[] = [
         {
             type: SCHEDULER_JOB_TYPES.dataIntegrity,
             data: { mode: "startup" },
@@ -933,36 +956,16 @@ async function registerSchedulerJobs(): Promise<void> {
                 removeOnFail: 10,
             },
         },
-        {
-            type: SCHEDULER_JOB_TYPES.audioHashBackfill,
-            data: {
-                mode: "startup",
-                sweepStartedAt: new Date().toISOString(),
-            },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.audioHashBackfillStartup,
-                delay: 50_000,
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
-        {
-            type: SCHEDULER_JOB_TYPES.loudnessBackfill,
-            data: {
-                mode: "startup",
-                sweepStartedAt: new Date().toISOString(),
-            },
-            opts: {
-                jobId: SCHEDULER_JOB_IDS.loudnessBackfillStartup,
-                delay: 55_000,
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: true,
-                removeOnFail: 10,
-            },
-        },
+        analysisBackfillStartupJob(
+            SCHEDULER_JOB_TYPES.audioHashBackfill,
+            SCHEDULER_JOB_IDS.audioHashBackfillStartup,
+            50_000,
+        ),
+        analysisBackfillStartupJob(
+            SCHEDULER_JOB_TYPES.loudnessBackfill,
+            SCHEDULER_JOB_IDS.loudnessBackfillStartup,
+            55_000,
+        ),
         loudnessBackfillRepeatSchedule,
         {
             type: SCHEDULER_JOB_TYPES.trackRemovalPurge,

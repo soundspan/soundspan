@@ -78,6 +78,10 @@ def test_measure_loudness_returns_none_on_timeout(
     monkeypatch.setattr(loudness.subprocess, "run", timeout)
 
     assert loudness.measure_loudness("/music/track.flac", 7) is None
+    assert loudness.measure_loudness_for_backfill("/music/track.flac", 7) == {
+        "measurement": None,
+        "failure": "transient",
+    }
 
 
 def test_measure_loudness_returns_none_on_ffmpeg_failure(
@@ -92,8 +96,13 @@ def test_measure_loudness_returns_none_on_ffmpeg_failure(
     )
     monkeypatch.setattr(loudness.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(loudness.subprocess, "run", lambda *_args, **_kwargs: completed)
+    monkeypatch.setattr(loudness.os.path, "exists", lambda _path: True)
 
     assert loudness.measure_loudness("/music/track.flac", 7) is None
+    assert loudness.measure_loudness_for_backfill("/music/track.flac", 7) == {
+        "measurement": None,
+        "failure": "permanent",
+    }
 
 
 @pytest.mark.parametrize(

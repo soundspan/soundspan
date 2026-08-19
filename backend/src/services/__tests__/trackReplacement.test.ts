@@ -8,6 +8,11 @@ jest.mock("../../utils/logger", () => ({
 
 jest.mock("../../utils/db", () => ({ prisma: {} }));
 
+const mockRecomputeAlbumLoudness = jest.fn();
+jest.mock("../albumLoudness", () => ({
+    recomputeAlbumLoudness: mockRecomputeAlbumLoudness,
+}));
+
 import { applyTrackReplacement } from "../trackReplacement";
 
 describe("track replacement", () => {
@@ -18,11 +23,6 @@ describe("track replacement", () => {
             loudnessLufs: -24,
             truePeakDb: -8,
         };
-        const albumState = {
-            id: "album-1",
-            albumLoudnessLufs: -23,
-            albumTruePeakDb: -7,
-        };
         const transaction = {
             track: {
                 findUnique: jest.fn(async () => ({
@@ -30,12 +30,6 @@ describe("track replacement", () => {
                 })),
                 updateMany: jest.fn(async ({ data }) => {
                     Object.assign(trackState, data);
-                    return { count: 1 };
-                }),
-            },
-            album: {
-                updateMany: jest.fn(async ({ data }) => {
-                    Object.assign(albumState, data);
                     return { count: 1 };
                 }),
             },
@@ -58,10 +52,9 @@ describe("track replacement", () => {
                 truePeakDb: null,
             }),
         );
-        expect(albumState).toEqual({
-            id: "album-1",
-            albumLoudnessLufs: null,
-            albumTruePeakDb: null,
-        });
+        expect(mockRecomputeAlbumLoudness).toHaveBeenCalledWith(transaction, [
+            "album-1",
+            "album-1",
+        ]);
     });
 });

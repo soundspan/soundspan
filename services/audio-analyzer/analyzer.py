@@ -20,6 +20,7 @@ for _root in _POTENTIAL_PROJECT_ROOTS:
 
 from audio_paths import resolve_music_path
 from loudness import (
+    ALBUM_LOUDNESS_LOCK_SQL,
     ALBUM_LOUDNESS_ROLLUP_SQL,
     LOUDNESS_MEASURE_TIMEOUT_SECONDS,
     measure_loudness,
@@ -2120,9 +2121,8 @@ class AnalysisWorker:
                 _SAVE_ANALYSIS_RESULTS_SQL,
                 _analysis_result_values(track_id, features),
             )
-
+            cursor.execute(ALBUM_LOUDNESS_LOCK_SQL, (track_id,))
             cursor.execute(ALBUM_LOUDNESS_ROLLUP_SQL, (track_id,))
-
             # Successful analysis should clear stale unresolved audio failures
             # for this track so UI failure counts remain accurate across reruns.
             cursor.execute(_RESOLVE_AUDIO_FAILURES_SQL, (track_id,))

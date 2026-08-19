@@ -64,12 +64,15 @@ def test_save_results_resolves_unresolved_audio_failures(
 
     worker._save_results(track_id, "/music/a.flac", features)
 
-    assert len(database.cursor.executions) == 3
+    assert len(database.cursor.executions) == 4
     result_sql, result_params = database.cursor.executions[0]
-    rollup_sql, rollup_params = database.cursor.executions[1]
-    failure_sql, failure_params = database.cursor.executions[2]
+    lock_sql, lock_params = database.cursor.executions[1]
+    rollup_sql, rollup_params = database.cursor.executions[2]
+    failure_sql, failure_params = database.cursor.executions[3]
     assert 'UPDATE "Track"' in result_sql
     assert result_params == loaded_analyzer._analysis_result_values(track_id, features)
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == (track_id,)
     assert 'UPDATE "Album"' in rollup_sql
     assert rollup_params == (track_id,)
     assert 'UPDATE "EnrichmentFailure"' in failure_sql

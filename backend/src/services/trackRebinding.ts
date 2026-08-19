@@ -4,9 +4,9 @@ import { logger } from "../utils/logger";
 import type { TrackIdentity, TrackIdentityMatch } from "./trackIdentityMatcher";
 import {
     applyTrackReplacement,
-    clearAlbumLoudness,
     removeReplacementCacheFiles,
 } from "./trackReplacement";
+import { recomputeAlbumLoudness } from "./albumLoudness";
 
 const log = logger.child("MusicScannerService");
 
@@ -23,6 +23,14 @@ export function hasAudioReplacement(
     nextHash: string | null,
 ): boolean {
     return storedHash !== null && nextHash !== null && storedHash !== nextHash;
+}
+
+/** Report whether a detected change lacks equal, non-null content hashes. */
+export function hasUnprovenAudioChange(
+    storedHash: string | null,
+    nextHash: string | null,
+): boolean {
+    return storedHash === null || nextHash === null;
 }
 
 function buildRebindData(
@@ -56,6 +64,7 @@ function buildRebindData(
 async function commitRebind(
     match: TrackIdentityMatch<RebindTrack, RebindTrack>,
     replacement: boolean,
+    unprovenChange: boolean,
 ): Promise<string[]> {
     return prisma.$transaction(async (transaction) => {
         await transaction.track.delete({ where: { id: match.candidate.id } });
@@ -70,9 +79,14 @@ async function commitRebind(
         if (!replacement) {
             await transaction.track.update({
                 where: { id: match.missing.id },
-                data: trackData,
+                data: {
+                    ...trackData,
+                    ...(unprovenChange
+                        ? { loudnessLufs: null, truePeakDb: null }
+                        : {}),
+                },
             });
-            await clearAlbumLoudness(transaction, [
+            await recomputeAlbumLoudness(transaction, [
                 match.missing.albumId,
                 match.candidate.albumId,
             ]);
@@ -93,7 +107,11 @@ export async function rebindMovedTrack(
         match.missing.audioHash,
         match.candidate.audioHash,
     );
-    const cachePaths = await commitRebind(match, replacement);
+    const unprovenChange = hasUnprovenAudioChange(
+        match.missing.audioHash,
+        match.candidate.audioHash,
+    );
+    const cachePaths = await commitRebind(match, replacement, unprovenChange);
     await removeReplacementCacheFiles(cachePaths);
     const action = revival ? "Revived" : "Re-bound";
     log.info(
