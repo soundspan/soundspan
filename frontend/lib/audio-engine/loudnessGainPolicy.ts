@@ -176,3 +176,29 @@ export function resolveLoudnessGain(
         reason: grantedDb < desiredDb ? "boost_clamped" : "leveled",
     };
 }
+
+/** Number of intermediate volume steps in a mid-track gain transition. */
+export const GAIN_RAMP_STEPS = 8;
+
+/** Milliseconds between mid-track gain transition steps. */
+export const GAIN_RAMP_STEP_MS = 25;
+
+/**
+ * Returns the intermediate gain factors for a smooth mid-track transition.
+ * The sequence always ends exactly at `to`; a degenerate or non-finite
+ * input collapses to a single immediate step.
+ */
+export function computeGainRampSteps(
+    from: number,
+    to: number,
+    steps: number = GAIN_RAMP_STEPS,
+): number[] {
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return [to];
+    if (from === to || steps <= 1) return [to];
+    const sequence: number[] = [];
+    for (let index = 1; index <= steps; index += 1) {
+        sequence.push(from + ((to - from) * index) / steps);
+    }
+    sequence[sequence.length - 1] = to;
+    return sequence;
+}

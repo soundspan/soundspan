@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    computeGainRampSteps,
     isAlbumOrderedQueue,
     resolveLoudnessGain,
     type LoudnessGainInput,
@@ -235,4 +236,24 @@ test("flattened album measurements win over nested ones", () => {
         }),
     );
     assert.ok(Math.abs(decision.gainDb - -8) < 1e-9);
+});
+
+test("computeGainRampSteps interpolates monotonically and ends exactly at the target", () => {
+    const rising = computeGainRampSteps(0.5, 1, 4);
+    assert.deepEqual(rising, [0.625, 0.75, 0.875, 1]);
+    const falling = computeGainRampSteps(1, 0.5, 4);
+    assert.equal(falling.length, 4);
+    assert.equal(falling.at(-1), 0.5);
+    for (let index = 1; index < falling.length; index += 1) {
+        assert.ok(falling[index] < falling[index - 1]);
+    }
+});
+
+test("computeGainRampSteps collapses degenerate and invalid transitions", () => {
+    assert.deepEqual(computeGainRampSteps(0.8, 0.8), [0.8]);
+    assert.deepEqual(computeGainRampSteps(0.4, 0.9, 1), [0.9]);
+    assert.deepEqual(computeGainRampSteps(Number.NaN, 0.7), [0.7]);
+    assert.deepEqual(computeGainRampSteps(0.7, Number.POSITIVE_INFINITY), [
+        Number.POSITIVE_INFINITY,
+    ]);
 });
