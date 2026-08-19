@@ -9,6 +9,9 @@ describe("library rate-limit path classification", () => {
         "/tracks/track-1/stream",
         "/tracks/track-1/stream/",
         "/tracks/track-1/stream/extra",
+        "/COVER-ART/album-1",
+        "/Album-Cover/release-1",
+        "/TRACKS/track-1/STREAM",
     ])("classifies the mounted media path %s", (path) => {
         expect(isLibraryMediaPath(path)).toBe(true);
     });

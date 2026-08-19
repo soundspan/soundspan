@@ -402,6 +402,18 @@ describe("library route table", () => {
         expect(await send("GET", "/tracks/item-1", key)).toBe(401);
     });
 
+    it("classifies mixed-case media paths away from the metadata budget", async () => {
+        const key = "mixed-case-isolation";
+
+        expect(await send("GET", "/COVER-ART/item-1", key)).toBe(401);
+        expect(await send("GET", "/TRACKS/item-1/STREAM", key)).toBe(401);
+        expect(
+            mockMiddlewareTrace
+                .get(key)
+                ?.filter((name) => limiterNames.has(name)),
+        ).toEqual(["coverArtLimiter", "streamingLimiter"]);
+    });
+
     it("counts an after-media metadata request exactly once", async () => {
         expect(
             await statuses(
