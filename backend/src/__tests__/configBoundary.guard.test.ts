@@ -8,7 +8,6 @@ import path from "path";
 const ALLOWLIST = [
     "index.ts",
     "middleware/auth.ts",
-    "routes/auth/localCredentials.ts",
     "utils/apiKeyHash.ts",
     "utils/configValidator.ts",
     "utils/db.ts",
