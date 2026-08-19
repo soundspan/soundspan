@@ -399,6 +399,111 @@ describe("artists routes runtime", () => {
         );
     });
 
+    it("prefers an exact legacy /discover match over a fuzzy raw match", async () => {
+        mockSearchArtist.mockImplementation(async (candidate: string) => {
+            if (candidate === "Legacy%20Artist") {
+                return [{ id: "raw-fuzzy-mbid", name: "Legacy Artists" }];
+            }
+            if (candidate === "Legacy Artist") {
+                return [{ id: "legacy-exact-mbid", name: "Legacy Artist" }];
+            }
+            return [];
+        });
+
+        const req = {
+            params: { nameOrMbid: "Legacy%20Artist" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockSearchArtist.mock.calls).toEqual([
+            ["Legacy%20Artist", 1],
+            ["Legacy Artist", 1],
+        ]);
+        expect(mockGetArtistInfo).toHaveBeenCalledWith(
+            "Legacy Artist",
+            "legacy-exact-mbid",
+        );
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                mbid: "legacy-exact-mbid",
+                name: "Legacy Artist",
+            }),
+        );
+    });
+
+    it("keeps an exact raw /discover match without trying the legacy candidate", async () => {
+        mockSearchArtist.mockResolvedValueOnce([
+            { id: "raw-exact-mbid", name: "a%2fb" },
+        ]);
+
+        const req = {
+            params: { nameOrMbid: "A%2FB" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockSearchArtist).toHaveBeenCalledTimes(1);
+        expect(mockSearchArtist).toHaveBeenCalledWith("A%2FB", 1);
+        expect(mockGetArtistInfo).toHaveBeenCalledWith(
+            "a%2fb",
+            "raw-exact-mbid",
+        );
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                mbid: "raw-exact-mbid",
+                name: "a%2fb",
+            }),
+        );
+    });
+
+    it("preserves the fuzzy raw /discover result when neither candidate matches exactly", async () => {
+        mockSearchArtist.mockImplementation(async (candidate: string) =>
+            candidate === "Legacy%20Artist"
+                ? [{ id: "raw-fuzzy-mbid", name: "Legacy Artists" }]
+                : [{ id: "legacy-fuzzy-mbid", name: "Legacy Artiste" }],
+        );
+
+        const req = {
+            params: { nameOrMbid: "Legacy%20Artist" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockSearchArtist.mock.calls).toEqual([
+            ["Legacy%20Artist", 1],
+            ["Legacy Artist", 1],
+        ]);
+        expect(mockGetArtistInfo).toHaveBeenCalledWith(
+            "Legacy Artists",
+            "raw-fuzzy-mbid",
+        );
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                mbid: "raw-fuzzy-mbid",
+                name: "Legacy Artists",
+            }),
+        );
+    });
+
     it("returns 404 when MBID-only discover cannot resolve artist name", async () => {
         const mbid = "11111111-1111-1111-1111-111111111111";
         mockGetArtist.mockRejectedValueOnce(new Error("not found"));

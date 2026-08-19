@@ -18,17 +18,27 @@ export function normalizeRouteName(raw: string): readonly string[] {
 }
 
 /**
- * Looks up an artist route name raw-first, then uses the valid legacy
- * double-encoded candidate only when the raw name has no match.
+ * Looks up an artist route name raw-first. When provided, `matchesCandidate`
+ * allows an exact legacy match to replace a fuzzy raw match while preserving
+ * the raw result when neither candidate matches exactly.
  */
 export async function findRouteNameMatch<T>(
     raw: string,
     lookup: (candidate: string) => Promise<T | null>,
+    matchesCandidate?: (candidate: string, match: T) => boolean,
 ): Promise<T | null> {
     const [routeName, legacyName] = normalizeRouteName(raw);
-    const match = await lookup(routeName);
-    if (match !== null || !legacyName) {
-        return match;
+    const rawMatch = await lookup(routeName);
+    const rawMatches =
+        rawMatch !== null &&
+        (!matchesCandidate || matchesCandidate(routeName, rawMatch));
+    if (!legacyName || rawMatches) {
+        return rawMatch;
     }
-    return lookup(legacyName);
+
+    const legacyMatch = await lookup(legacyName);
+    const legacyMatches =
+        legacyMatch !== null &&
+        (!matchesCandidate || matchesCandidate(legacyName, legacyMatch));
+    return legacyMatches ? legacyMatch : rawMatch;
 }

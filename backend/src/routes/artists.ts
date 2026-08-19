@@ -11,6 +11,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { ytMusicStreamLimiter } from "../middleware/rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+import { normalizeArtistName } from "../utils/artistNormalization";
 import { findRouteNameMatch } from "./artistRouteName";
 
 const router = Router();
@@ -385,6 +386,9 @@ router.get<{ nameOrMbid: string }>(
                         );
                         return result ?? null;
                     },
+                    (candidate, result) =>
+                        normalizeArtistName(result.name) ===
+                        normalizeArtistName(candidate),
                 );
                 if (mbResult) {
                     mbid = mbResult.id;

@@ -304,6 +304,29 @@ describe("artists preview (YT Music) routes", () => {
                 expect.any(Object),
             );
         });
+
+        it.each([
+            ["100% Pure", "yt-preview:100% pure:test track"],
+            ["A%2FB", "yt-preview:a%2fb:test track"],
+        ])(
+            "uses the post-Express artist param %s verbatim for preview lookup",
+            async (artist, expectedCacheKey) => {
+                const res = createRes();
+                await getPreview(buildReq(artist, "Test Track"), res);
+
+                expect(mockRedisGet).toHaveBeenCalledWith(expectedCacheKey);
+                expect(mockSearch).toHaveBeenCalledWith(
+                    "__public__",
+                    `${artist} Test Track`,
+                    "songs",
+                );
+                expect(mockRedisSet).toHaveBeenCalledWith(
+                    expectedCacheKey,
+                    "null",
+                    expect.any(Object),
+                );
+            },
+        );
     });
 
     // ── GET /preview-stream/:videoId ───────────────────────────────
