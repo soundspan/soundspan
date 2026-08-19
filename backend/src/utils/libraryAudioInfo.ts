@@ -21,33 +21,109 @@ interface FederatedAudioInfoTrack {
     duration: number | null;
 }
 
-const AUDIO_CODEC_BY_FORMAT_VALUE: Readonly<Record<string, string>> = {
-    mp3: "MP3",
-    flac: "FLAC",
-    m4a: "AAC",
-    aac: "AAC",
-    ogg: "OGG",
-    opus: "Opus",
-    wav: "WAV",
-    wma: "WMA",
-    ape: "APE",
-    wavpack: "WavPack",
-    "audio/aac": "AAC",
-    "audio/alac": "ALAC",
-    "audio/flac": "FLAC",
-    "audio/mp3": "MP3",
-    "audio/mp4": "AAC",
-    "audio/mpeg": "MP3",
-    "audio/ogg": "OGG",
-    "audio/opus": "Opus",
-    "audio/wav": "WAV",
-    "audio/webm": "WEBM",
-    "audio/x-flac": "FLAC",
-    "audio/x-wav": "WAV",
-    "application/ogg": "OGG",
-};
+interface NormalizedAudioCodec {
+    codec: string | null;
+    lossless: boolean;
+}
 
-const LOSSLESS_CODECS = new Set(["FLAC", "ALAC", "WAV", "APE", "WavPack"]);
+const MAX_AUDIO_FORMAT_VALUE_LENGTH = 256;
+const UNKNOWN_AUDIO_CODEC: NormalizedAudioCodec = {
+    codec: null,
+    lossless: false,
+};
+const MP3_CODEC = { codec: "MP3", lossless: false } as const;
+const AAC_CODEC = { codec: "AAC", lossless: false } as const;
+const ALAC_CODEC = { codec: "ALAC", lossless: true } as const;
+const VORBIS_CODEC = { codec: "Vorbis", lossless: false } as const;
+const OPUS_CODEC = { codec: "Opus", lossless: false } as const;
+const FLAC_CODEC = { codec: "FLAC", lossless: true } as const;
+const PCM_CODEC = { codec: "PCM", lossless: true } as const;
+const WAV_CODEC = { codec: "WAV", lossless: true } as const;
+const APE_CODEC = { codec: "APE", lossless: true } as const;
+const WAVPACK_CODEC = { codec: "WavPack", lossless: true } as const;
+const DSD_CODEC = { codec: "DSD", lossless: true } as const;
+const WMA_CODEC = { codec: "WMA", lossless: false } as const;
+
+// music-metadata@11.14.0 parser labels plus scanner extension and legacy MIME labels.
+const AUDIO_CODEC_BY_FORMAT_VALUE = new Map<string, NormalizedAudioCodec>([
+    ["mp3", MP3_CODEC],
+    ["mpeg 1 layer 3", MP3_CODEC],
+    ["mpeg-1 layer 3", MP3_CODEC],
+    ["m4a", AAC_CODEC],
+    ["aac", AAC_CODEC],
+    ["mpeg-4/aac", AAC_CODEC],
+    ["adts/mpeg-4", AAC_CODEC],
+    ["alac", ALAC_CODEC],
+    ["ogg", { codec: "OGG", lossless: false }],
+    ["vorbis i", VORBIS_CODEC],
+    ["opus", OPUS_CODEC],
+    ["flac", FLAC_CODEC],
+    ["wav", WAV_CODEC],
+    ["wave", WAV_CODEC],
+    ["pcm", PCM_CODEC],
+    ["ape", APE_CODEC],
+    ["monkey's audio", APE_CODEC],
+    ["wavpack", WAVPACK_CODEC],
+    ["dsd", DSD_CODEC],
+    ["wma", WMA_CODEC],
+    ["asf/audio", WMA_CODEC],
+    ["audio/aac", AAC_CODEC],
+    ["audio/alac", ALAC_CODEC],
+    ["audio/flac", FLAC_CODEC],
+    ["audio/mp3", MP3_CODEC],
+    ["audio/mp4", AAC_CODEC],
+    // Real MP3s persist a parser layer label or the scanner's "MP3" extension label.
+    ["audio/mpeg", UNKNOWN_AUDIO_CODEC],
+    ["audio/ogg", { codec: "OGG", lossless: false }],
+    ["audio/opus", OPUS_CODEC],
+    ["audio/wav", WAV_CODEC],
+    ["audio/webm", { codec: "WEBM", lossless: false }],
+    ["audio/x-flac", FLAC_CODEC],
+    ["audio/x-wav", WAV_CODEC],
+    ["application/ogg", { codec: "OGG", lossless: false }],
+]);
+
+function inferAudioCodec(normalized: string): NormalizedAudioCodec | null {
+    if (normalized.includes("flac")) return FLAC_CODEC;
+    if (normalized.includes("alac")) return ALAC_CODEC;
+    if (normalized.includes("aac")) return AAC_CODEC;
+    if (normalized.includes("vorbis")) return VORBIS_CODEC;
+    if (normalized.includes("opus")) return OPUS_CODEC;
+    if (normalized.includes("wavpack")) return WAVPACK_CODEC;
+    if (normalized.includes("monkey")) return APE_CODEC;
+    if (normalized.includes("dsd")) return DSD_CODEC;
+    if (normalized.includes("windows media audio") || normalized.includes("wma")) {
+        return normalized.includes("lossless")
+            ? { codec: "WMA", lossless: true }
+            : WMA_CODEC;
+    }
+    if (
+        normalized.includes("layer 3") ||
+        (normalized.includes("mpeg") && normalized.includes("layer"))
+    ) {
+        return MP3_CODEC;
+    }
+    if (normalized.includes("mp3")) return MP3_CODEC;
+    if (normalized.includes("pcm") && !normalized.includes("adpcm")) {
+        return PCM_CODEC;
+    }
+    if (normalized.includes("wave")) return WAV_CODEC;
+    if (normalized.includes("ogg")) return { codec: "OGG", lossless: false };
+    return null;
+}
+
+function normalizeAudioCodec(value: unknown): NormalizedAudioCodec {
+    if (typeof value !== "string" || value.length > MAX_AUDIO_FORMAT_VALUE_LENGTH) {
+        return UNKNOWN_AUDIO_CODEC;
+    }
+    const normalized = value.split(";", 1)[0].trim().toLowerCase();
+    if (!normalized) return UNKNOWN_AUDIO_CODEC;
+    return (
+        AUDIO_CODEC_BY_FORMAT_VALUE.get(normalized) ??
+        inferAudioCodec(normalized) ??
+        UNKNOWN_AUDIO_CODEC
+    );
+}
 
 interface AudioInfoCacheEntry {
     expiresAt: number;
@@ -114,11 +190,7 @@ export const normalizeStreamingQuality = (
 export const buildFederatedAudioInfo = (
     track: FederatedAudioInfoTrack,
 ): AudioInfoResponsePayload => {
-    const normalizedFormatValue =
-        typeof track.mime === "string"
-            ? track.mime.split(";", 1)[0].trim().toLowerCase()
-            : "";
-    const codec = AUDIO_CODEC_BY_FORMAT_VALUE[normalizedFormatValue] ?? null;
+    const audioCodec = normalizeAudioCodec(track.mime);
     const fileSize = track.fileSize;
     const duration = track.duration;
     const bitrate =
@@ -132,11 +204,11 @@ export const buildFederatedAudioInfo = (
             : null;
 
     return {
-        codec,
+        codec: audioCodec.codec,
         bitrate,
         sampleRate: null,
         bitDepth: null,
-        lossless: codec !== null && LOSSLESS_CODECS.has(codec),
+        lossless: audioCodec.lossless,
         channels: null,
     };
 };
