@@ -347,7 +347,13 @@ describeWithPostgres("PostgreSQL production-volume query shapes", () => {
             countEmbeddedLocalTracks,
         );
         const registry = new Registry();
-        createLoudnessMetrics(registry, prisma);
+        createLoudnessMetrics(registry, prisma, {
+            getBackfillOutcomes: async () => ({
+                measured_success: 0,
+                transient_failure: 0,
+                permanently_skipped: 0,
+            }),
+        });
         const metrics = await withinBudget(
             "loudness coverage",
             DATABASE_BUDGET_MS,
