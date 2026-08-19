@@ -99,12 +99,13 @@ export interface SearchResult {
 }
 
 export interface DiscoverResult {
-    type: "music" | "podcast";
+    type: "music" | "podcast" | "track";
     id?: string;
     name: string;
     mbid?: string;
     image?: string;
     artist?: string;
+    album?: string | null;
     coverUrl?: string;
     description?: string;
     feedUrl?: string;

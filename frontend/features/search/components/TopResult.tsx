@@ -8,21 +8,30 @@ import { PeerBadge } from "@/components/ui/PeerBadge";
 interface TopResultProps {
     libraryArtist?: Artist;
     discoveryArtist?: DiscoverResult;
+    preferDiscovery?: boolean;
 }
 
 /**
  * Renders the TopResult component.
  */
-export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
-    // Prefer library artist over discovery
+export function TopResult({
+    libraryArtist,
+    discoveryArtist,
+    preferDiscovery = false,
+}: TopResultProps) {
+    // Prefer library artist over discovery unless the discovery result is
+    // an exact match for the query and the library artist is only fuzzy.
     if (!libraryArtist && !discoveryArtist) {
         return null;
     }
 
-    const isLibrary = !!libraryArtist;
+    const isLibrary =
+        !!libraryArtist && !(preferDiscovery && !!discoveryArtist);
 
     // Get the display name
-    const name = libraryArtist?.name || discoveryArtist?.name || "";
+    const name = isLibrary
+        ? libraryArtist?.name || ""
+        : discoveryArtist?.name || "";
 
     // Get the artist ID for linking - prefer MBID for consistent URLs
     const artistId = isLibrary
@@ -74,7 +83,8 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                         {name}
                     </h3>
                     <p className="text-sm text-white font-bold">Artist</p>
-                    {libraryArtist?.source === "federated" &&
+                    {isLibrary &&
+                        libraryArtist?.source === "federated" &&
                         libraryArtist.peer && (
                             <PeerBadge
                                 className="mt-2"

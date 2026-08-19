@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Per-peer federation health observability: bounded Prometheus sync, catalog, stream, authentication, lease, and quota metrics; an administrator health panel and API; persisted sync/error diagnostics; Grafana panels; and an example federation alert pack (#531).
+- Search results now surface external discovery: all matching Last.fm artists render in an Artists section, external track matches render in a Songs to Discover section linking to artist pages, and an exact-name external match wins the Top result over a fuzzy library match (searching "Drake" no longer tops out at an owned "Nick Drake").
+
 - Subsonic client guide (`docs/SUBSONIC_CLIENTS.md`): the mobile positioning statement, a per-feature compatibility matrix for Symfonium, Tempo, DSub2000, Ultrasonic, and play:Sub with per-release re-verification instructions, and the OpenSubsonic extension roadmap.
 - Library Health dashboard read model and admin API (metadata gaps, analysis coverage, duplicate clusters, storage and quality analytics).
 - Library Insights section on the Admin page: browsable panels for metadata gaps, analysis coverage with retry actions, report-only duplicate clusters, storage breakdown, and low-bitrate album detection.

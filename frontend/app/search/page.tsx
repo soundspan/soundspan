@@ -19,6 +19,7 @@ import { DiscoverPodcastsGrid } from "@/features/search/components/DiscoverPodca
 import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudiobooksGrid";
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
+import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksList";
 import { AliasResolutionBanner } from "@/features/search/components/AliasResolutionBanner";
 import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsList";
 import { TVSearchInput } from "@/features/search/components/TVSearchInput";
@@ -115,7 +116,23 @@ export default function SearchPage() {
     }, [urlQuery]);
 
     // Derived state
-    const topArtist = discoverResults.find((r) => r.type === "music");
+    const discoverArtists = discoverResults.filter((r) => r.type === "music");
+    const discoverTracks = discoverResults.filter((r) => r.type === "track");
+    const normalizedQuery = query.trim().toLowerCase();
+    const exactDiscoverArtist = discoverArtists.find(
+        (artist) => artist.name.trim().toLowerCase() === normalizedQuery,
+    );
+    const libraryTopArtist = libraryResults?.artists?.[0];
+    const libraryTopIsExact =
+        libraryTopArtist?.name.trim().toLowerCase() === normalizedQuery;
+    // An exact-name external match beats a fuzzy library match, so
+    // searching "Drake" surfaces Drake rather than an owned "Nick Drake".
+    const preferDiscoveryTopResult =
+        !!exactDiscoverArtist && !libraryTopIsExact;
+    const topArtist = exactDiscoverArtist ?? discoverArtists[0];
+    const secondaryDiscoverArtists = discoverArtists.filter(
+        (artist) => artist !== topArtist,
+    );
     const isLoading =
         isLibrarySearching ||
         isDiscoverSearching ||
@@ -296,6 +313,7 @@ export default function SearchPage() {
                             <TopResult
                                 libraryArtist={libraryResults?.artists?.[0]}
                                 discoveryArtist={topArtist}
+                                preferDiscovery={preferDiscoveryTopResult}
                             />
                         </div>
 
@@ -378,6 +396,9 @@ export default function SearchPage() {
                                             libraryResults?.artists?.[0]
                                         }
                                         discoveryArtist={topArtist}
+                                        preferDiscovery={
+                                            preferDiscoveryTopResult
+                                        }
                                     />
                                 </div>
                             )}
@@ -530,6 +551,32 @@ export default function SearchPage() {
                             <LibraryAudiobooksGrid
                                 audiobooks={libraryResults.audiobooks}
                             />
+                        </section>
+                    )}
+
+                {/* Discover Artists — external matches beyond the top result */}
+                {hasSearched &&
+                    showDiscover &&
+                    !isPodcastTab &&
+                    (sectionView === null || isArtistsView) &&
+                    secondaryDiscoverArtists.length > 0 && (
+                        <SimilarArtistsGrid
+                            similarArtists={secondaryDiscoverArtists}
+                            title="Artists"
+                        />
+                    )}
+
+                {/* Songs to Discover — external track matches */}
+                {hasSearched &&
+                    showDiscover &&
+                    !isPodcastTab &&
+                    !isSectionView &&
+                    discoverTracks.length > 0 && (
+                        <section>
+                            <h2 className="text-2xl font-bold text-white mb-6">
+                                Songs to Discover
+                            </h2>
+                            <DiscoverTracksList tracks={discoverTracks} />
                         </section>
                     )}
 
