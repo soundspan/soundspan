@@ -200,6 +200,7 @@ export interface PlaylistPendingTrackItem {
 export interface PlaylistDetailResponse {
     id: string;
     name: string;
+    mixId?: string | null;
     isOwner: boolean;
     isHidden: boolean;
     isPublic: boolean;
@@ -208,6 +209,20 @@ export interface PlaylistDetailResponse {
     pendingTracks: PlaylistPendingTrackItem[];
     pendingCount: number;
     unplayableCount?: number;
+}
+
+/** Station filter accepted by generated radio playlist endpoints. */
+export type RadioPlaylistFilter =
+    | { type: "genre"; value: string }
+    | { type: "decade"; value: string }
+    | { type: "discovery" }
+    | { type: "favorites" }
+    | { type: "workout" };
+
+/** Result returned after creating or mutating a generated radio playlist. */
+export interface RadioPlaylistMutationResponse {
+    playlistId: string;
+    entries: ApiData[];
 }
 
 /** Lifecycle states returned by generic playlist import jobs. */

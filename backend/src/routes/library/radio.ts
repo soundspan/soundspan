@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { prisma, Prisma } from "../../utils/db";
-import { transformRadioTrack } from "./radioTrackResponse";
+import { transformRadioTrack } from "../../services/libraryRadioTrackResponse";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { allocateTracksWithArtistWeighting } from "../../services/artistSlotAllocation";
@@ -12,7 +12,6 @@ import {
 import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { separateArtists } from "../../utils/separateArtists";
-import { escapeLikePattern } from "../../utils/likePattern";
 import {
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
@@ -32,13 +31,17 @@ import {
     hasConnectedProviderToken,
     toLikedResponseTrack,
 } from "../../services/libraryTrackPreferences";
-import { sendInternalRouteError, sendRouteError } from "../routeErrorResponse";
+import { sendRouteError } from "../routeErrorResponse";
 import {
     buildMultiTrackRadio,
     getRadioArtistCapForLimit,
     getRelaxedRadioArtistCapForLimit,
     selectTracksWithArtistDiversity,
 } from "../../services/libraryRadioBuilder";
+import {
+    isLibraryRadioPlaylistType,
+    selectLibraryRadioStationTracks,
+} from "../../services/libraryRadioStationSelection";
 import {
     hasReliableEnhancedAnalysis,
     TRACK_BROWSE_SQL,
@@ -305,42 +308,20 @@ export async function handleGetRadio(req: Request, res: Response) {
         radioValue = matchedArtist.id;
     }
 
+    if (isLibraryRadioPlaylistType(radioType)) {
+        const selection = await selectLibraryRadioStationTracks({
+            type: radioType,
+            value: radioValue,
+            limit: limitNum,
+            userId: userId ?? "",
+        });
+        return res.json(selection);
+    }
+
     let trackIds: string[] = [];
     let vibeSourceFeatures: any = null; // For vibe mode - store source track features
 
     switch (radioType) {
-        case "discovery":
-            // Lesser-played tracks - get tracks the user hasn't played or played least
-            // First, get tracks with NO plays at all (truly undiscovered)
-            const unplayedTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND NOT EXISTS (
-                        SELECT 1 FROM "Play" p WHERE p."trackId" = t.id
-                    )
-                    ORDER BY random()
-                    LIMIT ${limitNum * 4}
-                `;
-
-            if (unplayedTracks.length >= limitNum) {
-                // The candidate pool is bounded and uniformly sampled in SQL.
-                trackIds = unplayedTracks.map((t) => t.id);
-            } else {
-                // Fallback: get tracks with the fewest plays using raw count
-                const leastPlayedTracks = await prisma.$queryRaw<
-                    { id: string }[]
-                >`
-                        SELECT t.id
-                        FROM "Track" t
-                        LEFT JOIN "Play" p ON p."trackId" = t.id
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
-                        GROUP BY t.id
-                        ORDER BY COUNT(p.id) ASC
-                        LIMIT ${limitNum * 2}
-                    `;
-                trackIds = leastPlayedTracks.map((t) => t.id);
-            }
-            break;
-
         case "liked":
             if (!userId) {
                 return res.status(401).json({
@@ -366,126 +347,6 @@ export async function handleGetRadio(req: Request, res: Response) {
             );
             break;
 
-        case "favorites":
-            // Most-played tracks - use raw query for accurate count ordering
-            const mostPlayedTracks = await prisma.$queryRaw<
-                { id: string; play_count: bigint }[]
-            >`
-                    SELECT t.id, COUNT(p.id) as play_count
-                    FROM "Track" t
-                    LEFT JOIN "Play" p ON p."trackId" = t.id
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
-                    GROUP BY t.id
-                    HAVING COUNT(p.id) > 0
-                    ORDER BY play_count DESC
-                    LIMIT ${limitNum * 2}
-                `;
-
-            if (mostPlayedTracks.length > 0) {
-                trackIds = mostPlayedTracks.map((t) => t.id);
-            } else {
-                // No play data yet - just get random tracks
-                logger.debug(
-                    "[Radio:favorites] No play data found, returning random tracks",
-                );
-                const randomTracks = await prisma.$queryRaw<{ id: string }[]>`
-                        SELECT t.id FROM "Track" t
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
-                        ORDER BY random()
-                        LIMIT ${limitNum * 4}
-                    `;
-                trackIds = randomTracks.map((t) => t.id);
-            }
-            break;
-
-        case "decade":
-            // Filter by decade (e.g., value = "1990" for 90s)
-            const decadeStart = parseInt(radioValue || "2000", 10) || 2000;
-
-            // The candidate pool is bounded and uniformly sampled in SQL.
-            const decadeTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT t.id FROM "Track" t
-                    JOIN "Album" a ON a.id = t."albumId"
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
-                        (a."originalYear" >= ${decadeStart} AND a."originalYear" < ${decadeStart + 10})
-                        OR (a."originalYear" IS NULL AND a."year" >= ${decadeStart} AND a."year" < ${decadeStart + 10})
-                    )
-                    ORDER BY random()
-                    LIMIT ${limitNum * 4}
-                `;
-            trackIds = decadeTracks.map((t) => t.id);
-            break;
-
-        case "genre": {
-            const genreValue = (radioValue || "").toLowerCase();
-            const genrePattern = `%${escapeLikePattern(genreValue)}%`;
-
-            // Prefer track-level genre evidence (Last.fm track tags,
-            // Essentia genres) so the pool is matching TRACKS — the
-            // artist-level fallback below pulls whole discographies of
-            // any artist whose broad tag list substring-matches, which
-            // is how a couple of prolific artists owned every genre
-            // station (GH #46). Pools are sampled uniformly
-            // (ORDER BY random()) instead of an unordered LIMIT that
-            // truncated to the same artist-clustered slice every time.
-            const trackLevelGenreTracks = await prisma.$queryRaw<
-                { id: string }[]
-            >`
-                    SELECT t.id
-                    FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
-                    EXISTS (
-                        SELECT 1 FROM unnest(t."lastfmTags") AS tag(name)
-                        WHERE LOWER(tag.name) LIKE ${genrePattern} ESCAPE '\\'
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM unnest(t."essentiaGenres") AS eg(name)
-                        WHERE LOWER(eg.name) LIKE ${genrePattern} ESCAPE '\\'
-                    )
-                    )
-                    ORDER BY random()
-                    LIMIT ${limitNum * 4}
-                `;
-            trackIds = trackLevelGenreTracks.map((t) => t.id);
-
-            if (trackIds.length < limitNum) {
-                // Fallback: artist-level genres (Artist.genres and
-                // userGenres), uniformly sampled.
-                const artistLevelGenreTracks = await prisma.$queryRaw<
-                    { id: string }[]
-                >`
-                        SELECT DISTINCT t.id, random() AS sort_key
-                        FROM "Artist" ar
-                        JOIN "Album" a ON a."artistId" = ar.id
-                        JOIN "Track" t ON t."albumId" = a.id
-                        WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
-                            (ar.genres IS NOT NULL AND EXISTS (
-                                SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-                                WHERE LOWER(g.genre) LIKE ${genrePattern} ESCAPE '\\'
-                            ))
-                            OR
-                            (ar."userGenres" IS NOT NULL AND EXISTS (
-                                SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
-                                WHERE LOWER(ug.genre) LIKE ${genrePattern} ESCAPE '\\'
-                            ))
-                        )
-                        ORDER BY sort_key
-                        LIMIT ${limitNum * 4}
-                    `;
-                trackIds = [
-                    ...new Set([
-                        ...trackIds,
-                        ...artistLevelGenreTracks.map((t) => t.id),
-                    ]),
-                ];
-            }
-
-            logger.debug(
-                `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" (track-level tags first, artist-level fallback)`,
-            );
-            break;
-        }
-
         case "mood": {
             // Mood-based filtering using audio analysis features
             const moodValue = (radioValue || "").toLowerCase();
@@ -499,106 +360,6 @@ export async function handleGetRadio(req: Request, res: Response) {
             trackIds = moodTracks.map((t) => t.id);
             break;
         }
-
-        case "workout":
-            // High-energy workout tracks - multiple strategies
-            let workoutTrackIds: string[] = [];
-
-            // Strategy 1: Audio analysis - high energy AND fast BPM
-            const energyTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT t.id FROM "Track" t
-                    WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
-                      AND t."analysisStatus" = ${"completed"}
-                      AND ((t.energy >= ${0.65} AND t.bpm >= ${115})
-                           OR t."moodTags" && ARRAY[${"workout"}, ${"energetic"}, ${"upbeat"}]::text[])
-                    ORDER BY random()
-                    LIMIT ${limitNum * 4}
-                `;
-            workoutTrackIds = energyTracks.map((t) => t.id);
-            logger.debug(
-                `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`,
-            );
-
-            // Strategy 2: Genre-based (if not enough from audio)
-            if (workoutTrackIds.length < limitNum) {
-                const workoutGenreNames = [
-                    "rock",
-                    "metal",
-                    "hard rock",
-                    "alternative rock",
-                    "punk",
-                    "hip hop",
-                    "rap",
-                    "trap",
-                    "electronic",
-                    "edm",
-                    "house",
-                    "techno",
-                    "drum and bass",
-                    "dubstep",
-                    "hardstyle",
-                    "metalcore",
-                    "hardcore",
-                    "industrial",
-                    "nu metal",
-                    "pop punk",
-                ];
-
-                // Check Genre table
-                const workoutGenres = await prisma.genre.findMany({
-                    where: {
-                        name: {
-                            in: workoutGenreNames,
-                            mode: "insensitive",
-                        },
-                    },
-                    include: {
-                        trackGenres: {
-                            select: { trackId: true },
-                            take: 50,
-                        },
-                    },
-                });
-
-                const genreTrackIds = workoutGenres.flatMap((g) =>
-                    g.trackGenres.map((tg) => tg.trackId),
-                );
-                workoutTrackIds = [
-                    ...new Set([...workoutTrackIds, ...genreTrackIds]),
-                ];
-                logger.debug(
-                    `[Radio:workout] After genre check: ${workoutTrackIds.length} tracks`,
-                );
-
-                // Also check album.genres JSON field
-                if (workoutTrackIds.length < limitNum) {
-                    const albumGenreTracks = await prisma.$queryRaw<
-                        { id: string }[]
-                    >`
-                            SELECT t.id FROM "Track" t
-                            JOIN "Album" a ON a.id = t."albumId"
-                            WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND a.genres IS NOT NULL
-                              AND EXISTS (
-                                SELECT 1 FROM unnest(${workoutGenreNames}::text[]) AS g(name)
-                                WHERE (a.genres #>> '{}') LIKE '%' || g.name || '%'
-                              )
-                            ORDER BY random()
-                            LIMIT ${limitNum * 2}
-                        `;
-                    workoutTrackIds = [
-                        ...new Set([
-                            ...workoutTrackIds,
-                            ...albumGenreTracks.map((t) => t.id),
-                        ]),
-                    ];
-                    logger.debug(
-                        `[Radio:workout] After album genre check: ${workoutTrackIds.length} tracks`,
-                    );
-                }
-            }
-
-            trackIds = workoutTrackIds;
-            break;
 
         case "artist":
             // Artist Radio - plays tracks from the artist + similar artists in library

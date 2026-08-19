@@ -111,6 +111,7 @@ import * as imageBackfill from "../library/imageBackfill";
 import * as maintenance from "../library/maintenance";
 import * as metadataBackfill from "../library/metadataBackfill";
 import * as radio from "../library/radio";
+import * as radioPlaylists from "../library/radioPlaylists";
 import * as remoteTracks from "../library/remoteTracks";
 import * as tracks from "../library/tracks";
 import { flattenLibraryRouteLayers } from "./libraryRouteTestUtils";
@@ -191,6 +192,7 @@ const handlerModules = [
     coverArt,
     remoteTracks,
     radio,
+    radioPlaylists,
 ];
 
 describe("library route table", () => {
@@ -198,7 +200,7 @@ describe("library route table", () => {
         const table = buildRouteTable();
         const routeCount = table.filter((entry) => "method" in entry).length;
 
-        expect(routeCount).toBe(36);
+        expect(routeCount).toBe(39);
         expect(table).toMatchSnapshot();
     });
 
@@ -213,7 +215,7 @@ describe("library route table", () => {
             )
             .map((handler) => handler.name);
 
-        expect(handlerNames).toHaveLength(36);
+        expect(handlerNames).toHaveLength(39);
         expect(handlerNames.every((name) => /^handle[A-Z]/.test(name))).toBe(
             true,
         );

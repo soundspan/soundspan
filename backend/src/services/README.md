@@ -77,6 +77,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
 | `backend/src/services/libraryRadioBuilder.ts` | Core |
+| `backend/src/services/libraryRadioStationSelection.ts` | Shared Quick Start, genre, and decade radio selection |
+| `backend/src/services/libraryRadioTrackResponse.ts` | Library-radio playback response mapping |
 | `backend/src/services/libraryOrphanCleanup.ts` | Deletes catalog parents after their final track row is purged |
 | `backend/src/services/libraryHealthDashboard/index.ts` | Library Health read-model composition and cached panel surface |
 | `backend/src/services/libraryHealthDashboard/analysisCoverage.ts` | Local analysis, vibe, loudness, and failure coverage |
@@ -124,6 +126,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/providerFidelity.ts` | Pure provider-fidelity cosine, recall-overlap, and gate evaluation metrics |
 | `backend/src/services/providerFidelityValidation.ts` | Testable provider-fidelity sampling, orchestration, reporting, and CLI parsing |
 | `backend/src/services/radioVibeEngine.ts` | Core |
+| `backend/src/services/radioPlaylistIdentity.ts` | Generated-radio playlist discriminator prefix |
+| `backend/src/services/radioPlaylistService.ts` | User-scoped generated-radio playlist persistence and mutation |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |

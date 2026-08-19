@@ -121,7 +121,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 
 `backend/src/routes/library.ts` is a compatibility re-export of
 `backend/src/routes/library/index.ts`. The mounted `/api/library` router is
-composed from these ten domain modules:
+composed from these eleven domain modules:
 
 | Module                        | Responsibility                                                |
 | ----------------------------- | ------------------------------------------------------------- |
@@ -133,6 +133,7 @@ composed from these ten domain modules:
 | `library/maintenance.ts`      | Scan and library-maintenance routes                           |
 | `library/metadataBackfill.ts` | Metadata-backfill administration routes                       |
 | `library/radio.ts`            | Library radio generation routes                               |
+| `library/radioPlaylists.ts`   | Persisted generated-radio playlist mutation routes            |
 | `library/remoteTracks.ts`     | Remote-track preference routes                                |
 | `library/tracks.ts`           | Track browse, detail, preference, stream, and deletion routes |
 

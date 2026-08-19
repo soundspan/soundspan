@@ -43,6 +43,7 @@ mock.module("lucide-react", {
         ArrowDown: Icon,
         ArrowUpToLine: Icon,
         AudioLines: Icon,
+        ListPlus: Icon,
     },
 });
 
@@ -440,6 +441,28 @@ test("playlist detail renders consolidated action bar buttons", async () => {
     assert.match(html, /title="Add all to queue"/);
     assert.match(html, /title="Like all tracks"/);
     assert.match(html, /title="Start playlist radio"/);
+});
+
+test("generated radio playlist detail adds append and regenerate actions", async () => {
+    const playlist = state.playlist;
+    assert.ok(playlist);
+    state.playlist = {
+        ...playlist,
+        mixId: "radio-ephemeral:genre:rock",
+    };
+    const mod = await import("../../app/playlist/[id]/page");
+    const PlaylistDetailPage = mod.default;
+    const queryClient = new QueryClient();
+    const html = renderToStaticMarkup(
+        React.createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            React.createElement(PlaylistDetailPage),
+        ),
+    );
+
+    assert.match(html, /Add more tracks/);
+    assert.match(html, /Regenerate/);
 });
 
 test("playlist detail renders overflow menu for remote tracks (tidal + youtube)", async () => {

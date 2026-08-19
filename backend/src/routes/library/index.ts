@@ -26,6 +26,7 @@ import {
 import { coverArtRouter } from "./coverArt";
 import { remoteTracksRouter } from "./remoteTracks";
 import { radioRouter } from "./radio";
+import { radioPlaylistRouter } from "./radioPlaylists";
 
 const router = Router();
 
@@ -65,6 +66,7 @@ router.use(tracksDetailRouter);
 router.use(tracksDeletionRouter);
 router.use(albumsDeletionRouter);
 router.use(artistsDeletionRouter);
+router.use(radioPlaylistRouter);
 router.use(radioRouter);
 
 export default router;

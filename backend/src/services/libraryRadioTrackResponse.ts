@@ -1,13 +1,8 @@
 /**
- * Maps a radio track row (with album/artist relations and analysis columns)
- * to the frontend playback Track shape.
- *
- * Extracted from radio.ts (its only caller) to keep that route module
- * inside its file-size baseline.
+ * Maps a radio track row with album and artist relations to the frontend
+ * playback track shape.
  */
-
-// The radio queue rows mix Track columns with included relations and are
-// consumed by an untyped response payload; the transform mirrors that.
+// Radio queue rows combine Prisma scalars with included relations.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function transformRadioTrack(track: any, vibeSourceFeatures: unknown) {
     return {
@@ -29,7 +24,6 @@ export function transformRadioTrack(track: any, vibeSourceFeatures: unknown) {
             albumLoudnessLufs: track.album.albumLoudnessLufs,
             albumTruePeakDb: track.album.albumTruePeakDb,
         },
-        // Include audio features for vibe mode visualization (if available)
         ...(vibeSourceFeatures
             ? {
                   audioFeatures: {
@@ -41,7 +35,6 @@ export function transformRadioTrack(track: any, vibeSourceFeatures: unknown) {
                       keyScale: track.keyScale,
                       instrumentalness: track.instrumentalness,
                       analysisMode: track.analysisMode,
-                      // ML Mood predictions for enhanced visualization
                       moodHappy: track.moodHappy,
                       moodSad: track.moodSad,
                       moodRelaxed: track.moodRelaxed,

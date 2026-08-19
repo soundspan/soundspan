@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { shuffleArray } from "@/utils/shuffle";
 import { Shuffle } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { Track } from "@/lib/audio-state-context";
+import type { Track } from "@/lib/audio-state-context";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import {
@@ -17,7 +18,9 @@ import {
     selectFeaturedRadioGenres,
 } from "./libraryRadioStationsGenreSelection";
 
-type RadioStation = RadioStationCardStation;
+type RadioStation = Omit<RadioStationCardStation, "filter"> & {
+    filter: { type: "all" } | RadioPlaylistFilter;
+};
 
 // Static radio stations (always shown if tracks exist)
 const STATIC_STATIONS: RadioStation[] = [
@@ -212,6 +215,7 @@ export function LibraryRadioStations({
     stations: stationsProp,
     externalLoading,
 }: LibraryRadioStationsProps = {}) {
+    const router = useRouter();
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
 
@@ -222,49 +226,50 @@ export function LibraryRadioStations({
         ? (externalLoading ?? false)
         : internalData.isLoading;
 
-    const startRadio = async (station: RadioStation) => {
-        setLoadingStation(station.id);
+    const startShuffleAll = async (station: RadioStation) => {
+        const params = new URLSearchParams({ type: "all", limit: "100" });
+        const response = await api.get<{ tracks: Track[] }>(
+            `/library/radio?${params.toString()}`,
+        );
 
-        try {
-            const params = new URLSearchParams();
-            params.set("type", station.filter.type);
-            if (station.filter.value) {
-                params.set("value", station.filter.value);
-            }
-            params.set("limit", "100");
+        if (!response.tracks || response.tracks.length === 0) {
+            toast.error(`No tracks found for ${station.name}`);
+            return;
+        }
 
-            const response = await api.get<{ tracks: Track[] }>(
-                `/library/radio?${params.toString()}`,
-            );
-
-            if (!response.tracks || response.tracks.length === 0) {
-                toast.error(`No tracks found for ${station.name}`);
-                return;
-            }
-
-            if (response.tracks.length < (station.minTracks || 10)) {
-                toast.error(`Not enough tracks for ${station.name} radio`, {
-                    description: `Found ${
-                        response.tracks.length
-                    }, need at least ${station.minTracks || 10}`,
-                });
-                return;
-            }
-
-            // Artist diversity is enforced server-side by the radio
-            // endpoint's shared weighted allocator (GH #46). The previous
-            // client-side "diversifier" only reordered tracks and its
-            // output was immediately re-shuffled -- a no-op that masked
-            // the server bug.
-            const shuffled = shuffleArray(response.tracks);
-            playTracks(shuffled, 0);
-            toast.success(`${station.name} Radio`, {
-                description: `Shuffling ${shuffled.length} tracks`,
-                icon: <Shuffle className="w-4 h-4" />,
+        if (response.tracks.length < (station.minTracks || 10)) {
+            toast.error(`Not enough tracks for ${station.name} radio`, {
+                description: `Found ${response.tracks.length}, need at least ${station.minTracks || 10}`,
             });
+            return;
+        }
+
+        const shuffled = shuffleArray(response.tracks);
+        playTracks(shuffled, 0);
+        toast.success(`${station.name} Radio`, {
+            description: `Shuffling ${shuffled.length} tracks`,
+            icon: <Shuffle className="w-4 h-4" />,
+        });
+    };
+
+    const openGeneratedPlaylist = async (filter: RadioPlaylistFilter) => {
+        const response = await api.createRadioPlaylist({
+            filter,
+        });
+        router.push(`/playlist/${response.playlistId}`);
+    };
+
+    const handleStation = async (station: RadioStation) => {
+        setLoadingStation(station.id);
+        try {
+            if (station.filter.type === "all") {
+                await startShuffleAll(station);
+            } else {
+                await openGeneratedPlaylist(station.filter);
+            }
         } catch (error) {
-            sharedFrontendLogger.error("Failed to start radio:", error);
-            toast.error("Failed to start radio station");
+            sharedFrontendLogger.error("Failed to open radio station:", error);
+            toast.error("Failed to open radio station");
         } finally {
             setLoadingStation(null);
         }
@@ -290,7 +295,7 @@ export function LibraryRadioStations({
                 <RadioStationCard
                     key={station.id}
                     station={station}
-                    onPlay={() => startRadio(station)}
+                    onPlay={() => handleStation(station)}
                     isLoading={loadingStation === station.id}
                 />
             ))}

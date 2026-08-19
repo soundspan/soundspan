@@ -73,6 +73,8 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useCollectionLikeAll } from "@/hooks/useCollectionLikeAll";
 import type { LikeableTrack } from "@/hooks/useCollectionLikeAll";
 import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
+import { RadioPlaylistActions } from "./RadioPlaylistActions";
+import { formatPlaylistDuration } from "./playlistDuration";
 
 type PlaylistItem = PlaylistDetailTrackItem;
 type PendingTrack = PlaylistPendingTrackItem;
@@ -606,15 +608,6 @@ export default function PlaylistDetailPage() {
         );
     }, [trackItems]);
 
-    const formatTotalDuration = (seconds: number) => {
-        const hours = Math.floor(seconds / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        if (hours > 0) {
-            return `about ${hours} hr ${mins} min`;
-        }
-        return `${mins} min`;
-    };
-
     const handlePlayPlaylist = () => {
         if (trackItems.length === 0) return;
 
@@ -763,11 +756,9 @@ export default function PlaylistDetailPage() {
                                 {providerCounts.youtube} YouTube
                             </span>
                             {totalDuration > 0 && (
-                                <>
-                                    <span>
-                                        , {formatTotalDuration(totalDuration)}
-                                    </span>
-                                </>
+                                <span>
+                                    , {formatPlaylistDuration(totalDuration)}
+                                </span>
                             )}
                         </div>
                     </div>
@@ -867,6 +858,14 @@ export default function PlaylistDetailPage() {
                             <Radio className="w-5 h-5" />
                         </button>
                     )}
+
+                    <RadioPlaylistActions
+                        enabled={Boolean(
+                            playlist.isOwner &&
+                            playlist.mixId?.startsWith("radio-ephemeral:"),
+                        )}
+                        playlistId={playlistId}
+                    />
 
                     {/* Spacer */}
                     <div className="flex-1" />

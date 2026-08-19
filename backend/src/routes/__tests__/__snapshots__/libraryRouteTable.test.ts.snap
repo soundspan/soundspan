@@ -192,6 +192,21 @@ exports[`library route table matches the locked route surface 1`] = `
     "path": "/artists/:id",
   },
   {
+    "method": "POST",
+    "middleware": [],
+    "path": "/radio/playlists",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/radio/playlists/:id/append",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/radio/playlists/:id/regenerate",
+  },
+  {
     "method": "GET",
     "middleware": [],
     "path": "/genres",

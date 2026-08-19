@@ -5,6 +5,8 @@ import type {
     LikedPlaylistResponse,
     PurgeRemovedStatusResponse,
     PurgeRemovedTracksResponse,
+    RadioPlaylistFilter,
+    RadioPlaylistMutationResponse,
     TrackPreferenceResponse,
     TrackPreferenceSignal,
 } from "../api";
@@ -278,6 +280,36 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
             if (value) params.append("value", value);
             return this.request<{ tracks: ApiData[] }>(
                 `/library/radio?${params.toString()}`,
+            );
+        }
+
+        async createRadioPlaylist(input: {
+            filter: RadioPlaylistFilter;
+            size?: number;
+        }) {
+            return this.request<RadioPlaylistMutationResponse>(
+                "/library/radio/playlists",
+                {
+                    method: "POST",
+                    body: JSON.stringify(input),
+                },
+            );
+        }
+
+        async appendRadioPlaylist(playlistId: string, count?: number) {
+            return this.request<RadioPlaylistMutationResponse>(
+                `/library/radio/playlists/${encodeURIComponent(playlistId)}/append`,
+                {
+                    method: "POST",
+                    body: JSON.stringify(count === undefined ? {} : { count }),
+                },
+            );
+        }
+
+        async regenerateRadioPlaylist(playlistId: string) {
+            return this.request<RadioPlaylistMutationResponse>(
+                `/library/radio/playlists/${encodeURIComponent(playlistId)}/regenerate`,
+                { method: "POST", body: JSON.stringify({}) },
             );
         }
 
