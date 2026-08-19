@@ -61,6 +61,7 @@ import {
     LOUDNESS_BACKFILL_JOB_NAME,
     processLoudnessBackfill,
 } from "./processors/loudnessBackfillProcessor";
+import { loudnessBackfillRepeatSchedule } from "./loudnessBackfillSchedule";
 import {
     processTrackRemovalPurge,
     TRACK_REMOVAL_PURGE_JOB_NAME,
@@ -962,6 +963,7 @@ async function registerSchedulerJobs(): Promise<void> {
                 removeOnFail: 10,
             },
         },
+        loudnessBackfillRepeatSchedule,
         {
             type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
             data: { mode: "startup" },

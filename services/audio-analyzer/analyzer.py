@@ -25,6 +25,7 @@ from loudness import (
     measure_loudness,
 )
 from loudness_backfill import (
+    RedisLoudnessBackfillBookkeeping,
     partition_analysis_jobs,
     process_loudness_backfill_jobs,
 )
@@ -1921,6 +1922,7 @@ class AnalysisWorker:
             resolve_path=_resolve_music_path,
             max_file_size_mb=MAX_FILE_SIZE_MB,
             timeout_seconds=LOUDNESS_MEASURE_TIMEOUT_SECONDS,
+            bookkeeping=RedisLoudnessBackfillBookkeeping(self.redis),
         )
         return True
 
@@ -2119,8 +2121,7 @@ class AnalysisWorker:
                 _analysis_result_values(track_id, features),
             )
 
-            if features.get("loudnessLufs") is not None:
-                cursor.execute(ALBUM_LOUDNESS_ROLLUP_SQL, (track_id,))
+            cursor.execute(ALBUM_LOUDNESS_ROLLUP_SQL, (track_id,))
 
             # Successful analysis should clear stale unresolved audio failures
             # for this track so UI failure counts remain accurate across reruns.

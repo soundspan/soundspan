@@ -12,7 +12,13 @@ describe("loudnessBackfillProcessor", () => {
         }>,
         admissions: Array<"queued" | "duplicate" | "full"> = [],
         batchSize = 25,
+        failureCounts: Array<string | null> = [],
     ) {
+        const storedTracks = tracks.map((track) => ({
+            ...track,
+            fileModified: new Date("2026-08-18T10:00:00.000Z"),
+            fileSize: 4_096,
+        }));
         const logger = {
             debug: jest.fn(),
             info: jest.fn(),
@@ -23,12 +29,17 @@ describe("loudnessBackfillProcessor", () => {
         logger.child.mockReturnValue(logger);
         const prisma = {
             track: {
-                findMany: jest.fn(async () => tracks),
+                findMany: jest.fn(async () => storedTracks),
             },
         };
         const schedulerQueue = {
             add: jest.fn(async () => ({})),
-            client: { eval: jest.fn() },
+            client: {
+                eval: jest.fn(async () => 1),
+                get: jest.fn(async () => null),
+                mget: jest.fn(async () => failureCounts),
+                set: jest.fn(async () => "OK"),
+            },
         };
         const enqueueReservedWork = jest.fn(async () =>
             admissions.length > 0 ? admissions.shift() : "queued",
@@ -104,6 +115,8 @@ describe("loudnessBackfillProcessor", () => {
                 id: true,
                 filePath: true,
                 duration: true,
+                fileModified: true,
+                fileSize: true,
             },
         });
         expect(enqueueReservedWork).toHaveBeenNthCalledWith(
@@ -112,12 +125,7 @@ describe("loudnessBackfillProcessor", () => {
             {
                 queueKey: "audio:analysis:queue",
                 trackId: "track-0",
-                payload: JSON.stringify({
-                    trackId: "track-0",
-                    filePath: "Artist/Track-0.flac",
-                    duration: 180,
-                    loudnessOnly: true,
-                }),
+                payload: expect.any(String),
                 maxDepth: 100,
                 reservationTtlSeconds: 3600,
             },
@@ -209,5 +217,106 @@ describe("loudnessBackfillProcessor", () => {
             capacityLimited: false,
         });
         expect(schedulerQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("does not enqueue a content revision after its bounded failure budget", async () => {
+        const { module, logger, enqueueReservedWork } = loadProcessor(
+            [
+                {
+                    id: "track-failed",
+                    filePath: "Artist/failed.flac",
+                    duration: 181,
+                },
+            ],
+            [],
+            25,
+            ["3"],
+        );
+
+        await expect(
+            module.processLoudnessBackfill(buildJob()),
+        ).resolves.toEqual({
+            processed: 1,
+            queued: 0,
+            duplicates: 0,
+            skipped: 1,
+            continued: false,
+            capacityLimited: false,
+        });
+
+        expect(enqueueReservedWork).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("track-failed"),
+        );
+    });
+
+    it("rejects corrupted attempt bookkeeping without enqueueing work", async () => {
+        const { module, enqueueReservedWork } = loadProcessor(
+            [
+                {
+                    id: "track-corrupt",
+                    filePath: "Artist/corrupt.flac",
+                    duration: 181,
+                },
+            ],
+            [],
+            25,
+            ["3failures"],
+        );
+
+        await expect(
+            module.processLoudnessBackfill(buildJob()),
+        ).rejects.toThrow("Loudness backfill failure count is invalid");
+        expect(enqueueReservedWork).not.toHaveBeenCalled();
+    });
+
+    it("turns each repeat tick into one jittered bounded sweep", async () => {
+        jest.spyOn(Math, "random").mockReturnValue(0.5);
+        const { module, prisma, schedulerQueue } = loadProcessor([]);
+
+        await module.processLoudnessBackfill({
+            id: "repeat:loudness:1",
+            data: { mode: "repeat" },
+        });
+
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+        expect(schedulerQueue.add).toHaveBeenCalledWith(
+            "track-loudness-backfill",
+            {
+                mode: "periodic",
+                sweepStartedAt: expect.any(String),
+            },
+            expect.objectContaining({
+                delay: 7.5 * 60 * 1000,
+                jobId: "scheduler:loudness-backfill:periodic:repeat:loudness:1",
+            }),
+        );
+    });
+
+    it("does not overlap a periodic sweep with an unfinished startup sweep", async () => {
+        const { module, logger, prisma, schedulerQueue } = loadProcessor([]);
+        schedulerQueue.client.eval.mockResolvedValueOnce(0);
+
+        await expect(
+            module.processLoudnessBackfill({
+                id: "periodic-1",
+                data: {
+                    mode: "periodic",
+                    sweepStartedAt: "2026-08-18T18:00:00.000Z",
+                },
+            }),
+        ).resolves.toEqual({
+            processed: 0,
+            queued: 0,
+            duplicates: 0,
+            skipped: 0,
+            continued: false,
+            capacityLimited: false,
+        });
+
+        expect(prisma.track.findMany).not.toHaveBeenCalled();
+        expect(logger.info).toHaveBeenCalledWith(
+            "Skipped overlapping loudness backfill sweep",
+        );
     });
 });

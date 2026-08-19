@@ -8,6 +8,7 @@ const queueInstances: Array<{ add: jest.Mock; onIdle: jest.Mock }> = [];
 const mockPrisma = {
     track: {
         findMany: jest.fn(),
+        findUnique: jest.fn(),
         upsert: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
@@ -24,6 +25,7 @@ const mockPrisma = {
     album: {
         findMany: jest.fn(),
         deleteMany: jest.fn(),
+        updateMany: jest.fn(),
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         create: jest.fn(),
@@ -240,6 +242,7 @@ describe("MusicScannerService.scanLibrary", () => {
         } as any);
 
         mockPrisma.track.findMany.mockResolvedValue([]);
+        mockPrisma.track.findUnique.mockResolvedValue({ albumId: "album-1" });
         mockPrisma.track.upsert.mockResolvedValue({});
         mockPrisma.track.update.mockResolvedValue({});
         mockPrisma.track.updateMany.mockResolvedValue({ count: 0 });
@@ -291,6 +294,7 @@ describe("MusicScannerService.scanLibrary", () => {
         });
         mockPrisma.album.findMany.mockResolvedValue([]);
         mockPrisma.album.findUnique.mockResolvedValue(null);
+        mockPrisma.album.updateMany.mockResolvedValue({ count: 0 });
         mockPrisma.album.create.mockResolvedValue({
             id: "album-1",
             title: "Test Album",
@@ -1479,6 +1483,10 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
             where: { trackId: "track-removed" },
         });
+        expect(mockPrisma.album.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["album-1"] } },
+            data: { albumLoudnessLufs: null, albumTruePeakDb: null },
+        });
         expect(mockPrisma.trackEmbedding.deleteMany).not.toHaveBeenCalled();
     });
 
@@ -1559,6 +1567,10 @@ describe("MusicScannerService.scanLibrary", () => {
         });
         expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
             where: { trackId: "track-removed" },
+        });
+        expect(mockPrisma.album.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["album-1"] } },
+            data: { albumLoudnessLufs: null, albumTruePeakDb: null },
         });
         expect(result).toEqual(
             expect.objectContaining({
@@ -1669,7 +1681,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-old-1", "track-old-2"] },
@@ -1677,6 +1689,10 @@ describe("MusicScannerService.scanLibrary", () => {
                 removedAt: null,
             },
             data: { removedAt: expect.any(Date) },
+        });
+        expect(mockPrisma.album.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["album-1"] } },
+            data: { albumLoudnessLufs: null, albumTruePeakDb: null },
         });
         expect(mockPrisma.track.deleteMany).not.toHaveBeenCalled();
         expect(result).toEqual(

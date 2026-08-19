@@ -400,6 +400,18 @@ describe("workers runtime behavior", () => {
             }),
         );
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
+            "track-loudness-backfill",
+            { mode: "repeat" },
+            {
+                jobId: "scheduler:loudness-backfill:repeat",
+                repeat: { every: 6 * 60 * 60 * 1000 },
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        );
+        expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
             { mode: "startup" },
             {

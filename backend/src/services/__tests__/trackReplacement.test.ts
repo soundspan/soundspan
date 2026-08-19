@@ -11,9 +11,34 @@ jest.mock("../../utils/db", () => ({ prisma: {} }));
 import { applyTrackReplacement } from "../trackReplacement";
 
 describe("track replacement", () => {
-    it("invalidates vibe work with a generation increment in the transaction", async () => {
+    it("clears stale track and album loudness with the other derived state", async () => {
+        const trackState = {
+            id: "track-1",
+            albumId: "album-1",
+            loudnessLufs: -24,
+            truePeakDb: -8,
+        };
+        const albumState = {
+            id: "album-1",
+            albumLoudnessLufs: -23,
+            albumTruePeakDb: -7,
+        };
         const transaction = {
-            track: { updateMany: jest.fn(async () => ({ count: 1 })) },
+            track: {
+                findUnique: jest.fn(async () => ({
+                    albumId: trackState.albumId,
+                })),
+                updateMany: jest.fn(async ({ data }) => {
+                    Object.assign(trackState, data);
+                    return { count: 1 };
+                }),
+            },
+            album: {
+                updateMany: jest.fn(async ({ data }) => {
+                    Object.assign(albumState, data);
+                    return { count: 1 };
+                }),
+            },
             trackEmbedding: {
                 deleteMany: jest.fn(async () => ({ count: 1 })),
             },
@@ -27,13 +52,16 @@ describe("track replacement", () => {
             applyTrackReplacement(transaction as never, "track-1"),
         ).resolves.toEqual(["track.opus"]);
 
-        expect(transaction.track.updateMany).toHaveBeenCalledWith({
-            where: { id: "track-1" },
-            data: expect.objectContaining({
-                analysisStatus: "pending",
-                vibeAnalysisStatus: "pending",
-                vibeAnalysisGeneration: { increment: 1 },
+        expect(trackState).toEqual(
+            expect.objectContaining({
+                loudnessLufs: null,
+                truePeakDb: null,
             }),
+        );
+        expect(albumState).toEqual({
+            id: "album-1",
+            albumLoudnessLufs: null,
+            albumTruePeakDb: null,
         });
     });
 });

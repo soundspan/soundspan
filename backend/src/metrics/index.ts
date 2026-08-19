@@ -4,7 +4,12 @@ import {
     type FederationSyncSkipReason,
 } from "./domainMetrics";
 import { createHttpRequestMetrics } from "./httpMetrics";
-import { createLoudnessMetrics } from "./loudnessMetrics";
+import {
+    createLoudnessMetrics,
+    LOUDNESS_BACKFILL_OUTCOMES,
+    loudnessBackfillOutcomeKey,
+    parseLoudnessOutcomeCount,
+} from "./loudnessMetrics";
 import {
     createLibraryHealthMetrics,
     type LibraryHealthCachePanel,
@@ -42,7 +47,19 @@ const httpMetrics = createHttpRequestMetrics(metricsRegistry);
 const domainMetrics = createDomainMetrics(metricsRegistry);
 const libraryHealthMetrics = createLibraryHealthMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
-createLoudnessMetrics(metricsRegistry, prisma);
+createLoudnessMetrics(metricsRegistry, prisma, {
+    getBackfillOutcomes: async () => {
+        const { redisClient } = await import("../utils/redis");
+        const values = await redisClient.mGet(
+            LOUDNESS_BACKFILL_OUTCOMES.map(loudnessBackfillOutcomeKey),
+        );
+        return {
+            measured_success: parseLoudnessOutcomeCount(values[0] ?? null),
+            transient_failure: parseLoudnessOutcomeCount(values[1] ?? null),
+            permanently_skipped: parseLoudnessOutcomeCount(values[2] ?? null),
+        };
+    },
+});
 const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
     // Resolved at scrape time: importing the client eagerly would pull the
     // validated runtime config into every module that imports metrics.

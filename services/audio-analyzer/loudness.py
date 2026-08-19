@@ -30,10 +30,12 @@ class LoudnessMeasurement(TypedDict):
 
 
 ALBUM_LOUDNESS_ROLLUP_SQL = """
-    UPDATE "Album" AS album
-    SET "albumLoudnessLufs" = aggregate."albumLoudnessLufs",
-        "albumTruePeakDb" = aggregate."albumTruePeakDb"
-    FROM (
+    WITH saved_album AS (
+        SELECT "albumId"
+        FROM "Track"
+        WHERE id = %s
+    ),
+    aggregate AS (
         SELECT
             sibling."albumId",
             10.0 * LOG(
@@ -43,15 +45,19 @@ ALBUM_LOUDNESS_ROLLUP_SQL = """
                 ) / NULLIF(SUM(sibling.duration), 0)
             ) AS "albumLoudnessLufs",
             MAX(sibling."truePeakDb") AS "albumTruePeakDb"
-        FROM "Track" AS saved
-        JOIN "Track" AS sibling ON sibling."albumId" = saved."albumId"
-        WHERE saved.id = %s
+        FROM "Track" AS sibling
+        JOIN saved_album ON saved_album."albumId" = sibling."albumId"
+        WHERE sibling."removedAt" IS NULL
         AND sibling."loudnessLufs" IS NOT NULL
         AND sibling.duration > 0
         GROUP BY sibling."albumId"
-    ) AS aggregate
-    WHERE album.id = aggregate."albumId"
-    AND aggregate."albumLoudnessLufs" IS NOT NULL
+    )
+    UPDATE "Album" AS album
+    SET "albumLoudnessLufs" = aggregate."albumLoudnessLufs",
+        "albumTruePeakDb" = aggregate."albumTruePeakDb"
+    FROM saved_album
+    LEFT JOIN aggregate ON aggregate."albumId" = saved_album."albumId"
+    WHERE album.id = saved_album."albumId"
 """
 
 

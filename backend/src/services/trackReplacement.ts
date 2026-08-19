@@ -10,19 +10,34 @@ const replacementLogger = logger.child("TrackReplacement");
 
 type ReplacementTransaction = Pick<
     Prisma.TransactionClient,
-    "track" | "trackEmbedding" | "transcodedFile"
+    "album" | "track" | "trackEmbedding" | "transcodedFile"
 >;
 
 type TrackUpdateData = Prisma.TrackUpdateManyMutationInput;
 
-function replacementResetData(now: Date) {
+function replacementResetData() {
     return {
         analysisStatus: "pending",
         analyzedAt: null,
         analysisError: null,
         analysisRetryCount: 0,
         analysisStartedAt: null,
+        loudnessLufs: null,
+        truePeakDb: null,
     } satisfies TrackUpdateData;
+}
+
+/** Clears cached album loudness for every affected album in one store. */
+export async function clearAlbumLoudness(
+    store: Pick<Prisma.TransactionClient, "album">,
+    albumIds: readonly string[],
+): Promise<void> {
+    const uniqueAlbumIds = [...new Set(albumIds)];
+    if (uniqueAlbumIds.length === 0) return;
+    await store.album.updateMany({
+        where: { id: { in: uniqueAlbumIds } },
+        data: { albumLoudnessLufs: null, albumTruePeakDb: null },
+    });
 }
 
 /**
@@ -35,6 +50,13 @@ export async function applyTrackReplacement(
     trackId: string,
     trackData: TrackUpdateData = {},
 ): Promise<string[]> {
+    const existingTrack = await transaction.track.findUnique({
+        where: { id: trackId },
+        select: { albumId: true },
+    });
+    if (existingTrack === null) {
+        throw new Error("Track replacement requires an existing track");
+    }
     const cachedFiles = await transaction.transcodedFile.findMany({
         where: { trackId },
         select: { cachePath: true },
@@ -44,13 +66,24 @@ export async function applyTrackReplacement(
         transaction,
         { id: trackId },
         invalidatedAt,
-        { ...trackData, ...replacementResetData(invalidatedAt) },
+        { ...trackData, ...replacementResetData() },
     );
     if (updated !== 1) {
         throw new Error("Track replacement requires exactly one track");
     }
     await transaction.trackEmbedding.deleteMany({ where: { trackId } });
     await transaction.transcodedFile.deleteMany({ where: { trackId } });
+    const replacedTrack = await transaction.track.findUnique({
+        where: { id: trackId },
+        select: { albumId: true },
+    });
+    if (replacedTrack === null) {
+        throw new Error("Replaced track disappeared before album invalidation");
+    }
+    await clearAlbumLoudness(transaction, [
+        existingTrack.albumId,
+        replacedTrack.albumId,
+    ]);
     return cachedFiles.map((file) => file.cachePath);
 }
 
