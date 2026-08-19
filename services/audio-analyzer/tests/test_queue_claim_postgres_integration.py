@@ -15,11 +15,11 @@ from types import ModuleType
 
 import pytest
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL,
-    reason="TEST_DATABASE_URL or DATABASE_URL is required for PostgreSQL integration",
+    reason="TEST_DATABASE_URL is required for PostgreSQL integration",
 )
 
 if TEST_DATABASE_URL:

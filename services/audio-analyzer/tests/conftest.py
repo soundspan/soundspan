@@ -139,7 +139,7 @@ class FakeRedis:
 def _uses_real_postgres(request: pytest.FixtureRequest) -> bool:
     """Keep the live driver only for the environment-gated integration module."""
     module_name = request.module.__name__.rsplit(".", maxsplit=1)[-1]
-    database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+    database_url = os.getenv("TEST_DATABASE_URL")
     return module_name == "test_queue_claim_postgres_integration" and bool(database_url)
 
 
@@ -212,7 +212,7 @@ def loaded_analyzer(request: pytest.FixtureRequest) -> Iterator[ModuleType]:
     uses_real_postgres = _configure_psycopg2(monkeypatch, request)
     monkeypatch.delenv("NUM_WORKERS", raising=False)
     if uses_real_postgres:
-        database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+        database_url = os.getenv("TEST_DATABASE_URL")
         assert database_url is not None
         monkeypatch.setenv("DATABASE_URL", database_url)
     else:
