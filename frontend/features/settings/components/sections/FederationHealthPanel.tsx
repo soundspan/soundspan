@@ -76,6 +76,8 @@ function FederationHealthCard({
     peer: FederationPeerHealth;
     now: Date;
 }) {
+    const consumesCatalog = peer.direction !== "HOST";
+    const hostsStreams = peer.direction !== "CONSUMER";
     return (
         <article className="rounded-lg border border-white/[0.06] bg-surface-hover p-4">
             <div className="flex items-start justify-between gap-3">
@@ -91,12 +93,18 @@ function FederationHealthCard({
             </div>
             <div className="mt-3 space-y-2">
                 <p className="text-xs text-gray-300">
-                    Synced {formatFreshness(peer.lastSyncSuccessAt, now)}
-                    {peer.lastSyncDurationMs !== null &&
+                    Synced{" "}
+                    {consumesCatalog
+                        ? formatFreshness(peer.lastSyncSuccessAt, now)
+                        : "n/a"}
+                    {consumesCatalog &&
+                        peer.lastSyncDurationMs !== null &&
                         ` in ${(peer.lastSyncDurationMs / 1_000).toFixed(1)}s`}
                 </p>
-                <CatalogSummary catalog={peer.catalog} />
-                <p className="text-xs text-gray-400">{leaseUsage(peer)}</p>
+                {consumesCatalog && <CatalogSummary catalog={peer.catalog} />}
+                {hostsStreams && (
+                    <p className="text-xs text-gray-400">{leaseUsage(peer)}</p>
+                )}
                 {peer.lastError && (
                     <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-2 text-xs text-amber-200">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -186,8 +194,28 @@ export function FederationHealthPanel() {
         }
     }, []);
     useEffect(() => {
-        void load();
-    }, [load]);
+        let active = true;
+        void api.getFederationPeerHealth().then(
+            (response) => {
+                if (!active) return;
+                setPeers(response.peers);
+                setError(null);
+                setLoading(false);
+            },
+            (cause: unknown) => {
+                if (!active) return;
+                setError(
+                    cause instanceof Error
+                        ? cause.message
+                        : "Health request failed",
+                );
+                setLoading(false);
+            },
+        );
+        return () => {
+            active = false;
+        };
+    }, []);
     return (
         <section
             aria-labelledby="federation-health-title"

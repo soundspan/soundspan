@@ -85,10 +85,17 @@ async function markPeerOffline(peerId: string, error: unknown): Promise<void> {
         log.info(`peerId=${peerId} status=OFFLINE previous=ACTIVE`);
         return;
     }
-    await prisma.federationPeer.updateMany({
-        where: { id: peerId, outboundStatus: { not: "REVOKED" } },
-        data: { lastError, lastErrorAt },
-    });
+    try {
+        await prisma.federationPeer.updateMany({
+            where: { id: peerId, outboundStatus: { not: "REVOKED" } },
+            data: { lastError, lastErrorAt },
+        });
+    } catch (cause) {
+        log.debug("Failed to persist federation peer stream diagnostic", {
+            peerId,
+            cause,
+        });
+    }
 }
 
 async function loadPeerStream(

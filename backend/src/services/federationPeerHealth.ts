@@ -2,6 +2,7 @@ import type { PeerDirection, PeerStatus } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { logger } from "../utils/logger";
 
 const MAX_HEALTH_PEERS = 500;
 const LEASE_QUERY_BATCH_SIZE = 25;
@@ -15,6 +16,10 @@ const CATALOG_TYPES = [
     "audiobook",
     "podcast",
 ] as const;
+const log = logger.child("FederationPeerHealth");
+const warnedCappedCollectors = new Set<CappedCollector>();
+
+type CappedCollector = "admin_health" | "worker_metrics" | "lease_metrics";
 
 export type FederationCatalogType = (typeof CATALOG_TYPES)[number];
 export type FederationHealthState = "green" | "amber" | "red";
@@ -109,15 +114,24 @@ export function deriveFederationHealthState(
 }
 
 /** Produces a bounded credential-safe federation error for persistence. */
-export function safeFederationErrorMessage(error: unknown): string {
-    const raw = error instanceof Error ? error.message : String(error);
+export function safeFederationErrorMessage(cause: unknown): string {
+    const raw = (cause instanceof Error ? cause.message : String(cause)).slice(
+        0,
+        MAX_ERROR_LENGTH * 4,
+    );
     const redacted = raw
         .replace(/https?:\/\/\S+/gi, "[url redacted]")
+        .replace(
+            /\bAuthorization\s*:\s*(?:Basic|Bearer)\s+[^\s,;]+/gi,
+            "Authorization: [redacted]",
+        )
+        .replace(/\bx-api-key\s*:\s*[^\s,;]+/gi, "x-api-key: [redacted]")
         .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
         .replace(
-            /\b(token|password|credential|secret)\b\s*(?:[=:]\s*)?\S+/gi,
+            /\b(api[_-]?key|access[_-]?token|client[_-]?secret|x-api-key|token|password|credential|secret)\b\s*[=:]\s*[^\s&,;]+/gi,
             "$1=[redacted]",
         )
+        .replace(/\b([a-z][\w.-]{1,30})=([^\s&,;]{20,})/gi, "$1=[redacted]")
         .replace(/\b[0-9a-f]{64}\b/gi, "[credential redacted]")
         .replace(/[\r\n\t]+/g, " ")
         .trim();
@@ -130,14 +144,28 @@ export function safeFederationErrorMessage(error: unknown): string {
 /** Stores one bounded peer failure without persisting credential material. */
 export async function recordFederationPeerError(
     peerId: string,
-    error: unknown,
+    cause: unknown,
 ): Promise<void> {
     await prisma.federationPeer.updateMany({
         where: { id: peerId },
         data: {
-            lastError: safeFederationErrorMessage(error),
+            lastError: safeFederationErrorMessage(cause),
             lastErrorAt: new Date(),
         },
+    });
+}
+
+function warnIfPeerQueryCapped(
+    peerCount: number,
+    collector: CappedCollector,
+): void {
+    if (peerCount < MAX_HEALTH_PEERS || warnedCappedCollectors.has(collector)) {
+        return;
+    }
+    warnedCappedCollectors.add(collector);
+    log.warn("Federation peer query reached its collection cap", {
+        collector,
+        maxPeers: MAX_HEALTH_PEERS,
     });
 }
 
@@ -267,6 +295,7 @@ export async function listFederationPeerHealth(): Promise<
     FederationPeerHealth[]
 > {
     const peers = await listHealthPeerRows();
+    warnIfPeerQueryCapped(peers.length, "admin_health");
     const peerIds = peers.map(({ id }) => id);
     const [catalogs, leases] = await Promise.all([
         loadCatalogCounts(peerIds),
@@ -297,10 +326,12 @@ export async function collectFederationWorkerMetricSnapshot(): Promise<
     FederationWorkerMetricSnapshot[]
 > {
     const peers = await prisma.federationPeer.findMany({
+        where: { direction: { in: ["CONSUMER", "BOTH"] } },
         orderBy: { id: "asc" },
         take: MAX_HEALTH_PEERS,
         select: { id: true, lastSyncSuccessAt: true },
     });
+    warnIfPeerQueryCapped(peers.length, "worker_metrics");
     const catalogs = await loadCatalogCounts(peers.map(({ id }) => id));
     return peers.map((peer) => ({
         peerId: peer.id,
@@ -314,9 +345,11 @@ export async function collectFederationLeaseMetricSnapshot(): Promise<
     FederationLeaseMetricSnapshot[]
 > {
     const peers = await prisma.federationPeer.findMany({
+        where: { direction: { in: ["HOST", "BOTH"] } },
         orderBy: { id: "asc" },
         take: MAX_HEALTH_PEERS,
         select: { id: true },
     });
+    warnIfPeerQueryCapped(peers.length, "lease_metrics");
     return loadLeaseCounts(peers.map(({ id }) => id));
 }

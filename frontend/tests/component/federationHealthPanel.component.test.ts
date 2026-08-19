@@ -64,3 +64,60 @@ test("federation health cards render an empty state", async () => {
     );
     assert.match(html, /No federation peer health data/);
 });
+
+test("federation health cards render only direction-applicable details", async () => {
+    const { FederationHealthCards } =
+        await import("../../features/settings/components/sections/FederationHealthPanel");
+    const basePeer = {
+        inboundStatus: null,
+        outboundStatus: null,
+        lastSeenAt: null,
+        lastSyncSuccessAt: null,
+        lastSyncDurationMs: null,
+        syncLagSeconds: null,
+        catalog: {
+            artist: 10,
+            album: 20,
+            track: 300,
+            audiobook: 4,
+            podcast: 5,
+        },
+        activeStreamLeases: 2,
+        maxConcurrentStreams: 4,
+        lastError: null,
+        lastErrorAt: null,
+        health: "green" as const,
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(FederationHealthCards, {
+            peers: [
+                {
+                    ...basePeer,
+                    id: "host",
+                    name: "Host only",
+                    direction: "HOST" as const,
+                    inboundStatus: "ACTIVE" as const,
+                },
+                {
+                    ...basePeer,
+                    id: "consumer",
+                    name: "Consumer only",
+                    direction: "CONSUMER" as const,
+                    outboundStatus: "ACTIVE" as const,
+                },
+            ],
+        }),
+    );
+    const hostCard = html.slice(
+        html.indexOf("Host only"),
+        html.indexOf("Consumer only"),
+    );
+    const consumerCard = html.slice(html.indexOf("Consumer only"));
+
+    assert.match(hostCard, /Synced n\/a/);
+    assert.doesNotMatch(hostCard, /Never synced|300 tracks/);
+    assert.match(hostCard, /2 \/ 4 active streams/);
+    assert.match(consumerCard, /Never synced/);
+    assert.match(consumerCard, /300 tracks/);
+    assert.doesNotMatch(consumerCard, /active streams/);
+});

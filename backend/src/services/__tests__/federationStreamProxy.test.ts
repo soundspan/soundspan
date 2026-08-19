@@ -239,6 +239,31 @@ describe("federated stream proxy", () => {
         );
     });
 
+    it("preserves the upstream error when diagnostic persistence fails", async () => {
+        const { FederationHttpError } = jest.requireMock("../federationClient");
+        getStream.mockRejectedValueOnce(new FederationHttpError(503, true));
+        prisma.federationPeer.updateMany
+            .mockResolvedValueOnce({ count: 0 })
+            .mockRejectedValueOnce(new Error("postgres unavailable"));
+
+        await expect(
+            proxyFederatedTrackStream({
+                req: createRequest() as never,
+                res: createResponse() as never,
+                peer,
+                remoteId: "remote-track-1",
+                trackId: "fed-track-1",
+                sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+                sourceMime: "audio/flac",
+                quality: "original",
+            }),
+        ).rejects.toThrow("peer error");
+        expect(logDebug).toHaveBeenCalledWith(
+            "Failed to persist federation peer stream diagnostic",
+            expect.objectContaining({ peerId: "peer-1" }),
+        );
+    });
+
     it("fills a non-Range miss and serves the completed cached file", async () => {
         getStream.mockResolvedValueOnce({
             status: 200,

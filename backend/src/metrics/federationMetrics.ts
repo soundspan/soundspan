@@ -156,12 +156,9 @@ function setWorkerSnapshot(
         const catalog = catalogs.get(peer) ?? emptyCatalog();
         addCatalog(catalog, snapshot.catalog);
         catalogs.set(peer, catalog);
-        if (!snapshot.lastSyncSuccessAt) continue;
-        const timestamp = snapshot.lastSyncSuccessAt.getTime() / 1_000;
-        const lag = Math.max(
-            0,
-            (nowMs - snapshot.lastSyncSuccessAt.getTime()) / 1_000,
-        );
+        const lastSuccessMs = snapshot.lastSyncSuccessAt?.getTime() ?? 0;
+        const timestamp = lastSuccessMs / 1_000;
+        const lag = Math.max(0, (nowMs - lastSuccessMs) / 1_000);
         const previousTimestamp = lastSuccess.get(peer);
         lastSuccess.set(
             peer,
@@ -205,15 +202,21 @@ function workerCollector(
     return () => {
         if (pending) return pending;
         pending = (async () => {
-            instruments.syncLag.reset();
-            instruments.lastSyncSuccess.reset();
-            instruments.catalogItems.reset();
-            setWorkerSnapshot(
-                instruments,
-                await collectSnapshot(),
-                boundPeer,
-                now().getTime(),
-            );
+            try {
+                const snapshots = await collectSnapshot();
+                instruments.syncLag.reset();
+                instruments.lastSyncSuccess.reset();
+                instruments.catalogItems.reset();
+                setWorkerSnapshot(
+                    instruments,
+                    snapshots,
+                    boundPeer,
+                    now().getTime(),
+                );
+            } catch {
+                // Keep the last successful samples. Telemetry dependency
+                // failures must not make the complete scrape unavailable.
+            }
         })();
         pending.then(
             () => (pending = null),
@@ -232,7 +235,7 @@ function registerWorkerMetrics(
     let collectAll: () => Promise<void> = async () => undefined;
     const syncLag = new Gauge({
         name: "soundspan_federation_peer_sync_lag_seconds",
-        help: "Seconds since each peer's last successful sync; peer labels are bounded to 100 values plus other.",
+        help: "Seconds since each consumer peer's last successful sync, or since the Unix epoch when never synced; peer labels are bounded to 100 values plus other among the first 500 applicable peers by ID.",
         labelNames: ["peer"] as const,
         registers: [registry],
         async collect() {
@@ -241,7 +244,7 @@ function registerWorkerMetrics(
     });
     const lastSyncSuccess = new Gauge({
         name: "soundspan_federation_peer_last_sync_success_timestamp_seconds",
-        help: "Unix timestamp of each peer's last successful sync; peer labels are bounded to 100 values plus other.",
+        help: "Unix timestamp of each consumer peer's last successful sync, or 0 when never synced; peer labels are bounded to 100 values plus other among the first 500 applicable peers by ID.",
         labelNames: ["peer"] as const,
         registers: [registry],
         async collect() {
@@ -250,7 +253,7 @@ function registerWorkerMetrics(
     });
     const catalogItems = new Gauge({
         name: "soundspan_federation_peer_catalog_items",
-        help: "Federated catalog items by bounded peer and media type; peer labels are bounded to 100 values plus other.",
+        help: "Federated catalog items by bounded consumer peer and media type for the first 500 applicable peers by ID; peer labels are bounded to 100 values plus other.",
         labelNames: ["peer", "type"] as const,
         registers: [registry],
         async collect() {
@@ -292,6 +295,31 @@ function setLeaseSnapshot(
         if (!entry) break;
         gauge.set({ peer: entry[0] }, entry[1]);
     }
+}
+
+function leaseCollector(
+    gauge: Gauge<"peer">,
+    collectLeases: () => Promise<FederationLeaseMetricSnapshot[]>,
+    leasePeer: (peerId: string) => string,
+): () => Promise<void> {
+    let pending: Promise<void> | null = null;
+    return () => {
+        if (pending) return pending;
+        pending = (async () => {
+            try {
+                const snapshots = await collectLeases();
+                gauge.reset();
+                setLeaseSnapshot(gauge, snapshots, leasePeer);
+            } catch {
+                // Keep the last successful samples without failing the scrape.
+            }
+        })();
+        pending.then(
+            () => (pending = null),
+            () => (pending = null),
+        );
+        return pending;
+    };
 }
 
 function registerProxyMetrics(
@@ -341,16 +369,21 @@ function registerHostMetrics(
         labelNames: ["peer", "reason"] as const,
         registers: [registry],
     });
+    let collectStreamLeases: () => Promise<void> = async () => undefined;
     const streamLeases = new Gauge({
         name: "soundspan_federation_stream_leases",
-        help: `Active host-side stream leases at scrape time; ${boundedHelp}`,
+        help: `Active host-side stream leases at scrape time for the first 500 applicable peers by ID; ${boundedHelp}`,
         labelNames: ["peer"] as const,
         registers: [registry],
         async collect() {
-            streamLeases.reset();
-            setLeaseSnapshot(streamLeases, await collectLeases(), leasePeer);
+            await collectStreamLeases();
         },
     });
+    collectStreamLeases = leaseCollector(
+        streamLeases,
+        collectLeases,
+        leasePeer,
+    );
     const quotaRejections = new Counter({
         name: "soundspan_federation_quota_rejections_total",
         help: `Host-side federation stream quota rejections by kind; ${boundedHelp}`,

@@ -103,10 +103,9 @@ export function initializeFederationMetrics(role: FederationMetricsRole): void {
     federationMetrics = createFederationMetrics(metricsRegistry, { role });
 }
 
-function activeFederationMetrics(): FederationMetrics {
-    if (!federationMetrics) {
-        throw new Error("Federation metrics are not initialized");
-    }
+// Telemetry must never break request handling: in process roles (or tests)
+// that never initialize the federation family, recording is a no-op.
+function activeFederationMetrics(): FederationMetrics | null {
     return federationMetrics;
 }
 
@@ -139,7 +138,7 @@ export function recordFederationPeerSync(
     outcome: FederationSyncOutcome,
     durationSeconds: number,
 ): void {
-    activeFederationMetrics().recordPeerSync(peerId, outcome, durationSeconds);
+    activeFederationMetrics()?.recordPeerSync(peerId, outcome, durationSeconds);
 }
 
 /** Records one completed consumer-side federation stream proxy request. */
@@ -148,7 +147,7 @@ export function recordFederationStreamProxy(
     outcome: FederationStreamOutcome,
     durationSeconds: number,
 ): void {
-    activeFederationMetrics().recordStreamProxy(
+    activeFederationMetrics()?.recordStreamProxy(
         peerId,
         outcome,
         durationSeconds,
@@ -160,7 +159,7 @@ export function recordFederationStreamProxyCache(
     peerId: string,
     result: FederationCacheResult,
 ): void {
-    activeFederationMetrics().recordStreamProxyCache(peerId, result);
+    activeFederationMetrics()?.recordStreamProxyCache(peerId, result);
 }
 
 /** Records one completed host-side federation stream request. */
@@ -168,7 +167,7 @@ export function recordFederationHostStream(
     peerId: string,
     outcome: FederationStreamOutcome,
 ): void {
-    activeFederationMetrics().recordHostStream(peerId, outcome);
+    activeFederationMetrics()?.recordHostStream(peerId, outcome);
 }
 
 /** Records one bounded federation authentication or scope failure. */
@@ -176,7 +175,7 @@ export function recordFederationAuthFailure(
     peerId: string,
     reason: FederationAuthFailureReason,
 ): void {
-    activeFederationMetrics().recordAuthFailure(peerId, reason);
+    activeFederationMetrics()?.recordAuthFailure(peerId, reason);
 }
 
 /** Records one host-side federation stream quota rejection. */
@@ -184,7 +183,7 @@ export function recordFederationQuotaRejection(
     peerId: string,
     kind: FederationQuotaKind,
 ): void {
-    activeFederationMetrics().recordQuotaRejection(peerId, kind);
+    activeFederationMetrics()?.recordQuotaRejection(peerId, kind);
 }
 
 /** Records bounded federation data discarded during compatibility parsing. */

@@ -38,6 +38,110 @@ describe("federation metrics", () => {
         );
     });
 
+    it("emits epoch freshness for a consumer peer that has never synced", async () => {
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "worker",
+            collectWorkerSnapshot: async () => [
+                {
+                    peerId: "never-synced",
+                    lastSyncSuccessAt: null,
+                    catalog: {
+                        artist: 0,
+                        album: 0,
+                        track: 0,
+                        audiobook: 0,
+                        podcast: 0,
+                    },
+                },
+            ],
+            now: () => new Date("2026-08-19T12:00:00.000Z"),
+        });
+
+        const exposition = await registry.metrics();
+
+        expect(exposition).toContain(
+            'soundspan_federation_peer_last_sync_success_timestamp_seconds{peer="never-synced"} 0',
+        );
+        expect(exposition).toContain(
+            'soundspan_federation_peer_sync_lag_seconds{peer="never-synced"} 1787140800',
+        );
+    });
+
+    it("keeps worker last-good samples when collection fails", async () => {
+        const collectWorkerSnapshot = jest
+            .fn()
+            .mockResolvedValueOnce([
+                {
+                    peerId: "peer-1",
+                    lastSyncSuccessAt: new Date("2026-08-19T11:59:00.000Z"),
+                    catalog: {
+                        artist: 1,
+                        album: 2,
+                        track: 3,
+                        audiobook: 4,
+                        podcast: 5,
+                    },
+                },
+            ])
+            .mockRejectedValueOnce(new Error("postgres unavailable"));
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "worker",
+            collectWorkerSnapshot,
+            now: () => new Date("2026-08-19T12:00:00.000Z"),
+        });
+
+        await registry.metrics();
+        const exposition = await registry.metrics();
+
+        expect(collectWorkerSnapshot).toHaveBeenCalledTimes(2);
+        expect(exposition).toContain(
+            'soundspan_federation_peer_catalog_items{peer="peer-1",type="track"} 3',
+        );
+    });
+
+    it("coalesces concurrent lease collection and keeps last-good samples", async () => {
+        let releaseCollection: (() => void) | undefined;
+        const collectionGate = new Promise<void>((resolve) => {
+            releaseCollection = resolve;
+        });
+        const collectLeaseSnapshot = jest
+            .fn()
+            .mockImplementationOnce(async () => {
+                await collectionGate;
+                return [{ peerId: "peer-1", activeLeases: 2 }];
+            })
+            .mockRejectedValueOnce(new Error("redis unavailable"));
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "api",
+            collectLeaseSnapshot,
+        });
+
+        const first = registry.metrics();
+        const concurrent = registry.metrics();
+        await Promise.resolve();
+        expect(collectLeaseSnapshot).toHaveBeenCalledTimes(1);
+        releaseCollection?.();
+        const [firstExposition, concurrentExposition] = await Promise.all([
+            first,
+            concurrent,
+        ]);
+        const afterFailure = await registry.metrics();
+
+        expect(firstExposition).toContain(
+            'soundspan_federation_stream_leases{peer="peer-1"} 2',
+        );
+        expect(concurrentExposition).toContain(
+            'soundspan_federation_stream_leases{peer="peer-1"} 2',
+        );
+        expect(afterFailure).toContain(
+            'soundspan_federation_stream_leases{peer="peer-1"} 2',
+        );
+        expect(collectLeaseSnapshot).toHaveBeenCalledTimes(2);
+    });
+
     it("records bounded worker and API outcomes", async () => {
         const registry = new Registry();
         const metrics = createFederationMetrics(registry, {

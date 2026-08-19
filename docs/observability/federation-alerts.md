@@ -6,8 +6,18 @@ sync duration, catalog counts, and the existing sync outcome counter. The API
 exports consumer proxy, host stream, authentication, stream lease, cache, and
 quota metrics. An all-in-one backend exports both sets from one registry.
 
-Every `peer` label is the stable federation peer ID. Each metric family retains
-at most 100 peer IDs and aggregates additional IDs under `peer="other"`.
+Every `peer` label is the stable federation peer ID. Scrape-time gauges collect
+the first 500 direction-applicable peers in stable ID order: consumer and
+two-way peers for sync/catalog gauges, and host and two-way peers for lease
+gauges. Within that collection cap, each metric family retains at most 100 peer
+IDs and aggregates additional IDs under `peer="other"`. Applicable peers after
+the first 500 are omitted, and the owning process logs one warning when it
+reaches that cap.
+
+The last-success gauge emits `0` for a consumer peer that has never completed a
+sync. Its sync-lag gauge consequently reports the elapsed time since the Unix
+epoch. Both freshness alerts below therefore fire for never-synced peers instead
+of treating the missing success as an absent series.
 
 The following Prometheus Operator rule pack is an example. It assumes the
 default 15-minute `FEDERATION_SYNC_INTERVAL_MINUTES`. Replace the 1,800-second
@@ -26,17 +36,23 @@ spec:
       rules:
         - alert: SoundspanFederationPeerUnreachable
           expr: |
-            time()
-              - max by (peer) (
-                  soundspan_federation_peer_last_sync_success_timestamp_seconds{peer!="other"}
-                )
-              > 6 * 60 * 60
+            max by (peer) (
+              soundspan_federation_peer_last_sync_success_timestamp_seconds{peer!="other"}
+            ) == 0
+            or
+            (
+              time()
+                - max by (peer) (
+                    soundspan_federation_peer_last_sync_success_timestamp_seconds{peer!="other"}
+                  )
+                > 6 * 60 * 60
+            )
           for: 15m
           labels:
             severity: critical
           annotations:
             summary: Federation peer {{ $labels.peer }} has not synced
-            description: The peer's last successful catalog sync is more than six hours old.
+            description: The peer has never completed a catalog sync or its last success is more than six hours old.
 
         - alert: SoundspanFederationPeerSyncLagHigh
           expr: |
@@ -48,7 +64,7 @@ spec:
             severity: warning
           annotations:
             summary: Federation peer {{ $labels.peer }} sync lag is high
-            description: Sync lag is at least twice the configured 15-minute interval.
+            description: Sync lag is at least twice the configured 15-minute interval; never-synced peers report time since the Unix epoch.
 
         - alert: SoundspanFederationStreamProxyErrorsBurst
           expr: |
