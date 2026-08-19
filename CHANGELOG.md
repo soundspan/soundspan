@@ -48,10 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Federation consumer tokens are now encrypted at rest with an automatic,
-  idempotent startup backfill, and outbound peer URLs reject literal localhost,
-  private, loopback, and link-local addresses by default. Internal peer
-  deployments can opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
+- Federation token encryption is now enforced through a dedicated cipher
+  boundary with an automatic, idempotent startup backfill for plaintext rows,
+  and outbound peer URLs reject literal localhost, private, loopback, and
+  link-local addresses by default. Internal peer deployments can opt in with
+  `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
 - Credential-guarding rate limiters now use bounded per-process memory windows
   during Redis outages instead of allowing unlimited authentication attempts.
 

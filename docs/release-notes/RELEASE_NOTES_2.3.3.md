@@ -11,12 +11,15 @@ complete analyzer images and adds a build-time check so an incomplete image
 can never pass CI again. The release also makes federation tolerant of
 version differences between peers: a newer peer's extra fields no longer
 cause tracks to be skipped, and servers now only send fields a peer
-understands. Two security hardenings ship as well: federation tokens are
-now encrypted at rest, and outbound federation now refuses private and
-local peer addresses unless you opt in. Upgrading from 2.3.x is a plain
-rolling update for most deployments — but if you federate with a peer on
-a private LAN or VPN address, set `FEDERATION_ALLOW_PRIVATE_PEERS=true`
-before upgrading or that peer stops syncing.
+understands. Two security hardenings ship as well: the existing
+encryption of federation tokens is now enforced with an automatic
+startup backfill for any remaining plaintext rows, and outbound
+federation now refuses literal private, loopback, and link-local peer
+addresses (including `localhost`) unless you opt in. Upgrading from
+2.3.x is a plain rolling update for most deployments — but if a
+federation peer is configured by a literal private LAN or VPN IP
+address, set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading or
+that peer stops syncing.
 
 ## Before you upgrade
 
@@ -27,11 +30,12 @@ to 2.3.3. Complete the 2.0.0 breaking changes first. See
 - Straightforward rolling upgrade from 2.3.x - a small database migration
   runs automatically and no special procedure is needed. If you are coming
   from 2.2.x or earlier, follow the 2.3.0 upgrade steps first.
-- **If you federate with a peer on a private address** (a LAN IP, VPN
-  address, localhost, or an internal hostname that resolves to one),
+- **If a federation peer is configured with a literal private address**
+  (a LAN IP, VPN IP, loopback or link-local address, or `localhost`),
   set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading. Outbound
-  federation now blocks private and local peer addresses by default, and
-  a private peer stops syncing until you opt in.
+  federation now rejects literal private and local peer addresses by
+  default, and such a peer stops syncing until you opt in. Peers
+  configured by hostname are not affected in this release.
 - If you are on 2.3.2, upgrade promptly: loudness measurement has not been
   running since you upgraded. It resumes automatically on 2.3.3 and catches
   up in the background.
@@ -57,11 +61,13 @@ to 2.3.3. Complete the 2.0.0 breaking changes first. See
 
 ## Security
 
-- Federation consumer tokens are now encrypted at rest. Existing plaintext
-  tokens are re-encrypted automatically at startup; no action needed.
-- Outbound federation peer URLs now reject localhost, private, loopback,
-  and link-local addresses by default. Deployments that intentionally
-  federate over a LAN or VPN opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
+- Federation token encryption is now enforced: any plaintext token rows
+  left from older releases are re-encrypted automatically at startup
+  through a dedicated cipher boundary. No action needed.
+- Outbound federation peer URLs now reject literal localhost, private,
+  loopback, and link-local addresses by default. Deployments that
+  intentionally federate over a LAN or VPN by literal IP opt in with
+  `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
 - Sign-in rate limiting keeps working during a Redis outage: credential
   endpoints now fall back to bounded in-memory limits instead of allowing
   unlimited attempts while Redis is unavailable.
