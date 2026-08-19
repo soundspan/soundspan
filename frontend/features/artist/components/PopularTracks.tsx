@@ -109,6 +109,13 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                 !isTidalTrack &&
                 !isYtMusic;
 
+            const preferenceTrackId =
+                isTidalTrack && track.tidalTrackId
+                    ? `tidal:${track.tidalTrackId}`
+                    : isYtMusic && track.youtubeVideoId
+                      ? `yt:${track.youtubeVideoId}`
+                      : track.id;
+
             return {
                 titleBadges: (
                     <>
@@ -145,11 +152,14 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                             </span>
                         )}
                         <TrackPreferenceButtons
-                            trackId={track.id}
+                            trackId={preferenceTrackId}
                             mode="both"
                             buttonSizeClassName="h-8 w-8"
                             iconSizeClassName="h-4 w-4"
-                            metadata={buildPreferenceMetadata(track)}
+                            metadata={buildPreferenceMetadata({
+                                ...track,
+                                id: preferenceTrackId,
+                            })}
                         />
                         {isPlayable && (
                             <TrackOverflowMenu
