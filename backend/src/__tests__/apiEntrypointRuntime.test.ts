@@ -38,7 +38,6 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/tidalStreaming",
         "../routes/trackMappings",
         "../routes/playlistImport",
-        "../routes/streaming",
         "../routes/lyrics",
         "../routes/listenTogether",
         "../routes/subsonic",
@@ -173,7 +172,6 @@ describe("api entrypoint runtime behavior", () => {
 
         const setupListenTogetherSocket = jest.fn();
         const shutdownListenTogetherSocket = jest.fn();
-        const initializeDashCapabilityProbe = jest.fn(async () => undefined);
         const startPersistLoop = jest.fn();
         const stopPersistLoop = jest.fn();
         const persistAllGroups = jest.fn(async () => undefined);
@@ -227,6 +225,7 @@ describe("api entrypoint runtime behavior", () => {
             redisUrl: "redis://redis:6379/0",
             docsPublic: false,
             metrics: { token: "metrics-token", publicAccess: false },
+            streaming: { traceEnabled: false },
             adminResetPassword: undefined,
             discover: { mode: "recommendation" },
             ...(configOverrides || {}),
@@ -287,11 +286,6 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../services/listenTogetherSocket", () => ({
             setupListenTogetherSocket,
             shutdownListenTogetherSocket,
-        }));
-        jest.doMock("../services/segmented-streaming/segmentService", () => ({
-            segmentedSegmentService: {
-                initializeDashCapabilityProbe,
-            },
         }));
         jest.doMock("../services/listenTogether", () => ({
             startPersistLoop,
@@ -362,7 +356,6 @@ describe("api entrypoint runtime behavior", () => {
             dependencyReadiness,
             setupListenTogetherSocket,
             shutdownListenTogetherSocket,
-            initializeDashCapabilityProbe,
             startPersistLoop,
             stopPersistLoop,
             persistAllGroups,

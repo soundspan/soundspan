@@ -119,10 +119,6 @@ const createHybridWithNativeSlot = (): {
     const hybrid = new HybridRuntimeAudioEngine({
         howlerEngine: native.engine,
         directEngineDescriptor: "native",
-        resolveMode: () => "native",
-        createVideoJsEngine: () => {
-            throw new Error("video.js must not load in native mode");
-        },
     });
     return { hybrid, native };
 };
@@ -202,10 +198,6 @@ test("getActiveEngineDescriptor reports the engine actually in use, not just the
 
     const plain = new HybridRuntimeAudioEngine({
         howlerEngine: createNativeEngine().engine,
-        resolveMode: () => "howler",
-        createVideoJsEngine: () => {
-            throw new Error("not used");
-        },
     });
     assert.equal(
         plain.getActiveEngineDescriptor(),
@@ -217,10 +209,6 @@ test("getActiveEngineDescriptor reports the engine actually in use, not just the
 test("upgradeHowlerEngine updates the direct-slot descriptor", () => {
     const hybrid = new HybridRuntimeAudioEngine({
         howlerEngine: createNativeEngine().engine,
-        resolveMode: () => "howler",
-        createVideoJsEngine: () => {
-            throw new Error("not used");
-        },
     });
     assert.equal(hybrid.getActiveEngineDescriptor(), "howler");
     hybrid.upgradeHowlerEngine(
@@ -228,40 +216,6 @@ test("upgradeHowlerEngine updates the direct-slot descriptor", () => {
         "native",
     );
     assert.equal(hybrid.getActiveEngineDescriptor(), "native");
-});
-
-test("getActiveEngineDescriptor reports videojs while the segmented engine is active", async () => {
-    const stubVideoJs: AudioEngine = {
-        load: () => undefined,
-        play: () => undefined,
-        pause: () => undefined,
-        stop: () => undefined,
-        seek: () => undefined,
-        setVolume: () => undefined,
-        setMuted: () => undefined,
-        getCurrentTime: () => 0,
-        getDuration: () => 0,
-        isPlaying: () => false,
-        on: () => undefined,
-        off: () => undefined,
-    };
-    const native = createNativeEngine();
-    const hybrid = new HybridRuntimeAudioEngine({
-        howlerEngine: native.engine,
-        resolveMode: () => "videojs",
-        createVideoJsEngine: () => stubVideoJs,
-    });
-
-    hybrid.load(
-        { url: "https://stream.example/manifest.mpd", protocol: "dash" },
-        { autoplay: false },
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(hybrid.getActiveEngineDescriptor(), "videojs");
-
-    // Loading a direct source routes back to the direct slot.
-    hybrid.load("https://stream.example/track.flac", { autoplay: false });
-    assert.equal(hybrid.getActiveEngineDescriptor(), "howler");
 });
 
 test("existing engine interface methods pass through to the native engine", () => {

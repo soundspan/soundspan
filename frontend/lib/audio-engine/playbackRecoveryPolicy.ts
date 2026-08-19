@@ -1,3 +1,9 @@
+/**
+ * Pure decision helpers for direct-playback recovery: trusted-position
+ * resolution, startup-guarded recovery anchoring, resume correlation,
+ * buffering reconciliation, and seek-continuity tolerance.
+ */
+
 export interface TrustedTrackPositionInput {
     fallbackPositionSec: number;
     fallbackTrackId?: string | null;
@@ -10,43 +16,10 @@ export interface TrustedTrackPositionInput {
     maxEngineDriftSec?: number;
 }
 
-export interface StartupRetryDecisionInput {
-    isLoading: boolean;
-    sourceKind: "segmented" | "direct";
-    requestLoadId: number;
-    activeLoadId: number;
-}
-
-export interface StartupRetryDelayInput extends StartupRetryDecisionInput {
-    startupAttemptStartedAtMs: number;
-    retryTimeoutMs: number;
-    nowMs?: number;
-}
-
 export interface BufferingRecoveryDecisionInput {
     machineIsBuffering: boolean;
     machineIsPlaying: boolean;
     engineIsPlaying: boolean;
-}
-
-export interface HeartbeatGuardedRefreshDecisionInput {
-    consecutiveFailureCount: number;
-    failureThreshold: number;
-    lastRefreshAtMs: number;
-    refreshCooldownMs: number;
-    nowMs?: number;
-}
-
-export type HeartbeatGuardedRefreshReason =
-    | "below_threshold"
-    | "cooldown_active"
-    | "trigger_refresh";
-
-export interface HeartbeatGuardedRefreshDecision {
-    shouldTriggerRefresh: boolean;
-    reason: HeartbeatGuardedRefreshReason;
-    consecutiveFailureCount: number;
-    remainingCooldownMs: number;
 }
 
 export interface StartupGuardedRecoveryPositionInput {
@@ -89,7 +62,7 @@ const DEFAULT_SEEK_TOLERANCE_SEC = 5;
 const DEFAULT_STARTUP_PROGRESS_THRESHOLD_SEC = 0.25;
 
 /**
- * Resolve the safest trusted playback position for segmented handoff/recovery.
+ * Resolve the safest trusted playback position for handoff/recovery.
  * Falls back to local context time when engine position appears stale or invalid.
  */
 export function resolveTrustedTrackPositionSec(
@@ -208,44 +181,6 @@ export function resolveCorrelatedRecoveryResumeDecision(
 }
 
 /**
- * Decide whether the active load should run segmented startup timeout retry logic.
- * This keeps retry behavior deterministic when load attempts race.
- */
-export function shouldRetrySegmentedStartupTimeout(
-    input: StartupRetryDecisionInput,
-): boolean {
-    return (
-        input.sourceKind === "segmented" &&
-        input.isLoading &&
-        input.requestLoadId === input.activeLoadId
-    );
-}
-
-/**
- * Resolve remaining delay before a segmented startup timeout retry.
- * Returns null when retry no longer applies to the active load attempt.
- */
-export function resolveSegmentedStartupRetryDelayMs(
-    input: StartupRetryDelayInput,
-): number | null {
-    if (!shouldRetrySegmentedStartupTimeout(input)) {
-        return null;
-    }
-
-    const timeoutMs = Math.max(0, input.retryTimeoutMs);
-    const nowMs =
-        typeof input.nowMs === "number" && Number.isFinite(input.nowMs)
-            ? input.nowMs
-            : Date.now();
-    const startedAtMs = Number.isFinite(input.startupAttemptStartedAtMs)
-        ? input.startupAttemptStartedAtMs
-        : nowMs;
-    const elapsedMs = Math.max(0, nowMs - startedAtMs);
-
-    return Math.max(0, timeoutMs - elapsedMs);
-}
-
-/**
  * Decide how buffering recovery should reconcile state-machine and engine state.
  */
 export function resolveBufferingRecoveryAction(
@@ -258,62 +193,6 @@ export function resolveBufferingRecoveryAction(
         return "force_playing";
     }
     return "noop";
-}
-
-/**
- * Gate heartbeat-driven session refreshes to avoid retry storms while still
- * recovering after sustained heartbeat failures.
- */
-export function resolveHeartbeatGuardedRefreshDecision(
-    input: HeartbeatGuardedRefreshDecisionInput,
-): HeartbeatGuardedRefreshDecision {
-    const consecutiveFailureCount = Number.isFinite(
-        input.consecutiveFailureCount,
-    )
-        ? Math.max(0, Math.floor(input.consecutiveFailureCount))
-        : 0;
-    const failureThreshold = Number.isFinite(input.failureThreshold)
-        ? Math.max(1, Math.floor(input.failureThreshold))
-        : 1;
-
-    if (consecutiveFailureCount < failureThreshold) {
-        return {
-            shouldTriggerRefresh: false,
-            reason: "below_threshold",
-            consecutiveFailureCount,
-            remainingCooldownMs: 0,
-        };
-    }
-
-    const nowMs =
-        typeof input.nowMs === "number" && Number.isFinite(input.nowMs)
-            ? input.nowMs
-            : Date.now();
-    const lastRefreshAtMs = Number.isFinite(input.lastRefreshAtMs)
-        ? Math.max(0, input.lastRefreshAtMs)
-        : 0;
-    const refreshCooldownMs = Number.isFinite(input.refreshCooldownMs)
-        ? Math.max(0, input.refreshCooldownMs)
-        : 0;
-    const elapsedMs = Math.max(0, nowMs - lastRefreshAtMs);
-    const remainingCooldownMs =
-        lastRefreshAtMs > 0 ? Math.max(0, refreshCooldownMs - elapsedMs) : 0;
-
-    if (remainingCooldownMs > 0) {
-        return {
-            shouldTriggerRefresh: false,
-            reason: "cooldown_active",
-            consecutiveFailureCount,
-            remainingCooldownMs,
-        };
-    }
-
-    return {
-        shouldTriggerRefresh: true,
-        reason: "trigger_refresh",
-        consecutiveFailureCount,
-        remainingCooldownMs: 0,
-    };
 }
 
 /**

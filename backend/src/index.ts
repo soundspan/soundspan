@@ -56,7 +56,6 @@ import streamingRoutes from "./routes/streaming";
 import lyricsRoutes from "./routes/lyrics";
 import listenTogetherRoutes from "./routes/listenTogether";
 import subsonicRoutes from "./routes/subsonic";
-import { segmentedSegmentService } from "./services/segmented-streaming/segmentService";
 import {
     setupListenTogetherSocket,
     shutdownListenTogetherSocket,
@@ -595,7 +594,6 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
     // Initialize music configuration (reads from SystemSettings)
     const { initializeMusicConfig } = await import("./config");
     await initializeMusicConfig();
-    await segmentedSegmentService.initializeDashCapabilityProbe();
     if (config.features.federation) {
         const { ensureFederationIdentity } =
             await import("./services/federationPeers");

@@ -54,23 +54,7 @@ const boundedPositiveIntEnvOr = (
         : fallback;
 };
 
-// Lenient positive-int override; null when unset/empty/non-positive.
-const positiveIntEnvOrNull = (value: string | undefined): number | null => {
-    const raw = value?.trim();
-    if (!raw) return null;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-// Lenient positive-float override; null when unset/empty/non-positive.
-const positiveNumberEnvOrNull = (value: string | undefined): number | null => {
-    const raw = value?.trim();
-    if (!raw) return null;
-    const parsed = Number.parseFloat(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-// Segmented-streaming trace flag accepts a wider truthy set than isEnvFlagEnabled.
+// Playback trace logging accepts a wider truthy set than isEnvFlagEnabled.
 const TRACE_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const isTraceTruthy = (value: string | undefined): boolean => {
     const normalized = value?.trim().toLowerCase();
@@ -857,41 +841,9 @@ export const config = {
             process.env.READINESS_REQUIRE_DEPENDENCIES !== "false",
     },
 
-    segmentedStreaming: {
-        dashBuildLockEnabled:
-            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED !== "false",
-        dashBuildLockPrefix:
-            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX ||
-            "segmented-streaming:dash-build-lock",
-        dashBuildLockTtlMsOverride: positiveIntEnvOrNull(
-            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS,
-        ),
-        localSegmentDurationSecOverride: positiveNumberEnvOrNull(
-            process.env.SEGMENTED_LOCAL_SEG_DURATION_SEC,
-        ),
+    streaming: {
         ffmpegPathOverride: process.env.FFMPEG_PATH?.trim() || undefined,
-        traceEnabled:
-            isTraceTruthy(process.env.STREAMING_TRACE_LOGS) ||
-            isTraceTruthy(process.env.SEGMENTED_STREAMING_TRACE_LOGS),
-        cache: {
-            basePathOverride:
-                process.env.SEGMENTED_STREAMING_CACHE_PATH?.trim() || undefined,
-            maxGbOverride: positiveNumberEnvOrNull(
-                process.env.SEGMENTED_STREAMING_CACHE_MAX_GB,
-            ),
-            pruneIntervalMsOverride: positiveNumberEnvOrNull(
-                process.env.SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS,
-            ),
-            minAgeMsOverride: positiveNumberEnvOrNull(
-                process.env.SEGMENTED_STREAMING_CACHE_MIN_AGE_MS,
-            ),
-            pruneTargetRatioOverride: positiveNumberEnvOrNull(
-                process.env.SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO,
-            ),
-            schemaVersionOverride:
-                process.env.SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION?.trim() ||
-                undefined,
-        },
+        traceEnabled: isTraceTruthy(process.env.STREAMING_TRACE_LOGS),
     },
 
     get audiobookshelf(): { url: string; apiKey: string } | undefined {

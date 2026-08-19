@@ -2,9 +2,7 @@ import { useEffect } from "react";
 import type {
     AudioEngineErrorPayload,
     AudioEngineEventHandler,
-    AudioEngineManifestStallPayload,
 } from "@/lib/audio-engine/types";
-import { AUDIO_ENGINE_MANIFEST_STALL_EVENTS } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 
@@ -34,13 +32,6 @@ export function useAudioEngineBindings({
             engineEventHandlersRef.current?.handlePlay();
         const stableHandlePause: AudioEngineEventHandler<"pause"> = () =>
             engineEventHandlersRef.current?.handlePause();
-        const stableHandleVhsResponse: AudioEngineEventHandler<
-            "vhsresponse"
-        > = (payload) =>
-            engineEventHandlersRef.current?.handleVhsResponse(payload);
-        const stableHandleManifestStall = (
-            payload: AudioEngineManifestStallPayload,
-        ) => engineEventHandlersRef.current?.handleManifestStall(payload);
 
         audioEngine.on("timeupdate", stableHandleTimeUpdate);
         audioEngine.on("load", stableHandleLoad);
@@ -49,10 +40,6 @@ export function useAudioEngineBindings({
         audioEngine.on("playerror", stableHandleError);
         audioEngine.on("play", stableHandlePlay);
         audioEngine.on("pause", stableHandlePause);
-        audioEngine.on("vhsresponse", stableHandleVhsResponse);
-        for (const eventName of AUDIO_ENGINE_MANIFEST_STALL_EVENTS) {
-            audioEngine.on(eventName, stableHandleManifestStall);
-        }
 
         return () => {
             // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
@@ -66,10 +53,6 @@ export function useAudioEngineBindings({
             audioEngine.off("playerror", stableHandleError);
             audioEngine.off("play", stableHandlePlay);
             audioEngine.off("pause", stableHandlePause);
-            audioEngine.off("vhsresponse", stableHandleVhsResponse);
-            for (const eventName of AUDIO_ENGINE_MANIFEST_STALL_EVENTS) {
-                audioEngine.off(eventName, stableHandleManifestStall);
-            }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
     }, []);

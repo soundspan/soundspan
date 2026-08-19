@@ -4,19 +4,13 @@ import type { Track } from "@/lib/audio-state-context";
 import type { PlaybackStreamProfile } from "@/lib/audio-playback-context";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
-import {
-    resolveDirectTrackSourceType,
-    resolveSegmentedTrackContext,
-} from "@/lib/audio-engine/audioPlaybackTrackPolicy";
-import { createEmptySegmentedStartupRecoveryStageAttempts } from "../audioPlaybackOrchestratorPolicy";
+import { resolveDirectTrackSourceType } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import type { usePlaybackRecoveryHelpers } from "./usePlaybackRecoveryHelpers";
-import type { useSegmentedStartupCallbacks } from "./useSegmentedStartupCallbacks";
 
 interface UsePlaybackStateSyncOptions {
     refs: PlaybackOrchestratorRefs;
     playbackRecoveryHelpers: ReturnType<typeof usePlaybackRecoveryHelpers>;
-    segmentedStartupCallbacks: ReturnType<typeof useSegmentedStartupCallbacks>;
     currentTrack: Track | null;
     playbackType: "track" | "audiobook" | "podcast" | null;
     queueLength: number;
@@ -29,7 +23,6 @@ interface UsePlaybackStateSyncOptions {
 export function usePlaybackStateSync({
     refs,
     playbackRecoveryHelpers,
-    segmentedStartupCallbacks,
     currentTrack,
     playbackType,
     queueLength,
@@ -37,49 +30,15 @@ export function usePlaybackStateSync({
     isBuffering,
     setStreamProfile,
 }: UsePlaybackStateSyncOptions): void {
-    const {
-        clearTransientTrackRecovery,
-        clearSegmentedHandoffLoadListeners,
-        resetSegmentedHandoffCircuit,
-    } = playbackRecoveryHelpers;
-    const {
-        abortAllSegmentedPrewarmValidations,
-        markSegmentedStartupRampWindow,
-    } = segmentedStartupCallbacks;
+    const { clearTransientTrackRecovery } = playbackRecoveryHelpers;
     const {
         currentTrackRef,
         trackEndWatchdogRef,
-        segmentedHandoffListenerContextRef,
-        startupSegmentedSessionRef,
-        segmentedProactiveHandoffAttemptedTrackIdRef,
-        segmentedProactiveHandoffAttemptCountRef,
-        segmentedProactiveHandoffLastAttemptAtRef,
-        segmentedProactiveHandoffCompletedTrackIdRef,
-        segmentedProactiveHandoffLastSkipKeyRef,
         startupRecoveryAttemptedTrackIdRef,
         transientTrackRecoveryTrackIdRef,
-        activeSegmentedPlaybackTrackIdRef,
-        activeSegmentedSessionRef,
-        segmentedHeartbeatConsecutiveFailureCountRef,
-        segmentedHeartbeatLastGuardedRefreshAtMsRef,
-        segmentedHeartbeatSessionIdRef,
-        segmentedColdStartRebufferDeferralRef,
-        segmentedHandoffAttemptRef,
-        segmentedHandoffLastAttemptAtRef,
-        segmentedSessionCreateFallbackAttemptRef,
-        segmentedSessionCreateFallbackLastAttemptAtRef,
-        segmentedChunkQuarantineRef,
-        segmentedChunkQuarantineLastRecoveryAtRef,
-        segmentedLastFailedChunkRef,
-        segmentedHandoffInProgressRef,
-        segmentedHandoffLastRecoveryRef,
         lastLoggedRemotePlayKeyRef,
         queueLengthRef,
         playbackTypeRef,
-        segmentedStartupRetryCountRef,
-        segmentedStartupStageAttemptsRef,
-        segmentedStartupRecoveryWindowStartedAtMsRef,
-        segmentedStartupSessionResetCountRef,
     } = refs;
 
     useEffect(() => {
@@ -88,28 +47,6 @@ export function usePlaybackStateSync({
         const currentTrackId = currentTrack?.id ?? null;
         if (previousTrackId !== currentTrackId) {
             trackEndWatchdogRef.current?.clear();
-            abortAllSegmentedPrewarmValidations("track_change");
-        }
-        const handoffListenerTrackId =
-            segmentedHandoffListenerContextRef.current?.trackId ?? null;
-        if (
-            handoffListenerTrackId &&
-            handoffListenerTrackId !== currentTrack?.id
-        ) {
-            clearSegmentedHandoffLoadListeners("track_change");
-        }
-        if (startupSegmentedSessionRef.current?.trackId !== currentTrack?.id) {
-            startupSegmentedSessionRef.current = null;
-        }
-        if (
-            currentTrack?.id !==
-            segmentedProactiveHandoffAttemptedTrackIdRef.current
-        ) {
-            segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
-            segmentedProactiveHandoffAttemptCountRef.current = 0;
-            segmentedProactiveHandoffLastAttemptAtRef.current = 0;
-            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
-            segmentedProactiveHandoffLastSkipKeyRef.current = null;
         }
         if (currentTrack?.id !== startupRecoveryAttemptedTrackIdRef.current) {
             startupRecoveryAttemptedTrackIdRef.current = null;
@@ -117,110 +54,18 @@ export function usePlaybackStateSync({
         if (currentTrack?.id !== transientTrackRecoveryTrackIdRef.current) {
             clearTransientTrackRecovery(true);
         }
-        if (
-            activeSegmentedPlaybackTrackIdRef.current &&
-            activeSegmentedPlaybackTrackIdRef.current !== currentTrack?.id
-        ) {
-            activeSegmentedPlaybackTrackIdRef.current = null;
-        }
-        if (!currentTrack || !resolveSegmentedTrackContext(currentTrack)) {
-            activeSegmentedSessionRef.current = null;
-            activeSegmentedPlaybackTrackIdRef.current = null;
-            segmentedHeartbeatConsecutiveFailureCountRef.current = 0;
-            segmentedHeartbeatLastGuardedRefreshAtMsRef.current = 0;
-            segmentedHeartbeatSessionIdRef.current = null;
-            segmentedColdStartRebufferDeferralRef.current = {
-                trackId: null,
-                count: 0,
-            };
-            segmentedHandoffAttemptRef.current = 0;
-            segmentedHandoffLastAttemptAtRef.current = 0;
-            segmentedSessionCreateFallbackAttemptRef.current = 0;
-            segmentedSessionCreateFallbackLastAttemptAtRef.current = 0;
-            segmentedChunkQuarantineRef.current.clear();
-            segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-            segmentedLastFailedChunkRef.current = {
-                trackId: null,
-                sessionId: null,
-                chunkName: null,
-                statusCode: null,
-                observedAtMs: 0,
-            };
-            resetSegmentedHandoffCircuit(null);
-            segmentedHandoffInProgressRef.current = false;
-            segmentedHandoffLastRecoveryRef.current = {
-                trackId: null,
-                resumeAtSec: 0,
-                recoveredAtMs: 0,
-            };
-            segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
-            segmentedProactiveHandoffAttemptCountRef.current = 0;
-            segmentedProactiveHandoffLastAttemptAtRef.current = 0;
-            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
-            segmentedProactiveHandoffLastSkipKeyRef.current = null;
-            startupSegmentedSessionRef.current = null;
-            if (currentTrack) {
-                setStreamProfile({
-                    mode: "direct",
-                    sourceType: resolveDirectTrackSourceType(currentTrack),
-                    codec: null,
-                    bitrateKbps: null,
-                });
-            } else {
-                setStreamProfile(null);
-            }
-            return;
-        }
-
-        if (
-            activeSegmentedSessionRef.current &&
-            activeSegmentedSessionRef.current.trackId !== currentTrack.id
-        ) {
-            clearSegmentedHandoffLoadListeners("track_change");
-            activeSegmentedSessionRef.current = null;
-            segmentedHeartbeatConsecutiveFailureCountRef.current = 0;
-            segmentedHeartbeatLastGuardedRefreshAtMsRef.current = 0;
-            segmentedHeartbeatSessionIdRef.current = null;
-            segmentedColdStartRebufferDeferralRef.current = {
-                trackId: null,
-                count: 0,
-            };
-            segmentedHandoffAttemptRef.current = 0;
-            segmentedHandoffLastAttemptAtRef.current = 0;
-            segmentedSessionCreateFallbackAttemptRef.current = 0;
-            segmentedSessionCreateFallbackLastAttemptAtRef.current = 0;
-            segmentedChunkQuarantineRef.current.clear();
-            segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-            segmentedLastFailedChunkRef.current = {
-                trackId: null,
-                sessionId: null,
-                chunkName: null,
-                statusCode: null,
-                observedAtMs: 0,
-            };
-            resetSegmentedHandoffCircuit(null);
-            segmentedHandoffInProgressRef.current = false;
-            segmentedHandoffLastRecoveryRef.current = {
-                trackId: null,
-                resumeAtSec: 0,
-                recoveredAtMs: 0,
-            };
-            segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
-            segmentedProactiveHandoffAttemptCountRef.current = 0;
-            segmentedProactiveHandoffLastAttemptAtRef.current = 0;
-            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
-            segmentedProactiveHandoffLastSkipKeyRef.current = null;
-            startupSegmentedSessionRef.current = null;
+        if (currentTrack) {
+            setStreamProfile({
+                mode: "direct",
+                sourceType: resolveDirectTrackSourceType(currentTrack),
+                codec: null,
+                bitrateKbps: null,
+            });
+        } else {
+            setStreamProfile(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-    }, [
-        abortAllSegmentedPrewarmValidations,
-        currentTrack,
-        clearTransientTrackRecovery,
-        clearSegmentedHandoffLoadListeners,
-        setStreamProfile,
-        resetSegmentedHandoffCircuit,
-    ]);
+    }, [currentTrack, clearTransientTrackRecovery, setStreamProfile]);
 
     useEffect(() => {
         if (playbackType !== "track" || !currentTrack) {
@@ -290,58 +135,8 @@ export function usePlaybackStateSync({
         playbackTypeRef.current = playbackType;
         if (playbackType !== "track") {
             trackEndWatchdogRef.current?.clear();
-            abortAllSegmentedPrewarmValidations("track_change");
-            clearSegmentedHandoffLoadListeners("playback_type_change");
-            segmentedStartupRetryCountRef.current = 0;
-            segmentedStartupStageAttemptsRef.current =
-                createEmptySegmentedStartupRecoveryStageAttempts();
-            segmentedStartupRecoveryWindowStartedAtMsRef.current = null;
-            segmentedStartupSessionResetCountRef.current = 0;
-            markSegmentedStartupRampWindow(null, "playback_type_not_track");
-            activeSegmentedSessionRef.current = null;
-            activeSegmentedPlaybackTrackIdRef.current = null;
-            segmentedHeartbeatConsecutiveFailureCountRef.current = 0;
-            segmentedHeartbeatLastGuardedRefreshAtMsRef.current = 0;
-            segmentedHeartbeatSessionIdRef.current = null;
-            segmentedColdStartRebufferDeferralRef.current = {
-                trackId: null,
-                count: 0,
-            };
-            segmentedHandoffAttemptRef.current = 0;
-            segmentedHandoffLastAttemptAtRef.current = 0;
-            segmentedSessionCreateFallbackAttemptRef.current = 0;
-            segmentedSessionCreateFallbackLastAttemptAtRef.current = 0;
-            segmentedChunkQuarantineRef.current.clear();
-            segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-            segmentedLastFailedChunkRef.current = {
-                trackId: null,
-                sessionId: null,
-                chunkName: null,
-                statusCode: null,
-                observedAtMs: 0,
-            };
-            resetSegmentedHandoffCircuit(null);
-            segmentedHandoffInProgressRef.current = false;
-            segmentedHandoffLastRecoveryRef.current = {
-                trackId: null,
-                resumeAtSec: 0,
-                recoveredAtMs: 0,
-            };
-            segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
-            segmentedProactiveHandoffAttemptCountRef.current = 0;
-            segmentedProactiveHandoffLastAttemptAtRef.current = 0;
-            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
-            segmentedProactiveHandoffLastSkipKeyRef.current = null;
-            startupSegmentedSessionRef.current = null;
             setStreamProfile(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-    }, [
-        abortAllSegmentedPrewarmValidations,
-        playbackType,
-        setStreamProfile,
-        markSegmentedStartupRampWindow,
-        resetSegmentedHandoffCircuit,
-        clearSegmentedHandoffLoadListeners,
-    ]);
+    }, [playbackType, setStreamProfile]);
 }

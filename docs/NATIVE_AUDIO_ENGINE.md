@@ -52,7 +52,7 @@ Selection is explicit and unit-tested (`frontend/lib/audio-engine/engineSelectio
 
 Key behaviors:
 
-- **Native is a direct mode.** Segmented startup, session prewarm, and DASH handoff activate only under `videojs` (`isSegmentedModeEnabled()`); that mode is deprecated, no longer receives fixes, and is planned for removal. A bare `<audio>` element cannot play DASH manifests. Direct stream URLs are used exactly as in howler mode.
+- **Native is a direct mode.** Direct stream URLs are used exactly as in howler mode. (The Video.js segmented/DASH engine was removed in issue #534; direct playback is the only path.)
 - **End detection** is the native `ended` event only — it is media-pipeline driven and fires under background timer throttling. No heartbeat/polling monitors; position updates come from `timeupdate` plus a 1 s ticker.
 - **Seeks** are direct `currentTime` assignments. A seek requested while loading is stored and applied on `loadedmetadata` (load-bearing for podcast/audiobook resume-at-position). A ~300 ms seek mark suppresses stale positions instead of lock flags and timers.
 - **Autoplay policy**: the native `play()` promise is used. `NotAllowedError` surfaces a user-gesture requirement and arms exactly one gesture retry — never a loop. Automatic retries are bounded and exhaust into an explicit error instead of showing "playing" while nothing plays.
@@ -73,7 +73,7 @@ The bridge is gated to **iOS user agent AND `display-mode: standalone`** only, s
 All playback client metrics (`[Playback][ClientMetric]` log lines and the backend beacon) carry two engine tags:
 
 - `engineMode` — the deployment flag (`STREAMING_ENGINE_MODE` as resolved). Identifies the rollout cohort.
-- `activeEngine` — the engine actually driving playback at the moment of the event (`howler`, `native`, or `videojs`). Platform pins (Android WebView → howler) and per-source videojs routing make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
+- `activeEngine` — the engine actually driving playback at the moment of the event (`howler` or `native`). Platform pins (Android WebView → howler) make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
 
 For 2.0.0 log queries, `player.howler_startup` became
 `player.engine_startup`, and client-signal ingestion moved from
@@ -81,8 +81,9 @@ For 2.0.0 log queries, `player.howler_startup` became
 `playback.client.signal` / `[Playback.Trace]`. The always-on client-signal
 metric log identity likewise moved from `[SegmentedStreaming][Metric]` to
 `[Playback.Metric]`, and client-ingestion errors moved from the
-`[SegmentedStreaming]` scope to `[Playback]`. Segmented manifest, segment, and
-session traces retain their existing segmented-streaming names.
+`[SegmentedStreaming]` scope to `[Playback]`. (The segmented manifest,
+segment, and session traces themselves were removed with the segmented
+engine in issue #534.)
 
 This makes howler and native directly comparable over a soak window: playback error events by `MEDIA_ERR` code, playback-start latency, and recovery attempts. The engine additionally emits `[NativeAudioEngine][Telemetry]` events (`playback_start_latency`, `recovery_attempt`, `playback_error`, `load_retry_applied`) tagged `engineMode: native`.
 
@@ -101,4 +102,4 @@ Those were the exit criteria for flipping the default (met during the 1.7.0 soak
 
 ## Rollout
 
-Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope at rollout time: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs). Since then the Tauri adapter has been removed (issue #607), and removal of the Video.js segmented engine is planned (issue #534).
+Opt-in flag (1.7.0) → soaked on the operator deployment → default flipped to `native` in 1.8.0. Howler remains the gated fallback (not removed). Out of scope at rollout time: removing Howler/Video.js/Tauri adapters, crossfade, and true bit-perfect hi-res output (impossible from web APIs). Since then the Tauri adapter (issue #607) and the Video.js segmented engine (issue #534) have both been removed; the engine matrix is native (default) plus Howler (fallback).

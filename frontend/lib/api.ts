@@ -36,10 +36,7 @@ import { WithTidal } from "./api/tidal";
 import { WithVibe } from "./api/vibe";
 import { WithYouTube } from "./api/youtube";
 import { WithYtMusic } from "./api/ytmusic";
-import type {
-    ResolvedMediaSource,
-    SegmentedStreamingSourceType,
-} from "@soundspan/media-metadata-contract";
+import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 
 export { vibeErrorMessage } from "./api/vibe";
 
@@ -434,54 +431,6 @@ export interface LikedPlaylistResponse {
         hasMore: boolean;
         nextCursor: LikedPlaylistCursor | null;
     };
-}
-
-export interface SegmentedStreamingSessionResponse {
-    sessionId: string;
-    manifestUrl: string;
-    sessionToken: string;
-    expiresAt: string;
-    playbackProfile?: {
-        protocol?: "dash";
-        sourceType?: SegmentedStreamingSourceType;
-        quality?: "original" | "high" | "medium" | "low";
-        manifestProfile?: "startup_single" | "steady_state_dual";
-        codec?: string;
-        bitrateKbps?: number;
-    };
-    engineHints?: {
-        protocol?: "dash";
-        sourceType?: SegmentedStreamingSourceType;
-        recommendedEngine?: "videojs";
-        assetBuildInFlight?: boolean;
-    };
-}
-
-export interface CreateSegmentedStreamingSessionInput {
-    trackId: string;
-    sourceType?: SegmentedStreamingSourceType;
-    desiredQuality?: "original" | "high" | "medium" | "low";
-    manifestProfile?: "startup_single" | "steady_state_dual";
-    startupLoadId?: number;
-    startupCorrelationId?: string;
-}
-
-export interface SegmentedStreamingHeartbeatResponse {
-    sessionId: string;
-    sessionToken: string;
-    expiresAt: string;
-}
-
-export interface SegmentedStreamingSnapshotInput {
-    positionSec?: number;
-    isPlaying?: boolean;
-    bufferedUntilSec?: number;
-}
-
-export interface SegmentedStreamingHandoffResponse extends SegmentedStreamingSessionResponse {
-    previousSessionId: string;
-    resumeAtSec: number;
-    shouldPlay: boolean;
 }
 
 export interface PlaybackClientMetricInput {

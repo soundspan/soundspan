@@ -5,12 +5,6 @@ interface TrackListResponse {
     tracks?: Array<{ id?: string }>;
 }
 
-interface SegmentedSessionCreateResponse {
-    sessionId?: string;
-    manifestUrl?: string;
-    sessionToken?: string;
-}
-
 function readHeader(response: APIResponse, name: string): string {
     const value = response.headers()[name.toLowerCase()];
     return typeof value === "string" ? value : "";
@@ -24,32 +18,12 @@ function expectCorsHeader(response: APIResponse, requestOrigin: string): void {
     ).toBeTruthy();
 }
 
-function resolveInitSegmentName(manifestBody: string): string {
-    const initializationMatch = manifestBody.match(/initialization="([^"]+)"/i);
-    if (!initializationMatch) {
-        return "";
-    }
-
-    const representationMatch = manifestBody.match(
-        /<Representation[^>]*\sid="([^"]+)"/i,
-    );
-    const representationId = representationMatch?.[1] ?? "0";
-
-    return initializationMatch[1]
-        .replace(/\$RepresentationID\$/g, representationId)
-        .replace(/\$Bandwidth\$/g, "0")
-        .replace(/\$Number%0(\d+)d\$/g, (_match, width: string) =>
-            String(1).padStart(Number.parseInt(width, 10), "0"),
-        )
-        .replace(/\$Number\$/g, "1");
-}
-
 test.describe("Media Contract", () => {
     test.beforeEach(async ({ page }) => {
         await loginAsTestUser(page);
     });
 
-    test("direct and segmented media paths satisfy range/cors/content-type contracts", async ({
+    test("direct media path satisfies range/cors/content-type contracts", async ({
         page,
         baseURL,
     }) => {
@@ -113,67 +87,17 @@ test.describe("Media Contract", () => {
             ).toBeTruthy();
         }
 
-        const createSessionResponse = await page.request.post(
+        // Removed with segmented streaming (issue #534): the session surface
+        // must be gone, not silently half-alive.
+        const removedSessionResponse = await page.request.post(
             "/api/streaming/v1/sessions",
             {
                 data: {
                     trackId,
                     sourceType: "local",
-                    desiredQuality: "medium",
                 },
             },
         );
-
-        expect(createSessionResponse.status()).toBe(201);
-        const segmentedSession =
-            (await createSessionResponse.json()) as SegmentedSessionCreateResponse;
-        expect(segmentedSession.manifestUrl).toBeTruthy();
-        expect(segmentedSession.sessionToken).toBeTruthy();
-
-        const manifestResponse = await page.request.get(
-            segmentedSession.manifestUrl!,
-            {
-                headers: {
-                    Origin: requestOrigin,
-                },
-            },
-        );
-
-        expect(manifestResponse.status()).toBe(200);
-        expectCorsHeader(manifestResponse, requestOrigin);
-        expect(
-            readHeader(manifestResponse, "content-type").toLowerCase(),
-        ).toContain("application/dash+xml");
-
-        const manifestBody = await manifestResponse.text();
-        const initSegmentName = resolveInitSegmentName(manifestBody);
-        expect(
-            initSegmentName,
-            "Expected DASH manifest to provide an initialization segment template",
-        ).toBeTruthy();
-
-        const manifestUrl = new URL(segmentedSession.manifestUrl!, baseURL);
-        const initSegmentUrl = new URL(initSegmentName, manifestUrl);
-
-        const segmentResponse = await page.request.get(
-            initSegmentUrl.toString(),
-            {
-                headers: {
-                    Range: "bytes=0-63",
-                    Origin: requestOrigin,
-                    "x-streaming-session-token": segmentedSession.sessionToken!,
-                },
-            },
-        );
-
-        expect(segmentResponse.status()).toBe(206);
-        expect(readHeader(segmentResponse, "accept-ranges")).toContain("bytes");
-        expect(readHeader(segmentResponse, "content-range")).toMatch(
-            /^bytes\s+\d+-\d+\/\d+$/i,
-        );
-        expectCorsHeader(segmentResponse, requestOrigin);
-        expect(
-            readHeader(segmentResponse, "content-type").toLowerCase(),
-        ).toContain("video/iso.segment");
+        expect(removedSessionResponse.status()).toBe(404);
     });
 });

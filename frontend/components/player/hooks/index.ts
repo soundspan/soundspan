@@ -1,5 +1,6 @@
 export type { DesiredLoadPlayIntent } from "./audioPlaybackOrchestratorTypes";
 export { useAudioEngineBindings } from "./useAudioEngineBindings";
+export { useApplyCurrentOutputState } from "./useOutputState";
 export { useForegroundRecovery } from "./useForegroundRecovery";
 export { useNextTrackPreload } from "./useNextTrackPreload";
 export { useAutoMatchVibe, useYtMusicAuth } from "./usePlaybackAccounts";
@@ -16,10 +17,5 @@ export {
     useProgressSaveCallbacks,
 } from "./useProgressPersistence";
 export { useQueueRecoveryEffects } from "./useQueueRecoveryEffects";
-export { useSegmentedHandoffRecovery } from "./useSegmentedHandoffRecovery";
-export { useSegmentedHeartbeat } from "./useSegmentedHeartbeat";
-export { useSegmentedPrewarm } from "./useSegmentedPrewarm";
-export { useSegmentedSessionRecovery } from "./useSegmentedSessionRecovery";
-export { useSegmentedStartupCallbacks } from "./useSegmentedStartupCallbacks";
 export { useLoudnessNormalization } from "./useLoudnessNormalization";
 export { useTrackRecovery } from "./useTrackRecovery";

@@ -21,7 +21,7 @@ import {
 } from "../utils/configValidator";
 
 const ffmpegBinaryPath = resolveFfmpegBinaryPath(
-    config.segmentedStreaming.ffmpegPathOverride,
+    config.streaming.ffmpegPathOverride,
 );
 inspectFfmpegVersion(ffmpegBinaryPath);
 ffmpeg.setFfmpegPath(ffmpegBinaryPath);

@@ -1,18 +1,8 @@
 import { useEffect, type MutableRefObject } from "react";
 import type { Podcast, Track } from "@/lib/audio-state-context";
 import type { QueueItem } from "@/lib/queue-item";
-import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
-import { isSegmentedModeEnabled } from "@/lib/audio-engine/engineMode";
-import {
-    getNextTrackInfo,
-    resolveSegmentedTrackContext,
-    type SegmentedTrackContext,
-} from "@/lib/audio-engine/audioPlaybackTrackPolicy";
-import {
-    buildSegmentedSessionKey,
-    isSegmentedSessionPrewarmEnabled,
-    isSegmentedSessionUsable,
-} from "@/lib/audio-engine/audioPlaybackRuntimePolicy";
+import { api } from "@/lib/api";
+import { getNextTrackInfo } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
 import { resolveRemoteStreamFormat } from "../audioPlaybackOrchestratorPolicy";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 
@@ -26,17 +16,6 @@ interface UseNextTrackPreloadOptions {
     isShuffle: boolean;
     shuffleIndices: number[];
     repeatMode: "off" | "one" | "all";
-    prewarmSegmentedSession: (options: {
-        sessionKey: string;
-        context: SegmentedTrackContext;
-        trackId: string;
-        reason: "startup_background" | "next_track";
-        retryCount?: number;
-    }) => void;
-    isListenTogetherSegmentedPlaybackAllowed: () => boolean;
-    prewarmedSegmentedSessionRef: MutableRefObject<
-        Map<string, SegmentedStreamingSessionResponse>
-    >;
     lastPreloadedTrackIdRef: MutableRefObject<string | null>;
     ytMusicAuthenticatedRef: MutableRefObject<boolean>;
 }
@@ -52,9 +31,6 @@ export function useNextTrackPreload({
     isShuffle,
     shuffleIndices,
     repeatMode,
-    prewarmSegmentedSession,
-    isListenTogetherSegmentedPlaybackAllowed,
-    prewarmedSegmentedSessionRef,
     lastPreloadedTrackIdRef,
     ytMusicAuthenticatedRef,
 }: UseNextTrackPreloadOptions): void {
@@ -71,15 +47,6 @@ export function useNextTrackPreload({
                   : false;
         if (!hasActiveQueueMedia || !isPlaying) {
             return;
-        }
-
-        for (const [
-            sessionKey,
-            session,
-        ] of prewarmedSegmentedSessionRef.current) {
-            if (!isSegmentedSessionUsable(session)) {
-                prewarmedSegmentedSessionRef.current.delete(sessionKey);
-            }
         }
 
         const nextTrack = getNextTrackInfo(
@@ -132,36 +99,6 @@ export function useNextTrackPreload({
 
         audioEngine.preload(streamUrl, format);
         lastPreloadedTrackIdRef.current = nextTrack.id;
-
-        const nextSegmentedTrackContext =
-            resolveSegmentedTrackContext(nextTrack);
-        const shouldPrewarmSegmentedSession =
-            isSegmentedSessionPrewarmEnabled() &&
-            Boolean(nextSegmentedTrackContext) &&
-            isListenTogetherSegmentedPlaybackAllowed() &&
-            isSegmentedModeEnabled();
-
-        if (!shouldPrewarmSegmentedSession || !nextSegmentedTrackContext) {
-            return;
-        }
-
-        const nextSessionKey = buildSegmentedSessionKey(
-            nextSegmentedTrackContext,
-        );
-        const existingPrewarmedSession =
-            prewarmedSegmentedSessionRef.current.get(nextSessionKey);
-        if (
-            existingPrewarmedSession &&
-            isSegmentedSessionUsable(existingPrewarmedSession)
-        ) {
-            return;
-        }
-        prewarmSegmentedSession({
-            sessionKey: nextSessionKey,
-            context: nextSegmentedTrackContext,
-            trackId: nextTrack.id,
-            reason: "next_track",
-        });
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
     }, [
         playbackType,
@@ -173,7 +110,5 @@ export function useNextTrackPreload({
         isShuffle,
         shuffleIndices,
         repeatMode,
-        prewarmSegmentedSession,
-        isListenTogetherSegmentedPlaybackAllowed,
     ]);
 }

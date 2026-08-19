@@ -33,7 +33,6 @@ The ordinary backend suite uses colocated `__tests__` directories under
 | `backend/src/services/__tests__/`                     | service-level behavior/regression tests                           |
 | `backend/src/services/discovery/__tests__/`           | discovery subsystem tests                                         |
 | `backend/src/services/lidarr/__tests__/`              | Lidarr client and helper tests                                    |
-| `backend/src/services/segmented-streaming/__tests__/` | segmented-streaming service tests                                 |
 | `backend/src/workers/__tests__/`                      | worker orchestration/scheduler/claim behavior                     |
 | `backend/src/workers/processors/__tests__/`           | queue processor behavior tests                                    |
 | `backend/src/jobs/__tests__/`                         | background job modules                                            |
@@ -77,7 +76,6 @@ These scripts intentionally run outside Jest because they are operator diagnosti
 - `*.spec.ts` for E2E flows.
 - `predeploy/` subtree for release-focused validation paths.
 - `predeploy/media-contract.spec.ts` validates media contract behavior (`Range` + `206`, CORS headers, content-type correctness; MP4 responses also get fast-start `moov` sanity checks).
-- Segmented-specific rollout and validation guidance is documented separately in [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md).
 
 ### Frontend Node unit tests
 

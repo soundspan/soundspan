@@ -2,7 +2,7 @@ import { useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { Podcast } from "@/lib/audio-state-context";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
-import { isSeekWithinTolerance } from "@/lib/audio-engine/segmentedPlaybackRegressionPolicy";
+import { isSeekWithinTolerance } from "@/lib/audio-engine/playbackRecoveryPolicy";
 import {
     audioEngine,
     podcastDebugLog,
@@ -18,8 +18,6 @@ interface UsePodcastSeekingOptions {
     setIsBuffering: (isBuffering: boolean) => void;
     setTargetSeekPosition: (position: number | null) => void;
     setIsPlaying: (isPlaying: boolean) => void;
-    clearSegmentedStartupFallback: () => void;
-    clearSegmentedManifestNudges: () => void;
 }
 
 /** Preserves podcast cache polling and seek/reload orchestration. */
@@ -31,8 +29,6 @@ export function usePodcastSeeking({
     setIsBuffering,
     setTargetSeekPosition,
     setIsPlaying,
-    clearSegmentedStartupFallback,
-    clearSegmentedManifestNudges,
 }: UsePodcastSeekingOptions): void {
     const {
         seekOperationIdRef,
@@ -443,8 +439,6 @@ export function usePodcastSeeking({
             if (seekCheckTimeoutRef.current) {
                 clearTimeout(seekCheckTimeoutRef.current);
             }
-            clearSegmentedStartupFallback();
-            clearSegmentedManifestNudges();
             if (seekReloadListenerRef.current) {
                 audioEngine.off("load", seekReloadListenerRef.current);
                 seekReloadListenerRef.current = null;
@@ -455,5 +449,5 @@ export function usePodcastSeeking({
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-    }, [clearSegmentedStartupFallback, clearSegmentedManifestNudges]);
+    }, []);
 }

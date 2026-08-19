@@ -62,7 +62,7 @@
         "socket.io-client": "^4.8.3",
         "sonner": "^2.0.8",
         "tailwind-merge": "^3.6.0",
-        "video.js": "^8.24.0"
+        "video": {}
     },
     "devDependencies": {
         "@eslint/compat": "^2.1.0",

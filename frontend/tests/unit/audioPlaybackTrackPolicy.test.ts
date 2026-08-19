@@ -3,7 +3,6 @@ import test from "node:test";
 import {
     getNextTrackInfo,
     isLikelyTransientStreamError,
-    resolveSegmentedTrackContext,
 } from "../../lib/audio-engine/audioPlaybackTrackPolicy";
 
 test("selects the next music track in queue order", () => {
@@ -35,21 +34,6 @@ test("wraps a shuffled queue only for repeat-all playback", () => {
 
     assert.equal(getNextTrackInfo(queue, 0, true, [1, 0], "off"), null);
     assert.equal(getNextTrackInfo(queue, 0, true, [1, 0], "all")?.id, "second");
-});
-
-test("allows segmented startup only for local tracks", () => {
-    assert.deepEqual(resolveSegmentedTrackContext({ id: "local" }), {
-        sourceType: "local",
-        sessionTrackId: "local",
-    });
-    assert.equal(
-        resolveSegmentedTrackContext({
-            id: "remote",
-            streamSource: "tidal",
-            tidalTrackId: 42,
-        }),
-        null,
-    );
 });
 
 test("classifies bounded transport failures as transient", () => {

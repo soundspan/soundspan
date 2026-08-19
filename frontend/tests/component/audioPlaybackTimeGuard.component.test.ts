@@ -13,7 +13,7 @@ import {
  * handleTimeUpdate callback without requiring React rendering.
  */
 
-const SEGMENTED_STARTUP_AUDIBLE_THRESHOLD_SEC = 0.2;
+const STARTUP_AUDIBLE_THRESHOLD_SEC = 0.2;
 
 interface TimeupdateGuardContext {
     isLoading: boolean;
@@ -33,7 +33,7 @@ function simulateTimeupdateGuard(
     if (
         isLoading &&
         ctx.activeSelection.playbackType === "track" &&
-        currentTimeValue >= SEGMENTED_STARTUP_AUDIBLE_THRESHOLD_SEC
+        currentTimeValue >= STARTUP_AUDIBLE_THRESHOLD_SEC
     ) {
         isLoading = false;
         clearedLoading = true;

@@ -56,7 +56,7 @@ services:
       # Next-served documents start in report-only CSP mode.
       - CSP_ENFORCE=${CSP_ENFORCE:-false}
       - CSP_REPORT_URI=${CSP_REPORT_URI:-}
-      # Runtime streaming-engine selector. Accepted: native | howler | videojs (deprecated; removal planned).
+      # Runtime streaming-engine selector. Accepted: native | howler.
       # Leave unset to use the default native engine.
       - STREAMING_ENGINE_MODE=${STREAMING_ENGINE_MODE:-}
       # Preserve Redis streams/groups across restarts unless explicitly overridden

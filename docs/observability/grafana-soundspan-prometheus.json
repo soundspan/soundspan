@@ -130,17 +130,12 @@
             "id": 5,
             "targets": [
                 {
-                    "expr": "sum(rate(soundspan_transcode_cache_requests_total{result=\"hit\"}[$__rate_interval])) / clamp_min(sum(rate(soundspan_transcode_cache_requests_total[$__rate_interval])), 1e-9)",
-                    "legendFormat": "transcode",
-                    "refId": "A"
-                },
-                {
                     "expr": "sum(rate(soundspan_browse_image_cache_requests_total{result=\"hit\"}[$__rate_interval])) / clamp_min(sum(rate(soundspan_browse_image_cache_requests_total[$__rate_interval])), 1e-9)",
                     "legendFormat": "browse image",
-                    "refId": "B"
+                    "refId": "A"
                 }
             ],
-            "title": "Cache hit ratio",
+            "title": "Browse image cache hit ratio",
             "type": "timeseries"
         },
         {

@@ -43,7 +43,7 @@ import {
 } from "@/lib/audio-clock-policy";
 
 export interface PlaybackStreamProfile {
-    mode: "direct" | "dash";
+    mode: "direct";
     sourceType: "local" | "tidal" | "ytmusic" | "unknown";
     codec: string | null;
     bitrateKbps: number | null;

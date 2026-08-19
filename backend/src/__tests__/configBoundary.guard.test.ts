@@ -9,8 +9,6 @@ const ALLOWLIST = [
     "index.ts",
     "middleware/auth.ts",
     "routes/auth/localCredentials.ts",
-    "services/segmented-streaming/cacheService.ts",
-    "services/segmented-streaming/segmentService.ts",
     "utils/apiKeyHash.ts",
     "utils/configValidator.ts",
     "utils/db.ts",

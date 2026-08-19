@@ -143,14 +143,6 @@ Notes:
 - Redis remains critical for sessions/queues/realtime; use a highly available Redis endpoint for HA-focused deployments.
 - Compose defaults now set `REDIS_FLUSH_ON_STARTUP=false` to preserve Redis stream/group metadata unless you explicitly override it.
 
-## Experimental Features
-
-Segmented streaming documentation has been moved to a dedicated experimental guide:
-
-- [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) (deprecated)
-
-Use that guide for segmented runtime controls, rollout levels, observability, and primary-mode reversion procedures.
-
 ## Building Images with Docker Bake
 
 The repository includes a `docker-bake.json` file that defines all buildable images organized into groups. This is an alternative to `docker compose build` when you want fine-grained control over which images to build, or want to leverage BuildKit parallelism across targets.

@@ -5,7 +5,7 @@ import {
     type CanonicalMediaSource,
 } from "@soundspan/media-metadata-contract";
 
-/** Provider fields used to select direct or segmented playback. */
+/** Provider fields used to resolve the direct playback source. */
 export interface RuntimeProviderTrack {
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
@@ -69,42 +69,6 @@ export function getNextTrackInfo(
     // Mixed-media queue: only music tracks can be preloaded gaplessly.
     if (!nextItem || nextItem.itemType === "episode") return null;
     return nextItem;
-}
-
-/** Local-only identity required by segmented playback APIs. */
-export interface SegmentedTrackContext {
-    sourceType: "local";
-    sessionTrackId: string;
-}
-
-/** Resolves a local track into its segmented-session context. */
-export function resolveSegmentedTrackContext(
-    track:
-        | (RuntimeProviderTrack & {
-              id: string;
-          })
-        | null
-        | undefined,
-): SegmentedTrackContext | null {
-    if (!track) return null;
-
-    // Segmented startup/handoff is local-only. Remote providers (TIDAL/YouTube)
-    // always use direct proxy playback and must not create segmented sessions.
-    const provider = normalizeCanonicalMediaProviderIdentity({
-        mediaSource: track.mediaSource,
-        providerTrackId: track.provider?.providerTrackId,
-        tidalTrackId: track.provider?.tidalTrackId ?? track.tidalTrackId,
-        youtubeVideoId: track.provider?.youtubeVideoId ?? track.youtubeVideoId,
-        streamSource: track.streamSource,
-    });
-    if (provider.source !== "local") {
-        return null;
-    }
-
-    return {
-        sourceType: "local",
-        sessionTrackId: track.id,
-    };
 }
 
 /** Resolves the direct engine source type from canonical provider metadata. */

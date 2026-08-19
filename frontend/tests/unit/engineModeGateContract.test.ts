@@ -8,11 +8,11 @@ import test from "node:test";
  *
  * Regression net for the GH #42 no-audio incident: three orchestrator
  * gates tested `resolveStreamingEngineMode() !== "howler"` — written
- * when videojs was the only non-howler mode — so STREAMING_ENGINE_MODE=
- * native activated segmented DASH sessions and fed the native element
+ * when videojs was the only non-howler mode — so a new mode value
+ * silently changed behavior and fed the native element
  * engine a manifest it cannot play. Feature detection by mode
  * INEQUALITY breaks every time a new mode is added; gates must use the
- * semantic helpers (isSegmentedModeEnabled / isHowlerModeEnabled) or
+ * semantic helpers (isHowlerModeEnabled) or
  * explicit equality against the mode they mean.
  */
 
@@ -27,7 +27,7 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 const BANNED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     {
         pattern: /resolveStreamingEngineMode\(\)\s*!==?=?\s*["']howler["']/,
-        reason: 'mode inequality against "howler" — use isSegmentedModeEnabled() (or the helper matching the mode you mean)',
+        reason: 'mode inequality against "howler" — use isHowlerModeEnabled() (or the helper matching the mode you mean)',
     },
     {
         pattern: /!==\s*["']howler["']/,

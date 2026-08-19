@@ -192,7 +192,7 @@ export function resolveEffectiveLocalPlaybackQuality(input: {
     sourceQuality: LocalTrackQuality | null;
     playbackQuality: LocalTrackQuality | null;
     streamProfile: {
-        mode: "direct" | "dash";
+        mode: "direct";
         sourceType: "local" | "tidal" | "ytmusic" | "unknown";
         codec: string | null;
         bitrateKbps: number | null;

@@ -1,5 +1,4 @@
 import { useCallback } from "react";
-import type { AudioEngineManifestStallPayload } from "@/lib/audio-engine/types";
 import { playbackStateMachine } from "@/lib/audio";
 import {
     getListenTogetherSessionSnapshot,
@@ -17,24 +16,17 @@ import {
     TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS,
     TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS,
 } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
-import {
-    audioEngine,
-    logPlaybackClientMetric,
-} from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
-import {
-    isLikelyTransientStreamError,
-    resolveDirectTrackSourceType,
-} from "@/lib/audio-engine/audioPlaybackTrackPolicy";
+import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
+import { isLikelyTransientStreamError } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { toast } from "sonner";
+import { resolveCorrelatedRecoveryResumeDecision } from "@/lib/audio-engine/playbackRecoveryPolicy";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import type { usePlaybackRecoveryHelpers } from "./usePlaybackRecoveryHelpers";
-import type { useSegmentedStartupCallbacks } from "./useSegmentedStartupCallbacks";
 
 interface UseTrackRecoveryOptions {
     refs: PlaybackOrchestratorRefs;
     playbackRecoveryHelpers: ReturnType<typeof usePlaybackRecoveryHelpers>;
-    segmentedStartupCallbacks: ReturnType<typeof useSegmentedStartupCallbacks>;
     next: () => void;
     setCurrentTime: (time: number) => void;
     setIsBuffering: (isBuffering: boolean) => void;
@@ -44,7 +36,6 @@ interface UseTrackRecoveryOptions {
 export function useTrackRecovery({
     refs,
     playbackRecoveryHelpers,
-    segmentedStartupCallbacks,
     next,
     setCurrentTime,
     setIsBuffering,
@@ -53,11 +44,8 @@ export function useTrackRecovery({
         clearStartupPlaybackRecovery,
         clearPendingTrackErrorSkip,
         clearTransientTrackRecovery,
-        resolveStartupSafeTrackPositionSec,
-        resolveCorrelatedRecoveryResume,
-        shouldForceCleanStartFromCorrelationMismatch,
+        readTrustedTrackPositionSec,
     } = playbackRecoveryHelpers;
-    const { hasStartupChunkResponseForTrack } = segmentedStartupCallbacks;
     const {
         startupRecoveryAttemptedTrackIdRef,
         startupRecoveryTimeoutRef,
@@ -66,10 +54,8 @@ export function useTrackRecovery({
         loadIdRef,
         lastPlayingStateRef,
         currentTrackRef,
-        segmentedStartupStabilityRef,
         isLoadingRef,
         startupRecoveryLoadListenerRef,
-        activeSegmentedSessionRef,
         listenTogetherFollowerRecoveryRef,
         pendingTrackErrorSkipRef,
         pendingTrackErrorTrackIdRef,
@@ -121,14 +107,7 @@ export function useTrackRecovery({
                     return;
                 }
 
-                const startupStability = segmentedStartupStabilityRef.current;
-                const hasStartupProgress =
-                    startupStability.trackId === trackId &&
-                    startupStability.firstProgressAtMs !== null;
-                const startupPlayingWithoutProgress =
-                    audioEngine.isPlaying() && !hasStartupProgress;
-
-                if (audioEngine.isPlaying() && hasStartupProgress) {
+                if (audioEngine.isPlaying()) {
                     return;
                 }
 
@@ -143,14 +122,6 @@ export function useTrackRecovery({
                     return;
                 }
 
-                if (
-                    startupPlayingWithoutProgress &&
-                    recheckCount < STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS
-                ) {
-                    scheduleStartupPlaybackRecovery(trackId, recheckCount + 1);
-                    return;
-                }
-
                 if (startupRecoveryAttemptedTrackIdRef.current === trackId)
                     return;
                 startupRecoveryAttemptedTrackIdRef.current = trackId;
@@ -158,7 +129,6 @@ export function useTrackRecovery({
                 sharedFrontendLogger.warn(
                     "[AudioPlaybackOrchestrator] Startup playback watchdog triggered reload+retry",
                     {
-                        startupPlayingWithoutProgress,
                         recheckCount,
                     },
                 );
@@ -198,42 +168,6 @@ export function useTrackRecovery({
         [clearStartupPlaybackRecovery],
     );
 
-    const handleStartupManifestStall = useCallback(
-        (payload?: Partial<AudioEngineManifestStallPayload>): void => {
-            if (playbackTypeRef.current !== "track") return;
-
-            const trackId = currentTrackRef.current?.id ?? null;
-            if (!trackId) return;
-            if (payload?.trackId && payload.trackId !== trackId) return;
-
-            const activeSession = activeSegmentedSessionRef.current;
-            if (!activeSession || activeSession.trackId !== trackId) {
-                return;
-            }
-            if (
-                payload?.sessionId &&
-                payload.sessionId !== activeSession.sessionId
-            ) {
-                return;
-            }
-            if (hasStartupChunkResponseForTrack(trackId)) {
-                return;
-            }
-
-            logPlaybackClientMetric("player.rebuffer", {
-                reason: "manifest_stall_startup_recovery",
-                trackId,
-                sessionId: activeSession.sessionId,
-                sourceType: activeSession.sourceType,
-                manifestStallReason:
-                    typeof payload?.reason === "string" ? payload.reason : null,
-            });
-            scheduleStartupPlaybackRecovery(trackId);
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [hasStartupChunkResponseForTrack, scheduleStartupPlaybackRecovery],
-    );
-
     const requestListenTogetherFollowerRecovery = useCallback(
         (reason: string): boolean => {
             const listenTogetherGroupId = resolveListenTogetherFollowerGroupId(
@@ -267,8 +201,6 @@ export function useTrackRecovery({
                     groupId: listenTogetherGroupId,
                     reason,
                     trackId: currentTrackRef.current?.id ?? null,
-                    sessionId:
-                        activeSegmentedSessionRef.current?.sessionId ?? null,
                 },
             );
 
@@ -410,31 +342,27 @@ export function useTrackRecovery({
             const attemptNumber = transientTrackRecoveryAttemptRef.current;
             clearPendingTrackErrorSkip();
             clearTransientTrackRecovery(false);
-            const resumeAtSec =
-                resolveStartupSafeTrackPositionSec(failedTrackId);
+            const resumeAtSec = readTrustedTrackPositionSec(failedTrackId);
             const recoveryLoadId = loadIdRef.current;
-            const failedTrackSnapshot = currentTrackRef.current;
-            const recoverySourceType = failedTrackSnapshot
-                ? resolveDirectTrackSourceType(failedTrackSnapshot)
-                : "local";
 
             const onRecoveredLoad = () => {
                 clearTransientTrackRecovery(false);
                 if (playbackTypeRef.current !== "track") return;
                 if (!lastPlayingStateRef.current) return;
                 const correlatedResumeDecision =
-                    resolveCorrelatedRecoveryResume({
+                    resolveCorrelatedRecoveryResumeDecision({
                         requestedResumeAtSec: resumeAtSec,
                         expectedTrackId: failedTrackId,
+                        activeTrackId: currentTrackRef.current?.id ?? null,
                         expectedLoadId: recoveryLoadId,
-                        sourceType: recoverySourceType,
-                        reason: "transient_track_recovery",
+                        activeLoadId: loadIdRef.current,
                     });
                 if (!correlatedResumeDecision.matched) {
                     if (
-                        shouldForceCleanStartFromCorrelationMismatch(
-                            correlatedResumeDecision.mismatchReason,
-                        )
+                        correlatedResumeDecision.mismatchReason ===
+                            "track_mismatch" ||
+                        correlatedResumeDecision.mismatchReason ===
+                            "load_mismatch"
                     ) {
                         audioEngine.seek(0);
                         setCurrentTime(0);
@@ -476,16 +404,13 @@ export function useTrackRecovery({
             requestListenTogetherFollowerRecovery,
             clearPendingTrackErrorSkip,
             clearTransientTrackRecovery,
-            resolveStartupSafeTrackPositionSec,
-            resolveCorrelatedRecoveryResume,
-            shouldForceCleanStartFromCorrelationMismatch,
+            readTrustedTrackPositionSec,
             setCurrentTime,
         ],
     );
 
     return {
         scheduleStartupPlaybackRecovery,
-        handleStartupManifestStall,
         requestListenTogetherFollowerRecovery,
         scheduleTrackErrorSkip,
         attemptTransientTrackRecovery,

@@ -48,7 +48,7 @@ const mockConfig = {
     allowedOrigins: [] as boolean | string[],
     transcodeConcurrency: 3,
     transcodeTimeoutMs: 5 * 60 * 1000,
-    segmentedStreaming: {
+    streaming: {
         ffmpegPathOverride: undefined as string | undefined,
     },
 };

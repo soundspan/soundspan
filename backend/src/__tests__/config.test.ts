@@ -1096,73 +1096,17 @@ describe("config module", () => {
         expect(nonLiteral.config.readiness.requireDependencies).toBe(true);
     });
 
-    it("uses segmented streaming defaults", async () => {
-        const { config } = await loadConfigModule({
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED: undefined,
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX: undefined,
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: undefined,
-            SEGMENTED_LOCAL_SEG_DURATION_SEC: undefined,
-            FFMPEG_PATH: undefined,
-            STREAMING_TRACE_LOGS: undefined,
-            SEGMENTED_STREAMING_TRACE_LOGS: undefined,
-            SEGMENTED_STREAMING_CACHE_PATH: undefined,
-            SEGMENTED_STREAMING_CACHE_MAX_GB: undefined,
-            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: undefined,
-            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: undefined,
-            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: undefined,
-            SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION: undefined,
-        });
+    it("uses the streaming ffmpeg default and honors an override", async () => {
+        const defaults = await loadConfigModule({ FFMPEG_PATH: undefined });
+        expect(defaults.config.streaming.ffmpegPathOverride).toBeUndefined();
+        expect(defaults.config.streaming.traceEnabled).toBe(false);
 
-        expect(config.segmentedStreaming).toEqual({
-            dashBuildLockEnabled: true,
-            dashBuildLockPrefix: "segmented-streaming:dash-build-lock",
-            dashBuildLockTtlMsOverride: null,
-            localSegmentDurationSecOverride: null,
-            ffmpegPathOverride: undefined,
-            traceEnabled: false,
-            cache: {
-                basePathOverride: undefined,
-                maxGbOverride: null,
-                pruneIntervalMsOverride: null,
-                minAgeMsOverride: null,
-                pruneTargetRatioOverride: null,
-                schemaVersionOverride: undefined,
-            },
-        });
-    });
-
-    it("honors segmented streaming overrides", async () => {
-        const { config } = await loadConfigModule({
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED: "false",
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX: "dash-lock",
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: "12000",
-            SEGMENTED_LOCAL_SEG_DURATION_SEC: "4.5",
+        const overridden = await loadConfigModule({
             FFMPEG_PATH: " /usr/local/bin/ffmpeg ",
-            SEGMENTED_STREAMING_TRACE_LOGS: "yes",
-            SEGMENTED_STREAMING_CACHE_PATH: " /var/cache/segments ",
-            SEGMENTED_STREAMING_CACHE_MAX_GB: "25.5",
-            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: "60000",
-            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: "1500",
-            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: "0.8",
-            SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION: " v2 ",
         });
-
-        expect(config.segmentedStreaming).toEqual({
-            dashBuildLockEnabled: false,
-            dashBuildLockPrefix: "dash-lock",
-            dashBuildLockTtlMsOverride: 12000,
-            localSegmentDurationSecOverride: 4.5,
-            ffmpegPathOverride: "/usr/local/bin/ffmpeg",
-            traceEnabled: true,
-            cache: {
-                basePathOverride: "/var/cache/segments",
-                maxGbOverride: 25.5,
-                pruneIntervalMsOverride: 60000,
-                minAgeMsOverride: 1500,
-                pruneTargetRatioOverride: 0.8,
-                schemaVersionOverride: "v2",
-            },
-        });
+        expect(overridden.config.streaming.ffmpegPathOverride).toBe(
+            "/usr/local/bin/ffmpeg",
+        );
     });
 
     it.each(["1", "true", "yes", "on"])(
@@ -1170,34 +1114,18 @@ describe("config module", () => {
         async (value) => {
             const { config } = await loadConfigModule({
                 STREAMING_TRACE_LOGS: value,
-                SEGMENTED_STREAMING_TRACE_LOGS: undefined,
             });
-            expect(config.segmentedStreaming.traceEnabled).toBe(true);
+            expect(config.streaming.traceEnabled).toBe(true);
         },
     );
 
-    it("rejects non-positive segmented streaming numeric overrides", async () => {
+    it("does not enable tracing from the removed trace alias", async () => {
         const { config } = await loadConfigModule({
-            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: "0",
-            SEGMENTED_LOCAL_SEG_DURATION_SEC: "-1",
-            SEGMENTED_STREAMING_CACHE_MAX_GB: "0",
-            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: "-2",
-            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: "0",
-            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: "-0.1",
+            STREAMING_TRACE_LOGS: undefined,
+            SEGMENTED_STREAMING_TRACE_LOGS: "true",
         });
 
-        expect(config.segmentedStreaming.dashBuildLockTtlMsOverride).toBeNull();
-        expect(
-            config.segmentedStreaming.localSegmentDurationSecOverride,
-        ).toBeNull();
-        expect(config.segmentedStreaming.cache.maxGbOverride).toBeNull();
-        expect(
-            config.segmentedStreaming.cache.pruneIntervalMsOverride,
-        ).toBeNull();
-        expect(config.segmentedStreaming.cache.minAgeMsOverride).toBeNull();
-        expect(
-            config.segmentedStreaming.cache.pruneTargetRatioOverride,
-        ).toBeNull();
+        expect(config.streaming.traceEnabled).toBe(false);
     });
 
     it("requires both Audiobookshelf URL and API key", async () => {

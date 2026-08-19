@@ -10,29 +10,22 @@ import type {
     AudioEngineEventHandler,
     AudioEngineEventType,
     AudioEngineLoadOptions,
-    AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
 } from "@/lib/audio-engine/types";
 import { DEFAULT_AUDIO_VOLUME, clampAudioVolume } from "@/lib/audio-volume";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
-type EngineKind = "howler" | "videojs";
 type AnyAudioEventHandler = (payload: unknown) => void;
-interface PendingLazyLoad {
-    sequence: number;
-    autoplayOverride: boolean | null;
-}
 
 /** Which concrete engine occupies the direct-playback slot. */
 export type DirectEngineDescriptor = "howler" | "native";
 
 /**
  * The engine actually driving playback right now. Distinct from the
- * STREAMING_ENGINE_MODE flag: platform pins and per-source videojs
- * routing make "configured" diverge from "actual" (GH #42 soak
- * telemetry).
+ * STREAMING_ENGINE_MODE flag: platform pins (Android WebView → howler)
+ * make "configured" diverge from "actual" (GH #42 soak telemetry).
  */
-export type RuntimeEngineDescriptor = DirectEngineDescriptor | "videojs";
+export type RuntimeEngineDescriptor = DirectEngineDescriptor;
 
 const AUDIO_ENGINE_EVENTS: AudioEngineEventType[] = [
     "load",
@@ -47,22 +40,7 @@ const AUDIO_ENGINE_EVENTS: AudioEngineEventType[] = [
     "loaderror",
     "playerror",
     "error",
-    "vhsresponse",
 ];
-
-const isDashProtocol = (source: AudioEngineSource): boolean => {
-    if (source.protocol === "dash") {
-        return true;
-    }
-
-    const mimeType = source.mimeType?.trim().toLowerCase();
-    if (mimeType === "application/dash+xml") {
-        return true;
-    }
-
-    const normalizedUrl = source.url.trim().toLowerCase();
-    return normalizedUrl.endsWith(".mpd") || normalizedUrl.includes(".mpd?");
-};
 
 const resolveSource = (
     source: AudioEngineSource | string,
@@ -71,15 +49,6 @@ const resolveSource = (
         return { url: source };
     }
     return source;
-};
-
-// Lazy-load the Video.js segmented engine (and the ~500KB video.js
-// dependency) only when a DASH/segmented source is actually selected,
-// keeping video.js out of every page's initial bundle.
-const loadVideoJsSegmentedEngine = async (): Promise<AudioEngine> => {
-    const { VideoJsSegmentedEngine } =
-        await import("@/lib/audio-engine/videoJsSegmentedEngine");
-    return new VideoJsSegmentedEngine();
 };
 
 interface RuntimeAudioEngine extends AudioEngine {
@@ -98,12 +67,6 @@ interface RuntimeAudioEngine extends AudioEngine {
     ): void;
     preload(source: AudioEngineSource | string, format?: string): void;
     reload(): void;
-    refreshManifest(): void;
-    quarantineRepresentation(
-        representationId: string,
-        cooldownMs: number,
-    ): AudioEngineRepresentationFailoverResult | null;
-    clearRepresentationQuarantine(): void;
     getActualCurrentTime(): number;
     hasTrackEnded(): boolean;
     isCurrentlySeeking(): boolean;
@@ -113,28 +76,17 @@ interface RuntimeAudioEngine extends AudioEngine {
 
 interface HybridRuntimeAudioEngineOptions {
     howlerEngine?: AudioEngine;
-    createVideoJsEngine?: () => AudioEngine | Promise<AudioEngine>;
-    resolveMode?: () => ReturnType<typeof resolveStreamingEngineMode>;
     /** What the injected direct-slot engine actually is (default howler). */
     directEngineDescriptor?: DirectEngineDescriptor;
 }
 
 /**
- * Hybrid runtime engine:
- * - Uses the direct slot for byte streams (HowlerEngineAdapter by
- *   default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native)
- * - Uses Video.js for DASH manifests when segmented mode is active
+ * Runtime engine router: owns the direct-playback slot (HowlerEngineAdapter
+ * by default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native),
+ * forwards its events, and supports hot-swapping the slot engine.
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     private howlerEngine: AudioEngine;
-    private videoJsEngine: AudioEngine | null = null;
-    private videoJsEnginePromise: Promise<AudioEngine | null> | null = null;
-    private readonly createVideoJsEngine: () =>
-        | AudioEngine
-        | Promise<AudioEngine>;
-    private readonly resolveMode: () => ReturnType<
-        typeof resolveStreamingEngineMode
-    >;
     private readonly listeners = new Map<
         AudioEngineEventType,
         Set<AnyAudioEventHandler>
@@ -143,21 +95,9 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         AudioEngineEventType,
         AnyAudioEventHandler
     >();
-    private readonly videoJsForwarders = new Map<
-        AudioEngineEventType,
-        AnyAudioEventHandler
-    >();
-    private activeEngineKind: EngineKind = "howler";
     private directEngineDescriptor: DirectEngineDescriptor;
     private lastSource: AudioEngineSource | null = null;
     private lastLoadOptions: AudioEngineLoadOptions | null = null;
-    private loadSequence = 0;
-    // Tracks the load that is waiting on the lazy video.js chunk so
-    // play()/pause() during the download can redirect intent to it instead
-    // of acting on the stale active engine. Non-null only while the most
-    // recent load() is deferred; autoplayOverride wins over the original
-    // load options when set.
-    private pendingLazyLoad: PendingLazyLoad | null = null;
     private isDestroyed = false;
     private outputVolume = DEFAULT_AUDIO_VOLUME;
     private outputMuted = false;
@@ -166,10 +106,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         this.howlerEngine = options.howlerEngine ?? new HowlerEngineAdapter();
         this.directEngineDescriptor =
             options.directEngineDescriptor ?? "howler";
-        this.createVideoJsEngine =
-            options.createVideoJsEngine ?? loadVideoJsSegmentedEngine;
-        this.resolveMode = options.resolveMode ?? resolveStreamingEngineMode;
-        this.bindEngineEvents("howler", this.howlerEngine);
+        this.bindEngineEvents(this.howlerEngine);
         this.applyOutputState(this.howlerEngine);
     }
 
@@ -179,7 +116,6 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
      *
      * Safe to call while idle or during playback — volume/mute state is
      * re-applied and event forwarding is re-wired automatically.
-     * Only takes effect when the howler slot is the active engine.
      */
     upgradeHowlerEngine(
         engine: AudioEngine,
@@ -189,7 +125,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
             return;
         }
 
-        this.unbindEngineEvents("howler", this.howlerEngine);
+        this.unbindEngineEvents(this.howlerEngine);
 
         if (typeof this.howlerEngine.destroy === "function") {
             this.howlerEngine.destroy();
@@ -197,21 +133,17 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
         this.howlerEngine = engine;
         this.directEngineDescriptor = descriptor;
-        this.bindEngineEvents("howler", this.howlerEngine);
+        this.bindEngineEvents(this.howlerEngine);
         this.applyOutputState(this.howlerEngine);
     }
 
     /**
-     * Reports the engine actually driving playback right now — the
-     * direct-slot descriptor, or "videojs" while the segmented engine is
-     * active. Pairs with the STREAMING_ENGINE_MODE flag in telemetry so
-     * configured-vs-actual divergence (platform pins, per-source
-     * routing) is visible.
+     * Reports the engine actually driving playback right now. Pairs with
+     * the STREAMING_ENGINE_MODE flag in telemetry so configured-vs-actual
+     * divergence (platform pins) is visible.
      */
     getActiveEngineDescriptor(): RuntimeEngineDescriptor {
-        return this.activeEngineKind === "videojs"
-            ? "videojs"
-            : this.directEngineDescriptor;
+        return this.directEngineDescriptor;
     }
 
     load(
@@ -228,6 +160,9 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         optionsOrAutoplay: AudioEngineLoadOptions | boolean = {},
         format?: string,
     ): void {
+        if (this.isDestroyed) {
+            return;
+        }
         const normalizedSource = resolveSource(source);
         const normalizedOptions: AudioEngineLoadOptions =
             typeof optionsOrAutoplay === "boolean"
@@ -239,138 +174,47 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
         this.lastSource = normalizedSource;
         this.lastLoadOptions = normalizedOptions;
-        const sequence = ++this.loadSequence;
-        this.pendingLazyLoad = null;
 
-        const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
-        if (preferredKind === "videojs" && !this.videoJsEngine) {
-            // Halt in-progress playback immediately (mirroring the synchronous
-            // engine-switch path in loadWithEngine) so the previous track does
-            // not keep playing while the video.js chunk downloads.
-            const activeEngine = this.getActiveEngine();
-            if (activeEngine.isPlaying()) {
-                activeEngine.stop();
-            }
-            // Video.js engine is lazy-loaded; finish this load once it arrives
-            // unless a newer load superseded it in the meantime. play()/pause()
-            // in the interim adjust autoplay via pendingLazyLoad rather than
-            // cancelling the load (see those methods).
-            const pendingLazyLoad: PendingLazyLoad = {
-                sequence,
-                autoplayOverride: null,
-            };
-            this.pendingLazyLoad = pendingLazyLoad;
-            void this.ensureVideoJsEngine().then((videoJsEngine) => {
-                if (this.pendingLazyLoad === pendingLazyLoad) {
-                    this.pendingLazyLoad = null;
-                }
-                if (sequence !== this.loadSequence || this.isDestroyed) {
-                    return;
-                }
-                const effectiveOptions =
-                    pendingLazyLoad.autoplayOverride === null
-                        ? normalizedOptions
-                        : {
-                              ...normalizedOptions,
-                              autoplay: pendingLazyLoad.autoplayOverride,
-                          };
-                this.loadWithEngine(
-                    videoJsEngine ? "videojs" : "howler",
-                    videoJsEngine ?? this.howlerEngine,
-                    normalizedSource,
-                    effectiveOptions,
-                );
-            });
-            return;
-        }
-
-        const targetEngine = this.getEngineByKind(preferredKind);
-        const targetKind: EngineKind =
-            targetEngine === this.howlerEngine ? "howler" : "videojs";
-        this.loadWithEngine(
-            targetKind,
-            targetEngine,
-            normalizedSource,
-            normalizedOptions,
-        );
-    }
-
-    private loadWithEngine(
-        targetKind: EngineKind,
-        targetEngine: AudioEngine,
-        source: AudioEngineSource,
-        options: AudioEngineLoadOptions,
-    ): void {
-        if (this.activeEngineKind !== targetKind) {
-            this.getActiveEngine().stop();
-            this.activeEngineKind = targetKind;
-            this.applyOutputState(targetEngine);
-        }
-
-        targetEngine.load(source, options);
-        this.applyOutputState(targetEngine);
+        this.howlerEngine.load(normalizedSource, normalizedOptions);
+        this.applyOutputState(this.howlerEngine);
     }
 
     play(): void | Promise<void> {
-        const pendingLazyLoad = this.pendingLazyLoad;
-        if (pendingLazyLoad && pendingLazyLoad.sequence === this.loadSequence) {
-            // The queued track is still waiting on the lazy video.js chunk and
-            // the active engine only holds the previous (already halted)
-            // source; restarting it would play the wrong track from position 0.
-            // Record the play intent so the deferred load starts playback as
-            // soon as the engine arrives.
-            pendingLazyLoad.autoplayOverride = true;
-            return;
-        }
-        return this.getActiveEngine().play();
+        return this.howlerEngine.play();
     }
 
     pause(): void | Promise<void> {
-        const pendingLazyLoad = this.pendingLazyLoad;
-        if (pendingLazyLoad && pendingLazyLoad.sequence === this.loadSequence) {
-            // Keep the deferred lazy-engine load (see load()) so the queued
-            // track still becomes ready (and the orchestrator's load listeners
-            // fire), but suppress autoplay so playback cannot start against the
-            // user's intent once the chunk arrives.
-            pendingLazyLoad.autoplayOverride = false;
-        }
-        return this.getActiveEngine().pause();
+        return this.howlerEngine.pause();
     }
 
     stop(): void | Promise<void> {
-        // Invalidate any deferred lazy-engine load (see load()) so it cannot
-        // start playback after the transport was stopped. No cancellation
-        // event is needed: every stop() caller either re-issues load() or
-        // clears its own load bookkeeping synchronously.
-        this.loadSequence += 1;
-        this.pendingLazyLoad = null;
-        return this.getActiveEngine().stop();
+        return this.howlerEngine.stop();
     }
 
     seek(timeSec: number): void | Promise<void> {
-        return this.getActiveEngine().seek(timeSec);
+        return this.howlerEngine.seek(timeSec);
     }
 
     setVolume(value: number): void {
         this.outputVolume = clampAudioVolume(value);
-        this.getActiveEngine().setVolume(this.outputVolume);
+        this.howlerEngine.setVolume(this.outputVolume);
     }
 
     setMuted(value: boolean): void {
         this.outputMuted = Boolean(value);
-        this.getActiveEngine().setMuted(this.outputMuted);
+        this.howlerEngine.setMuted(this.outputMuted);
     }
 
     getCurrentTime(): number {
-        return this.getActiveEngine().getCurrentTime();
+        return this.howlerEngine.getCurrentTime();
     }
 
     getDuration(): number {
-        return this.getActiveEngine().getDuration();
+        return this.howlerEngine.getDuration();
     }
 
     isPlaying(): boolean {
-        return this.getActiveEngine().isPlaying();
+        return this.howlerEngine.isPlaying();
     }
 
     on<T extends AudioEngineEventType>(
@@ -414,31 +258,14 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
                 ? { format: optionsOrFormat }
                 : (optionsOrFormat ?? {});
 
-        const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
-        if (preferredKind === "videojs" && !this.videoJsEngine) {
-            void this.ensureVideoJsEngine().then((videoJsEngine) => {
-                if (
-                    !videoJsEngine ||
-                    this.isDestroyed ||
-                    typeof videoJsEngine.preload !== "function"
-                ) {
-                    return;
-                }
-                videoJsEngine.preload(normalizedSource, normalizedOptions);
-            });
-            return;
-        }
-
-        const targetEngine = this.getEngineByKind(preferredKind);
-        if (typeof targetEngine.preload === "function") {
-            targetEngine.preload(normalizedSource, normalizedOptions);
+        if (typeof this.howlerEngine.preload === "function") {
+            this.howlerEngine.preload(normalizedSource, normalizedOptions);
         }
     }
 
     reload(): void {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.reload === "function") {
-            activeEngine.reload();
+        if (typeof this.howlerEngine.reload === "function") {
+            this.howlerEngine.reload();
             return;
         }
 
@@ -449,62 +276,25 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         }
     }
 
-    refreshManifest(): void {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.refreshManifest === "function") {
-            activeEngine.refreshManifest();
-            return;
-        }
-
-        if (this.lastSource && isDashProtocol(this.lastSource)) {
-            this.reload();
-        }
-    }
-
-    quarantineRepresentation(
-        representationId: string,
-        cooldownMs: number,
-    ): AudioEngineRepresentationFailoverResult | null {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.quarantineRepresentation !== "function") {
-            return null;
-        }
-        return activeEngine.quarantineRepresentation(
-            representationId,
-            cooldownMs,
-        );
-    }
-
-    clearRepresentationQuarantine(): void {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.clearRepresentationQuarantine !== "function") {
-            return;
-        }
-        activeEngine.clearRepresentationQuarantine();
-    }
-
     getActualCurrentTime(): number {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.getActualCurrentTime === "function") {
-            return activeEngine.getActualCurrentTime();
+        if (typeof this.howlerEngine.getActualCurrentTime === "function") {
+            return this.howlerEngine.getActualCurrentTime();
         }
-        return activeEngine.getCurrentTime();
+        return this.howlerEngine.getCurrentTime();
     }
 
     hasTrackEnded(): boolean {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.hasTrackEnded === "function") {
-            return activeEngine.hasTrackEnded();
+        if (typeof this.howlerEngine.hasTrackEnded === "function") {
+            return this.howlerEngine.hasTrackEnded();
         }
-        const duration = activeEngine.getDuration();
-        const position = activeEngine.getCurrentTime();
+        const duration = this.howlerEngine.getDuration();
+        const position = this.howlerEngine.getCurrentTime();
         return duration > 0 && position >= duration - 0.1;
     }
 
     notifyTrackEnded(): void {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.notifyTrackEnded === "function") {
-            activeEngine.notifyTrackEnded();
+        if (typeof this.howlerEngine.notifyTrackEnded === "function") {
+            this.howlerEngine.notifyTrackEnded();
         } else {
             // Engine doesn't implement notifyTrackEnded — emit end directly
             // so foreground recovery can still advance tracks.
@@ -513,118 +303,34 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     }
 
     isCurrentlySeeking(): boolean {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.isCurrentlySeeking === "function") {
-            return activeEngine.isCurrentlySeeking();
+        if (typeof this.howlerEngine.isCurrentlySeeking === "function") {
+            return this.howlerEngine.isCurrentlySeeking();
         }
         return false;
     }
 
     getSeekTarget(): number | null {
-        const activeEngine = this.getActiveEngine();
-        if (typeof activeEngine.getSeekTarget === "function") {
-            return activeEngine.getSeekTarget();
+        if (typeof this.howlerEngine.getSeekTarget === "function") {
+            return this.howlerEngine.getSeekTarget();
         }
         return null;
     }
 
     destroy(): void {
         this.isDestroyed = true;
-        this.loadSequence += 1;
-        this.pendingLazyLoad = null;
-        this.videoJsEnginePromise = null;
-        this.unbindEngineEvents("howler", this.howlerEngine);
-        if (this.videoJsEngine) {
-            this.unbindEngineEvents("videojs", this.videoJsEngine);
-            if (typeof this.videoJsEngine.destroy === "function") {
-                this.videoJsEngine.destroy();
-            }
-            this.videoJsEngine = null;
-        }
+        this.unbindEngineEvents(this.howlerEngine);
         if (typeof this.howlerEngine.destroy === "function") {
             this.howlerEngine.destroy();
         }
         this.listeners.clear();
     }
 
-    private getActiveEngine(): AudioEngine {
-        return this.activeEngineKind === "videojs"
-            ? this.getEngineByKind("videojs")
-            : this.howlerEngine;
-    }
-
-    private resolvePreferredEngineKind(source: AudioEngineSource): EngineKind {
-        const mode = this.resolveMode();
-        if (mode === "howler") {
-            return "howler";
-        }
-
-        if (mode === "videojs") {
-            return isDashProtocol(source) ? "videojs" : "howler";
-        }
-
-        // "native" (and any future direct mode) routes through the direct
-        // slot; createRuntimeAudioEngine seeds that slot with the selected
-        // engine (NativeAudioElementEngine when STREAMING_ENGINE_MODE=native).
-        return "howler";
-    }
-
-    private getEngineByKind(kind: EngineKind): AudioEngine {
-        if (kind === "howler") {
-            return this.howlerEngine;
-        }
-
-        return this.videoJsEngine ?? this.howlerEngine;
-    }
-
-    private ensureVideoJsEngine(): Promise<AudioEngine | null> {
-        if (this.videoJsEngine) {
-            return Promise.resolve(this.videoJsEngine);
-        }
-
-        if (!this.videoJsEnginePromise) {
-            this.videoJsEnginePromise = Promise.resolve()
-                .then(() => this.createVideoJsEngine())
-                .then((engine) => {
-                    if (this.isDestroyed) {
-                        if (typeof engine.destroy === "function") {
-                            engine.destroy();
-                        }
-                        return null;
-                    }
-                    this.videoJsEngine = engine;
-                    this.bindEngineEvents("videojs", engine);
-                    this.applyOutputState(engine);
-                    return engine;
-                })
-                .catch((error) => {
-                    sharedFrontendLogger.error(
-                        "[AudioEngine] Failed to initialize Video.js segmented engine; continuing with primary Howler engine.",
-                        error,
-                    );
-                    this.videoJsEnginePromise = null;
-                    return null;
-                });
-        }
-
-        return this.videoJsEnginePromise;
-    }
-
-    private bindEngineEvents(kind: EngineKind, engine: AudioEngine): void {
+    private bindEngineEvents(engine: AudioEngine): void {
         AUDIO_ENGINE_EVENTS.forEach((event) => {
             const forwarder = ((payload: unknown) => {
-                if (this.activeEngineKind !== kind) {
-                    return;
-                }
                 this.emit(event, payload);
             }) as AnyAudioEventHandler;
-
-            if (kind === "howler") {
-                this.howlerForwarders.set(event, forwarder);
-            } else {
-                this.videoJsForwarders.set(event, forwarder);
-            }
-
+            this.howlerForwarders.set(event, forwarder);
             engine.on(
                 event,
                 forwarder as AudioEngineEventHandler<typeof event>,
@@ -632,16 +338,14 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         });
     }
 
-    private unbindEngineEvents(kind: EngineKind, engine: AudioEngine): void {
-        const forwarders =
-            kind === "howler" ? this.howlerForwarders : this.videoJsForwarders;
-        forwarders.forEach((forwarder, event) => {
+    private unbindEngineEvents(engine: AudioEngine): void {
+        this.howlerForwarders.forEach((forwarder, event) => {
             engine.off(
                 event,
                 forwarder as AudioEngineEventHandler<typeof event>,
             );
         });
-        forwarders.clear();
+        this.howlerForwarders.clear();
     }
 
     private emit(event: AudioEngineEventType, payload: unknown): void {

@@ -495,7 +495,6 @@ export class HowlerEngineAdapter implements AudioEngine {
                     ],
                 };
             case "buffering":
-            case "vhsresponse":
                 return null;
             default:
                 return null;

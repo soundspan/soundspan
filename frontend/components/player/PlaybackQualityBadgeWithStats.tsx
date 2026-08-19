@@ -212,7 +212,7 @@ export function PlaybackQualityBadgeWithStats({
     ) {
         rows.push({
             label: "Delivery",
-            value: streamProfile.mode === "direct" ? "Direct" : "DASH",
+            value: "Direct",
         });
     }
 

@@ -14,11 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 - `DISCOVERY_MODE=legacy` is deprecated, no longer receives fixes, and will be removed in a future release; unset `DISCOVERY_MODE` to migrate.
-- `STREAMING_ENGINE_MODE=videojs` (segmented/DASH streaming) is deprecated, no longer receives fixes, and will be removed in a future release; unset `STREAMING_ENGINE_MODE` to migrate to the default native engine.
 
 ### Removed
 
 - The Tauri desktop integration: the `tauri-native` engine mode, the desktop auto-upgrade path, and the `@tauri-apps/*` dependencies. The discontinued desktop app never lived in this repository, and the integration was dead code in every shipping deployment; playback continues on the standard web engines.
+- Segmented/DASH streaming: the Video.js engine, the `/api/streaming/v1` session surface, the session/segment/cache services, and the `SEGMENTED_*` and `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` runtime settings. Removed settings are ignored; `STREAMING_ENGINE_MODE=videojs` is invalid and falls back to the default native engine.
+- The `soundspan_transcode_cache_requests_total` metric, which was only emitted by the removed segmented-streaming service.
 
 ## [2.3.3] - 2026-08-18
 

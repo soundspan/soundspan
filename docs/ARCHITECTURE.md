@@ -87,7 +87,7 @@ The frontend's custom server (`frontend/server.js` + `frontend/server-proxy.js`)
 Browser → GET /api/library/tracks/:id/stream → backend reads file from /music → audio stream response
 ```
 
-Local files are served directly from the mounted `/music` volume. Transcoded variants are cached in `backend_cache` volume. The separate `/api/streaming` router is the experimental segmented/DASH playback path (see [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)) and is not used for standard local playback.
+Local files are served directly from the mounted `/music` volume. Transcoded variants are cached in `backend_cache` volume. The `/api/streaming` router carries authenticated playback client metrics; it does not serve audio.
 
 ### Gap-Fill Playback (TIDAL)
 

@@ -6,7 +6,7 @@ const playbackMetricLogger = logger.child("Playback.Metric");
 const playbackTraceLogger = logger.child("Playback.Trace");
 
 /** Whether playback trace logs were enabled when this module loaded. */
-export const playbackTraceEnabled = config.segmentedStreaming.traceEnabled;
+export const playbackTraceEnabled = config.streaming.traceEnabled;
 
 /** Return the non-negative elapsed time for a playback trace operation. */
 export const playbackTraceDurationMs = (startedAtMs: number): number =>

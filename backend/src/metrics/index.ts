@@ -62,11 +62,6 @@ const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
 /** Express middleware recording bounded HTTP request duration labels. */
 export const httpMetricsMiddleware = httpMetrics.middleware;
 
-/** Records one segmented transcode cache lookup. */
-export function recordTranscodeCacheResult(result: "hit" | "miss"): void {
-    domainMetrics.transcodeCacheRequests.inc({ result });
-}
-
 /** Records one browse-image cache lookup. */
 export function recordBrowseImageCacheResult(result: "hit" | "miss"): void {
     domainMetrics.browseImageCacheRequests.inc({ result });

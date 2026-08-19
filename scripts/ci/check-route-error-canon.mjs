@@ -48,7 +48,6 @@ const BASELINE = Object.freeze({
     "backend/src/routes/shareLinks.ts": 6,
     "backend/src/routes/social.ts": 3,
     "backend/src/routes/soulseek.ts": 6,
-    "backend/src/routes/streaming.ts": 3,
     "backend/src/routes/system.ts": 2,
     "backend/src/routes/systemSettings.ts": 12,
     "backend/src/routes/tidalStreaming.ts": 10,
@@ -85,9 +84,6 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/settings.ts": 1,
     // soulseek.ts at zero for the property-value pattern; the admin-gated direct-download 404 still forwards result.error as the sendRouteError message (admin-only surface, slice-J follow-up).
     "backend/src/routes/soulseek.ts": 0,
-    // streaming.ts remaining 7: forwards typed SegmentedSessionError messages that are static code-owned text; segmented build-failure detail is logged server-side in sessionService.
-    // streaming.ts +1: segmented route trace normalization's ternary-consequent error.message (~L518); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/routes/streaming.ts": 8,
     // subsonic/mediaRetrieval.ts +1: cover-fetch failure classification's ternary-consequent error.message; frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/routes/subsonic/mediaRetrieval.ts": 1,
     // youtube.ts remaining 4: yt-dlp sidecar err.response?.data?.detail echoed in error responses (L68, L126, L335, L341); known backlog item, frozen under the slice-J scope guard.
@@ -140,8 +136,6 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/remoteTrackBackfillService.ts": 2,
     // rssParser.ts +1: feed-failure result's ternary-consequent error.message (~L252); frozen under the ratchet-widening (slice-X1) scope guard.
     "backend/src/services/rssParser.ts": 1,
-    // segmented-streaming/trace.ts +1: internal trace normalization's ternary-consequent error.message (~L33); frozen under the ratchet-widening (slice-X1) scope guard.
-    "backend/src/services/segmented-streaming/trace.ts": 1,
     // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
     "backend/src/services/simpleDownloadManager.ts": 4,
     // soulseek.ts remaining 9: download-result error objects and downstream aggregations/passthroughs in Soulseek orchestration; the session log is client-visible and its raw error/path entries are sanitized rather than frozen.

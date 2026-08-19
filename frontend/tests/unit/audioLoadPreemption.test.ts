@@ -76,11 +76,10 @@ test("treats empty-string ids as present values for change detection", () => {
     );
 });
 
-test("only allows persisted resume on initial non-segmented track load", () => {
+test("only allows persisted resume on the initial track load", () => {
     assert.equal(
         shouldAllowInitialPersistedTrackResume({
             isInitialTrackLoad: true,
-            segmentedStartupEligible: false,
             listenTogetherActiveOrPending: false,
         }),
         true,
@@ -88,7 +87,6 @@ test("only allows persisted resume on initial non-segmented track load", () => {
     assert.equal(
         shouldAllowInitialPersistedTrackResume({
             isInitialTrackLoad: false,
-            segmentedStartupEligible: false,
             listenTogetherActiveOrPending: false,
         }),
         false,
@@ -96,15 +94,6 @@ test("only allows persisted resume on initial non-segmented track load", () => {
     assert.equal(
         shouldAllowInitialPersistedTrackResume({
             isInitialTrackLoad: true,
-            segmentedStartupEligible: true,
-            listenTogetherActiveOrPending: false,
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAllowInitialPersistedTrackResume({
-            isInitialTrackLoad: true,
-            segmentedStartupEligible: false,
             listenTogetherActiveOrPending: true,
         }),
         false,

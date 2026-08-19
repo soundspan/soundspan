@@ -38,7 +38,7 @@ export async function computeAudioStreamHash(
     }
 
     const ffmpegBinary = resolveFfmpegBinaryPath(
-        config.segmentedStreaming.ffmpegPathOverride,
+        config.streaming.ffmpegPathOverride,
     );
     const args = [
         "-hide_banner",

@@ -1,22 +1,16 @@
 import { useRef } from "react";
-import type { SegmentedStreamingSessionResponse } from "@/lib/api";
 import type { Track } from "@/lib/audio-state-context";
 import { HeartbeatMonitor } from "@/lib/audio";
 import { createConsecutiveErrorBreaker } from "@/lib/audio-engine/consecutiveErrorBreaker";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import { TRACK_END_WATCHDOG_TIMEOUT_MS } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
-import { createEmptySegmentedStartupRecoveryStageAttempts } from "../audioPlaybackOrchestratorPolicy";
 import {
     createTrackEndWatchdog,
     type TrackEndWatchdog,
 } from "../trackEndWatchdog";
 import type {
-    ActiveSegmentedSessionSnapshot,
     DesiredLoadPlayIntent,
     OrchestratorEngineEventHandlers,
-    SegmentedHandoffListenerRegistration,
-    SegmentedStartupTimelineSnapshot,
-    StartupSegmentedSessionSnapshot,
 } from "./audioPlaybackOrchestratorTypes";
 
 interface UsePlaybackOrchestratorRefsOptions {
@@ -64,9 +58,6 @@ export function usePlaybackOrchestratorRefs({
     const seekCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const cacheStatusPollingRef = useRef<NodeJS.Timeout | null>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const segmentedStartupFallbackTimeoutRef = useRef<NodeJS.Timeout | null>(
-        null,
-    );
     const loadTimeoutRetryCountRef = useRef<number>(0);
     const seekReloadListenerRef = useRef<(() => void) | null>(null);
     const seekReloadInProgressRef = useRef<boolean>(false);
@@ -83,25 +74,6 @@ export function usePlaybackOrchestratorRefs({
     const pendingSeekTimeRef = useRef<number | null>(null);
     // Preload management
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
-    const prewarmedSegmentedSessionRef = useRef<
-        Map<string, SegmentedStreamingSessionResponse>
-    >(new Map());
-    const segmentedPrewarmInFlightRef = useRef<Set<string>>(new Set());
-    const segmentedPrewarmRetryTimeoutsRef = useRef<
-        Map<string, NodeJS.Timeout>
-    >(new Map());
-    const segmentedPrewarmValidationInFlightRef = useRef<Set<string>>(
-        new Set(),
-    );
-    const segmentedPrewarmValidationAbortControllersRef = useRef<
-        Map<string, AbortController>
-    >(new Map());
-    const segmentedPrewarmValidationSessionByKeyRef = useRef<
-        Map<string, string>
-    >(new Map());
-    const segmentedPrewarmValidatedSessionIdsRef = useRef<Set<string>>(
-        new Set(),
-    );
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const trackErrorAdvanceFromTrackIdRef = useRef<string | null>(null);
@@ -133,7 +105,6 @@ export function usePlaybackOrchestratorRefs({
     );
     // eslint-disable-next-line react-hooks/purity -- Preserve the relocated timestamp ref initialization.
     const lastTrackTimeUpdateAtMsRef = useRef<number>(Date.now());
-    const segmentedManifestNudgeTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
     const transientTrackRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(
         null,
     );
@@ -149,97 +120,6 @@ export function usePlaybackOrchestratorRefs({
     // YouTube Music: prefer authenticated stream when user has OAuth,
     // fall back to public stream otherwise.
     const ytMusicAuthenticatedRef = useRef<boolean>(false);
-    const activeSegmentedSessionRef =
-        useRef<ActiveSegmentedSessionSnapshot | null>(null);
-    const activeSegmentedPlaybackTrackIdRef = useRef<string | null>(null);
-    const segmentedHandoffInProgressRef = useRef<boolean>(false);
-    const segmentedHandoffAttemptRef = useRef<number>(0);
-    const segmentedHandoffLastAttemptAtRef = useRef<number>(0);
-    const segmentedSessionCreateFallbackAttemptRef = useRef<number>(0);
-    const segmentedSessionCreateFallbackLastAttemptAtRef = useRef<number>(0);
-    const segmentedChunkQuarantineRef = useRef<Map<string, number>>(new Map());
-    const segmentedChunkQuarantineLastRecoveryAtRef = useRef<number>(0);
-    const segmentedLastFailedChunkRef = useRef<{
-        trackId: string | null;
-        sessionId: string | null;
-        chunkName: string | null;
-        statusCode: number | null;
-        observedAtMs: number;
-    }>({
-        trackId: null,
-        sessionId: null,
-        chunkName: null,
-        statusCode: null,
-        observedAtMs: 0,
-    });
-    const segmentedHandoffCircuitRef = useRef<{
-        trackId: string | null;
-        windowStartedAtMs: number;
-        attempts: number;
-    }>({
-        trackId: null,
-        windowStartedAtMs: 0,
-        attempts: 0,
-    });
-    const segmentedHandoffLastRecoveryRef = useRef<{
-        trackId: string | null;
-        resumeAtSec: number;
-        recoveredAtMs: number;
-    }>({
-        trackId: null,
-        resumeAtSec: 0,
-        recoveredAtMs: 0,
-    });
-    const segmentedProactiveHandoffAttemptedTrackIdRef = useRef<string | null>(
-        null,
-    );
-    const segmentedProactiveHandoffAttemptCountRef = useRef<number>(0);
-    const segmentedProactiveHandoffLastAttemptAtRef = useRef<number>(0);
-    const segmentedProactiveHandoffCompletedTrackIdRef = useRef<string | null>(
-        null,
-    );
-    const segmentedProactiveHandoffLastSkipKeyRef = useRef<string | null>(null);
-    const startupSegmentedSessionRef =
-        useRef<StartupSegmentedSessionSnapshot | null>(null);
-    const startupSegmentedSessionInFlightRef = useRef<Set<string>>(new Set());
-    const startupSegmentedSessionPromisesRef = useRef<
-        Map<string, Promise<SegmentedStreamingSessionResponse | null>>
-    >(new Map());
-    const segmentedStartupRetryCountRef = useRef<number>(0);
-    const segmentedStartupStageAttemptsRef = useRef(
-        createEmptySegmentedStartupRecoveryStageAttempts(),
-    );
-    const segmentedStartupRecoveryWindowStartedAtMsRef = useRef<number | null>(
-        null,
-    );
-    const segmentedStartupSessionResetCountRef = useRef<number>(0);
-    const segmentedStartupTimelineRef =
-        useRef<SegmentedStartupTimelineSnapshot | null>(null);
-    const segmentedStartupStabilityRef = useRef<{
-        trackId: string | null;
-        firstProgressAtMs: number | null;
-        lastObservedProgressSec: number;
-    }>({
-        trackId: null,
-        firstProgressAtMs: null,
-        lastObservedProgressSec: 0,
-    });
-    const segmentedUnexpectedStopStartupGuardRef = useRef<{
-        trackId: string | null;
-        suppressUntilMs: number;
-        reason: string | null;
-    }>({
-        trackId: null,
-        suppressUntilMs: 0,
-        reason: null,
-    });
-    const segmentedColdStartRebufferDeferralRef = useRef<{
-        trackId: string | null;
-        count: number;
-    }>({
-        trackId: null,
-        count: 0,
-    });
     const lastHandledTrackEndRef = useRef<{
         trackId: string | null;
         loadId: number;
@@ -283,9 +163,6 @@ export function usePlaybackOrchestratorRefs({
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
-    const segmentedHeartbeatConsecutiveFailureCountRef = useRef<number>(0);
-    const segmentedHeartbeatLastGuardedRefreshAtMsRef = useRef<number>(0);
-    const segmentedHeartbeatSessionIdRef = useRef<string | null>(null);
     const listenTogetherFollowerRecoveryRef = useRef<{
         groupId: string | null;
         inFlight: boolean;
@@ -295,14 +172,6 @@ export function usePlaybackOrchestratorRefs({
         inFlight: false,
         lastRequestedAtMs: 0,
     });
-    const segmentedHandoffListenerCleanupRef = useRef<(() => void) | null>(
-        null,
-    );
-    const segmentedHandoffListenerTimeoutRef = useRef<NodeJS.Timeout | null>(
-        null,
-    );
-    const segmentedHandoffListenerContextRef =
-        useRef<SegmentedHandoffListenerRegistration | null>(null);
 
     return {
         lastTrackIdRef,
@@ -322,7 +191,6 @@ export function usePlaybackOrchestratorRefs({
         seekCheckTimeoutRef,
         cacheStatusPollingRef,
         loadTimeoutRef,
-        segmentedStartupFallbackTimeoutRef,
         loadTimeoutRetryCountRef,
         seekReloadListenerRef,
         seekReloadInProgressRef,
@@ -334,13 +202,6 @@ export function usePlaybackOrchestratorRefs({
         seekDebounceRef,
         pendingSeekTimeRef,
         lastPreloadedTrackIdRef,
-        prewarmedSegmentedSessionRef,
-        segmentedPrewarmInFlightRef,
-        segmentedPrewarmRetryTimeoutsRef,
-        segmentedPrewarmValidationInFlightRef,
-        segmentedPrewarmValidationAbortControllersRef,
-        segmentedPrewarmValidationSessionByKeyRef,
-        segmentedPrewarmValidatedSessionIdsRef,
         pendingTrackErrorSkipRef,
         pendingTrackErrorTrackIdRef,
         trackErrorAdvanceFromTrackIdRef,
@@ -361,7 +222,6 @@ export function usePlaybackOrchestratorRefs({
         startupRecoveryAttemptedTrackIdRef,
         unexpectedPauseRecoveryTimeoutRef,
         lastTrackTimeUpdateAtMsRef,
-        segmentedManifestNudgeTimeoutsRef,
         transientTrackRecoveryTimeoutRef,
         transientTrackRecoveryLoadListenerRef,
         transientTrackRecoveryTrackIdRef,
@@ -371,45 +231,11 @@ export function usePlaybackOrchestratorRefs({
         autoMatchVibeTrackIdRef,
         autoMatchVibeLastAttemptAtRef,
         ytMusicAuthenticatedRef,
-        activeSegmentedSessionRef,
-        activeSegmentedPlaybackTrackIdRef,
-        segmentedHandoffInProgressRef,
-        segmentedHandoffAttemptRef,
-        segmentedHandoffLastAttemptAtRef,
-        segmentedSessionCreateFallbackAttemptRef,
-        segmentedSessionCreateFallbackLastAttemptAtRef,
-        segmentedChunkQuarantineRef,
-        segmentedChunkQuarantineLastRecoveryAtRef,
-        segmentedLastFailedChunkRef,
-        segmentedHandoffCircuitRef,
-        segmentedHandoffLastRecoveryRef,
-        segmentedProactiveHandoffAttemptedTrackIdRef,
-        segmentedProactiveHandoffAttemptCountRef,
-        segmentedProactiveHandoffLastAttemptAtRef,
-        segmentedProactiveHandoffCompletedTrackIdRef,
-        segmentedProactiveHandoffLastSkipKeyRef,
-        startupSegmentedSessionRef,
-        startupSegmentedSessionInFlightRef,
-        startupSegmentedSessionPromisesRef,
-        segmentedStartupRetryCountRef,
-        segmentedStartupStageAttemptsRef,
-        segmentedStartupRecoveryWindowStartedAtMsRef,
-        segmentedStartupSessionResetCountRef,
-        segmentedStartupTimelineRef,
-        segmentedStartupStabilityRef,
-        segmentedUnexpectedStopStartupGuardRef,
-        segmentedColdStartRebufferDeferralRef,
         lastHandledTrackEndRef,
         trackEndWatchdogRef,
         howlerLoadStartMsRef,
         heartbeatRef,
-        segmentedHeartbeatConsecutiveFailureCountRef,
-        segmentedHeartbeatLastGuardedRefreshAtMsRef,
-        segmentedHeartbeatSessionIdRef,
         listenTogetherFollowerRecoveryRef,
-        segmentedHandoffListenerCleanupRef,
-        segmentedHandoffListenerTimeoutRef,
-        segmentedHandoffListenerContextRef,
     };
 }
 

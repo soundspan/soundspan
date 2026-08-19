@@ -693,11 +693,8 @@ ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
 case "$ENGINE_MODE" in
     ""|"howler"|"native")
         ;;
-    "videojs")
-        echo "WARN: Segmented/DASH streaming (STREAMING_ENGINE_MODE=videojs) is deprecated, no longer receives fixes, and will be removed in a future release; unset STREAMING_ENGINE_MODE to migrate to the default native engine."
-        ;;
     *)
-        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected native|howler|videojs. Using primary default (native)."
+        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected native|howler. Using primary default (native)."
         ENGINE_MODE=""
         ;;
 esac

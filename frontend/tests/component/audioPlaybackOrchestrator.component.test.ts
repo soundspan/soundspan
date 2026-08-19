@@ -36,27 +36,6 @@ type Audiobook = {
     progress?: { currentTime?: number };
 };
 
-type SegmentedSession = {
-    sessionId: string;
-    sessionToken: string;
-    manifestUrl: string;
-    expiresAt: string;
-    playbackProfile?: {
-        sourceType?: "local" | "tidal" | "ytmusic";
-        codec?: string;
-        bitrateKbps?: number;
-    };
-    engineHints?: {
-        sourceType?: "local" | "tidal" | "ytmusic";
-        assetBuildInFlight?: boolean;
-    };
-};
-
-type HandoffSession = SegmentedSession & {
-    resumeAtSec?: number;
-    shouldPlay?: boolean;
-};
-
 class FakeAudioEngine {
     public readonly loadCalls: Array<{ args: unknown[] }> = [];
     public readonly onCalls: Array<{ event: string }> = [];
@@ -175,19 +154,11 @@ class FakeAudioEngine {
     }
 
     // Mirrors HybridRuntimeAudioEngine.getActiveEngineDescriptor() (GH #42
-    // native-engine soak): reports "videojs" while the segmented engine is
-    // active, else the direct-slot descriptor. This fake has one slot, so it
-    // keys off the same runtimeEngineMode the engineMode mock uses.
-    getActiveEngineDescriptor(): "howler" | "native" | "videojs" {
-        if (runtimeEngineMode === "videojs") return "videojs";
+    // native-engine soak): this fake has one slot, so it keys off the same
+    // runtimeEngineMode the engineMode mock uses.
+    getActiveEngineDescriptor(): "howler" | "native" {
         return runtimeEngineMode === "native" ? "native" : "howler";
     }
-
-    quarantineRepresentation(): null {
-        return null;
-    }
-
-    clearRepresentationQuarantine(): void {}
 
     on(event: string, handler: (payload?: unknown) => void): void {
         let listeners = this.handlers.get(event);
@@ -443,23 +414,6 @@ const controlCalls = {
 
 const apiCalls = {
     getStreamUrl: [] as string[],
-    createSegmentedStreamingSession: [] as Array<Record<string, unknown>>,
-    fetchSegmentedStreamingManifest: [] as Array<{
-        manifestUrl: string;
-        sessionToken: string;
-        signal: AbortSignal;
-    }>,
-    fetchSegmentedStreamingSegment: [] as Array<{
-        sessionId: string;
-        sessionToken: string;
-        segmentName: string;
-        signal: AbortSignal;
-    }>,
-    handoffSegmentedStreamingSession: [] as Array<{
-        sessionId: string;
-        sessionToken: string;
-        payload: Record<string, unknown>;
-    }>,
     getPodcastEpisodeCacheStatus: [] as Array<{
         podcastId: string;
         episodeId: string;
@@ -484,7 +438,7 @@ const toastErrors: string[] = [];
 const listenTogetherResyncCalls: string[] = [];
 const migratingStorageItems = new Map<string, string>();
 
-let runtimeEngineMode: "howler" | "native" | "videojs" = "howler";
+let runtimeEngineMode: "howler" | "native" = "howler";
 let listenTogetherSnapshot: {
     groupId?: string;
     isHost?: boolean;
@@ -495,24 +449,7 @@ let podcastCacheStatus = {
     downloadProgress: null as number | null,
 };
 let seekToleranceOverride: boolean | null = null;
-let segmentedStartupRetryDelayOverride: number | null = null;
 let mirrorMachineIntentToPlaybackState = false;
-let segmentedManifestFetchOverride:
-    | ((
-          manifestUrl: string,
-          sessionToken: string,
-          signal: AbortSignal,
-      ) => Promise<Response>)
-    | null = null;
-const segmentedStartupRetryDelayInputs: Array<{
-    retryTimeoutMs: number;
-    sourceKind: "segmented" | "direct";
-    requestLoadId: number;
-    activeLoadId: number;
-}> = [];
-
-const segmentedSessionQueue: Array<SegmentedSession | Error> = [];
-const handoffSessionQueue: Array<HandoffSession | Error> = [];
 const loggerCalls = {
     info: [] as Array<unknown[]>,
     warn: [] as Array<unknown[]>,
@@ -556,26 +493,6 @@ const makeTrack = (id: string, overrides: Partial<Track> = {}): Track => ({
     duration: 210,
     filePath: `${id}.mp3`,
     streamSource: "local",
-    ...overrides,
-});
-
-const makeSegmentedSession = (
-    sessionId: string,
-    overrides: Partial<SegmentedSession> = {},
-): SegmentedSession => ({
-    sessionId,
-    sessionToken: `${sessionId}-token`,
-    manifestUrl: `https://stream.test/${sessionId}/manifest.mpd`,
-    expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
-    playbackProfile: {
-        sourceType: "local",
-        codec: "aac",
-        bitrateKbps: 320,
-    },
-    engineHints: {
-        sourceType: "local",
-        assetBuildInFlight: false,
-    },
     ...overrides,
 });
 
@@ -630,12 +547,7 @@ const resetHarnessState = (): void => {
         downloadProgress: null,
     };
     seekToleranceOverride = null;
-    segmentedStartupRetryDelayOverride = null;
     mirrorMachineIntentToPlaybackState = false;
-    segmentedManifestFetchOverride = null;
-    segmentedStartupRetryDelayInputs.length = 0;
-    segmentedSessionQueue.length = 0;
-    handoffSessionQueue.length = 0;
     loggerCalls.info.length = 0;
     loggerCalls.warn.length = 0;
     loggerCalls.error.length = 0;
@@ -857,12 +769,8 @@ mock.module("@/lib/audio-load-preemption", {
     exports: {
         shouldAllowInitialPersistedTrackResume: (input: {
             isInitialTrackLoad: boolean;
-            segmentedStartupEligible: boolean;
             listenTogetherActiveOrPending: boolean;
-        }) =>
-            input.isInitialTrackLoad &&
-            !input.segmentedStartupEligible &&
-            !input.listenTogetherActiveOrPending,
+        }) => input.isInitialTrackLoad && !input.listenTogetherActiveOrPending,
         shouldPreemptInFlightAudioLoad: (input: {
             currentMediaId: string | null;
             previousMediaId: string | null;
@@ -910,98 +818,6 @@ mock.module("@/lib/api", {
                     downloadProgress: podcastCacheStatus.downloadProgress,
                 };
             },
-            createSegmentedStreamingSession: async (
-                request: Record<string, unknown>,
-            ) => {
-                apiCalls.createSegmentedStreamingSession.push(request);
-                const next = segmentedSessionQueue.shift();
-                if (next instanceof Error) throw next;
-                return next ?? makeSegmentedSession("default-segmented");
-            },
-            fetchSegmentedStreamingManifest: async (
-                manifestUrl: string,
-                sessionToken: string,
-                signal: AbortSignal,
-            ) => {
-                apiCalls.fetchSegmentedStreamingManifest.push({
-                    manifestUrl,
-                    sessionToken,
-                    signal,
-                });
-                if (segmentedManifestFetchOverride) {
-                    return segmentedManifestFetchOverride(
-                        manifestUrl,
-                        sessionToken,
-                        signal,
-                    );
-                }
-                return new Response("<MPD />", { status: 200 });
-            },
-            fetchSegmentedStreamingSegment: async (
-                sessionId: string,
-                sessionToken: string,
-                segmentName: string,
-                signal: AbortSignal,
-            ) => {
-                apiCalls.fetchSegmentedStreamingSegment.push({
-                    sessionId,
-                    sessionToken,
-                    segmentName,
-                    signal,
-                });
-                return new Response(null, { status: 204 });
-            },
-            handoffSegmentedStreamingSession: async (
-                sessionId: string,
-                sessionToken: string,
-                payload: Record<string, unknown>,
-            ) => {
-                apiCalls.handoffSegmentedStreamingSession.push({
-                    sessionId,
-                    sessionToken,
-                    payload,
-                });
-                const next = handoffSessionQueue.shift();
-                if (next instanceof Error) throw next;
-                const resolved =
-                    next ?? makeSegmentedSession("default-handoff");
-                const resolvedAny = resolved as Record<string, unknown>;
-                return {
-                    ...resolved,
-                    resumeAtSec:
-                        typeof resolvedAny.resumeAtSec === "number"
-                            ? resolvedAny.resumeAtSec
-                            : 0,
-                    shouldPlay:
-                        typeof resolvedAny.shouldPlay === "boolean"
-                            ? resolvedAny.shouldPlay
-                            : false,
-                };
-            },
-            heartbeatSegmentedStreamingSession: async (
-                sessionId: string,
-                sessionToken: string,
-            ) => ({
-                sessionId,
-                sessionToken,
-                expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
-            }),
-            updateAudiobookProgress: async () => undefined,
-            updatePodcastProgress: async (
-                podcastId: string,
-                episodeId: string,
-                positionSec: number,
-                durationSec: number,
-                isFinished: boolean,
-            ) => {
-                apiCalls.updatePodcastProgress.push({
-                    podcastId,
-                    episodeId,
-                    positionSec,
-                    durationSec,
-                    isFinished,
-                });
-            },
             getStreamingAuthToken: () => "test-auth-token",
             reportPlaybackClientMetric: async (
                 payload: Record<string, unknown>,
@@ -1020,7 +836,6 @@ mock.module("@/lib/api", {
 mock.module("@/lib/audio-engine/engineMode", {
     exports: {
         resolveStreamingEngineMode: () => runtimeEngineMode,
-        isSegmentedModeEnabled: () => runtimeEngineMode === "videojs",
     },
 });
 
@@ -1044,21 +859,10 @@ mock.module("@/lib/audio-engine/recoveryPolicy", {
     },
 });
 
-mock.module("@/lib/audio-engine/segmentedStartupPolicy", {
-    exports: {
-        resolveSegmentedPrewarmMaxRetries: () => 0,
-    },
-});
-
-mock.module("@/lib/audio-engine/segmentedPlaybackRegressionPolicy", {
+mock.module("@/lib/audio-engine/playbackRecoveryPolicy", {
     exports: {
         isSeekWithinTolerance: (_actual: number, _target: number) =>
             seekToleranceOverride ?? true,
-        resolveHeartbeatGuardedRefreshDecision: () => ({
-            shouldTriggerRefresh: false,
-            reason: "below_threshold",
-            remainingCooldownMs: 0,
-        }),
         resolveCorrelatedRecoveryResumeDecision: (input: {
             requestedResumeAtSec: number;
         }) => ({
@@ -1069,46 +873,11 @@ mock.module("@/lib/audio-engine/segmentedPlaybackRegressionPolicy", {
         resolveStartupGuardedRecoveryPositionSec: (input: {
             trustedPositionSec: number;
         }) => input.trustedPositionSec,
-        resolveSegmentedStartupRetryDelayMs: (input: {
-            sourceKind: "segmented" | "direct";
-            requestLoadId: number;
-            activeLoadId: number;
-            retryTimeoutMs: number;
-        }) => {
-            segmentedStartupRetryDelayInputs.push({
-                sourceKind: input.sourceKind,
-                requestLoadId: input.requestLoadId,
-                activeLoadId: input.activeLoadId,
-                retryTimeoutMs: input.retryTimeoutMs,
-            });
-            return segmentedStartupRetryDelayOverride;
-        },
         resolveBufferingRecoveryAction: () => "transition_playing",
         resolveTrustedTrackPositionSec: (input: {
             enginePositionSec: number;
             fallbackPositionSec: number;
         }) => Math.max(0, input.enginePositionSec || input.fallbackPositionSec),
-        shouldRetrySegmentedStartupTimeout: (input: {
-            isLoading: boolean;
-            requestLoadId: number;
-            activeLoadId: number;
-        }) => input.isLoading && input.requestLoadId === input.activeLoadId,
-    },
-});
-
-mock.module("@/lib/audio-engine/segmentedRepresentationPolicy", {
-    exports: {
-        resolveSegmentAssetNameFromUri: (uri: string | null | undefined) => {
-            if (!uri) return null;
-            const parts = uri.split("/");
-            return parts[parts.length - 1] ?? null;
-        },
-        resolveSegmentRepresentationIdFromName: (
-            segmentName: string | null | undefined,
-        ) => {
-            if (!segmentName) return null;
-            return segmentName.split("_")[0] ?? null;
-        },
     },
 });
 
@@ -1378,20 +1147,6 @@ const enableWindowMetrics = (
     };
 };
 
-const getClientMetricEvents = (
-    eventName: string,
-): Array<Record<string, unknown>> => {
-    return loggerCalls.info
-        .map((args) => args[1])
-        .filter((payload): payload is Record<string, unknown> =>
-            Boolean(
-                payload &&
-                typeof payload === "object" &&
-                (payload as { event?: string }).event === eventName,
-            ),
-        );
-};
-
 const getServerSignalEvents = (
     eventName: string,
 ): Array<Record<string, unknown>> => {
@@ -1411,16 +1166,12 @@ const emitFatalLoadError = async (): Promise<void> => {
 
 const extractedHookNames = [
     "usePlaybackOrchestratorRefs",
-    "useSegmentedStartupCallbacks",
+    "useApplyCurrentOutputState",
     "usePlaybackRecoveryHelpers",
-    "useSegmentedPrewarm",
     "useTrackRecovery",
-    "useSegmentedSessionRecovery",
-    "useSegmentedHandoffRecovery",
     "useYtMusicAuth",
     "useAutoMatchVibe",
     "usePlaybackStateSync",
-    "useSegmentedHeartbeat",
     "useQueueRecoveryEffects",
     "usePlaybackWatchdogs",
     "usePlaybackMetadataSync",
@@ -1596,16 +1347,7 @@ test("keeps engine end listeners attached across playback state churn", async ()
     engine.emit("load", { durationSec: 210 });
     await flushAsync();
 
-    const stableEvents = [
-        "timeupdate",
-        "end",
-        "playerror",
-        "play",
-        "pause",
-        "vhsresponse",
-        "manifeststall",
-        "manifest-stall",
-    ];
+    const stableEvents = ["timeupdate", "end", "playerror", "play", "pause"];
     const beforeChurn = stableEvents.map((event) => ({
         event,
         on: engine.onCalls.filter((call) => call.event === event).length,
@@ -2090,154 +1832,6 @@ test("preempts in-flight load when track switches before initial load settles", 
     );
 });
 
-test("howler mode restores persisted startup and skips segmented session attempt and prewarm", async () => {
-    enableWindowMetrics();
-    playbackState.isPlaying = true;
-    const currentTrack = makeTrack("mode-howler-current");
-    const nextTrack = makeTrack("mode-howler-next");
-    audioState.currentTrack = currentTrack;
-    audioState.queue = [currentTrack, nextTrack];
-    migratingStorageItems.set("current_time_track_id", currentTrack.id);
-    migratingStorageItems.set("current_time", "37");
-
-    renderOrchestrator();
-    await flushAsync(20);
-
-    assert.ok(playbackCalls.setCurrentTime.includes(37));
-    assert.equal(apiCalls.createSegmentedStreamingSession.length, 0);
-    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 0);
-    assert.deepEqual(engine.preloadCalls, [
-        {
-            url: "https://stream.test/direct/mode-howler-next",
-            format: "mp3",
-        },
-    ]);
-    assert.equal(
-        engine.loadCalls[0]?.args[0],
-        "https://stream.test/direct/mode-howler-current",
-    );
-});
-
-test("videojs mode starts segmented playback and prewarms the next track without persisted resume", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-    const currentTrack = makeTrack("mode-videojs-current");
-    const nextTrack = makeTrack("mode-videojs-next");
-    audioState.currentTrack = currentTrack;
-    audioState.queue = [currentTrack, nextTrack];
-    migratingStorageItems.set("current_time_track_id", currentTrack.id);
-    migratingStorageItems.set("current_time", "37");
-    segmentedSessionQueue.push(
-        makeSegmentedSession("mode-videojs-startup"),
-        makeSegmentedSession("mode-videojs-prewarm"),
-    );
-
-    renderOrchestrator();
-    await flushAsync(24);
-
-    assert.equal(playbackCalls.setCurrentTime.includes(37), false);
-    assert.deepEqual(
-        apiCalls.createSegmentedStreamingSession
-            .map((request) => request.trackId)
-            .sort(),
-        [currentTrack.id, nextTrack.id].sort(),
-    );
-    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 1);
-    assert.equal(engine.loadCalls.length, 1);
-    assert.equal(
-        (engine.loadCalls[0]?.args[0] as { protocol?: string }).protocol,
-        "dash",
-    );
-});
-
-test("creates segmented startup session and loads DASH source", async () => {
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("seg-track");
-    audioState.queue = [audioState.currentTrack];
-    segmentedSessionQueue.push(makeSegmentedSession("seg-session"));
-
-    renderOrchestrator();
-    await flushAsync(10);
-
-    assert.equal(apiCalls.createSegmentedStreamingSession.length, 1);
-    assert.equal(engine.loadCalls.length, 1);
-    const [source, options] = engine.loadCalls[0].args as [
-        {
-            protocol: string;
-            trackId: string;
-            sessionId: string;
-            mimeType: string;
-        },
-        {
-            withCredentials: boolean;
-            autoplay: boolean;
-            requestHeaders?: Record<string, string>;
-        },
-    ];
-    assert.equal(source.protocol, "dash");
-    assert.equal(source.trackId, "seg-track");
-    assert.equal(source.sessionId, "seg-session");
-    assert.equal(source.mimeType, "application/dash+xml");
-    assert.equal(options.withCredentials, true);
-    assert.equal(options.autoplay, false);
-    assert.equal(
-        options.requestHeaders?.["x-streaming-session-token"],
-        "seg-session-token",
-    );
-
-    assert.ok(
-        playbackCalls.setStreamProfile.some((profile) =>
-            Boolean(
-                profile &&
-                typeof profile === "object" &&
-                "mode" in profile &&
-                (profile as { mode: string }).mode === "dash",
-            ),
-        ),
-    );
-});
-
-test("retries segmented startup after transient session creation failures", async () => {
-    mock.timers.enable();
-
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("retry-track");
-    audioState.queue = [audioState.currentTrack];
-
-    const transientSessionError1 = Object.assign(
-        new Error("transient timeout #1"),
-        { data: { isTransient: true, retryAfterMs: 1 } },
-    );
-    const transientSessionError2 = Object.assign(
-        new Error("transient timeout #2"),
-        { data: { isTransient: true, retryAfterMs: 1 } },
-    );
-
-    segmentedSessionQueue.push(
-        transientSessionError1,
-        transientSessionError2,
-        makeSegmentedSession("retry-session"),
-    );
-
-    renderOrchestrator();
-    await flushAsync(12);
-
-    assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
-    assert.equal(engine.loadCalls.length, 0);
-
-    mock.timers.tick(5_000);
-    await flushAsync(12);
-
-    assert.ok(apiCalls.createSegmentedStreamingSession.length >= 3);
-    assert.ok(engine.stopCalls >= 1);
-    assert.equal(engine.loadCalls.length, 1);
-    const [source] = engine.loadCalls[0].args as [{ sessionId?: string }];
-    assert.equal(source.sessionId, "retry-session");
-});
-
 test("podcast cached seek falls back to reload when direct seek misses target", async () => {
     mock.timers.enable();
 
@@ -2294,381 +1888,6 @@ test("unmount cleanup stops engine and detaches listeners", async () => {
 
     assert.ok(engine.stopCalls >= 1);
     assert.ok(engine.offCalls.length > 0);
-});
-
-test("aborts in-flight segmented prewarm validation when track changes", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-
-    const currentTrack = makeTrack("prewarm-current");
-    const nextTrack = makeTrack("prewarm-next");
-    audioState.currentTrack = currentTrack;
-    audioState.queue = [currentTrack, nextTrack];
-    audioState.currentIndex = 0;
-
-    segmentedSessionQueue.push(
-        makeSegmentedSession("startup-session"),
-        makeSegmentedSession("prewarm-session"),
-    );
-
-    const abortReasons: unknown[] = [];
-    segmentedManifestFetchOverride = (_manifestUrl, _sessionToken, signal) =>
-        new Promise<Response>((_resolve, reject) => {
-            signal.addEventListener(
-                "abort",
-                () => {
-                    abortReasons.push(signal.reason);
-                    const abortError = new Error("aborted");
-                    (abortError as { name: string }).name = "AbortError";
-                    reject(abortError);
-                },
-                { once: true },
-            );
-        });
-
-    renderOrchestrator();
-    await flushAsync(20);
-    assert.ok(apiCalls.createSegmentedStreamingSession.length >= 2);
-
-    audioState.currentTrack = makeTrack("prewarm-replacement");
-    audioState.queue = [audioState.currentTrack];
-    rerenderOrchestrator();
-    await flushAsync(20);
-
-    assert.ok(abortReasons.includes("track_change"));
-    const abortedMetrics = getClientMetricEvents(
-        "session.prewarm_validation_aborted",
-    );
-    assert.ok(
-        abortedMetrics.some(
-            (metric) =>
-                metric.reason === "track_change" &&
-                metric.trackId === "prewarm-next",
-        ),
-    );
-});
-
-test("validates prewarmed startup chunks through the API boundary", async () => {
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-
-    const currentTrack = makeTrack("prewarm-api-current");
-    const nextTrack = makeTrack("prewarm-api-next");
-    audioState.currentTrack = currentTrack;
-    audioState.queue = [currentTrack, nextTrack];
-    audioState.currentIndex = 0;
-    segmentedSessionQueue.push(
-        makeSegmentedSession("prewarm-api-startup"),
-        makeSegmentedSession("prewarm-api-next-session"),
-    );
-    segmentedManifestFetchOverride = async () =>
-        new Response("chunk-a.m4s chunk-a.m4s chunk-b.webm chunk-c.m4s", {
-            status: 200,
-        });
-
-    renderOrchestrator();
-    await flushAsync(24);
-
-    assert.equal(apiCalls.fetchSegmentedStreamingManifest.length, 1);
-    assert.deepEqual(
-        apiCalls.fetchSegmentedStreamingSegment.map((call) => ({
-            sessionId: call.sessionId,
-            sessionToken: call.sessionToken,
-            segmentName: call.segmentName,
-            signal: call.signal,
-        })),
-        [
-            {
-                sessionId: "prewarm-api-next-session",
-                sessionToken: "prewarm-api-next-session-token",
-                segmentName: "chunk-a.m4s",
-                signal: apiCalls.fetchSegmentedStreamingManifest[0].signal,
-            },
-            {
-                sessionId: "prewarm-api-next-session",
-                sessionToken: "prewarm-api-next-session-token",
-                segmentName: "chunk-b.webm",
-                signal: apiCalls.fetchSegmentedStreamingManifest[0].signal,
-            },
-        ],
-    );
-});
-
-test("consumes prewarmed segmented session while prewarm validation is still in-flight", async () => {
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-
-    const currentTrack = makeTrack("inflight-current");
-    const nextTrack = makeTrack("inflight-next");
-    audioState.currentTrack = currentTrack;
-    audioState.queue = [currentTrack, nextTrack];
-    audioState.currentIndex = 0;
-
-    segmentedSessionQueue.push(
-        makeSegmentedSession("inflight-startup"),
-        makeSegmentedSession("inflight-prewarm"),
-    );
-
-    segmentedManifestFetchOverride = async () =>
-        new Promise<Response>(() => undefined);
-
-    renderOrchestrator();
-    await flushAsync(20);
-    assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
-
-    audioState.currentTrack = nextTrack;
-    audioState.queue = [nextTrack];
-    audioState.currentIndex = 0;
-    rerenderOrchestrator();
-    await flushAsync(20);
-
-    assert.equal(apiCalls.createSegmentedStreamingSession.length, 2);
-
-    const loadedSessionIds = engine.loadCalls
-        .map(
-            (call) =>
-                (call.args[0] as { sessionId?: string } | undefined)
-                    ?.sessionId ?? null,
-        )
-        .filter(
-            (sessionId): sessionId is string => typeof sessionId === "string",
-        );
-    assert.ok(loadedSessionIds.includes("inflight-prewarm"));
-});
-
-test("clears handoff listeners on track change while handoff load is pending", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-
-    const primaryTrack = makeTrack("handoff-track-a");
-    const replacementTrack = makeTrack("handoff-track-b");
-    audioState.currentTrack = primaryTrack;
-    audioState.queue = [primaryTrack, replacementTrack];
-    audioState.currentIndex = 0;
-
-    segmentedSessionQueue.push(makeSegmentedSession("handoff-startup"));
-    handoffSessionQueue.push({
-        ...makeSegmentedSession("handoff-recovered"),
-        resumeAtSec: 14,
-        shouldPlay: false,
-    });
-
-    renderOrchestrator();
-    await flushAsync(14);
-    assert.ok(engine.loadCalls.length >= 1);
-    engine.emit("load", { durationSec: 210 });
-    await flushAsync(8);
-    engine.emit("vhsresponse", {
-        kind: "manifest",
-        uri: "https://stream.test/handoff-startup/manifest.mpd",
-        representationId: null,
-        statusCode: 200,
-        hasError: false,
-        roundTripMs: 24,
-        bytesReceived: 1024,
-        sourceType: "local",
-        sessionId: "handoff-startup",
-        trackId: "handoff-track-a",
-        timestampMs: Date.now(),
-    });
-    engine.emit("vhsresponse", {
-        kind: "segment",
-        uri: "https://stream.test/handoff-startup/chunk-0001.m4s",
-        representationId: "chunk-0001",
-        statusCode: 200,
-        hasError: false,
-        roundTripMs: 22,
-        bytesReceived: 2048,
-        sourceType: "local",
-        sessionId: "handoff-startup",
-        trackId: "handoff-track-a",
-        timestampMs: Date.now() + 1,
-    });
-    engine.currentTime = 0.3;
-    engine.emit("timeupdate", {
-        timeSec: 0.3,
-    });
-    await flushAsync(8);
-
-    engine.emit("loaderror", {
-        error: new Error("forced handoff recovery trigger"),
-    });
-    await flushAsync(20);
-    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 1);
-
-    audioState.currentTrack = replacementTrack;
-    audioState.queue = [replacementTrack];
-    rerenderOrchestrator();
-    await flushAsync(20);
-
-    const loadOffCount = engine.offCalls.filter(
-        (call) => call.event === "load",
-    ).length;
-    const loadErrorOffCount = engine.offCalls.filter(
-        (call) => call.event === "loaderror",
-    ).length;
-    assert.ok(loadOffCount >= 1);
-    assert.ok(loadErrorOffCount >= 1);
-
-    const cleanupMetrics = getClientMetricEvents(
-        "session.handoff_listener_cleanup",
-    );
-    assert.ok(
-        cleanupMetrics.some(
-            (metric) =>
-                metric.reason === "track_change" &&
-                metric.trackId === "handoff-track-a" &&
-                metric.activeTrackId === "handoff-track-b",
-        ),
-    );
-});
-
-test("listen-together followers resync on buffer timeout instead of starting local handoff recovery", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-    listenTogetherSnapshot = {
-        groupId: "lt-group-1",
-        isHost: false,
-    };
-
-    const track = makeTrack("lt-follower-track");
-    audioState.currentTrack = track;
-    audioState.queue = [track];
-    segmentedSessionQueue.push(makeSegmentedSession("lt-follower-session"));
-
-    renderOrchestrator();
-    await flushAsync(14);
-
-    assert.equal(heartbeatInstances.length, 1);
-
-    heartbeatInstances[0].triggerBufferTimeout();
-    await flushAsync(10);
-
-    assert.deepEqual(listenTogetherResyncCalls, ["lt-group-1"]);
-    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
-    assert.equal(engine.reloadCalls, 0);
-    assert.ok(playbackCalls.setIsBuffering.includes(true));
-});
-
-test("listen-together followers resync on unexpected stop instead of starting local handoff recovery", async () => {
-    mock.timers.enable();
-
-    enableWindowMetrics({
-        SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: 1500,
-    });
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = true;
-    listenTogetherSnapshot = {
-        groupId: "lt-group-stop",
-        isHost: false,
-    };
-
-    const track = makeTrack("lt-follower-stop-track");
-    audioState.currentTrack = track;
-    audioState.queue = [track];
-    segmentedSessionQueue.push(
-        makeSegmentedSession("lt-follower-stop-session"),
-    );
-
-    renderOrchestrator();
-    await flushAsync(14);
-
-    assert.equal(heartbeatInstances.length, 1);
-
-    engine.emit("load", { durationSec: 210 });
-    await flushAsync(8);
-
-    engine.currentTime = 0.3;
-    engine.actualCurrentTime = 0.3;
-    engine.emit("timeupdate", {
-        timeSec: 0.3,
-    });
-    await flushAsync(8);
-
-    mock.timers.tick(8_001);
-    await flushAsync(8);
-
-    const reloadCallsBeforeStop = engine.reloadCalls;
-    engine.playing = false;
-    heartbeatInstances[0].triggerUnexpectedStop();
-    await flushAsync(10);
-
-    assert.deepEqual(listenTogetherResyncCalls, ["lt-group-stop"]);
-    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
-    assert.equal(engine.reloadCalls, reloadCallsBeforeStop);
-    assert.ok(playbackCalls.setIsBuffering.includes(true));
-});
-
-test("routes segmented load errors into startup recovery before first chunk response", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-
-    const track = makeTrack("startup-gate-track");
-    audioState.currentTrack = track;
-    audioState.queue = [track];
-    segmentedSessionQueue.push(makeSegmentedSession("startup-gate-session"));
-
-    renderOrchestrator();
-    await flushAsync(14);
-    assert.ok(engine.loadCalls.length >= 1);
-
-    engine.emit("load", { durationSec: 210 });
-    await flushAsync(8);
-
-    engine.emit("loaderror", {
-        error: new Error("forced startup gate error"),
-    });
-    await flushAsync(20);
-
-    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
-    const rebufferMetrics = getClientMetricEvents("player.rebuffer");
-    assert.ok(
-        rebufferMetrics.some(
-            (metric) =>
-                metric.trackId === "startup-gate-track" &&
-                metric.reason === "manifest_stall_startup_recovery" &&
-                metric.manifestStallReason === "load_error_before_first_chunk",
-        ),
-    );
-});
-
-test("handles manifest-stall audio engine events through startup recovery path", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-
-    const track = makeTrack("manifest-stall-track");
-    audioState.currentTrack = track;
-    audioState.queue = [track];
-    segmentedSessionQueue.push(makeSegmentedSession("manifest-stall-session"));
-
-    renderOrchestrator();
-    await flushAsync(14);
-
-    assert.ok(engine.onCalls.some((call) => call.event === "manifeststall"));
-    assert.ok(engine.onCalls.some((call) => call.event === "manifest-stall"));
-
-    engine.emit("manifeststall", {
-        trackId: "manifest-stall-track",
-        sessionId: "manifest-stall-session",
-        reason: "playlist_refresh_timeout",
-    });
-    await flushAsync(12);
-
-    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
-    const rebufferMetrics = getClientMetricEvents("player.rebuffer");
-    assert.ok(
-        rebufferMetrics.some(
-            (metric) =>
-                metric.trackId === "manifest-stall-track" &&
-                metric.reason === "manifest_stall_startup_recovery" &&
-                metric.manifestStallReason === "playlist_refresh_timeout",
-        ),
-    );
 });
 
 test("keeps track time snapshot id null when track playback has no active track", async () => {
@@ -2757,127 +1976,4 @@ test("preempting an in-flight load clears seek-reload load listener", async () =
         (call) => call.event === "load",
     ).length;
     assert.ok(loadOffAfter - loadOffBefore >= 2);
-});
-
-test("segmented startup create failure uses transient heuristic when backend hint omits transient flag", async () => {
-    mock.timers.enable();
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("hintless-transient");
-    audioState.queue = [audioState.currentTrack];
-
-    segmentedSessionQueue.push(
-        new Error("startup session bootstrap failed"),
-        Object.assign(
-            new Error("network timeout while creating segmented session"),
-            { data: { retryAfterMs: 750 } },
-        ),
-    );
-
-    renderOrchestrator();
-    await flushAsync(16);
-
-    const createFailures = getClientMetricEvents("session.create_failure");
-    const transientFailure = createFailures.find(
-        (metric) =>
-            metric.trackId === "hintless-transient" &&
-            metric.reason ===
-                "network timeout while creating segmented session",
-    );
-    assert.ok(transientFailure);
-    assert.equal(transientFailure.isTransient, true);
-    assert.equal(transientFailure.retryAfterMsHint, 750);
-    assert.equal(transientFailure.backendHintTransient, null);
-
-    const retryMetrics = getClientMetricEvents("session.startup_retry");
-    assert.ok(
-        retryMetrics.some(
-            (metric) =>
-                metric.trackId === "hintless-transient" &&
-                metric.retryAfterMsHint === 750 &&
-                metric.stage === "session_create",
-        ),
-    );
-});
-
-test("segmented startup create failure honors backend transient=false hint in retry metadata", async () => {
-    mock.timers.enable();
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("backend-hint-false");
-    audioState.queue = [audioState.currentTrack];
-
-    segmentedSessionQueue.push(
-        new Error("startup session bootstrap failed"),
-        Object.assign(new Error("service unavailable"), {
-            data: { isTransient: false, retryAfterMs: 321 },
-        }),
-    );
-
-    renderOrchestrator();
-    await flushAsync(16);
-
-    const createFailures = getClientMetricEvents("session.create_failure");
-    const hintedFailure = createFailures.find(
-        (metric) =>
-            metric.trackId === "backend-hint-false" &&
-            metric.reason === "service unavailable",
-    );
-    assert.ok(hintedFailure);
-    assert.equal(hintedFailure.isTransient, false);
-    assert.equal(hintedFailure.retryAfterMsHint, 321);
-    assert.equal(hintedFailure.backendHintTransient, false);
-});
-
-test("segmented startup with asset-build-inflight hint arms backend-aligned extended retry timeout metric", async () => {
-    enableWindowMetrics();
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("asset-build-track");
-    audioState.queue = [audioState.currentTrack];
-
-    segmentedSessionQueue.push(
-        makeSegmentedSession("asset-build-session", {
-            engineHints: {
-                sourceType: "local",
-                assetBuildInFlight: true,
-            },
-        }),
-    );
-
-    renderOrchestrator();
-    await flushAsync(16);
-
-    const assetBuildMetrics = getClientMetricEvents(
-        "session.startup_asset_build_retry_armed",
-    );
-    const metric = assetBuildMetrics.find(
-        (entry) => entry.trackId === "asset-build-track",
-    );
-    assert.ok(metric);
-    assert.equal(metric.sourceType, "local");
-    assert.equal(metric.effectiveRetryTimeoutMs, 22000);
-    assert.ok(
-        segmentedStartupRetryDelayInputs.some(
-            (entry) => entry.retryTimeoutMs === 22000,
-        ),
-    );
-});
-
-test("segmented startup uses backend-aligned default readiness timeout for retry arming", async () => {
-    runtimeEngineMode = "videojs";
-    playbackState.isPlaying = false;
-    audioState.currentTrack = makeTrack("reduced-timeout-track");
-    audioState.queue = [audioState.currentTrack];
-
-    segmentedSessionQueue.push(makeSegmentedSession("reduced-timeout-session"));
-
-    renderOrchestrator();
-    await flushAsync(16);
-
-    assert.ok(segmentedStartupRetryDelayInputs.length >= 1);
-    assert.equal(segmentedStartupRetryDelayInputs[0]?.sourceKind, "segmented");
-    assert.equal(segmentedStartupRetryDelayInputs[0]?.retryTimeoutMs, 20000);
 });

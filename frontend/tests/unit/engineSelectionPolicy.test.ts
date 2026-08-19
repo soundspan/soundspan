@@ -28,15 +28,6 @@ test("howler mode selects howler in the direct slot", () => {
     assert.equal(decision.reason, "default_direct_engine");
 });
 
-test("videojs mode keeps howler in the direct slot (segmented engine is separate)", () => {
-    const decision = resolveDirectEngineSelection({
-        mode: "videojs",
-        isAndroidWebView: false,
-    });
-    assert.equal(decision.engine, "howler");
-    assert.equal(decision.reason, "default_direct_engine");
-});
-
 test("native mode selects the native element engine", () => {
     const decision = resolveDirectEngineSelection({
         mode: "native",

@@ -8,44 +8,22 @@ import {
     shouldAllowInitialPersistedTrackResume,
     shouldPreemptInFlightAudioLoad,
 } from "@/lib/audio-load-preemption";
-import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
-import { isSegmentedModeEnabled } from "@/lib/audio-engine/engineMode";
-import type {
-    AudioEngineErrorPayload,
-    AudioEngineManifestStallPayload,
-    AudioEngineRepresentationFailoverResult,
-    AudioEngineSource,
-    AudioEngineVhsResponsePayload,
-} from "@/lib/audio-engine/types";
+import { api } from "@/lib/api";
+import type { AudioEngineErrorPayload } from "@/lib/audio-engine/types";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
 import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
-import {
-    resolveSegmentedStartupRetryDelayMs,
-    shouldRetrySegmentedStartupTimeout,
-} from "@/lib/audio-engine/segmentedPlaybackRegressionPolicy";
-import {
-    resolveSegmentAssetNameFromUri,
-    resolveSegmentRepresentationIdFromName,
-} from "@/lib/audio-engine/segmentedRepresentationPolicy";
 import {
     getListenTogetherSessionSnapshot,
     isListenTogetherActiveOrPending,
 } from "@/lib/listen-together-session";
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
-    createEmptySegmentedStartupRecoveryStageAttempts,
     isAdvancePlayIntentFresh,
     resolveLoadAutoplayDecision,
     resolvePlaybackDuration,
     resolveRemoteStreamFormat,
-    resolveSegmentedStartupRecoveryDecision,
-    type SegmentedStartupRecoveryStage,
-    shouldAttemptSegmentedRecoveryOnUnexpectedPause,
+    shouldAttemptRecoveryOnUnexpectedPause,
 } from "./audioPlaybackOrchestratorPolicy";
-import {
-    parseSegmentedStartupErrorHint,
-    resolveConservativeSegmentedStartupRetryDelayMs,
-} from "./segmentedStartupErrorContract";
 import { readMigratingStorageItem } from "@/lib/storage-migration";
 import { playbackStateMachine } from "@/lib/audio";
 import { useQueryClient } from "@tanstack/react-query";
@@ -54,46 +32,20 @@ import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import {
     getNextTrackInfo,
-    isLikelyTransientStreamError,
     resolveDirectTrackSourceType,
-    resolveSegmentedTrackContext,
 } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
 import {
-    buildSegmentedSessionKey,
-    clampSegmentedStartupFallbackTimeoutMs,
-    getSegmentedSessionRemainingMs,
-    isSegmentedSessionUsable,
-    resolveSegmentedStartupFallbackTimeoutMs,
-} from "@/lib/audio-engine/audioPlaybackRuntimePolicy";
-import {
     AUDIO_LOAD_RETRY_DELAY_MS,
-    AUDIO_LOAD_TIMEOUT_ASSET_BUILD_INFLIGHT_MS,
     AUDIO_LOAD_TIMEOUT_MS,
     AUDIO_LOAD_TIMEOUT_RETRIES,
     CURRENT_TIME_KEY,
     CURRENT_TIME_TRACK_ID_KEY,
     FORMAT_TO_CODEC,
-    SEGMENTED_CHUNK_QUARANTINE_MAX_ENTRIES,
-    SEGMENTED_CHUNK_QUARANTINE_RECOVERY_COOLDOWN_MS,
-    SEGMENTED_COLD_START_REBUFFER_MAX_POSITION_SEC,
-    SEGMENTED_HANDOFF_CIRCUIT_WINDOW_MS,
-    SEGMENTED_HEARTBEAT_BUFFER_TIMEOUT_MS,
-    SEGMENTED_PAUSE_RECOVERY_DEBOUNCE_MS,
-    SEGMENTED_PAUSE_RECOVERY_MAX_BUFFERED_AHEAD_SEC,
-    SEGMENTED_PAUSE_RECOVERY_MIN_SILENCE_MS,
-    SEGMENTED_REPRESENTATION_QUARANTINE_COOLDOWN_MS,
-    SEGMENTED_STARTUP_ASSET_BUILD_TIMEOUT_BONUS_MS,
-    SEGMENTED_STARTUP_ASSET_BUILD_TIMEOUT_FLOOR_MS,
-    SEGMENTED_STARTUP_AUDIBLE_THRESHOLD_SEC,
-    SEGMENTED_STARTUP_MANIFEST_READINESS_MAX_SESSION_RESETS,
-    SEGMENTED_STARTUP_MAX_SESSION_RESETS,
-    SEGMENTED_STARTUP_ON_DEMAND_TIMEOUT_BONUS_MS,
-    SEGMENTED_STARTUP_RECOVERY_WINDOW_MS,
-    SEGMENTED_STARTUP_RETRY_BACKOFF_MAX_MS,
-    SEGMENTED_STARTUP_RETRY_DELAY_MS,
-    SEGMENTED_STARTUP_RETRY_JITTER_RATIO,
-    SEGMENTED_STARTUP_STAGE_MAX_ATTEMPTS,
+    STARTUP_AUDIBLE_THRESHOLD_SEC,
     TRACK_END_WATCHDOG_BOUNDARY_SEC,
+    UNEXPECTED_PAUSE_RECOVERY_DEBOUNCE_MS,
+    UNEXPECTED_PAUSE_RECOVERY_MAX_BUFFERED_AHEAD_SEC,
+    UNEXPECTED_PAUSE_RECOVERY_MIN_SILENCE_MS,
 } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
 import {
     audioEngine,
@@ -167,7 +119,6 @@ export const AudioPlaybackOrchestrator = memo(
             desiredLoadPlayRef,
             cancelledLoadPlayIdRef,
             loadTimeoutRef,
-            segmentedStartupFallbackTimeoutRef,
             loadTimeoutRetryCountRef,
             seekReloadListenerRef,
             seekReloadInProgressRef,
@@ -175,7 +126,6 @@ export const AudioPlaybackOrchestrator = memo(
             loadListenerRef,
             loadErrorListenerRef,
             lastPreloadedTrackIdRef,
-            prewarmedSegmentedSessionRef,
             consecutiveErrorBreakerRef,
             wasPlayingWhenHiddenRef,
             currentTrackRef,
@@ -189,118 +139,36 @@ export const AudioPlaybackOrchestrator = memo(
             unexpectedPauseRecoveryTimeoutRef,
             lastTrackTimeUpdateAtMsRef,
             ytMusicAuthenticatedRef,
-            activeSegmentedSessionRef,
-            activeSegmentedPlaybackTrackIdRef,
-            segmentedHandoffInProgressRef,
-            segmentedHandoffAttemptRef,
-            segmentedHandoffLastAttemptAtRef,
-            segmentedSessionCreateFallbackAttemptRef,
-            segmentedSessionCreateFallbackLastAttemptAtRef,
-            segmentedChunkQuarantineRef,
-            segmentedChunkQuarantineLastRecoveryAtRef,
-            segmentedLastFailedChunkRef,
-            segmentedHandoffLastRecoveryRef,
-            segmentedProactiveHandoffAttemptedTrackIdRef,
-            segmentedProactiveHandoffAttemptCountRef,
-            segmentedProactiveHandoffLastAttemptAtRef,
-            segmentedProactiveHandoffCompletedTrackIdRef,
-            segmentedProactiveHandoffLastSkipKeyRef,
-            startupSegmentedSessionRef,
-            startupSegmentedSessionInFlightRef,
-            startupSegmentedSessionPromisesRef,
-            segmentedStartupRetryCountRef,
-            segmentedStartupStageAttemptsRef,
-            segmentedStartupRecoveryWindowStartedAtMsRef,
-            segmentedStartupSessionResetCountRef,
-            segmentedStartupTimelineRef,
-            segmentedColdStartRebufferDeferralRef,
             lastHandledTrackEndRef,
             trackEndWatchdogRef,
             howlerLoadStartMsRef,
             heartbeatRef,
         } = orchestratorRefs;
-        const segmentedStartupCallbacks = H.useSegmentedStartupCallbacks({
+        const applyCurrentOutputState = H.useApplyCurrentOutputState({
             refs: orchestratorRefs,
         });
-        const {
-            isListenTogetherSegmentedPlaybackAllowed,
-            ensureSegmentedStartupTimeline,
-            emitSegmentedStartupTimeline,
-            clearSegmentedStartupFallback,
-            clearSegmentedManifestNudges,
-            applyCurrentOutputState,
-            markSegmentedStartupRampWindow,
-            noteSegmentedStartupProgress,
-            noteSegmentedStartupVhsResponse,
-            hasStartupChunkResponseForTrack,
-            noteSegmentedStartupAudible,
-            clearSegmentedPrewarmRetry,
-            abortSegmentedPrewarmValidation,
-            abortAllSegmentedPrewarmValidations,
-        } = segmentedStartupCallbacks;
         const playbackRecoveryHelpers = H.usePlaybackRecoveryHelpers({
             refs: orchestratorRefs,
         });
         const {
             clearPendingTrackErrorSkip,
             clearUnexpectedPauseRecoveryCheck,
-            resetSegmentedHandoffCircuit,
             resolveBufferedAheadSec,
             clearStartupPlaybackRecovery,
             clearTransientTrackRecovery,
-            clearSegmentedHandoffLoadListeners,
         } = playbackRecoveryHelpers;
-        const { prewarmSegmentedSession, ensureStartupSegmentedSession } =
-            H.useSegmentedPrewarm({
-                refs: orchestratorRefs,
-                abortSegmentedPrewarmValidation,
-                clearSegmentedPrewarmRetry,
-            });
         const {
             scheduleStartupPlaybackRecovery,
-            handleStartupManifestStall,
             requestListenTogetherFollowerRecovery,
             scheduleTrackErrorSkip,
             attemptTransientTrackRecovery,
         } = H.useTrackRecovery({
             refs: orchestratorRefs,
             playbackRecoveryHelpers,
-            segmentedStartupCallbacks,
             next,
             setCurrentTime,
             setIsBuffering,
         });
-        const { attemptSegmentedSessionCreateRecovery } =
-            H.useSegmentedSessionRecovery({
-                refs: orchestratorRefs,
-                playbackRecoveryHelpers,
-                segmentedStartupCallbacks,
-                setCurrentTime,
-                setIsBuffering,
-                setIsPlaying,
-                setStreamProfile,
-            });
-        const { attemptSegmentedHandoffRecovery } =
-            H.useSegmentedHandoffRecovery({
-                refs: orchestratorRefs,
-                playbackRecoveryHelpers,
-                segmentedStartupCallbacks,
-                trackRecovery: {
-                    scheduleStartupPlaybackRecovery,
-                    handleStartupManifestStall,
-                    requestListenTogetherFollowerRecovery,
-                    scheduleTrackErrorSkip,
-                    attemptTransientTrackRecovery,
-                },
-                segmentedSessionRecovery: {
-                    attemptSegmentedSessionCreateRecovery,
-                },
-                isPlaying,
-                setCurrentTime,
-                setIsBuffering,
-                setIsPlaying,
-                setStreamProfile,
-            });
         H.useYtMusicAuth(ytMusicAuthenticatedRef);
         const requestAutoMatchVibe = H.useAutoMatchVibe({
             refs: orchestratorRefs,
@@ -309,20 +177,12 @@ export const AudioPlaybackOrchestrator = memo(
         H.usePlaybackStateSync({
             refs: orchestratorRefs,
             playbackRecoveryHelpers,
-            segmentedStartupCallbacks,
             currentTrack,
             playbackType,
             queueLength: queue.length,
             isPlaying,
             isBuffering,
             setStreamProfile,
-        });
-        H.useSegmentedHeartbeat({
-            refs: orchestratorRefs,
-            playbackType,
-            currentTrack,
-            ensureStartupSegmentedSession,
-            attemptSegmentedHandoffRecovery,
         });
         H.useQueueRecoveryEffects({
             refs: orchestratorRefs,
@@ -340,12 +200,10 @@ export const AudioPlaybackOrchestrator = memo(
             refs: orchestratorRefs,
             trackRecovery: {
                 scheduleStartupPlaybackRecovery,
-                handleStartupManifestStall,
                 requestListenTogetherFollowerRecovery,
                 scheduleTrackErrorSkip,
                 attemptTransientTrackRecovery,
             },
-            attemptSegmentedHandoffRecovery,
             isPlaying,
             isBuffering,
             setIsBuffering,
@@ -402,10 +260,8 @@ export const AudioPlaybackOrchestrator = memo(
                     if (
                         isLoadingRef.current &&
                         liveTrackId &&
-                        currentTimeValue >=
-                            SEGMENTED_STARTUP_AUDIBLE_THRESHOLD_SEC
+                        currentTimeValue >= STARTUP_AUDIBLE_THRESHOLD_SEC
                     ) {
-                        clearSegmentedStartupFallback();
                         if (loadTimeoutRef.current) {
                             clearTimeout(loadTimeoutRef.current);
                             loadTimeoutRef.current = null;
@@ -418,14 +274,11 @@ export const AudioPlaybackOrchestrator = memo(
                             "session.startup_timeout_skip",
                             {
                                 trackId: liveTrackId,
-                                sourceType:
-                                    activeSegmentedSessionRef.current
-                                        ?.sourceType ??
-                                    (currentTrackRef.current
-                                        ? resolveDirectTrackSourceType(
-                                              currentTrackRef.current,
-                                          )
-                                        : "unknown"),
+                                sourceType: currentTrackRef.current
+                                    ? resolveDirectTrackSourceType(
+                                          currentTrackRef.current,
+                                      )
+                                    : "unknown",
                                 reason: "progress_before_load_event",
                             },
                         );
@@ -435,8 +288,6 @@ export const AudioPlaybackOrchestrator = memo(
                     if (audioEngine.isPlaying()) {
                         clearUnexpectedPauseRecoveryCheck();
                     }
-                    noteSegmentedStartupProgress(liveTrackId, currentTimeValue);
-                    noteSegmentedStartupAudible(liveTrackId, currentTimeValue);
 
                     const durationSec = audioEngine.getDuration();
                     const isEndAdjacent =
@@ -463,26 +314,6 @@ export const AudioPlaybackOrchestrator = memo(
 
                 // Notify heartbeat of progress to detect stalls
                 heartbeatRef.current?.notifyProgress(currentTimeValue);
-
-                const activeSession = activeSegmentedSessionRef.current;
-                if (
-                    activeSession?.assetBuildInFlight &&
-                    currentTrackRef.current?.id === activeSession.trackId &&
-                    currentTimeValue >
-                        SEGMENTED_COLD_START_REBUFFER_MAX_POSITION_SEC
-                ) {
-                    activeSegmentedSessionRef.current = {
-                        ...activeSession,
-                        assetBuildInFlight: false,
-                    };
-                    segmentedColdStartRebufferDeferralRef.current = {
-                        trackId: activeSession.trackId,
-                        count: 0,
-                    };
-                    heartbeatRef.current?.updateConfig({
-                        bufferTimeout: SEGMENTED_HEARTBEAT_BUFFER_TIMEOUT_MS,
-                    });
-                }
             };
 
             const handleLoad = (data: {
@@ -536,10 +367,7 @@ export const AudioPlaybackOrchestrator = memo(
                     scheduleStartupPlaybackRecovery(currentTrack.id);
                 }
 
-                if (
-                    howlerLoadStartMsRef.current > 0 &&
-                    !activeSegmentedSessionRef.current
-                ) {
+                if (howlerLoadStartMsRef.current > 0) {
                     const durationMs =
                         Date.now() - howlerLoadStartMsRef.current;
                     howlerLoadStartMsRef.current = 0;
@@ -807,68 +635,17 @@ export const AudioPlaybackOrchestrator = memo(
                     data.error instanceof Error
                         ? data.error.message
                         : String(data.error);
-                const initialActiveSession = activeSegmentedSessionRef.current;
-                const initialSourceType =
-                    initialActiveSession?.sourceType ??
-                    (currentTrack
-                        ? resolveDirectTrackSourceType(currentTrack)
-                        : "unknown");
-                const latestFailedChunk = segmentedLastFailedChunkRef.current;
-                const failingChunkName =
-                    playbackType === "track" &&
-                    latestFailedChunk.trackId === currentTrack?.id
-                        ? latestFailedChunk.chunkName
-                        : null;
+                const errorSourceType = currentTrack
+                    ? resolveDirectTrackSourceType(currentTrack)
+                    : "unknown";
 
                 if (playbackType === "track") {
-                    if (segmentedHandoffInProgressRef.current) {
-                        logPlaybackClientMetric("player.playback_error", {
-                            trackId: currentTrack?.id ?? null,
-                            sessionId: initialActiveSession?.sessionId ?? null,
-                            sourceType: initialSourceType,
-                            streamingMode: activeSegmentedSessionRef.current
-                                ? "segmented"
-                                : "direct",
-                            error: errorMessage,
-                            stage: "suppressed_handoff_in_progress",
-                            chunkName: failingChunkName,
-                        });
-                        playbackStateMachine.forceTransition("LOADING");
-                        setIsBuffering(true);
-                        return;
-                    }
-
                     logPlaybackClientMetric("player.playback_error", {
                         trackId: currentTrack?.id ?? null,
-                        sessionId: initialActiveSession?.sessionId ?? null,
-                        sourceType: initialSourceType,
-                        streamingMode: activeSegmentedSessionRef.current
-                            ? "segmented"
-                            : "direct",
+                        sourceType: errorSourceType,
                         error: errorMessage,
                         stage: "pre_recovery",
-                        chunkName: failingChunkName,
                     });
-                    if (
-                        currentTrack?.id &&
-                        initialActiveSession?.trackId === currentTrack.id &&
-                        !hasStartupChunkResponseForTrack(currentTrack.id)
-                    ) {
-                        handleStartupManifestStall({
-                            trackId: currentTrack.id,
-                            sessionId: initialActiveSession.sessionId,
-                            reason: "load_error_before_first_chunk",
-                        });
-                        playbackStateMachine.forceTransition("LOADING");
-                        setIsBuffering(true);
-                        return;
-                    }
-                    const didRecoverWithHandoff =
-                        await attemptSegmentedHandoffRecovery(data.error);
-                    if (didRecoverWithHandoff) {
-                        return;
-                    }
-
                     const failedTrackId = currentTrack?.id ?? null;
                     const isTransientRecoveryScheduled =
                         attemptTransientTrackRecovery(
@@ -880,14 +657,7 @@ export const AudioPlaybackOrchestrator = memo(
                         logPlaybackClientMetric("player.rebuffer", {
                             reason: "transient_track_recovery",
                             trackId: failedTrackId,
-                            sessionId:
-                                activeSegmentedSessionRef.current?.sessionId ??
-                                null,
-                            sourceType:
-                                activeSegmentedSessionRef.current?.sourceType ??
-                                (currentTrack
-                                    ? resolveDirectTrackSourceType(currentTrack)
-                                    : "unknown"),
+                            sourceType: errorSourceType,
                         });
                         playbackStateMachine.forceTransition("LOADING");
                         setIsBuffering(true);
@@ -920,25 +690,12 @@ export const AudioPlaybackOrchestrator = memo(
                 setIsBuffering(false);
                 logPlaybackClientMetric("player.playback_error", {
                     trackId: currentTrack?.id ?? null,
-                    sessionId:
-                        activeSegmentedSessionRef.current?.sessionId ?? null,
-                    sourceType:
-                        activeSegmentedSessionRef.current?.sourceType ??
-                        (currentTrack
-                            ? resolveDirectTrackSourceType(currentTrack)
-                            : "unknown"),
-                    streamingMode: activeSegmentedSessionRef.current
-                        ? "segmented"
-                        : "direct",
+                    sourceType: errorSourceType,
                     error: errorMessage,
                     stage:
                         playbackType === "track"
                             ? "fatal_after_recovery"
                             : "fatal",
-                    chunkName: failingChunkName,
-                });
-                emitSegmentedStartupTimeline("playback_error", {
-                    error: errorMessage,
                 });
                 recoverablePlayErrorPendingRef.current = false;
                 isUserInitiatedRef.current = false;
@@ -991,182 +748,6 @@ export const AudioPlaybackOrchestrator = memo(
                 }
             };
 
-            const handleVhsResponse = (data: AudioEngineVhsResponsePayload) => {
-                noteSegmentedStartupVhsResponse(data);
-
-                if (data.kind !== "segment") {
-                    return;
-                }
-
-                const chunkName = resolveSegmentAssetNameFromUri(data.uri);
-                if (!chunkName || !chunkName.startsWith("chunk-")) {
-                    return;
-                }
-
-                const liveTrackId =
-                    data.trackId ?? currentTrackRef.current?.id ?? null;
-                const liveSessionId =
-                    data.sessionId ??
-                    activeSegmentedSessionRef.current?.sessionId ??
-                    null;
-                const statusCode = data.statusCode;
-                const hasSegmentFetchError =
-                    data.hasError ||
-                    (typeof statusCode === "number" && statusCode >= 400);
-                const quarantineKey = `${liveTrackId ?? "unknown"}:${liveSessionId ?? "unknown"}:${chunkName}`;
-
-                if (!hasSegmentFetchError) {
-                    segmentedChunkQuarantineRef.current.delete(quarantineKey);
-                    return;
-                }
-
-                if (segmentedChunkQuarantineRef.current.has(quarantineKey)) {
-                    return;
-                }
-
-                segmentedChunkQuarantineRef.current.set(
-                    quarantineKey,
-                    Date.now(),
-                );
-                if (
-                    segmentedChunkQuarantineRef.current.size >
-                    SEGMENTED_CHUNK_QUARANTINE_MAX_ENTRIES
-                ) {
-                    const oldestKey = segmentedChunkQuarantineRef.current
-                        .keys()
-                        .next().value;
-                    if (typeof oldestKey === "string") {
-                        segmentedChunkQuarantineRef.current.delete(oldestKey);
-                    }
-                }
-
-                segmentedLastFailedChunkRef.current = {
-                    trackId: liveTrackId,
-                    sessionId: liveSessionId,
-                    chunkName,
-                    statusCode,
-                    observedAtMs: Date.now(),
-                };
-
-                const representationId =
-                    data.representationId ??
-                    resolveSegmentRepresentationIdFromName(chunkName);
-                let representationFailoverResult: AudioEngineRepresentationFailoverResult | null =
-                    null;
-                const isCurrentLiveTrackPlayback =
-                    playbackTypeRef.current === "track" &&
-                    !!liveTrackId &&
-                    currentTrackRef.current?.id === liveTrackId &&
-                    !segmentedHandoffInProgressRef.current;
-                const canAttemptRepresentationFailover =
-                    isCurrentLiveTrackPlayback &&
-                    typeof representationId === "string" &&
-                    typeof audioEngine.quarantineRepresentation === "function";
-
-                if (canAttemptRepresentationFailover) {
-                    representationFailoverResult =
-                        audioEngine.quarantineRepresentation(
-                            representationId,
-                            SEGMENTED_REPRESENTATION_QUARANTINE_COOLDOWN_MS,
-                        ) ?? null;
-                }
-
-                logPlaybackClientMetric("player.segment_quarantined", {
-                    trackId: liveTrackId,
-                    sessionId: liveSessionId,
-                    sourceType:
-                        activeSegmentedSessionRef.current?.sourceType ??
-                        (currentTrackRef.current
-                            ? resolveDirectTrackSourceType(
-                                  currentTrackRef.current,
-                              )
-                            : "unknown"),
-                    chunkName,
-                    statusCode,
-                    hasError: data.hasError,
-                    uri: data.uri,
-                    representationId: representationId ?? null,
-                    representationFailoverAttempted:
-                        canAttemptRepresentationFailover,
-                    representationFailoverSwitched:
-                        representationFailoverResult?.didSwitchRepresentation ??
-                        null,
-                    representationEnabledCount:
-                        representationFailoverResult?.enabledRepresentationCount ??
-                        null,
-                    representationTotalCount:
-                        representationFailoverResult?.totalRepresentationCount ??
-                        null,
-                    representationAllUnhealthy:
-                        representationFailoverResult?.allRepresentationsUnhealthy ??
-                        null,
-                });
-
-                if (playbackTypeRef.current !== "track") {
-                    return;
-                }
-
-                if (
-                    !liveTrackId ||
-                    currentTrackRef.current?.id !== liveTrackId
-                ) {
-                    return;
-                }
-                if (segmentedHandoffInProgressRef.current) {
-                    return;
-                }
-                if (
-                    representationFailoverResult &&
-                    !representationFailoverResult.allRepresentationsUnhealthy
-                ) {
-                    return;
-                }
-
-                const nowMs = Date.now();
-                const isSegmentMissing404 = statusCode === 404;
-                const activeSessionId =
-                    activeSegmentedSessionRef.current?.sessionId ?? null;
-                const activeSessionAssetBuildInFlight =
-                    activeSegmentedSessionRef.current?.assetBuildInFlight ===
-                    true;
-                const isCurrentActiveSession =
-                    !!liveSessionId &&
-                    !!activeSessionId &&
-                    liveSessionId === activeSessionId;
-                const wasRecentHandoffAttempt =
-                    segmentedHandoffLastAttemptAtRef.current > 0 &&
-                    nowMs - segmentedHandoffLastAttemptAtRef.current <=
-                        SEGMENTED_HANDOFF_CIRCUIT_WINDOW_MS;
-                const shouldForceSessionCreateRecovery =
-                    isSegmentMissing404 &&
-                    isCurrentActiveSession &&
-                    wasRecentHandoffAttempt &&
-                    !activeSessionAssetBuildInFlight;
-
-                if (
-                    !shouldForceSessionCreateRecovery &&
-                    nowMs - segmentedChunkQuarantineLastRecoveryAtRef.current <
-                        SEGMENTED_CHUNK_QUARANTINE_RECOVERY_COOLDOWN_MS
-                ) {
-                    return;
-                }
-                segmentedChunkQuarantineLastRecoveryAtRef.current = nowMs;
-
-                const quarantineError = new Error(
-                    `Segment quarantined before hard-stop (${chunkName}, status=${statusCode ?? "unknown"})`,
-                );
-                void attemptSegmentedHandoffRecovery(quarantineError, {
-                    forceSessionCreate: shouldForceSessionCreateRecovery,
-                    forceSessionCreateReason: shouldForceSessionCreateRecovery
-                        ? "segment_missing_404"
-                        : undefined,
-                }).then((didRecoverWithHandoff) => {
-                    if (didRecoverWithHandoff) {
-                        clearPendingTrackErrorSkip();
-                    }
-                });
-            };
-
             const handlePlay = () => {
                 // Transition state machine to PLAYING
                 playbackStateMachine.transition("PLAYING");
@@ -1193,11 +774,6 @@ export const AudioPlaybackOrchestrator = memo(
                 trackEndWatchdogRef.current?.clear();
                 if (isLoadingRef.current) return;
                 if (seekReloadInProgressRef.current) return;
-                if (segmentedHandoffInProgressRef.current) {
-                    // Pause can occur transiently while reloading source during handoff.
-                    isUserInitiatedRef.current = false;
-                    return;
-                }
                 clearUnexpectedPauseRecoveryCheck();
 
                 const currentPositionSec = Math.max(
@@ -1250,7 +826,6 @@ export const AudioPlaybackOrchestrator = memo(
 
                         if (
                             playbackTypeRef.current !== "track" ||
-                            segmentedHandoffInProgressRef.current ||
                             seekReloadInProgressRef.current ||
                             isLoadingRef.current
                         ) {
@@ -1273,16 +848,16 @@ export const AudioPlaybackOrchestrator = memo(
                         );
                         if (
                             silenceSinceTimeUpdateMs <
-                            SEGMENTED_PAUSE_RECOVERY_MIN_SILENCE_MS
+                            UNEXPECTED_PAUSE_RECOVERY_MIN_SILENCE_MS
                         ) {
                             const remainingSilenceMs =
-                                SEGMENTED_PAUSE_RECOVERY_MIN_SILENCE_MS -
+                                UNEXPECTED_PAUSE_RECOVERY_MIN_SILENCE_MS -
                                 silenceSinceTimeUpdateMs;
                             unexpectedPauseRecoveryTimeoutRef.current =
                                 setTimeout(
                                     runUnexpectedPauseRecoveryCheck,
                                     Math.min(
-                                        SEGMENTED_PAUSE_RECOVERY_DEBOUNCE_MS,
+                                        UNEXPECTED_PAUSE_RECOVERY_DEBOUNCE_MS,
                                         Math.max(remainingSilenceMs, 50),
                                     ),
                                 );
@@ -1293,26 +868,20 @@ export const AudioPlaybackOrchestrator = memo(
                         const hasBufferedAheadMeasurement =
                             Number.isFinite(bufferedAheadSec);
                         const hasLowBufferedAhead =
-                            shouldAttemptSegmentedRecoveryOnUnexpectedPause(
+                            shouldAttemptRecoveryOnUnexpectedPause(
                                 bufferedAheadSec,
-                                SEGMENTED_PAUSE_RECOVERY_MAX_BUFFERED_AHEAD_SEC,
+                                UNEXPECTED_PAUSE_RECOVERY_MAX_BUFFERED_AHEAD_SEC,
                             );
 
                         if (!hasBufferedAheadMeasurement) {
                             logPlaybackClientMetric("player.unexpected_pause", {
                                 reason: "pause_without_buffered_ahead_measurement",
                                 trackId: liveTrackId,
-                                sessionId:
-                                    activeSegmentedSessionRef.current
-                                        ?.sessionId ?? null,
-                                sourceType:
-                                    activeSegmentedSessionRef.current
-                                        ?.sourceType ??
-                                    (currentTrackRef.current
-                                        ? resolveDirectTrackSourceType(
-                                              currentTrackRef.current,
-                                          )
-                                        : "unknown"),
+                                sourceType: currentTrackRef.current
+                                    ? resolveDirectTrackSourceType(
+                                          currentTrackRef.current,
+                                      )
+                                    : "unknown",
                                 hasPlayIntent,
                                 nearTrackEnd,
                                 bufferedAheadSec,
@@ -1326,17 +895,11 @@ export const AudioPlaybackOrchestrator = memo(
                             logPlaybackClientMetric("player.unexpected_pause", {
                                 reason: "pause_with_buffered_ahead",
                                 trackId: liveTrackId,
-                                sessionId:
-                                    activeSegmentedSessionRef.current
-                                        ?.sessionId ?? null,
-                                sourceType:
-                                    activeSegmentedSessionRef.current
-                                        ?.sourceType ??
-                                    (currentTrackRef.current
-                                        ? resolveDirectTrackSourceType(
-                                              currentTrackRef.current,
-                                          )
-                                        : "unknown"),
+                                sourceType: currentTrackRef.current
+                                    ? resolveDirectTrackSourceType(
+                                          currentTrackRef.current,
+                                      )
+                                    : "unknown",
                                 hasPlayIntent,
                                 nearTrackEnd,
                                 bufferedAheadSec,
@@ -1352,16 +915,11 @@ export const AudioPlaybackOrchestrator = memo(
                         logPlaybackClientMetric("player.unexpected_pause", {
                             reason: "engine_pause_while_play_intent_stall_confirmed",
                             trackId: liveTrackId,
-                            sessionId:
-                                activeSegmentedSessionRef.current?.sessionId ??
-                                null,
-                            sourceType:
-                                activeSegmentedSessionRef.current?.sourceType ??
-                                (currentTrackRef.current
-                                    ? resolveDirectTrackSourceType(
-                                          currentTrackRef.current,
-                                      )
-                                    : "unknown"),
+                            sourceType: currentTrackRef.current
+                                ? resolveDirectTrackSourceType(
+                                      currentTrackRef.current,
+                                  )
+                                : "unknown",
                             hasPlayIntent,
                             nearTrackEnd,
                             bufferedAheadSec,
@@ -1375,35 +933,23 @@ export const AudioPlaybackOrchestrator = memo(
                         });
                         setIsBuffering(true);
                         playbackStateMachine.forceTransition("LOADING");
-                        void attemptSegmentedHandoffRecovery(pauseError).then(
-                            (didRecoverWithHandoff) => {
-                                if (didRecoverWithHandoff) {
-                                    return;
-                                }
+                        const didScheduleTransientRecovery =
+                            attemptTransientTrackRecovery(
+                                liveTrackId,
+                                pauseError,
+                            );
+                        if (didScheduleTransientRecovery) {
+                            return;
+                        }
 
-                                const didScheduleTransientRecovery =
-                                    attemptTransientTrackRecovery(
-                                        liveTrackId,
-                                        pauseError,
-                                    );
-                                if (didScheduleTransientRecovery) {
-                                    playbackStateMachine.forceTransition(
-                                        "LOADING",
-                                    );
-                                    setIsBuffering(true);
-                                    return;
-                                }
-
-                                setIsPlaying(false);
-                                setIsBuffering(false);
-                                playbackStateMachine.forceTransition("READY");
-                            },
-                        );
+                        setIsPlaying(false);
+                        setIsBuffering(false);
+                        playbackStateMachine.forceTransition("READY");
                     };
 
                     unexpectedPauseRecoveryTimeoutRef.current = setTimeout(
                         runUnexpectedPauseRecoveryCheck,
-                        SEGMENTED_PAUSE_RECOVERY_DEBOUNCE_MS,
+                        UNEXPECTED_PAUSE_RECOVERY_DEBOUNCE_MS,
                     );
                     isUserInitiatedRef.current = false;
                     return;
@@ -1414,14 +960,9 @@ export const AudioPlaybackOrchestrator = memo(
                             ? "pause_near_track_end"
                             : "pause_without_play_intent",
                         trackId: currentTrack?.id ?? null,
-                        sessionId:
-                            activeSegmentedSessionRef.current?.sessionId ??
-                            null,
-                        sourceType:
-                            activeSegmentedSessionRef.current?.sourceType ??
-                            (currentTrack
-                                ? resolveDirectTrackSourceType(currentTrack)
-                                : "unknown"),
+                        sourceType: currentTrack
+                            ? resolveDirectTrackSourceType(currentTrack)
+                            : "unknown",
                         hasPlayIntent,
                         nearTrackEnd,
                         stateMachineState: playbackStateMachine.getState(),
@@ -1439,11 +980,6 @@ export const AudioPlaybackOrchestrator = memo(
                 }
                 isUserInitiatedRef.current = false;
             };
-            const handleManifestStall = (
-                payload: AudioEngineManifestStallPayload,
-            ) => {
-                handleStartupManifestStall(payload);
-            };
             engineEventHandlersRef.current = {
                 handleTimeUpdate,
                 handleLoad,
@@ -1451,8 +987,6 @@ export const AudioPlaybackOrchestrator = memo(
                 handleError,
                 handlePlay,
                 handlePause,
-                handleVhsResponse,
-                handleManifestStall,
                 cleanup: clearUnexpectedPauseRecoveryCheck,
             };
         });
@@ -1490,20 +1024,16 @@ export const AudioPlaybackOrchestrator = memo(
                 desiredLoadPlayRef.current = null;
                 cancelledLoadPlayIdRef.current = null;
                 wasPlayingWhenHiddenRef.current = false;
-                markSegmentedStartupRampWindow(null, "media_cleared");
                 setStreamProfile(null);
-                segmentedStartupTimelineRef.current = null;
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
                 clearTransientTrackRecovery(true);
-                clearSegmentedStartupFallback();
                 if (loadTimeoutRef.current) {
                     clearTimeout(loadTimeoutRef.current);
                     loadTimeoutRef.current = null;
                 }
                 loadTimeoutRetryCountRef.current = 0;
                 activeEngineTrackIdRef.current = null;
-                activeSegmentedPlaybackTrackIdRef.current = null;
                 audioEngine.stop();
                 lastTrackIdRef.current = null;
                 isLoadingRef.current = false;
@@ -1515,7 +1045,6 @@ export const AudioPlaybackOrchestrator = memo(
             const previousMediaId = lastTrackIdRef.current;
             if (currentMediaId !== previousMediaId) {
                 trackEndWatchdogRef.current?.clear();
-                segmentedStartupTimelineRef.current = null;
             }
 
             if (currentMediaId === previousMediaId) {
@@ -1547,7 +1076,6 @@ export const AudioPlaybackOrchestrator = memo(
                 // while startup/session resolution for the next track is in-flight.
                 audioEngine.stop();
                 activeEngineTrackIdRef.current = null;
-                activeSegmentedPlaybackTrackIdRef.current = null;
             }
 
             if (
@@ -1562,8 +1090,6 @@ export const AudioPlaybackOrchestrator = memo(
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
                 clearTransientTrackRecovery(true);
-                clearSegmentedStartupFallback();
-                clearSegmentedManifestNudges();
                 if (loadTimeoutRef.current) {
                     clearTimeout(loadTimeoutRef.current);
                     loadTimeoutRef.current = null;
@@ -1582,7 +1108,6 @@ export const AudioPlaybackOrchestrator = memo(
                 }
                 seekReloadInProgressRef.current = false;
                 activeEngineTrackIdRef.current = null;
-                activeSegmentedPlaybackTrackIdRef.current = null;
                 audioEngine.stop();
                 isLoadingRef.current = false;
             }
@@ -1610,19 +1135,6 @@ export const AudioPlaybackOrchestrator = memo(
                 consecutiveErrorBreakerRef.current.reset();
             }
             loadTimeoutRetryCountRef.current = 0;
-            segmentedStartupRetryCountRef.current = 0;
-            segmentedStartupStageAttemptsRef.current =
-                createEmptySegmentedStartupRecoveryStageAttempts();
-            segmentedStartupRecoveryWindowStartedAtMsRef.current = Date.now();
-            segmentedStartupSessionResetCountRef.current = 0;
-            if (playbackType === "track" && currentTrack) {
-                markSegmentedStartupRampWindow(
-                    currentTrack.id,
-                    "track_load_started",
-                );
-            } else {
-                markSegmentedStartupRampWindow(null, "non_track_load_started");
-            }
 
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
@@ -1669,21 +1181,13 @@ export const AudioPlaybackOrchestrator = memo(
                 } else {
                     streamUrl = api.getStreamUrl(currentTrack.id);
                 }
-                const segmentedStartupEligible =
-                    isSegmentedModeEnabled() &&
-                    isListenTogetherSegmentedPlaybackAllowed() &&
-                    Boolean(resolveSegmentedTrackContext(currentTrack));
-                const listenTogetherActiveOrPending =
-                    isListenTogetherActiveOrPending();
-                // Only restore persisted position on initial player boot when not
-                // using segmented startup or active/pending Listen Together playback.
-                // Segmented startup must begin at 0 unless a handoff recovery path
-                // provides an explicit resume target.
+                // Only restore persisted position on initial player boot when
+                // Listen Together playback is not active or pending.
                 const allowPersistedResume =
                     shouldAllowInitialPersistedTrackResume({
                         isInitialTrackLoad,
-                        segmentedStartupEligible,
-                        listenTogetherActiveOrPending,
+                        listenTogetherActiveOrPending:
+                            isListenTogetherActiveOrPending(),
                     });
                 if (allowPersistedResume && typeof window !== "undefined") {
                     let resumeTrackId: string | null = null;
@@ -1783,370 +1287,6 @@ export const AudioPlaybackOrchestrator = memo(
                     setStreamProfile(null);
                 }
 
-                let sourceForLoad: string | AudioEngineSource = streamUrl;
-                let sourceRequestHeaders: Record<string, string> | undefined;
-                let sourceResolved = false;
-                let usingSegmentedSource = false;
-                let segmentedAssetBuildInFlight = false;
-                let segmentedInitSource:
-                    | "prewarm"
-                    | "startup"
-                    | "on_demand"
-                    | null = null;
-                let forceFreshSegmentedSession = false;
-                let capturedLoadPlayIntent: DesiredLoadPlayIntent | null = null;
-
-                const resolveSourceForLoad = async (): Promise<void> => {
-                    if (sourceResolved) {
-                        return;
-                    }
-                    sourceResolved = true;
-
-                    const segmentedTrackContext =
-                        playbackType === "track"
-                            ? resolveSegmentedTrackContext(currentTrack)
-                            : null;
-
-                    const shouldAttemptSegmentedSession =
-                        playbackType === "track" &&
-                        Boolean(currentTrack) &&
-                        Boolean(segmentedTrackContext) &&
-                        isListenTogetherSegmentedPlaybackAllowed() &&
-                        isSegmentedModeEnabled();
-
-                    if (
-                        !shouldAttemptSegmentedSession ||
-                        !currentTrack ||
-                        !segmentedTrackContext
-                    ) {
-                        segmentedStartupTimelineRef.current = null;
-                        activeSegmentedSessionRef.current = null;
-                        segmentedHandoffAttemptRef.current = 0;
-                        segmentedHandoffLastAttemptAtRef.current = 0;
-                        segmentedSessionCreateFallbackAttemptRef.current = 0;
-                        segmentedSessionCreateFallbackLastAttemptAtRef.current = 0;
-                        segmentedChunkQuarantineRef.current.clear();
-                        segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-                        segmentedLastFailedChunkRef.current = {
-                            trackId: null,
-                            sessionId: null,
-                            chunkName: null,
-                            statusCode: null,
-                            observedAtMs: 0,
-                        };
-                        resetSegmentedHandoffCircuit(null);
-                        segmentedHandoffLastRecoveryRef.current = {
-                            trackId: null,
-                            resumeAtSec: 0,
-                            recoveredAtMs: 0,
-                        };
-                        segmentedProactiveHandoffAttemptedTrackIdRef.current =
-                            null;
-                        segmentedProactiveHandoffAttemptCountRef.current = 0;
-                        segmentedProactiveHandoffLastAttemptAtRef.current = 0;
-                        segmentedProactiveHandoffCompletedTrackIdRef.current =
-                            null;
-                        segmentedProactiveHandoffLastSkipKeyRef.current = null;
-                        startupSegmentedSessionRef.current = null;
-                        return;
-                    }
-
-                    const segmentedInitStartedAtMs = Date.now();
-                    const startupTimeline = ensureSegmentedStartupTimeline(
-                        currentTrack.id,
-                        thisLoadId,
-                        segmentedInitStartedAtMs,
-                    );
-                    const startupCorrelationMetadata = {
-                        startupLoadId: thisLoadId,
-                        startupCorrelationId:
-                            startupTimeline.startupCorrelationId,
-                    };
-                    const segmentedSessionKey = buildSegmentedSessionKey(
-                        segmentedTrackContext,
-                    );
-                    if (forceFreshSegmentedSession) {
-                        prewarmedSegmentedSessionRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                        startupSegmentedSessionRef.current = null;
-                        startupSegmentedSessionInFlightRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                        startupSegmentedSessionPromisesRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                    }
-                    const prewarmedSessionCandidate = forceFreshSegmentedSession
-                        ? null
-                        : prewarmedSegmentedSessionRef.current.get(
-                              segmentedSessionKey,
-                          );
-                    const prewarmedSession =
-                        prewarmedSessionCandidate &&
-                        isSegmentedSessionUsable(prewarmedSessionCandidate)
-                            ? prewarmedSessionCandidate
-                            : null;
-                    if (prewarmedSessionCandidate && !prewarmedSession) {
-                        logPlaybackClientMetric("session.prewarm_discarded", {
-                            trackId: currentTrack.id,
-                            sourceType: segmentedTrackContext.sourceType,
-                            reason: "insufficient_ttl",
-                            remainingMs: getSegmentedSessionRemainingMs(
-                                prewarmedSessionCandidate,
-                            ),
-                        });
-                        prewarmedSegmentedSessionRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                    }
-
-                    const startupSessionSnapshot =
-                        startupSegmentedSessionRef.current;
-                    const startupSession =
-                        !forceFreshSegmentedSession &&
-                        startupSessionSnapshot &&
-                        startupSessionSnapshot.trackId === currentTrack.id &&
-                        startupSessionSnapshot.sourceType ===
-                            segmentedTrackContext.sourceType &&
-                        isSegmentedSessionUsable(startupSessionSnapshot.session)
-                            ? startupSessionSnapshot.session
-                            : null;
-                    if (
-                        startupSessionSnapshot &&
-                        startupSessionSnapshot.trackId === currentTrack.id &&
-                        !startupSession
-                    ) {
-                        logPlaybackClientMetric("session.startup_discarded", {
-                            trackId: currentTrack.id,
-                            sourceType: segmentedTrackContext.sourceType,
-                            reason: "insufficient_ttl",
-                            remainingMs: getSegmentedSessionRemainingMs(
-                                startupSessionSnapshot.session,
-                            ),
-                        });
-                        startupSegmentedSessionRef.current = null;
-                    }
-
-                    let initSource: "prewarm" | "startup" | "on_demand" =
-                        "on_demand";
-                    let segmentedSession: SegmentedStreamingSessionResponse | null =
-                        prewarmedSession;
-                    if (segmentedSession) {
-                        initSource = "prewarm";
-                        prewarmedSegmentedSessionRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                    } else if (startupSession) {
-                        segmentedSession = startupSession;
-                        initSource = "startup";
-                    } else {
-                        const startupSessionFromRequest =
-                            await ensureStartupSegmentedSession(
-                                currentTrack.id,
-                                segmentedTrackContext,
-                                "load_segmented_startup",
-                                startupCorrelationMetadata,
-                            );
-                        if (
-                            startupSessionFromRequest &&
-                            isSegmentedSessionUsable(startupSessionFromRequest)
-                        ) {
-                            segmentedSession = startupSessionFromRequest;
-                            initSource = "startup";
-                        } else {
-                            startupTimeline.createRequestedAtMs ??= Date.now();
-                            logPlaybackClientMetric("session.create_request", {
-                                trackId: currentTrack.id,
-                                sourceType: segmentedTrackContext.sourceType,
-                                initSource: "on_demand",
-                            });
-
-                            const createdSession =
-                                await api.createSegmentedStreamingSession({
-                                    trackId:
-                                        segmentedTrackContext.sessionTrackId,
-                                    sourceType:
-                                        segmentedTrackContext.sourceType,
-                                    startupLoadId:
-                                        startupCorrelationMetadata.startupLoadId,
-                                    startupCorrelationId:
-                                        startupCorrelationMetadata.startupCorrelationId,
-                                    manifestProfile: "steady_state_dual",
-                                });
-                            startupTimeline.createResolvedAtMs = Date.now();
-                            if (!isSegmentedSessionUsable(createdSession)) {
-                                logPlaybackClientMetric(
-                                    "session.create_failure",
-                                    {
-                                        trackId: currentTrack.id,
-                                        sourceType:
-                                            segmentedTrackContext.sourceType,
-                                        reason: "created_session_not_usable",
-                                    },
-                                );
-                                throw new Error(
-                                    "Segmented startup session is not usable for playback",
-                                );
-                            }
-                            segmentedSession = createdSession;
-                        }
-                        startupSegmentedSessionRef.current = {
-                            trackId: currentTrack.id,
-                            sourceType: segmentedTrackContext.sourceType,
-                            session: segmentedSession,
-                        };
-                    }
-
-                    if (!segmentedSession) {
-                        throw new Error(
-                            "Segmented startup session unavailable",
-                        );
-                    }
-
-                    segmentedAssetBuildInFlight =
-                        segmentedSession.engineHints?.assetBuildInFlight ===
-                        true;
-
-                    if (segmentedAssetBuildInFlight) {
-                        logPlaybackClientMetric(
-                            "session.create_asset_build_inflight_hint",
-                            {
-                                trackId: currentTrack.id,
-                                sourceType:
-                                    segmentedSession.playbackProfile
-                                        ?.sourceType ??
-                                    segmentedSession.engineHints?.sourceType ??
-                                    segmentedTrackContext.sourceType,
-                                sessionId: segmentedSession.sessionId,
-                            },
-                        );
-                    }
-
-                    if (
-                        loadIdRef.current !== thisLoadId ||
-                        !isLoadingRef.current
-                    ) {
-                        return;
-                    }
-
-                    sourceForLoad = {
-                        url: segmentedSession.manifestUrl,
-                        trackId: currentTrack.id,
-                        sessionId: segmentedSession.sessionId,
-                        sourceType:
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        protocol: "dash",
-                        mimeType: "application/dash+xml",
-                    };
-                    usingSegmentedSource = true;
-                    segmentedInitSource = initSource;
-                    format = "mp4";
-                    startupTimeline.sessionId = segmentedSession.sessionId;
-                    startupTimeline.sourceType =
-                        segmentedSession.engineHints?.sourceType ??
-                        segmentedSession.playbackProfile?.sourceType ??
-                        segmentedTrackContext.sourceType;
-                    startupTimeline.initSource = initSource;
-
-                    sourceRequestHeaders = {
-                        "x-streaming-session-token":
-                            segmentedSession.sessionToken,
-                    };
-                    const authToken = api.getStreamingAuthToken();
-                    if (authToken) {
-                        sourceRequestHeaders.Authorization = `Bearer ${authToken}`;
-                    }
-
-                    activeSegmentedSessionRef.current = {
-                        sessionId: segmentedSession.sessionId,
-                        sessionToken: segmentedSession.sessionToken,
-                        trackId: currentTrack.id,
-                        sourceType:
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        manifestUrl: segmentedSession.manifestUrl,
-                        expiresAt: segmentedSession.expiresAt,
-                        assetBuildInFlight:
-                            segmentedSession.engineHints?.assetBuildInFlight ===
-                            true,
-                        manifestProfile:
-                            segmentedSession.playbackProfile?.manifestProfile ??
-                            null,
-                    };
-                    segmentedChunkQuarantineRef.current.clear();
-                    segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-                    segmentedLastFailedChunkRef.current = {
-                        trackId: currentTrack.id,
-                        sessionId: segmentedSession.sessionId,
-                        chunkName: null,
-                        statusCode: null,
-                        observedAtMs: Date.now(),
-                    };
-                    segmentedColdStartRebufferDeferralRef.current = {
-                        trackId: currentTrack.id,
-                        count: 0,
-                    };
-                    startupSegmentedSessionRef.current = {
-                        trackId: currentTrack.id,
-                        sourceType:
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        session: segmentedSession,
-                    };
-                    forceFreshSegmentedSession = false;
-                    setStreamProfile({
-                        mode: "dash",
-                        sourceType:
-                            segmentedSession.playbackProfile?.sourceType ??
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        codec:
-                            segmentedSession.playbackProfile?.codec?.toUpperCase() ??
-                            "AAC",
-                        bitrateKbps:
-                            segmentedSession.playbackProfile?.bitrateKbps ??
-                            null,
-                    });
-                    logPlaybackClientMetric("session.create_success", {
-                        trackId: currentTrack.id,
-                        sourceType:
-                            segmentedSession.playbackProfile?.sourceType ??
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        sessionId: segmentedSession.sessionId,
-                        initSource,
-                        latencyMs: Math.max(
-                            0,
-                            Date.now() - segmentedInitStartedAtMs,
-                        ),
-                    });
-                    segmentedHandoffAttemptRef.current = 0;
-                    segmentedHandoffLastAttemptAtRef.current = 0;
-                    segmentedSessionCreateFallbackAttemptRef.current = 0;
-                    segmentedSessionCreateFallbackLastAttemptAtRef.current = 0;
-                    segmentedChunkQuarantineRef.current.clear();
-                    segmentedChunkQuarantineLastRecoveryAtRef.current = 0;
-                    segmentedLastFailedChunkRef.current = {
-                        trackId: currentTrack.id,
-                        sessionId: segmentedSession.sessionId,
-                        chunkName: null,
-                        statusCode: null,
-                        observedAtMs: Date.now(),
-                    };
-                    resetSegmentedHandoffCircuit(currentTrack.id);
-                    segmentedHandoffLastRecoveryRef.current = {
-                        trackId: currentTrack.id,
-                        resumeAtSec: 0,
-                        recoveredAtMs: Date.now(),
-                    };
-                    segmentedProactiveHandoffAttemptCountRef.current = 0;
-                    segmentedProactiveHandoffCompletedTrackIdRef.current =
-                        currentTrack.id;
-                    segmentedProactiveHandoffLastSkipKeyRef.current = null;
-                };
-
                 const clearLoadListeners = () => {
                     if (loadListenerRef.current) {
                         audioEngine.off("load", loadListenerRef.current);
@@ -2160,308 +1300,15 @@ export const AudioPlaybackOrchestrator = memo(
                         loadErrorListenerRef.current = null;
                     }
                 };
-                const startLoadAttempt = async (
-                    options: {
-                        retryReason?:
-                            | "segmented_session_create_error"
-                            | "segmented_load_error"
-                            | "segmented_startup_timeout";
-                    } = {},
-                ) => {
+
+                let capturedLoadPlayIntent: DesiredLoadPlayIntent | null = null;
+
+                const startLoadAttempt = () => {
                     clearLoadListeners();
-                    clearSegmentedStartupFallback();
-                    clearSegmentedManifestNudges();
-                    const startupAttemptStartedAtMs = Date.now();
 
                     if (loadTimeoutRef.current) {
                         clearTimeout(loadTimeoutRef.current);
                         loadTimeoutRef.current = null;
-                    }
-
-                    const scheduleSegmentedStartupRetry = (
-                        stage: SegmentedStartupRecoveryStage,
-                        reason:
-                            | "segmented_session_create_error"
-                            | "segmented_load_error"
-                            | "segmented_startup_timeout",
-                        retryDetails: {
-                            isTransient: boolean;
-                            errorMessage: string;
-                            retryAfterMsHint?: number | null;
-                        },
-                    ): boolean => {
-                        if (playbackType !== "track" || !currentTrack) {
-                            return false;
-                        }
-
-                        if (
-                            stage !== "session_create" &&
-                            !usingSegmentedSource
-                        ) {
-                            return false;
-                        }
-
-                        if (!retryDetails.isTransient) {
-                            return false;
-                        }
-
-                        const nowMs = Date.now();
-                        if (
-                            segmentedStartupRecoveryWindowStartedAtMsRef.current ===
-                            null
-                        ) {
-                            segmentedStartupRecoveryWindowStartedAtMsRef.current =
-                                nowMs;
-                        }
-                        const windowStartedAtMs =
-                            segmentedStartupRecoveryWindowStartedAtMsRef.current;
-                        const windowElapsedMs =
-                            windowStartedAtMs === null
-                                ? 0
-                                : Math.max(0, nowMs - windowStartedAtMs);
-                        const maxSessionResetsForStage =
-                            stage === "manifest_readiness"
-                                ? SEGMENTED_STARTUP_MANIFEST_READINESS_MAX_SESSION_RESETS
-                                : SEGMENTED_STARTUP_MAX_SESSION_RESETS;
-
-                        const decision =
-                            resolveSegmentedStartupRecoveryDecision({
-                                stage,
-                                stageAttempts:
-                                    segmentedStartupStageAttemptsRef.current,
-                                stageLimits:
-                                    SEGMENTED_STARTUP_STAGE_MAX_ATTEMPTS,
-                                recoveryWindowStartedAtMs:
-                                    segmentedStartupRecoveryWindowStartedAtMsRef.current,
-                                recoveryWindowMaxMs:
-                                    SEGMENTED_STARTUP_RECOVERY_WINDOW_MS,
-                                sessionResetsUsed:
-                                    segmentedStartupSessionResetCountRef.current,
-                                maxSessionResets: maxSessionResetsForStage,
-                                baseDelayMs: SEGMENTED_STARTUP_RETRY_DELAY_MS,
-                                maxDelayMs:
-                                    SEGMENTED_STARTUP_RETRY_BACKOFF_MAX_MS,
-                                jitterRatio:
-                                    SEGMENTED_STARTUP_RETRY_JITTER_RATIO,
-                                nowMs,
-                            });
-
-                        segmentedStartupStageAttemptsRef.current =
-                            decision.nextStageAttempts;
-                        segmentedStartupSessionResetCountRef.current =
-                            decision.nextSessionResetsUsed;
-
-                        if (
-                            decision.action === "exhausted_stage" ||
-                            decision.action === "exhausted_window"
-                        ) {
-                            logPlaybackClientMetric(
-                                "session.startup_retry_exhausted",
-                                {
-                                    trackId: currentTrack.id,
-                                    sourceType:
-                                        resolveDirectTrackSourceType(
-                                            currentTrack,
-                                        ),
-                                    stage,
-                                    reason,
-                                    action: decision.action,
-                                    errorMessage: retryDetails.errorMessage,
-                                    attempts:
-                                        segmentedStartupRetryCountRef.current,
-                                    stageAttempts:
-                                        segmentedStartupStageAttemptsRef
-                                            .current[stage],
-                                    windowElapsedMs,
-                                    windowMaxMs:
-                                        SEGMENTED_STARTUP_RECOVERY_WINDOW_MS,
-                                    sessionResetsUsed:
-                                        segmentedStartupSessionResetCountRef.current,
-                                    maxSessionResets: maxSessionResetsForStage,
-                                },
-                            );
-                            return false;
-                        }
-
-                        if (decision.action === "reset_session_and_retry") {
-                            startupSegmentedSessionRef.current = null;
-                            activeSegmentedSessionRef.current = null;
-                            logPlaybackClientMetric(
-                                "session.startup_stage_reset",
-                                {
-                                    trackId: currentTrack.id,
-                                    sourceType:
-                                        resolveDirectTrackSourceType(
-                                            currentTrack,
-                                        ),
-                                    stage,
-                                    reason,
-                                    errorMessage: retryDetails.errorMessage,
-                                    sessionResetsUsed:
-                                        segmentedStartupSessionResetCountRef.current,
-                                },
-                            );
-                        }
-
-                        segmentedStartupRetryCountRef.current += 1;
-                        const attempt = segmentedStartupRetryCountRef.current;
-                        const startupTimeline =
-                            segmentedStartupTimelineRef.current;
-                        if (
-                            startupTimeline &&
-                            startupTimeline.trackId === currentTrack.id &&
-                            startupTimeline.loadId === thisLoadId
-                        ) {
-                            startupTimeline.startupRetryCount = attempt;
-                        }
-
-                        const baseRetryDelayMs =
-                            typeof decision.delayMs === "number"
-                                ? decision.delayMs
-                                : SEGMENTED_STARTUP_RETRY_DELAY_MS;
-                        const retryDelayMs =
-                            resolveConservativeSegmentedStartupRetryDelayMs({
-                                computedDelayMs: baseRetryDelayMs,
-                                retryAfterMsHint: retryDetails.retryAfterMsHint,
-                                maxDelayMs:
-                                    SEGMENTED_STARTUP_RECOVERY_WINDOW_MS,
-                            });
-                        logPlaybackClientMetric("session.startup_retry", {
-                            trackId: currentTrack.id,
-                            sourceType:
-                                activeSegmentedSessionRef.current?.sourceType ??
-                                resolveDirectTrackSourceType(currentTrack),
-                            reason,
-                            stage,
-                            action: decision.action,
-                            attempt,
-                            stageAttempts:
-                                segmentedStartupStageAttemptsRef.current[stage],
-                            delayMs: retryDelayMs,
-                            baseDelayMs: baseRetryDelayMs,
-                            retryAfterMsHint:
-                                retryDetails.retryAfterMsHint ?? null,
-                            windowElapsedMs,
-                            windowMaxMs: SEGMENTED_STARTUP_RECOVERY_WINDOW_MS,
-                            sessionResetsUsed:
-                                segmentedStartupSessionResetCountRef.current,
-                            maxSessionResets: maxSessionResetsForStage,
-                        });
-
-                        clearLoadListeners();
-                        clearSegmentedStartupFallback();
-                        clearSegmentedManifestNudges();
-                        if (loadTimeoutRef.current) {
-                            clearTimeout(loadTimeoutRef.current);
-                            loadTimeoutRef.current = null;
-                        }
-
-                        const retryTrackContext =
-                            resolveSegmentedTrackContext(currentTrack);
-                        if (retryTrackContext) {
-                            const retrySessionKey =
-                                buildSegmentedSessionKey(retryTrackContext);
-                            prewarmedSegmentedSessionRef.current.delete(
-                                retrySessionKey,
-                            );
-                            startupSegmentedSessionInFlightRef.current.delete(
-                                retrySessionKey,
-                            );
-                            startupSegmentedSessionPromisesRef.current.delete(
-                                retrySessionKey,
-                            );
-                        }
-                        startupSegmentedSessionRef.current = null;
-                        forceFreshSegmentedSession = true;
-                        isLoadingRef.current = true;
-                        activeEngineTrackIdRef.current = null;
-                        sourceResolved = false;
-                        sourceForLoad = streamUrl;
-                        sourceRequestHeaders = undefined;
-                        usingSegmentedSource = false;
-                        segmentedAssetBuildInFlight = false;
-                        segmentedInitSource = null;
-                        activeSegmentedSessionRef.current = null;
-                        markSegmentedStartupRampWindow(currentTrack.id, reason);
-                        audioEngine.stop();
-                        playbackStateMachine.forceTransition("RECOVERING");
-                        setIsBuffering(true);
-
-                        setTimeout(() => {
-                            if (
-                                loadIdRef.current !== thisLoadId ||
-                                !isLoadingRef.current
-                            ) {
-                                return;
-                            }
-                            playbackStateMachine.forceTransition("LOADING");
-                            void startLoadAttempt({
-                                retryReason: reason,
-                            });
-                        }, retryDelayMs);
-
-                        return true;
-                    };
-
-                    try {
-                        await resolveSourceForLoad();
-                    } catch (segmentedStartupError) {
-                        const startupErrorMessage =
-                            segmentedStartupError instanceof Error
-                                ? segmentedStartupError.message
-                                : String(segmentedStartupError ?? "unknown");
-                        const startupErrorHint = parseSegmentedStartupErrorHint(
-                            segmentedStartupError,
-                        );
-                        const isTransientCreateFailure =
-                            startupErrorHint?.isTransient ??
-                            isLikelyTransientStreamError(startupErrorMessage);
-                        sharedFrontendLogger.error(
-                            "[AudioPlaybackOrchestrator] Segmented startup session failed:",
-                            segmentedStartupError,
-                        );
-                        logPlaybackClientMetric("session.create_failure", {
-                            trackId: currentTrack?.id ?? null,
-                            sourceType: currentTrack
-                                ? resolveDirectTrackSourceType(currentTrack)
-                                : "unknown",
-                            reason: startupErrorMessage,
-                            stage: "session_create",
-                            isTransient: isTransientCreateFailure,
-                            retryAfterMsHint:
-                                startupErrorHint?.retryAfterMs ?? null,
-                            backendHintTransient:
-                                startupErrorHint?.isTransient ?? null,
-                        });
-                        if (
-                            scheduleSegmentedStartupRetry(
-                                "session_create",
-                                "segmented_session_create_error",
-                                {
-                                    isTransient: isTransientCreateFailure,
-                                    errorMessage: startupErrorMessage,
-                                    retryAfterMsHint:
-                                        startupErrorHint?.retryAfterMs ?? null,
-                                },
-                            )
-                        ) {
-                            return;
-                        }
-                        emitSegmentedStartupTimeline("playback_error", {
-                            error: startupErrorMessage,
-                        });
-                        isLoadingRef.current = false;
-                        activeEngineTrackIdRef.current = null;
-                        lastTrackIdRef.current = null;
-                        playbackStateMachine.forceTransition("ERROR", {
-                            error:
-                                startupErrorMessage ||
-                                "Segmented startup failed",
-                            errorCode: 500,
-                        });
-                        setIsPlaying(false);
-                        setIsBuffering(false);
-                        return;
                     }
 
                     if (
@@ -2471,8 +1318,7 @@ export const AudioPlaybackOrchestrator = memo(
                         return;
                     }
 
-                    const deferAutoplay =
-                        typeof sourceForLoad === "string" && startTime > 0;
+                    const deferAutoplay = startTime > 0;
                     if (!capturedLoadPlayIntent) {
                         const listenTogetherSnapshotForLoad =
                             getListenTogetherSessionSnapshot();
@@ -2518,57 +1364,22 @@ export const AudioPlaybackOrchestrator = memo(
                         desiredLoadPlay.loadId === thisLoadId,
                     );
 
-                    if (typeof sourceForLoad === "string") {
-                        activeSegmentedPlaybackTrackIdRef.current = null;
-                        howlerLoadStartMsRef.current = Date.now();
-                        // When resuming from a non-zero position, defer autoplay to
-                        // handleLoaded so the seek completes before playback starts.
-                        // Passing autoplay=true here would cause Howler's onload to
-                        // play() from position 0 before handleLoaded can seek,
-                        // producing overlapping audio streams.
-                        audioEngine.load(
-                            sourceForLoad,
-                            deferAutoplay ? false : shouldAutoPlayOnLoad,
-                            format,
-                        );
-                    } else {
-                        activeSegmentedPlaybackTrackIdRef.current =
-                            sourceForLoad.protocol === "dash"
-                                ? (sourceForLoad.trackId ?? null)
-                                : null;
-                        audioEngine.load(sourceForLoad, {
-                            autoplay: shouldAutoPlayOnLoad,
-                            format,
-                            withCredentials: true,
-                            requestHeaders: sourceRequestHeaders,
-                        });
-                    }
+                    howlerLoadStartMsRef.current = Date.now();
+                    // When resuming from a non-zero position, defer autoplay to
+                    // handleLoaded so the seek completes before playback starts.
+                    // Passing autoplay=true here would cause Howler's onload to
+                    // play() from position 0 before handleLoaded can seek,
+                    // producing overlapping audio streams.
+                    audioEngine.load(
+                        streamUrl,
+                        deferAutoplay ? false : shouldAutoPlayOnLoad,
+                        format,
+                    );
                     applyCurrentOutputState();
-                    if (
-                        options.retryReason &&
-                        playbackType === "track" &&
-                        currentTrack
-                    ) {
-                        logPlaybackClientMetric(
-                            "session.startup_retry_attempt",
-                            {
-                                trackId: currentTrack.id,
-                                sourceType:
-                                    activeSegmentedSessionRef.current
-                                        ?.sourceType ??
-                                    resolveDirectTrackSourceType(currentTrack),
-                                reason: options.retryReason,
-                                attempt: segmentedStartupRetryCountRef.current,
-                            },
-                        );
-                    }
 
                     if (playbackType === "podcast" && currentPodcast) {
                         podcastDebugLog("audioEngine.load()", {
-                            url:
-                                typeof sourceForLoad === "string"
-                                    ? sourceForLoad
-                                    : sourceForLoad.url,
+                            url: streamUrl,
                             format,
                             loadId: thisLoadId,
                             attempt: loadTimeoutRetryCountRef.current + 1,
@@ -2578,19 +1389,11 @@ export const AudioPlaybackOrchestrator = memo(
                     const handleLoaded = () => {
                         if (loadIdRef.current !== thisLoadId) return;
 
-                        clearSegmentedStartupFallback();
-                        clearSegmentedManifestNudges();
                         if (loadTimeoutRef.current) {
                             clearTimeout(loadTimeoutRef.current);
                             loadTimeoutRef.current = null;
                         }
                         loadTimeoutRetryCountRef.current = 0;
-                        segmentedStartupRetryCountRef.current = 0;
-                        segmentedStartupStageAttemptsRef.current =
-                            createEmptySegmentedStartupRecoveryStageAttempts();
-                        segmentedStartupRecoveryWindowStartedAtMsRef.current =
-                            null;
-                        segmentedStartupSessionResetCountRef.current = 0;
                         isLoadingRef.current = false;
                         activeEngineTrackIdRef.current =
                             playbackType === "track" && currentTrack
@@ -2645,8 +1448,6 @@ export const AudioPlaybackOrchestrator = memo(
                     };
 
                     const handleLoadError = (loadError?: unknown) => {
-                        clearSegmentedStartupFallback();
-                        clearSegmentedManifestNudges();
                         if (loadTimeoutRef.current) {
                             clearTimeout(loadTimeoutRef.current);
                             loadTimeoutRef.current = null;
@@ -2654,25 +1455,7 @@ export const AudioPlaybackOrchestrator = memo(
                         const loadErrorMessage =
                             loadError instanceof Error
                                 ? loadError.message
-                                : String(
-                                      loadError ??
-                                          "segmented engine load error",
-                                  );
-                        const isTransientLoadError =
-                            loadError == null ||
-                            isLikelyTransientStreamError(loadErrorMessage);
-                        if (
-                            scheduleSegmentedStartupRetry(
-                                "engine_load",
-                                "segmented_load_error",
-                                {
-                                    isTransient: isTransientLoadError,
-                                    errorMessage: loadErrorMessage,
-                                },
-                            )
-                        ) {
-                            return;
-                        }
+                                : String(loadError ?? "engine load error");
                         loadTimeoutRetryCountRef.current = 0;
                         isLoadingRef.current = false;
                         activeEngineTrackIdRef.current = null;
@@ -2680,7 +1463,7 @@ export const AudioPlaybackOrchestrator = memo(
                         playbackStateMachine.forceTransition("ERROR", {
                             error:
                                 loadErrorMessage ||
-                                "Segmented audio failed while loading",
+                                "Audio failed while loading",
                             errorCode: 502,
                         });
                         setIsPlaying(false);
@@ -2711,124 +1494,6 @@ export const AudioPlaybackOrchestrator = memo(
                     audioEngine.on("load", handleLoaded);
                     audioEngine.on("loaderror", handleLoadError);
 
-                    if (
-                        usingSegmentedSource &&
-                        playbackType === "track" &&
-                        currentTrack &&
-                        isListenTogetherSegmentedPlaybackAllowed()
-                    ) {
-                        const configuredFallbackTimeoutMs =
-                            resolveSegmentedStartupFallbackTimeoutMs();
-                        const startupRetryTimeoutMs =
-                            segmentedInitSource === "on_demand"
-                                ? clampSegmentedStartupFallbackTimeoutMs(
-                                      configuredFallbackTimeoutMs +
-                                          SEGMENTED_STARTUP_ON_DEMAND_TIMEOUT_BONUS_MS,
-                                  )
-                                : configuredFallbackTimeoutMs;
-                        {
-                            const effectiveRetryTimeoutMs =
-                                segmentedAssetBuildInFlight
-                                    ? Math.max(
-                                          SEGMENTED_STARTUP_ASSET_BUILD_TIMEOUT_FLOOR_MS,
-                                          clampSegmentedStartupFallbackTimeoutMs(
-                                              startupRetryTimeoutMs +
-                                                  SEGMENTED_STARTUP_ASSET_BUILD_TIMEOUT_BONUS_MS,
-                                          ),
-                                      )
-                                    : startupRetryTimeoutMs;
-
-                            if (segmentedAssetBuildInFlight) {
-                                logPlaybackClientMetric(
-                                    "session.startup_asset_build_retry_armed",
-                                    {
-                                        trackId: currentTrack.id,
-                                        sourceType:
-                                            activeSegmentedSessionRef.current
-                                                ?.sourceType ??
-                                            resolveDirectTrackSourceType(
-                                                currentTrack,
-                                            ),
-                                        effectiveRetryTimeoutMs,
-                                    },
-                                );
-                            }
-
-                            const retryDelayMs =
-                                resolveSegmentedStartupRetryDelayMs({
-                                    isLoading: isLoadingRef.current,
-                                    sourceKind: usingSegmentedSource
-                                        ? "segmented"
-                                        : "direct",
-                                    requestLoadId: thisLoadId,
-                                    activeLoadId: loadIdRef.current,
-                                    startupAttemptStartedAtMs,
-                                    retryTimeoutMs: effectiveRetryTimeoutMs,
-                                });
-                            const retrySegmentedStartup = () => {
-                                if (
-                                    !shouldRetrySegmentedStartupTimeout({
-                                        isLoading: isLoadingRef.current,
-                                        sourceKind: usingSegmentedSource
-                                            ? "segmented"
-                                            : "direct",
-                                        requestLoadId: thisLoadId,
-                                        activeLoadId: loadIdRef.current,
-                                    })
-                                ) {
-                                    return;
-                                }
-
-                                const didScheduleRetry =
-                                    scheduleSegmentedStartupRetry(
-                                        "manifest_readiness",
-                                        "segmented_startup_timeout",
-                                        {
-                                            isTransient: true,
-                                            errorMessage:
-                                                "Segmented startup readiness timeout",
-                                        },
-                                    );
-                                if (!didScheduleRetry) {
-                                    emitSegmentedStartupTimeline(
-                                        "startup_timeout",
-                                        {
-                                            effectiveRetryTimeoutMs,
-                                        },
-                                    );
-                                    sharedFrontendLogger.warn(
-                                        `[AudioPlaybackOrchestrator] Segmented startup exceeded ${effectiveRetryTimeoutMs}ms and retry budget is exhausted.`,
-                                    );
-                                    playbackStateMachine.forceTransition(
-                                        "ERROR",
-                                        {
-                                            error: "Segmented startup timed out after retry budget",
-                                            errorCode: 408,
-                                        },
-                                    );
-                                    setIsPlaying(false);
-                                    setIsBuffering(false);
-                                }
-                            };
-
-                            if (typeof retryDelayMs === "number") {
-                                if (retryDelayMs === 0) {
-                                    retrySegmentedStartup();
-                                    return;
-                                }
-                                segmentedStartupFallbackTimeoutRef.current =
-                                    setTimeout(
-                                        retrySegmentedStartup,
-                                        retryDelayMs,
-                                    );
-                            }
-                        }
-                    }
-
-                    const loadTimeoutMs =
-                        usingSegmentedSource && segmentedAssetBuildInFlight
-                            ? AUDIO_LOAD_TIMEOUT_ASSET_BUILD_INFLIGHT_MS
-                            : AUDIO_LOAD_TIMEOUT_MS;
                     loadTimeoutRef.current = setTimeout(() => {
                         if (
                             loadIdRef.current !== thisLoadId ||
@@ -2842,7 +1507,7 @@ export const AudioPlaybackOrchestrator = memo(
                         if (retryAttempt <= AUDIO_LOAD_TIMEOUT_RETRIES) {
                             loadTimeoutRetryCountRef.current = retryAttempt;
                             sharedFrontendLogger.warn(
-                                `[AudioPlaybackOrchestrator] Audio load timed out after ${loadTimeoutMs}ms; retrying (${retryAttempt}/${AUDIO_LOAD_TIMEOUT_RETRIES})`,
+                                `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms; retrying (${retryAttempt}/${AUDIO_LOAD_TIMEOUT_RETRIES})`,
                             );
                             clearLoadListeners();
                             if (loadTimeoutRef.current) {
@@ -2858,7 +1523,7 @@ export const AudioPlaybackOrchestrator = memo(
                                 ) {
                                     return;
                                 }
-                                void startLoadAttempt();
+                                startLoadAttempt();
                             }, AUDIO_LOAD_RETRY_DELAY_MS);
                             return;
                         }
@@ -2866,10 +1531,6 @@ export const AudioPlaybackOrchestrator = memo(
                         sharedFrontendLogger.error(
                             `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms`,
                         );
-                        emitSegmentedStartupTimeline("startup_timeout", {
-                            loadTimeoutMs,
-                            reason: "audio_load_timeout",
-                        });
                         loadTimeoutRetryCountRef.current = 0;
                         isLoadingRef.current = false;
                         activeEngineTrackIdRef.current = null;
@@ -2882,28 +1543,18 @@ export const AudioPlaybackOrchestrator = memo(
                         setIsBuffering(false);
                         clearLoadListeners();
                         loadTimeoutRef.current = null;
-                    }, loadTimeoutMs);
+                    }, AUDIO_LOAD_TIMEOUT_MS);
                 };
 
-                void startLoadAttempt();
+                startLoadAttempt();
             } else {
-                markSegmentedStartupRampWindow(null, "no_stream_url");
-                clearSegmentedStartupFallback();
-                clearSegmentedManifestNudges();
                 if (loadTimeoutRef.current) {
                     clearTimeout(loadTimeoutRef.current);
                     loadTimeoutRef.current = null;
                 }
                 loadTimeoutRetryCountRef.current = 0;
-                segmentedStartupRetryCountRef.current = 0;
-                segmentedStartupStageAttemptsRef.current =
-                    createEmptySegmentedStartupRecoveryStageAttempts();
-                segmentedStartupRecoveryWindowStartedAtMsRef.current = null;
-                segmentedStartupSessionResetCountRef.current = 0;
-                segmentedStartupTimelineRef.current = null;
                 isLoadingRef.current = false;
                 activeEngineTrackIdRef.current = null;
-                activeSegmentedPlaybackTrackIdRef.current = null;
             }
             // eslint-disable-next-line react-hooks/exhaustive-deps -- canSeek/isPlaying/setIsPlaying intentionally excluded: adding them would re-trigger audio loading on play/pause or seek state changes, breaking playback
         }, [
@@ -2915,16 +1566,8 @@ export const AudioPlaybackOrchestrator = memo(
             setStreamProfile,
             clearPendingTrackErrorSkip,
             clearStartupPlaybackRecovery,
-            clearSegmentedStartupFallback,
-            clearSegmentedManifestNudges,
             clearTransientTrackRecovery,
-            prewarmSegmentedSession,
-            ensureStartupSegmentedSession,
-            ensureSegmentedStartupTimeline,
-            emitSegmentedStartupTimeline,
-            markSegmentedStartupRampWindow,
-            isListenTogetherSegmentedPlaybackAllowed,
-            resetSegmentedHandoffCircuit,
+            applyCurrentOutputState,
         ]);
         H.useNextTrackPreload({
             playbackType,
@@ -2936,9 +1579,6 @@ export const AudioPlaybackOrchestrator = memo(
             isShuffle,
             shuffleIndices,
             repeatMode,
-            prewarmSegmentedSession,
-            isListenTogetherSegmentedPlaybackAllowed,
-            prewarmedSegmentedSessionRef,
             lastPreloadedTrackIdRef,
             ytMusicAuthenticatedRef,
         });
@@ -2965,8 +1605,6 @@ export const AudioPlaybackOrchestrator = memo(
             setIsBuffering,
             setTargetSeekPosition,
             setIsPlaying,
-            clearSegmentedStartupFallback,
-            clearSegmentedManifestNudges,
         });
         H.useProgressPersistence({
             playbackType,
@@ -2977,13 +1615,9 @@ export const AudioPlaybackOrchestrator = memo(
         });
         H.usePlaybackUnmountCleanup({
             refs: orchestratorRefs,
-            abortAllSegmentedPrewarmValidations,
-            clearSegmentedStartupFallback,
-            clearSegmentedManifestNudges,
             clearPendingTrackErrorSkip,
             clearStartupPlaybackRecovery,
             clearTransientTrackRecovery,
-            clearSegmentedHandoffLoadListeners,
         });
         return (
             <PlaybackProgressSnapshot

@@ -22,12 +22,6 @@ export type ResolvedMediaSource = Exclude<
     "youtube-direct"
 >;
 
-/** Canonical sources supported by segmented streaming sessions. */
-export type SegmentedStreamingSourceType = Extract<
-    CanonicalMediaSource,
-    "local"
->;
-
 /** Source identifiers accepted by the audio engine boundary. */
 export type AudioEngineSourceType = "local" | "tidal" | "ytmusic";
 

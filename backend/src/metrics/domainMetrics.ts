@@ -6,7 +6,6 @@ export type FederationSyncSkipReason = "unknown_key_stripped";
 /** Domain counters owned by a process-local Prometheus registry. */
 export interface DomainMetrics {
     browseImageCacheRequests: Counter<"result">;
-    transcodeCacheRequests: Counter<"result">;
     federationSyncs: Counter<"outcome">;
     federationSyncSkips: Counter<"reason">;
     federationEmbeddingPages: Counter<"outcome">;
@@ -19,12 +18,6 @@ export function createDomainMetrics(registry: Registry): DomainMetrics {
         browseImageCacheRequests: new Counter({
             name: "soundspan_browse_image_cache_requests_total",
             help: "Browse image cache lookups by result.",
-            labelNames: ["result"] as const,
-            registers: [registry],
-        }),
-        transcodeCacheRequests: new Counter({
-            name: "soundspan_transcode_cache_requests_total",
-            help: "Segmented transcode cache lookups by result.",
             labelNames: ["result"] as const,
             registers: [registry],
         }),

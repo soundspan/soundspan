@@ -1,16 +1,7 @@
 import { useCallback } from "react";
-import {
-    resolveCorrelatedRecoveryResumeDecision,
-    resolveStartupGuardedRecoveryPositionSec,
-    resolveTrustedTrackPositionSec,
-} from "@/lib/audio-engine/segmentedPlaybackRegressionPolicy";
-import { SEGMENTED_HANDOFF_LISTENER_BACKSTOP_MS } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
-import {
-    audioEngine,
-    logPlaybackClientMetric,
-} from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
+import { resolveTrustedTrackPositionSec } from "@/lib/audio-engine/playbackRecoveryPolicy";
+import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
-import type { SegmentedHandoffListenerRegistration } from "./audioPlaybackOrchestratorTypes";
 
 interface UsePlaybackRecoveryHelpersOptions {
     refs: PlaybackOrchestratorRefs;
@@ -29,11 +20,7 @@ export function usePlaybackRecoveryHelpers({
         currentTrackRef,
         isLoadingRef,
         activeEngineTrackIdRef,
-        segmentedStartupStabilityRef,
-        activeSegmentedSessionRef,
-        loadIdRef,
         unexpectedPauseRecoveryTimeoutRef,
-        segmentedHandoffCircuitRef,
         startupRecoveryTimeoutRef,
         startupRecoveryLoadListenerRef,
         transientTrackRecoveryTimeoutRef,
@@ -41,9 +28,6 @@ export function usePlaybackRecoveryHelpers({
         transientTrackRecoveryTrackIdRef,
         transientTrackRecoveryAttemptRef,
         transientTrackRecoveryWindowStartedAtRef,
-        segmentedHandoffListenerTimeoutRef,
-        segmentedHandoffListenerCleanupRef,
-        segmentedHandoffListenerContextRef,
     } = refs;
 
     const clearPendingTrackErrorSkip = useCallback(() => {
@@ -79,97 +63,6 @@ export function usePlaybackRecoveryHelpers({
         [],
     );
 
-    const resolveStartupSafeTrackPositionSec = useCallback(
-        (trackId: string): number => {
-            const trustedPositionSec = readTrustedTrackPositionSec(trackId);
-            const startupStability = segmentedStartupStabilityRef.current;
-            return resolveStartupGuardedRecoveryPositionSec({
-                targetTrackId: trackId,
-                trustedPositionSec,
-                startupStabilityTrackId: startupStability.trackId,
-                startupFirstProgressAtMs: startupStability.firstProgressAtMs,
-            });
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [readTrustedTrackPositionSec],
-    );
-
-    const resolveHandoffLocalPositionSec = useCallback(
-        (trackId: string, anchorPositionSec: number): number => {
-            const livePositionSec = resolveStartupSafeTrackPositionSec(trackId);
-            if (livePositionSec > 0.25) {
-                return livePositionSec;
-            }
-            return Math.max(0, anchorPositionSec);
-        },
-        [resolveStartupSafeTrackPositionSec],
-    );
-
-    const resolveCorrelatedRecoveryResume = useCallback(
-        ({
-            requestedResumeAtSec,
-            expectedTrackId,
-            expectedLoadId,
-            expectedSessionId = null,
-            sourceType,
-            reason,
-        }: {
-            requestedResumeAtSec: number;
-            expectedTrackId: string;
-            expectedLoadId: number;
-            expectedSessionId?: string | null;
-            sourceType: "local" | "tidal" | "ytmusic";
-            reason: string;
-        }) => {
-            const activeSessionSnapshot = activeSegmentedSessionRef.current;
-            const activeTrackId =
-                playbackTypeRef.current === "track"
-                    ? (currentTrackRef.current?.id ?? null)
-                    : null;
-            const decision = resolveCorrelatedRecoveryResumeDecision({
-                requestedResumeAtSec,
-                expectedTrackId,
-                activeTrackId,
-                expectedLoadId,
-                activeLoadId: loadIdRef.current,
-                expectedSessionId,
-                activeSessionTrackId: activeSessionSnapshot?.trackId ?? null,
-                activeSessionId: activeSessionSnapshot?.sessionId ?? null,
-            });
-            if (!decision.matched) {
-                logPlaybackClientMetric("session.handoff_skipped", {
-                    trackId: expectedTrackId,
-                    sourceType,
-                    reason: `resume_correlation_${reason}_${decision.mismatchReason}`,
-                    expectedLoadId,
-                    activeLoadId: loadIdRef.current,
-                    expectedSessionId: expectedSessionId ?? null,
-                    activeSessionId: activeSessionSnapshot?.sessionId ?? null,
-                    activeTrackId,
-                });
-            }
-            return decision;
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [],
-    );
-
-    const shouldForceCleanStartFromCorrelationMismatch = useCallback(
-        (
-            mismatchReason:
-                | "none"
-                | "track_mismatch"
-                | "load_mismatch"
-                | "session_mismatch",
-        ): boolean => {
-            return (
-                mismatchReason === "track_mismatch" ||
-                mismatchReason === "load_mismatch"
-            );
-        },
-        [],
-    );
-
     const clearUnexpectedPauseRecoveryCheck = useCallback(() => {
         if (unexpectedPauseRecoveryTimeoutRef.current) {
             clearTimeout(unexpectedPauseRecoveryTimeoutRef.current);
@@ -178,25 +71,13 @@ export function usePlaybackRecoveryHelpers({
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
     }, []);
 
-    const resetSegmentedHandoffCircuit = useCallback(
-        (trackId: string | null) => {
-            segmentedHandoffCircuitRef.current = {
-                trackId,
-                windowStartedAtMs: trackId ? Date.now() : 0,
-                attempts: 0,
-            };
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [],
-    );
-
     const resolveBufferedAheadSec = useCallback((): number | null => {
         if (typeof document === "undefined") {
             return null;
         }
 
         const mediaElement = document.querySelector(
-            "video.vjs-tech, audio.vjs-tech, video, audio",
+            "video, audio",
         ) as HTMLMediaElement | null;
         if (!mediaElement?.buffered) {
             return null;
@@ -261,103 +142,12 @@ export function usePlaybackRecoveryHelpers({
         [],
     );
 
-    const clearSegmentedHandoffLoadListeners = useCallback(
-        (
-            reason:
-                | "load"
-                | "loaderror"
-                | "track_change"
-                | "playback_type_change"
-                | "unmount"
-                | "replace"
-                | "timeout"
-                | "correlation_mismatch",
-        ): void => {
-            if (segmentedHandoffListenerTimeoutRef.current) {
-                clearTimeout(segmentedHandoffListenerTimeoutRef.current);
-                segmentedHandoffListenerTimeoutRef.current = null;
-            }
-
-            const cleanup = segmentedHandoffListenerCleanupRef.current;
-            const listenerContext = segmentedHandoffListenerContextRef.current;
-            segmentedHandoffListenerCleanupRef.current = null;
-            segmentedHandoffListenerContextRef.current = null;
-
-            if (!cleanup) {
-                return;
-            }
-
-            cleanup();
-            if (reason === "load" || reason === "loaderror") {
-                return;
-            }
-
-            logPlaybackClientMetric("session.handoff_listener_cleanup", {
-                reason,
-                trackId: listenerContext?.trackId ?? null,
-                sourceType: listenerContext?.sourceType ?? null,
-                sessionId: listenerContext?.sessionId ?? null,
-                expectedLoadId: listenerContext?.expectedLoadId ?? null,
-                phase: listenerContext?.phase ?? null,
-                activeTrackId: currentTrackRef.current?.id ?? null,
-                activeLoadId: loadIdRef.current,
-            });
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [],
-    );
-
-    const registerSegmentedHandoffLoadListeners = useCallback(
-        (
-            listenerRegistration: SegmentedHandoffListenerRegistration,
-            onLoad: () => void,
-            onLoadError: () => void,
-        ): void => {
-            clearSegmentedHandoffLoadListeners("replace");
-
-            audioEngine.on("load", onLoad);
-            audioEngine.on("loaderror", onLoadError);
-            segmentedHandoffListenerCleanupRef.current = () => {
-                audioEngine.off("load", onLoad);
-                audioEngine.off("loaderror", onLoadError);
-            };
-            segmentedHandoffListenerContextRef.current = listenerRegistration;
-            segmentedHandoffListenerTimeoutRef.current = setTimeout(() => {
-                const listenerContext =
-                    segmentedHandoffListenerContextRef.current;
-                if (!listenerContext) {
-                    return;
-                }
-                logPlaybackClientMetric("session.handoff_listener_timeout", {
-                    trackId: listenerContext.trackId,
-                    sourceType: listenerContext.sourceType,
-                    sessionId: listenerContext.sessionId,
-                    expectedLoadId: listenerContext.expectedLoadId,
-                    phase: listenerContext.phase,
-                    timeoutMs: SEGMENTED_HANDOFF_LISTENER_BACKSTOP_MS,
-                    activeTrackId: currentTrackRef.current?.id ?? null,
-                    activeLoadId: loadIdRef.current,
-                });
-                clearSegmentedHandoffLoadListeners("timeout");
-            }, SEGMENTED_HANDOFF_LISTENER_BACKSTOP_MS);
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [clearSegmentedHandoffLoadListeners],
-    );
-
     return {
         clearPendingTrackErrorSkip,
         readTrustedTrackPositionSec,
-        resolveStartupSafeTrackPositionSec,
-        resolveHandoffLocalPositionSec,
-        resolveCorrelatedRecoveryResume,
-        shouldForceCleanStartFromCorrelationMismatch,
         clearUnexpectedPauseRecoveryCheck,
-        resetSegmentedHandoffCircuit,
         resolveBufferedAheadSec,
         clearStartupPlaybackRecovery,
         clearTransientTrackRecovery,
-        clearSegmentedHandoffLoadListeners,
-        registerSegmentedHandoffLoadListeners,
     };
 }

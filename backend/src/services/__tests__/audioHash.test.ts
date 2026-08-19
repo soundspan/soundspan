@@ -23,7 +23,7 @@ jest.mock("../../utils/logger", () => ({
 
 jest.mock("../../config", () => ({
     config: {
-        segmentedStreaming: {
+        streaming: {
             ffmpegPathOverride: process.env.FFMPEG_PATH?.trim() || undefined,
         },
     },

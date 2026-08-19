@@ -6,7 +6,6 @@ export interface AudioLoadPreemptionDecisionInput {
 
 export interface InitialPersistedResumeDecisionInput {
     isInitialTrackLoad: boolean;
-    segmentedStartupEligible: boolean;
     listenTogetherActiveOrPending: boolean;
 }
 
@@ -20,7 +19,4 @@ export const shouldPreemptInFlightAudioLoad = (
 
 export const shouldAllowInitialPersistedTrackResume = (
     input: InitialPersistedResumeDecisionInput,
-): boolean =>
-    input.isInitialTrackLoad &&
-    !input.segmentedStartupEligible &&
-    !input.listenTogetherActiveOrPending;
+): boolean => input.isInitialTrackLoad && !input.listenTogetherActiveOrPending;

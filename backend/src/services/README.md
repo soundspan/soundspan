@@ -127,11 +127,6 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
 | `backend/src/services/rssParser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
-| `backend/src/services/segmented-streaming/cacheService.ts` | Segmented Streaming |
-| `backend/src/services/segmented-streaming/manifestService.ts` | Segmented Streaming |
-| `backend/src/services/segmented-streaming/segmentService.ts` | Segmented Streaming |
-| `backend/src/services/segmented-streaming/sessionService.ts` | Segmented Streaming |
-| `backend/src/services/segmented-streaming/trace.ts` | Segmented Streaming |
 | `backend/src/services/simpleDownloadManager.ts` | Core |
 | `backend/src/services/socialPresenceEvents.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
