@@ -5,10 +5,19 @@ type RedisClient = {
         (event: string, handler: (...args: unknown[]) => void) => RedisClient
     >;
     connect: jest.MockedFunction<() => Promise<void>>;
-    duplicate: jest.MockedFunction<() => DedicatedRedisClient>;
+    duplicate: jest.MockedFunction<
+        (options?: Record<string, unknown>) => DedicatedRedisClient
+    >;
 };
 
 type DedicatedRedisClient = {
+    isOpen: boolean;
+    on: jest.MockedFunction<
+        (
+            event: string,
+            handler: (...args: unknown[]) => void,
+        ) => DedicatedRedisClient
+    >;
     connect: jest.MockedFunction<() => Promise<void>>;
     blPop: jest.MockedFunction<
         (
@@ -17,6 +26,7 @@ type DedicatedRedisClient = {
         ) => Promise<{ key: string; element: string } | null>
     >;
     close: jest.MockedFunction<() => Promise<void>>;
+    destroy: jest.MockedFunction<() => void>;
 };
 
 const mockCreateClient = jest.fn<(...args: unknown[]) => RedisClient>();
@@ -58,11 +68,15 @@ describe("redisClient", () => {
             },
         );
         client.connect = jest.fn(async () => undefined);
-        dedicatedClient = {
+        dedicatedClient = {} as DedicatedRedisClient;
+        dedicatedClient.on = jest.fn(() => dedicatedClient);
+        Object.assign(dedicatedClient, {
+            isOpen: false,
             connect: jest.fn(async () => undefined),
             blPop: jest.fn(async () => null),
             close: jest.fn(async () => undefined),
-        };
+            destroy: jest.fn(),
+        });
         client.duplicate = jest.fn(() => dedicatedClient);
 
         mockCreateClient.mockReturnValue(client);
@@ -181,59 +195,107 @@ describe("redisClient", () => {
         }
     });
 
-    it("runs blocking BLPOP on a dedicated connection", async () => {
+    it("reuses one dedicated connection for repeated blocking pops", async () => {
         const value = { key: "k", element: "payload" };
         dedicatedClient.blPop.mockResolvedValue(value);
-        const { blockingBlPop } = await import("../redis");
+        const { blockingBlPop, closeBlockingBlPop } = await import("../redis");
 
+        await expect(blockingBlPop("k", 30)).resolves.toEqual(value);
+        dedicatedClient.isOpen = true;
         await expect(blockingBlPop("k", 30)).resolves.toEqual(value);
 
         expect(client.duplicate).toHaveBeenCalledTimes(1);
         expect(dedicatedClient.connect).toHaveBeenCalledTimes(1);
-        expect(dedicatedClient.blPop).toHaveBeenCalledWith("k", 30);
+        expect(dedicatedClient.blPop).toHaveBeenCalledTimes(2);
         expect(
             dedicatedClient.connect.mock.invocationCallOrder[0],
         ).toBeLessThan(dedicatedClient.blPop.mock.invocationCallOrder[0]);
+        expect(dedicatedClient.close).not.toHaveBeenCalled();
+        await closeBlockingBlPop("k");
         expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
     });
 
-    it("closes the dedicated connection after a BLPOP timeout", async () => {
+    it("bounds dedicated reconnect attempts with exponential backoff", async () => {
+        const { blockingBlPop } = await import("../redis");
+        await blockingBlPop("k", 30);
+
+        const [options] = client.duplicate.mock.calls[0] as [
+            {
+                socket: {
+                    reconnectStrategy: (retries: number) => number | Error;
+                };
+            },
+        ];
+        const reconnectStrategy = options.socket.reconnectStrategy;
+
+        expect(reconnectStrategy(0)).toBe(250);
+        expect(reconnectStrategy(1)).toBe(500);
+        expect(reconnectStrategy(4)).toBe(4_000);
+        expect(reconnectStrategy(5)).toEqual(expect.any(Error));
+    });
+
+    it.each([
+        ["", 30],
+        ["k", 0],
+        ["k", 301],
+        ["k", 1.5],
+    ])("rejects invalid blocking pop inputs (%s, %s)", async (key, timeout) => {
         const { blockingBlPop } = await import("../redis");
 
-        await expect(blockingBlPop("k", 30)).resolves.toBeNull();
-
-        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        await expect(blockingBlPop(key, timeout)).rejects.toEqual(
+            expect.any(Error),
+        );
+        expect(client.duplicate).not.toHaveBeenCalled();
     });
 
-    it("closes the dedicated connection after a BLPOP error", async () => {
+    it("discards a failed blocking connection and recreates it on the next pop", async () => {
         const error = new Error("BLPOP failed");
+        const recoveredClient = {} as DedicatedRedisClient;
+        recoveredClient.on = jest.fn(() => recoveredClient);
+        Object.assign(recoveredClient, {
+            isOpen: false,
+            connect: jest.fn(async () => undefined),
+            blPop: jest.fn(async () => ({ key: "k", element: "recovered" })),
+            close: jest.fn(async () => undefined),
+            destroy: jest.fn(),
+        });
         dedicatedClient.blPop.mockRejectedValue(error);
+        client.duplicate
+            .mockReturnValueOnce(dedicatedClient)
+            .mockReturnValueOnce(recoveredClient);
         const { blockingBlPop } = await import("../redis");
 
         await expect(blockingBlPop("k", 30)).rejects.toBe(error);
+        await expect(blockingBlPop("k", 30)).resolves.toEqual({
+            key: "k",
+            element: "recovered",
+        });
 
-        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
+        expect(client.duplicate).toHaveBeenCalledTimes(2);
+        expect(recoveredClient.connect).toHaveBeenCalledTimes(1);
     });
 
-    it("closes the dedicated connection when connect() rejects", async () => {
+    it("discards a dedicated connection when connect rejects", async () => {
         const error = new Error("connect failed");
         dedicatedClient.connect.mockRejectedValue(error);
         const { blockingBlPop } = await import("../redis");
 
         await expect(blockingBlPop("k", 30)).rejects.toBe(error);
 
-        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
         expect(dedicatedClient.blPop).not.toHaveBeenCalled();
     });
 
-    it("swallows close failures after a successful BLPOP", async () => {
-        const value = { key: "k", element: "payload" };
-        dedicatedClient.blPop.mockResolvedValue(value);
+    it("destroys a blocking connection when graceful shutdown close fails", async () => {
         dedicatedClient.close.mockRejectedValue(new Error("close failed"));
-        const { blockingBlPop } = await import("../redis");
+        const { blockingBlPop, closeBlockingBlPop } = await import("../redis");
 
-        await expect(blockingBlPop("k", 30)).resolves.toEqual(value);
+        await blockingBlPop("k", 30);
+        dedicatedClient.isOpen = true;
+        await expect(closeBlockingBlPop("k")).resolves.toBeUndefined();
 
         expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
     });
 });

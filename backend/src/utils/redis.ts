@@ -4,6 +4,8 @@ import { config } from "../config";
 
 const MAX_RETRY_DELAY_MS = 30_000; // Cap at 30 seconds
 const BASE_RETRY_DELAY_MS = 250; // Start at 250ms
+const MAX_BLOCKING_RECONNECT_ATTEMPTS = 5;
+const MAX_BLOCKING_TIMEOUT_SECONDS = 300;
 
 const redisClient = createClient({
     url: config.redisUrl,
@@ -51,30 +53,144 @@ if (!runningUnderJest) {
     });
 }
 
-/**
- * Run a blocking BLPOP on a short-lived dedicated connection so the blocking
- * wait never parks the shared client's socket (which also serves the session
- * store and all caches). The dedicated connection is closed on every path.
- */
+type DedicatedRedisClient = typeof redisClient;
+
+interface BlockingRedisConnection {
+    client: DedicatedRedisClient;
+    connectPromise: Promise<void> | null;
+    destroyed: boolean;
+}
+
+const blockingConnections = new Map<string, BlockingRedisConnection>();
+
+function blockingReconnectStrategy(retries: number): number | Error {
+    if (retries >= MAX_BLOCKING_RECONNECT_ATTEMPTS) {
+        return new Error(
+            `Dedicated Redis reconnect limit reached after ${MAX_BLOCKING_RECONNECT_ATTEMPTS} attempts`,
+        );
+    }
+    return Math.min(
+        BASE_RETRY_DELAY_MS * Math.pow(2, retries),
+        MAX_RETRY_DELAY_MS,
+    );
+}
+
+function createBlockingConnection(): BlockingRedisConnection {
+    const client = redisClient.duplicate({
+        socket: {
+            connectTimeout: 10_000,
+            reconnectStrategy: blockingReconnectStrategy,
+        },
+    });
+    client.on("error", (error) => {
+        logger.error(
+            "Dedicated Redis blocking connection error:",
+            error.message,
+        );
+    });
+    return { client, connectPromise: null, destroyed: false };
+}
+
+function destroyBlockingConnection(
+    key: string,
+    connection: BlockingRedisConnection,
+): void {
+    if (connection.destroyed) return;
+    connection.destroyed = true;
+    if (blockingConnections.get(key) === connection) {
+        blockingConnections.delete(key);
+    }
+    try {
+        connection.client.destroy();
+    } catch (error) {
+        logger.debug(
+            "Failed to destroy dedicated Redis connection:",
+            error instanceof Error ? error.message : String(error),
+        );
+    }
+}
+
+async function connectBlockingConnection(
+    key: string,
+    connection: BlockingRedisConnection,
+): Promise<void> {
+    if (connection.client.isOpen) return;
+    if (!connection.connectPromise) {
+        const connecting = connection.client
+            .connect()
+            .then(() => undefined)
+            .catch((error: unknown) => {
+                destroyBlockingConnection(key, connection);
+                throw error;
+            })
+            .finally(() => {
+                if (connection.connectPromise === connecting) {
+                    connection.connectPromise = null;
+                }
+            });
+        connection.connectPromise = connecting;
+    }
+    await connection.connectPromise;
+}
+
+function getBlockingConnection(key: string): BlockingRedisConnection {
+    const current = blockingConnections.get(key);
+    if (current) return current;
+    const created = createBlockingConnection();
+    blockingConnections.set(key, created);
+    return created;
+}
+
+function validateBlockingPop(key: string, timeoutSeconds: number): void {
+    if (key.trim().length === 0) throw new TypeError("Redis key is required");
+    if (
+        !Number.isInteger(timeoutSeconds) ||
+        timeoutSeconds < 1 ||
+        timeoutSeconds > MAX_BLOCKING_TIMEOUT_SECONDS
+    ) {
+        throw new RangeError(
+            `Redis blocking timeout must be an integer from 1 through ${MAX_BLOCKING_TIMEOUT_SECONDS}`,
+        );
+    }
+}
+
+/** Run BLPOP on a persistent connection dedicated to this queue key. */
 export async function blockingBlPop(
     key: string,
     timeoutSeconds: number,
 ): Promise<{ key: string; element: string } | null> {
-    const dedicated = redisClient.duplicate();
+    validateBlockingPop(key, timeoutSeconds);
+    const connection = getBlockingConnection(key);
     try {
-        await dedicated.connect();
-        return await dedicated.blPop(key, timeoutSeconds);
-    } finally {
+        await connectBlockingConnection(key, connection);
+        return await connection.client.blPop(key, timeoutSeconds);
+    } catch (error) {
+        destroyBlockingConnection(key, connection);
+        throw error;
+    }
+}
+
+/** Close the persistent blocking connection owned by one queue consumer. */
+export async function closeBlockingBlPop(key: string): Promise<void> {
+    const connection = blockingConnections.get(key);
+    if (!connection) return;
+    blockingConnections.delete(key);
+    if (connection.connectPromise) {
         try {
-            await dedicated.close();
-        } catch (closeError) {
-            logger.debug(
-                "Failed to close dedicated Redis connection:",
-                closeError instanceof Error
-                    ? closeError.message
-                    : String(closeError),
-            );
+            await connection.connectPromise;
+        } catch {
+            return;
         }
+    }
+    if (!connection.client.isOpen) return;
+    try {
+        await connection.client.close();
+    } catch (error) {
+        logger.debug(
+            "Failed to close dedicated Redis connection:",
+            error instanceof Error ? error.message : String(error),
+        );
+        destroyBlockingConnection(key, connection);
     }
 }
 

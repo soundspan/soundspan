@@ -183,12 +183,13 @@ tmp_dclap_default="$(mktemp)"
 tmp_dclap_aio="$(mktemp)"
 tmp_dclap_enabled="$(mktemp)"
 tmp_dclap_override="$(mktemp)"
+tmp_dclap_scaled="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
 tmp_frontend_uid="$(mktemp)"
 tmp_metrics="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_aio_sidecars" "$tmp_aio_rotated_secrets" "$tmp_aio_secret_overrides" "$tmp_aio_oidc" "$tmp_aio_digests" "$tmp_aio_reserved_labels" "$tmp_individual_ha" "$tmp_individual_component_database" "$tmp_individual_external_database" "$tmp_individual_digests" "$tmp_individual_reserved_labels" "$tmp_individual_oidc" "$tmp_individual_notes" "$tmp_global_env" "$tmp_sidecars" "$tmp_dclap_default" "$tmp_dclap_aio" "$tmp_dclap_enabled" "$tmp_dclap_override" "$tmp_dclap_scaled" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid" "$tmp_metrics"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -551,6 +552,13 @@ if line_match '^  name: '"$RELEASE_NAME"'-vibe-provider-dclap$' "$tmp_dclap_defa
 fi
 assert_deployment_env_absent "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "$tmp_dclap_default"
 
+echo "[CHECK] render default backend-worker vibe concurrency"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  >"$tmp_dclap_default"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_EMBED_CONCURRENCY" "2" "$tmp_dclap_default"
+
 echo "[CHECK] explain inactive vibe similarity in individual-mode notes"
 helm install "$RELEASE_NAME" "$CHART_PATH" \
   --dry-run=client \
@@ -609,6 +617,32 @@ done
 dclap_url="http://${RELEASE_NAME}-vibe-provider-dclap:8199"
 assert_deployment_env_value "${RELEASE_NAME}-backend" "VIBE_PROVIDER_URL" "$dclap_url" "$tmp_dclap_enabled"
 assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_PROVIDER_URL" "$dclap_url" "$tmp_dclap_enabled"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_EMBED_CONCURRENCY" "4" "$tmp_dclap_enabled"
+
+echo "[CHECK] size backend-worker vibe concurrency from DCLAP replicas"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set vibeProviderDclap.enabled=true \
+  --set vibeProviderDclap.replicas=4 \
+  >"$tmp_dclap_scaled"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_EMBED_CONCURRENCY" "8" "$tmp_dclap_scaled"
+
+echo "[CHECK] honor explicit backend-worker vibe concurrency"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set vibeProviderDclap.enabled=true \
+  --set vibeProviderDclap.replicas=4 \
+  --set backendWorker.vibeEmbedConcurrency=3 \
+  >"$tmp_dclap_override"
+assert_deployment_env_value "${RELEASE_NAME}-backend-worker" "VIBE_EMBED_CONCURRENCY" "3" "$tmp_dclap_override"
+assert_template_rejected \
+  "backend-worker vibe concurrency above the backend cap" \
+  "backendWorker.vibeEmbedConcurrency must be an integer from 1 through 32" \
+  --set deploymentMode=individual \
+  --set backendWorker.enabled=true \
+  --set backendWorker.vibeEmbedConcurrency=33
 
 if ! DEPLOYMENT_NAME="${RELEASE_NAME}-vibe-provider-dclap" SECRET_NAME="$RELEASE_NAME" perl -0777 -ne '
     for my $doc (split /^---/m, $_) {

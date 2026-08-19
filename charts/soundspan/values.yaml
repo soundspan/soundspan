@@ -223,6 +223,9 @@ backendWorker:
   # When enabled, backend API pods auto-run with BACKEND_PROCESS_ROLE=api
   # unless backend.processRole is explicitly set.
   enabled: false
+  # -- Concurrent provider-backed vibe embedding jobs per worker pod. Null
+  # defaults to min(32, max(1, 2 * vibeProviderDclap.replicas)).
+  vibeEmbedConcurrency: null
   image:
     repository: ghcr.io/soundspan/soundspan-backend-worker
     tag: 2.3.3
@@ -849,4 +852,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-

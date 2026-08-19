@@ -140,8 +140,8 @@ const vibeProviderUrlEnvSchema = z
 
 const vibeEmbedConcurrencyEnvSchema = z
     .string()
-    .regex(/^[1-8]$/, {
-        message: "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 8",
+    .regex(/^(?:[1-9]|[12][0-9]|3[0-2])$/, {
+        message: "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 32",
     })
     .optional();
 

@@ -16,11 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `DISCOVERY_MODE=legacy` is deprecated, no longer receives fixes, and will be removed in a future release; unset `DISCOVERY_MODE` to migrate.
 
+### Changed
+
+- Provider-backed vibe embedding concurrency now accepts 1–32 workers. The Helm backend-worker defaults to two jobs per DCLAP replica, capped at 32, while Compose and AIO retain the single-job default.
+
 ### Fixed
 
 - Artist detail and discovery routes now preserve artist names with percent signs while retaining lookup compatibility for legacy double-encoded names (#632).
 - Popular Artists cards (home and Explore) now open the artist page directly, matching the Related Artists behavior, instead of running a name search.
 - Trending Community Playlists cards (home and Explore) no longer show a play-button overlay on hover; the cards only navigate to the playlist and never started playback.
+- Vibe embedding queueing now runs alongside ordinary audio analysis and pauses only when the audio queue exceeds its 500-job high-water mark, preventing DCLAP replicas from starving during long analyzer runs.
+- The vibe worker now reuses a dedicated blocking Redis connection per queue, applies bounded reconnect backoff, and closes the connection during worker shutdown instead of reconnecting for every job.
+- Audio-analyzer reconciliation replicas now lock disjoint pending batches with `FOR UPDATE SKIP LOCKED` and claim each batch in the same transaction, preventing replicas from selecting identical work.
 - The audio analyzer now reconnects to PostgreSQL after a server-side connection close instead of waiting for multiple worker failures, so loudness backfill jobs no longer spend retry budget on a stale connection.
 - OpenSubsonic `stream` requests now honor `timeOffset` for transcoded audio with fast ffmpeg input seeking. Offset work bypasses the reusable track-and-quality cache, shares the global ffmpeg concurrency cap, uses interval-gated stale sweeping that excludes active temporary files, and cancels and cleans up when clients disconnect (#624).
 - OpenSubsonic song and album responses now report the authenticated user's latest `played` timestamp across the shared browse, search, playlist, queue, bookmark, starred, discovery, and now-playing surfaces (#625).

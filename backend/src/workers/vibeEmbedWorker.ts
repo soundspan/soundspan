@@ -25,7 +25,7 @@ import {
 } from "../metrics";
 import type { VibeEmbeddingCoverage } from "../metrics/vibeEmbedMetrics";
 import { logger } from "../utils/logger";
-import { blockingBlPop, redisClient } from "../utils/redis";
+import { blockingBlPop, closeBlockingBlPop, redisClient } from "../utils/redis";
 import {
     cleanupLegacyVibeRedisArtifacts,
     VIBE_PROVIDER_QUEUE_KEY,
@@ -56,6 +56,7 @@ interface VibeEmbedWorkerDependencies {
     audioAnalysisEnabled: boolean;
     concurrency: number;
     pop(queue: string, timeoutSeconds: number): Promise<string | null>;
+    closePop(): Promise<void>;
     processJob(
         rawJob: string,
         targetSpace: VibeWorkerJobTargetSpace,
@@ -512,8 +513,13 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.lifecycleTask = null;
         await this.cleanupTask;
         this.cleanupTask = null;
-        await this.loopPromise;
-        this.loopPromise = null;
+        const loopPromise = this.loopPromise;
+        try {
+            await loopPromise;
+        } finally {
+            this.loopPromise = null;
+            if (loopPromise) await this.dependencies.closePop();
+        }
         this.clearResolvedTarget();
     }
 }
@@ -536,6 +542,9 @@ const worker = createVibeEmbedWorker({
     pop: async (queue, timeoutSeconds) => {
         const result = await blockingBlPop(queue, timeoutSeconds);
         return result?.element ?? null;
+    },
+    closePop: async () => {
+        await closeBlockingBlPop(VIBE_PROVIDER_QUEUE_KEY);
     },
     processJob: processVibeEmbedJob,
     requeue: async (rawJob) => {

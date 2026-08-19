@@ -366,6 +366,12 @@ backend:
 
 An explicit `backend.env.VIBE_PROVIDER_URL` or
 `backendWorker.env.VIBE_PROVIDER_URL` takes precedence over the generated URL.
+The backend worker sets `VIBE_EMBED_CONCURRENCY` from
+`backendWorker.vibeEmbedConcurrency`. Its default is twice the configured
+`vibeProviderDclap.replicas`, clamped to the backend's supported range of 1 to
+32. Set an explicit value when provider capacity or worker replica count calls
+for a different ratio; `backendWorker.env.VIBE_EMBED_CONCURRENCY` remains the
+highest-precedence per-workload override.
 `vibeProviderDclap.env.DCLAP_HTTP_PORT` is reserved; set
 `vibeProviderDclap.port` so the provider, Service, probes, and backend URLs use
 the same port.

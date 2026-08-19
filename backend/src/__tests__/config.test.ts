@@ -287,6 +287,7 @@ describe("config module", () => {
         ["1", 1],
         ["4", 4],
         ["8", 8],
+        ["32", 32],
     ])("parses VIBE_EMBED_CONCURRENCY %s", async (raw, expected) => {
         const { config } = await loadConfigModule({
             VIBE_EMBED_CONCURRENCY: raw,
@@ -295,12 +296,12 @@ describe("config module", () => {
         expect(config.vibeEmbedConcurrency).toBe(expected);
     });
 
-    it.each(["", "0", "9", "1.5", "not-a-number"])(
+    it.each(["", "0", "33", "1.5", "not-a-number"])(
         "rejects invalid VIBE_EMBED_CONCURRENCY %s",
         async (raw) => {
             await expectStartupValidationFailure(
                 { VIBE_EMBED_CONCURRENCY: raw },
-                "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 8",
+                "VIBE_EMBED_CONCURRENCY must be an integer from 1 through 32",
             );
         },
     );

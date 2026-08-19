@@ -51,6 +51,7 @@ const MAX_CONSECUTIVE_SYSTEM_FAILURES = 5; // Circuit breaker threshold
 const ENRICHMENT_STOP_WAIT_INTERVAL_MS = 100;
 const ENRICHMENT_STOP_MAX_WAIT_MS = 30_000;
 const ENRICHMENT_PRISMA_RETRY_ATTEMPTS = 3;
+const AUDIO_QUEUE_VIBE_HIGH_WATER_MARK = 500;
 
 let isRunning = false;
 let enrichmentInterval: NodeJS.Timeout | null = null;
@@ -1492,13 +1493,6 @@ async function executeVibePhase(): Promise<number> {
         log.debug(`Cleaned up ${reset} stale vibe processing entries`);
     }
 
-    const audioProcessing = await withEnrichmentPrismaRetry(
-        "executeVibePhase.audioProcessing.count",
-        () =>
-            prisma.track.count({
-                where: { analysisStatus: "processing" },
-            }),
-    );
     let audioQueue = 0;
     try {
         audioQueue = await withEnrichmentQueueRedisRetry(
@@ -1512,9 +1506,9 @@ async function executeVibePhase(): Promise<number> {
         );
         return 0;
     }
-    if (audioProcessing > 0 || audioQueue > 0) {
+    if (audioQueue > AUDIO_QUEUE_VIBE_HIGH_WATER_MARK) {
         log.debug(
-            `Skipping vibe phase - audio still running (${audioProcessing} processing, ${audioQueue} queued)`,
+            `Skipping vibe phase - audio queue high-water mark exceeded (${audioQueue} queued, limit ${AUDIO_QUEUE_VIBE_HIGH_WATER_MARK})`,
         );
         return 0;
     }

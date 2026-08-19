@@ -256,6 +256,27 @@ HA mode helpers (individual mode only)
 {{- end }}
 
 {{/*
+Backend-worker vibe embedding concurrency. An explicit value must match the
+backend's validated range; null scales from the DCLAP provider replica count.
+*/}}
+{{- define "soundspan.backendWorkerVibeEmbedConcurrency" -}}
+{{- $configured := .Values.backendWorker.vibeEmbedConcurrency -}}
+{{- if kindIs "invalid" $configured -}}
+{{- min 32 (max 1 (mul 2 (.Values.vibeProviderDclap.replicas | int))) -}}
+{{- else -}}
+{{- $text := toString $configured -}}
+{{- if not (regexMatch "^[0-9]+$" $text) -}}
+{{- fail "backendWorker.vibeEmbedConcurrency must be an integer from 1 through 32" -}}
+{{- end -}}
+{{- $value := $configured | int -}}
+{{- if or (lt $value 1) (gt $value 32) -}}
+{{- fail "backendWorker.vibeEmbedConcurrency must be an integer from 1 through 32" -}}
+{{- end -}}
+{{- $value -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Render one env entry for an optional third-party API key/token, preferring a
 Secret reference over a plaintext value in the pod spec.
 Precedence:

@@ -2299,7 +2299,7 @@ describe("unified enrichment runtime behavior", () => {
         );
     });
 
-    it("runs vibe cleanup while the audio queue is nonzero", async () => {
+    it("queues vibe work while audio analysis is active below the high-water mark", async () => {
         const {
             prisma,
             getFeatures,
@@ -2307,20 +2307,52 @@ describe("unified enrichment runtime behavior", () => {
             queueRedisPrimary,
         } = setupUnifiedEnrichmentMocks();
         getFeatures.mockResolvedValue({ vibeEmbeddings: true });
-        (prisma.track.count as jest.Mock).mockResolvedValue(0);
+        (prisma.track.count as jest.Mock).mockResolvedValue(3);
         (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(7);
+        (prisma.track.findMany as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "track-vibe-concurrent",
+                filePath: "/music/track-vibe-concurrent.flac",
+                vibeAnalysisStatus: null,
+            },
+        ]);
         (
             vibeAnalysisCleanupService.cleanupStaleProcessing as jest.Mock
         ).mockResolvedValue({ reset: 1 });
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const enrichment = require("../unifiedEnrichment");
-        await enrichment.__unifiedEnrichmentTestables.executeVibePhase();
+        await expect(
+            enrichment.__unifiedEnrichmentTestables.executeVibePhase(),
+        ).resolves.toBe(1);
 
         expect(
             vibeAnalysisCleanupService.cleanupStaleProcessing,
         ).toHaveBeenCalledTimes(1);
+        expect(prisma.track.findMany).toHaveBeenCalledTimes(1);
+        expect(queueRedisPrimary.rpush).toHaveBeenCalledWith(
+            "audio:clap:queue",
+            expect.stringContaining("track-vibe-concurrent"),
+        );
+    });
+
+    it("skips vibe queueing above the audio queue high-water mark", async () => {
+        const { prisma, getFeatures, queueRedisPrimary, logger } =
+            setupUnifiedEnrichmentMocks();
+        getFeatures.mockResolvedValue({ vibeEmbeddings: true });
+        (prisma.track.count as jest.Mock).mockResolvedValue(0);
+        (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(501);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        await expect(
+            enrichment.__unifiedEnrichmentTestables.executeVibePhase(),
+        ).resolves.toBe(0);
+
         expect(prisma.track.findMany).not.toHaveBeenCalled();
+        expect(logger.debug).toHaveBeenCalledWith(
+            "Skipping vibe phase - audio queue high-water mark exceeded (501 queued, limit 500)",
+        );
     });
 
     it("retries enrichment progress reads on rust panic prisma errors", async () => {

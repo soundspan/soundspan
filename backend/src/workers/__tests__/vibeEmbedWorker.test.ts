@@ -38,6 +38,7 @@ describe("vibe embed worker", () => {
         const pop = jest.fn<Promise<string | null>, [string, number]>();
         const processJob = jest.fn(async () => "stored" as const);
         const requeue = jest.fn(async () => undefined);
+        const closePop = jest.fn(async () => undefined);
         const refreshCoverage = jest.fn(async () => ({
             embedded: 8,
             pending: 2,
@@ -80,6 +81,7 @@ describe("vibe embed worker", () => {
             audioAnalysisEnabled: overrides?.audioAnalysisEnabled ?? true,
             concurrency: overrides?.concurrency ?? 1,
             pop,
+            closePop,
             processJob,
             requeue,
             probeProvider,
@@ -98,6 +100,7 @@ describe("vibe embed worker", () => {
         return {
             worker,
             pop,
+            closePop,
             processJob,
             requeue,
             probeProvider,
@@ -279,6 +282,7 @@ describe("vibe embed worker", () => {
         await stopping;
         expect(stopped).toBe(true);
         expect(harness.requeue).not.toHaveBeenCalled();
+        expect(harness.closePop).toHaveBeenCalledTimes(1);
     });
 
     it("awaits each bounded BLPOP timeout instead of busy-spinning", async () => {

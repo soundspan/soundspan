@@ -111,6 +111,7 @@ spec:
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
             "VIBE_PROVIDER_URL" true
+            "VIBE_EMBED_CONCURRENCY" true
             "ALLOWED_ORIGINS" true
             "LOG_LEVEL" true
             "DOCS_PUBLIC" true
@@ -333,6 +334,13 @@ spec:
             {{- else if .Values.vibeProviderDclap.enabled }}
             - name: VIBE_PROVIDER_URL
               value: {{ printf "http://%s-vibe-provider-dclap:%v" (include "soundspan.fullname" .) .Values.vibeProviderDclap.port | quote }}
+            {{- end }}
+            {{- if hasKey $backendWorkerEnv "VIBE_EMBED_CONCURRENCY" }}
+            - name: VIBE_EMBED_CONCURRENCY
+              value: {{ index $backendWorkerEnv "VIBE_EMBED_CONCURRENCY" | quote }}
+            {{- else }}
+            - name: VIBE_EMBED_CONCURRENCY
+              value: {{ include "soundspan.backendWorkerVibeEmbedConcurrency" . | quote }}
             {{- end }}
             {{- if hasKey $backendWorkerEnv "ALLOWED_ORIGINS" }}
             - name: ALLOWED_ORIGINS
