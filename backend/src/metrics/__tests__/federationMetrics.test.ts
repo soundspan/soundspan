@@ -1,4 +1,8 @@
 import { Registry } from "prom-client";
+import type {
+    FederationLeaseMetricSnapshot,
+    FederationWorkerMetricSnapshot,
+} from "../../services/federationPeerHealth";
 
 const logWarn = jest.fn();
 jest.mock("../../utils/logger", () => ({
@@ -131,11 +135,19 @@ describe("federation metrics", () => {
         );
     });
 
-    it("releases a timed-out worker collection before the next scrape", async () => {
+    it("keeps a timed-out worker collection single-flight until it settles", async () => {
         jest.useFakeTimers();
+        let resolveCollection:
+            | ((snapshots: FederationWorkerMetricSnapshot[]) => void)
+            | undefined;
+        const collection = new Promise<FederationWorkerMetricSnapshot[]>(
+            (resolve) => {
+                resolveCollection = resolve;
+            },
+        );
         const collectWorkerSnapshot = jest
             .fn()
-            .mockReturnValueOnce(new Promise(() => undefined))
+            .mockReturnValueOnce(collection)
             .mockResolvedValueOnce([
                 {
                     peerId: "peer-recovered",
@@ -162,6 +174,15 @@ describe("federation metrics", () => {
         const failureExposition = await registry.getSingleMetricAsString(
             "soundspan_federation_collector_failures_total",
         );
+        const coalescedScrape = registry.metrics();
+        await Promise.resolve();
+
+        expect(collectWorkerSnapshot).toHaveBeenCalledTimes(1);
+
+        await jest.advanceTimersByTimeAsync(5_000);
+        await coalescedScrape;
+        resolveCollection?.([]);
+        await jest.advanceTimersByTimeAsync(0);
         const recoveredExposition = await registry.metrics();
 
         expect(failureExposition).toContain(
@@ -221,11 +242,19 @@ describe("federation metrics", () => {
         );
     });
 
-    it("releases a timed-out lease collection before the next scrape", async () => {
+    it("keeps a timed-out lease collection single-flight until it settles", async () => {
         jest.useFakeTimers();
+        let resolveCollection:
+            | ((snapshots: FederationLeaseMetricSnapshot[]) => void)
+            | undefined;
+        const collection = new Promise<FederationLeaseMetricSnapshot[]>(
+            (resolve) => {
+                resolveCollection = resolve;
+            },
+        );
         const collectLeaseSnapshot = jest
             .fn()
-            .mockReturnValueOnce(new Promise(() => undefined))
+            .mockReturnValueOnce(collection)
             .mockResolvedValueOnce([
                 { peerId: "peer-recovered", activeLeases: 2 },
             ]);
@@ -241,6 +270,15 @@ describe("federation metrics", () => {
         const failureExposition = await registry.getSingleMetricAsString(
             "soundspan_federation_collector_failures_total",
         );
+        const coalescedScrape = registry.metrics();
+        await Promise.resolve();
+
+        expect(collectLeaseSnapshot).toHaveBeenCalledTimes(1);
+
+        await jest.advanceTimersByTimeAsync(5_000);
+        await coalescedScrape;
+        resolveCollection?.([]);
+        await jest.advanceTimersByTimeAsync(0);
         const recoveredExposition = await registry.metrics();
 
         expect(failureExposition).toContain(
@@ -251,6 +289,80 @@ describe("federation metrics", () => {
         );
         expect(collectLeaseSnapshot).toHaveBeenCalledTimes(2);
         expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("serves a late lease result from cache on the next scrape", async () => {
+        jest.useFakeTimers();
+        let resolveCollection:
+            | ((snapshots: FederationLeaseMetricSnapshot[]) => void)
+            | undefined;
+        const collection = new Promise<FederationLeaseMetricSnapshot[]>(
+            (resolve) => {
+                resolveCollection = resolve;
+            },
+        );
+        const collectLeaseSnapshot = jest
+            .fn()
+            .mockReturnValueOnce(collection)
+            .mockReturnValueOnce(new Promise(() => undefined));
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "api",
+            collectLeaseSnapshot,
+        });
+
+        const timedOutScrape = registry.metrics();
+        await jest.advanceTimersByTimeAsync(5_000);
+        await timedOutScrape;
+        resolveCollection?.([{ peerId: "peer-late", activeLeases: 7 }]);
+        await jest.advanceTimersByTimeAsync(0);
+
+        const nextScrape = registry.metrics();
+        await jest.advanceTimersByTimeAsync(5_000);
+        const nextExposition = await nextScrape;
+
+        expect(nextExposition).toContain(
+            'soundspan_federation_stream_leases{peer="peer-late"} 7',
+        );
+        expect(collectLeaseSnapshot).toHaveBeenCalledTimes(2);
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("does not reference the collector deadline timer", async () => {
+        const nativeSetTimeout = global.setTimeout;
+        const deadlineTimers: NodeJS.Timeout[] = [];
+        const setTimeoutSpy = jest
+            .spyOn(global, "setTimeout")
+            .mockImplementation(((callback: () => void, delay?: number) => {
+                const timer = nativeSetTimeout(callback, delay);
+                deadlineTimers.push(timer);
+                return timer;
+            }) as typeof setTimeout);
+        let releaseCollection: (() => void) | undefined;
+        const collection = new Promise<void>((resolve) => {
+            releaseCollection = resolve;
+        });
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "api",
+            collectLeaseSnapshot: async () => {
+                await collection;
+                return [];
+            },
+        });
+
+        let scrape: Promise<string> | undefined;
+        try {
+            scrape = registry.metrics();
+            await Promise.resolve();
+
+            expect(deadlineTimers).toHaveLength(1);
+            expect(deadlineTimers[0]?.hasRef()).toBe(false);
+        } finally {
+            releaseCollection?.();
+            if (scrape) await scrape;
+            setTimeoutSpy.mockRestore();
+        }
     });
 
     it("rate-limits repeated collector failure warnings", async () => {

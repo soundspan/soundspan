@@ -101,12 +101,28 @@ async function collectWithTimeout<T>(
                 ),
             );
         }, COLLECTOR_TIMEOUT_MS);
+        timer?.unref?.();
     });
     try {
         return await Promise.race([collect(), timeout]);
     } finally {
         if (timer !== undefined) clearTimeout(timer);
     }
+}
+
+function singleFlightCollector<T>(
+    collect: () => Promise<T>,
+    retain: (value: T) => void,
+): () => Promise<void> {
+    let pending: Promise<void> | null = null;
+    return () => {
+        if (pending) return pending;
+        const collection = collect().then(retain);
+        pending = collection.finally(() => {
+            pending = null;
+        });
+        return pending;
+    };
 }
 
 function registerCollectorFailureReporter(
@@ -261,36 +277,32 @@ function workerCollector(
     now: () => Date,
     recordFailure: RecordCollectorFailure,
 ): () => Promise<void> {
-    let pending: Promise<void> | null = null;
     let lastGood: readonly FederationWorkerMetricSnapshot[] | null = null;
+    let pendingScrape: Promise<void> | null = null;
+    const collectSingleFlight = singleFlightCollector(
+        collectSnapshot,
+        (snapshots) => {
+            lastGood = snapshots.slice(0, MAX_COLLECTED_PEERS);
+        },
+    );
+    const scrape = async (): Promise<void> => {
+        try {
+            await collectWithTimeout("worker_snapshot", collectSingleFlight);
+        } catch (cause) {
+            recordFailure("worker_snapshot", cause);
+        }
+        if (lastGood === null) return;
+        instruments.syncLag.reset();
+        instruments.lastSyncSuccess.reset();
+        instruments.catalogItems.reset();
+        setWorkerSnapshot(instruments, lastGood, boundPeer, now().getTime());
+    };
     return () => {
-        if (pending) return pending;
-        pending = (async () => {
-            try {
-                const snapshots = await collectWithTimeout(
-                    "worker_snapshot",
-                    collectSnapshot,
-                );
-                lastGood = snapshots.slice(0, MAX_COLLECTED_PEERS);
-            } catch (cause) {
-                recordFailure("worker_snapshot", cause);
-            }
-            if (lastGood === null) return;
-            instruments.syncLag.reset();
-            instruments.lastSyncSuccess.reset();
-            instruments.catalogItems.reset();
-            setWorkerSnapshot(
-                instruments,
-                lastGood,
-                boundPeer,
-                now().getTime(),
-            );
-        })();
-        pending.then(
-            () => (pending = null),
-            () => (pending = null),
-        );
-        return pending;
+        if (pendingScrape) return pendingScrape;
+        pendingScrape = scrape().finally(() => {
+            pendingScrape = null;
+        });
+        return pendingScrape;
     };
 }
 
@@ -378,26 +390,22 @@ function leaseCollector(
     leasePeer: (peerId: string) => string,
     recordFailure: RecordCollectorFailure,
 ): () => Promise<void> {
-    let pending: Promise<void> | null = null;
-    return () => {
-        if (pending) return pending;
-        pending = (async () => {
-            try {
-                const snapshots = await collectWithTimeout(
-                    "lease_snapshot",
-                    collectLeases,
-                );
-                gauge.reset();
-                setLeaseSnapshot(gauge, snapshots, leasePeer);
-            } catch (cause) {
-                recordFailure("lease_snapshot", cause);
-            }
-        })();
-        pending.then(
-            () => (pending = null),
-            () => (pending = null),
-        );
-        return pending;
+    let lastGood: readonly FederationLeaseMetricSnapshot[] | null = null;
+    const collectSingleFlight = singleFlightCollector(
+        collectLeases,
+        (snapshots) => {
+            lastGood = snapshots.slice(0, MAX_COLLECTED_PEERS);
+        },
+    );
+    return async () => {
+        try {
+            await collectWithTimeout("lease_snapshot", collectSingleFlight);
+        } catch (cause) {
+            recordFailure("lease_snapshot", cause);
+        }
+        if (lastGood === null) return;
+        gauge.reset();
+        setLeaseSnapshot(gauge, lastGood, leasePeer);
     };
 }
 
