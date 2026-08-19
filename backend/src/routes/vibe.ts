@@ -131,7 +131,7 @@ async function buildTrackPreferenceScoreMapForUser(
  * /api/vibe/map:
  *   get:
  *     summary: Get vibe map projection data
- *     description: Returns the cached 2D projection for the active embedding space, or 202 while a background build is in progress.
+ *     description: Returns the cached 2D projection for the active embedding space, or 202 while a background build is running or waiting for its failure cooldown.
  *     tags: [Vibe]
  *     security:
  *       - apiKeyAuth: []
@@ -139,7 +139,7 @@ async function buildTrackPreferenceScoreMapForUser(
  *       200:
  *         description: 2D vibe map projection payload
  *       202:
- *         description: Projection build in progress; retry shortly
+ *         description: Projection build in progress or failed with a bounded retry time
  *       401:
  *         description: Not authenticated
  */
@@ -151,6 +151,16 @@ router.get(
             const projection = await computeMapProjection();
             if (projection.status === "building") {
                 res.status(202).json({ building: true });
+                return;
+            }
+            if (projection.status === "failed") {
+                res.status(202).json({
+                    building: true,
+                    failed: true,
+                    attempt: projection.attempt,
+                    retryAt: projection.retryAt,
+                    error: "Vibe map build failed",
+                });
                 return;
             }
             res.json(projection.data);

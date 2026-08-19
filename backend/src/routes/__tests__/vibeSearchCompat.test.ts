@@ -332,6 +332,25 @@ describe("vibe search transport compatibility", () => {
 
         expect(buildingRes.statusCode).toBe(202);
         expect(buildingRes.body).toEqual({ building: true });
+
+        mockComputeMapProjection.mockResolvedValueOnce({
+            status: "failed",
+            attempt: 2,
+            error: "internal database detail",
+            failedAt: "2026-08-19T12:00:00.000Z",
+            retryAt: "2026-08-19T12:15:00.000Z",
+        });
+        const failedRes = createRes();
+        await mapHandler(req, failedRes);
+
+        expect(failedRes.statusCode).toBe(202);
+        expect(failedRes.body).toEqual({
+            building: true,
+            failed: true,
+            attempt: 2,
+            retryAt: "2026-08-19T12:15:00.000Z",
+            error: "Vibe map build failed",
+        });
     });
 
     it("handles similar-track route success, empty, and error branches", async () => {

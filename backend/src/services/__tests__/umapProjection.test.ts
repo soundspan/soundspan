@@ -1,13 +1,5 @@
 import { jest } from "@jest/globals";
 
-type MockPipeline = {
-    setEx: jest.Mock;
-    del: jest.Mock;
-    sAdd: jest.Mock;
-    expire: jest.Mock;
-    exec: jest.Mock;
-};
-
 type QueryRow = {
     track_id: string;
     title: string;
@@ -28,49 +20,74 @@ type QueryRow = {
     moodParty: number | null;
     moodAcoustic: number | null;
     moodElectronic: number | null;
-    embedding: string;
 };
 
-const mockQueryRaw = jest.fn<(...args: unknown[]) => Promise<QueryRow[]>>();
-const mockRedisGet = jest.fn<(...args: unknown[]) => Promise<string | null>>();
-const mockRedisMulti = jest.fn<(...args: unknown[]) => MockPipeline>();
+type MockPipeline = {
+    setEx: jest.Mock;
+    del: jest.Mock;
+    sAdd: jest.Mock;
+    expire: jest.Mock;
+    exec: jest.Mock;
+};
+
+type WorkerData = { spaceId: string; sampleSize: number };
+type WorkerOptions = {
+    workerData?: WorkerData;
+    execArgv?: string[];
+    resourceLimits?: { maxOldGenerationSizeMb?: number };
+};
+
+const mockRedisGet = jest.fn<(key: string) => Promise<string | null>>();
+const mockRedisSet =
+    jest.fn<
+        (
+            key: string,
+            value: string,
+            options: { NX?: boolean; EX?: number },
+        ) => Promise<string | null>
+    >();
+const mockRedisSetEx =
+    jest.fn<
+        (
+            key: string,
+            ttlSeconds: number,
+            value: string,
+        ) => Promise<string | null>
+    >();
+const mockRedisEval =
+    jest.fn<
+        (
+            script: string,
+            options: { keys: string[]; arguments: string[] },
+        ) => Promise<number>
+    >();
+const mockRedisIncr = jest.fn<(key: string) => Promise<number>>();
+const mockRedisExpire =
+    jest.fn<(key: string, ttlSeconds: number) => Promise<boolean>>();
+const mockRedisDel = jest.fn<(keys: string | string[]) => Promise<number>>();
+const mockRedisMulti = jest.fn<() => MockPipeline>();
 const mockExistsSync = jest.fn<(candidatePath: string) => boolean>();
 const mockPathJoin = jest.fn<(...parts: string[]) => string>();
-const mockParseEmbedding = jest.fn<(embedding: string) => number[]>();
-const mockUmapLoggerDebug = jest.fn<(...args: unknown[]) => void>();
-const mockUmapLoggerInfo = jest.fn<(...args: unknown[]) => void>();
-const mockUmapLoggerWarn = jest.fn<(...args: unknown[]) => void>();
-const mockUmapLoggerError = jest.fn<(...args: unknown[]) => void>();
+const mockLoggerDebug = jest.fn<(...args: unknown[]) => void>();
+const mockLoggerInfo = jest.fn<(...args: unknown[]) => void>();
+const mockLoggerWarn = jest.fn<(...args: unknown[]) => void>();
+const mockLoggerError = jest.fn<(...args: unknown[]) => void>();
 const mockGetActiveSpace = jest.fn<() => Promise<{ id: string }>>();
 
 let pipeline: MockPipeline;
 let workerBehavior: ((worker: MockWorker, index: number) => void) | null = null;
 let workers: MockWorker[] = [];
-let lastWorkerFilename: string | null = null;
-let lastWorkerOptions: {
-    workerData?: { embeddings: number[][]; nNeighbors: number };
-    resourceLimits?: { maxOldGenerationSizeMb?: number };
-} | null = null;
+let workerOptions: WorkerOptions[] = [];
 
 class MockWorker {
     listeners = new Map<string, Array<(payload?: unknown) => void>>();
     terminate = jest.fn(async () => 0);
 
-    constructor(
-        filename: string,
-        options: {
-            workerData?: { embeddings: number[][]; nNeighbors: number };
-            resourceLimits?: { maxOldGenerationSizeMb?: number };
-        },
-    ) {
-        lastWorkerFilename = filename;
-        lastWorkerOptions = options;
+    constructor(_filename: string, options: WorkerOptions) {
         workers.push(this);
+        workerOptions.push(options);
         const index = workers.length - 1;
-
-        setImmediate(() => {
-            workerBehavior?.(this, index);
-        });
+        setImmediate(() => workerBehavior?.(this, index));
     }
 
     on(event: string, listener: (payload?: unknown) => void): this {
@@ -81,63 +98,63 @@ class MockWorker {
     }
 
     emit(event: string, payload?: unknown): void {
-        for (const listener of this.listeners.get(event) ?? []) {
+        for (const listener of this.listeners.get(event) ?? [])
             listener(payload);
-        }
     }
 }
 
 jest.mock("fs", () => ({
     existsSync: (candidatePath: string) => mockExistsSync(candidatePath),
 }));
-
 jest.mock("path", () => ({
     __esModule: true,
-    default: {
-        join: (...args: string[]) => mockPathJoin(...args),
-    },
+    default: { join: (...parts: string[]) => mockPathJoin(...parts) },
 }));
-
 jest.mock("../../config", () => ({
     config: { vibeMapWorkerMemoryMb: 512 },
 }));
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
-    },
-}));
-
 jest.mock("../../utils/redis", () => ({
     redisClient: {
-        get: (...args: unknown[]) => mockRedisGet(...args),
-        multi: (...args: unknown[]) => mockRedisMulti(...args),
+        get: (key: string) => mockRedisGet(key),
+        set: (
+            key: string,
+            value: string,
+            options: { NX?: boolean; EX?: number },
+        ) => mockRedisSet(key, value, options),
+        setEx: (key: string, ttlSeconds: number, value: string) =>
+            mockRedisSetEx(key, ttlSeconds, value),
+        eval: (
+            script: string,
+            options: { keys: string[]; arguments: string[] },
+        ) => mockRedisEval(script, options),
+        incr: (key: string) => mockRedisIncr(key),
+        expire: (key: string, ttlSeconds: number) =>
+            mockRedisExpire(key, ttlSeconds),
+        del: (keys: string | string[]) => mockRedisDel(keys),
+        multi: () => mockRedisMulti(),
     },
 }));
-
 jest.mock("../../utils/logger", () => ({
     logger: {
-        debug: (...args: unknown[]) => mockUmapLoggerDebug(...args),
-        info: (...args: unknown[]) => mockUmapLoggerInfo(...args),
-        warn: (...args: unknown[]) => mockUmapLoggerWarn(...args),
-        error: (...args: unknown[]) => mockUmapLoggerError(...args),
+        child: () => ({
+            debug: (...args: unknown[]) => mockLoggerDebug(...args),
+            info: (...args: unknown[]) => mockLoggerInfo(...args),
+            warn: (...args: unknown[]) => mockLoggerWarn(...args),
+            error: (...args: unknown[]) => mockLoggerError(...args),
+        }),
     },
 }));
-
-jest.mock("../../utils/embedding", () => ({
-    parseEmbedding: (embedding: string) => mockParseEmbedding(embedding),
-}));
-
 jest.mock("../embeddingSpaces", () => ({
     getActiveSpace: () => mockGetActiveSpace(),
 }));
+jest.mock("worker_threads", () => ({ Worker: MockWorker }));
 
-jest.mock("worker_threads", () => ({
-    Worker: MockWorker,
-}));
-
-const PROJECTION_KEY = "vibe:map:v5:projection:space-active";
-const TRACK_IDS_KEY = "vibe:map:v5:track_ids:space-active";
+const SPACE_ID = "space-active";
+const PROJECTION_KEY = `vibe:map:v5:projection:${SPACE_ID}`;
+const TRACK_IDS_KEY = `vibe:map:v5:track_ids:${SPACE_ID}`;
+const LEASE_KEY = `vibe-map:build-lease:${SPACE_ID}`;
+const FAILURE_KEY = `vibe-map:build-failed:${SPACE_ID}`;
+const FAILURE_COUNT_KEY = `vibe-map:build-failure-count:${SPACE_ID}`;
 
 function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
     return {
@@ -146,13 +163,13 @@ function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
         artistName: `Artist ${index}`,
         artistId: `artist-${index}`,
         albumId: `album-${index}`,
-        coverUrl: index % 2 === 0 ? `cover-${index}.jpg` : null,
+        coverUrl: null,
         loudnessLufs: null,
         truePeakDb: null,
         albumLoudnessLufs: null,
         albumTruePeakDb: null,
-        energy: Number((index / 10).toFixed(2)),
-        valence: Number((1 - index / 10).toFixed(2)),
+        energy: 0.5,
+        valence: 0.5,
         moodHappy: 0.1,
         moodSad: 0.2,
         moodRelaxed: 0.3,
@@ -160,7 +177,6 @@ function makeRow(index: number, overrides: Partial<QueryRow> = {}): QueryRow {
         moodParty: 0.5,
         moodAcoustic: 0.6,
         moodElectronic: 0.7,
-        embedding: `[${index},${index + 1},${index + 2}]`,
         ...overrides,
     };
 }
@@ -169,20 +185,34 @@ function makeRows(count: number): QueryRow[] {
     return Array.from({ length: count }, (_, index) => makeRow(index + 1));
 }
 
-async function flushMicrotasks(turns = 8): Promise<void> {
+function emitResult(
+    worker: MockWorker,
+    rows: QueryRow[],
+    projection: number[][] | null,
+) {
+    worker.emit("message", { type: "materialized", rowCount: rows.length });
+    worker.emit("message", { type: "result", rows, projection });
+}
+
+async function flushMicrotasks(turns = 10): Promise<void> {
     for (let index = 0; index < turns; index += 1) {
         await new Promise((resolve) => setImmediate(resolve));
     }
 }
 
-function cachedPayload(): { tracks: unknown[]; trackCount: number } {
-    const setExCall = pipeline.setEx.mock.calls.find(
-        (call) => call[0] === PROJECTION_KEY,
+function cachedPayload(): {
+    tracks: unknown[];
+    trackCount: number;
+    sampled?: boolean;
+} {
+    const call = pipeline.setEx.mock.calls.find(
+        (entry) => entry[0] === PROJECTION_KEY,
     );
-    if (!setExCall) throw new Error("projection was never cached");
-    return JSON.parse(setExCall[2] as string) as {
+    if (!call) throw new Error("projection was never cached");
+    return JSON.parse(call[2] as string) as {
         tracks: unknown[];
         trackCount: number;
+        sampled?: boolean;
     };
 }
 
@@ -195,102 +225,151 @@ describe("computeMapProjection", () => {
         jest.resetModules();
         jest.clearAllMocks();
         jest.useRealTimers();
-
-        workerBehavior = null;
         workers = [];
-        lastWorkerFilename = null;
-        lastWorkerOptions = null;
-
+        workerOptions = [];
+        workerBehavior = null;
         pipeline = {
-            setEx: jest.fn<(...args: unknown[]) => MockPipeline>(
-                () => pipeline,
-            ),
-            del: jest.fn<(...args: unknown[]) => MockPipeline>(() => pipeline),
-            sAdd: jest.fn<(...args: unknown[]) => MockPipeline>(() => pipeline),
-            expire: jest.fn<(...args: unknown[]) => MockPipeline>(
-                () => pipeline,
-            ),
+            setEx: jest.fn(() => pipeline),
+            del: jest.fn(() => pipeline),
+            sAdd: jest.fn(() => pipeline),
+            expire: jest.fn(() => pipeline),
             exec: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
         };
-
         mockRedisGet.mockResolvedValue(null);
+        mockRedisSet.mockResolvedValue("OK");
+        mockRedisSetEx.mockResolvedValue("OK");
+        mockRedisEval.mockResolvedValue(1);
+        mockRedisIncr.mockResolvedValue(1);
+        mockRedisExpire.mockResolvedValue(true);
+        mockRedisDel.mockResolvedValue(1);
         mockRedisMulti.mockReturnValue(pipeline);
-        mockQueryRaw.mockResolvedValue([]);
-        mockExistsSync.mockImplementation((candidatePath: string) =>
-            candidatePath.endsWith("umapWorker.ts"),
+        mockExistsSync.mockImplementation((candidate) =>
+            candidate.endsWith("umapWorker.ts"),
         );
-        mockPathJoin.mockImplementation((...parts: string[]) =>
-            parts.join("/").replace(/\/+/g, "/"),
-        );
-        mockParseEmbedding.mockImplementation(
-            (embedding: string) => JSON.parse(embedding) as number[],
-        );
-        mockGetActiveSpace.mockResolvedValue({ id: "space-active" });
+        mockPathJoin.mockImplementation((...parts) => parts.join("/"));
+        mockGetActiveSpace.mockResolvedValue({ id: SPACE_ID });
     });
 
-    it("returns the cached projection for the active space without querying the database", async () => {
+    it("returns a cached projection without acquiring a build lease", async () => {
         const cached = {
-            tracks: [{ id: "track-1", x: 0.1, y: 0.2 }],
-            trackCount: 1,
-            computedAt: "2026-03-14T12:00:00.000Z",
+            tracks: [],
+            trackCount: 0,
+            computedAt: "2026-08-19T12:00:00.000Z",
         };
-        mockRedisGet.mockResolvedValueOnce(JSON.stringify(cached));
+        mockRedisGet.mockImplementation(async (key) =>
+            key === PROJECTION_KEY ? JSON.stringify(cached) : null,
+        );
 
-        const { computeMapProjection } = loadModule();
-
-        await expect(computeMapProjection()).resolves.toEqual({
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
             status: "ready",
             data: cached,
         });
-        expect(mockRedisGet).toHaveBeenCalledWith(PROJECTION_KEY);
-        expect(mockQueryRaw).not.toHaveBeenCalled();
-        expect(mockRedisMulti).not.toHaveBeenCalled();
+        expect(mockRedisSet).not.toHaveBeenCalled();
+        expect(workers).toHaveLength(0);
     });
 
-    it("reports building and deduplicates concurrent background computations", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(5));
-
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
+    it("prevents a second replica module from building while the Redis NX lease is held", async () => {
+        const firstReplica = loadModule();
+        await expect(firstReplica.computeMapProjection()).resolves.toEqual({
             status: "building",
         });
-        await expect(computeMapProjection()).resolves.toEqual({
+        jest.resetModules();
+        mockRedisSet.mockResolvedValueOnce(null);
+        const secondReplica = loadModule();
+        await expect(secondReplica.computeMapProjection()).resolves.toEqual({
             status: "building",
         });
 
-        await flushMicrotasks();
-
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-        const [query, ...values] = mockQueryRaw.mock.calls[0];
-        expect((query as readonly string[]).join(" ")).toContain(
-            "te.space_id =",
+        expect(mockRedisSet).toHaveBeenNthCalledWith(
+            2,
+            LEASE_KEY,
+            expect.any(String),
+            { NX: true, EX: 3600 },
         );
-        expect(values).toContain("space-active");
         expect(workers).toHaveLength(1);
 
-        workers[0].emit("message", [
-            [0, 0],
-            [1, 1],
-            [2, 2],
-            [3, 3],
-            [4, 4],
-        ]);
+        const rows = makeRows(5);
+        emitResult(
+            workers[0],
+            rows,
+            rows.map((_, index) => [index, index]),
+        );
         await flushMicrotasks();
-
-        expect(cachedPayload().trackCount).toBe(5);
     });
 
-    it("caches an empty projection briefly when no embedded tracks exist", async () => {
-        const { computeMapProjection } = loadModule();
+    it("refreshes and releases an acquired build lease", async () => {
+        jest.useFakeTimers();
+        const { acquireVibeMapBuildLease } =
+            require("../vibeMapBuildState") as typeof import("../vibeMapBuildState");
+        const lease = await acquireVibeMapBuildLease(SPACE_ID);
+        if (!lease) throw new Error("lease was not acquired");
 
-        await expect(computeMapProjection()).resolves.toEqual({
+        await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+        expect(mockRedisEval).toHaveBeenCalledWith(
+            expect.stringContaining("EXPIRE"),
+            {
+                keys: [LEASE_KEY],
+                arguments: [expect.any(String), "3600"],
+            },
+        );
+        await lease.release();
+        expect(mockRedisEval).toHaveBeenLastCalledWith(
+            expect.stringContaining("DEL"),
+            { keys: [LEASE_KEY], arguments: [expect.any(String)] },
+        );
+    });
+
+    it("passes only bounded query parameters to the worker and releases its lease", async () => {
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
             status: "building",
         });
         await flushMicrotasks();
 
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-        expect(mockParseEmbedding).not.toHaveBeenCalled();
-        expect(workers).toHaveLength(0);
+        expect(workerOptions).toEqual([
+            {
+                workerData: { spaceId: SPACE_ID, sampleSize: 15000 },
+                execArgv: ["--import", "tsx"],
+                resourceLimits: { maxOldGenerationSizeMb: 512 },
+            },
+        ]);
+        expect(cachedPayload().trackCount).toBe(5);
+        expect(pipeline.sAdd).toHaveBeenCalledWith(
+            TRACK_IDS_KEY,
+            rows.map((row) => row.track_id),
+        );
+        expect(mockRedisEval).toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            { keys: [LEASE_KEY], arguments: [expect.any(String)] },
+        );
+        expect(mockRedisDel).toHaveBeenCalledWith([
+            FAILURE_KEY,
+            FAILURE_COUNT_KEY,
+        ]);
+        const payload = cachedPayload() as {
+            tracks: Array<{ x: number; y: number }>;
+        };
+        expect(payload.tracks[0]).toEqual(
+            expect.objectContaining({ x: 0, y: 0 }),
+        );
+        expect(payload.tracks[4]).toEqual(
+            expect.objectContaining({ x: 1, y: 1 }),
+        );
+    });
+
+    it("caches an empty worker result for five minutes", async () => {
+        workerBehavior = (worker) => emitResult(worker, [], null);
+        await loadModule().computeMapProjection();
+        await flushMicrotasks();
+
         expect(pipeline.setEx).toHaveBeenCalledWith(
             PROJECTION_KEY,
             300,
@@ -299,101 +378,129 @@ describe("computeMapProjection", () => {
         expect(cachedPayload().trackCount).toBe(0);
     });
 
-    it("uses the circular fallback layout for datasets smaller than five tracks", async () => {
-        mockQueryRaw.mockResolvedValueOnce([
-            makeRow(1, {
-                moodElectronic: 0.95,
-                moodParty: 0.3,
-                loudnessLufs: -17.6,
-                truePeakDb: -1.4,
-                albumLoudnessLufs: -18.2,
-                albumTruePeakDb: -0.7,
-            }),
-            makeRow(2, {
-                moodHappy: null,
-                moodSad: null,
-                moodRelaxed: null,
-                moodAggressive: null,
-                moodParty: null,
-                moodAcoustic: null,
-                moodElectronic: null,
-            }),
-            makeRow(3, { moodRelaxed: 0.92, moodElectronic: 0.2 }),
-            makeRow(4, { moodAggressive: 0.88, moodElectronic: 0.1 }),
-        ]);
-
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
+    it("uses a circular layout for an undersized worker result", async () => {
+        const rows = makeRows(4).map((row, index) => ({
+            ...row,
+            moodElectronic: index === 0 ? 0.95 : row.moodElectronic,
+        }));
+        workerBehavior = (worker) => {
+            worker.emit("message", {
+                type: "materialized",
+                rowCount: rows.length,
+            });
+            worker.emit("message", {
+                type: "result",
+                rows,
+                projection: null,
+            });
+        };
+        await loadModule().computeMapProjection();
         await flushMicrotasks();
 
-        const payload = cachedPayload();
-        expect(payload.trackCount).toBe(4);
-        expect(payload.tracks).toEqual([
+        expect(cachedPayload()).toEqual(
+            expect.objectContaining({ trackCount: 4 }),
+        );
+        expect(cachedPayload().tracks[0]).toEqual(
             expect.objectContaining({
                 id: "track-1",
                 dominantMood: "moodElectronic",
                 moodScore: 0.95,
-                loudnessLufs: -17.6,
-                truePeakDb: -1.4,
-                albumLoudnessLufs: -18.2,
-                albumTruePeakDb: -0.7,
+                x: 0.8,
+                y: 0.5,
             }),
-            expect.objectContaining({
-                id: "track-2",
-                dominantMood: "neutral",
-                moodScore: 0,
-                moods: {},
-                loudnessLufs: null,
-                truePeakDb: null,
-                albumLoudnessLufs: null,
-                albumTruePeakDb: null,
-            }),
-            expect.objectContaining({
-                id: "track-3",
-                dominantMood: "moodRelaxed",
-            }),
-            expect.objectContaining({
-                id: "track-4",
-                dominantMood: "moodAggressive",
-            }),
-        ]);
-        expect(mockParseEmbedding).not.toHaveBeenCalled();
-        expect(workers).toHaveLength(0);
-        expect(pipeline.setEx).toHaveBeenCalledWith(
-            PROJECTION_KEY,
-            86400,
-            expect.any(String),
         );
-        expect(pipeline.del).toHaveBeenCalledWith(TRACK_IDS_KEY);
-        expect(pipeline.sAdd).toHaveBeenCalledWith(TRACK_IDS_KEY, [
-            "track-1",
-            "track-2",
-            "track-3",
-            "track-4",
-        ]);
-        expect(pipeline.expire).toHaveBeenCalledWith(TRACK_IDS_KEY, 86400);
-        expect(pipeline.exec).toHaveBeenCalledTimes(1);
     });
 
-    it("runs the UMAP worker with a bounded heap, normalizes coordinates, and caches the result", async () => {
-        mockQueryRaw.mockResolvedValueOnce([
-            makeRow(1, { moodHappy: 0.9, moodElectronic: 0.4 }),
-            makeRow(2, { moodSad: 0.8, moodElectronic: 0.1 }),
-            makeRow(3, { moodRelaxed: 0.7, moodElectronic: 0.2 }),
-            makeRow(4, { moodParty: 0.7, moodElectronic: 0.6 }),
-            makeRow(5, { moodElectronic: 0.85, moodParty: 0.4 }),
-        ]);
-        workerBehavior = (worker) => {
-            worker.emit("message", [
-                [-3, 4],
-                [1, 6],
-                [0, 2],
-                [5, 8],
-                [3, 1],
-            ]);
+    it("reports a live failure marker and does not acquire a lease", async () => {
+        const marker = {
+            attempt: 2,
+            error: "UMAP worker exited with code 2",
+            failedAt: "2026-08-19T12:00:00.000Z",
+            retryAt: "2026-08-19T12:15:00.000Z",
         };
+        mockRedisGet.mockImplementation(async (key) =>
+            key === FAILURE_KEY ? JSON.stringify(marker) : null,
+        );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "failed",
+            ...marker,
+        });
+        expect(mockRedisSet).not.toHaveBeenCalled();
+        expect(workers).toHaveLength(0);
+    });
+
+    it("suppresses the next poll after a build writes its failure marker", async () => {
+        let storedMarker: string | null = null;
+        mockRedisGet.mockImplementation(async (key) =>
+            key === FAILURE_KEY ? storedMarker : null,
+        );
+        mockRedisSetEx.mockImplementation(async (key, _ttl, value) => {
+            if (key === FAILURE_KEY) storedMarker = value;
+            return "OK";
+        });
+        workerBehavior = (worker) =>
+            worker.emit("error", new Error("repeatable failure"));
+        const { computeMapProjection } = loadModule();
+
+        await computeMapProjection();
+        await flushMicrotasks();
+        const secondPoll = await computeMapProjection();
+
+        expect(secondPoll).toEqual(
+            expect.objectContaining({
+                status: "failed",
+                attempt: 1,
+                error: "Vibe map projection build failed",
+            }),
+        );
+        expect(workers).toHaveLength(1);
+        expect(mockRedisSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("records bounded escalating cooldowns after repeated build failures", async () => {
+        mockRedisIncr
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(2)
+            .mockResolvedValueOnce(3)
+            .mockResolvedValueOnce(4);
+        workerBehavior = (worker) =>
+            worker.emit("error", new Error("deterministic failure"));
+        const { computeMapProjection } = loadModule();
+
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+            await computeMapProjection();
+            await flushMicrotasks();
+        }
+
+        const markerTtls = mockRedisSetEx.mock.calls
+            .filter((call) => call[0] === FAILURE_KEY)
+            .map((call) => call[1]);
+        expect(markerTtls).toEqual([300, 900, 3600, 3600]);
+        expect(mockRedisExpire).toHaveBeenCalledTimes(4);
+        expect(mockRedisExpire).toHaveBeenLastCalledWith(
+            FAILURE_COUNT_KEY,
+            86400,
+        );
+        const finalMarker = JSON.parse(
+            mockRedisSetEx.mock.calls.at(-1)?.[2] as string,
+        ) as { attempt: number; error: string };
+        expect(finalMarker).toEqual(
+            expect.objectContaining({
+                attempt: 4,
+                error: "Vibe map projection build failed",
+            }),
+        );
+    });
+
+    it("allows a fresh build after the failure marker expires", async () => {
+        const rows = makeRows(5);
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
 
         const { computeMapProjection } = loadModule();
         await expect(computeMapProjection()).resolves.toEqual({
@@ -401,168 +508,71 @@ describe("computeMapProjection", () => {
         });
         await flushMicrotasks();
 
-        const payload = cachedPayload() as {
-            trackCount: number;
-            tracks: Array<{ id: string; x: number; y: number }>;
-        };
-        expect(payload.trackCount).toBe(5);
-        expect(
-            payload.tracks.every(
-                (track) =>
-                    track.x >= 0 &&
-                    track.x <= 1 &&
-                    track.y >= 0 &&
-                    track.y <= 1,
-            ),
-        ).toBe(true);
-        expect(mockParseEmbedding).toHaveBeenCalledTimes(5);
-        expect(lastWorkerFilename).toMatch(/umapWorker\.ts$/);
-        expect(lastWorkerOptions).toEqual({
-            workerData: {
-                embeddings: [
-                    [1, 2, 3],
-                    [2, 3, 4],
-                    [3, 4, 5],
-                    [4, 5, 6],
-                    [5, 6, 7],
-                ],
-                nNeighbors: 2,
-            },
-            execArgv: ["--import", "tsx"],
-            resourceLimits: { maxOldGenerationSizeMb: 512 },
-        });
-        expect(pipeline.setEx).toHaveBeenCalledWith(
-            PROJECTION_KEY,
-            86400,
+        expect(mockRedisGet).toHaveBeenCalledWith(FAILURE_KEY);
+        expect(mockRedisSet).toHaveBeenCalledWith(
+            LEASE_KEY,
             expect.any(String),
+            { NX: true, EX: 3600 },
         );
-        expect(pipeline.exec).toHaveBeenCalledTimes(1);
+        expect(cachedPayload().trackCount).toBe(5);
     });
 
-    it("halves the sample and retries when the worker dies on its memory limit", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(4000));
+    it("uses the worker-reported materialized count for OOM sample degradation", async () => {
         workerBehavior = (worker, index) => {
             if (index === 0) {
-                const oom = new Error(
-                    "Worker terminated due to reaching memory limit: JS heap out of memory",
+                worker.emit("message", {
+                    type: "materialized",
+                    rowCount: 4000,
+                });
+                const error = new Error(
+                    "Worker terminated due to reaching memory limit",
                 ) as NodeJS.ErrnoException;
-                oom.code = "ERR_WORKER_OUT_OF_MEMORY";
-                worker.emit("error", oom);
+                error.code = "ERR_WORKER_OUT_OF_MEMORY";
+                worker.emit("error", error);
                 return;
             }
-            worker.emit(
-                "message",
-                Array.from({ length: 2000 }, (_, i) => [i, i]),
+            const rows = makeRows(2000);
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, rowIndex) => [rowIndex, rowIndex]),
             );
         };
 
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
-        await flushMicrotasks(16);
+        await loadModule().computeMapProjection();
+        await flushMicrotasks(20);
 
-        expect(workers).toHaveLength(2);
-        expect(lastWorkerOptions?.workerData?.embeddings).toHaveLength(2000);
-        expect(mockUmapLoggerWarn).toHaveBeenCalledWith(
-            expect.stringContaining("heap ceiling at 4000 tracks"),
+        expect(
+            workerOptions.map((options) => options.workerData?.sampleSize),
+        ).toEqual([15000, 2000]);
+        expect(cachedPayload()).toEqual(
+            expect.objectContaining({ trackCount: 2000, sampled: true }),
         );
-        const payload = cachedPayload() as {
-            trackCount: number;
-            sampled?: boolean;
-        };
-        expect(payload.trackCount).toBe(2000);
-        expect(payload.sampled).toBe(true);
-    });
-
-    it("logs instead of caching when the worker posts an error payload", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(5));
-        workerBehavior = (worker) => {
-            worker.emit("message", { error: "projection failed" });
-        };
-
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
-        await flushMicrotasks();
-
-        expect(mockUmapLoggerError).toHaveBeenCalledWith(
-            "Vibe map error:",
-            expect.objectContaining({ message: "projection failed" }),
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "UMAP worker memory limit reached; retrying with a smaller sample",
+            expect.objectContaining({ sampleSize: 4000 }),
         );
-        expect(pipeline.exec).not.toHaveBeenCalled();
-    });
-
-    it("logs instead of caching when the worker exits with a non-zero code", async () => {
-        mockQueryRaw.mockResolvedValueOnce(makeRows(5));
-        workerBehavior = (worker) => {
-            worker.emit("exit", 2);
-        };
-
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
-        await flushMicrotasks();
-
-        expect(mockUmapLoggerError).toHaveBeenCalledWith(
-            "Vibe map error:",
-            expect.objectContaining({
-                message: "UMAP worker exited with code 2",
-            }),
-        );
-        expect(pipeline.exec).not.toHaveBeenCalled();
-    });
-
-    it("allows a fresh build after a failed one", async () => {
-        mockQueryRaw.mockResolvedValue(makeRows(5));
-        workerBehavior = (worker, index) => {
-            if (index === 0) {
-                worker.emit("error", new Error("worker exploded"));
-                return;
-            }
-            worker.emit("message", [
-                [0, 0],
-                [1, 1],
-                [2, 2],
-                [3, 3],
-                [4, 4],
-            ]);
-        };
-
-        const { computeMapProjection } = loadModule();
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
-        await flushMicrotasks();
-        expect(mockUmapLoggerError).toHaveBeenCalledTimes(1);
-
-        await expect(computeMapProjection()).resolves.toEqual({
-            status: "building",
-        });
-        await flushMicrotasks();
-
-        expect(workers).toHaveLength(2);
-        expect(cachedPayload().trackCount).toBe(5);
     });
 });
 
 describe("umapWorkerOptions", () => {
+    beforeEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
+    });
+
     it("registers tsx only for the development TypeScript worker", () => {
         const { umapWorkerOptions } = loadModule();
-        const embeddings = [[1, 2, 3]];
-
         expect(
-            umapWorkerOptions("/workers/umapWorker.ts", embeddings, 2),
+            umapWorkerOptions("/workers/umapWorker.ts", SPACE_ID, 5000),
         ).toEqual({
-            workerData: { embeddings, nNeighbors: 2 },
+            workerData: { spaceId: SPACE_ID, sampleSize: 5000 },
             execArgv: ["--import", "tsx"],
         });
         expect(
-            umapWorkerOptions("/workers/umapWorker.js", embeddings, 2),
+            umapWorkerOptions("/workers/umapWorker.js", SPACE_ID, 5000),
         ).toEqual({
-            workerData: { embeddings, nNeighbors: 2 },
+            workerData: { spaceId: SPACE_ID, sampleSize: 5000 },
         });
     });
 });

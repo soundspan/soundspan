@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Vibe-map builds now stay within their worker memory limit during database materialization, coordinate across backend replicas, and back off after failures instead of restarting on every browser poll.
 - Federation catalog parsing now bounds forward-compatible unknown-key warning samples, preventing oversized peer envelopes from crashing or creating unbounded warning state.
 - Library Insights drill-downs no longer crash the Admin page: the metadata-gap Genres/Lyrics tabs and the analysis-coverage failure list read fields the API never returned, so expanding them with real data threw a client-side error. Gap tabs and the quality bitrate floor also fetch on selection now instead of requiring a separate Load press.
 - Transient playback recovery now resumes correctly after its automatic reload: the recovery listener was previously cancelled before it could restart playback, and a stale pre-failure position can no longer be restored before the track has made real startup progress.
