@@ -9,14 +9,33 @@ import {
     LIBRARY_HEALTH_TRACK_SAMPLE_LIMIT,
 } from "./storageAnalytics";
 
-/** Lossy MIME values defined by the repository audio-streaming MIME map. */
-export const LOSSY_AUDIO_MIMES = [
+const LOSSY_AUDIO_MIMES = new Set([
     "audio/mpeg",
     "audio/mp4",
     "audio/aac",
     "audio/ogg",
     "audio/opus",
-] as const;
+]);
+const LOSSLESS_CODEC_PATTERN =
+    /(?:^|[\s/._-])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd)(?:$|[\s/._-])/i;
+const LOSSY_CODEC_PATTERN =
+    /(?:^|[\s/._-])(mp3|aac|m4a|opus|vorbis|ogg|wma)(?:$|[\s/._-])/i;
+const MPEG_LAYER_PATTERN =
+    /\bmpeg(?:[\s._-]*\d+)?[\s._-]+layer[\s._-]+(?:[123]|i{1,3})\b/i;
+
+/** Classifies scanner codec labels and legacy MIME values without guessing unknowns. */
+export function isLossyAudioCodec(value: string | null): boolean {
+    if (value === null) return false;
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0 || LOSSLESS_CODEC_PATTERN.test(normalized)) {
+        return false;
+    }
+    return (
+        LOSSY_AUDIO_MIMES.has(normalized) ||
+        LOSSY_CODEC_PATTERN.test(normalized) ||
+        MPEG_LAYER_PATTERN.test(normalized)
+    );
+}
 
 export interface LossyAlbumQuality {
     albumId: string;
@@ -35,6 +54,7 @@ export interface LossyAlbumQualityStats {
 
 function reduceAlbumQuality(
     rows: Array<{
+        mime: string | null;
         fileSize: number;
         duration: number | null;
         album: {
@@ -49,6 +69,7 @@ function reduceAlbumQuality(
         { album: (typeof rows)[number]["album"]; sum: number; count: number }
     >();
     for (const row of rows) {
+        if (!isLossyAudioCodec(row.mime)) continue;
         const bitrate = deriveBitrateKbps(row.fileSize, row.duration);
         if (bitrate === null) continue;
         const current = grouped.get(row.album.id) ?? {
@@ -74,9 +95,9 @@ export async function loadLossyAlbumQualityStats(): Promise<LossyAlbumQualitySta
     const loadedRows = await prisma.track.findMany({
         where: {
             ...VISIBLE_LOCAL_TRACK_WHERE,
-            mime: { in: [...LOSSY_AUDIO_MIMES] },
         },
         select: {
+            mime: true,
             fileSize: true,
             duration: true,
             album: {

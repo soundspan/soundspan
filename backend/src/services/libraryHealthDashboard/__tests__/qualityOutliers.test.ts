@@ -3,16 +3,53 @@ jest.mock("../../../utils/db", () => ({ prisma: { track: { findMany } } }));
 
 import {
     getQualityOutliers,
+    isLossyAudioCodec,
     loadLossyAlbumQualityStats,
-    LOSSY_AUDIO_MIMES,
 } from "../qualityOutliers";
 
 describe("library health quality outliers", () => {
     beforeEach(() => jest.clearAllMocks());
 
-    it("uses supported lossy MIME types, ignores zero duration, and clamps pagination", async () => {
+    it.each([
+        "mp3",
+        "MPEG 1 Layer 3",
+        "mpeg layer 3",
+        "AAC",
+        "m4a",
+        "Opus",
+        "Vorbis",
+        "ogg",
+        "WMA",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/aac",
+        "audio/ogg",
+        "audio/opus",
+    ])("classifies %s as lossy", (codec) => {
+        expect(isLossyAudioCodec(codec)).toBe(true);
+    });
+
+    it.each([
+        "FLAC",
+        "ALAC",
+        "PCM",
+        "WAV",
+        "AIFF",
+        "APE",
+        "WavPack",
+        "DSD",
+        "audio/flac",
+        "unknown-codec",
+        "",
+        null,
+    ])("does not classify %s as lossy", (codec) => {
+        expect(isLossyAudioCodec(codec)).toBe(false);
+    });
+
+    it("classifies the bounded visible-track sample and ignores invalid durations", async () => {
         findMany.mockResolvedValueOnce([
             {
+                mime: "MPEG 1 Layer 3",
                 fileSize: 4_000_000,
                 duration: 200,
                 album: {
@@ -22,6 +59,17 @@ describe("library health quality outliers", () => {
                 },
             },
             {
+                mime: "FLAC",
+                fileSize: 4_000_000,
+                duration: 200,
+                album: {
+                    id: "lossless",
+                    title: "Lossless Album",
+                    artist: { id: "a1", name: "Artist" },
+                },
+            },
+            {
+                mime: "AAC",
                 fileSize: 9_000_000,
                 duration: 0,
                 album: {
@@ -40,9 +88,8 @@ describe("library health quality outliers", () => {
 
         expect(findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: expect.objectContaining({
-                    mime: { in: [...LOSSY_AUDIO_MIMES] },
-                }),
+                where: expect.not.objectContaining({ mime: expect.anything() }),
+                select: expect.objectContaining({ mime: true }),
             }),
         );
         expect(result).toEqual(

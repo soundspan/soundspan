@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { schedulerQueue } from "../workers/queues";
@@ -58,6 +59,12 @@ async function enqueuePurgeAt(cutoff: Date): Promise<void> {
 const PURGE_STATES_IN_FLIGHT = new Set(["waiting", "delayed", "active"]);
 const FAILED_SCAN_LIMIT = 50;
 const FAILURE_REASON_LIMIT = 200;
+const CONTINUATION_JOB_ID_PREFIX = "scheduler:track-removal-purge:";
+const continuationDataSchema = z.strictObject({
+    startAfterId: z.string().trim().min(1).max(128),
+    cutoffAt: z.iso.datetime({ offset: true }),
+    deletedSoFar: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
 
 function boundedFailureReason(reason: string | undefined): string {
     if (!reason) return "Purge job failed";
@@ -83,18 +90,34 @@ async function findLatestPurgeFailure(): Promise<string | null> {
     return null;
 }
 
+function isPurgeContinuation(job: {
+    id?: string | number;
+    name?: string;
+    data?: unknown;
+}): boolean {
+    return (
+        job.name === TRACK_REMOVAL_PURGE_JOB_NAME &&
+        typeof job.id === "string" &&
+        job.id.startsWith(CONTINUATION_JOB_ID_PREFIX) &&
+        job.id !== PURGE_NOW_JOB_ID &&
+        continuationDataSchema.safeParse(job.data).success
+    );
+}
+
 async function isPurgeInFlight(): Promise<boolean> {
     const purgeNowJob = await schedulerQueue.getJob(PURGE_NOW_JOB_ID);
     if (purgeNowJob) {
         const state = await purgeNowJob.getState();
         if (PURGE_STATES_IN_FLIGHT.has(state)) return true;
     }
-    const active = await schedulerQueue.getJobs(
-        ["active"],
-        0,
-        FAILED_SCAN_LIMIT,
+    const [active, waitingOrDelayed] = await Promise.all([
+        schedulerQueue.getJobs(["active"], 0, FAILED_SCAN_LIMIT),
+        schedulerQueue.getJobs(["waiting", "delayed"], 0, FAILED_SCAN_LIMIT),
+    ]);
+    return (
+        active.some((job) => job?.name === TRACK_REMOVAL_PURGE_JOB_NAME) ||
+        waitingOrDelayed.some(isPurgeContinuation)
     );
-    return active.some((job) => job?.name === TRACK_REMOVAL_PURGE_JOB_NAME);
 }
 
 /**

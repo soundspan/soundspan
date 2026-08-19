@@ -30,6 +30,9 @@ function analysisCounts(
             )
         ) {
             counts[row.analysisStatus as AnalysisStatus] += row._count;
+        } else {
+            // Legacy worker values have no public bucket; keep totals visible as pending work.
+            counts.pending += row._count;
         }
     }
     return counts;
@@ -43,6 +46,9 @@ function vibeCounts(
         const status = row.vibeAnalysisStatus ?? "pending";
         if (ANALYSIS_STATUS_VALUES.includes(status as AnalysisStatus)) {
             counts[status as AnalysisStatus] += row._count;
+        } else {
+            // Legacy worker values have no public bucket; keep totals visible as pending work.
+            counts.pending += row._count;
         }
     }
     return counts;
@@ -50,34 +56,36 @@ function vibeCounts(
 
 /** Returns aggregate status and loudness coverage for visible local tracks. */
 export async function getAnalysisCoverageSummary() {
-    const [analysisRows, vibeRows, measured, missing] = await Promise.all([
-        prisma.track.groupBy({
-            by: ["analysisStatus"],
-            where: VISIBLE_LOCAL_TRACK_WHERE,
-            _count: true,
-        }),
-        prisma.track.groupBy({
-            by: ["vibeAnalysisStatus"],
-            where: VISIBLE_LOCAL_TRACK_WHERE,
-            _count: true,
-        }),
-        prisma.track.count({
-            where: {
-                ...VISIBLE_LOCAL_TRACK_WHERE,
-                loudnessLufs: { not: null },
-                truePeakDb: { not: null },
-            },
-        }),
-        prisma.track.count({
-            where: {
-                ...VISIBLE_LOCAL_TRACK_WHERE,
-                OR: [{ loudnessLufs: null }, { truePeakDb: null }],
-            },
-        }),
-    ]);
+    const [analysisRows, vibeRows, total, measured, missing] =
+        await Promise.all([
+            prisma.track.groupBy({
+                by: ["analysisStatus"],
+                where: VISIBLE_LOCAL_TRACK_WHERE,
+                _count: true,
+            }),
+            prisma.track.groupBy({
+                by: ["vibeAnalysisStatus"],
+                where: VISIBLE_LOCAL_TRACK_WHERE,
+                _count: true,
+            }),
+            prisma.track.count({ where: VISIBLE_LOCAL_TRACK_WHERE }),
+            prisma.track.count({
+                where: {
+                    ...VISIBLE_LOCAL_TRACK_WHERE,
+                    loudnessLufs: { not: null },
+                    truePeakDb: { not: null },
+                },
+            }),
+            prisma.track.count({
+                where: {
+                    ...VISIBLE_LOCAL_TRACK_WHERE,
+                    OR: [{ loudnessLufs: null }, { truePeakDb: null }],
+                },
+            }),
+        ]);
     const statuses = analysisCounts(analysisRows);
     return {
-        total: Object.values(statuses).reduce((sum, value) => sum + value, 0),
+        total,
         analysisStatus: statuses,
         vibeAnalysisStatus: vibeCounts(vibeRows),
         loudness: { measured, missing },

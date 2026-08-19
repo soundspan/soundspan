@@ -18,18 +18,41 @@ import { sendInternalRouteError, sendRouteError } from "./routeErrorResponse";
 const router = Router();
 const log = logger.child("LibraryHealthDashboard");
 const emptySchema = z.strictObject({});
+function scalarQueryValue(value: unknown): unknown {
+    if (
+        value === undefined ||
+        typeof value === "string" ||
+        typeof value === "number"
+    ) {
+        return value;
+    }
+    return Number.NaN;
+}
+
 const paginationShape = {
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-    offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    limit: z.preprocess(
+        scalarQueryValue,
+        z.coerce.number().int().min(1).max(100).default(50),
+    ),
+    offset: z.preprocess(
+        scalarQueryValue,
+        z.coerce.number().int().min(0).max(1_000_000).default(0),
+    ),
 };
 const paginationSchema = z.strictObject(paginationShape);
 const duplicatePaginationSchema = z.strictObject({
     ...paginationShape,
-    limit: z.coerce.number().int().min(1).max(50).default(50),
+    limit: z.preprocess(
+        scalarQueryValue,
+        z.coerce.number().int().min(1).max(50).default(50),
+    ),
 });
 const qualityQuerySchema = z.strictObject({
     ...paginationShape,
-    floor: z.coerce.number().min(32).max(2_000).default(192),
+    floor: z.preprocess(
+        scalarQueryValue,
+        z.coerce.number().min(32).max(2_000).default(192),
+    ),
 });
 const gapParamsSchema = z.strictObject({
     kind: z.enum(METADATA_GAP_KINDS),
@@ -61,6 +84,46 @@ router.use(requireAuth, requireAdmin);
  *             schema:
  *               type: object
  *               required: [metadataGaps, analysisCoverage, storage, quality, duplicates]
+ *               properties:
+ *                 metadataGaps:
+ *                   type: object
+ *                   required: [missingArt, missingMbid, missingGenres, missingLyrics]
+ *                   properties:
+ *                     missingArt: { type: object, required: [albums, artists], properties: { albums: { type: integer }, artists: { type: integer } } }
+ *                     missingMbid: { type: object, required: [albums, artists], properties: { albums: { type: integer }, artists: { type: integer } } }
+ *                     missingGenres: { type: integer }
+ *                     missingLyrics: { type: integer }
+ *                 analysisCoverage:
+ *                   type: object
+ *                   required: [total, analysisStatus, vibeAnalysisStatus, loudness]
+ *                   properties:
+ *                     total: { type: integer }
+ *                     analysisStatus: { type: object, required: [pending, processing, failed, completed], properties: { pending: { type: integer }, processing: { type: integer }, failed: { type: integer }, completed: { type: integer } } }
+ *                     vibeAnalysisStatus: { type: object, required: [pending, processing, failed, completed], properties: { pending: { type: integer }, processing: { type: integer }, failed: { type: integer }, completed: { type: integer } } }
+ *                     loudness: { type: object, required: [measured, missing], properties: { measured: { type: integer }, missing: { type: integer } } }
+ *                 storage:
+ *                   type: object
+ *                   required: [tracks, totalFileSize, mimeTypes, artists, isTruncated]
+ *                   properties:
+ *                     tracks: { type: integer }
+ *                     totalFileSize: { type: number }
+ *                     mimeTypes: { type: integer }
+ *                     artists: { type: integer }
+ *                     isTruncated: { type: boolean }
+ *                 quality:
+ *                   type: object
+ *                   required: [floorKbps, albumsBelowFloor, isTruncated]
+ *                   properties:
+ *                     floorKbps: { type: number }
+ *                     albumsBelowFloor: { type: integer }
+ *                     isTruncated: { type: boolean }
+ *                 duplicates:
+ *                   type: object
+ *                   required: [clusters, byTier, isTruncated]
+ *                   properties:
+ *                     clusters: { type: integer }
+ *                     byTier: { type: object, required: [audioHash, recordingMbid, isrc], properties: { audioHash: { type: integer }, recordingMbid: { type: integer }, isrc: { type: integer } } }
+ *                     isTruncated: { type: boolean }
  *       400: { description: Invalid query parameters }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -98,6 +161,38 @@ router.get(
  *             schema:
  *               type: object
  *               required: [kind, counts, items, total, limit, offset]
+ *               properties:
+ *                 kind: { type: string, enum: [missing-art, missing-mbid, missing-genres, missing-lyrics] }
+ *                 counts:
+ *                   type: object
+ *                   properties:
+ *                     artists: { type: integer }
+ *                     albums: { type: integer }
+ *                     tracks: { type: integer }
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     oneOf:
+ *                       - type: object
+ *                         required: [id, title, rgMbid, coverUrl, userCoverUrl, artist]
+ *                         properties:
+ *                           id: { type: string }
+ *                           title: { type: string }
+ *                           rgMbid: { type: string, nullable: true }
+ *                           coverUrl: { type: string, nullable: true }
+ *                           userCoverUrl: { type: string, nullable: true }
+ *                           artist: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+ *                       - type: object
+ *                         required: [id, title, filePath, albumTitle, artistName]
+ *                         properties:
+ *                           id: { type: string }
+ *                           title: { type: string }
+ *                           filePath: { type: string, nullable: true }
+ *                           albumTitle: { type: string }
+ *                           artistName: { type: string }
+ *                 total: { type: integer }
+ *                 limit: { type: integer }
+ *                 offset: { type: integer }
  *       400: { description: Invalid kind or pagination }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -144,6 +239,29 @@ router.get(
  *             schema:
  *               type: object
  *               required: [total, analysisStatus, vibeAnalysisStatus, loudness, failed]
+ *               properties:
+ *                 total: { type: integer }
+ *                 analysisStatus: { type: object, required: [pending, processing, failed, completed], properties: { pending: { type: integer }, processing: { type: integer }, failed: { type: integer }, completed: { type: integer } } }
+ *                 vibeAnalysisStatus: { type: object, required: [pending, processing, failed, completed], properties: { pending: { type: integer }, processing: { type: integer }, failed: { type: integer }, completed: { type: integer } } }
+ *                 loudness: { type: object, required: [measured, missing], properties: { measured: { type: integer }, missing: { type: integer } } }
+ *                 failed:
+ *                   type: object
+ *                   required: [items, total, limit, offset]
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         required: [id, title, artistName, albumTitle, analysisError]
+ *                         properties:
+ *                           id: { type: string }
+ *                           title: { type: string }
+ *                           artistName: { type: string }
+ *                           albumTitle: { type: string }
+ *                           analysisError: { type: string, nullable: true }
+ *                     total: { type: integer }
+ *                     limit: { type: integer }
+ *                     offset: { type: integer }
  *       400: { description: Invalid pagination }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -177,6 +295,31 @@ router.get(
  *             schema:
  *               type: object
  *               required: [formats, topArtists, sampledTracks, sampleLimit, isTruncated]
+ *               properties:
+ *                 formats:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [mime, trackCount, totalFileSize, averageBitrateKbps, bitrateSampleSize]
+ *                     properties:
+ *                       mime: { type: string, nullable: true }
+ *                       trackCount: { type: integer }
+ *                       totalFileSize: { type: number }
+ *                       averageBitrateKbps: { type: number, nullable: true }
+ *                       bitrateSampleSize: { type: integer }
+ *                 topArtists:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [artistId, artistName, trackCount, totalFileSize]
+ *                     properties:
+ *                       artistId: { type: string }
+ *                       artistName: { type: string }
+ *                       trackCount: { type: integer }
+ *                       totalFileSize: { type: number }
+ *                 sampledTracks: { type: integer }
+ *                 sampleLimit: { type: integer }
+ *                 isTruncated: { type: boolean }
  *       400: { description: Invalid query parameters }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -214,6 +357,25 @@ router.get(
  *             schema:
  *               type: object
  *               required: [floorKbps, items, total, limit, offset, sampledTracks, sampleLimit, isTruncated]
+ *               properties:
+ *                 floorKbps: { type: number }
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [albumId, title, artist, averageBitrateKbps, trackCount]
+ *                     properties:
+ *                       albumId: { type: string }
+ *                       title: { type: string }
+ *                       artist: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+ *                       averageBitrateKbps: { type: number }
+ *                       trackCount: { type: integer }
+ *                 total: { type: integer }
+ *                 limit: { type: integer }
+ *                 offset: { type: integer }
+ *                 sampledTracks: { type: integer }
+ *                 sampleLimit: { type: integer }
+ *                 isTruncated: { type: boolean }
  *       400: { description: Invalid floor or pagination }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -253,6 +415,36 @@ router.get(
  *             schema:
  *               type: object
  *               required: [clusters, total, byTier, isTruncated, limit, offset]
+ *               properties:
+ *                 clusters:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [tier, identity, memberCount, totalFileSize, members]
+ *                     properties:
+ *                       tier: { type: string, enum: [audioHash, recordingMbid, isrc] }
+ *                       identity: { type: string }
+ *                       memberCount: { type: integer }
+ *                       totalFileSize: { type: number }
+ *                       members:
+ *                         type: array
+ *                         maxItems: 8
+ *                         items:
+ *                           type: object
+ *                           required: [id, title, albumTitle, artistName, filePath, fileSize, mime]
+ *                           properties:
+ *                             id: { type: string }
+ *                             title: { type: string }
+ *                             albumTitle: { type: string }
+ *                             artistName: { type: string }
+ *                             filePath: { type: string, nullable: true }
+ *                             fileSize: { type: number }
+ *                             mime: { type: string, nullable: true }
+ *                 total: { type: integer }
+ *                 byTier: { type: object, required: [audioHash, recordingMbid, isrc], properties: { audioHash: { type: integer }, recordingMbid: { type: integer }, isrc: { type: integer } } }
+ *                 isTruncated: { type: boolean }
+ *                 limit: { type: integer }
+ *                 offset: { type: integer }
  *       400: { description: Invalid pagination }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }
@@ -290,6 +482,12 @@ router.get(
  *             schema:
  *               type: object
  *               required: [metadataGaps, analysisCoverage, storage, quality, duplicates]
+ *               properties:
+ *                 metadataGaps: { type: object }
+ *                 analysisCoverage: { type: object }
+ *                 storage: { type: object }
+ *                 quality: { type: object }
+ *                 duplicates: { type: object }
  *       400: { description: Invalid request }
  *       401: { description: Not authenticated }
  *       403: { description: Administrator access required }

@@ -1,5 +1,6 @@
 import { prisma } from "../../utils/db";
 import type { TrackIdentityTier } from "../trackIdentityMatcher";
+import { DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT } from "./constants";
 import {
     normalizePagination,
     type LibraryHealthPagination,
@@ -14,6 +15,8 @@ export type DuplicateClusterTier = Extract<
 
 const DUPLICATE_CLUSTER_KEY_LIMIT = 10_000;
 const DUPLICATE_MEMBER_LIMIT = 100_000;
+
+export { DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT } from "./constants";
 
 interface DuplicateTrackRow {
     id: string;
@@ -88,7 +91,9 @@ function addTierClusters(
                 (sum, member) => sum + member.fileSize,
                 0,
             ),
-            members: members.map(clusterMember),
+            members: members
+                .slice(0, DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT)
+                .map(clusterMember),
         });
     }
     return clusters.sort((left, right) =>

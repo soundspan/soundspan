@@ -2,6 +2,7 @@ import {
     getAnalysisCoverage,
     getAnalysisCoverageSummary,
 } from "./analysisCoverage";
+import { prisma } from "../../utils/db";
 import {
     getCachedLibraryHealthPanel,
     invalidateLibraryHealthDashboardCache,
@@ -16,6 +17,7 @@ import {
     type MetadataGapKind,
 } from "./metadataGaps";
 import type { LibraryHealthPagination } from "./pagination";
+import { VISIBLE_LOCAL_TRACK_WHERE } from "./predicates";
 import {
     getQualityOutliers,
     loadLossyAlbumQualityStats,
@@ -67,14 +69,30 @@ export async function getLibraryHealthDuplicates(
 }
 
 async function loadSummary() {
-    const [metadataGaps, analysisCoverage, storage, quality, duplicates] =
-        await Promise.all([
-            getMetadataGapSummary(),
-            getAnalysisCoverageSummary(),
-            getLibraryHealthStorage(),
-            getLibraryHealthQuality(192, { limit: 1, offset: 0 }),
-            getLibraryHealthDuplicates({ limit: 1, offset: 0 }),
-        ]);
+    const [
+        metadataGaps,
+        analysisCoverage,
+        storage,
+        quality,
+        duplicates,
+        artists,
+    ] = await Promise.all([
+        getMetadataGapSummary(),
+        getAnalysisCoverageSummary(),
+        getLibraryHealthStorage(),
+        getLibraryHealthQuality(192, { limit: 1, offset: 0 }),
+        getLibraryHealthDuplicates({ limit: 1, offset: 0 }),
+        prisma.artist.count({
+            where: {
+                albums: {
+                    some: {
+                        location: "LIBRARY",
+                        tracks: { some: VISIBLE_LOCAL_TRACK_WHERE },
+                    },
+                },
+            },
+        }),
+    ]);
     return {
         metadataGaps,
         analysisCoverage,
@@ -88,7 +106,7 @@ async function loadSummary() {
                 0,
             ),
             mimeTypes: storage.formats.length,
-            artists: storage.topArtists.length,
+            artists,
             isTruncated: storage.isTruncated,
         },
         quality: {
