@@ -35,7 +35,8 @@ to 2.3.3. Complete the 2.0.0 breaking changes first. See
   set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading. Outbound
   federation now rejects literal private and local peer addresses by
   default, and such a peer stops syncing until you opt in. Peers
-  configured by hostname are not affected in this release.
+  configured by a DNS hostname other than `localhost` are not affected
+  in this release.
 - If you are on 2.3.2, upgrade promptly: loudness measurement has not been
   running since you upgraded. It resumes automatically on 2.3.3 and catches
   up in the background.
