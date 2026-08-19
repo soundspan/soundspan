@@ -769,6 +769,8 @@ export async function handleLegacyClear(
         const orphanedArtists = await prisma.artist.findMany({
             where: {
                 albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
         });
 

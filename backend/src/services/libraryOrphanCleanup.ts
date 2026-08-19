@@ -20,7 +20,12 @@ async function deleteOrphanedAlbums(
     writeTombstones: boolean,
 ): Promise<number> {
     const orphanedAlbums = await client.album.findMany({
-        where: { peerId: null, tracks: { none: {} } },
+        where: {
+            peerId: null,
+            tracks: { none: {} },
+            tracksTidal: { none: {} },
+            tracksYtMusic: { none: {} },
+        },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
         select: { id: true },
@@ -31,6 +36,8 @@ async function deleteOrphanedAlbums(
             id: { in: orphanedAlbums.map((album) => album.id) },
             peerId: null,
             tracks: { none: {} },
+            tracksTidal: { none: {} },
+            tracksYtMusic: { none: {} },
         },
     });
     if (writeTombstones && result.count > 0) {
@@ -74,7 +81,12 @@ async function deleteOrphanedArtists(
     writeTombstones: boolean,
 ): Promise<number> {
     const orphanedArtists = await client.artist.findMany({
-        where: { peerId: null, albums: { none: {} } },
+        where: {
+            peerId: null,
+            albums: { none: {} },
+            tracksTidal: { none: {} },
+            tracksYtMusic: { none: {} },
+        },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
         select: { id: true },
@@ -85,6 +97,8 @@ async function deleteOrphanedArtists(
             id: { in: orphanedArtists.map((artist) => artist.id) },
             peerId: null,
             albums: { none: {} },
+            tracksTidal: { none: {} },
+            tracksYtMusic: { none: {} },
         },
     });
     if (writeTombstones && result.count > 0) {

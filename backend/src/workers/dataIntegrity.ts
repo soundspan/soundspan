@@ -358,6 +358,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             prisma.album.findMany({
                 where: {
                     tracks: { none: {} },
+                    tracksTidal: { none: {} },
+                    tracksYtMusic: { none: {} },
                 },
                 include: { artist: true },
             }),
@@ -478,6 +480,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             prisma.artist.findMany({
                 where: {
                     albums: { none: {} },
+                    tracksTidal: { none: {} },
+                    tracksYtMusic: { none: {} },
                 },
             }),
     );
