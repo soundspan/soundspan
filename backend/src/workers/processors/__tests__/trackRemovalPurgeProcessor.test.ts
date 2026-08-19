@@ -42,6 +42,21 @@ describe("trackRemovalPurgeProcessor", () => {
                 deleteMany: jest.fn(async (args: any) => ({
                     count: deletedCount ?? args.where.id.in.length,
                 })),
+                count: jest.fn(
+                    async (args: any) =>
+                        candidates.filter((track) => {
+                            const isLocal = track.origin !== "FEDERATED";
+                            const isBeforeCutoff =
+                                track.removedAt === undefined ||
+                                (track.removedAt !== null &&
+                                    track.removedAt < args.where.removedAt.lt);
+                            return (
+                                isLocal &&
+                                isBeforeCutoff &&
+                                track.id > args.where.id.gt
+                            );
+                        }).length,
+                ),
             },
             trackMapping: {
                 deleteMany: jest.fn(async () => ({ count: 0 })),
@@ -55,6 +70,10 @@ describe("trackRemovalPurgeProcessor", () => {
             ),
         };
         const schedulerQueue = { add: jest.fn(async () => ({})) };
+        const redisClient = {
+            set: jest.fn(async () => "OK"),
+            del: jest.fn(async () => 1),
+        };
         const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
             albumsDeleted: 0,
             artistsDeleted: 0,
@@ -76,6 +95,7 @@ describe("trackRemovalPurgeProcessor", () => {
             },
         }));
         jest.doMock("../../queues", () => ({ schedulerQueue }));
+        jest.doMock("../../../utils/redis", () => ({ redisClient }));
         jest.doMock("../../../services/libraryOrphanCleanup", () => ({
             cleanupOrphanedLibraryEntities,
         }));
@@ -90,6 +110,7 @@ describe("trackRemovalPurgeProcessor", () => {
             logger,
             prisma,
             schedulerQueue,
+            redisClient,
             cleanupOrphanedLibraryEntities,
             backfillAllArtistCounts,
         };
@@ -132,6 +153,32 @@ describe("trackRemovalPurgeProcessor", () => {
         });
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
         expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("expires the active marker after a continuation page can outlive the queue slice", async () => {
+        const candidates = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${index.toString().padStart(3, "0")}`,
+        }));
+        const { module, redisClient } = loadProcessor(candidates);
+
+        await module.processTrackRemovalPurge(buildJob());
+
+        expect(redisClient.set).toHaveBeenCalledWith(
+            "library-health:purge-active",
+            "1",
+            { EX: 600 },
+        );
+        expect(redisClient.del).not.toHaveBeenCalled();
+    });
+
+    it("deletes the active marker when the sweep completes", async () => {
+        const { module, redisClient } = loadProcessor([{ id: "track-old" }]);
+
+        await module.processTrackRemovalPurge(buildJob());
+
+        expect(redisClient.del).toHaveBeenCalledWith(
+            "library-health:purge-active",
+        );
     });
 
     it("uses an explicit initial cutoff and never purges tracks without removedAt", async () => {

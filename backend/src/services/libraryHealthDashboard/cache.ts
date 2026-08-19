@@ -4,13 +4,20 @@ import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { coalesceInFlightByKey } from "../../utils/singleflight";
 import { LIBRARY_HEALTH_CACHE_SCHEMAS } from "./cacheSchemas";
+import { withLibraryHealthRedisDeadline } from "./redisDeadline";
 
 const log = logger.child("LibraryHealthDashboard");
 const CACHE_TTL_SECONDS = 15 * 60;
-const CACHE_OPERATION_TIMEOUT_MS = 1_500;
+const CACHE_GENERATION_KEY = "library-health:v2:generation";
 const inFlight = new Map<string, Promise<unknown>>();
 const pendingWrites = new Set<Promise<void>>();
-let invalidationGeneration = 0;
+const WRITE_IF_GENERATION_MATCHES_SCRIPT = `
+local current = redis.call("GET", KEYS[1])
+if not current then current = "0" end
+if current ~= ARGV[1] then return 0 end
+redis.call("SETEX", KEYS[2], ARGV[2], ARGV[3])
+return 1
+`;
 
 /** Complete versioned key set; refresh invalidation deletes only these keys. */
 export const LIBRARY_HEALTH_CACHE_KEYS = {
@@ -20,26 +27,11 @@ export const LIBRARY_HEALTH_CACHE_KEYS = {
     duplicates: "library-health:v2:duplicates",
 } as const satisfies Record<LibraryHealthCachePanel, string>;
 
-async function withCacheDeadline<T>(operation: Promise<T>): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-            () => reject(new Error("Library Health cache operation timed out")),
-            CACHE_OPERATION_TIMEOUT_MS,
-        );
-    });
-    try {
-        return await Promise.race([operation, timeout]);
-    } finally {
-        if (timer !== undefined) clearTimeout(timer);
-    }
-}
-
 async function deleteCachedPanel(
     panel: LibraryHealthCachePanel,
 ): Promise<void> {
     try {
-        await withCacheDeadline(
+        await withLibraryHealthRedisDeadline(
             redisClient.del(LIBRARY_HEALTH_CACHE_KEYS[panel]),
         );
     } catch (error) {
@@ -51,7 +43,7 @@ async function deleteCachedPanel(
 async function readCachedPanel(panel: LibraryHealthCachePanel) {
     let value: string | null;
     try {
-        value = await withCacheDeadline(
+        value = await withLibraryHealthRedisDeadline(
             redisClient.get(LIBRARY_HEALTH_CACHE_KEYS[panel]),
         );
     } catch (error) {
@@ -83,14 +75,18 @@ async function readCachedPanel(panel: LibraryHealthCachePanel) {
 async function writeCachedPanel(
     panel: LibraryHealthCachePanel,
     value: unknown,
+    generation: string,
 ): Promise<void> {
     try {
-        await withCacheDeadline(
-            redisClient.setEx(
-                LIBRARY_HEALTH_CACHE_KEYS[panel],
-                CACHE_TTL_SECONDS,
-                JSON.stringify(value),
-            ),
+        await withLibraryHealthRedisDeadline(
+            redisClient.eval(WRITE_IF_GENERATION_MATCHES_SCRIPT, {
+                keys: [CACHE_GENERATION_KEY, LIBRARY_HEALTH_CACHE_KEYS[panel]],
+                arguments: [
+                    generation,
+                    String(CACHE_TTL_SECONDS),
+                    JSON.stringify(value),
+                ],
+            }),
         );
     } catch (error) {
         recordLibraryHealthCacheResult(panel, "error");
@@ -101,23 +97,46 @@ async function writeCachedPanel(
 function scheduleCacheWrite(
     panel: LibraryHealthCachePanel,
     value: unknown,
+    generation: string,
 ): void {
-    const write = writeCachedPanel(panel, value).finally(() => {
+    const write = writeCachedPanel(panel, value, generation).finally(() => {
         pendingWrites.delete(write);
     });
     pendingWrites.add(write);
 }
 
+async function readCacheGeneration(
+    panel: LibraryHealthCachePanel,
+): Promise<string | undefined> {
+    try {
+        const generation = await withLibraryHealthRedisDeadline(
+            redisClient.get(CACHE_GENERATION_KEY),
+        );
+        if (generation === null) return "0";
+        if (!/^(0|[1-9]\d*)$/.test(generation)) {
+            throw new Error("Library Health cache generation is invalid");
+        }
+        return generation;
+    } catch (error) {
+        recordLibraryHealthCacheResult(panel, "error");
+        log.warn("Library Health cache generation read failed", {
+            panel,
+            error,
+        });
+        return undefined;
+    }
+}
+
 async function loadCachedPanel<T>(
     panel: LibraryHealthCachePanel,
     loader: () => Promise<T>,
-    fillGeneration: number,
 ): Promise<T> {
     const cached = await readCachedPanel(panel);
     if (cached !== undefined) return cached as T;
+    const fillGeneration = await readCacheGeneration(panel);
     const value = await loader();
-    if (fillGeneration === invalidationGeneration) {
-        scheduleCacheWrite(panel, value);
+    if (fillGeneration !== undefined) {
+        scheduleCacheWrite(panel, value, fillGeneration);
     }
     return value;
 }
@@ -127,20 +146,25 @@ export function getCachedLibraryHealthPanel<T>(
     panel: LibraryHealthCachePanel,
     loader: () => Promise<T>,
 ): Promise<T> {
-    const fillGeneration = invalidationGeneration;
     return coalesceInFlightByKey(
         inFlight,
         LIBRARY_HEALTH_CACHE_KEYS[panel],
-        () => loadCachedPanel(panel, loader, fillGeneration),
+        () => loadCachedPanel(panel, loader),
     ) as Promise<T>;
 }
 
-/** Deletes every known Library Health dashboard cache key. */
+/** Advances the shared generation fence and deletes every dashboard cache key. */
 export async function invalidateLibraryHealthDashboardCache(): Promise<void> {
-    invalidationGeneration += 1;
     inFlight.clear();
     try {
-        await withCacheDeadline(
+        await withLibraryHealthRedisDeadline(
+            redisClient.incr(CACHE_GENERATION_KEY),
+        );
+    } catch (error) {
+        log.warn("Library Health cache generation increment failed", { error });
+    }
+    try {
+        await withLibraryHealthRedisDeadline(
             redisClient.del(Object.values(LIBRARY_HEALTH_CACHE_KEYS)),
         );
     } catch (error) {

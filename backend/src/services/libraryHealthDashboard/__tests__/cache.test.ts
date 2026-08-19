@@ -1,9 +1,13 @@
 const get = jest.fn();
 const setEx = jest.fn();
 const del = jest.fn();
+const evalScript = jest.fn();
+const incr = jest.fn();
 const record = jest.fn();
 const warn = jest.fn();
-jest.mock("../../../utils/redis", () => ({ redisClient: { get, setEx, del } }));
+jest.mock("../../../utils/redis", () => ({
+    redisClient: { get, setEx, del, eval: evalScript, incr },
+}));
 jest.mock("../../../metrics", () => ({
     recordLibraryHealthCacheResult: record,
 }));
@@ -113,12 +117,41 @@ const duplicates = {
 const validPanels = { summary, storage, quality, duplicates } as const;
 
 describe("library health cache", () => {
+    let generation: number;
+    let atomicWrites: Array<{ key: string; value: string }>;
+
     beforeEach(() => {
         jest.useRealTimers();
         jest.clearAllMocks();
-        get.mockResolvedValue(null);
+        get.mockReset();
+        setEx.mockReset();
+        del.mockReset();
+        evalScript.mockReset();
+        incr.mockReset();
+        generation = 0;
+        atomicWrites = [];
+        get.mockImplementation(async (key: string) =>
+            key === "library-health:v2:generation" ? String(generation) : null,
+        );
         setEx.mockResolvedValue("OK");
         del.mockResolvedValue(1);
+        incr.mockImplementation(async () => {
+            generation += 1;
+            return generation;
+        });
+        evalScript.mockImplementation(
+            async (
+                _script: string,
+                options: { keys: string[]; arguments: string[] },
+            ) => {
+                if (options.arguments[0] !== String(generation)) return 0;
+                atomicWrites.push({
+                    key: options.keys[1],
+                    value: options.arguments[2],
+                });
+                return 1;
+            },
+        );
     });
 
     afterEach(() => jest.useRealTimers());
@@ -170,11 +203,19 @@ describe("library health cache", () => {
 
         expect(results).toEqual([storage, storage]);
         expect(loader).toHaveBeenCalledTimes(1);
-        expect(setEx).toHaveBeenCalledWith(
-            LIBRARY_HEALTH_CACHE_KEYS.storage,
-            900,
-            JSON.stringify(storage),
-        );
+        expect(atomicWrites).toEqual([
+            {
+                key: LIBRARY_HEALTH_CACHE_KEYS.storage,
+                value: JSON.stringify(storage),
+            },
+        ]);
+        expect(evalScript).toHaveBeenCalledWith(expect.any(String), {
+            keys: [
+                "library-health:v2:generation",
+                LIBRARY_HEALTH_CACHE_KEYS.storage,
+            ],
+            arguments: ["0", "900", JSON.stringify(storage)],
+        });
     });
 
     it("treats a hung read as a miss and releases the single-flight entry", async () => {
@@ -195,7 +236,7 @@ describe("library health cache", () => {
 
     it("returns a loaded value without waiting for a hung cache write", async () => {
         jest.useFakeTimers();
-        setEx.mockReturnValueOnce(new Promise(() => undefined));
+        evalScript.mockReturnValueOnce(new Promise(() => undefined));
 
         await expect(
             getCachedLibraryHealthPanel("quality", async () => quality),
@@ -216,7 +257,7 @@ describe("library health cache", () => {
         expect(warn).toHaveBeenCalled();
     });
 
-    it("suppresses stale fill writes and recomputes after invalidation", async () => {
+    it("suppresses a stale fill after another replica bumps the generation", async () => {
         let releaseLoader!: (value: typeof duplicates) => void;
         let markStarted!: () => void;
         const started = new Promise<void>((resolve) => {
@@ -235,23 +276,42 @@ describe("library health cache", () => {
 
         const staleFill = getCachedLibraryHealthPanel("duplicates", loader);
         await started;
-        const invalidation = invalidateLibraryHealthDashboardCache();
+        generation += 1;
         releaseLoader(duplicates);
 
         await expect(staleFill).resolves.toEqual(duplicates);
-        await invalidation;
-        expect(setEx).not.toHaveBeenCalled();
+        expect(evalScript).toHaveBeenCalledTimes(1);
+        expect(atomicWrites).toEqual([]);
 
         await expect(
             getCachedLibraryHealthPanel("duplicates", loader),
         ).resolves.toEqual(duplicates);
         expect(loader).toHaveBeenCalledTimes(2);
-        expect(setEx).toHaveBeenCalledTimes(1);
+        expect(atomicWrites).toEqual([
+            {
+                key: LIBRARY_HEALTH_CACHE_KEYS.duplicates,
+                value: JSON.stringify(duplicates),
+            },
+        ]);
+    });
+
+    it("skips a cache write when the Redis generation read fails", async () => {
+        get.mockImplementationOnce(async () => null).mockRejectedValueOnce(
+            new Error("generation unavailable"),
+        );
+
+        await expect(
+            getCachedLibraryHealthPanel("quality", async () => quality),
+        ).resolves.toEqual(quality);
+
+        expect(evalScript).not.toHaveBeenCalled();
+        expect(atomicWrites).toEqual([]);
+        expect(record).toHaveBeenCalledWith("quality", "error");
     });
 
     it("fails open on Redis errors and explicitly deletes known keys", async () => {
         get.mockRejectedValueOnce(new Error("offline"));
-        setEx.mockRejectedValueOnce(new Error("offline"));
+        get.mockRejectedValueOnce(new Error("offline"));
 
         await expect(
             getCachedLibraryHealthPanel("quality", async () => quality),
@@ -260,8 +320,67 @@ describe("library health cache", () => {
         expect(warn).toHaveBeenCalled();
 
         await invalidateLibraryHealthDashboardCache();
+        expect(incr).toHaveBeenCalledWith("library-health:v2:generation");
         expect(del).toHaveBeenCalledWith(
             Object.values(LIBRARY_HEALTH_CACHE_KEYS),
         );
+    });
+
+    it.each([
+        [
+            "a zero member count",
+            {
+                ...duplicates,
+                clusters: [{ ...duplicates.clusters[0], memberCount: 0 }],
+            },
+        ],
+        [
+            "an empty member preview",
+            {
+                ...duplicates,
+                clusters: [{ ...duplicates.clusters[0], members: [] }],
+            },
+        ],
+        [
+            "a preview larger than its member count",
+            {
+                ...duplicates,
+                clusters: [
+                    {
+                        ...duplicates.clusters[0],
+                        memberCount: 2,
+                        members: [
+                            duplicates.clusters[0].members[0],
+                            {
+                                ...duplicates.clusters[0].members[0],
+                                id: "track-2",
+                            },
+                            {
+                                ...duplicates.clusters[0].members[0],
+                                id: "track-3",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        ["a mismatched total", { ...duplicates, total: 2 }],
+        [
+            "tier counts that do not sum to the total",
+            {
+                ...duplicates,
+                byTier: { audioHash: 0, recordingMbid: 0, isrc: 0 },
+            },
+        ],
+    ])("recomputes a duplicate catalog with %s", async (_name, payload) => {
+        get.mockResolvedValueOnce(JSON.stringify(payload));
+        const loader = jest.fn(async () => duplicates);
+
+        await expect(
+            getCachedLibraryHealthPanel("duplicates", loader),
+        ).resolves.toEqual(duplicates);
+
+        expect(loader).toHaveBeenCalledTimes(1);
+        expect(del).toHaveBeenCalledWith(LIBRARY_HEALTH_CACHE_KEYS.duplicates);
     });
 });

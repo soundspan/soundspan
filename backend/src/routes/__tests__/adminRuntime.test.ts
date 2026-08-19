@@ -32,6 +32,11 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+const mockRedisGet = jest.fn();
+jest.mock("../../utils/redis", () => ({
+    redisClient: { get: mockRedisGet },
+}));
+
 jest.mock("../../workers/queues", () => ({
     schedulerQueue: {
         add: jest.fn(),
@@ -126,6 +131,7 @@ describe("admin library health routes", () => {
         mockSchedulerGetJob.mockResolvedValue(undefined);
         mockSchedulerGetJobs.mockResolvedValue([]);
         mockSchedulerGetFailed.mockResolvedValue([]);
+        mockRedisGet.mockResolvedValue(null);
     });
 
     afterEach(() => {
@@ -335,6 +341,22 @@ describe("admin library health routes", () => {
                 purging: false,
                 lastFailure: null,
             });
+        });
+
+        it("reports the stable purge marker before inspecting the queue", async () => {
+            mockRedisGet.mockResolvedValueOnce("17");
+            const res = createRes();
+
+            await purgeStatusHandler({} as any, res);
+
+            expect(res.body).toEqual({
+                remaining: 17,
+                purging: true,
+                lastFailure: null,
+            });
+            expect(mockRemovedTrackCount).not.toHaveBeenCalled();
+            expect(mockSchedulerGetJob).not.toHaveBeenCalled();
+            expect(mockSchedulerGetJobs).not.toHaveBeenCalled();
         });
 
         it("reports a waiting purge-now singleton as in flight", async () => {

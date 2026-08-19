@@ -4,6 +4,10 @@ import { z } from "zod";
 import { config } from "../../config";
 import { backfillAllArtistCounts } from "../../services/artistCountsService";
 import { cleanupOrphanedLibraryEntities } from "../../services/libraryOrphanCleanup";
+import {
+    clearLibraryHealthPurgeMarker,
+    refreshLibraryHealthPurgeMarker,
+} from "../../services/libraryHealthDashboard/purgeMarker";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { schedulerQueue } from "../queues";
@@ -197,6 +201,44 @@ async function enqueueContinuation(
     );
 }
 
+async function countRemainingPurgeTracks(
+    cutoff: Date,
+    startAfterId: string,
+): Promise<number> {
+    return prisma.track.count({
+        where: {
+            origin: "LOCAL",
+            removedAt: { lt: cutoff },
+            id: { gt: startAfterId },
+        },
+    });
+}
+
+async function continuePurge(
+    batch: readonly { id: string }[],
+    cursor: PurgeCursor,
+    sweepDeleted: number,
+): Promise<void> {
+    const lastTrack = batch[BATCH_SIZE - 1];
+    if (!lastTrack) {
+        throw new Error("Track removal purge continuation has no cursor");
+    }
+    const remaining = await countRemainingPurgeTracks(
+        cursor.cutoff,
+        lastTrack.id,
+    );
+    await refreshLibraryHealthPurgeMarker(remaining);
+    await enqueueContinuation(lastTrack.id, cursor.cutoff, sweepDeleted);
+}
+
+async function finishPurge(sweepDeleted: number): Promise<void> {
+    if (sweepDeleted > 0) {
+        await refreshCatalogAfterPurge(sweepDeleted);
+    }
+    await cleanupExpiredFederationTombstones(new Date());
+    await clearLibraryHealthPurgeMarker();
+}
+
 async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
     const orphans = await cleanupOrphanedLibraryEntities();
     const { processed, errors: failedCount } = await backfillAllArtistCounts();
@@ -241,16 +283,9 @@ export async function processTrackRemovalPurge(
 
     const continued = candidates.length > BATCH_SIZE;
     if (continued) {
-        await enqueueContinuation(
-            batch[BATCH_SIZE - 1].id,
-            cursor.cutoff,
-            sweepDeleted,
-        );
+        await continuePurge(batch, cursor, sweepDeleted);
     } else {
-        if (sweepDeleted > 0) {
-            await refreshCatalogAfterPurge(sweepDeleted);
-        }
-        await cleanupExpiredFederationTombstones(new Date());
+        await finishPurge(sweepDeleted);
     }
     log.info(
         `Purged ${deleted} expired removed tracks (selected ${batch.length}, sweepDeleted=${sweepDeleted}, continued=${continued})`,

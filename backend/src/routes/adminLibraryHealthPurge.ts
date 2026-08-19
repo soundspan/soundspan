@@ -4,6 +4,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { schedulerQueue } from "../workers/queues";
 import { TRACK_REMOVAL_PURGE_JOB_NAME } from "../workers/processors/trackRemovalPurgeProcessor";
+import { readLibraryHealthPurgeMarker } from "../services/libraryHealthDashboard/purgeMarker";
 import { sendInternalRouteError } from "./routeErrorResponse";
 
 const log = logger.child("AdminLibraryHealthPurge");
@@ -129,9 +130,10 @@ export async function handlePurgeRemovedStatus(
     res: Response,
 ): Promise<Response> {
     try {
+        const markedRemaining = await readLibraryHealthPurgeMarker();
         const [remaining, purging, lastFailure] = await Promise.all([
-            countRemovedLocalTracks(),
-            isPurgeInFlight(),
+            markedRemaining ?? countRemovedLocalTracks(),
+            markedRemaining === null ? isPurgeInFlight() : true,
             findLatestPurgeFailure(),
         ]);
         return res.json({ remaining, purging, lastFailure });

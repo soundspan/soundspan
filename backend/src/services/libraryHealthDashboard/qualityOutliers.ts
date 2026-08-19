@@ -17,11 +17,38 @@ const LOSSY_AUDIO_MIMES = new Set([
     "audio/opus",
 ]);
 const LOSSLESS_CODEC_PATTERN =
-    /(?:^|[\s/._-])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd)(?:$|[\s/._-])/i;
+    /(?:^|[\s/._-])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd|tak|tta|ieee_float|lossless)(?:$|[\s/._-])/i;
 const LOSSY_CODEC_PATTERN =
     /(?:^|[\s/._-])(mp3|aac|m4a|opus|vorbis|ogg|wma)(?:$|[\s/._-])/i;
 const MPEG_LAYER_PATTERN =
     /\bmpeg(?:[\s._-]*\d+)?[\s._-]+layer[\s._-]+(?:[123]|i{1,3})\b/i;
+const WINDOWS_MEDIA_AUDIO_PATTERN = /^windows media audio(?:\b|$)/i;
+const LOSSY_CODEC_NAMES = new Set([
+    "mace 3:1",
+    "mace 6:1",
+    "ima 4:1",
+    "ulaw 2:1",
+    "qualcomm purevoice",
+    "ac-3",
+    "mpeg-4/aac",
+    "mp4s",
+    "adpcm",
+    "alaw",
+    "mulaw",
+    "dvi_adpcm",
+    "gsm610",
+    "mpeg_adts_aac",
+    "mpeg_loas",
+    "raw_aac1",
+    "dolby_ac3_spdif",
+    "dvm",
+    "raw_sport",
+    "esst_ac3",
+    "drm",
+    "dts2",
+    "mpeg",
+    "mpeglayer3",
+]);
 
 /** Classifies scanner codec labels and legacy MIME values without guessing unknowns. */
 export function isLossyAudioCodec(value: string | null): boolean {
@@ -32,8 +59,10 @@ export function isLossyAudioCodec(value: string | null): boolean {
     }
     return (
         LOSSY_AUDIO_MIMES.has(normalized) ||
+        LOSSY_CODEC_NAMES.has(normalized) ||
         LOSSY_CODEC_PATTERN.test(normalized) ||
-        MPEG_LAYER_PATTERN.test(normalized)
+        MPEG_LAYER_PATTERN.test(normalized) ||
+        WINDOWS_MEDIA_AUDIO_PATTERN.test(normalized)
     );
 }
 

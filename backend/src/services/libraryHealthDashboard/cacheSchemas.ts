@@ -96,32 +96,64 @@ const qualitySchema = z.strictObject({
     isTruncated: z.boolean(),
 });
 
-const duplicatesSchema = z.strictObject({
-    clusters: z.array(
-        z.strictObject({
-            tier: z.enum(["audioHash", "recordingMbid", "isrc"]),
-            identity: z.string(),
-            memberCount: nonnegativeInteger,
-            totalFileSize: nonnegativeNumber,
-            members: z
-                .array(
-                    z.strictObject({
-                        id: z.string(),
-                        title: z.string(),
-                        albumTitle: z.string(),
-                        artistName: z.string(),
-                        filePath: nullableString,
-                        fileSize: nonnegativeNumber,
-                        mime: nullableString,
-                    }),
-                )
-                .max(DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT),
-        }),
-    ),
-    total: nonnegativeInteger,
-    byTier: duplicateTierCountsSchema,
-    isTruncated: z.boolean(),
-});
+const duplicateClusterSchema = z
+    .strictObject({
+        tier: z.enum(["audioHash", "recordingMbid", "isrc"]),
+        identity: z.string(),
+        memberCount: z.number().int().min(2),
+        totalFileSize: nonnegativeNumber,
+        members: z
+            .array(
+                z.strictObject({
+                    id: z.string(),
+                    title: z.string(),
+                    albumTitle: z.string(),
+                    artistName: z.string(),
+                    filePath: nullableString,
+                    fileSize: nonnegativeNumber,
+                    mime: nullableString,
+                }),
+            )
+            .min(1)
+            .max(DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT),
+    })
+    .superRefine((cluster, context) => {
+        if (cluster.members.length > cluster.memberCount) {
+            context.addIssue({
+                code: "custom",
+                path: ["members"],
+                message: "Duplicate preview exceeds member count",
+            });
+        }
+    });
+
+const duplicatesSchema = z
+    .strictObject({
+        clusters: z.array(duplicateClusterSchema),
+        total: nonnegativeInteger,
+        byTier: duplicateTierCountsSchema,
+        isTruncated: z.boolean(),
+    })
+    .superRefine((catalog, context) => {
+        if (catalog.total !== catalog.clusters.length) {
+            context.addIssue({
+                code: "custom",
+                path: ["total"],
+                message: "Duplicate total does not match cluster count",
+            });
+        }
+        const tierTotal = Object.values(catalog.byTier).reduce(
+            (sum, count) => sum + count,
+            0,
+        );
+        if (tierTotal !== catalog.total) {
+            context.addIssue({
+                code: "custom",
+                path: ["byTier"],
+                message: "Duplicate tier counts do not match total",
+            });
+        }
+    });
 
 /** Strict payload validators keyed by the versioned Library Health panel cache. */
 export const LIBRARY_HEALTH_CACHE_SCHEMAS = {
