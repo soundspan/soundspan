@@ -61,8 +61,7 @@
         "recharts": "^3.10.1",
         "socket.io-client": "^4.8.3",
         "sonner": "^2.0.8",
-        "tailwind-merge": "^3.6.0",
-        "video": {}
+        "tailwind-merge": "^3.6.0"
     },
     "devDependencies": {
         "@eslint/compat": "^2.1.0",
