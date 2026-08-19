@@ -36,6 +36,7 @@ export function DuplicatesPanel({
             subtitle={`${duplicates.clusters} clusters · ${duplicates.byTier.audioHash} exact · ${duplicates.byTier.recordingMbid} same recording · ${duplicates.byTier.isrc} same ISRC`}
             isTruncated={duplicates.isTruncated}
             onFirstExpand={page.load}
+            onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}
         >

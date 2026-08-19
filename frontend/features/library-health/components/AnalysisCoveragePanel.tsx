@@ -49,6 +49,7 @@ export function AnalysisCoveragePanel({
             title="Analysis coverage"
             subtitle={`Audio ${formatCoveragePercent(analysisDone, coverage.total)} · Vibe ${formatCoveragePercent(vibeDone, coverage.total)} · Loudness ${formatCoveragePercent(coverage.loudness.measured, loudnessTotal)} · ${coverage.analysisStatus.failed} failed`}
             onFirstExpand={page.load}
+            onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}
         >

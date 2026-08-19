@@ -33,6 +33,7 @@ export function QualityPanel({ quality }: Readonly<QualityPanelProps>) {
             subtitle={`${quality.albumsBelowFloor} lossy albums below ${quality.floorKbps} kbps`}
             isTruncated={quality.isTruncated}
             onFirstExpand={() => setHasExpanded(true)}
+            onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}
         >

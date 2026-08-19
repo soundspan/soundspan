@@ -48,6 +48,7 @@ export function MetadataGapsPanel({ gaps }: Readonly<MetadataGapsPanelProps>) {
             title="Metadata gaps"
             subtitle={`${gaps.missingArt.albums} albums without art · ${gaps.missingMbid.albums} albums without MBIDs · ${gaps.missingGenres} tracks without genres · ${gaps.missingLyrics} tracks without lyrics`}
             onFirstExpand={() => setHasExpanded(true)}
+            onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}
         >

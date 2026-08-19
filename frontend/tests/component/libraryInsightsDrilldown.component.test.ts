@@ -78,9 +78,16 @@ const ANALYSIS_PAGE = {
     },
 };
 
-const getLibraryHealthGaps = mock.fn(async (kind: string) =>
-    kind === "missing-art" ? ALBUM_GAP_PAGE : { ...TRACK_GAP_PAGE, kind },
-);
+let failGapLoads = 0;
+const getLibraryHealthGaps = mock.fn(async (kind: string) => {
+    if (failGapLoads > 0) {
+        failGapLoads -= 1;
+        throw new Error("network down");
+    }
+    return kind === "missing-art"
+        ? ALBUM_GAP_PAGE
+        : { ...TRACK_GAP_PAGE, kind };
+});
 const getLibraryHealthAnalysis = mock.fn(async () => ANALYSIS_PAGE);
 const retryFailedAnalysis = mock.fn(async () => ({ enqueued: 1 }));
 
@@ -122,6 +129,7 @@ after(() => {
 });
 
 beforeEach(() => {
+    failGapLoads = 0;
     getLibraryHealthGaps.mock.resetCalls();
     getLibraryHealthAnalysis.mock.resetCalls();
     document.body.replaceChildren();
@@ -195,6 +203,36 @@ test("metadata gaps drill-down renders backend album and track shapes", async ()
     );
     assert.match(document.body.textContent ?? "", /Genreless Track/);
     assert.match(document.body.textContent ?? "", /Some Artist — Some Album/);
+
+    await mounted.unmount();
+});
+
+test("a failed panel load shows an error with a working Retry control", async () => {
+    failGapLoads = 1;
+    const mounted = await mountPanel(async () => {
+        const { MetadataGapsPanel } =
+            await import("../../features/library-health/components/MetadataGapsPanel");
+        return {
+            element: React.createElement(MetadataGapsPanel, {
+                gaps: SUMMARY_GAPS,
+            }),
+        };
+    });
+
+    await click(panelHeader());
+    assert.match(
+        document.body.textContent ?? "",
+        /Failed to load metadata gaps/,
+    );
+    assert.doesNotMatch(document.body.textContent ?? "", /Bare Album/);
+
+    await click(tabButton("Retry"));
+    assert.equal(getLibraryHealthGaps.mock.callCount(), 2);
+    assert.doesNotMatch(
+        document.body.textContent ?? "",
+        /Failed to load metadata gaps/,
+    );
+    assert.match(document.body.textContent ?? "", /Bare Album/);
 
     await mounted.unmount();
 });

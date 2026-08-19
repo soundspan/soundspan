@@ -21,6 +21,7 @@ export function StoragePanel({ storage }: Readonly<StoragePanelProps>) {
             subtitle={`${storage.tracks} tracks · ${formatBytes(storage.totalFileSize)} across ${storage.mimeTypes} formats`}
             isTruncated={storage.isTruncated}
             onFirstExpand={report.load}
+            onRetry={report.load}
             isLoading={report.isLoading}
             error={report.error}
         >

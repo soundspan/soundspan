@@ -11,6 +11,8 @@ interface InsightPanelProps {
     error?: string | null;
     /** Called the first time the panel is expanded (lazy drill-down fetch). */
     onFirstExpand?: () => void;
+    /** Called by the Retry control rendered beside a load error. */
+    onRetry?: () => void;
     children: ReactNode;
 }
 
@@ -22,6 +24,7 @@ export function InsightPanel({
     isLoading = false,
     error = null,
     onFirstExpand,
+    onRetry,
     children,
 }: Readonly<InsightPanelProps>) {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -69,7 +72,18 @@ export function InsightPanel({
                         </div>
                     )}
                     {error && (
-                        <div className="py-2 text-sm text-red-400">{error}</div>
+                        <div className="py-2 text-sm text-red-400 flex items-center gap-3">
+                            <span>{error}</span>
+                            {onRetry && (
+                                <button
+                                    type="button"
+                                    onClick={onRetry}
+                                    className="px-2 py-1 text-xs rounded-full border border-white/10 text-gray-300 hover:text-white"
+                                >
+                                    Retry
+                                </button>
+                            )}
+                        </div>
                     )}
                     {!isLoading && !error && children}
                 </div>
