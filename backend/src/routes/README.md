@@ -82,6 +82,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/federationAdmin.ts`    | `/api/federation/admin` (peer lifecycle, consumer linking, and sync enqueue)                          |
 | `backend/src/routes/homepage.ts`           | `/api/homepage`                                                                                       |
 | `backend/src/routes/library.ts`            | `/api/library`                                                                                        |
+| `backend/src/routes/libraryHealthDashboard.ts` | `/api/library-health` (admin-gated read-only dashboard analytics)                                 |
 | `backend/src/routes/listeningState.ts`     | `/api/listening-state`                                                                                |
 | `backend/src/routes/listenTogether.ts`     | `/api/listen-together`                                                                                |
 | `backend/src/routes/lyrics.ts`             | `/api/lyrics`                                                                                         |

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added
+
+- Library Health dashboard read model and admin API (metadata gaps, analysis coverage, duplicate clusters, storage and quality analytics).
+
 ### Deprecated
 
 - `DISCOVERY_MODE=legacy` is deprecated, no longer receives fixes, and will be removed in a future release; unset `DISCOVERY_MODE` to migrate.

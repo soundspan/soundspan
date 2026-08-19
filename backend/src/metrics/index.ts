@@ -6,6 +6,11 @@ import {
 import { createHttpRequestMetrics } from "./httpMetrics";
 import { createLoudnessMetrics } from "./loudnessMetrics";
 import {
+    createLibraryHealthMetrics,
+    type LibraryHealthCachePanel,
+    type LibraryHealthCacheResult,
+} from "./libraryHealthMetrics";
+import {
     createProviderMetrics,
     type VibeProviderEndpoint,
     type VibeProviderOutcome,
@@ -35,6 +40,7 @@ collectDefaultMetrics({
 
 const httpMetrics = createHttpRequestMetrics(metricsRegistry);
 const domainMetrics = createDomainMetrics(metricsRegistry);
+const libraryHealthMetrics = createLibraryHealthMetrics(metricsRegistry);
 const providerMetrics = createProviderMetrics(metricsRegistry);
 createLoudnessMetrics(metricsRegistry, prisma);
 const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
@@ -64,6 +70,14 @@ export function recordTranscodeCacheResult(result: "hit" | "miss"): void {
 /** Records one browse-image cache lookup. */
 export function recordBrowseImageCacheResult(result: "hit" | "miss"): void {
     domainMetrics.browseImageCacheRequests.inc({ result });
+}
+
+/** Records one Library Health panel cache outcome. */
+export function recordLibraryHealthCacheResult(
+    panel: LibraryHealthCachePanel,
+    result: LibraryHealthCacheResult,
+): void {
+    libraryHealthMetrics.cacheResults.inc({ panel, result });
 }
 
 /** Records one final federation sync outcome. */

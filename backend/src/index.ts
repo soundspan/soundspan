@@ -44,6 +44,7 @@ import deviceLinkRoutes from "./routes/deviceLink";
 import notificationsRoutes from "./routes/notifications";
 import browseRoutes from "./routes/browse";
 import adminRoutes from "./routes/admin";
+import libraryHealthDashboardRoutes from "./routes/libraryHealthDashboard";
 import releasesRoutes from "./routes/releases";
 import systemRoutes from "./routes/system";
 import ytMusicRoutes from "./routes/youtubeMusic";
@@ -324,6 +325,11 @@ if (config.features.audioAnalysis) {
     app.use("/api/analysis", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/admin", adminSurfaceLimiter, adminRoutes);
+app.use(
+    "/api/library-health",
+    adminSurfaceLimiter,
+    libraryHealthDashboardRoutes,
+);
 app.use("/api/releases", apiLimiter, releasesRoutes);
 if (config.features.audioAnalysis) {
     app.use("/api/vibe", apiLimiter, require("./routes/vibe").default);

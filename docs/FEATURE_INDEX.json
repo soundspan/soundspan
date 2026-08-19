@@ -1,7 +1,7 @@
 {
     "metadata": {
         "id": "soundspan-feature-index",
-        "version": "2026-08-17.01",
+        "version": "2026-08-18.01",
         "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
         "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
     },
@@ -102,6 +102,39 @@
                     "streamingRuntime.test.ts"
                 ],
                 "backend_contract": []
+            }
+        },
+        {
+            "id": "library-health-dashboard",
+            "name": "Library Health Dashboard",
+            "description": "Admin-only read model for metadata gaps, analysis coverage, duplicate clusters, storage use, and lossy quality outliers",
+            "frontend": {
+                "feature_dirs": [],
+                "routes": []
+            },
+            "backend": {
+                "routes": ["libraryHealthDashboard.ts"],
+                "services": [
+                    "libraryHealthDashboard/analysisCoverage.ts",
+                    "libraryHealthDashboard/cache.ts",
+                    "libraryHealthDashboard/duplicateClusters.ts",
+                    "libraryHealthDashboard/index.ts",
+                    "libraryHealthDashboard/metadataGaps.ts",
+                    "libraryHealthDashboard/qualityOutliers.ts",
+                    "libraryHealthDashboard/storageAnalytics.ts"
+                ]
+            },
+            "tests": {
+                "backend_route": ["libraryHealthDashboard.test.ts"],
+                "backend_contract": [
+                    "analysisCoverage.test.ts",
+                    "cache.test.ts",
+                    "duplicateClusters.test.ts",
+                    "libraryHealthMetrics.test.ts",
+                    "metadataGaps.test.ts",
+                    "qualityOutliers.test.ts",
+                    "storageAnalytics.test.ts"
+                ]
             }
         },
         {

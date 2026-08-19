@@ -75,6 +75,15 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/lastfm.ts` | Core |
 | `backend/src/services/libraryRadioBuilder.ts` | Core |
 | `backend/src/services/libraryOrphanCleanup.ts` | Deletes catalog parents after their final track row is purged |
+| `backend/src/services/libraryHealthDashboard/index.ts` | Library Health read-model composition and cached panel surface |
+| `backend/src/services/libraryHealthDashboard/analysisCoverage.ts` | Local analysis, vibe, loudness, and failure coverage |
+| `backend/src/services/libraryHealthDashboard/cache.ts` | Redis caching, invalidation, and request coalescing |
+| `backend/src/services/libraryHealthDashboard/duplicateClusters.ts` | Report-only durable-identity duplicate clusters |
+| `backend/src/services/libraryHealthDashboard/metadataGaps.ts` | Local metadata-gap counts and drill-down pages |
+| `backend/src/services/libraryHealthDashboard/pagination.ts` | Bounded service-level offset pagination |
+| `backend/src/services/libraryHealthDashboard/predicates.ts` | Shared visible-local track predicate |
+| `backend/src/services/libraryHealthDashboard/qualityOutliers.ts` | Lossy album bitrate outlier analytics |
+| `backend/src/services/libraryHealthDashboard/storageAnalytics.ts` | MIME, storage, bitrate, and artist analytics |
 | `backend/src/services/libraryTrackPreferences.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
 | `backend/src/services/listenTogether.ts` | Core |

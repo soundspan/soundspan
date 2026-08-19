@@ -45,6 +45,7 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/shareLinks",
         "../routes/federation",
         "../routes/federationAdmin",
+        "../routes/libraryHealthDashboard",
     ];
 
     const flushPromises = async (): Promise<void> => {
@@ -742,6 +743,10 @@ describe("api entrypoint runtime behavior", () => {
             "/api/browse": ["api-limiter", route("../routes/browse")],
             "/api/analysis": ["api-limiter", route("../routes/analysis")],
             "/api/admin": ["admin-surface-limiter", route("../routes/admin")],
+            "/api/library-health": [
+                "admin-surface-limiter",
+                route("../routes/libraryHealthDashboard"),
+            ],
             "/api/releases": ["api-limiter", route("../routes/releases")],
             "/api/vibe": ["api-limiter", route("../routes/vibe")],
             "/api/system": ["api-limiter", route("../routes/system")],
