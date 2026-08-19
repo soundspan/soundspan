@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type LibraryHealthSummary } from "@/lib/api";
 import { formatKbps } from "../format";
 import { usePanelLoader } from "../hooks/usePanelLoader";
@@ -15,18 +15,24 @@ interface QualityPanelProps {
 /** Lossy albums whose derived average bitrate sits below a chosen floor. */
 export function QualityPanel({ quality }: Readonly<QualityPanelProps>) {
     const [floor, setFloor] = useState(quality.floorKbps);
+    const [hasExpanded, setHasExpanded] = useState(false);
     const fetchPage = useCallback(
         () => api.getLibraryHealthQuality(floor, { limit: 50 }),
         [floor],
     );
     const page = usePanelLoader(fetchPage, "Failed to load quality outliers");
+    const { load } = page;
+
+    useEffect(() => {
+        if (hasExpanded) load();
+    }, [hasExpanded, load]);
 
     return (
         <InsightPanel
             title="Quality outliers"
             subtitle={`${quality.albumsBelowFloor} lossy albums below ${quality.floorKbps} kbps`}
             isTruncated={quality.isTruncated}
-            onFirstExpand={page.load}
+            onFirstExpand={() => setHasExpanded(true)}
             isLoading={page.isLoading}
             error={page.error}
         >
@@ -46,13 +52,6 @@ export function QualityPanel({ quality }: Readonly<QualityPanelProps>) {
                         {choice} kbps
                     </button>
                 ))}
-                <button
-                    type="button"
-                    onClick={page.load}
-                    className="px-2 py-1 text-xs rounded-full border border-white/10 text-gray-400"
-                >
-                    Apply
-                </button>
             </div>
             {page.data && (
                 <ul className="space-y-1">

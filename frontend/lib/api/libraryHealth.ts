@@ -61,7 +61,8 @@ export interface LibraryHealthTrackGapItem {
     id: string;
     title: string;
     filePath: string | null;
-    album: { title: string; artist: { name: string } };
+    albumTitle: string;
+    artistName: string;
 }
 
 export interface LibraryHealthGapPage {
@@ -83,7 +84,8 @@ export interface LibraryHealthAnalysisPage {
             id: string;
             title: string;
             analysisError: string | null;
-            album: { title: string; artist: { name: string } };
+            artistName: string;
+            albumTitle: string;
         }>;
         total: number;
         limit: number;

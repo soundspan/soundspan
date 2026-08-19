@@ -1,6 +1,31 @@
 /** Pure display formatters for the Library Insights dashboard. */
 
+import type {
+    LibraryHealthAlbumGapItem,
+    LibraryHealthTrackGapItem,
+} from "@/lib/api";
+
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+
+/** Narrows a metadata-gap item to the album shape (nested artist object). */
+export function isAlbumGapItem(
+    item: LibraryHealthAlbumGapItem | LibraryHealthTrackGapItem,
+): item is LibraryHealthAlbumGapItem {
+    return "artist" in item;
+}
+
+/** Maps one metadata-gap item to its primary/secondary display line. */
+export function gapItemLine(
+    item: LibraryHealthAlbumGapItem | LibraryHealthTrackGapItem,
+): { primary: string; secondary: string } {
+    if (isAlbumGapItem(item)) {
+        return { primary: item.title, secondary: item.artist.name };
+    }
+    return {
+        primary: item.title,
+        secondary: `${item.artistName} — ${item.albumTitle}`,
+    };
+}
 
 /** Formats a byte count as a compact human-readable size. */
 export function formatBytes(bytes: number): string {

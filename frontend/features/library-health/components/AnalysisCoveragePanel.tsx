@@ -90,7 +90,7 @@ export function AnalysisCoveragePanel({
                             <span className="truncate">{track.title}</span>
                             <span className="text-gray-500">
                                 {" "}
-                                — {track.album.artist.name}
+                                — {track.artistName}
                                 {track.analysisError
                                     ? ` · ${track.analysisError}`
                                     : ""}
