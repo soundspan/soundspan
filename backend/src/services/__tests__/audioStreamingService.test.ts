@@ -408,6 +408,8 @@ describe("AudioStreamingService", () => {
         });
 
         it("does not enumerate the offset directory twice while a sweep is in flight", async () => {
+            const now = Date.now();
+            const dateNowSpy = jest.spyOn(Date, "now").mockReturnValue(now);
             let releaseReaddir: (() => void) | undefined;
             mockFsReaddir.mockImplementationOnce(
                 () =>
@@ -417,12 +419,20 @@ describe("AudioStreamingService", () => {
             );
 
             createService();
-            createService();
+            const firstSweep = waitForOffsetSweepForTests();
+            let secondSweep = Promise.resolve();
+            try {
+                dateNowSpy.mockReturnValue(now + 16 * 60 * 1000);
+                createService();
+                secondSweep = waitForOffsetSweepForTests();
 
-            expect(mockFsReaddir).toHaveBeenCalledTimes(1);
-            if (!releaseReaddir) throw new Error("readdir did not start");
-            releaseReaddir();
-            await waitForOffsetSweepForTests();
+                expect(mockFsReaddir).toHaveBeenCalledTimes(1);
+            } finally {
+                if (!releaseReaddir) throw new Error("readdir did not start");
+                releaseReaddir();
+                await Promise.all([firstSweep, secondSweep]);
+                dateNowSpy.mockRestore();
+            }
         });
 
         it("attempts to remove at most 1000 entries during one sweep", async () => {
