@@ -175,16 +175,6 @@ function normalizeCodecLabel(raw?: string | null): string | null {
     return friendlyCodecName(normalized).toUpperCase();
 }
 
-function isLosslessCodec(codec?: string | null): boolean {
-    const normalized = normalizeCodecLabel(codec);
-    return (
-        normalized === "FLAC" ||
-        normalized === "ALAC" ||
-        normalized === "WAV" ||
-        normalized === "PCM"
-    );
-}
-
 /**
  * Executes resolveEffectiveLocalPlaybackQuality.
  */
@@ -202,38 +192,7 @@ export function resolveEffectiveLocalPlaybackQuality(input: {
         return input.sourceQuality;
     }
 
-    if (input.streamProfile.mode === "direct") {
-        return input.playbackQuality ?? input.sourceQuality;
-    }
-
-    const profileCodec = normalizeCodecLabel(input.streamProfile.codec);
-    if (!profileCodec) {
-        return input.sourceQuality;
-    }
-
-    if (isLosslessCodec(profileCodec)) {
-        return {
-            codec: profileCodec,
-            bitrate: null,
-            sampleRate: input.sourceQuality?.sampleRate ?? null,
-            bitDepth: input.sourceQuality?.bitDepth ?? null,
-            lossless: true,
-        };
-    }
-
-    return {
-        codec: profileCodec,
-        bitrate:
-            input.streamProfile.bitrateKbps &&
-            input.streamProfile.bitrateKbps > 0
-                ? input.streamProfile.bitrateKbps
-                : (input.playbackQuality?.bitrate ??
-                  input.sourceQuality?.bitrate ??
-                  null),
-        sampleRate: null,
-        bitDepth: null,
-        lossless: false,
-    };
+    return input.playbackQuality ?? input.sourceQuality;
 }
 
 /**

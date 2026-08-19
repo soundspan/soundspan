@@ -111,33 +111,6 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     }
 
     /**
-     * Hot-swap the direct-playback engine (the "howler" slot) with a
-     * replacement engine.
-     *
-     * Safe to call while idle or during playback — volume/mute state is
-     * re-applied and event forwarding is re-wired automatically.
-     */
-    upgradeHowlerEngine(
-        engine: AudioEngine,
-        descriptor: DirectEngineDescriptor = "howler",
-    ): void {
-        if (engine === this.howlerEngine) {
-            return;
-        }
-
-        this.unbindEngineEvents(this.howlerEngine);
-
-        if (typeof this.howlerEngine.destroy === "function") {
-            this.howlerEngine.destroy();
-        }
-
-        this.howlerEngine = engine;
-        this.directEngineDescriptor = descriptor;
-        this.bindEngineEvents(this.howlerEngine);
-        this.applyOutputState(this.howlerEngine);
-    }
-
-    /**
      * Reports the engine actually driving playback right now. Pairs with
      * the STREAMING_ENGINE_MODE flag in telemetry so configured-vs-actual
      * divergence (platform pins) is visible.

@@ -19,57 +19,12 @@ const clientMetricSchema = z.object({
     fields: z.record(z.string(), z.unknown()).optional(),
 });
 
-const STARTUP_TIMELINE_STRING_FIELDS = [
-    "outcome",
-    "initSource",
-    "firstChunkName",
-    "startupCorrelationId",
-    "cmcdObjectType",
-] as const;
-
-const STARTUP_TIMELINE_NUMBER_FIELDS = [
-    "loadId",
-    "startupRetryCount",
-    "createLatencyMs",
-    "createToManifestMs",
-    "manifestToFirstChunkMs",
-    "firstChunkToAudibleMs",
-    "totalToAudibleMs",
-    "retryBudgetMax",
-    "retryBudgetRemaining",
-    "startupRecoveryWindowMs",
-    "startupSessionResetsUsed",
-    "startupSessionResetsMax",
-] as const;
-
 function optionalStringField(
     fields: Record<string, unknown>,
     name: string,
 ): string | undefined {
     const value = fields[name];
     return typeof value === "string" ? value : undefined;
-}
-
-function selectStartupTimelineFields(
-    event: string,
-    fields: Record<string, unknown>,
-): Record<string, unknown> {
-    if (event !== "player.startup_timeline") return {};
-
-    const selected: Record<string, unknown> = {};
-    for (const fieldName of STARTUP_TIMELINE_STRING_FIELDS) {
-        const value = fields[fieldName];
-        if (typeof value === "string" && value.length > 0) {
-            selected[fieldName] = value;
-        }
-    }
-    for (const fieldName of STARTUP_TIMELINE_NUMBER_FIELDS) {
-        const value = fields[fieldName];
-        if (typeof value === "number" && Number.isFinite(value)) {
-            selected[fieldName] = value;
-        }
-    }
-    return selected;
 }
 
 function rejectClientMetric(
@@ -111,7 +66,6 @@ function acceptClientMetric(
         sourceType,
         trackId,
         userId,
-        ...selectStartupTimelineFields(event, fields),
         latencyMs: playbackTraceDurationMs(startedAtMs),
     });
     logPlaybackTrace(

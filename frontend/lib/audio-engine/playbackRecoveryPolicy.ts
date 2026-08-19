@@ -216,3 +216,65 @@ export function isSeekWithinTolerance(
         normalizedTolerance
     );
 }
+
+export interface StartupStabilitySnapshot {
+    trackId: string | null;
+    firstProgressAtMs: number | null;
+    lastObservedProgressSec: number;
+}
+
+/** Fresh stability window for a (re)started track load. */
+export function createStartupStabilityWindow(
+    trackId: string | null,
+): StartupStabilitySnapshot {
+    return {
+        trackId,
+        firstProgressAtMs: null,
+        lastObservedProgressSec: 0,
+    };
+}
+
+/**
+ * Advances the startup-stability snapshot for one timeupdate. Real progress
+ * (>= 0.2 s position, moving by more than 0.15 s) stamps firstProgressAtMs;
+ * an engine that "plays" with frozen time never earns the stamp, which is
+ * what the startup watchdog keys on.
+ */
+export function noteStartupProgressTransition(
+    current: StartupStabilitySnapshot,
+    trackId: string | null,
+    timeSec: number,
+    nowMs: number,
+): StartupStabilitySnapshot {
+    if (!trackId || !Number.isFinite(timeSec)) {
+        return current;
+    }
+
+    if (current.trackId !== trackId) {
+        return {
+            trackId,
+            firstProgressAtMs: null,
+            lastObservedProgressSec: Math.max(0, timeSec),
+        };
+    }
+
+    const normalizedTimeSec = Math.max(0, timeSec);
+    const progressed =
+        normalizedTimeSec > current.lastObservedProgressSec + 0.15;
+    if (progressed && normalizedTimeSec >= 0.2) {
+        return {
+            ...current,
+            firstProgressAtMs: current.firstProgressAtMs ?? nowMs,
+            lastObservedProgressSec: normalizedTimeSec,
+        };
+    }
+
+    if (normalizedTimeSec > current.lastObservedProgressSec) {
+        return {
+            ...current,
+            lastObservedProgressSec: normalizedTimeSec,
+        };
+    }
+
+    return current;
+}

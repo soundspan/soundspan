@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-import re
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ENTRYPOINT = REPO_ROOT / "frontend/docker-entrypoint.sh"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
-COMPOSE_FILES = (
-    REPO_ROOT / "docker-compose.yml",
-    REPO_ROOT / "docker-compose.aio.yml",
-)
-DEPLOYMENT_FILES = (
-    *COMPOSE_FILES,
-    REPO_ROOT / ".env.example",
-    REPO_ROOT / "charts/soundspan/values.yaml",
-)
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+ENGINE_ASSIGNMENT = 'ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"'
+SHELL_SURFACES = ("frontend", "aio")
 
 
 def _heredoc(dockerfile: str, target: str) -> str:
@@ -28,64 +24,92 @@ def _heredoc(dockerfile: str, target: str) -> str:
     return dockerfile[start:end]
 
 
-def _engine_case(script: str) -> str:
-    """Return the runtime engine-mode case block."""
-    case_start = script.index('case "$ENGINE_MODE" in')
-    case_end = script.index("\nesac", case_start)
-    return script[case_start:case_end]
+def _runtime_config_block(script: str, end_marker: str) -> str:
+    """Return the executable runtime-configuration section."""
+    start = script.index(ENGINE_ASSIGNMENT)
+    end = script.index(end_marker, start)
+    return script[start:end]
 
 
-def _entrypoint_scripts() -> tuple[str, str]:
-    """Return the split and AIO runtime entrypoint scripts."""
-    frontend = FRONTEND_ENTRYPOINT.read_text(encoding="utf-8")
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
-    return frontend, _heredoc(dockerfile, "/app/start.sh")
+def _entrypoint_config(surface: str) -> str:
+    """Return one real entrypoint's executable runtime configuration."""
+    if surface == "frontend":
+        script = FRONTEND_ENTRYPOINT.read_text(encoding="utf-8")
+        return _runtime_config_block(script, "# Execute the main command")
+    if surface == "aio":
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+        script = _heredoc(dockerfile, "/app/start.sh")
+        return _runtime_config_block(script, 'echo "Starting soundspan..."')
+    raise ValueError(f"Unknown shell surface: {surface}")
 
 
-def test_entrypoints_reject_removed_videojs_mode() -> None:
-    """Neither runtime selector may retain an accepted videojs case arm."""
-    accepted_arm = re.compile(
-        r"(?m)^\s*[^#\n]*[\"']?videojs[\"']?[^\n]*\)\s*$"
+def _run_runtime_config(
+    surface: str,
+    engine_mode: str,
+    extra_environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Execute one real runtime-configuration section in Bash."""
+    environment = {
+        **os.environ,
+        "STREAMING_ENGINE_MODE": engine_mode,
+        **(extra_environment or {}),
+    }
+    script = _entrypoint_config(surface)
+    probe = f'{script}\nprintf \'__EFFECTIVE_MODE__=%s\\n\' "$STREAMING_ENGINE_MODE"\n'
+    return subprocess.run(
+        ["bash", "-c", probe],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
     )
 
-    for script in _entrypoint_scripts():
-        assert accepted_arm.search(_engine_case(script)) is None
+
+@pytest.mark.parametrize("surface", SHELL_SURFACES)
+@pytest.mark.parametrize(
+    ("engine_mode", "effective_mode", "warns"),
+    (
+        pytest.param("videojs", "", True, id="removed-videojs"),
+        pytest.param("tauri-native", "", True, id="removed-tauri-native"),
+        pytest.param("howler", "howler", False, id="supported-howler"),
+        pytest.param("native", "native", False, id="supported-native"),
+    ),
+)
+def test_entrypoints_normalize_engine_modes(
+    surface: str, engine_mode: str, effective_mode: str, warns: bool
+) -> None:
+    """Runtime selectors must reject removed modes and preserve supported modes."""
+    result = _run_runtime_config(surface, engine_mode)
+
+    assert result.returncode == 0, result.stderr
+    assert f"__EFFECTIVE_MODE__={effective_mode}\n" in result.stdout
+    warning = f"Invalid STREAMING_ENGINE_MODE '{engine_mode}'"
+    assert (warning in result.stdout) is warns
+    if warns:
+        assert "native (primary default)" in result.stdout
 
 
-def test_entrypoints_accept_native_and_howler_modes() -> None:
-    """Both supported playback engines must remain accepted."""
-    for script in _entrypoint_scripts():
-        engine_case = _engine_case(script)
-        assert re.search(r'(?m)^\s*""\|"howler"\|"native"\)\s*$', engine_case)
+@pytest.mark.parametrize("surface", SHELL_SURFACES)
+@pytest.mark.parametrize(
+    ("variable_name", "value"),
+    (
+        ("SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS", "1"),
+        ("SEGMENTED_SESSION_PREWARM_ENABLED", "invalid"),
+        ("LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED", "invalid"),
+        ("SEGMENTED_STREAMING_TRACE_LOGS", "true"),
+    ),
+)
+def test_entrypoints_ignore_removed_runtime_settings(
+    surface: str, variable_name: str, value: str
+) -> None:
+    """Removed segmented settings must not affect shell runtime configuration."""
+    result = _run_runtime_config(surface, "native", {variable_name: value})
 
-
-def test_entrypoints_keep_invalid_value_fallback() -> None:
-    """Unknown engine values must warn and clear the selector to native."""
-    for script in _entrypoint_scripts():
-        engine_case = _engine_case(script)
-        fallback_start = engine_case.index("*)")
-        fallback_end = engine_case.index(";;", fallback_start)
-        fallback = engine_case[fallback_start:fallback_end].lower()
-
-        assert "warn" in fallback
-        assert 'engine_mode=""' in fallback
-        assert "native|howler" in fallback
-
-
-def test_removed_runtime_settings_are_absent_from_deployment_surfaces() -> None:
-    """Retired runtime settings must be ignored by every deployment surface."""
-    frontend, aio_start = _entrypoint_scripts()
-    surfaces = {
-        "frontend/docker-entrypoint.sh": frontend,
-        "Dockerfile:/app/start.sh": aio_start,
-        **{
-            str(path.relative_to(REPO_ROOT)): path.read_text(encoding="utf-8")
-            for path in DEPLOYMENT_FILES
-        },
-    }
-
-    for name, content in surfaces.items():
-        assert "SEGMENTED_" not in content, name
+    assert result.returncode == 0, result.stderr
+    assert "__EFFECTIVE_MODE__=native\n" in result.stdout
+    assert variable_name not in result.stdout
+    assert result.stderr == ""
 
 
 def test_unreleased_changelog_announces_streaming_removal() -> None:

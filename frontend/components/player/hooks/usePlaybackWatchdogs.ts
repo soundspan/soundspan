@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { HeartbeatMonitor, playbackStateMachine } from "@/lib/audio";
-import { HEARTBEAT_BUFFER_TIMEOUT_MS } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
+import {
+    HEARTBEAT_BUFFER_TIMEOUT_MS,
+    UNEXPECTED_STOP_STARTUP_GUARD_MS,
+} from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
 import {
     audioEngine,
     logPlaybackClientMetric,
@@ -14,6 +17,7 @@ interface UsePlaybackWatchdogsOptions {
     refs: PlaybackOrchestratorRefs;
     trackRecovery: ReturnType<typeof useTrackRecovery>;
     isPlaying: boolean;
+
     isBuffering: boolean;
     setIsBuffering: (isBuffering: boolean) => void;
     setIsPlaying: (isPlaying: boolean) => void;
@@ -28,7 +32,8 @@ export function usePlaybackWatchdogs({
     setIsBuffering,
     setIsPlaying,
 }: UsePlaybackWatchdogsOptions): void {
-    const { attemptTransientTrackRecovery } = trackRecovery;
+    const { attemptTransientTrackRecovery, scheduleStartupPlaybackRecovery } =
+        trackRecovery;
     const {
         heartbeatRef,
         currentTrackRef,
@@ -36,6 +41,8 @@ export function usePlaybackWatchdogs({
         seekReloadInProgressRef,
         isLoadingRef,
         lastPlayingStateRef,
+        startupStabilityRef,
+        unexpectedStopStartupGuardRef,
     } = refs;
 
     // Initialize heartbeat monitor
@@ -67,18 +74,59 @@ export function usePlaybackWatchdogs({
                 onUnexpectedStop: () => {
                     // Engine stopped without an explicit stop/end event
                     const trackId = currentTrackRef.current?.id ?? null;
+                    const startupStability = startupStabilityRef.current;
+                    const startupNoProgress =
+                        playbackTypeRef.current === "track" &&
+                        Boolean(trackId) &&
+                        startupStability.trackId === trackId &&
+                        startupStability.firstProgressAtMs === null;
                     const suppressionReason = seekReloadInProgressRef.current
                         ? "seek_reload_in_progress"
                         : isLoadingRef.current
                           ? "load_in_progress"
-                          : null;
+                          : startupNoProgress
+                            ? "startup_no_progress"
+                            : null;
                     if (suppressionReason) {
+                        if (trackId && startupNoProgress) {
+                            unexpectedStopStartupGuardRef.current = {
+                                trackId,
+                                suppressUntilMs:
+                                    Date.now() +
+                                    UNEXPECTED_STOP_STARTUP_GUARD_MS,
+                                reason: "startup_no_progress",
+                            };
+                            scheduleStartupPlaybackRecovery(trackId);
+                        }
                         logPlaybackClientMetric(
                             "player.unexpected_stop_suppressed",
                             {
                                 reason: suppressionReason,
                                 trackId,
                                 sourceType: "direct",
+                            },
+                        );
+                        return;
+                    }
+
+                    const startupGuard = unexpectedStopStartupGuardRef.current;
+                    const startupGuardActive =
+                        playbackTypeRef.current === "track" &&
+                        Boolean(trackId) &&
+                        startupGuard.trackId === trackId &&
+                        Date.now() < startupGuard.suppressUntilMs;
+                    if (startupGuardActive) {
+                        logPlaybackClientMetric(
+                            "player.unexpected_stop_suppressed",
+                            {
+                                reason: "startup_guard_active",
+                                trackId,
+                                sourceType: "direct",
+                                guardReason: startupGuard.reason,
+                                guardRemainingMs: Math.max(
+                                    0,
+                                    startupGuard.suppressUntilMs - Date.now(),
+                                ),
                             },
                         );
                         return;
@@ -207,7 +255,12 @@ export function usePlaybackWatchdogs({
             heartbeatRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-    }, [attemptTransientTrackRecovery, setIsBuffering, setIsPlaying]);
+    }, [
+        attemptTransientTrackRecovery,
+        scheduleStartupPlaybackRecovery,
+        setIsBuffering,
+        setIsPlaying,
+    ]);
 
     // Keep heartbeat active while buffering so stall timeouts can still fire.
     useEffect(() => {

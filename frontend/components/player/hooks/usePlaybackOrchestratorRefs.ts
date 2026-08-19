@@ -120,6 +120,24 @@ export function usePlaybackOrchestratorRefs({
     // YouTube Music: prefer authenticated stream when user has OAuth,
     // fall back to public stream otherwise.
     const ytMusicAuthenticatedRef = useRef<boolean>(false);
+    const startupStabilityRef = useRef<{
+        trackId: string | null;
+        firstProgressAtMs: number | null;
+        lastObservedProgressSec: number;
+    }>({
+        trackId: null,
+        firstProgressAtMs: null,
+        lastObservedProgressSec: 0,
+    });
+    const unexpectedStopStartupGuardRef = useRef<{
+        trackId: string | null;
+        suppressUntilMs: number;
+        reason: string | null;
+    }>({
+        trackId: null,
+        suppressUntilMs: 0,
+        reason: null,
+    });
     const lastHandledTrackEndRef = useRef<{
         trackId: string | null;
         loadId: number;
@@ -231,6 +249,8 @@ export function usePlaybackOrchestratorRefs({
         autoMatchVibeTrackIdRef,
         autoMatchVibeLastAttemptAtRef,
         ytMusicAuthenticatedRef,
+        startupStabilityRef,
+        unexpectedStopStartupGuardRef,
         lastHandledTrackEndRef,
         trackEndWatchdogRef,
         howlerLoadStartMsRef,

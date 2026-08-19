@@ -24,6 +24,9 @@ export const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
 export const AUTOPLAY_INTENT_CONFLICT_WINDOW_MS = 3_000;
 export const AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS = 8000;
 export const HEARTBEAT_BUFFER_TIMEOUT_MS = 7_000;
+// Suppress unexpected-stop recovery this long after a load starts so a slow
+// startup is retried through startup recovery, not misread as a mid-play stop.
+export const UNEXPECTED_STOP_STARTUP_GUARD_MS = 20_000;
 export const TRACK_END_WATCHDOG_TIMEOUT_MS = 2_000;
 export const TRACK_END_WATCHDOG_BOUNDARY_SEC = 0.75;
 

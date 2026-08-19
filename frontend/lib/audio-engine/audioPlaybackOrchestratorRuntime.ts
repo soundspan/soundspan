@@ -11,9 +11,7 @@ const PLAYBACK_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.engine_startup",
     "player.rebuffer",
     "player.rebuffer_timeout",
-    "player.rebuffer_timeout_deferred",
     "player.rebuffer_recovered",
-    "player.startup_timeline",
     "player.unexpected_stop",
     "player.unexpected_pause",
     "player.load_autoplay_decision",
@@ -21,13 +19,6 @@ const PLAYBACK_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.track_end_rejected",
     "player.track_end_advanced",
     "player.playback_error",
-    "player.segment_quarantined",
-    "session.prewarm_validation_aborted",
-    "session.prewarm_validation_failed",
-    "session.handoff_attempt",
-    "session.handoff_skipped",
-    "session.handoff_failure",
-    "session.handoff_load_error",
 ]);
 
 /** Stable runtime audio-engine facade shared by every orchestrator concern. */

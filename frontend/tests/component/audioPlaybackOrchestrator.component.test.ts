@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as realPlaybackRecoveryPolicy from "../../lib/audio-engine/playbackRecoveryPolicy";
 import { afterEach, before, beforeEach, mock, test } from "node:test";
 
 type PlaybackType = "track" | "audiobook" | "podcast" | null;
@@ -861,23 +862,18 @@ mock.module("@/lib/audio-engine/recoveryPolicy", {
 
 mock.module("@/lib/audio-engine/playbackRecoveryPolicy", {
     exports: {
-        isSeekWithinTolerance: (_actual: number, _target: number) =>
-            seekToleranceOverride ?? true,
-        resolveCorrelatedRecoveryResumeDecision: (input: {
-            requestedResumeAtSec: number;
-        }) => ({
-            matched: true,
-            resumeAtSec: input.requestedResumeAtSec,
-            mismatchReason: "none",
-        }),
-        resolveStartupGuardedRecoveryPositionSec: (input: {
-            trustedPositionSec: number;
-        }) => input.trustedPositionSec,
-        resolveBufferingRecoveryAction: () => "transition_playing",
-        resolveTrustedTrackPositionSec: (input: {
-            enginePositionSec: number;
-            fallbackPositionSec: number;
-        }) => Math.max(0, input.enginePositionSec || input.fallbackPositionSec),
+        ...realPlaybackRecoveryPolicy,
+        isSeekWithinTolerance: (
+            actual: number,
+            target: number,
+            toleranceSec?: number,
+        ) =>
+            seekToleranceOverride ??
+            realPlaybackRecoveryPolicy.isSeekWithinTolerance(
+                actual,
+                target,
+                toleranceSec,
+            ),
     },
 });
 
@@ -991,6 +987,10 @@ class MockHeartbeatMonitor {
     }
 
     notifyProgress(_time: number): void {}
+
+    triggerStall(): void {
+        this.callbacks.onStall?.();
+    }
 
     triggerUnexpectedStop(): void {
         this.callbacks.onUnexpectedStop?.();
@@ -1976,4 +1976,172 @@ test("preempting an in-flight load clears seek-reload load listener", async () =
         (call) => call.event === "load",
     ).length;
     assert.ok(loadOffAfter - loadOffBefore >= 2);
+});
+
+test("startup watchdog reloads when the engine plays without any progress", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("frozen-startup-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    // Engine claims to play, but no timeupdate ever arrives: frozen time.
+    engine.playing = true;
+    assert.equal(engine.reloadCalls, 0);
+
+    t.mock.timers.tick(1_400);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+
+    assert.equal(engine.reloadCalls, 1);
+});
+
+test("startup watchdog leaves healthy playback with real progress alone", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("healthy-startup-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    engine.playing = true;
+    engine.currentTime = 0.6;
+    engine.actualCurrentTime = 0.6;
+    engine.emit("timeupdate", { timeSec: 0.6 });
+    await flushAsync();
+    engine.emit("timeupdate", { timeSec: 1.4 });
+    await flushAsync();
+
+    t.mock.timers.tick(1_400);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+
+    assert.equal(engine.reloadCalls, 0);
+});
+
+test("early unexpected stop is suppressed and routed to startup recovery", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("early-stop-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    // No startup progress yet; the engine stops claiming playback.
+    engine.playing = false;
+    assert.equal(heartbeatInstances.length, 1);
+    heartbeatInstances[0].triggerUnexpectedStop();
+    await flushAsync();
+
+    // Suppressed: play intent is preserved instead of being cleared.
+    assert.equal(playbackCalls.setIsPlaying.includes(false), false);
+
+    // The scheduled startup recovery reloads the frozen load.
+    t.mock.timers.tick(1_400);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+    t.mock.timers.tick(900);
+    await flushAsync();
+    assert.equal(engine.reloadCalls, 1);
+});
+
+test("load timeout retries once and then fails playback", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("timeout-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    assert.equal(engine.loadCalls.length, 1);
+
+    // First timeout: bounded retry re-issues the load.
+    t.mock.timers.tick(20_000);
+    await flushAsync();
+    t.mock.timers.tick(350);
+    await flushAsync();
+    assert.equal(engine.loadCalls.length, 2);
+
+    // Second timeout: retry budget exhausted → explicit error state.
+    t.mock.timers.tick(20_000);
+    await flushAsync();
+    assert.equal(playbackMachine.state, "ERROR");
+    assert.ok(playbackCalls.setIsPlaying.includes(false));
+    assert.ok(playbackCalls.setIsBuffering.includes(false));
+});
+
+test("transient playback errors reload the current track and resume", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("transient-error-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    engine.emit("playerror", {
+        error: new Error("network connection reset"),
+    });
+    await flushAsync();
+
+    // Transient recovery holds the loading state rather than failing.
+    assert.equal(playbackMachine.state, "LOADING");
+    t.mock.timers.tick(450);
+    await flushAsync();
+    assert.equal(engine.reloadCalls, 1);
+
+    // The reloaded source resumes playback via the correlated load handler.
+    const playCallsBeforeResume = engine.playCalls;
+    engine.playing = false;
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+    assert.ok(engine.playCalls > playCallsBeforeResume);
+});
+
+test("heartbeat stall buffers and buffer timeout runs transient recovery", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("stall-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+    engine.playing = true;
+    engine.emit("timeupdate", { timeSec: 0.9 });
+    await flushAsync();
+
+    assert.equal(heartbeatInstances.length, 1);
+    heartbeatInstances[0].triggerStall();
+    await flushAsync();
+    assert.equal(playbackMachine.state, "BUFFERING");
+    assert.ok(playbackCalls.setIsBuffering.includes(true));
+
+    // Buffer timeout ("Connection lost...") is transient → reload, not death.
+    heartbeatInstances[0].triggerBufferTimeout();
+    await flushAsync();
+    t.mock.timers.tick(450);
+    await flushAsync();
+    assert.equal(engine.reloadCalls, 1);
+    assert.equal(playbackMachine.state, "LOADING");
 });

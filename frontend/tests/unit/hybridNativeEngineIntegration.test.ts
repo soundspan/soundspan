@@ -6,7 +6,6 @@ import {
     type NativeAudioElementLike,
     type NativeEngineScheduler,
 } from "../../lib/audio-engine/nativeAudioElementEngine";
-import type { AudioEngine } from "../../lib/audio-engine/types";
 
 type ElementListener = (event: unknown) => void;
 
@@ -155,18 +154,6 @@ test("volume and mute state are applied to the native slot engine", () => {
     assert.equal(native.elements[0].muted, true);
 });
 
-test("upgradeHowlerEngine hot-swap preserves volume/mute (rollback path guarantees)", () => {
-    const { hybrid } = createHybridWithNativeSlot();
-    hybrid.setVolume(0.3);
-    hybrid.setMuted(true);
-
-    const replacement = createNativeEngine();
-    hybrid.upgradeHowlerEngine(replacement.engine as unknown as AudioEngine);
-    hybrid.load("https://stream.example/track.flac", { autoplay: false });
-    assert.equal(replacement.elements[0].volume, 0.3);
-    assert.equal(replacement.elements[0].muted, true);
-});
-
 test("double-play through the hybrid: rapid load/play spam keeps one element, one active stream", async () => {
     const { hybrid, native } = createHybridWithNativeSlot();
     for (let index = 0; index < 20; index += 1) {
@@ -204,18 +191,6 @@ test("getActiveEngineDescriptor reports the engine actually in use, not just the
         "howler",
         "descriptor defaults to howler when the slot is not declared native",
     );
-});
-
-test("upgradeHowlerEngine updates the direct-slot descriptor", () => {
-    const hybrid = new HybridRuntimeAudioEngine({
-        howlerEngine: createNativeEngine().engine,
-    });
-    assert.equal(hybrid.getActiveEngineDescriptor(), "howler");
-    hybrid.upgradeHowlerEngine(
-        createNativeEngine().engine as unknown as AudioEngine,
-        "native",
-    );
-    assert.equal(hybrid.getActiveEngineDescriptor(), "native");
 });
 
 test("existing engine interface methods pass through to the native engine", () => {

@@ -11,7 +11,6 @@ export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "native";
 export interface AudioEngineSource {
     url: string;
     trackId?: string;
-    sessionId?: string;
     sourceType?: AudioEngineSourceType | "unknown";
     mimeType?: string;
 }

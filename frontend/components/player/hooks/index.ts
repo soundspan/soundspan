@@ -1,6 +1,7 @@
 export type { DesiredLoadPlayIntent } from "./audioPlaybackOrchestratorTypes";
 export { useAudioEngineBindings } from "./useAudioEngineBindings";
 export { useApplyCurrentOutputState } from "./useOutputState";
+export { useStartupStability } from "./useStartupStability";
 export { useForegroundRecovery } from "./useForegroundRecovery";
 export { useNextTrackPreload } from "./useNextTrackPreload";
 export { useAutoMatchVibe, useYtMusicAuth } from "./usePlaybackAccounts";

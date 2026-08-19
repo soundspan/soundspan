@@ -8,8 +8,8 @@
  * 1. Platform pins — Android WebView is pinned to Howler because its
  *    Web Audio mode is the established fix for crackling/popping on
  *    track changes there (see howler-engine.ts).
- * 2. The deployment engine-mode flag (STREAMING_ENGINE_MODE=native).
- * 3. Default — Howler.
+ * 2. The deployment engine-mode flag; native is the default when unset,
+ *    and STREAMING_ENGINE_MODE=howler selects the explicit fallback.
  */
 
 import type { StreamingEngineMode } from "@/lib/audio-engine/types";

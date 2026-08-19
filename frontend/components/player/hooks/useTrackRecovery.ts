@@ -20,7 +20,10 @@ import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime
 import { isLikelyTransientStreamError } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { toast } from "sonner";
-import { resolveCorrelatedRecoveryResumeDecision } from "@/lib/audio-engine/playbackRecoveryPolicy";
+import {
+    resolveCorrelatedRecoveryResumeDecision,
+    resolveStartupGuardedRecoveryPositionSec,
+} from "@/lib/audio-engine/playbackRecoveryPolicy";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import type { usePlaybackRecoveryHelpers } from "./usePlaybackRecoveryHelpers";
 
@@ -54,6 +57,7 @@ export function useTrackRecovery({
         loadIdRef,
         lastPlayingStateRef,
         currentTrackRef,
+        startupStabilityRef,
         isLoadingRef,
         startupRecoveryLoadListenerRef,
         listenTogetherFollowerRecoveryRef,
@@ -107,7 +111,14 @@ export function useTrackRecovery({
                     return;
                 }
 
-                if (audioEngine.isPlaying()) {
+                const startupStability = startupStabilityRef.current;
+                const hasStartupProgress =
+                    startupStability.trackId === trackId &&
+                    startupStability.firstProgressAtMs !== null;
+                const startupPlayingWithoutProgress =
+                    audioEngine.isPlaying() && !hasStartupProgress;
+
+                if (audioEngine.isPlaying() && hasStartupProgress) {
                     return;
                 }
 
@@ -122,6 +133,14 @@ export function useTrackRecovery({
                     return;
                 }
 
+                if (
+                    startupPlayingWithoutProgress &&
+                    recheckCount < STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS
+                ) {
+                    scheduleStartupPlaybackRecovery(trackId, recheckCount + 1);
+                    return;
+                }
+
                 if (startupRecoveryAttemptedTrackIdRef.current === trackId)
                     return;
                 startupRecoveryAttemptedTrackIdRef.current = trackId;
@@ -129,6 +148,7 @@ export function useTrackRecovery({
                 sharedFrontendLogger.warn(
                     "[AudioPlaybackOrchestrator] Startup playback watchdog triggered reload+retry",
                     {
+                        startupPlayingWithoutProgress,
                         recheckCount,
                     },
                 );
@@ -342,7 +362,14 @@ export function useTrackRecovery({
             const attemptNumber = transientTrackRecoveryAttemptRef.current;
             clearPendingTrackErrorSkip();
             clearTransientTrackRecovery(false);
-            const resumeAtSec = readTrustedTrackPositionSec(failedTrackId);
+            const startupStabilityAtFailure = startupStabilityRef.current;
+            const resumeAtSec = resolveStartupGuardedRecoveryPositionSec({
+                targetTrackId: failedTrackId,
+                trustedPositionSec: readTrustedTrackPositionSec(failedTrackId),
+                startupStabilityTrackId: startupStabilityAtFailure.trackId,
+                startupFirstProgressAtMs:
+                    startupStabilityAtFailure.firstProgressAtMs,
+            });
             const recoveryLoadId = loadIdRef.current;
 
             const onRecoveredLoad = () => {

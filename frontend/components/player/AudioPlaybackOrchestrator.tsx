@@ -147,6 +147,8 @@ export const AudioPlaybackOrchestrator = memo(
         const applyCurrentOutputState = H.useApplyCurrentOutputState({
             refs: orchestratorRefs,
         });
+        const { markStartupStabilityWindow, noteStartupProgress } =
+            H.useStartupStability({ refs: orchestratorRefs });
         const playbackRecoveryHelpers = H.usePlaybackRecoveryHelpers({
             refs: orchestratorRefs,
         });
@@ -288,6 +290,7 @@ export const AudioPlaybackOrchestrator = memo(
                     if (audioEngine.isPlaying()) {
                         clearUnexpectedPauseRecoveryCheck();
                     }
+                    noteStartupProgress(liveTrackId, currentTimeValue);
 
                     const durationSec = audioEngine.getDuration();
                     const isEndAdjacent =
@@ -1024,6 +1027,7 @@ export const AudioPlaybackOrchestrator = memo(
                 desiredLoadPlayRef.current = null;
                 cancelledLoadPlayIdRef.current = null;
                 wasPlayingWhenHiddenRef.current = false;
+                markStartupStabilityWindow(null, "media_cleared");
                 setStreamProfile(null);
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
@@ -1135,6 +1139,14 @@ export const AudioPlaybackOrchestrator = memo(
                 consecutiveErrorBreakerRef.current.reset();
             }
             loadTimeoutRetryCountRef.current = 0;
+            if (playbackType === "track" && currentTrack) {
+                markStartupStabilityWindow(
+                    currentTrack.id,
+                    "track_load_started",
+                );
+            } else {
+                markStartupStabilityWindow(null, "non_track_load_started");
+            }
 
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
@@ -1568,6 +1580,7 @@ export const AudioPlaybackOrchestrator = memo(
             clearStartupPlaybackRecovery,
             clearTransientTrackRecovery,
             applyCurrentOutputState,
+            markStartupStabilityWindow,
         ]);
         H.useNextTrackPreload({
             playbackType,
