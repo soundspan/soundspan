@@ -312,6 +312,14 @@ test("artist PopularTracks limits visible items and renders provider states", as
     assert.match(html, /YT/);
     assert.match(html, /IN QUEUE/);
     assert.match(html, /#12/);
+
+    // Remote provider tracks must use canonical IDs for preference actions.
+    assert.match(html, /data-track-id="yt:yt-id"/);
+    assert.match(html, /data-track-id="tidal:101"/);
+
+    // Non-provider tracks keep their original local/discovery IDs.
+    assert.match(html, /data-track-id="p-loading"/);
+
     assert.doesNotMatch(html, /Hidden Sixth/);
 });
 
