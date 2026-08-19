@@ -326,6 +326,9 @@ jobs:
       - name: Test npm override staleness gate
         run: npm run check:override-staleness:test
 
+      - name: Test infrastructure and release helpers
+        run: npm run check:infra-release:test
+
       - name: Check Dockerfile hygiene
         run: node --test scripts/ci/dockerfile-hygiene.test.mjs
 

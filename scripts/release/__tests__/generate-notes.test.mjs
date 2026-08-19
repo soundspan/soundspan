@@ -16,6 +16,35 @@ const template = path.join(
     repoRoot,
     "docs/maintainers/RELEASE_NOTES_TEMPLATE.md",
 );
+const fixtureTag = "2.3.3";
+
+function runGit(fixtureRoot, args) {
+    const result = spawnSync("git", args, {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+}
+
+function initializeGitFixture(fixtureRoot) {
+    runGit(fixtureRoot, ["init", "--initial-branch=main"]);
+    runGit(fixtureRoot, ["add", "CHANGELOG.md", "docs/maintainers"]);
+    runGit(fixtureRoot, [
+        "-c",
+        "user.name=Soundspan Release Test",
+        "-c",
+        "user.email=release-test@soundspan.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-m",
+        "Create release notes fixture",
+    ]);
+    runGit(fixtureRoot, ["-c", "tag.gpgSign=false", "tag", fixtureTag]);
+}
 
 function runGenerator(
     changelogContent,
@@ -37,11 +66,18 @@ function runGenerator(
             template,
             path.join(fixtureTemplateDirectory, "RELEASE_NOTES_TEMPLATE.md"),
         );
+        initializeGitFixture(fixtureRoot);
 
         const versionArgs = version === null ? [] : ["--version", version];
         return spawnSync(
             process.execPath,
-            [generator, ...versionArgs, "--from", "2.3.3", ...additionalArgs],
+            [
+                generator,
+                ...versionArgs,
+                "--from",
+                fixtureTag,
+                ...additionalArgs,
+            ],
             { cwd: fixtureRoot, encoding: "utf8" },
         );
     } finally {
