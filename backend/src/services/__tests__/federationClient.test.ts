@@ -2,8 +2,13 @@ process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY || "federation-client-test-key-123456";
 
 const axiosRequest = jest.fn();
+const dnsLookup = jest.fn();
 const recordFederationSyncSkip = jest.fn();
 const log = { warn: jest.fn() };
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => dnsLookup(...args),
+}));
 
 jest.mock("axios", () => ({
     __esModule: true,
@@ -113,6 +118,8 @@ const trackEnvelope = {
 describe("federation HTTP client", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        dnsLookup.mockReset();
+        dnsLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     });
 
     it("applies the default timeout and decrypts the bearer token", async () => {
@@ -132,8 +139,14 @@ describe("federation HTTP client", () => {
                 headers: expect.objectContaining({
                     Authorization: "Bearer secret-token",
                 }),
+                proxy: false,
+                httpsAgent: expect.any(Object),
             }),
         );
+        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
+            all: true,
+            verbatim: true,
+        });
     });
 
     it.each([
@@ -145,6 +158,11 @@ describe("federation HTTP client", () => {
         "127.0.0.1",
         "127.255.255.255",
         "169.254.1.1",
+        "0.1.2.3",
+        "100.64.0.1",
+        "100.127.255.254",
+        "198.18.0.1",
+        "198.19.255.254",
         "::1",
         "fc00::1",
         "fdff:ffff::1",
@@ -183,6 +201,72 @@ describe("federation HTTP client", () => {
         expect(() => resolveBaseUrl("http://10.0.0.8", true)).toThrow(
             "Federation peer base URL is invalid",
         );
+    });
+
+    it("rejects a peer hostname when any DNS answer is non-global", async () => {
+        dnsLookup.mockResolvedValue([
+            { address: "93.184.216.34", family: 4 },
+            { address: "10.0.0.8", family: 4 },
+        ]);
+
+        await expect(
+            createFederationClient(peer, { attempts: 1 }).getManifest(),
+        ).rejects.toMatchObject({
+            name: "FederationHttpError",
+            status: null,
+            transient: false,
+        });
+        expect(axiosRequest).not.toHaveBeenCalled();
+    });
+
+    it("rejects private DNS rebinding by pinning connect-time lookup", async () => {
+        const publicAddress = { address: "93.184.216.34", family: 4 };
+        const privateAddress = { address: "127.0.0.1", family: 4 };
+        dnsLookup
+            .mockResolvedValueOnce([publicAddress])
+            .mockResolvedValueOnce([privateAddress]);
+        let requestConfig: Record<string, unknown> | undefined;
+        axiosRequest.mockImplementationOnce(async (config: unknown) => {
+            requestConfig = config as Record<string, unknown>;
+            return { status: 200, data: manifest };
+        });
+
+        await createFederationClient(peer).getManifest();
+        await expect(
+            dnsLookup("peer.example", { all: true, verbatim: true }),
+        ).resolves.toEqual([privateAddress]);
+
+        const agent = requestConfig?.httpsAgent as {
+            options?: {
+                lookup?: (
+                    hostname: string,
+                    options: { all?: boolean },
+                    callback: (
+                        error: NodeJS.ErrnoException | null,
+                        address:
+                            | string
+                            | Array<{ address: string; family: number }>,
+                        family?: number,
+                    ) => void,
+                ) => void;
+            };
+        };
+        const pinnedAddress = await new Promise<unknown>((resolve, reject) => {
+            agent.options?.lookup?.(
+                "peer.example",
+                { all: false },
+                (error, address, family) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+                    resolve({ address, family });
+                },
+            );
+        });
+
+        expect(pinnedAddress).toEqual(publicAddress);
+        expect(dnsLookup).toHaveBeenCalledTimes(2);
     });
 
     it("never exposes a bearer token through an Axios error", async () => {
@@ -524,8 +608,77 @@ describe("federation HTTP client", () => {
             {
                 peerId: "forward-compatible-peer",
                 keys: ["futureTrackScore"],
+                omittedCount: 0,
             },
         );
+    });
+
+    it("bounds sampled unknown track keys and reports the omitted count", async () => {
+        const unknownAttributes = Object.fromEntries(
+            Array.from({ length: 10_000 }, (_value, index) => [
+                `future-${index.toString().padStart(5, "0")}-${"x".repeat(140)}`,
+                index,
+            ]),
+        );
+        const item = {
+            ...trackEnvelope,
+            attributes: {
+                ...trackEnvelope.attributes,
+                ...unknownAttributes,
+            },
+        };
+        axiosRequest.mockResolvedValueOnce({
+            status: 200,
+            data: { items: [item], nextCursor: null },
+        });
+
+        await expect(
+            createFederationClient({
+                ...peer,
+                id: "many-key-peer",
+            }).getCatalogItems("track"),
+        ).resolves.toMatchObject({ skippedInvalid: 0 });
+
+        expect(recordFederationSyncSkip).toHaveBeenCalledWith(
+            "unknown_key_stripped",
+            10_000,
+        );
+        const warningContext = log.warn.mock.calls[0]?.[1] as {
+            keys: string[];
+            omittedCount: number;
+        };
+        expect(warningContext.keys).toHaveLength(32);
+        expect(warningContext.keys.every((key) => key.length <= 128)).toBe(
+            true,
+        );
+        expect(warningContext.omittedCount).toBe(9_968);
+    });
+
+    it("bounds the per-peer unknown-key warning registry", async () => {
+        const item = {
+            ...trackEnvelope,
+            attributes: {
+                ...trackEnvelope.attributes,
+                futureTrackScore: 0.75,
+            },
+        };
+        axiosRequest.mockResolvedValue({
+            status: 200,
+            data: { items: [item], nextCursor: null },
+        });
+
+        for (let index = 0; index < 257; index += 1) {
+            await createFederationClient({
+                ...peer,
+                id: `bounded-warning-peer-${index}`,
+            }).getCatalogItems("track");
+        }
+        await createFederationClient({
+            ...peer,
+            id: "bounded-warning-peer-0",
+        }).getCatalogItems("track");
+
+        expect(log.warn).toHaveBeenCalledTimes(258);
     });
 
     it.each([
@@ -782,13 +935,17 @@ describe("federation HTTP client", () => {
             createFederationClient(peer, { retryDelayMs: 0 }).getManifest(),
         ).resolves.toEqual(manifest);
         expect(axiosRequest).toHaveBeenCalledTimes(3);
+        expect(dnsLookup).toHaveBeenCalledTimes(3);
 
         axiosRequest.mockReset();
+        dnsLookup.mockClear();
+        dnsLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
         axiosRequest.mockResolvedValue({ status: 503, data: {} });
         await expect(
             createFederationClient(peer, { retryDelayMs: 0 }).getManifest(),
         ).rejects.toBeInstanceOf(FederationHttpError);
         expect(axiosRequest).toHaveBeenCalledTimes(3);
+        expect(dnsLookup).toHaveBeenCalledTimes(3);
     });
 
     it("does not retry a non-transient peer response", async () => {
@@ -887,6 +1044,8 @@ describe("federation HTTP client", () => {
         );
         expect(axiosRequest).toHaveBeenCalledWith(
             expect.objectContaining({
+                proxy: false,
+                httpsAgent: expect.any(Object),
                 data: expect.objectContaining({
                     capabilities: ["track-attrs-loudness"],
                     reciprocalPairingCode: "HGFEDCBA",
@@ -894,6 +1053,10 @@ describe("federation HTTP client", () => {
                 }),
             }),
         );
+        expect(dnsLookup).toHaveBeenCalledWith("peer.example", {
+            all: true,
+            verbatim: true,
+        });
     });
 
     it("rejects a malformed pairing response at the public trust boundary", async () => {

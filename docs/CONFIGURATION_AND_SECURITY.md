@@ -145,7 +145,7 @@ Cookie-session authentication has been removed. Each authenticated request now u
 | Surface | Credential transport | Lifetime | Revocation path |
 | ------- | -------------------- | -------- | --------------- |
 | Web UI and first-party API | `Authorization: Bearer` JWT access token plus refresh token in the refresh request body | Access: 24 hours. Refresh: 30 days. | A self-service password change or administrator-set password increments `tokenVersion`, invalidating outstanding access and refresh JWTs. Ordinary logout removes the current browser's tokens only; there is no separate logout-all-devices endpoint. |
-| OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it can no longer be set from Settings, but existing values are still honored until removed in a future release. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
+| OpenSubsonic `/rest` | Per-request token plus salt, password transport, or an `ssap_` app password; API keys use the separate `apiKey` parameter | The token is a per-request digest with no independent server-side lifetime. App-password credentials remain valid until revoked. The legacy dedicated Subsonic password is deprecated: it can no longer be set from Settings, but direct API updates remain possible during the compatibility period and existing values are still honored until removal. | Revoke an app password individually. Account password changes and administrator-set passwords clear any legacy dedicated Subsonic password. |
 | External API clients | `X-API-Key` header | 90 days from creation | Delete the API key. |
 | Federation peer API | Dedicated opaque `Authorization: Bearer` peer credential | No automatic expiry. | Rotate the credential, revoke the peer, or delete the peer. |
 | Internal sidecar requests | `x-internal-secret` header | No automatic expiry. | Rotate `INTERNAL_API_SECRET` across the backend and sidecars, then restart them. |
@@ -206,18 +206,16 @@ See the [`OIDC_SSO.md` topology matrix](OIDC_SSO.md#deployment-topology) for sup
 ## Federation Credential Security
 
 - Instance links use dedicated `Authorization: Bearer` credentials. They do not reuse user JWTs or API keys and never establish a user identity on the host.
-- Host-issued credentials are random 32-byte tokens. The raw value is returned only when issued or rotated; the database stores an HMAC hash for constant-time verification.
+- Host-issued credentials are random 32-byte tokens. The raw value is returned only when issued or rotated; the database stores an HMAC hash for verification without storing the raw token.
 - Each credential grants an explicit subset of `library:read`, `stream:read`, and `embeddings:read`. Embedding access also requires library access.
 - `library:read` includes the instance's complete subscribed podcast-feed catalog. Treat linked peers as trusted recipients of feed URLs and podcast metadata.
 - Revocation clears credential material and changes the peer to `REVOKED`. Deleting a peer also cascades its consumer-side mirrored catalog rows.
 - Consumer outbound tokens are encrypted at rest through the authenticated AES-256-GCM settings cipher backed by `SETTINGS_ENCRYPTION_KEY`. The `v2:` prefix marks the current cipher envelope. On startup, an idempotent backfill treats any non-null outbound token without that marker as legacy plaintext and encrypts it before the process becomes ready. Compare-and-set updates make concurrent API and worker starts safe; plaintext reader compatibility exists only during that rolling-startup window. API and admin responses exclude both outbound tokens and credential hashes.
-- Peer base URLs must use HTTPS and contain no URL credentials. By default, literal `localhost` and literal addresses in `10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7`, and `fe80::/10` are rejected. Administrators who intentionally federate over a private LAN or VPN can set `FEDERATION_ALLOW_PRIVATE_PEERS=true`; this unsafe opt-in does not relax HTTPS or URL-credential checks.
-- The consumer backend attaches the decrypted token to bounded peer requests; browser clients never receive it. Redirects are disabled, and Axios failures are converted to safe federation errors before callers can log them.
+- Peer base URLs must use HTTPS and contain no URL credentials. By default, literal and DNS-resolved destinations in `0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.168/16`, `198.18/15`, `::`, `::1`, `fc00::/7`, and `fe80::/10` are rejected. Administrators who intentionally federate over a private LAN or VPN can set `FEDERATION_ALLOW_PRIVATE_PEERS=true`; this unsafe opt-in does not relax HTTPS, URL-credential, or connection-pinning checks.
+- Before each attempt, the consumer resolves every peer address and pins the socket to the validated result while retaining the hostname for TLS and HTTP. The backend then attaches the decrypted token to the bounded request; browser clients never receive it. Redirects are disabled, and Axios failures are converted to safe federation errors before callers can log them.
 
-The literal-host guard does not resolve DNS and does not prevent DNS rebinding.
-Network egress policy remains the defense-in-depth control for resolved peer
-addresses. Administrators must treat a linked peer as trusted and limit admin
-access accordingly.
+Network egress policy remains a defense-in-depth control. Administrators must
+treat a linked peer as trusted and limit admin access accordingly.
 
 ## Webhook and Admin Security
 

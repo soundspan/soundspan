@@ -100,6 +100,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/nativeCoverHealing.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
+| `backend/src/services/outboundAddressPolicy.ts` | Shared outbound IP address classification policy |
 | `backend/src/services/outboundUrlSafety.ts` | Core |
 | `backend/src/services/playlistImportService.ts` | Core |
 | `backend/src/services/playlistTrackResolution.ts` | Core |

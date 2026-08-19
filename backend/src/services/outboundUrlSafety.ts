@@ -1,9 +1,6 @@
 import dns = require("dns");
 import { lookup } from "dns/promises";
-
-const IPV4_PRIVATE_172_RE = /^172\.(1[6-9]|2[0-9]|3[0-1])\./;
-const IPV4_DOTTED_QUAD_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const IPV6_LINK_LOCAL_RE = /^fe[89ab]/i;
+import { isBlockedAddress } from "./outboundAddressPolicy";
 const VETTED_HOSTNAME_TTL_MS = 30_000;
 const MAX_VETTED_HOSTNAMES = 256;
 const vettedHostnames = new Map<string, number>();
@@ -18,86 +15,15 @@ function stripIpv6Brackets(hostname: string): string {
     return hostname;
 }
 
-function parseIpv4Octets(
-    hostname: string,
-): [number, number, number, number] | null {
-    const match = IPV4_DOTTED_QUAD_RE.exec(hostname);
-    if (!match) {
-        return null;
-    }
-    const first = Number(match[1]);
-    const second = Number(match[2]);
-    const third = Number(match[3]);
-    const fourth = Number(match[4]);
-    if (first > 255 || second > 255 || third > 255 || fourth > 255) {
-        return null;
-    }
-    return [first, second, third, fourth];
-}
-
-function isBlockedReservedIpv4Hostname(hostname: string): boolean {
-    const octets = parseIpv4Octets(hostname);
-    if (!octets) {
-        return false;
-    }
-    const [first, second] = octets;
-    return (
-        (first === 100 && second >= 64 && second <= 127) ||
-        (first === 198 && second >= 18 && second <= 19)
-    );
-}
-
 function isBlockedIpv4Hostname(hostname: string): boolean {
-    return (
-        // Whole ranges, not just the canonical literals: 127.0.0.2,
-        // 127.0.0.53 (systemd-resolved), 0.1.2.3 etc. are equally loopback/
-        // "this network" targets, and this predicate also range-checks
-        // DNS-RESOLVED addresses, where any 127/8 answer is an SSRF vector.
-        hostname.startsWith("127.") ||
-        hostname.startsWith("0.") ||
-        hostname === "0.0.0.0" ||
-        hostname.startsWith("10.") ||
-        hostname.startsWith("192.168.") ||
-        hostname.startsWith("169.254.") ||
-        IPV4_PRIVATE_172_RE.test(hostname) ||
-        isBlockedReservedIpv4Hostname(hostname)
-    );
-}
-
-function decodeMappedIpv4Hostname(hostname: string): string {
-    const match = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(hostname);
-    if (!match) {
-        return hostname;
-    }
-    const high = Number.parseInt(match[1], 16);
-    const low = Number.parseInt(match[2], 16);
-    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+    return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
+        ? isBlockedAddress(hostname)
+        : false;
 }
 
 function isBlockedIpv6Hostname(hostname: string): boolean {
     const normalized = stripIpv6Brackets(hostname).toLowerCase();
-
-    if (normalized === "::1" || normalized === "::") {
-        return true;
-    }
-
-    if (normalized.startsWith("::ffff:")) {
-        const mappedHostname = normalized.slice("::ffff:".length);
-        return isBlockedIpv4Hostname(decodeMappedIpv4Hostname(mappedHostname));
-    }
-
-    return (
-        IPV6_LINK_LOCAL_RE.test(normalized) ||
-        normalized.startsWith("fc") ||
-        normalized.startsWith("fd")
-    );
-}
-
-/**
- * Returns whether an IP address is denied by the shared outbound SSRF policy.
- */
-export function isBlockedAddress(address: string): boolean {
-    return isBlockedIpv4Hostname(address) || isBlockedIpv6Hostname(address);
+    return normalized.includes(":") ? isBlockedAddress(normalized) : false;
 }
 
 function isBlockedHostname(hostname: string): boolean {

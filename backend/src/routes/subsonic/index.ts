@@ -81,44 +81,51 @@ import { getRequestContext } from "./shared";
 
 const router = Router();
 const SUBSONIC_TRACE_LOGS = config.subsonicTraceLogs;
+const subsonicTraceLog = logger.child("SubsonicTrace");
+
+function sanitizeTraceField(value: unknown, maxLength = 64): string {
+    if (typeof value !== "string") return "-";
+    const sanitized = value
+        .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+        .slice(0, maxLength);
+    return sanitized.trim().length > 0 ? sanitized : "-";
+}
 
 router.use(mergeSubsonicBodyParamsIntoQuery);
 
 if (SUBSONIC_TRACE_LOGS) {
     router.use((req, res, next) => {
         const startMs = Date.now();
-        const client =
-            typeof req.query.c === "string" && req.query.c.trim().length > 0
-                ? req.query.c
-                : "-";
-        const version =
-            typeof req.query.v === "string" && req.query.v.trim().length > 0
-                ? req.query.v
-                : "-";
-        const format =
-            typeof req.query.f === "string" && req.query.f.trim().length > 0
-                ? req.query.f
-                : typeof req.query.format === "string" &&
-                    req.query.format.trim().length > 0
-                  ? req.query.format
-                  : "-";
+        const method = req.method;
+        const endpoint = sanitizeTraceField(
+            req.path.startsWith("/") ? req.path.slice(1) : req.path,
+            128,
+        );
+        const client = sanitizeTraceField(req.query.c);
+        const version = sanitizeTraceField(req.query.v);
+        const format = sanitizeTraceField(req.query.f ?? req.query.format);
 
         res.on("finish", () => {
-            const endpoint = req.path.startsWith("/")
-                ? req.path.slice(1)
-                : req.path;
             const protocolStatus =
                 typeof res.locals?.subsonicProtocolStatus === "string"
                     ? res.locals.subsonicProtocolStatus
                     : "unknown";
             const errorCode =
                 typeof res.locals?.subsonicErrorCode === "number"
-                    ? ` code=${res.locals.subsonicErrorCode}`
-                    : "";
+                    ? res.locals.subsonicErrorCode
+                    : null;
 
-            logger.warn(
-                `[SubsonicTrace] ${req.method} ${endpoint || "(root)"} c=${client} v=${version} f=${format} http=${res.statusCode} proto=${protocolStatus}${errorCode} ${Date.now() - startMs}ms`,
-            );
+            subsonicTraceLog.warn("Subsonic request completed", {
+                method,
+                endpoint,
+                client,
+                version,
+                format,
+                httpStatus: res.statusCode,
+                protocolStatus,
+                errorCode,
+                durationMs: Date.now() - startMs,
+            });
         });
 
         next();

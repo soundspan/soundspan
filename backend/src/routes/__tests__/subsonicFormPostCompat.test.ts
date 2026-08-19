@@ -1,16 +1,52 @@
 import { type Request, type Response } from "express";
 
-const passThrough = (req: Request, _res: Response, next: () => void): void => {
-    req.user = { id: "user-1", username: "alice", role: "user" };
+const passThrough = (_req: Request, _res: Response, next: () => void): void => {
     next();
 };
 
 jest.mock("../../middleware/subsonicAuth", () => ({
-    requireSubsonicAuth: passThrough,
+    ...jest.requireActual("../../middleware/subsonicAuth"),
     subsonicRateLimiter: passThrough,
 }));
 
-jest.mock("../../utils/db", () => ({ prisma: {} }));
+const findUser = jest.fn();
+const comparePassword = jest.fn();
+const runDummyBcrypt = jest.fn().mockResolvedValue(undefined);
+const traceLog = { warn: jest.fn() };
+const authLog = { debug: jest.fn() };
+
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        user: { findUnique: (...args: unknown[]) => findUser(...args) },
+        appPassword: {
+            findMany: jest.fn().mockResolvedValue([]),
+            update: jest.fn().mockResolvedValue({}),
+        },
+        apiKey: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            update: jest.fn().mockResolvedValue({}),
+        },
+    },
+}));
+
+jest.mock("bcrypt", () => ({
+    __esModule: true,
+    default: { compare: (...args: unknown[]) => comparePassword(...args) },
+}));
+
+jest.mock("../../utils/dummyCredential", () => ({ runDummyBcrypt }));
+
+jest.mock("../../utils/encryption", () => ({
+    decrypt: jest.fn((value: string) => value),
+}));
+
+jest.mock("../../utils/logger", () => ({
+    logger: {
+        child: jest.fn((scope: string) =>
+            scope === "SubsonicTrace" ? traceLog : authLog,
+        ),
+    },
+}));
 
 jest.mock("../../workers/queues", () => ({
     scanQueue: {
@@ -25,9 +61,17 @@ jest.mock("../../services/audioStreaming", () => ({
     AudioStreamingService: jest.fn(),
 }));
 
+jest.mock("../../services/federationStreamProxy", () => ({
+    proxyFederatedTrackStream: jest.fn(),
+}));
+
+jest.mock("../../services/federationCoverProxy", () => ({
+    proxyFederatedCover: jest.fn(),
+}));
+
 jest.mock("../../config", () => ({
     config: {
-        subsonicTraceLogs: false,
+        subsonicTraceLogs: true,
         music: {
             musicPath: "/music",
             transcodeCachePath: "/tmp/soundspan-cache",
@@ -49,6 +93,7 @@ import subsonicRouter from "../subsonic";
 type CapturedResponse = Response & {
     body?: string;
     jsonBody?: unknown;
+    statusCode: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,22 +101,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function createResponse(): CapturedResponse {
+    let finishHandler: (() => void) | undefined;
     const response = {
         locals: {},
+        statusCode: 200,
         status: jest.fn(),
         setHeader: jest.fn(),
         type: jest.fn(),
         send: jest.fn(),
         json: jest.fn(),
+        on: jest.fn((event: string, handler: () => void) => {
+            if (event === "finish") finishHandler = handler;
+        }),
     } as unknown as CapturedResponse;
-    (response.status as jest.Mock).mockReturnValue(response);
+    (response.status as jest.Mock).mockImplementation((statusCode: number) => {
+        response.statusCode = statusCode;
+        return response;
+    });
     (response.type as jest.Mock).mockReturnValue(response);
     (response.send as jest.Mock).mockImplementation((body: string) => {
         response.body = body;
+        finishHandler?.();
         return response;
     });
     (response.json as jest.Mock).mockImplementation((body: unknown) => {
         response.jsonBody = body;
+        finishHandler?.();
         return response;
     });
     return response;
@@ -110,12 +165,28 @@ async function invokeHandler(
 const MAX_ROUTER_LAYERS = 100;
 const MAX_ROUTE_HANDLERS = 5;
 
-async function executePost(path: string): Promise<CapturedResponse> {
+interface PostOptions {
+    query?: Record<string, unknown>;
+    body?: Record<string, unknown>;
+}
+
+const validFormCredentials = {
+    u: "alice",
+    p: "correct-password",
+    v: "1.16.1",
+    c: "compat-test",
+    f: "json",
+};
+
+async function executePost(
+    path: string,
+    options: PostOptions = {},
+): Promise<CapturedResponse> {
     const req = {
         method: "POST",
         path,
-        query: {},
-        body: { f: "json" },
+        query: options.query ?? {},
+        body: options.body ?? validFormCredentials,
     } as unknown as Request;
     const res = createResponse();
     const stack = getRouterStack();
@@ -159,6 +230,21 @@ async function executePost(path: string): Promise<CapturedResponse> {
 }
 
 describe("Subsonic form POST routing", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        findUser.mockResolvedValue({
+            id: "user-1",
+            username: "alice",
+            role: "user",
+            passwordHash: "stored-hash",
+            subsonicPassword: null,
+        });
+        comparePassword.mockImplementation(
+            async (provided: string) => provided === "correct-password",
+        );
+        runDummyBcrypt.mockResolvedValue(undefined);
+    });
+
     it.each([
         "/getLicense",
         "/getLicense.view",
@@ -185,4 +271,105 @@ describe("Subsonic form POST routing", () => {
 
         expect(response.jsonBody).toEqual({ method: "POST" });
     });
+
+    it("authenticates valid form credentials through the real middleware", async () => {
+        const response = await executePost("/getLicense");
+        const envelope = parseJsonEnvelope(response);
+
+        expect(envelope).toEqual(expect.objectContaining({ status: "ok" }));
+        expect(comparePassword).toHaveBeenCalledWith(
+            "correct-password",
+            "stored-hash",
+        );
+    });
+
+    it("returns the uniform Subsonic auth error for invalid form credentials", async () => {
+        const wrongPassword = await executePost("/getLicense", {
+            body: { ...validFormCredentials, p: "wrong-password" },
+        });
+        findUser.mockResolvedValueOnce(null);
+        const unknownUser = await executePost("/getLicense", {
+            body: {
+                ...validFormCredentials,
+                u: "unknown-user",
+                p: "another-wrong-password",
+            },
+        });
+
+        expect(parseJsonEnvelope(wrongPassword)).toEqual(
+            expect.objectContaining({
+                status: "failed",
+                error: { code: 40, message: "Wrong username or password" },
+            }),
+        );
+        expect(parseJsonEnvelope(unknownUser)).toEqual(
+            expect.objectContaining({
+                status: "failed",
+                error: { code: 40, message: "Wrong username or password" },
+            }),
+        );
+    });
+
+    it("keeps query credentials authoritative over form credentials", async () => {
+        const queryWins = await executePost("/getLicense", {
+            query: { p: "correct-password" },
+            body: { ...validFormCredentials, p: "wrong-password" },
+        });
+        const invalidQueryWins = await executePost("/getLicense", {
+            query: { p: "wrong-password" },
+            body: validFormCredentials,
+        });
+
+        expect(parseJsonEnvelope(queryWins)).toEqual(
+            expect.objectContaining({ status: "ok" }),
+        );
+        expect(parseJsonEnvelope(invalidQueryWins)).toEqual(
+            expect.objectContaining({ status: "failed" }),
+        );
+    });
+
+    it("sanitizes bounded trace fields without logging credentials", async () => {
+        const secrets = {
+            p: "password-secret",
+            t: "token-secret",
+            s: "salt-secret",
+            apiKey: "api-key-secret",
+        };
+        await executePost("/getLicense", {
+            body: {
+                ...validFormCredentials,
+                ...secrets,
+                c: "client\r\nforged-entry",
+                v: "v".repeat(100),
+                f: "json\r\nforged-format",
+            },
+        });
+
+        expect(traceLog.warn).toHaveBeenCalledWith(
+            "Subsonic request completed",
+            expect.objectContaining({
+                client: "clientforged-entry",
+                version: "v".repeat(64),
+                format: "jsonforged-format",
+            }),
+        );
+        const serializedLogs = JSON.stringify(traceLog.warn.mock.calls);
+        expect(serializedLogs).not.toMatch(/[\r\n]/);
+        for (const secret of Object.values(secrets)) {
+            expect(serializedLogs).not.toContain(secret);
+        }
+        expect(serializedLogs).not.toMatch(/"(?:p|t|s|apiKey)"/);
+    });
 });
+
+function parseJsonEnvelope(
+    response: CapturedResponse,
+): Record<string, unknown> {
+    if (typeof response.body !== "string") {
+        throw new Error("Expected a serialized Subsonic response");
+    }
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    const envelope = body["subsonic-response"];
+    if (!isRecord(envelope)) throw new Error("Expected Subsonic envelope");
+    return envelope;
+}

@@ -1,5 +1,8 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
-import { BlockList, isIP } from "node:net";
+import { lookup } from "dns/promises";
+import type { LookupAddress, LookupOptions } from "node:dns";
+import { Agent as HttpsAgent } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { recordFederationSyncSkip } from "../metrics";
@@ -20,6 +23,7 @@ import {
     FEDERATION_EMBEDDING_SPACE_HEADER,
     parseFederationEmbeddingSpaceHeader,
 } from "./federationEmbeddingSpaceHeader";
+import { isBlockedAddress } from "./outboundAddressPolicy";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ATTEMPTS = 3;
@@ -30,18 +34,12 @@ export const MAX_PAGE_ITEMS = 500;
 const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 const EMBEDDING_DIMENSIONS = 512;
 const UNKNOWN_KEY_WARNING_INTERVAL_MS = 60_000;
+const MAX_UNKNOWN_KEY_SAMPLES = 32;
+const MAX_UNKNOWN_KEY_LENGTH = 128;
+const MAX_UNKNOWN_KEY_WARNING_PEERS = 256;
 const requestLimit = pLimit(MAX_CONCURRENT_REQUESTS);
 const log = logger.child("FederationClient");
 const unknownKeyWarningAt = new Map<string, number>();
-const disallowedPeerAddresses = new BlockList();
-disallowedPeerAddresses.addSubnet("10.0.0.0", 8, "ipv4");
-disallowedPeerAddresses.addSubnet("172.16.0.0", 12, "ipv4");
-disallowedPeerAddresses.addSubnet("192.168.0.0", 16, "ipv4");
-disallowedPeerAddresses.addSubnet("127.0.0.0", 8, "ipv4");
-disallowedPeerAddresses.addSubnet("169.254.0.0", 16, "ipv4");
-disallowedPeerAddresses.addAddress("::1", "ipv6");
-disallowedPeerAddresses.addSubnet("fc00::", 7, "ipv6");
-disallowedPeerAddresses.addSubnet("fe80::", 10, "ipv6");
 const embeddingSpaceAcceptHeaders = {
     [FEDERATION_EMBEDDING_SPACE_ACCEPT_HEADER]:
         FEDERATION_EMBEDDING_SPACE_ACCEPT_VALUE,
@@ -285,29 +283,43 @@ function isKnownMediaType(
     return KNOWN_MEDIA_TYPES.some((known) => known === value);
 }
 
-function unknownTrackAttributeKeys(value: unknown): string[] {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+interface UnknownKeySample {
+    keys: string[];
+    totalCount: number;
+}
+
+function collectUnknownTrackAttributeKeys(
+    value: unknown,
+    sample: UnknownKeySample,
+): void {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const envelope = value as Record<string, unknown>;
-    if (envelope.mediaType !== "track") return [];
+    if (envelope.mediaType !== "track") return;
     const attributes = envelope.attributes;
     if (
         !attributes ||
         typeof attributes !== "object" ||
         Array.isArray(attributes)
     ) {
-        return [];
+        return;
     }
-    return Object.keys(attributes).filter(
-        (key) => !knownTrackAttributeKeys.has(key),
-    );
+    const keys = Object.keys(attributes);
+    for (let index = 0; index < keys.length; index += 1) {
+        const key = keys[index];
+        if (knownTrackAttributeKeys.has(key)) continue;
+        sample.totalCount += 1;
+        if (sample.keys.length >= MAX_UNKNOWN_KEY_SAMPLES) continue;
+        const boundedKey = key.slice(0, MAX_UNKNOWN_KEY_LENGTH);
+        if (!sample.keys.includes(boundedKey)) sample.keys.push(boundedKey);
+    }
 }
 
 function reportUnknownTrackAttributeKeys(
     peerId: string,
-    keys: readonly string[],
+    sample: UnknownKeySample,
 ): void {
-    if (keys.length === 0) return;
-    recordFederationSyncSkip("unknown_key_stripped", keys.length);
+    if (sample.totalCount === 0) return;
+    recordFederationSyncSkip("unknown_key_stripped", sample.totalCount);
     const now = Date.now();
     const previous = unknownKeyWarningAt.get(peerId);
     if (
@@ -316,11 +328,27 @@ function reportUnknownTrackAttributeKeys(
     ) {
         return;
     }
+    unknownKeyWarningAt.delete(peerId);
+    if (unknownKeyWarningAt.size >= MAX_UNKNOWN_KEY_WARNING_PEERS) {
+        const oldestPeerId = unknownKeyWarningAt.keys().next().value;
+        if (oldestPeerId !== undefined)
+            unknownKeyWarningAt.delete(oldestPeerId);
+    }
     unknownKeyWarningAt.set(peerId, now);
     log.warn("Stripped unknown federation track attribute keys", {
         peerId,
-        keys: [...new Set(keys)].sort(),
+        keys: sample.keys.slice().sort(),
+        omittedCount: sample.totalCount - sample.keys.length,
     });
+}
+
+function reportUnknownTrackAttributeKeysForValue(
+    peerId: string,
+    value: unknown,
+): void {
+    const sample: UnknownKeySample = { keys: [], totalCount: 0 };
+    collectUnknownTrackAttributeKeys(value, sample);
+    reportUnknownTrackAttributeKeys(peerId, sample);
 }
 
 /** Peer returned a valid HTTP response outside the accepted status set. */
@@ -384,10 +412,7 @@ export function isDisallowedPeerHost(hostname: string): boolean {
     if (normalized === "localhost") return true;
     const family = isIP(normalized);
     if (family === 0) return false;
-    return disallowedPeerAddresses.check(
-        normalized,
-        family === 4 ? "ipv4" : "ipv6",
-    );
+    return isBlockedAddress(normalized);
 }
 
 /** Resolves an HTTPS peer origin under the literal-address SSRF policy. */
@@ -402,8 +427,6 @@ export function resolveBaseUrl(
     } catch {
         throw new Error("Federation peer base URL is invalid");
     }
-    // DNS resolution and rebinding checks are out of scope for this literal-host
-    // guard. Deployment egress policy remains the network-level backstop.
     if (
         url.protocol !== "https:" ||
         url.username ||
@@ -420,7 +443,8 @@ function peerUrl(baseUrl: URL, path: string): string {
 }
 
 function isTransientNetworkError(error: unknown): boolean {
-    if (!axios.isAxiosError(error)) return false;
+    if (!(error instanceof Error) && !axios.isAxiosError(error)) return false;
+    const code = (error as NodeJS.ErrnoException).code ?? "";
     return [
         "ECONNABORTED",
         "ECONNREFUSED",
@@ -429,7 +453,97 @@ function isTransientNetworkError(error: unknown): boolean {
         "ENETUNREACH",
         "ENOTFOUND",
         "ETIMEDOUT",
-    ].includes(error.code ?? "");
+    ].includes(code);
+}
+
+function federationTransportError(transient: boolean): FederationHttpError {
+    return new FederationHttpError(null, transient);
+}
+
+function peerNetworkHostname(destination: URL): string {
+    return destination.hostname.replace(/^\[|\]$/g, "");
+}
+
+async function resolvePeerAddresses(
+    destination: URL,
+    allowPrivatePeers: boolean,
+): Promise<LookupAddress[]> {
+    try {
+        const addresses = await lookup(peerNetworkHostname(destination), {
+            all: true,
+            verbatim: true,
+        });
+        if (addresses.length === 0) throw federationTransportError(false);
+        const hasInvalidAddress = addresses.some(
+            ({ address }) =>
+                isIP(address) === 0 ||
+                (!allowPrivatePeers && isBlockedAddress(address)),
+        );
+        if (hasInvalidAddress) throw federationTransportError(false);
+        return addresses;
+    } catch (error) {
+        if (error instanceof FederationHttpError) throw error;
+        throw federationTransportError(isTransientNetworkError(error));
+    }
+}
+
+function lookupFamily(options: LookupOptions): number | undefined {
+    if (options.family === 4 || options.family === "IPv4") return 4;
+    if (options.family === 6 || options.family === "IPv6") return 6;
+    return undefined;
+}
+
+function lookupError(code: string): NodeJS.ErrnoException {
+    const error = new Error(
+        "Federation request failed",
+    ) as NodeJS.ErrnoException;
+    error.code = code;
+    return error;
+}
+
+function createPinnedLookup(
+    expectedHostname: string,
+    addresses: readonly LookupAddress[],
+): LookupFunction {
+    return (hostname, options, callback) => {
+        if (hostname.toLowerCase() !== expectedHostname.toLowerCase()) {
+            callback(lookupError("EOUTBOUNDBLOCKED"), "", 0);
+            return;
+        }
+        const family = lookupFamily(options);
+        const eligible = addresses.filter(
+            (address) => family === undefined || address.family === family,
+        );
+        if (eligible.length === 0) {
+            callback(lookupError("EAFNOSUPPORT"), "", 0);
+            return;
+        }
+        if (options.all) {
+            callback(null, eligible.slice());
+            return;
+        }
+        callback(null, eligible[0].address, eligible[0].family);
+    };
+}
+
+async function pinnedTransport(
+    destination: URL,
+    allowPrivatePeers: boolean,
+): Promise<{ httpsAgent: HttpsAgent; proxy: false }> {
+    const addresses = await resolvePeerAddresses(
+        destination,
+        allowPrivatePeers,
+    );
+    return {
+        httpsAgent: new HttpsAgent({
+            keepAlive: false,
+            lookup: createPinnedLookup(
+                peerNetworkHostname(destination),
+                addresses,
+            ),
+        }),
+        proxy: false,
+    };
 }
 
 async function waitForRetry(delayMs: number, attempt: number): Promise<void> {
@@ -447,9 +561,9 @@ function parseResponse<T>(schema: z.ZodType<T>, value: unknown): T {
 function parseLenientItems<T>(
     values: readonly unknown[],
     schema: z.ZodType<T>,
-): { items: T[]; skippedInvalid: number; strippedUnknownKeys: string[] } {
+): { items: T[]; skippedInvalid: number; unknownKeys: UnknownKeySample } {
     const items: T[] = [];
-    const strippedUnknownKeys: string[] = [];
+    const unknownKeys: UnknownKeySample = { keys: [], totalCount: 0 };
     let skippedInvalid = 0;
     for (
         let index = 0;
@@ -462,15 +576,15 @@ function parseLenientItems<T>(
             continue;
         }
         items.push(parsed.data);
-        strippedUnknownKeys.push(...unknownTrackAttributeKeys(values[index]));
+        collectUnknownTrackAttributeKeys(values[index], unknownKeys);
     }
-    return { items, skippedInvalid, strippedUnknownKeys };
+    return { items, skippedInvalid, unknownKeys };
 }
 
 function parseCatalogPage(
     value: unknown,
     embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
-): { page: FederationCatalogPage; strippedUnknownKeys: string[] } {
+): { page: FederationCatalogPage; unknownKeys: UnknownKeySample } {
     const page = parseResponse(catalogPageShapeSchema, value);
     const parsed = parseLenientItems(page.items, federationEnvelopeSchema);
     return {
@@ -480,14 +594,14 @@ function parseCatalogPage(
             nextCursor: page.nextCursor,
             ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
         },
-        strippedUnknownKeys: parsed.strippedUnknownKeys,
+        unknownKeys: parsed.unknownKeys,
     };
 }
 
 function parseDeltaPage(
     value: unknown,
     embeddingSpace: ParsedFederationEmbeddingSpaceIdentity | undefined,
-): { delta: FederationDelta; strippedUnknownKeys: string[] } {
+): { delta: FederationDelta; unknownKeys: UnknownKeySample } {
     const page = parseResponse(deltaPageShapeSchema, value);
     const changes = parseLenientItems(page.changes, federationEnvelopeSchema);
     const parsedTombstones = parseResponse(tombstonesSchema, page.tombstones);
@@ -510,7 +624,7 @@ function parseDeltaPage(
                 parsedTombstones.length - tombstones.length,
             ...(embeddingSpace !== undefined ? { embeddingSpace } : {}),
         },
-        strippedUnknownKeys: changes.strippedUnknownKeys,
+        unknownKeys: changes.unknownKeys,
     };
 }
 
@@ -533,6 +647,7 @@ class FederationClient {
     private readonly timeoutMs: number;
     private readonly attempts: number;
     private readonly retryDelayMs: number;
+    private readonly allowPrivatePeers: boolean;
 
     constructor(peer: FederationClientPeer, options: FederationClientOptions) {
         this.peerId = peer.id;
@@ -547,22 +662,27 @@ class FederationClient {
         this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
         this.attempts = options.attempts ?? DEFAULT_ATTEMPTS;
         this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+        this.allowPrivatePeers = options.allowPrivatePeers ?? false;
     }
 
     private async request(config: AxiosRequestConfig): Promise<AxiosResponse> {
         for (let attempt = 0; attempt < this.attempts; attempt += 1) {
             try {
                 const response = await requestLimit(() =>
-                    axios.request({
-                        ...config,
-                        timeout: this.timeoutMs,
-                        maxRedirects: 0,
-                        validateStatus: () => true,
-                        headers: {
-                            ...config.headers,
-                            Authorization: `Bearer ${this.token}`,
-                        },
-                    }),
+                    pinnedTransport(this.baseUrl, this.allowPrivatePeers).then(
+                        (transport) =>
+                            axios.request({
+                                ...config,
+                                ...transport,
+                                timeout: this.timeoutMs,
+                                maxRedirects: 0,
+                                validateStatus: () => true,
+                                headers: {
+                                    ...config.headers,
+                                    Authorization: `Bearer ${this.token}`,
+                                },
+                            }),
+                    ),
                 );
                 if (response.status < 500 || attempt + 1 === this.attempts) {
                     return response;
@@ -571,8 +691,16 @@ class FederationClient {
                     destroyStreamBody(response);
                 }
             } catch (error) {
+                if (error instanceof FederationHttpError && !error.transient) {
+                    throw error;
+                }
                 const transient = isTransientNetworkError(error);
-                if (!transient || attempt + 1 === this.attempts) {
+                const retryable =
+                    error instanceof FederationHttpError
+                        ? error.transient
+                        : transient;
+                if (!retryable || attempt + 1 === this.attempts) {
+                    if (error instanceof FederationHttpError) throw error;
                     if (axios.isAxiosError(error))
                         throw new FederationHttpError(null, transient);
                     throw error;
@@ -643,10 +771,7 @@ class FederationClient {
             response.data,
             parseEmbeddingSpaceResponseHeader(response),
         );
-        reportUnknownTrackAttributeKeys(
-            this.peerId,
-            parsed.strippedUnknownKeys,
-        );
+        reportUnknownTrackAttributeKeys(this.peerId, parsed.unknownKeys);
         return parsed.page;
     }
 
@@ -660,10 +785,7 @@ class FederationClient {
             federationEnvelopeSchema,
             { signal },
             (value) =>
-                reportUnknownTrackAttributeKeys(
-                    this.peerId,
-                    unknownTrackAttributeKeys(value),
-                ),
+                reportUnknownTrackAttributeKeysForValue(this.peerId, value),
         );
     }
 
@@ -704,10 +826,7 @@ class FederationClient {
             response.data,
             parseEmbeddingSpaceResponseHeader(response),
         );
-        reportUnknownTrackAttributeKeys(
-            this.peerId,
-            parsed.strippedUnknownKeys,
-        );
+        reportUnknownTrackAttributeKeys(this.peerId, parsed.unknownKeys);
         return parsed.delta;
     }
 
@@ -821,27 +940,42 @@ export function createFederationClient(
 async function requestPairWithRetry(
     config: AxiosRequestConfig,
     options: FederationClientOptions,
+    baseUrl: URL,
 ): Promise<AxiosResponse> {
     const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
     const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
             const response = await requestLimit(() =>
-                axios.request({
-                    ...config,
-                    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-                    maxRedirects: 0,
-                    validateStatus: () => true,
-                    maxContentLength: MAX_JSON_BODY_BYTES,
-                    maxBodyLength: MAX_JSON_BODY_BYTES,
-                }),
+                pinnedTransport(
+                    baseUrl,
+                    options.allowPrivatePeers ?? false,
+                ).then((transport) =>
+                    axios.request({
+                        ...config,
+                        ...transport,
+                        timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+                        maxRedirects: 0,
+                        validateStatus: () => true,
+                        maxContentLength: MAX_JSON_BODY_BYTES,
+                        maxBodyLength: MAX_JSON_BODY_BYTES,
+                    }),
+                ),
             );
             if (response.status < 500 || attempt + 1 === attempts) {
                 return response;
             }
         } catch (error) {
+            if (error instanceof FederationHttpError && !error.transient) {
+                throw error;
+            }
             const transient = isTransientNetworkError(error);
-            if (!transient || attempt + 1 === attempts) {
+            const retryable =
+                error instanceof FederationHttpError
+                    ? error.transient
+                    : transient;
+            if (!retryable || attempt + 1 === attempts) {
+                if (error instanceof FederationHttpError) throw error;
                 if (axios.isAxiosError(error))
                     throw new FederationHttpError(null, transient);
                 throw error;
@@ -891,6 +1025,7 @@ export async function pairFederationPeer(input: {
             },
         },
         options,
+        baseUrl,
     );
     if (response.status < 200 || response.status >= 300) {
         throw new FederationHttpError(response.status, response.status >= 500);
