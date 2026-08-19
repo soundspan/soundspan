@@ -144,6 +144,7 @@ jest.mock("../../utils/db", () => ({
         },
         $transaction: jest.fn(),
         $queryRaw: jest.fn(),
+        $executeRaw: jest.fn(),
     },
     Prisma: {
         SortOrder: {
@@ -448,6 +449,7 @@ const mockSimilarArtistDeleteMany = prisma.similarArtist
     .deleteMany as jest.Mock;
 const mockPrismaTransaction = prisma.$transaction as jest.Mock;
 const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
+const mockPrismaExecuteRaw = prisma.$executeRaw as jest.Mock;
 const mockScanQueueAdd = scanQueue.add as jest.Mock;
 const mockScanQueueGetJob = scanQueue.getJob as jest.Mock;
 const mockScanQueueGetJobs = scanQueue.getJobs as jest.Mock;
@@ -1904,13 +1906,12 @@ describe("library catalog list runtime coverage", () => {
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
         mockPrismaQueryRaw.mockResolvedValue([]);
+        mockPrismaExecuteRaw.mockResolvedValue(0);
+        // The transactional client mirrors the full prisma mock so services
+        // that run model operations inside $transaction (track deletion with
+        // album-loudness recompute, artist backfills) see the same stubs.
         mockPrismaTransaction.mockImplementation(async (callback: any) =>
-            callback({
-                artist: {
-                    findMany: async () => [],
-                    count: async () => 0,
-                },
-            }),
+            callback(prisma),
         );
         mockGetArtistImagesBatch.mockResolvedValue(new Map());
         mockGetArtistImage.mockResolvedValue(null);
@@ -4572,6 +4573,7 @@ describe("library catalog list runtime coverage", () => {
         );
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-2" },
+            select: { id: true },
         });
         expect(deleteTrackResOk.statusCode).toBe(200);
         expect(deleteTrackResOk.body).toEqual({
@@ -4677,6 +4679,7 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).toHaveBeenCalledWith("/music/Artist-One/Track.flac");
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-delete-1" },
+            select: { id: true },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ message: "Track deleted successfully" });
@@ -4727,12 +4730,15 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).not.toHaveBeenCalled();
         expect(mockTrackDelete).toHaveBeenNthCalledWith(1, {
             where: { id: "track-absolute" },
+            select: { id: true },
         });
         expect(mockTrackDelete).toHaveBeenNthCalledWith(2, {
             where: { id: "track-windows-absolute" },
+            select: { id: true },
         });
         expect(mockTrackDelete).toHaveBeenNthCalledWith(3, {
             where: { id: "track-dot-segment" },
+            select: { id: true },
         });
 
         existsSpy.mockRestore();
@@ -4764,6 +4770,7 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).toHaveBeenCalledWith("/music/Locked/Track.flac");
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-delete-2" },
+            select: { id: true },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ message: "Track deleted successfully" });
