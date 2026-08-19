@@ -79,8 +79,8 @@ test("offers retry and can be dismissed", async (testContext) => {
     assert.equal(harness.container.textContent, "");
 });
 
-test("keeps the same failure dismissed and reappears for a different failure", async (testContext) => {
-    const harness = await mountNotice(async () => undefined, "liked|ytCharts");
+test("keeps a refetched failure dismissed and reappears when another query fails", async (testContext) => {
+    const harness = await mountNotice(async () => undefined, "liked");
     testContext.after(harness.unmount);
 
     const dismiss = harness.container.querySelector(
@@ -89,10 +89,12 @@ test("keeps the same failure dismissed and reappears for a different failure", a
     assert.ok(dismiss instanceof HTMLButtonElement);
     await React.act(async () => dismiss.click());
 
-    await harness.rerender("liked|ytCharts");
+    // The same query failed again after a refetch cycle.
+    await harness.rerender("liked");
     assert.equal(harness.container.textContent, "");
 
-    await harness.rerender("liked|popularArtists");
+    // A second query joined the unchanged original failure set.
+    await harness.rerender("liked|ytCharts");
     assert.match(
         harness.container.textContent ?? "",
         /Some sections failed to load — Retry/,

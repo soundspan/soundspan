@@ -234,6 +234,7 @@ export function useExploreData(options?: {
     const hasDegradedResults = failedQueries.length > 0;
     const degradedFailureSignature = failedQueries
         .map(({ key }) => key)
+        .sort()
         .join("|");
     const retryAll = async (): Promise<void> => {
         await Promise.all(failedQueries.map(({ query }) => query.refetch()));

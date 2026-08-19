@@ -189,14 +189,14 @@ test("explore data disables mixes query and hides mixes when autoPlaylists is of
 });
 
 test("explore data reports degraded results and retries failed queries", async () => {
-    failedQueries.add("liked");
-    failedQueries.add("ytCharts");
+    failedQueries.add("ytHome");
+    failedQueries.add("popularArtists");
     const result = await renderHook();
 
     assert.equal(result.hasDegradedResults, true);
-    assert.equal(result.degradedFailureSignature, "liked|ytCharts");
+    assert.equal(result.degradedFailureSignature, "popularArtists|ytHome");
     await result.retryAll();
-    assert.deepEqual(refetchCalls.sort(), ["liked", "ytCharts"]);
+    assert.deepEqual(refetchCalls.sort(), ["popularArtists", "ytHome"]);
 });
 
 test("explore data is not degraded when every query succeeds", async () => {
