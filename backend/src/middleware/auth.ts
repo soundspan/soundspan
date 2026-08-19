@@ -18,6 +18,13 @@ if (!JWT_SECRET) {
 // Type assertion after validation - JWT_SECRET is guaranteed to be a string
 const JWT_SECRET_VALIDATED: string = JWT_SECRET;
 
+class AuthBackendUnavailableError extends Error {
+    constructor(cause: unknown) {
+        super("Authentication backend unavailable", { cause });
+        this.name = "AuthBackendUnavailableError";
+    }
+}
+
 declare global {
     namespace Express {
         interface Request {
@@ -127,17 +134,28 @@ export function verifyAccessToken(token: string): JWTPayload {
 /**
  * Resolve an access token to its user, enforcing token type (via
  * `verifyAccessToken`) and `tokenVersion` freshness. Returns `null` when the
- * user no longer exists or the token predates a password change; throws when
- * the token itself fails verification.
+ * user no longer exists or the token predates a password change. Throws a JWT
+ * verification error for invalid credentials and a typed availability error
+ * when the user lookup fails.
  */
 async function resolveAccessTokenUser(
     token: string,
 ): Promise<{ id: string; username: string; role: string } | null> {
     const decoded = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: { id: true, username: true, role: true, tokenVersion: true },
-    });
+    let user;
+    try {
+        user = await prisma.user.findUnique({
+            where: { id: decoded.userId },
+            select: {
+                id: true,
+                username: true,
+                role: true,
+                tokenVersion: true,
+            },
+        });
+    } catch (cause) {
+        throw new AuthBackendUnavailableError(cause);
+    }
     if (!user) {
         return null;
     }
@@ -156,6 +174,7 @@ async function resolveAccessTokenUser(
  * @param req Express request object
  * @param checkQueryToken Whether to check for token in query params (for streaming)
  * @returns User object if authenticated, null otherwise
+ * @throws AuthBackendUnavailableError when credential persistence cannot be read
  */
 async function authenticateRequest(
     req: Request,
@@ -193,8 +212,8 @@ async function authenticateRequest(
 
                 return apiKeyRecord.user;
             }
-        } catch (error) {
-            logger.error("API key auth error:", error);
+        } catch (cause) {
+            throw new AuthBackendUnavailableError(cause);
         }
     }
 
@@ -205,8 +224,11 @@ async function authenticateRequest(
             try {
                 const user = await resolveAccessTokenUser(tokenParam);
                 if (user) return user;
-            } catch (error) {
-                logger.debug("Query token validation failed", error);
+            } catch (cause) {
+                if (cause instanceof AuthBackendUnavailableError) {
+                    throw cause;
+                }
+                logger.debug("Query token validation failed", cause);
             }
         }
     }
@@ -221,8 +243,11 @@ async function authenticateRequest(
         try {
             const user = await resolveAccessTokenUser(token);
             if (user) return user;
-        } catch (error) {
-            logger.debug("Bearer token validation failed", error);
+        } catch (cause) {
+            if (cause instanceof AuthBackendUnavailableError) {
+                throw cause;
+            }
+            logger.debug("Bearer token validation failed", cause);
         }
     }
 
@@ -235,7 +260,21 @@ export async function requireAuth(
     res: Response,
     next: NextFunction,
 ) {
-    const user = await authenticateRequest(req, false);
+    let user;
+    try {
+        user = await authenticateRequest(req, false);
+    } catch (cause) {
+        if (cause instanceof AuthBackendUnavailableError) {
+            logger.warn("Authentication backend unavailable", cause);
+            return sendRouteError(
+                res,
+                503,
+                "Authentication service unavailable",
+                { code: "AUTH_BACKEND_UNAVAILABLE" },
+            );
+        }
+        throw cause;
+    }
     if (user) {
         req.user = user;
         return next();
@@ -281,80 +320,24 @@ export async function requireAuthOrToken(
     res: Response,
     next: NextFunction,
 ) {
-    // Check for API key in X-API-Key header (for mobile/external apps)
-    const apiKey = req.headers["x-api-key"] as string;
-    if (apiKey) {
-        try {
-            const apiKeyRecord = await findApiKeyRecord(apiKey, (key) =>
-                prisma.apiKey.findUnique({
-                    where: { key },
-                    include: {
-                        user: {
-                            select: { id: true, username: true, role: true },
-                        },
-                    },
-                }),
+    let user;
+    try {
+        user = await authenticateRequest(req, true);
+    } catch (cause) {
+        if (cause instanceof AuthBackendUnavailableError) {
+            logger.warn("Authentication backend unavailable", cause);
+            return sendRouteError(
+                res,
+                503,
+                "Authentication service unavailable",
+                { code: "AUTH_BACKEND_UNAVAILABLE" },
             );
-
-            if (
-                apiKeyRecord &&
-                apiKeyRecord.user &&
-                !isApiKeyExpired(apiKeyRecord.createdAt)
-            ) {
-                // Update last used timestamp (async, don't block)
-                prisma.apiKey
-                    .update({
-                        where: { id: apiKeyRecord.id },
-                        data: { lastUsed: new Date() },
-                    })
-                    .catch((err) => {
-                        logger.debug("Failed to update API key lastUsed", err);
-                    });
-
-                req.user = apiKeyRecord.user;
-                return next();
-            }
-        } catch (error) {
-            logger.error("API key auth error:", error);
         }
+        throw cause;
     }
-
-    // Check for token in query param (for streaming URLs from audio elements)
-    const tokenParam = req.query.token as string;
-    if (tokenParam) {
-        try {
-            const user = await resolveAccessTokenUser(tokenParam);
-            if (user) {
-                req.user = user;
-                return next();
-            }
-        } catch (error) {
-            logger.debug(
-                "Query token validation failed in requireAuthOrToken",
-                error,
-            );
-        }
-    }
-
-    // Fallback: check JWT token in Authorization header
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith("Bearer ")
-        ? authHeader.substring(7)
-        : null;
-
-    if (token) {
-        try {
-            const user = await resolveAccessTokenUser(token);
-            if (user) {
-                req.user = user;
-                return next();
-            }
-        } catch (error) {
-            logger.debug(
-                "Bearer token validation failed in requireAuthOrToken",
-                error,
-            );
-        }
+    if (user) {
+        req.user = user;
+        return next();
     }
 
     return res

@@ -108,6 +108,29 @@ export const authLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
+const REFRESH_RATE_LIMIT_MESSAGE =
+    "Too many token refresh attempts. Please try again later.";
+
+// Refresh traffic uses a separate, generous bucket so normal access-token
+// rotation cannot exhaust the interactive login-attempt budget.
+export const refreshLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 60,
+    skipSuccessfulRequests: true,
+    message: REFRESH_RATE_LIMIT_MESSAGE,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, next, options) => {
+        logger.warn(`Refresh rate limit exceeded: ${req.ip}`);
+        res.status(options.statusCode).json({
+            error: REFRESH_RATE_LIMIT_MESSAGE,
+            code: "RATE_LIMITED",
+        });
+    },
+    ...createRedisRateLimitOptions("auth-refresh", { fallback: "memory" }),
+    ...trustProxyValidation,
+});
+
 /** Counts every OIDC browser-flow request, including redirect responses. */
 export const oidcFlowLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,

@@ -544,7 +544,7 @@ describe("auth middleware", () => {
             );
         });
 
-        it("logs and rejects API key lookup errors", async () => {
+        it("reports API key lookup infrastructure failures as unavailable", async () => {
             mockApiKeyFindUnique.mockRejectedValueOnce(
                 new Error("api-key db outage"),
             );
@@ -555,15 +555,15 @@ describe("auth middleware", () => {
 
             await requireAuth(asRequest(req), asResponse(res), asNext(next));
 
-            expect(logger.error).toHaveBeenCalledWith(
-                "API key auth error:",
+            expect(logger.warn).toHaveBeenCalledWith(
+                "Authentication backend unavailable",
                 expect.any(Error),
             );
             expect(next).not.toHaveBeenCalled();
-            expect(res.statusCode).toBe(401);
+            expect(res.statusCode).toBe(503);
             expect(res.body).toEqual({
-                error: "Not authenticated",
-                code: "AUTH_REQUIRED",
+                error: "Authentication service unavailable",
+                code: "AUTH_BACKEND_UNAVAILABLE",
             });
         });
     });

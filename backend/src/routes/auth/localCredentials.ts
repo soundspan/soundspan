@@ -9,7 +9,7 @@ import {
     requireAuth,
     verifyAuthToken,
 } from "../../middleware/auth";
-import { apiLimiter, authLimiter } from "../../middleware/rateLimiter";
+import { apiLimiter } from "../../middleware/rateLimiter";
 import { config } from "../../config";
 import { runDummyBcrypt } from "../../utils/dummyCredential";
 import { sendRouteError } from "../routeErrorResponse";
@@ -152,26 +152,33 @@ export default function registerLocalCredentialRoutes(router: Router): void {
      *         description: Refresh token required
      *       401:
      *         description: Invalid or expired refresh token
+     *       429:
+     *         description: Too many failed refresh attempts
+     *       503:
+     *         description: Authentication persistence is temporarily unavailable
      */
     // POST /auth/refresh - Refresh access token using refresh token
-    router.post("/refresh", authLimiter, async (req, res) => {
+    router.post("/refresh", async (req, res) => {
         const { refreshToken } = req.body;
 
         if (!refreshToken) {
             return res.status(400).json({ error: "Refresh token required" });
         }
 
+        let decoded;
         try {
-            // Verify through the shared helper: it pins the HS256 algorithm and
-            // resolves the secret from one validated source (no inline process.env
-            // read, no `as any`).
-            const decoded = verifyAuthToken(refreshToken);
+            decoded = verifyAuthToken(refreshToken);
+        } catch {
+            return res.status(401).json({ error: "Invalid refresh token" });
+        }
 
-            if (decoded.type !== "refresh") {
-                return res.status(401).json({ error: "Invalid refresh token" });
-            }
+        if (decoded.type !== "refresh") {
+            return res.status(401).json({ error: "Invalid refresh token" });
+        }
 
-            const user = await prisma.user.findUnique({
+        let user;
+        try {
+            user = await prisma.user.findUnique({
                 where: { id: decoded.userId },
                 select: {
                     id: true,
@@ -180,26 +187,32 @@ export default function registerLocalCredentialRoutes(router: Router): void {
                     tokenVersion: true,
                 },
             });
-
-            if (!user) {
-                return res.status(401).json({ error: "User not found" });
-            }
-
-            // Validate tokenVersion
-            if (decoded.tokenVersion !== user.tokenVersion) {
-                return res.status(401).json({ error: "Token invalidated" });
-            }
-
-            const newAccessToken = generateToken(user);
-            const newRefreshToken = generateRefreshToken(user);
-
-            return res.json({
-                token: newAccessToken,
-                refreshToken: newRefreshToken,
-            });
-        } catch (error) {
-            return res.status(401).json({ error: "Invalid refresh token" });
+        } catch (cause) {
+            logger.warn("Refresh authentication backend unavailable", cause);
+            return sendRouteError(
+                res,
+                503,
+                "Authentication service unavailable",
+                { code: "AUTH_BACKEND_UNAVAILABLE" },
+            );
         }
+
+        if (!user) {
+            return res.status(401).json({ error: "User not found" });
+        }
+
+        // Validate tokenVersion
+        if (decoded.tokenVersion !== user.tokenVersion) {
+            return res.status(401).json({ error: "Token invalidated" });
+        }
+
+        const newAccessToken = generateToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+
+        return res.json({
+            token: newAccessToken,
+            refreshToken: newRefreshToken,
+        });
     });
 
     /**

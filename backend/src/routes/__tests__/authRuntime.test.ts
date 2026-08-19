@@ -146,6 +146,7 @@ import {
     adminSurfaceLimiter,
     apiLimiter,
     authLimiter,
+    refreshLimiter,
 } from "../../middleware/rateLimiter";
 import router from "../auth";
 
@@ -216,11 +217,13 @@ function expectLoginBodyMatchesOpenApi(body: Record<string, unknown>): void {
 const AUTH_FAILED_REQUEST_LIMIT = 40;
 const AUTH_LIMIT_MESSAGE =
     "Too many login attempts, please try again in 15 minutes.";
+const REFRESH_FAILED_REQUEST_LIMIT = 60;
 
 function createRouteApp() {
     const app = express();
     app.set("trust proxy", 1);
     app.use(express.json());
+    app.use("/refresh", refreshLimiter);
     app.use(router);
     return app;
 }
@@ -314,7 +317,6 @@ describe("auth routes runtime", () => {
     });
 
     it.each([
-        ["post", "/refresh", authLimiter],
         ["get", "/me", apiLimiter],
         ["post", "/change-password", authLimiter],
         ["post", "/change-email", apiLimiter],
@@ -341,7 +343,7 @@ describe("auth routes runtime", () => {
         },
     );
 
-    it("throttles repeated invalid refresh tokens without blocking successful rotation", async () => {
+    it("uses the separate refresh bucket and returns a JSON rate-limit response", async () => {
         const success = await request(routeApp)
             .post("/refresh")
             .set("X-Forwarded-For", "198.51.100.10")
@@ -355,14 +357,27 @@ describe("auth routes runtime", () => {
         mockVerifyAuthToken.mockImplementation(() => {
             throw new Error("bad token");
         });
-        await expectFailedRequestsAreThrottled(
-            async () =>
-                request(routeApp)
-                    .post("/refresh")
-                    .set("X-Forwarded-For", "198.51.100.10")
-                    .send({ refreshToken: "invalid-refresh-token" }),
-            401,
-        );
+        for (
+            let requestCount = 0;
+            requestCount < REFRESH_FAILED_REQUEST_LIMIT;
+            requestCount++
+        ) {
+            const response = await request(routeApp)
+                .post("/refresh")
+                .set("X-Forwarded-For", "198.51.100.10")
+                .send({ refreshToken: "invalid-refresh-token" });
+            expect(response.status).toBe(401);
+        }
+
+        const throttledResponse = await request(routeApp)
+            .post("/refresh")
+            .set("X-Forwarded-For", "198.51.100.10")
+            .send({ refreshToken: "invalid-refresh-token" });
+        expect(throttledResponse.status).toBe(429);
+        expect(throttledResponse.body).toEqual({
+            error: "Too many token refresh attempts. Please try again later.",
+            code: "RATE_LIMITED",
+        });
     });
 
     it("throttles repeated invalid registration attempts", async () => {
@@ -665,6 +680,26 @@ describe("auth routes runtime", () => {
         const badJwtRes = createRes();
         await refresh(badJwtReq, badJwtRes);
         expect(badJwtRes.statusCode).toBe(401);
+    });
+
+    it("returns service unavailable when refresh user lookup fails", async () => {
+        prisma.user.findUnique.mockRejectedValueOnce(
+            new Error("database unavailable"),
+        );
+        const req = { body: { refreshToken: "rt" } } as any;
+        const res = createRes();
+
+        await refresh(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "Authentication service unavailable",
+            code: "AUTH_BACKEND_UNAVAILABLE",
+        });
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            "Refresh authentication backend unavailable",
+            expect.any(Error),
+        );
     });
 
     it("returns current user profile and handles missing user", async () => {

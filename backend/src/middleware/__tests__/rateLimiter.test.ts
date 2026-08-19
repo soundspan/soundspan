@@ -18,7 +18,10 @@ type RateLimitOptions = {
     handler?: (
         req: { ip: string; method: string; path: string },
         res: {
-            status: (code: number) => { send: (message: string) => unknown };
+            status: (code: number) => {
+                send: (message: string) => unknown;
+                json: (body: unknown) => unknown;
+            };
         },
         next: jest.Mock,
         options: { statusCode: number; message: string },
@@ -28,6 +31,7 @@ type RateLimitOptions = {
 type RateLimitHandlerResponse = {
     status: jest.MockedFunction<(code: number) => RateLimitHandlerResponse>;
     send: jest.MockedFunction<(message: string) => void>;
+    json: jest.MockedFunction<(body: unknown) => void>;
 };
 
 const mockRateLimit = jest.fn((options: RateLimitOptions) => options);
@@ -71,12 +75,13 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(15);
+        expect(mockRateLimit).toHaveBeenCalledTimes(16);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.adminSurfaceLimiter).toBeDefined();
         expect(mod.shareLinkLimiter).toBeDefined();
         expect(mod.playbackStateLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
+        expect(mod.refreshLimiter).toBeDefined();
         expect(mod.oidcFlowLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
         expect(mod.downloadLimiter).toBeDefined();
@@ -94,16 +99,17 @@ describe("rateLimiter middleware config", () => {
             { index: 2, windowMs: 60_000, max: 5000 },
             { index: 3, windowMs: 60_000, max: 600 },
             { index: 4, windowMs: 900_000, max: 40 },
-            { index: 5, windowMs: 900_000, max: 40 },
-            { index: 6, windowMs: 60_000, max: 500 },
-            { index: 7, windowMs: 60_000, max: 100 },
-            { index: 8, windowMs: 60_000, max: 120 },
-            { index: 9, windowMs: 900_000, max: 20 },
-            { index: 10, windowMs: 60_000, max: 30 },
-            { index: 11, windowMs: 60_000, max: 20 },
-            { index: 12, windowMs: 60_000, max: 60 },
-            { index: 13, windowMs: 60_000, max: 1000 },
-            { index: 14, windowMs: 900_000, max: 20 },
+            { index: 5, windowMs: 300_000, max: 60 },
+            { index: 6, windowMs: 900_000, max: 40 },
+            { index: 7, windowMs: 60_000, max: 500 },
+            { index: 8, windowMs: 60_000, max: 100 },
+            { index: 9, windowMs: 60_000, max: 120 },
+            { index: 10, windowMs: 900_000, max: 20 },
+            { index: 11, windowMs: 60_000, max: 30 },
+            { index: 12, windowMs: 60_000, max: 20 },
+            { index: 13, windowMs: 60_000, max: 60 },
+            { index: 14, windowMs: 60_000, max: 1000 },
+            { index: 15, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -116,17 +122,19 @@ describe("rateLimiter middleware config", () => {
         }
 
         expect(getOptions(4).skipSuccessfulRequests).toBe(true);
-        expect(getOptions(5).skipSuccessfulRequests).not.toBe(true);
+        expect(getOptions(5).skipSuccessfulRequests).toBe(true);
+        expect(getOptions(6).skipSuccessfulRequests).not.toBe(true);
     });
 
     it.each([
         ["admin-surface", 1],
         ["share-link", 2],
         ["auth", 4],
-        ["oidc-flow", 5],
-        ["webhook", 12],
-        ["federation-peer", 13],
-        ["federation-pairing", 14],
+        ["auth-refresh", 5],
+        ["oidc-flow", 6],
+        ["webhook", 13],
+        ["federation-peer", 14],
+        ["federation-pairing", 15],
     ])("uses the namespaced shared store for %s", async (name, index) => {
         await loadRateLimiterModule();
 
@@ -136,6 +144,7 @@ describe("rateLimiter middleware config", () => {
     it.each([
         "share-link",
         "auth",
+        "auth-refresh",
         "oidc-flow",
         "webhook",
         "federation-pairing",
@@ -159,12 +168,12 @@ describe("rateLimiter middleware config", () => {
     it.each([
         ["general API", 0],
         ["playback state", 3],
-        ["image", 6],
-        ["download", 7],
-        ["lyrics lookup", 8],
-        ["lyrics mutation", 9],
-        ["YouTube Music search", 10],
-        ["YouTube Music stream", 11],
+        ["image", 7],
+        ["download", 8],
+        ["lyrics lookup", 9],
+        ["lyrics mutation", 10],
+        ["YouTube Music search", 11],
+        ["YouTube Music stream", 12],
     ])("keeps the %s limiter in memory", async (_name, index) => {
         await loadRateLimiterModule();
 
@@ -173,7 +182,7 @@ describe("rateLimiter middleware config", () => {
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(13).keyGenerator!;
+        const keyGenerator = getOptions(14).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
@@ -238,6 +247,7 @@ describe("rateLimiter middleware config", () => {
         const res = {} as RateLimitHandlerResponse;
         res.status = jest.fn((_: number) => res);
         res.send = jest.fn();
+        res.json = jest.fn();
 
         handler(
             { ip: "10.0.0.1", method: "GET", path: "/api/library" },
@@ -267,6 +277,7 @@ describe("rateLimiter middleware config", () => {
         const res = {} as RateLimitHandlerResponse;
         res.status = jest.fn((_: number) => res);
         res.send = jest.fn();
+        res.json = jest.fn();
 
         handler(
             { ip: "10.0.0.2", method: "POST", path: "/api/auth/login" },
@@ -286,6 +297,37 @@ describe("rateLimiter middleware config", () => {
         expect(res.send).toHaveBeenCalledWith(
             "Too many login attempts, please try again in 15 minutes.",
         );
+    });
+
+    it("refreshLimiter returns the stable JSON rate-limit response", async () => {
+        await loadRateLimiterModule();
+        const handler = getOptions(5).handler as NonNullable<
+            RateLimitOptions["handler"]
+        >;
+        const res = {} as RateLimitHandlerResponse;
+        res.status = jest.fn((_: number) => res);
+        res.send = jest.fn();
+        res.json = jest.fn();
+
+        handler(
+            { ip: "10.0.0.3", method: "POST", path: "/api/auth/refresh" },
+            res,
+            jest.fn(),
+            {
+                statusCode: 429,
+                message:
+                    "Too many token refresh attempts. Please try again later.",
+            },
+        );
+
+        expect(mockRateLimiterLoggerWarn).toHaveBeenCalledWith(
+            "Refresh rate limit exceeded: 10.0.0.3",
+        );
+        expect(res.status).toHaveBeenCalledWith(429);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Too many token refresh attempts. Please try again later.",
+            code: "RATE_LIMITED",
+        });
     });
 
     it("counts redirect responses against the OIDC flow limit", async () => {

@@ -75,6 +75,7 @@ import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
 import {
     authLimiter,
+    refreshLimiter,
     adminSurfaceLimiter,
     apiLimiter,
     imageLimiter,
@@ -236,6 +237,7 @@ app.set("trust proxy", config.trustProxy);
 // Apply rate limiting to auth routes
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/refresh", refreshLimiter);
 app.use("/api/auth", authRoutes);
 // Registration mints the first admin account, so it uses the strict auth limiter;
 // the rest of onboarding, including the public status probe, uses the general limiter.

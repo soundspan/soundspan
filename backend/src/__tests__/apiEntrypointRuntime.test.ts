@@ -209,6 +209,7 @@ describe("api entrypoint runtime behavior", () => {
         const requireAdmin = jest.fn((_req, _res, next) => next?.());
         const errorHandler = jest.fn((_err, _req, _res, _next) => undefined);
         const authLimiter = "auth-limiter";
+        const refreshLimiter = "refresh-limiter";
         const apiLimiter = "api-limiter";
         const adminSurfaceLimiter = "admin-surface-limiter";
         const shareLinkLimiter = "share-link-limiter";
@@ -305,6 +306,7 @@ describe("api entrypoint runtime behavior", () => {
         }));
         jest.doMock("../middleware/rateLimiter", () => ({
             authLimiter,
+            refreshLimiter,
             apiLimiter,
             adminSurfaceLimiter,
             shareLinkLimiter,
@@ -700,6 +702,7 @@ describe("api entrypoint runtime behavior", () => {
         const expectedMounts: Record<string, unknown[]> = {
             "/api/auth/login": ["auth-limiter"],
             "/api/auth/register": ["auth-limiter"],
+            "/api/auth/refresh": ["refresh-limiter"],
             "/api/auth": [route("../routes/auth")],
             "/api/onboarding/register": ["auth-limiter"],
             "/api/onboarding": ["api-limiter", route("../routes/onboarding")],

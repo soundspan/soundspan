@@ -258,6 +258,29 @@ describe("auth middleware behavioral token validation (real jsonwebtoken)", () =
             );
 
             expectRejected(result);
+            expect(result.res.body).toEqual({
+                error: "Not authenticated",
+                code: "AUTH_REQUIRED",
+            });
+        });
+
+        it("returns service unavailable when the user lookup fails", async () => {
+            mockUserFindUnique.mockRejectedValueOnce(
+                new Error("database unavailable"),
+            );
+
+            const result = await runRequireAuth(
+                createReq({
+                    headers: { authorization: `Bearer ${accessToken()}` },
+                }),
+            );
+
+            expect(result.next).not.toHaveBeenCalled();
+            expect(result.res.statusCode).toBe(503);
+            expect(result.res.body).toEqual({
+                error: "Authentication service unavailable",
+                code: "AUTH_BACKEND_UNAVAILABLE",
+            });
         });
 
         it("rejects an unsigned alg:none token", async () => {
@@ -355,6 +378,23 @@ describe("auth middleware behavioral token validation (real jsonwebtoken)", () =
             );
 
             expectRejected(result);
+        });
+
+        it("returns service unavailable when a query-token user lookup fails", async () => {
+            mockUserFindUnique.mockRejectedValueOnce(
+                new Error("database unavailable"),
+            );
+
+            const result = await runRequireAuthOrToken(
+                createReq({ query: { token: accessToken() } }),
+            );
+
+            expect(result.next).not.toHaveBeenCalled();
+            expect(result.res.statusCode).toBe(503);
+            expect(result.res.body).toEqual({
+                error: "Authentication service unavailable",
+                code: "AUTH_BACKEND_UNAVAILABLE",
+            });
         });
     });
 
