@@ -155,14 +155,15 @@ export function getCachedLibraryHealthPanel<T>(
 
 /** Advances the shared generation fence and deletes every dashboard cache key. */
 export async function invalidateLibraryHealthDashboardCache(): Promise<void> {
-    inFlight.clear();
     try {
         await withLibraryHealthRedisDeadline(
             redisClient.incr(CACHE_GENERATION_KEY),
         );
     } catch (error) {
         log.warn("Library Health cache generation increment failed", { error });
+        throw error;
     }
+    inFlight.clear();
     try {
         await withLibraryHealthRedisDeadline(
             redisClient.del(Object.values(LIBRARY_HEALTH_CACHE_KEYS)),

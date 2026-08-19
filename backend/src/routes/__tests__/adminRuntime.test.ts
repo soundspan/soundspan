@@ -32,9 +32,9 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-const mockRedisGet = jest.fn();
+const mockRedisEval = jest.fn();
 jest.mock("../../utils/redis", () => ({
-    redisClient: { get: mockRedisGet },
+    redisClient: { eval: mockRedisEval },
 }));
 
 jest.mock("../../workers/queues", () => ({
@@ -131,7 +131,7 @@ describe("admin library health routes", () => {
         mockSchedulerGetJob.mockResolvedValue(undefined);
         mockSchedulerGetJobs.mockResolvedValue([]);
         mockSchedulerGetFailed.mockResolvedValue([]);
-        mockRedisGet.mockResolvedValue(null);
+        mockRedisEval.mockResolvedValue("-1");
     });
 
     afterEach(() => {
@@ -344,7 +344,7 @@ describe("admin library health routes", () => {
         });
 
         it("reports the stable purge marker before inspecting the queue", async () => {
-            mockRedisGet.mockResolvedValueOnce("17");
+            mockRedisEval.mockResolvedValueOnce("17");
             const res = createRes();
 
             await purgeStatusHandler({} as any, res);
@@ -409,6 +409,11 @@ describe("admin library health routes", () => {
                                   startAfterId: "track-100",
                                   cutoffAt: "2026-08-18T12:00:00.000Z",
                                   deletedSoFar: 100,
+                                  sweepId: "purge-root",
+                                  initialTotal: 117,
+                                  processedSoFar: 100,
+                                  remaining: 17,
+                                  pageNumber: 1,
                               },
                           },
                       ]

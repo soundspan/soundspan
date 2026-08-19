@@ -106,6 +106,15 @@ const duplicates = {
                     fileSize: 2000,
                     mime: "audio/mpeg",
                 },
+                {
+                    id: "track-2",
+                    title: "Track Copy",
+                    albumTitle: "Album",
+                    artistName: "Artist",
+                    filePath: "/music/track-copy.mp3",
+                    fileSize: 2000,
+                    mime: "audio/mpeg",
+                },
             ],
         },
     ],
@@ -295,6 +304,37 @@ describe("library health cache", () => {
         ]);
     });
 
+    it("aborts invalidation when the generation fence cannot advance", async () => {
+        let releaseLoader!: (value: typeof duplicates) => void;
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            markStarted = resolve;
+        });
+        const blocked = new Promise<typeof duplicates>((resolve) => {
+            releaseLoader = resolve;
+        });
+        const staleFill = getCachedLibraryHealthPanel("duplicates", () => {
+            markStarted();
+            return blocked;
+        });
+        await started;
+        incr.mockRejectedValueOnce(new Error("generation unavailable"));
+
+        await expect(invalidateLibraryHealthDashboardCache()).rejects.toThrow(
+            "generation unavailable",
+        );
+        expect(del).not.toHaveBeenCalled();
+
+        await invalidateLibraryHealthDashboardCache();
+        releaseLoader(duplicates);
+        await expect(staleFill).resolves.toEqual(duplicates);
+        await Promise.resolve();
+
+        expect(generation).toBe(1);
+        expect(del).toHaveBeenCalledTimes(1);
+        expect(atomicWrites).toEqual([]);
+    });
+
     it("skips a cache write when the Redis generation read fails", async () => {
         get.mockImplementationOnce(async () => null).mockRejectedValueOnce(
             new Error("generation unavailable"),
@@ -364,12 +404,31 @@ describe("library health cache", () => {
                 ],
             },
         ],
+        [
+            "a preview shorter than the disclosed member count",
+            {
+                ...duplicates,
+                clusters: [
+                    {
+                        ...duplicates.clusters[0],
+                        members: [duplicates.clusters[0].members[0]],
+                    },
+                ],
+            },
+        ],
         ["a mismatched total", { ...duplicates, total: 2 }],
         [
             "tier counts that do not sum to the total",
             {
                 ...duplicates,
                 byTier: { audioHash: 0, recordingMbid: 0, isrc: 0 },
+            },
+        ],
+        [
+            "tier counts assigned to the wrong cluster tier",
+            {
+                ...duplicates,
+                byTier: { audioHash: 0, recordingMbid: 1, isrc: 0 },
             },
         ],
     ])("recomputes a duplicate catalog with %s", async (_name, payload) => {

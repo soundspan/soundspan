@@ -61,11 +61,28 @@ const PURGE_STATES_IN_FLIGHT = new Set(["waiting", "delayed", "active"]);
 const FAILED_SCAN_LIMIT = 50;
 const FAILURE_REASON_LIMIT = 200;
 const CONTINUATION_JOB_ID_PREFIX = "scheduler:track-removal-purge:";
-const continuationDataSchema = z.strictObject({
-    startAfterId: z.string().trim().min(1).max(128),
-    cutoffAt: z.iso.datetime({ offset: true }),
-    deletedSoFar: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-});
+const continuationCountSchema = z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER);
+const continuationDataSchema = z
+    .strictObject({
+        startAfterId: z.string().trim().min(1).max(128).optional(),
+        cutoffAt: z.iso.datetime({ offset: true }),
+        deletedSoFar: continuationCountSchema,
+        sweepId: z.string().trim().min(1).max(256),
+        initialTotal: continuationCountSchema,
+        processedSoFar: continuationCountSchema,
+        remaining: continuationCountSchema,
+        pageNumber: continuationCountSchema.min(1),
+    })
+    .refine(
+        (data) =>
+            data.remaining ===
+            Math.max(0, data.initialTotal - data.processedSoFar),
+        { path: ["remaining"] },
+    );
 
 function boundedFailureReason(reason: string | undefined): string {
     if (!reason) return "Purge job failed";

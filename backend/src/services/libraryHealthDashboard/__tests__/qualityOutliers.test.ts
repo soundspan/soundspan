@@ -52,6 +52,13 @@ describe("library health quality outliers", () => {
         "Windows Media Audio 9.2",
         "Windows Media Audio 10 Professional",
         "Windows Media Audio Voice",
+        "Speex 1.x",
+        "speex 1.2",
+        "ALaw 2:1",
+        "µLaw 2:1",
+        "uLaw 2:1",
+        "CCITT G.711 u-law",
+        "CCITT G.711 A-law",
     ])("classifies %s as lossy", (codec) => {
         expect(isLossyAudioCodec(codec)).toBe(true);
     });
@@ -73,6 +80,8 @@ describe("library health quality outliers", () => {
         "Windows Media Audio 9 Lossless",
         "MACE",
         "MACE custom",
+        "MACE 3:1+ALAC",
+        "FLAC+Speex 1.x",
         "audio/flac",
         "unknown-codec",
         "",

@@ -17,9 +17,9 @@ const LOSSY_AUDIO_MIMES = new Set([
     "audio/opus",
 ]);
 const LOSSLESS_CODEC_PATTERN =
-    /(?:^|[\s/._-])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd|tak|tta|ieee_float|lossless)(?:$|[\s/._-])/i;
+    /(?:^|[^a-z0-9])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd|tak|tta|ieee_float|lossless)(?=$|[^a-z0-9])/i;
 const LOSSY_CODEC_PATTERN =
-    /(?:^|[\s/._-])(mp3|aac|m4a|opus|vorbis|ogg|wma)(?:$|[\s/._-])/i;
+    /(?:^|[^a-z0-9])(mp3|aac|m4a|opus|vorbis|ogg|wma|speex|mace\s+(?:3|6):1)(?=$|[^a-z0-9])/i;
 const MPEG_LAYER_PATTERN =
     /\bmpeg(?:[\s._-]*\d+)?[\s._-]+layer[\s._-]+(?:[123]|i{1,3})\b/i;
 const WINDOWS_MEDIA_AUDIO_PATTERN = /^windows media audio(?:\b|$)/i;
@@ -28,6 +28,10 @@ const LOSSY_CODEC_NAMES = new Set([
     "mace 6:1",
     "ima 4:1",
     "ulaw 2:1",
+    "µlaw 2:1",
+    "alaw 2:1",
+    "ccitt g.711 u-law",
+    "ccitt g.711 a-law",
     "qualcomm purevoice",
     "ac-3",
     "mpeg-4/aac",
@@ -54,16 +58,18 @@ const LOSSY_CODEC_NAMES = new Set([
 export function isLossyAudioCodec(value: string | null): boolean {
     if (value === null) return false;
     const normalized = value.trim().toLowerCase();
-    if (normalized.length === 0 || LOSSLESS_CODEC_PATTERN.test(normalized)) {
-        return false;
-    }
-    return (
+    if (normalized.length === 0) return false;
+    const hasLosslessToken = LOSSLESS_CODEC_PATTERN.test(normalized);
+    const hasLossyToken =
         LOSSY_AUDIO_MIMES.has(normalized) ||
         LOSSY_CODEC_NAMES.has(normalized) ||
         LOSSY_CODEC_PATTERN.test(normalized) ||
         MPEG_LAYER_PATTERN.test(normalized) ||
-        WINDOWS_MEDIA_AUDIO_PATTERN.test(normalized)
-    );
+        WINDOWS_MEDIA_AUDIO_PATTERN.test(normalized);
+    // The dashboard is report-only. Exclude ambiguous mixed labels instead of
+    // presenting a file with any lossless stream as definitively lossy.
+    if (hasLosslessToken && hasLossyToken) return false;
+    return hasLossyToken;
 }
 
 export interface LossyAlbumQuality {

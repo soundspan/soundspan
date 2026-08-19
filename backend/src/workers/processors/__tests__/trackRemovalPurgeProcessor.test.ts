@@ -24,11 +24,13 @@ describe("trackRemovalPurgeProcessor", () => {
         };
         logger.child.mockReturnValue(logger);
 
+        const removedIds = new Set<string>();
         let prisma: any;
         prisma = {
             track: {
                 findMany: jest.fn(async (args: any) =>
                     candidates.filter((track) => {
+                        if (removedIds.has(track.id)) return false;
                         const isLocal = track.origin !== "FEDERATED";
                         const isBeforeCutoff =
                             track.removedAt === undefined ||
@@ -39,12 +41,16 @@ describe("trackRemovalPurgeProcessor", () => {
                         return isLocal && isBeforeCutoff && isAfterCursor;
                     }),
                 ),
-                deleteMany: jest.fn(async (args: any) => ({
-                    count: deletedCount ?? args.where.id.in.length,
-                })),
+                deleteMany: jest.fn(async (args: any) => {
+                    for (const id of args.where.id.in) removedIds.add(id);
+                    return {
+                        count: deletedCount ?? args.where.id.in.length,
+                    };
+                }),
                 count: jest.fn(
                     async (args: any) =>
                         candidates.filter((track) => {
+                            if (removedIds.has(track.id)) return false;
                             const isLocal = track.origin !== "FEDERATED";
                             const isBeforeCutoff =
                                 track.removedAt === undefined ||
@@ -53,7 +59,8 @@ describe("trackRemovalPurgeProcessor", () => {
                             return (
                                 isLocal &&
                                 isBeforeCutoff &&
-                                track.id > args.where.id.gt
+                                (!args.where.id?.gt ||
+                                    track.id > args.where.id.gt)
                             );
                         }).length,
                 ),
@@ -73,6 +80,7 @@ describe("trackRemovalPurgeProcessor", () => {
         const redisClient = {
             set: jest.fn(async () => "OK"),
             del: jest.fn(async () => 1),
+            eval: jest.fn(async () => 1),
         };
         const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
             albumsDeleted: 0,
@@ -155,30 +163,43 @@ describe("trackRemovalPurgeProcessor", () => {
         expect(backfillAllArtistCounts).toHaveBeenCalledTimes(1);
     });
 
-    it("expires the active marker after a continuation page can outlive the queue slice", async () => {
+    it("refreshes the one-hour marker after enqueuing a continuation", async () => {
         const candidates = Array.from({ length: 101 }, (_, index) => ({
             id: `track-${index.toString().padStart(3, "0")}`,
         }));
-        const { module, redisClient } = loadProcessor(candidates);
+        const { module, redisClient, schedulerQueue } =
+            loadProcessor(candidates);
 
         await module.processTrackRemovalPurge(buildJob());
 
-        expect(redisClient.set).toHaveBeenCalledWith(
-            "library-health:purge-active",
-            "1",
-            { EX: 600 },
-        );
-        expect(redisClient.del).not.toHaveBeenCalled();
+        expect(redisClient.eval).toHaveBeenLastCalledWith(expect.any(String), {
+            keys: [
+                "library-health:purge-active:owners",
+                "library-health:purge-active:remaining",
+            ],
+            arguments: expect.arrayContaining([
+                "track-removal-purge-1",
+                "1",
+                "3600",
+            ]),
+        });
+        const enqueueOrder = schedulerQueue.add.mock.invocationCallOrder[0];
+        const refreshOrder = redisClient.eval.mock.invocationCallOrder.at(-1);
+        expect(refreshOrder).toBeGreaterThan(enqueueOrder);
     });
 
-    it("deletes the active marker when the sweep completes", async () => {
+    it("clears only its owned marker when the sweep completes", async () => {
         const { module, redisClient } = loadProcessor([{ id: "track-old" }]);
 
         await module.processTrackRemovalPurge(buildJob());
 
-        expect(redisClient.del).toHaveBeenCalledWith(
-            "library-health:purge-active",
-        );
+        expect(redisClient.eval).toHaveBeenLastCalledWith(expect.any(String), {
+            keys: [
+                "library-health:purge-active:owners",
+                "library-health:purge-active:remaining",
+            ],
+            arguments: ["track-removal-purge-1"],
+        });
     });
 
     it("uses an explicit initial cutoff and never purges tracks without removedAt", async () => {
@@ -326,6 +347,11 @@ describe("trackRemovalPurgeProcessor", () => {
                 startAfterId: "track-099",
                 cutoffAt: "2026-05-16T12:00:00.000Z",
                 deletedSoFar: 100,
+                sweepId: "track-removal-purge-1",
+                initialTotal: 101,
+                processedSoFar: 100,
+                remaining: 1,
+                pageNumber: 1,
             },
             {
                 attempts: 3,
@@ -348,6 +374,11 @@ describe("trackRemovalPurgeProcessor", () => {
                 startAfterId: "track-100",
                 cutoffAt,
                 deletedSoFar: 100,
+                sweepId: "track-removal-purge-root",
+                initialTotal: 200,
+                processedSoFar: 100,
+                remaining: 100,
+                pageNumber: 1,
             }),
         );
 
@@ -361,6 +392,93 @@ describe("trackRemovalPurgeProcessor", () => {
             take: 101,
             select: { id: true },
         });
+    });
+
+    it("carries an arithmetic remaining countdown without recounting a non-correction page", async () => {
+        const candidates = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${index.toString().padStart(3, "0")}`,
+        }));
+        const { module, prisma, schedulerQueue } = loadProcessor(candidates);
+
+        await module.processTrackRemovalPurge(buildJob());
+
+        expect(prisma.track.count).toHaveBeenCalledTimes(1);
+        const continuationCalls = schedulerQueue.add.mock
+            .calls as unknown as Array<[string, Record<string, unknown>]>;
+        expect(continuationCalls[0]?.[1]).toEqual(
+            expect.objectContaining({
+                initialTotal: 101,
+                processedSoFar: 100,
+                remaining: 1,
+                pageNumber: 1,
+            }),
+        );
+    });
+
+    it("corrects the arithmetic countdown every tenth processed page", async () => {
+        const candidates = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${(index + 901).toString().padStart(4, "0")}`,
+        }));
+        const { module, prisma, schedulerQueue } = loadProcessor(candidates);
+        prisma.track.count.mockResolvedValueOnce(37);
+
+        await module.processTrackRemovalPurge(
+            buildJob({
+                startAfterId: "track-0900",
+                cutoffAt: "2026-05-16T12:00:00.000Z",
+                deletedSoFar: 900,
+                sweepId: "track-removal-purge-root",
+                initialTotal: 2_000,
+                processedSoFar: 900,
+                remaining: 1_100,
+                pageNumber: 9,
+            }),
+        );
+
+        expect(prisma.track.count).toHaveBeenCalledWith({
+            where: {
+                origin: "LOCAL",
+                removedAt: { lt: new Date("2026-05-16T12:00:00.000Z") },
+                id: { gt: "track-1000" },
+            },
+        });
+        const continuationCalls = schedulerQueue.add.mock
+            .calls as unknown as Array<[string, Record<string, unknown>]>;
+        expect(continuationCalls[0]?.[1]).toEqual(
+            expect.objectContaining({
+                initialTotal: 1_037,
+                processedSoFar: 1_000,
+                remaining: 37,
+                pageNumber: 10,
+            }),
+        );
+    });
+
+    it("recounts a terminal page and restarts when matching rows drifted behind the cursor", async () => {
+        const {
+            module,
+            prisma,
+            schedulerQueue,
+            cleanupOrphanedLibraryEntities,
+        } = loadProcessor([{ id: "track-001" }]);
+        prisma.track.count.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+
+        await expect(
+            module.processTrackRemovalPurge(buildJob()),
+        ).resolves.toEqual({ deleted: 1, continued: true });
+
+        const continuationCalls = schedulerQueue.add.mock
+            .calls as unknown as Array<[string, Record<string, unknown>]>;
+        expect(continuationCalls[0]?.[1]).toEqual(
+            expect.objectContaining({
+                initialTotal: 3,
+                processedSoFar: 1,
+                remaining: 2,
+                pageNumber: 1,
+            }),
+        );
+        expect(continuationCalls[0]?.[1]).not.toHaveProperty("startAfterId");
+        expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
     });
 
     it("rejects invalid continuation data before querying the database", async () => {
@@ -441,6 +559,7 @@ describe("trackRemovalPurgeProcessor", () => {
 
         prisma.track.findMany.mockResolvedValueOnce([{ id: "track-200" }]);
         prisma.track.deleteMany.mockResolvedValueOnce({ count: 0 });
+        prisma.track.count.mockResolvedValueOnce(0);
         const secondContinuation = continuationCalls[1]?.[1];
         await module.processTrackRemovalPurge(buildJob(secondContinuation));
 

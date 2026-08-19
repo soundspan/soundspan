@@ -118,11 +118,15 @@ const duplicateClusterSchema = z
             .max(DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT),
     })
     .superRefine((cluster, context) => {
-        if (cluster.members.length > cluster.memberCount) {
+        const expectedPreviewCount = Math.min(
+            cluster.memberCount,
+            DUPLICATE_CLUSTER_MEMBER_PREVIEW_LIMIT,
+        );
+        if (cluster.members.length !== expectedPreviewCount) {
             context.addIssue({
                 code: "custom",
                 path: ["members"],
-                message: "Duplicate preview exceeds member count",
+                message: "Duplicate preview does not match member count",
             });
         }
     });
@@ -142,16 +146,17 @@ const duplicatesSchema = z
                 message: "Duplicate total does not match cluster count",
             });
         }
-        const tierTotal = Object.values(catalog.byTier).reduce(
-            (sum, count) => sum + count,
-            0,
-        );
-        if (tierTotal !== catalog.total) {
-            context.addIssue({
-                code: "custom",
-                path: ["byTier"],
-                message: "Duplicate tier counts do not match total",
-            });
+        for (const tier of ["audioHash", "recordingMbid", "isrc"] as const) {
+            const actual = catalog.clusters.filter(
+                (cluster) => cluster.tier === tier,
+            ).length;
+            if (catalog.byTier[tier] !== actual) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["byTier", tier],
+                    message: `Duplicate ${tier} count does not match clusters`,
+                });
+            }
         }
     });
 

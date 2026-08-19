@@ -350,4 +350,16 @@ describe("library health dashboard routes", () => {
         expect(summary).toHaveBeenCalledTimes(1);
         expect(response.body).toEqual(summaryFixture);
     });
+
+    it("returns the canonical internal error when invalidation fails", async () => {
+        invalidate.mockRejectedValueOnce(new Error("generation unavailable"));
+
+        const response = await invoke("/refresh", "post", { body: {} });
+
+        expect(response.statusCode).toBe(500);
+        expect(response.body).toEqual({
+            error: "Failed to refresh library health dashboard",
+        });
+        expect(summary).not.toHaveBeenCalled();
+    });
 });
