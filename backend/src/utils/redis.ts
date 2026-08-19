@@ -58,12 +58,18 @@ type DedicatedRedisClient = typeof redisClient;
 interface BlockingRedisConnection {
     client: DedicatedRedisClient;
     connectPromise: Promise<void> | null;
-    destroyed: boolean;
+    lifecycle: { destroyed: boolean };
 }
 
 const blockingConnections = new Map<string, BlockingRedisConnection>();
 
-function blockingReconnectStrategy(retries: number): number | Error {
+function blockingReconnectStrategy(
+    retries: number,
+    shutdownRequested: boolean,
+): number | Error {
+    if (shutdownRequested) {
+        return new Error("Dedicated Redis blocking connection was stopped");
+    }
     if (retries >= MAX_BLOCKING_RECONNECT_ATTEMPTS) {
         return new Error(
             `Dedicated Redis reconnect limit reached after ${MAX_BLOCKING_RECONNECT_ATTEMPTS} attempts`,
@@ -76,27 +82,30 @@ function blockingReconnectStrategy(retries: number): number | Error {
 }
 
 function createBlockingConnection(): BlockingRedisConnection {
+    const lifecycle = { destroyed: false };
     const client = redisClient.duplicate({
         socket: {
             connectTimeout: 10_000,
-            reconnectStrategy: blockingReconnectStrategy,
+            reconnectStrategy: (retries: number) =>
+                blockingReconnectStrategy(retries, lifecycle.destroyed),
         },
     });
     client.on("error", (error) => {
+        if (lifecycle.destroyed) return;
         logger.error(
             "Dedicated Redis blocking connection error:",
             error.message,
         );
     });
-    return { client, connectPromise: null, destroyed: false };
+    return { client, connectPromise: null, lifecycle };
 }
 
 function destroyBlockingConnection(
     key: string,
     connection: BlockingRedisConnection,
 ): void {
-    if (connection.destroyed) return;
-    connection.destroyed = true;
+    if (connection.lifecycle.destroyed) return;
+    connection.lifecycle.destroyed = true;
     if (blockingConnections.get(key) === connection) {
         blockingConnections.delete(key);
     }
@@ -170,28 +179,11 @@ export async function blockingBlPop(
     }
 }
 
-/** Close the persistent blocking connection owned by one queue consumer. */
+/** Destroy the persistent blocking connection and interrupt its current wait. */
 export async function closeBlockingBlPop(key: string): Promise<void> {
     const connection = blockingConnections.get(key);
     if (!connection) return;
-    blockingConnections.delete(key);
-    if (connection.connectPromise) {
-        try {
-            await connection.connectPromise;
-        } catch {
-            return;
-        }
-    }
-    if (!connection.client.isOpen) return;
-    try {
-        await connection.client.close();
-    } catch (error) {
-        logger.debug(
-            "Failed to close dedicated Redis connection:",
-            error instanceof Error ? error.message : String(error),
-        );
-        destroyBlockingConnection(key, connection);
-    }
+    destroyBlockingConnection(key, connection);
 }
 
 export { redisClient };

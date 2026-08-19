@@ -2,3 +2,5 @@
 pytest>=9.1.1
 # analyzer.py imports numpy at module load; keep the <2.0 ABI bound from requirements.txt.
 numpy>=1.26.4,<2.0.0
+# Real-PostgreSQL queue-claim integration coverage.
+psycopg2-binary>=2.9.0

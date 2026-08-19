@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -135,23 +136,15 @@ class FakeRedis:
         return self.queue_pipeline
 
 
-@pytest.fixture(scope="module")
-def loaded_analyzer() -> Iterator[ModuleType]:
-    """Load analyzer.py with lightweight Redis and psycopg2 stubs."""
-    monkeypatch = pytest.MonkeyPatch()
+def _uses_real_postgres(request: pytest.FixtureRequest) -> bool:
+    """Keep the live driver only for the environment-gated integration module."""
+    module_name = request.module.__name__.rsplit(".", maxsplit=1)[-1]
+    database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+    return module_name == "test_queue_claim_postgres_integration" and bool(database_url)
 
-    redis_stub = ModuleType("redis")
 
-    class Redis:
-        """Prevent accidental Redis connections from unit tests."""
-
-        @staticmethod
-        def from_url(*args: Any, **kwargs: Any) -> None:
-            """Reject attempts to construct a real Redis client."""
-            raise AssertionError("Redis must not be created by these unit tests")
-
-    redis_stub.Redis = Redis  # type: ignore[attr-defined]
-
+def _create_psycopg2_stubs() -> tuple[ModuleType, ModuleType]:
+    """Build fail-closed psycopg2 modules for analyzer unit tests."""
     psycopg2_stub = ModuleType("psycopg2")
     extras_stub = ModuleType("psycopg2.extras")
 
@@ -171,16 +164,61 @@ def loaded_analyzer() -> Iterator[ModuleType]:
     psycopg2_stub.extras = extras_stub  # type: ignore[attr-defined]
     extras_stub.RealDictCursor = RealDictCursor  # type: ignore[attr-defined]
     extras_stub.Json = Json  # type: ignore[attr-defined]
+    return psycopg2_stub, extras_stub
 
-    monkeypatch.delenv("NUM_WORKERS", raising=False)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://stubbed-audio-analyzer")
-    monkeypatch.delitem(sys.modules, "tensorflow", raising=False)
-    monkeypatch.setitem(sys.modules, "redis", redis_stub)
-    monkeypatch.setitem(sys.modules, "psycopg2", psycopg2_stub)
-    monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_stub)
+
+def _configure_psycopg2(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> bool:
+    """Select the live integration driver or fail-closed unit-test stubs."""
+    uses_real_postgres = _uses_real_postgres(request)
+    if uses_real_postgres:
+        psycopg2_module = importlib.import_module("psycopg2")
+        extras_module = importlib.import_module("psycopg2.extras")
+    else:
+        psycopg2_module, extras_module = _create_psycopg2_stubs()
+        monkeypatch.setitem(sys.modules, "psycopg2", psycopg2_module)
+        monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_module)
+
     connection_module = sys.modules.get("database_connection")
     if connection_module is not None:
-        monkeypatch.setattr(connection_module, "psycopg2", psycopg2_stub)
+        monkeypatch.setattr(connection_module, "psycopg2", psycopg2_module)
+        monkeypatch.setattr(
+            connection_module,
+            "RealDictCursor",
+            extras_module.RealDictCursor,  # type: ignore[attr-defined]
+        )
+    return uses_real_postgres
+
+
+@pytest.fixture(scope="module")
+def loaded_analyzer(request: pytest.FixtureRequest) -> Iterator[ModuleType]:
+    """Load analyzer.py with isolated dependencies for the selected test module."""
+    monkeypatch = pytest.MonkeyPatch()
+
+    redis_stub = ModuleType("redis")
+
+    class Redis:
+        """Prevent accidental Redis connections from unit tests."""
+
+        @staticmethod
+        def from_url(*args: Any, **kwargs: Any) -> None:
+            """Reject attempts to construct a real Redis client."""
+            raise AssertionError("Redis must not be created by these unit tests")
+
+    redis_stub.Redis = Redis  # type: ignore[attr-defined]
+
+    uses_real_postgres = _configure_psycopg2(monkeypatch, request)
+    monkeypatch.delenv("NUM_WORKERS", raising=False)
+    if uses_real_postgres:
+        database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+        assert database_url is not None
+        monkeypatch.setenv("DATABASE_URL", database_url)
+    else:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://stubbed-audio-analyzer")
+    monkeypatch.delitem(sys.modules, "tensorflow", raising=False)
+    monkeypatch.setitem(sys.modules, "redis", redis_stub)
 
     spec = importlib.util.spec_from_file_location("audio_analyzer_behavior_module", ANALYZER_PATH)
     assert spec is not None

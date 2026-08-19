@@ -212,11 +212,11 @@ describe("redisClient", () => {
         ).toBeLessThan(dedicatedClient.blPop.mock.invocationCallOrder[0]);
         expect(dedicatedClient.close).not.toHaveBeenCalled();
         await closeBlockingBlPop("k");
-        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
     });
 
     it("bounds dedicated reconnect attempts with exponential backoff", async () => {
-        const { blockingBlPop } = await import("../redis");
+        const { blockingBlPop, closeBlockingBlPop } = await import("../redis");
         await blockingBlPop("k", 30);
 
         const [options] = client.duplicate.mock.calls[0] as [
@@ -232,6 +232,9 @@ describe("redisClient", () => {
         expect(reconnectStrategy(1)).toBe(500);
         expect(reconnectStrategy(4)).toBe(4_000);
         expect(reconnectStrategy(5)).toEqual(expect.any(Error));
+
+        await closeBlockingBlPop("k");
+        expect(reconnectStrategy(0)).toEqual(expect.any(Error));
     });
 
     it.each([
@@ -287,15 +290,38 @@ describe("redisClient", () => {
         expect(dedicatedClient.blPop).not.toHaveBeenCalled();
     });
 
-    it("destroys a blocking connection when graceful shutdown close fails", async () => {
-        dedicatedClient.close.mockRejectedValue(new Error("close failed"));
+    it("destroys without awaiting an in-flight connection attempt", async () => {
+        const shutdownError = new Error("connection destroyed");
+        let rejectConnect!: (reason?: unknown) => void;
+        dedicatedClient.connect.mockImplementation(
+            () =>
+                new Promise<void>((_resolve, reject) => {
+                    rejectConnect = reject;
+                }),
+        );
+        dedicatedClient.destroy.mockImplementation(() => {
+            rejectConnect(shutdownError);
+        });
+        const { blockingBlPop, closeBlockingBlPop } = await import("../redis");
+        const pop = blockingBlPop("k", 30);
+        const rejectedPop = expect(pop).rejects.toBe(shutdownError);
+        await Promise.resolve();
+
+        await expect(closeBlockingBlPop("k")).resolves.toBeUndefined();
+        await rejectedPop;
+
+        expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.blPop).not.toHaveBeenCalled();
+    });
+
+    it("destroys a blocking connection immediately during shutdown", async () => {
         const { blockingBlPop, closeBlockingBlPop } = await import("../redis");
 
         await blockingBlPop("k", 30);
         dedicatedClient.isOpen = true;
         await expect(closeBlockingBlPop("k")).resolves.toBeUndefined();
 
-        expect(dedicatedClient.close).toHaveBeenCalledTimes(1);
         expect(dedicatedClient.destroy).toHaveBeenCalledTimes(1);
+        expect(dedicatedClient.close).not.toHaveBeenCalled();
     });
 });

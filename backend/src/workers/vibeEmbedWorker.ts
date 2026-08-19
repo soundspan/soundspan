@@ -331,6 +331,7 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
                 BLPOP_TIMEOUT_SECONDS,
             );
         } catch (error) {
+            if (this.stopped || !this.running) return null;
             this.dependencies.logger.warn(
                 "Vibe embedding queue pop failed",
                 error,
@@ -507,19 +508,19 @@ class VibeEmbedWorkerRuntime implements VibeEmbedWorker {
         this.coverageInterval = null;
         if (this.lifecycleInterval) clearInterval(this.lifecycleInterval);
         this.lifecycleInterval = null;
+        const loopPromise = this.loopPromise;
+        if (loopPromise) await this.dependencies.closePop();
+        try {
+            await loopPromise;
+        } finally {
+            this.loopPromise = null;
+        }
         await this.statusRefreshTask;
         this.statusRefreshTask = null;
         await this.lifecycleTask;
         this.lifecycleTask = null;
         await this.cleanupTask;
         this.cleanupTask = null;
-        const loopPromise = this.loopPromise;
-        try {
-            await loopPromise;
-        } finally {
-            this.loopPromise = null;
-            if (loopPromise) await this.dependencies.closePop();
-        }
         this.clearResolvedTarget();
     }
 }
