@@ -105,6 +105,7 @@ import psycopg2
 import redis
 from database_connection import DatabaseConnection
 from psycopg2.extras import Json
+from reconciliation_claims import claim_reconciliation_tracks
 
 # Essentia imports (will fail gracefully if not installed for testing)
 ESSENTIA_AVAILABLE = False
@@ -1680,37 +1681,8 @@ class AnalysisWorker:
             cursor.close()
 
     def _select_and_claim_reconciliation_tracks(self, cursor) -> list[tuple[str, str]]:
-        """Lock and claim one bounded pending batch in the current transaction."""
-        cursor.execute(
-            """
-                SELECT id, "filePath"
-                FROM "Track"
-                WHERE "analysisStatus" = 'pending'
-                AND COALESCE("analysisRetryCount", 0) < %s
-                ORDER BY "fileModified" DESC
-                LIMIT %s
-                FOR UPDATE SKIP LOCKED
-            """,
-            (MAX_RETRIES, BATCH_SIZE),
-        )
-        tracks = cursor.fetchall()
-        if not tracks:
-            return []
-        track_ids = [track["id"] for track in tracks]
-        cursor.execute(
-            """
-                UPDATE "Track"
-                SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = NOW(),
-                    "updatedAt" = NOW()
-                WHERE id = ANY(%s)
-                AND "analysisStatus" = 'pending'
-                RETURNING id
-            """,
-            (track_ids,),
-        )
-        claimed_ids = {row["id"] for row in cursor.fetchall()}
-        return [(track["id"], track["filePath"]) for track in tracks if track["id"] in claimed_ids]
+        """Delegate the atomic reconciliation claim to the database boundary."""
+        return claim_reconciliation_tracks(cursor, MAX_RETRIES, BATCH_SIZE)
 
     def _run_db_reconciliation(self) -> bool:
         """Claim and process pending rows that may have missed the Redis queue."""
