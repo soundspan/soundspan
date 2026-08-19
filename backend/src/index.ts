@@ -746,6 +746,10 @@ async function gracefulShutdown(signal: string) {
             await closeHttpServerWithTimeout(HTTP_SERVER_CLOSE_TIMEOUT_MS);
         }
 
+        const { shutdownUmapProjection } =
+            await import("./services/umapProjection");
+        await shutdownUmapProjection();
+
         // Shutdown workers (intervals, crons, queues)
         if (workersInitialized) {
             const { shutdownWorkers } = await import("./workers");

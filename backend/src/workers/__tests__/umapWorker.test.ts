@@ -1,46 +1,75 @@
 import { jest } from "@jest/globals";
+import type { PrismaClient } from "@prisma/client";
+import { runUmapMaterialization } from "../umapMaterialization";
+import type { UmapWorkerMessage } from "../umapWorkerProtocol";
 
-const mockFit = jest.fn<(embeddings: number[][]) => number[][]>();
-const mockUmap = jest.fn(() => ({ fit: mockFit }));
-
-jest.mock("worker_threads", () => ({
-    isMainThread: true,
-    parentPort: null,
-    workerData: undefined,
-}));
-jest.mock("umap-js", () => ({ UMAP: mockUmap }));
-
-describe("UMAP worker materialization", () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
-
-    it("produces the same projection from embedding text as the previous parsed-array path", () => {
-        const expected = [
-            [0.11, 0.22],
-            [0.33, 0.44],
-            [0.55, 0.66],
+describe("UMAP worker orchestration", () => {
+    it("publishes undersized rows without fitting and disconnects", async () => {
+        const rows = [
+            {
+                track_id: "track-1",
+                title: "Track 1",
+                artistName: "Artist",
+                artistId: "artist-1",
+                albumId: "album-1",
+                coverUrl: null,
+                loudnessLufs: null,
+                truePeakDb: null,
+                albumLoudnessLufs: null,
+                albumTruePeakDb: null,
+                energy: 0.5,
+                valence: 0.5,
+                moodHappy: null,
+                moodSad: null,
+                moodRelaxed: null,
+                moodAggressive: null,
+                moodParty: null,
+                moodAcoustic: null,
+                moodElectronic: null,
+                embedding: "[1,2,3]",
+            },
         ];
-        mockFit.mockReturnValue(expected);
-        const { projectEmbeddingTexts } =
-            require("../umapWorker") as typeof import("../umapWorker");
+        const database = {
+            $queryRaw: jest.fn(async () => rows),
+            $disconnect: jest.fn(async () => undefined),
+        } as unknown as PrismaClient;
+        const publish = jest.fn<(message: UmapWorkerMessage) => void>();
 
-        const actual = projectEmbeddingTexts(
-            ["[1,2,3]", "[4,5,6]", "[7,8,9]"],
-            2,
+        await runUmapMaterialization(
+            { spaceId: "space-1", sampleSize: 10 },
+            publish,
+            () => database,
         );
 
-        expect(mockUmap).toHaveBeenCalledWith({
-            nComponents: 2,
-            nNeighbors: 2,
-            minDist: 0.1,
-            spread: 1.0,
+        expect(publish).toHaveBeenNthCalledWith(1, {
+            type: "materialized",
+            rowCount: 1,
         });
-        expect(mockFit).toHaveBeenCalledWith([
-            [1, 2, 3],
-            [4, 5, 6],
-            [7, 8, 9],
-        ]);
-        expect(actual).toBe(expected);
+        const { embedding: _embedding, ...expectedRow } = rows[0];
+        expect(publish).toHaveBeenNthCalledWith(2, {
+            type: "result",
+            rows: [expectedRow],
+            projection: null,
+        });
+        expect(database.$disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("disconnects when materialization fails", async () => {
+        const failure = new Error("query failed");
+        const database = {
+            $queryRaw: jest.fn(async () => {
+                throw failure;
+            }),
+            $disconnect: jest.fn(async () => undefined),
+        } as unknown as PrismaClient;
+
+        await expect(
+            runUmapMaterialization(
+                { spaceId: "space-1", sampleSize: 10 },
+                jest.fn(),
+                () => database,
+            ),
+        ).rejects.toBe(failure);
+        expect(database.$disconnect).toHaveBeenCalledTimes(1);
     });
 });

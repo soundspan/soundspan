@@ -268,6 +268,63 @@ describe("computeMapProjection", () => {
         expect(workers).toHaveLength(0);
     });
 
+    it("returns cache published between the initial check and lease acquisition", async () => {
+        const cached = {
+            tracks: [],
+            trackCount: 0,
+            computedAt: "2026-08-19T12:00:00.000Z",
+        };
+        let published = false;
+        mockRedisGet.mockImplementation(async (key) =>
+            published && key === PROJECTION_KEY ? JSON.stringify(cached) : null,
+        );
+        mockRedisSet.mockImplementation(async () => {
+            published = true;
+            return "OK";
+        });
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "ready",
+            data: cached,
+        });
+
+        expect(mockRedisGet).toHaveBeenCalledWith(PROJECTION_KEY);
+        expect(mockRedisGet).toHaveBeenCalledWith(FAILURE_KEY);
+        expect(mockRedisEval).toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            { keys: [LEASE_KEY], arguments: [expect.any(String)] },
+        );
+        expect(workers).toHaveLength(0);
+    });
+
+    it("returns a cooldown published between the initial check and lease acquisition", async () => {
+        const marker = {
+            attempt: 2,
+            error: "Vibe map projection build failed",
+            failedAt: "2026-08-19T12:00:00.000Z",
+            retryAt: "2026-08-19T12:15:00.000Z",
+        };
+        let published = false;
+        mockRedisGet.mockImplementation(async (key) =>
+            published && key === FAILURE_KEY ? JSON.stringify(marker) : null,
+        );
+        mockRedisSet.mockImplementation(async () => {
+            published = true;
+            return "OK";
+        });
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "failed",
+            ...marker,
+        });
+
+        expect(mockRedisEval).toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            { keys: [LEASE_KEY], arguments: [expect.any(String)] },
+        );
+        expect(workers).toHaveLength(0);
+    });
+
     it("prevents a second replica module from building while the Redis NX lease is held", async () => {
         const firstReplica = loadModule();
         await expect(firstReplica.computeMapProjection()).resolves.toEqual({
@@ -552,6 +609,43 @@ describe("computeMapProjection", () => {
             "UMAP worker memory limit reached; retrying with a smaller sample",
             expect.objectContaining({ sampleSize: 4000 }),
         );
+    });
+
+    it("terminates the active worker and releases its lease during shutdown", async () => {
+        let leaseHeld = false;
+        mockRedisSet.mockImplementation(async () => {
+            if (leaseHeld) return null;
+            leaseHeld = true;
+            return "OK";
+        });
+        mockRedisEval.mockImplementation(async (script) => {
+            if (script.includes("DEL")) leaseHeld = false;
+            return 1;
+        });
+        const { computeMapProjection, shutdownUmapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        workers[0].terminate.mockImplementation(async () => {
+            workers[0].emit("exit", 1);
+            return 1;
+        });
+
+        await shutdownUmapProjection();
+
+        expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+        expect(leaseHeld).toBe(false);
+        expect(mockLoggerError).not.toHaveBeenCalled();
+        mockRedisGet.mockClear();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        expect(mockRedisGet).not.toHaveBeenCalled();
+        const { acquireVibeMapBuildLease } =
+            require("../vibeMapBuildState") as typeof import("../vibeMapBuildState");
+        const replacementLease = await acquireVibeMapBuildLease(SPACE_ID);
+        expect(replacementLease).not.toBeNull();
+        await replacementLease?.release();
     });
 });
 

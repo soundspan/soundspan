@@ -30,7 +30,13 @@ const CACHE_TTL_SECONDS = 86400;
 const EMPTY_CACHE_TTL_SECONDS = 300;
 const UMAP_TIMEOUT_MS = 15 * 60 * 1000;
 const UMAP_WARN_MS = 5 * 60 * 1000;
+const UMAP_SHUTDOWN_TIMEOUT_MS = 3 * 1000;
 const activeBuilds = new Map<string, Promise<void>>();
+const activeAdmissions = new Set<Promise<VibeMapProjectionState>>();
+const activeWorkers = new Set<Worker>();
+const heldLeases = new Set<VibeMapBuildLease>();
+let acceptingBuilds = true;
+let shutdownPromise: Promise<void> | null = null;
 
 function cacheKeyForSpace(spaceId: string): string {
     return `${CACHE_KEY_PREFIX}:${spaceId}`;
@@ -251,10 +257,18 @@ function validateWorkerResult(
     return { rows, projection };
 }
 
-function terminateWorker(worker: Worker): void {
+function requestWorkerTermination(worker: Worker): void {
     worker.terminate().catch((error: unknown) => {
         log.warn("Failed to terminate UMAP worker", error);
     });
+}
+
+async function terminateWorker(worker: Worker): Promise<void> {
+    try {
+        await worker.terminate();
+    } catch (error) {
+        log.warn("Failed to terminate UMAP worker", error);
+    }
 }
 
 class UmapWorkerMonitor {
@@ -277,7 +291,7 @@ class UmapWorkerMonitor {
         this.timeoutTimer = setTimeout(() => {
             if (this.settled) return;
             this.finish();
-            terminateWorker(this.worker);
+            requestWorkerTermination(this.worker);
             this.reject(
                 new Error(
                     `UMAP worker timed out after ${UMAP_TIMEOUT_MS / 60000} minutes`,
@@ -355,6 +369,10 @@ function runUmapInWorker(
         resourceLimits: {
             maxOldGenerationSizeMb: config.vibeMapWorkerMemoryMb,
         },
+    });
+    activeWorkers.add(worker);
+    worker.on("exit", () => {
+        activeWorkers.delete(worker);
     });
     return monitorUmapWorker(worker, sampleSize);
 }
@@ -493,10 +511,28 @@ async function doCompute(spaceId: string): Promise<VibeMapResponse> {
 }
 
 async function releaseLease(lease: VibeMapBuildLease): Promise<void> {
+    if (!heldLeases.delete(lease)) return;
     try {
         await lease.release();
     } catch (error) {
         log.warn("Failed to release vibe map build lease", error);
+    }
+}
+
+async function recordBuildFailure(
+    spaceId: string,
+    error: unknown,
+): Promise<void> {
+    log.error("Vibe map build failed", error);
+    try {
+        await recordVibeMapBuildFailure(
+            spaceId,
+            isWorkerOutOfMemory(error)
+                ? "UMAP worker exceeded its memory limit"
+                : "Vibe map projection build failed",
+        );
+    } catch (markerError) {
+        log.error("Failed to record vibe map build cooldown", markerError);
     }
 }
 
@@ -512,16 +548,10 @@ async function superviseBuild(
             log.warn("Failed to clear vibe map build failure history", error);
         }
     } catch (error) {
-        log.error("Vibe map build failed", error);
-        try {
-            await recordVibeMapBuildFailure(
-                spaceId,
-                isWorkerOutOfMemory(error)
-                    ? "UMAP worker exceeded its memory limit"
-                    : "Vibe map projection build failed",
-            );
-        } catch (markerError) {
-            log.error("Failed to record vibe map build cooldown", markerError);
+        if (acceptingBuilds) {
+            await recordBuildFailure(spaceId, error);
+        } else {
+            log.debug("Vibe map build stopped during shutdown", { spaceId });
         }
     } finally {
         await releaseLease(lease);
@@ -534,11 +564,13 @@ export type VibeMapProjectionState =
     | { status: "building" }
     | ({ status: "failed" } & VibeMapBuildFailure);
 
-/** Serve cached data or supervise one leased background build per space. */
-export async function computeMapProjection(): Promise<VibeMapProjectionState> {
-    const activeSpace = await getActiveSpace();
-    const spaceId = activeSpace.id;
-    const cached = await redisClient.get(cacheKeyForSpace(spaceId));
+async function readPublishedState(
+    spaceId: string,
+): Promise<VibeMapProjectionState | null> {
+    const [cached, failure] = await Promise.all([
+        redisClient.get(cacheKeyForSpace(spaceId)),
+        readVibeMapBuildFailure(spaceId),
+    ]);
     if (cached) {
         log.debug("Vibe map cache hit", { spaceId });
         return {
@@ -546,17 +578,93 @@ export async function computeMapProjection(): Promise<VibeMapProjectionState> {
             data: JSON.parse(cached) as VibeMapResponse,
         };
     }
-    const failure = await readVibeMapBuildFailure(spaceId);
-    if (failure) return { status: "failed", ...failure };
+    return failure ? { status: "failed", ...failure } : null;
+}
+
+async function settleShutdownWork(): Promise<void> {
+    await Promise.allSettled(Array.from(activeAdmissions));
+    const terminations = Array.from(activeWorkers, terminateWorker);
+    const releases = Array.from(heldLeases, releaseLease);
+    const builds = Array.from(activeBuilds.values());
+    await Promise.allSettled([...terminations, ...releases, ...builds]);
+}
+
+async function settleWithinShutdownTimeout(): Promise<boolean> {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (completed: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(completed);
+        };
+        const timeoutId = setTimeout(
+            () => finish(false),
+            UMAP_SHUTDOWN_TIMEOUT_MS,
+        );
+        settleShutdownWork().then(
+            () => finish(true),
+            () => finish(true),
+        );
+    });
+}
+
+async function performShutdown(): Promise<void> {
+    const completed = await settleWithinShutdownTimeout();
+    if (completed) return;
+    log.warn("UMAP projection shutdown timed out", {
+        timeoutMs: UMAP_SHUTDOWN_TIMEOUT_MS,
+        activeBuilds: activeBuilds.size,
+        activeWorkers: activeWorkers.size,
+        heldLeases: heldLeases.size,
+    });
+}
+
+/** Stop projection admission and boundedly terminate owned workers and leases. */
+export function shutdownUmapProjection(): Promise<void> {
+    acceptingBuilds = false;
+    shutdownPromise ??= performShutdown();
+    return shutdownPromise;
+}
+
+async function admitMapProjection(): Promise<VibeMapProjectionState> {
+    if (!acceptingBuilds) return { status: "building" };
+    const activeSpace = await getActiveSpace();
+    const spaceId = activeSpace.id;
+    const published = await readPublishedState(spaceId);
+    if (published) return published;
+    if (!acceptingBuilds) return { status: "building" };
     if (activeBuilds.size > 0) return { status: "building" };
     const lease = await acquireVibeMapBuildLease(spaceId);
     if (!lease) {
         log.debug("Vibe map build lease held by another replica", { spaceId });
         return { status: "building" };
     }
+    heldLeases.add(lease);
+    if (!acceptingBuilds) {
+        await releaseLease(lease);
+        return { status: "building" };
+    }
+    const publishedWhileAcquiring = await readPublishedState(spaceId);
+    if (publishedWhileAcquiring || !acceptingBuilds) {
+        await releaseLease(lease);
+        return publishedWhileAcquiring ?? { status: "building" };
+    }
     const build = superviseBuild(spaceId, lease).finally(() => {
         activeBuilds.delete(spaceId);
     });
     activeBuilds.set(spaceId, build);
     return { status: "building" };
+}
+
+/** Serve cached data or supervise one leased background build per space. */
+export async function computeMapProjection(): Promise<VibeMapProjectionState> {
+    if (!acceptingBuilds) return { status: "building" };
+    const admission = admitMapProjection();
+    activeAdmissions.add(admission);
+    try {
+        return await admission;
+    } finally {
+        activeAdmissions.delete(admission);
+    }
 }

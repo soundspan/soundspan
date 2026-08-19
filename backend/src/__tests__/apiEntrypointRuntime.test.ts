@@ -261,6 +261,7 @@ describe("api entrypoint runtime behavior", () => {
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
+        const shutdownUmapProjection = jest.fn(async () => undefined);
 
         jest.doMock("express", () => expressFn);
         jest.doMock("express-session", () => sessionMiddleware, {
@@ -336,6 +337,9 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("../workers", () => ({
             shutdownWorkers,
         }));
+        jest.doMock("../services/umapProjection", () => ({
+            shutdownUmapProjection,
+        }));
 
         for (const routeModule of routeModules) {
             jest.doMock(routeModule, () => ({
@@ -366,6 +370,7 @@ describe("api entrypoint runtime behavior", () => {
             requireAuth,
             requireAdmin,
             shutdownWorkers,
+            shutdownUmapProjection,
             compressionMiddleware,
             compressionFilter,
             createMetricsRouter,
@@ -1126,8 +1131,12 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.shutdownListenTogetherSocket).toHaveBeenCalledTimes(1);
         expect(mocks.server.close).toHaveBeenCalledTimes(1);
         expect(mocks.server.closeIdleConnections).toHaveBeenCalledTimes(1);
+        expect(mocks.shutdownUmapProjection).toHaveBeenCalledTimes(1);
         expect(mocks.shutdownWorkers).toHaveBeenCalledTimes(1);
         expect(mocks.redisClient.close).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.shutdownUmapProjection.mock.invocationCallOrder[0],
+        ).toBeLessThan(mocks.redisClient.close.mock.invocationCallOrder[0]);
         expect(mocks.prisma.$disconnect).toHaveBeenCalled();
         expect(process.exit).toHaveBeenCalledWith(0);
         expect(mocks.logger.debug).toHaveBeenCalledWith(
