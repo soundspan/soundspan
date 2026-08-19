@@ -56,7 +56,7 @@ export function QualityPanel({
                     </button>
                 ))}
             </div>
-            {page.data && (
+            {page.data && page.data.floorKbps === floor && (
                 <ul className="space-y-1">
                     {page.data.items.map((album) => (
                         <li

@@ -121,15 +121,17 @@ const getLibraryHealthQuality = mock.fn((floor: number) => {
     });
 });
 
+// Section-level methods are attached below (Object.assign) once their
+// fixtures are defined; the mocked module keeps this object's identity.
+const apiMock: Record<string, unknown> = {
+    getLibraryHealthGaps,
+    getLibraryHealthAnalysis,
+    getLibraryHealthQuality,
+    retryFailedAnalysis,
+};
+
 mock.module("@/lib/api", {
-    namedExports: {
-        api: {
-            getLibraryHealthGaps,
-            getLibraryHealthAnalysis,
-            getLibraryHealthQuality,
-            retryFailedAnalysis,
-        },
-    },
+    namedExports: { api: apiMock },
 });
 
 mock.module("@/lib/enrichmentApi", {
@@ -167,6 +169,8 @@ beforeEach(() => {
     getLibraryHealthAnalysis.mock.resetCalls();
     getLibraryHealthQuality.mock.resetCalls();
     retryFailedAnalysis.mock.resetCalls();
+    getLibraryHealthSummary.mock.resetCalls();
+    refreshLibraryHealthDashboard.mock.resetCalls();
     document.body.replaceChildren();
 });
 
@@ -323,6 +327,9 @@ test("quality panel fetches on expand and floor selection, latest selection wins
 
     deferQualityLoads = true;
     await click(tabButton("128 kbps"));
+    // While the replacement request is pending, the previous floor's rows
+    // must not render beside the newly selected floor.
+    assert.doesNotMatch(document.body.textContent ?? "", /Album under 192/);
     await click(tabButton("256 kbps"));
     assert.equal(getLibraryHealthQuality.mock.callCount(), 3);
     assert.equal(getLibraryHealthQuality.mock.calls[1]?.arguments[0], 128);
@@ -382,6 +389,139 @@ test("analysis retry action reports remediation to the section", async () => {
     await click(tabButton("Retry failed audio analysis"));
     assert.equal(retryFailedAnalysis.mock.callCount(), 1);
     assert.equal(onRemediated.mock.callCount(), 1);
+
+    await mounted.unmount();
+});
+
+// --- Section-level integration: real wiring from Recompute/remediation to panels ---
+
+const SECTION_SUMMARY_INITIAL = {
+    metadataGaps: SUMMARY_GAPS,
+    analysisCoverage: SUMMARY_COVERAGE,
+    storage: {
+        tracks: 10,
+        totalFileSize: 1024,
+        mimeTypes: 1,
+        artists: 2,
+        isTruncated: false,
+    },
+    quality: { floorKbps: 192, albumsBelowFloor: 1, isTruncated: false },
+    duplicates: {
+        clusters: 0,
+        byTier: { audioHash: 0, recordingMbid: 0, isrc: 0 },
+        isTruncated: false,
+    },
+};
+const SECTION_SUMMARY_REFRESHED = {
+    ...SECTION_SUMMARY_INITIAL,
+    metadataGaps: { ...SUMMARY_GAPS, missingArt: { albums: 7, artists: 3 } },
+    analysisCoverage: {
+        ...SUMMARY_COVERAGE,
+        analysisStatus: { pending: 0, processing: 0, failed: 0, completed: 10 },
+    },
+};
+
+const getLibraryHealthSummary = mock.fn(async () => SECTION_SUMMARY_INITIAL);
+const refreshLibraryHealthDashboard = mock.fn(
+    async () => SECTION_SUMMARY_REFRESHED,
+);
+const getLibraryHealthStorage = mock.fn(async () => ({
+    formats: [],
+    topArtists: [],
+    sampledTracks: 0,
+    sampleLimit: 100_000,
+    isTruncated: false,
+}));
+const getLibraryHealthDuplicates = mock.fn(async () => ({
+    clusters: [],
+    total: 0,
+    byTier: { audioHash: 0, recordingMbid: 0, isrc: 0 },
+    isTruncated: false,
+    limit: 25,
+    offset: 0,
+}));
+
+Object.assign(apiMock, {
+    getLibraryHealthSummary,
+    refreshLibraryHealthDashboard,
+    getLibraryHealthStorage,
+    getLibraryHealthDuplicates,
+});
+
+mock.module("@/features/settings/components/ui", {
+    namedExports: {
+        SettingsSection: (props: {
+            title: string;
+            titleExtra?: React.ReactNode;
+            description?: string;
+            children?: React.ReactNode;
+        }) =>
+            React.createElement(
+                "section",
+                null,
+                React.createElement("h2", null, props.title),
+                props.titleExtra,
+                props.children,
+            ),
+    },
+});
+
+function headerByTitle(title: string): HTMLButtonElement {
+    const header = Array.from(
+        document.querySelectorAll("button[aria-expanded]"),
+    ).find((candidate) => candidate.textContent?.includes(title));
+    assert.ok(header instanceof HTMLButtonElement, `missing ${title} header`);
+    return header;
+}
+
+function sectionButton(label: string): HTMLButtonElement {
+    const button = Array.from(document.querySelectorAll("button")).find(
+        (candidate) =>
+            candidate.getAttribute("aria-label") === label ||
+            candidate.textContent?.trim() === label,
+    );
+    assert.ok(button instanceof HTMLButtonElement, `missing ${label} button`);
+    return button;
+}
+
+test("Recompute now reloads expanded panels and updates headlines through the real section wiring", async () => {
+    const mounted = await mountPanel(async () => {
+        const { LibraryInsightsSection } =
+            await import("../../features/library-health/components/LibraryInsightsSection");
+        return { element: React.createElement(LibraryInsightsSection) };
+    });
+
+    assert.equal(getLibraryHealthSummary.mock.callCount(), 1);
+    assert.match(document.body.textContent ?? "", /1 albums without art/);
+
+    await click(headerByTitle("Metadata gaps"));
+    assert.equal(getLibraryHealthGaps.mock.callCount(), 1);
+
+    await click(sectionButton("Recompute library insights"));
+    assert.equal(refreshLibraryHealthDashboard.mock.callCount(), 1);
+    assert.match(document.body.textContent ?? "", /7 albums without art/);
+    assert.equal(getLibraryHealthGaps.mock.callCount(), 2);
+
+    await mounted.unmount();
+});
+
+test("analysis retry refreshes the section headline through the real wiring", async () => {
+    const mounted = await mountPanel(async () => {
+        const { LibraryInsightsSection } =
+            await import("../../features/library-health/components/LibraryInsightsSection");
+        return { element: React.createElement(LibraryInsightsSection) };
+    });
+
+    assert.match(document.body.textContent ?? "", /1 failed/);
+
+    await click(headerByTitle("Analysis coverage"));
+    assert.equal(getLibraryHealthAnalysis.mock.callCount(), 1);
+
+    await click(sectionButton("Retry failed audio analysis"));
+    assert.equal(retryFailedAnalysis.mock.callCount(), 1);
+    assert.equal(refreshLibraryHealthDashboard.mock.callCount(), 1);
+    assert.match(document.body.textContent ?? "", /0 failed/);
+    assert.equal(getLibraryHealthAnalysis.mock.callCount(), 2);
 
     await mounted.unmount();
 });
