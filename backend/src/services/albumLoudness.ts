@@ -23,7 +23,9 @@ async function lockAlbum(
 ): Promise<void> {
     // Cross-language lock contract: PostgreSQL hashtextextended(album id, 0)
     // is also used by services/audio-analyzer/loudness.py.
-    await transaction.$queryRaw`
+    // pg_advisory_xact_lock returns void, which $queryRaw cannot
+    // deserialize — the repo's advisory locks always go through $executeRaw.
+    await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(hashtextextended(${albumId}, 0))
     `;
 }

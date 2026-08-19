@@ -4689,9 +4689,15 @@ describe("library catalog list runtime coverage", () => {
             where: { id: "track-delete-1" },
             select: { id: true, albumId: true },
         });
-        expect(mockPrismaQueryRaw).toHaveBeenCalledWith(
+        expect(mockPrismaExecuteRaw).toHaveBeenCalledWith(
             expect.any(Array),
             "album-authoritative",
+        );
+        // A concurrent reassignment makes the observed and authoritative
+        // albums differ; both must be recomputed.
+        expect(mockPrismaExecuteRaw).toHaveBeenCalledWith(
+            expect.any(Array),
+            "album-observed",
         );
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ message: "Track deleted successfully" });

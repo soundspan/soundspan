@@ -1754,7 +1754,7 @@ export async function handleDeleteTrack(
     }
 
     // Delete from database (cascade will handle related records)
-    await deleteTrackAndRecomputeAlbum(track.id);
+    await deleteTrackAndRecomputeAlbum(track.id, track.albumId);
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 
