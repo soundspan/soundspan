@@ -13,7 +13,6 @@ test("isSegmentedModeEnabled is true only for videojs mode", () => {
     // activate segmented startup/prewarm/session paths (a bare <audio>
     // element cannot play DASH manifests).
     assert.equal(isSegmentedModeEnabled("native"), false);
-    assert.equal(isSegmentedModeEnabled("tauri-native"), false);
     assert.equal(isSegmentedModeEnabled("not-a-mode"), false);
     // No runtime config in unit tests → default howler → not segmented.
     assert.equal(isSegmentedModeEnabled(), false);

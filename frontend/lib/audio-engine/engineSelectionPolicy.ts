@@ -2,16 +2,14 @@
  * Direct-Engine Selection Policy
  *
  * Pure decision module for which engine occupies the hybrid router's
- * direct-playback ("howler") slot, and whether the async Tauri platform
- * upgrade is allowed to replace it later.
+ * direct-playback ("howler") slot.
  *
  * Selection precedence (GH #42 §10), highest first:
  * 1. Platform pins — Android WebView is pinned to Howler because its
  *    Web Audio mode is the established fix for crackling/popping on
  *    track changes there (see howler-engine.ts).
  * 2. The deployment engine-mode flag (STREAMING_ENGINE_MODE=native).
- *    Native mode also suppresses the Tauri auto-upgrade path entirely.
- * 3. Default — Howler, with the existing Tauri upgrade allowed.
+ * 3. Default — Howler.
  */
 
 import type { StreamingEngineMode } from "@/lib/audio-engine/types";
@@ -35,11 +33,6 @@ export interface DirectEngineSelectionInput {
 export interface DirectEngineSelectionDecision {
     engine: DirectEngineSlot;
     reason: DirectEngineSelectionReason;
-    /**
-     * Whether the async Tauri platform detection may hot-swap the direct
-     * slot. Must be false whenever native mode is active (GH #42 §10).
-     */
-    allowTauriUpgrade: boolean;
 }
 
 /**
@@ -63,19 +56,16 @@ export function resolveDirectEngineSelection(
             return {
                 engine: "howler",
                 reason: "android_webview_pin",
-                allowTauriUpgrade: false,
             };
         }
         return {
             engine: "native",
             reason: "native_mode_flag",
-            allowTauriUpgrade: false,
         };
     }
 
     return {
         engine: "howler",
         reason: "default_direct_engine",
-        allowTauriUpgrade: true,
     };
 }

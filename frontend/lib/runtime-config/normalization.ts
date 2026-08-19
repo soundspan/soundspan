@@ -1,11 +1,9 @@
-import { warnTauriDeprecationOnce } from "../audio-engine/tauriDeprecation";
 import type { StreamingEngineMode } from "../audio-engine/types";
 
 const VALID_STREAMING_ENGINE_MODES = new Set<StreamingEngineMode>([
     "videojs",
     "howler",
     "native",
-    "tauri-native",
 ]);
 const VALID_SEGMENTED_VHS_PROFILES = new Set(["balanced", "legacy"]);
 const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MIN_MS = 1500;
@@ -133,9 +131,6 @@ export const buildRuntimeConfigPayload = (
     env: RuntimeConfigEnvironment,
 ): string => {
     const mode = normalizeStreamingEngineMode(env.STREAMING_ENGINE_MODE);
-    if (mode === "tauri-native") {
-        warnTauriDeprecationOnce("STREAMING_ENGINE_MODE=tauri-native");
-    }
     const modeJson = mode ? JSON.stringify(mode) : "null";
     const segmentedVhsProfile = normalizeSegmentedVhsProfile(
         env.SEGMENTED_VHS_PROFILE,

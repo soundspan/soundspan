@@ -1087,7 +1087,7 @@ The most important architectural fact the issue-by-issue review never states: **
 | Single Prisma gateway + role-aware pool                        | `utils/db.ts`, `worker.ts`                               |
 | Contract-test spine + data-path linter                         | 31 `*Contract.test.ts`, `verifyNoIgnoredDataPaths.ts`    |
 | Pure `*Policy.ts` + ~125 unit tests (the template)             | `frontend/lib/audio-engine/*Policy.ts`, backend services |
-| AudioEngine adapter strategy (Howler / Tauri / video.js)       | `frontend/lib/audio-engine/`                             |
+| AudioEngine adapter strategy (Howler / video.js; the Tauri adapter was removed per issue #607) | `frontend/lib/audio-engine/`                             |
 | pgvector substrate + `hybridSimilarity` (graceful degradation) | `schema.prisma`, `services/hybridSimilarity.ts`          |
 | Feature-folder modularization (the target structure)           | `frontend/features/*`                                    |
 | Centralized Bull queue registry                                | `workers/queues.ts`                                      |

@@ -17,6 +17,9 @@ test("normalizeStreamingEngineMode trims, lowercases, and validates values", () 
     assert.equal(normalizeStreamingEngineMode("native"), "native");
     assert.equal(normalizeStreamingEngineMode(""), null);
     assert.equal(normalizeStreamingEngineMode("invalid"), null);
+    // Removed with the Tauri desktop integration (issue #607): a leftover
+    // env value must be ignored, never honored.
+    assert.equal(normalizeStreamingEngineMode("tauri-native"), null);
 });
 
 test("normalizeSegmentedVhsProfile trims, lowercases, and validates values", () => {

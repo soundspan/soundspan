@@ -214,13 +214,20 @@ test("getActiveEngineDescriptor reports the engine actually in use, not just the
     );
 });
 
-test("upgradeHowlerEngine updates the direct-slot descriptor (Tauri platform upgrade)", () => {
-    const { hybrid } = createHybridWithNativeSlot();
+test("upgradeHowlerEngine updates the direct-slot descriptor", () => {
+    const hybrid = new HybridRuntimeAudioEngine({
+        howlerEngine: createNativeEngine().engine,
+        resolveMode: () => "howler",
+        createVideoJsEngine: () => {
+            throw new Error("not used");
+        },
+    });
+    assert.equal(hybrid.getActiveEngineDescriptor(), "howler");
     hybrid.upgradeHowlerEngine(
         createNativeEngine().engine as unknown as AudioEngine,
-        "tauri-native",
+        "native",
     );
-    assert.equal(hybrid.getActiveEngineDescriptor(), "tauri-native");
+    assert.equal(hybrid.getActiveEngineDescriptor(), "native");
 });
 
 test("getActiveEngineDescriptor reports videojs while the segmented engine is active", async () => {

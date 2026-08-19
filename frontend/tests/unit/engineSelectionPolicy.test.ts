@@ -19,13 +19,12 @@ test("detectAndroidWebView flags Android WebView user agents only", () => {
     assert.equal(detectAndroidWebView(""), false);
 });
 
-test("default mode selects howler and allows the Tauri upgrade path", () => {
+test("howler mode selects howler in the direct slot", () => {
     const decision = resolveDirectEngineSelection({
         mode: "howler",
         isAndroidWebView: false,
     });
     assert.equal(decision.engine, "howler");
-    assert.equal(decision.allowTauriUpgrade, true);
     assert.equal(decision.reason, "default_direct_engine");
 });
 
@@ -35,16 +34,15 @@ test("videojs mode keeps howler in the direct slot (segmented engine is separate
         isAndroidWebView: false,
     });
     assert.equal(decision.engine, "howler");
-    assert.equal(decision.allowTauriUpgrade, true);
+    assert.equal(decision.reason, "default_direct_engine");
 });
 
-test("native mode selects the native element engine and suppresses Tauri upgrade", () => {
+test("native mode selects the native element engine", () => {
     const decision = resolveDirectEngineSelection({
         mode: "native",
         isAndroidWebView: false,
     });
     assert.equal(decision.engine, "native");
-    assert.equal(decision.allowTauriUpgrade, false);
     assert.equal(decision.reason, "native_mode_flag");
 });
 
@@ -57,28 +55,11 @@ test("Android WebView platform pin overrides the native mode flag", () => {
     assert.equal(decision.reason, "android_webview_pin");
 });
 
-test("native mode never allows the Tauri auto-upgrade, even under the WebView pin", () => {
-    const decision = resolveDirectEngineSelection({
-        mode: "native",
-        isAndroidWebView: true,
-    });
-    assert.equal(decision.allowTauriUpgrade, false);
-});
-
-test("Android WebView under non-native modes keeps current behavior (howler + Tauri upgrade allowed)", () => {
+test("Android WebView under non-native modes keeps howler in the direct slot", () => {
     const decision = resolveDirectEngineSelection({
         mode: "howler",
         isAndroidWebView: true,
     });
     assert.equal(decision.engine, "howler");
-    assert.equal(decision.allowTauriUpgrade, true);
-});
-
-test("tauri-native mode keeps howler in the direct slot pending the async upgrade", () => {
-    const decision = resolveDirectEngineSelection({
-        mode: "tauri-native",
-        isAndroidWebView: false,
-    });
-    assert.equal(decision.engine, "howler");
-    assert.equal(decision.allowTauriUpgrade, true);
+    assert.equal(decision.reason, "default_direct_engine");
 });

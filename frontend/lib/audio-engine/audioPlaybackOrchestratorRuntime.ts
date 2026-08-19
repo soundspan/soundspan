@@ -48,8 +48,8 @@ export function logPlaybackClientMetric(
 
     // Engine tags for the native-engine soak (GH #42): engineMode is the
     // deployment flag (cohort), activeEngine is what is actually driving
-    // playback at this moment — platform pins, the Tauri upgrade, and
-    // per-source videojs routing make the two legitimately diverge, and
+    // playback at this moment — platform pins and per-source videojs
+    // routing make the two legitimately diverge, and
     // the disagreements are themselves diagnostic. Read at event time so
     // errors are attributed to the engine that produced them, not to
     // whatever a recovery switch installs afterwards.

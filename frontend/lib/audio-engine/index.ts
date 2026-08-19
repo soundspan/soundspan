@@ -13,7 +13,6 @@ import type {
     AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
 } from "@/lib/audio-engine/types";
-import { createAudioEngine } from "@/lib/audio-engine/engineFactory";
 import { DEFAULT_AUDIO_VOLUME, clampAudioVolume } from "@/lib/audio-volume";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
@@ -25,13 +24,13 @@ interface PendingLazyLoad {
 }
 
 /** Which concrete engine occupies the direct-playback slot. */
-export type DirectEngineDescriptor = "howler" | "native" | "tauri-native";
+export type DirectEngineDescriptor = "howler" | "native";
 
 /**
  * The engine actually driving playback right now. Distinct from the
- * STREAMING_ENGINE_MODE flag: platform pins, the Tauri upgrade, and
- * per-source videojs routing all make "configured" diverge from
- * "actual" (GH #42 soak telemetry).
+ * STREAMING_ENGINE_MODE flag: platform pins and per-source videojs
+ * routing make "configured" diverge from "actual" (GH #42 soak
+ * telemetry).
  */
 export type RuntimeEngineDescriptor = DirectEngineDescriptor | "videojs";
 
@@ -123,8 +122,7 @@ interface HybridRuntimeAudioEngineOptions {
 /**
  * Hybrid runtime engine:
  * - Uses the direct slot for byte streams (HowlerEngineAdapter by
- *   default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native;
- *   TauriNativeEngineAdapter after a platform upgrade)
+ *   default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native)
  * - Uses Video.js for DASH manifests when segmented mode is active
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
@@ -177,7 +175,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
     /**
      * Hot-swap the direct-playback engine (the "howler" slot) with a
-     * platform-specific engine such as TauriNativeEngineAdapter.
+     * replacement engine.
      *
      * Safe to call while idle or during playback — volume/mute state is
      * re-applied and event forwarding is re-wired automatically.
@@ -207,8 +205,8 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
      * Reports the engine actually driving playback right now — the
      * direct-slot descriptor, or "videojs" while the segmented engine is
      * active. Pairs with the STREAMING_ENGINE_MODE flag in telemetry so
-     * configured-vs-actual divergence (platform pins, Tauri upgrades,
-     * per-source routing) is visible.
+     * configured-vs-actual divergence (platform pins, per-source
+     * routing) is visible.
      */
     getActiveEngineDescriptor(): RuntimeEngineDescriptor {
         return this.activeEngineKind === "videojs"
@@ -664,7 +662,6 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 }
 
 let sharedRuntimeAudioEngine: HybridRuntimeAudioEngine | null = null;
-let engineUpgradeInitiated = false;
 
 export const createRuntimeAudioEngine = (): RuntimeAudioEngine => {
     if (!sharedRuntimeAudioEngine) {
@@ -693,31 +690,6 @@ export const createRuntimeAudioEngine = (): RuntimeAudioEngine => {
                 "[AudioEngine] Native element engine active in the direct slot.",
                 { reason: selection.reason },
             );
-        }
-
-        // Kick off async platform detection; if a Tauri native engine is
-        // needed, replace the inner direct engine transparently. This path
-        // must not fire when the native element mode is active (GH #42 §10).
-        if (!engineUpgradeInitiated && selection.allowTauriUpgrade) {
-            engineUpgradeInitiated = true;
-            createAudioEngine()
-                .then((engine) => {
-                    if (
-                        !(engine instanceof HowlerEngineAdapter) &&
-                        sharedRuntimeAudioEngine
-                    ) {
-                        sharedRuntimeAudioEngine.upgradeHowlerEngine(
-                            engine,
-                            "tauri-native",
-                        );
-                    }
-                })
-                .catch((err) => {
-                    sharedFrontendLogger.error(
-                        "[AudioEngine] Platform engine detection failed; continuing with Howler engine.",
-                        err,
-                    );
-                });
         }
     }
     return sharedRuntimeAudioEngine;

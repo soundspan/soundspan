@@ -765,7 +765,7 @@
         {
             "id": "native-audio-engine",
             "name": "Native Audio Engine",
-            "description": "Default native <audio>-element playback engine (fourth pluggable backend alongside Howler/Video.js/Tauri, the latter deprecated per issue #607) with a pure engine-selection policy (Android WebView pin, Tauri auto-upgrade suppression); implemented entirely under frontend/lib/audio-engine/ (nativeAudioElementEngine.ts, nativeAudioElementPolicy.ts, engineSelectionPolicy.ts, engineMode.ts). See docs/NATIVE_AUDIO_ENGINE.md.",
+            "description": "Default native <audio>-element playback engine (pluggable backend alongside Howler/Video.js) with a pure engine-selection policy (Android WebView pin); implemented entirely under frontend/lib/audio-engine/ (nativeAudioElementEngine.ts, nativeAudioElementPolicy.ts, engineSelectionPolicy.ts, engineMode.ts). See docs/NATIVE_AUDIO_ENGINE.md.",
             "frontend": {
                 "feature_dirs": [],
                 "routes": []

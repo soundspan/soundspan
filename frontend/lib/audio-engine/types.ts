@@ -1,12 +1,6 @@
 import type { AudioEngineSourceType } from "@soundspan/media-metadata-contract";
 
-export type StreamingEngineMode =
-    | "videojs"
-    | "howler"
-    | "native"
-    // Deprecated (issue #607): the Tauri desktop integration is slated for
-    // removal; "tauri-native" will leave this union with it.
-    | "tauri-native";
+export type StreamingEngineMode = "videojs" | "howler" | "native";
 
 // The native element engine is the default direct-playback engine as
 // of 1.8.0; Howler remains the gated fallback (STREAMING_ENGINE_MODE=
