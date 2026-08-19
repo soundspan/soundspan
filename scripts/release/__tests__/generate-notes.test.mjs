@@ -18,21 +18,26 @@ const template = path.join(
     "docs/maintainers/RELEASE_NOTES_TEMPLATE.md",
 );
 const fixtureTag = "2.3.3";
-const gitEnvironment = { ...process.env };
 
-for (const key of Object.keys(gitEnvironment)) {
-    if (/^GIT_/.test(key)) {
-        delete gitEnvironment[key];
+function sanitizedGitEnvironment() {
+    const environment = { ...process.env };
+
+    for (const key of Object.keys(environment)) {
+        if (/^GIT_/.test(key)) {
+            delete environment[key];
+        }
     }
+
+    environment.GIT_CONFIG_GLOBAL = "/dev/null";
+    environment.GIT_CONFIG_SYSTEM = "/dev/null";
+    return environment;
 }
-gitEnvironment.GIT_CONFIG_GLOBAL = "/dev/null";
-gitEnvironment.GIT_CONFIG_SYSTEM = "/dev/null";
 
 function runGit(fixtureRoot, args) {
     const result = spawnSync("git", args, {
         cwd: fixtureRoot,
         encoding: "utf8",
-        env: gitEnvironment,
+        env: sanitizedGitEnvironment(),
     });
 
     assert.equal(result.status, 0, result.stderr || result.error?.message);
@@ -92,7 +97,7 @@ function runGenerator(
             {
                 cwd: fixtureRoot,
                 encoding: "utf8",
-                env: gitEnvironment,
+                env: sanitizedGitEnvironment(),
             },
         );
     } finally {
