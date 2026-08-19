@@ -58,7 +58,12 @@ describe("cleanupOrphanedLibraryEntities", () => {
         });
 
         expect(prisma.album.findMany).toHaveBeenCalledWith({
-            where: { peerId: null, tracks: { none: {} } },
+            where: {
+                peerId: null,
+                tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
             orderBy: { id: "asc" },
             take: 10_000,
             select: { id: true },
@@ -68,10 +73,17 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 id: { in: ["local-album"] },
                 peerId: null,
                 tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
         });
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
-            where: { peerId: null, albums: { none: {} } },
+            where: {
+                peerId: null,
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
             orderBy: { id: "asc" },
             take: 10_000,
             select: { id: true },
@@ -81,6 +93,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 id: { in: ["local-artist"] },
                 peerId: null,
                 albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
         });
     });
