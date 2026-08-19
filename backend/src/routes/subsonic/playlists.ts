@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
 import {
+    PLAYLIST_REORDER_MAX_ITEMS,
     PlaylistMutationLockNotFoundError,
     requirePlaylistMutationLock,
 } from "../../services/playlistMutationLock";
@@ -26,6 +27,9 @@ import {
 } from "./shared";
 
 type PlaylistMutationResult = "ok" | "trackNotFound";
+
+const PLAYLIST_TRANSACTION_MAX_WAIT_MS = 2_000;
+const PLAYLIST_TRANSACTION_TIMEOUT_MS = 15_000;
 
 async function getPlaylistDurations(
     playlists: Array<{ id: string; _count: { items: number } }>,
@@ -295,11 +299,8 @@ async function replaceLockedPlaylistItems(
     userId: string,
     name: string,
     trackIds: string[],
-): Promise<PlaylistMutationResult> {
+): Promise<void> {
     await requirePlaylistMutationLock(tx, playlistId, userId);
-    if (!(await ensureLibraryTracksExist(trackIds, tx))) {
-        return "trackNotFound";
-    }
     if (name) {
         await tx.playlist.update({
             where: { id: playlistId },
@@ -317,7 +318,6 @@ async function replaceLockedPlaylistItems(
             skipDuplicates: true,
         });
     }
-    return "ok";
 }
 
 function sendPlaylistMutationNotAuthorized(
@@ -388,9 +388,15 @@ export async function handleCreatePlaylist(
     }
 
     try {
+        const tracksExist = await ensureLibraryTracksExist(trackIds);
+        if (!tracksExist) {
+            sendPlaylistTrackNotFound(res, format, callback);
+            return;
+        }
+
         if (rawPlaylistId) {
             const playlistId = parseSubsonicId(rawPlaylistId, "playlist").id;
-            const result = await prisma.$transaction((tx) =>
+            await prisma.$transaction((tx) =>
                 replaceLockedPlaylistItems(
                     tx,
                     playlistId,
@@ -399,19 +405,10 @@ export async function handleCreatePlaylist(
                     trackIds,
                 ),
             );
-            if (result === "trackNotFound") {
-                sendPlaylistTrackNotFound(res, format, callback);
-                return;
-            }
             sendSubsonicSuccess(res, {}, format, callback);
             return;
         }
 
-        const tracksExist = await ensureLibraryTracksExist(trackIds);
-        if (!tracksExist) {
-            sendPlaylistTrackNotFound(res, format, callback);
-            return;
-        }
         const playlist = await prisma.playlist.create({
             data: {
                 userId: req.user!.id,
@@ -460,8 +457,8 @@ async function removeLockedPlaylistIndexes(
     tx: Prisma.TransactionClient,
     playlistId: string,
     rawIndexes: string[],
-): Promise<void> {
-    if (rawIndexes.length === 0) return;
+): Promise<boolean> {
+    if (rawIndexes.length === 0) return false;
     const currentItems = await tx.playlistItem.findMany({
         where: { playlistId },
         orderBy: { sort: "asc" },
@@ -470,18 +467,19 @@ async function removeLockedPlaylistIndexes(
     const itemIds = parseRemovalIndexes(rawIndexes)
         .filter((index) => index < currentItems.length)
         .map((index) => currentItems[index].id);
-    if (itemIds.length === 0) return;
+    if (itemIds.length === 0) return false;
     await tx.playlistItem.deleteMany({
         where: { id: { in: itemIds } },
     });
+    return true;
 }
 
 async function appendLockedPlaylistTracks(
     tx: Prisma.TransactionClient,
     playlistId: string,
     trackIds: string[],
-): Promise<void> {
-    if (trackIds.length === 0) return;
+): Promise<boolean> {
+    if (trackIds.length === 0) return false;
     const [existingItems, maximum] = await Promise.all([
         tx.playlistItem.findMany({
             where: { playlistId },
@@ -496,7 +494,7 @@ async function appendLockedPlaylistTracks(
     const additions = trackIds.filter(
         (trackId) => !existingTrackIds.has(trackId),
     );
-    if (additions.length === 0) return;
+    if (additions.length === 0) return false;
     const startSort = (maximum._max.sort ?? -1) + 1;
     await tx.playlistItem.createMany({
         data: additions.map((trackId, index) => ({
@@ -506,25 +504,30 @@ async function appendLockedPlaylistTracks(
         })),
         skipDuplicates: true,
     });
+    return true;
 }
 
 async function reindexLockedPlaylistItems(
     tx: Prisma.TransactionClient,
     playlistId: string,
 ): Promise<void> {
-    const items = await tx.playlistItem.findMany({
-        where: { playlistId },
-        orderBy: { sort: "asc" },
-        select: { id: true },
-    });
-    await Promise.all(
-        items.map((item, sort) =>
-            tx.playlistItem.update({
-                where: { id: item.id },
-                data: { sort },
-            }),
-        ),
-    );
+    await tx.$executeRaw`
+        WITH ranked AS (
+            SELECT
+                item.id,
+                (ROW_NUMBER() OVER (
+                    ORDER BY item.sort ASC, item.id ASC
+                ) - 1)::integer AS "nextSort"
+            FROM "PlaylistItem" item
+            WHERE item."playlistId" = ${playlistId}
+            ORDER BY item.sort ASC, item.id ASC
+            LIMIT ${PLAYLIST_REORDER_MAX_ITEMS}
+        )
+        UPDATE "PlaylistItem" item
+        SET sort = ranked."nextSort"
+        FROM ranked
+        WHERE item.id = ranked.id
+    `;
 }
 
 async function updateLockedPlaylist(
@@ -533,9 +536,15 @@ async function updateLockedPlaylist(
     userId: string,
     name: string,
     rawIndexes: string[],
-    trackIdsToAdd: string[],
+    rawSongIdsToAdd: string[],
 ): Promise<PlaylistMutationResult> {
     await requirePlaylistMutationLock(tx, playlistId, userId);
+    let trackIdsToAdd: string[];
+    try {
+        trackIdsToAdd = parseTrackIdsFromQueryValues(rawSongIdsToAdd);
+    } catch {
+        return "trackNotFound";
+    }
     if (!(await ensureLibraryTracksExist(trackIdsToAdd, tx))) {
         return "trackNotFound";
     }
@@ -545,9 +554,19 @@ async function updateLockedPlaylist(
             data: { name },
         });
     }
-    await removeLockedPlaylistIndexes(tx, playlistId, rawIndexes);
-    await appendLockedPlaylistTracks(tx, playlistId, trackIdsToAdd);
-    await reindexLockedPlaylistItems(tx, playlistId);
+    const removedItems = await removeLockedPlaylistIndexes(
+        tx,
+        playlistId,
+        rawIndexes,
+    );
+    const appendedItems = await appendLockedPlaylistTracks(
+        tx,
+        playlistId,
+        trackIdsToAdd,
+    );
+    if (removedItems || appendedItems) {
+        await reindexLockedPlaylistItems(tx, playlistId);
+    }
     return "ok";
 }
 
@@ -589,24 +608,21 @@ export async function handleUpdatePlaylist(
         return;
     }
 
-    let trackIdsToAdd: string[] = [];
     try {
-        trackIdsToAdd = parseTrackIdsFromQueryValues(rawSongIdsToAdd);
-    } catch {
-        sendPlaylistTrackNotFound(res, format, callback);
-        return;
-    }
-
-    try {
-        const result = await prisma.$transaction((tx) =>
-            updateLockedPlaylist(
-                tx,
-                playlistId,
-                req.user!.id,
-                rawName,
-                rawSongIndexesToRemove,
-                trackIdsToAdd,
-            ),
+        const result = await prisma.$transaction(
+            (tx) =>
+                updateLockedPlaylist(
+                    tx,
+                    playlistId,
+                    req.user!.id,
+                    rawName,
+                    rawSongIndexesToRemove,
+                    rawSongIdsToAdd,
+                ),
+            {
+                maxWait: PLAYLIST_TRANSACTION_MAX_WAIT_MS,
+                timeout: PLAYLIST_TRANSACTION_TIMEOUT_MS,
+            },
         );
         if (result === "trackNotFound") {
             sendPlaylistTrackNotFound(res, format, callback);
