@@ -36,6 +36,12 @@ jest.mock("../../utils/db", () => ({
         play: {
             groupBy: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        trackRating: {
+            findMany: jest.fn(),
+        },
     },
 }));
 
@@ -106,6 +112,10 @@ describe("subsonic core compatibility handlers", () => {
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
     const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
     const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
+    const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+    const mockTrackRatingFindMany = (
+        prisma as unknown as { trackRating: { findMany: jest.Mock } }
+    ).trackRating.findMany;
     const mockSendSuccess = sendSubsonicSuccess as jest.Mock;
     const mockSendError = sendSubsonicError as jest.Mock;
 
@@ -116,6 +126,8 @@ describe("subsonic core compatibility handlers", () => {
         mockTrackFindMany.mockResolvedValue([]);
         mockTrackFindFirst.mockResolvedValue(null);
         mockPlayGroupBy.mockResolvedValue([]);
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockTrackRatingFindMany.mockResolvedValue([]);
     });
 
     it("normalizes invalid search3 count and offset params to safe defaults", async () => {
@@ -267,6 +279,102 @@ describe("subsonic core compatibility handlers", () => {
             "json",
             undefined,
         );
+    });
+
+    it("emits the latest played timestamp across an album's tracks", async () => {
+        mockAlbumFindMany.mockResolvedValue([
+            {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                lastSynced: new Date("2026-08-01T00:00:00.000Z"),
+                coverUrl: null,
+                genres: [],
+                userGenres: [],
+                artist: { id: "artist-1", name: "Artist One" },
+                tracks: [
+                    { id: "track-1", duration: 120 },
+                    { id: "track-2", duration: 180 },
+                ],
+            },
+        ]);
+        mockPlayGroupBy.mockResolvedValue([
+            {
+                trackId: "track-1",
+                _count: { _all: 2 },
+                _max: { playedAt: new Date("2026-08-17T00:00:00.000Z") },
+            },
+            {
+                trackId: "track-2",
+                _count: { _all: 3 },
+                _max: { playedAt: new Date("2026-08-18T00:00:00.000Z") },
+            },
+        ]);
+        mockLikedTrackFindMany.mockResolvedValue([
+            {
+                trackId: "track-1",
+                likedAt: new Date("2026-08-16T00:00:00.000Z"),
+            },
+        ]);
+
+        await handleGetAlbumList2(
+            buildReq({ type: "alphabeticalByName", size: "1" }),
+            buildRes(),
+        );
+
+        expect(mockPlayGroupBy).toHaveBeenCalledTimes(1);
+        expect(mockLikedTrackFindMany).toHaveBeenCalledTimes(1);
+        expect(mockPlayGroupBy).toHaveBeenCalledWith({
+            by: ["trackId"],
+            where: {
+                userId: "user-1",
+                trackId: { in: ["track-1", "track-2"] },
+            },
+            _count: { _all: true },
+            _max: { playedAt: true },
+        });
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                albumList2: {
+                    album: [
+                        expect.objectContaining({
+                            played: "2026-08-18T00:00:00.000Z",
+                            starred: "2026-08-16T00:00:00.000Z",
+                            playCount: 5,
+                        }),
+                    ],
+                },
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("omits played when no track on an album has been played", async () => {
+        mockAlbumFindMany.mockResolvedValue([
+            {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                lastSynced: new Date("2026-08-01T00:00:00.000Z"),
+                coverUrl: null,
+                genres: [],
+                userGenres: [],
+                artist: { id: "artist-1", name: "Artist One" },
+                tracks: [{ id: "track-1", duration: 120 }],
+            },
+        ]);
+
+        await handleGetAlbumList2(
+            buildReq({ type: "alphabeticalByName", size: "1" }),
+            buildRes(),
+        );
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            albumList2: { album: Array<Record<string, unknown>> };
+        };
+        expect(payload.albumList2.album[0]).not.toHaveProperty("played");
     });
 
     it("defaults random-song size and ignores an invalid fromYear while shuffling", async () => {
@@ -601,6 +709,102 @@ describe("subsonic core compatibility handlers", () => {
         );
     });
 
+    it("emits batched authenticated-user song fields and derived bitrate", async () => {
+        const playedAt = new Date("2026-08-18T12:34:56.000Z");
+        const likedAt = new Date("2026-08-17T11:22:33.000Z");
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-1",
+            title: "Played Song",
+            trackNo: 1,
+            discNo: 1,
+            duration: 180,
+            fileSize: 5_760_000,
+            mime: "audio/mpeg",
+            filePath: "Artist/Album/track-1.mp3",
+            album: {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                coverUrl: null,
+                genres: [],
+                userGenres: [],
+                artist: { id: "artist-1", name: "Artist One" },
+            },
+        });
+        mockPlayGroupBy.mockResolvedValue([
+            {
+                trackId: "track-1",
+                _count: { _all: 7 },
+                _max: { playedAt },
+            },
+        ]);
+        mockLikedTrackFindMany.mockResolvedValue([
+            { trackId: "track-1", likedAt },
+        ]);
+        mockTrackRatingFindMany.mockResolvedValue([
+            { trackId: "track-1", rating: 4 },
+        ]);
+
+        await handleGetSong(buildReq({ id: "tr-track-1" }), buildRes());
+
+        expect(mockPlayGroupBy).toHaveBeenCalledTimes(1);
+        expect(mockPlayGroupBy).toHaveBeenCalledWith({
+            by: ["trackId"],
+            where: { userId: "user-1", trackId: { in: ["track-1"] } },
+            _count: { _all: true },
+            _max: { playedAt: true },
+        });
+        expect(mockLikedTrackFindMany).toHaveBeenCalledTimes(1);
+        expect(mockTrackRatingFindMany).toHaveBeenCalledTimes(1);
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                song: expect.objectContaining({
+                    played: "2026-08-18T12:34:56.000Z",
+                    starred: "2026-08-17T11:22:33.000Z",
+                    userRating: 4,
+                    playCount: 7,
+                    bitRate: 256,
+                }),
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("omits absent user fields and an underivable bitrate", async () => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-1",
+            title: "Unplayed Song",
+            trackNo: 1,
+            discNo: 1,
+            duration: 0,
+            fileSize: 0,
+            mime: "audio/mpeg",
+            filePath: "Artist/Album/track-1.mp3",
+            album: {
+                id: "album-1",
+                title: "Album One",
+                year: 2024,
+                coverUrl: null,
+                genres: [],
+                userGenres: [],
+                artist: { id: "artist-1", name: "Artist One" },
+            },
+        });
+
+        await handleGetSong(buildReq({ id: "tr-track-1" }), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            song: Record<string, unknown>;
+        };
+        expect(payload.song).not.toHaveProperty("played");
+        expect(payload.song).not.toHaveProperty("starred");
+        expect(payload.song).not.toHaveProperty("userRating");
+        expect(payload.song).not.toHaveProperty("playCount");
+        expect(payload.song).not.toHaveProperty("bitRate");
+    });
+
     it("returns not-found when getSong receives a malformed track id", async () => {
         await handleGetSong(
             buildReq({
@@ -625,10 +829,14 @@ describe("subsonic core compatibility handlers", () => {
             expect.anything(),
             expect.objectContaining({
                 openSubsonicExtensions: expect.arrayContaining([
-                    expect.objectContaining({
-                        name: "apiKeyAuthentication",
-                    }),
+                    { name: "apiKeyAuthentication", versions: [1] },
+                    { name: "formPost", versions: [1] },
                     { name: "replayGain", versions: [1] },
+                    { name: "songLyrics", versions: [1] },
+                    { name: "transcodeOffset", versions: [1] },
+                    { name: "songPlayedDate", versions: [1] },
+                    { name: "albumPlayedDate", versions: [1] },
+                    { name: "indexBasedQueue", versions: [1] },
                 ]),
             }),
             "json",

@@ -21,6 +21,11 @@ import {
     TRACK_BROWSE_WHERE,
     TRACK_VISIBLE_WHERE,
 } from "../../utils/librarySorting";
+import {
+    combineSongEnrichmentForAlbum,
+    loadSongEnrichmentByTrackId,
+    type SongEnrichment,
+} from "./songEnrichment";
 
 const LIBRARY_LOCATION = "LIBRARY";
 const SUBSONIC_ALBUM_LOCATION_WHERE: Prisma.EnumAlbumLocationFilter = {
@@ -212,6 +217,7 @@ const albumListSelect = Prisma.validator<Prisma.AlbumSelect>()({
     tracks: {
         where: LIBRARY_TRACK_WHERE,
         select: {
+            id: true,
             duration: true,
         },
     },
@@ -244,23 +250,32 @@ function parseYearParam(value: unknown): number | null {
 
 function mapAlbumsForSubsonic(
     albums: AlbumListRecord[],
+    enrichmentByTrackId: ReadonlyMap<string, SongEnrichment> = new Map(),
+    enrichmentByAlbumId: ReadonlyMap<string, SongEnrichment> = new Map(),
 ): Record<string, unknown>[] {
     return albums.map((album) =>
-        formatAlbumForSubsonic({
-            id: album.id,
-            title: album.title,
-            year: album.year,
-            lastSynced: album.lastSynced,
-            coverUrl: album.coverUrl,
-            genres: album.genres,
-            userGenres: album.userGenres,
-            artist: album.artist,
-            songCount: album.tracks.length,
-            duration: album.tracks.reduce(
-                (sum, track) => sum + (track.duration ?? 0),
-                0,
-            ),
-        }),
+        formatAlbumForSubsonic(
+            {
+                id: album.id,
+                title: album.title,
+                year: album.year,
+                lastSynced: album.lastSynced,
+                coverUrl: album.coverUrl,
+                genres: album.genres,
+                userGenres: album.userGenres,
+                artist: album.artist,
+                songCount: album.tracks.length,
+                duration: album.tracks.reduce(
+                    (sum, track) => sum + (track.duration ?? 0),
+                    0,
+                ),
+            },
+            enrichmentByAlbumId.get(album.id) ??
+                combineSongEnrichmentForAlbum(
+                    album.tracks.map((track) => track.id),
+                    enrichmentByTrackId,
+                ),
+        ),
     );
 }
 
@@ -627,21 +642,24 @@ function formatArtistForSubsonic(artist: {
     return formatted;
 }
 
-function formatAlbumForSubsonic(album: {
-    id: string;
-    title: string;
-    year: number | null;
-    lastSynced: Date;
-    coverUrl: string | null;
-    genres?: unknown;
-    userGenres?: unknown;
-    artist: {
+function formatAlbumForSubsonic(
+    album: {
         id: string;
-        name: string;
-    };
-    songCount: number;
-    duration: number;
-}): Record<string, unknown> {
+        title: string;
+        year: number | null;
+        lastSynced: Date;
+        coverUrl: string | null;
+        genres?: unknown;
+        userGenres?: unknown;
+        artist: {
+            id: string;
+            name: string;
+        };
+        songCount: number;
+        duration: number;
+    },
+    enrichment: SongEnrichment = {},
+): Record<string, unknown> {
     const formatted: Record<string, unknown> = {
         id: toSubsonicId("album", album.id),
         parent: toSubsonicId("artist", album.artist.id),
@@ -672,10 +690,11 @@ function formatAlbumForSubsonic(album: {
         formatted.genre = genre;
     }
 
+    applyUserEnrichment(formatted, enrichment, false);
     return formatted;
 }
 
-function formatSongForSubsonic(song: {
+type SongForSubsonicInput = {
     id: string;
     title: string;
     trackNo: number;
@@ -701,7 +720,12 @@ function formatSongForSubsonic(song: {
             name: string;
         };
     };
-}): Record<string, unknown> {
+};
+
+function formatSongForSubsonic(
+    song: SongForSubsonicInput,
+    enrichment: SongEnrichment = {},
+): Record<string, unknown> {
     const suffix =
         song.filePath === null ? undefined : getFileSuffix(song.filePath);
 
@@ -729,6 +753,11 @@ function formatSongForSubsonic(song: {
         formatted.suffix = suffix;
     }
 
+    const bitRate = deriveBitRateKbps(song.fileSize, song.duration);
+    if (bitRate !== undefined) {
+        formatted.bitRate = bitRate;
+    }
+
     if (song.album.coverUrl) {
         formatted.coverArt = toSubsonicId("album", song.album.id);
     }
@@ -746,7 +775,36 @@ function formatSongForSubsonic(song: {
         formatted.replayGain = replayGain;
     }
 
+    applyUserEnrichment(formatted, enrichment, true);
     return formatted;
+}
+
+function applyUserEnrichment(
+    formatted: Record<string, unknown>,
+    enrichment: SongEnrichment,
+    includeRating: boolean,
+): void {
+    if (enrichment.playedAt) {
+        formatted.played = enrichment.playedAt.toISOString();
+    }
+    if (enrichment.starredAt) {
+        formatted.starred = enrichment.starredAt.toISOString();
+    }
+    if (includeRating && enrichment.userRating) {
+        formatted.userRating = enrichment.userRating;
+    }
+    if (enrichment.playCount) {
+        formatted.playCount = enrichment.playCount;
+    }
+}
+
+function deriveBitRateKbps(
+    fileSizeBytes: number,
+    durationSeconds: number,
+): number | undefined {
+    if (fileSizeBytes <= 0 || durationSeconds <= 0) return undefined;
+    const bitRate = Math.round((fileSizeBytes * 8) / durationSeconds / 1000);
+    return Number.isSafeInteger(bitRate) && bitRate > 0 ? bitRate : undefined;
 }
 
 type ReplayGainSongInput = {
@@ -799,6 +857,7 @@ function formatBookmarkForSubsonic(
         track: BookmarkTrackRecord;
     },
     username: string,
+    enrichment?: SongEnrichment,
 ): Record<string, unknown> {
     const position = Math.round(bookmark.positionSeconds * 1000);
     const createdAt = bookmark.createdAt ?? bookmark.updatedAt;
@@ -810,7 +869,7 @@ function formatBookmarkForSubsonic(
         created: createdAt.toISOString(),
         changed: bookmark.updatedAt.toISOString(),
         entry: {
-            ...formatSongForSubsonic(bookmark.track),
+            ...formatSongForSubsonic(bookmark.track, enrichment),
             bookmarkPosition: position,
         },
     };
@@ -960,6 +1019,7 @@ export {
     albumListSelect,
     bookmarkTrackSelect,
     buildAlbumPlayStats,
+    combineSongEnrichmentForAlbum,
     DEFAULT_SUBSONIC_AVATAR_PNG,
     ensureLibraryAlbumsExist,
     ensureLibraryArtistsExist,
@@ -977,6 +1037,7 @@ export {
     isUnsupportedMusicFolderId,
     LIBRARY_ALBUM_WHERE,
     LIBRARY_TRACK_WHERE,
+    loadSongEnrichmentByTrackId,
     mapAlbumsForSubsonic,
     normalizeSearchQuery,
     parseAlbumListType,
@@ -1003,4 +1064,4 @@ export {
     SUBSONIC_COVER_CACHE_CONTROL,
     SUBSONIC_MUSIC_FOLDER_ID,
 };
-export type { AlbumListRecord, BookmarkTrackRecord };
+export type { AlbumListRecord, BookmarkTrackRecord, SongEnrichment };

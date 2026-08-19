@@ -48,11 +48,17 @@ jest.mock("../../utils/db", () => ({
         },
         play: {
             createMany: jest.fn(),
+            groupBy: jest.fn(),
         },
         likedTrack: {
             createMany: jest.fn(),
             deleteMany: jest.fn(),
             findMany: jest.fn(),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
         },
         user: {
             findUnique: jest.fn(),
@@ -172,9 +178,19 @@ describe("subsonic Tier B handlers", () => {
         .aggregate as jest.Mock;
     const mockPlaylistItemUpdate = prisma.playlistItem.update as jest.Mock;
     const mockPlayCreateMany = prisma.play.createMany as jest.Mock;
+    const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockLikedCreateMany = prisma.likedTrack.createMany as jest.Mock;
     const mockLikedDeleteMany = prisma.likedTrack.deleteMany as jest.Mock;
     const mockLikedFindMany = prisma.likedTrack.findMany as jest.Mock;
+    const mockTrackRating = (
+        prisma as unknown as {
+            trackRating: {
+                findMany: jest.Mock;
+                upsert: jest.Mock;
+                deleteMany: jest.Mock;
+            };
+        }
+    ).trackRating;
     const mockTransaction = prisma.$transaction as jest.Mock;
     const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
     const mockScanGetActive = scanQueue.getActive as jest.Mock;
@@ -188,6 +204,11 @@ describe("subsonic Tier B handlers", () => {
         jest.clearAllMocks();
         resetSubsonicScanStartCooldownForTests();
         mockPlaylistFindMany.mockResolvedValue([]);
+        mockPlayGroupBy.mockResolvedValue([]);
+        mockLikedFindMany.mockResolvedValue([]);
+        mockTrackRating.findMany.mockResolvedValue([]);
+        mockTrackRating.upsert.mockResolvedValue({});
+        mockTrackRating.deleteMany.mockResolvedValue({ count: 0 });
         mockTrackAggregate.mockResolvedValue({ _sum: { duration: null } });
         mockTrackGroupBy.mockResolvedValue([]);
         mockPlaylistItemFindMany.mockResolvedValue([]);
@@ -1481,7 +1502,7 @@ describe("subsonic Tier B handlers", () => {
 
     it("returns generic error when setting a rating fails", async () => {
         mockTrackFindMany.mockResolvedValue([{ id: "track-1" }]);
-        mockLikedCreateMany.mockRejectedValue(new Error("db down"));
+        mockTrackRating.upsert.mockRejectedValue(new Error("db down"));
 
         await handleSetRating(
             buildReq({
@@ -1500,7 +1521,7 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
-    it("deletes and creates rating records based on numeric rating", async () => {
+    it("deletes and upserts numeric rating records", async () => {
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "track-1" }])
             .mockResolvedValueOnce([{ id: "track-1" }]);
@@ -1514,20 +1535,18 @@ describe("subsonic Tier B handlers", () => {
             buildRes(),
         );
 
-        expect(mockLikedDeleteMany).toHaveBeenCalledWith({
+        expect(mockTrackRating.deleteMany).toHaveBeenCalledWith({
             where: {
                 userId: "user-1",
                 trackId: "track-1",
             },
         });
-        expect(mockLikedCreateMany).toHaveBeenCalledWith({
-            data: [
-                {
-                    userId: "user-1",
-                    trackId: "track-1",
-                },
-            ],
-            skipDuplicates: true,
+        expect(mockTrackRating.upsert).toHaveBeenCalledWith({
+            where: {
+                userId_trackId: { userId: "user-1", trackId: "track-1" },
+            },
+            create: { userId: "user-1", trackId: "track-1", rating: 5 },
+            update: { rating: 5 },
         });
     });
 
@@ -1543,18 +1562,18 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
-    it("returns generic error for malformed star identifiers", async () => {
+    it("returns not-found for a star identifier with the wrong entity type", async () => {
         await handleStar(
             buildReq({
-                id: ["bad-id"],
+                id: ["al-album-1"],
             }),
             buildRes(),
         );
 
         expect(mockSendError).toHaveBeenCalledWith(
             expect.anything(),
-            0,
-            "Failed to star item",
+            70,
+            "Invalid song, album, or artist ID",
             "json",
             undefined,
         );

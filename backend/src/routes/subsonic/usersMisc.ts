@@ -10,6 +10,7 @@ import {
     formatSongForSubsonic,
     getRequestContext,
     LIBRARY_TRACK_WHERE,
+    loadSongEnrichmentByTrackId,
     SONG_LOUDNESS_ALBUM_SELECT,
     SONG_LOUDNESS_TRACK_SELECT,
     SUBSONIC_ALBUM_LOCATION_WHERE,
@@ -104,6 +105,10 @@ export async function handleGetNowPlaying(
             },
         });
         const trackById = new Map(tracks.map((track) => [track.id, track]));
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            tracks.map((track) => track.id),
+        );
 
         const entries = playbackStates
             .map((state) => {
@@ -118,7 +123,10 @@ export async function handleGetNowPlaying(
                 }
 
                 return {
-                    ...formatSongForSubsonic(track),
+                    ...formatSongForSubsonic(
+                        track,
+                        playedAtByTrackId.get(track.id),
+                    ),
                     username: req.user!.username,
                     playerId: state.deviceId,
                     minutesAgo: Math.max(

@@ -30,6 +30,12 @@ jest.mock("../../utils/db", () => ({
         play: {
             groupBy: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
         genre: {
             findMany: jest.fn(),
         },

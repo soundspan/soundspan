@@ -53,6 +53,7 @@ export function handleGetOpenSubsonicExtensions(
                 { name: "transcodeOffset", versions: [1] },
                 { name: "songPlayedDate", versions: [1] },
                 { name: "albumPlayedDate", versions: [1] },
+                { name: "indexBasedQueue", versions: [1] },
             ],
         },
         format,

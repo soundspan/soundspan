@@ -14,6 +14,7 @@ import {
     getRequiredQueryString,
     LIBRARY_ALBUM_WHERE,
     LIBRARY_TRACK_WHERE,
+    loadSongEnrichmentByTrackId,
     parseCountParam,
     parseEntityIdOrNotFound,
     SONG_LOUDNESS_ALBUM_SELECT,
@@ -271,7 +272,7 @@ export async function handleGetSimilarSongs(
             similarArtistIds.map((id, index) => [id, index]),
         );
 
-        const songs = tracks
+        const selectedTracks = tracks
             .sort((left, right) => {
                 const leftRank =
                     similarArtistRank.get(left.album.artist.id) ??
@@ -297,8 +298,14 @@ export async function handleGetSimilarSongs(
 
                 return left.id.localeCompare(right.id);
             })
-            .slice(0, count)
-            .map((track) => formatSongForSubsonic(track));
+            .slice(0, count);
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            selectedTracks.map((track) => track.id),
+        );
+        const songs = selectedTracks.map((track) =>
+            formatSongForSubsonic(track, playedAtByTrackId.get(track.id)),
+        );
 
         sendSubsonicSuccess(
             res,
@@ -489,14 +496,22 @@ export async function handleGetSimilarSongs2(
             genreTracks,
             sameArtistTracks,
         ]);
+        const selectedTracks = mergedTracks.slice(0, count);
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            selectedTracks.map((track) => track.id),
+        );
 
         sendSubsonicSuccess(
             res,
             {
                 similarSongs2: {
-                    song: mergedTracks
-                        .slice(0, count)
-                        .map((track) => formatSongForSubsonic(track)),
+                    song: selectedTracks.map((track) =>
+                        formatSongForSubsonic(
+                            track,
+                            playedAtByTrackId.get(track.id),
+                        ),
+                    ),
                 },
             },
             format,
@@ -651,7 +666,7 @@ export async function handleGetTopSongs(
             },
         });
 
-        const topSongs = tracks
+        const selectedTracks = tracks
             .sort((left, right) => {
                 const leftCount = playCountByTrackId.get(left.id) ?? 0;
                 const rightCount = playCountByTrackId.get(right.id) ?? 0;
@@ -666,8 +681,14 @@ export async function handleGetTopSongs(
                 }
                 return left.title.localeCompare(right.title);
             })
-            .slice(0, 50)
-            .map((track) => formatSongForSubsonic(track));
+            .slice(0, 50);
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            selectedTracks.map((track) => track.id),
+        );
+        const topSongs = selectedTracks.map((track) =>
+            formatSongForSubsonic(track, playedAtByTrackId.get(track.id)),
+        );
 
         sendSubsonicSuccess(
             res,

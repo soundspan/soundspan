@@ -316,6 +316,126 @@ type SubsonicStreamTrack = {
     } | null;
 };
 
+function parseTimeOffsetSeconds(value: unknown): number {
+    if (typeof value !== "string" || !/^\d+$/.test(value)) return 0;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : 0;
+}
+
+async function loadSubsonicStreamTrack(
+    trackId: string,
+): Promise<SubsonicStreamTrack | null> {
+    return prisma.track.findFirst({
+        where: {
+            ...LIBRARY_TRACK_WHERE,
+            id: trackId,
+            album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
+        },
+        select: {
+            id: true,
+            origin: true,
+            remoteId: true,
+            mime: true,
+            filePath: true,
+            fileModified: true,
+            federationPeer: {
+                select: {
+                    id: true,
+                    baseUrl: true,
+                    outboundToken: true,
+                    outboundStatus: true,
+                },
+            },
+        },
+    });
+}
+
+function resolveLocalStreamPath(track: SubsonicStreamTrack):
+    | { path: string }
+    | { error: "song" | "file" } {
+    if (!track.filePath || !track.fileModified) return { error: "song" };
+    const absolutePath = resolveTrackPathWithinRoot(
+        config.music.musicPath,
+        track.filePath,
+    );
+    return absolutePath && fs.existsSync(absolutePath)
+        ? { path: absolutePath }
+        : { error: "file" };
+}
+
+async function getLocalStreamFile(
+    service: AudioStreamingService,
+    track: SubsonicStreamTrack,
+    quality: Quality,
+    absolutePath: string,
+    timeOffsetSeconds: number,
+) {
+    const offset = quality === "original" ? 0 : timeOffsetSeconds;
+    try {
+        return offset > 0
+            ? await service.getStreamFilePath(
+                  track.id,
+                  quality,
+                  track.fileModified,
+                  absolutePath,
+                  offset,
+              )
+            : await service.getStreamFilePath(
+                  track.id,
+                  quality,
+                  track.fileModified,
+                  absolutePath,
+              );
+    } catch (error) {
+        if ((error as { code?: string }).code !== "FFMPEG_NOT_FOUND") {
+            throw error;
+        }
+        return service.getStreamFilePath(
+            track.id,
+            "original",
+            track.fileModified,
+            absolutePath,
+        );
+    }
+}
+
+async function serveLocalSubsonicStream(input: {
+    req: Request;
+    res: Response;
+    track: SubsonicStreamTrack;
+    quality: Quality;
+    timeOffsetSeconds: number;
+}): Promise<"served" | "song-missing" | "file-missing"> {
+    const resolvedPath = resolveLocalStreamPath(input.track);
+    if ("error" in resolvedPath) return `${resolvedPath.error}-missing`;
+    const service = new AudioStreamingService(
+        config.music.musicPath,
+        config.music.transcodeCachePath,
+        config.music.transcodeCacheMaxGb,
+    );
+    let cleanup: (() => Promise<void>) | undefined;
+    try {
+        const streamFile = await getLocalStreamFile(
+            service,
+            input.track,
+            input.quality,
+            resolvedPath.path,
+            input.timeOffsetSeconds,
+        );
+        cleanup = streamFile.cleanup;
+        await service.streamFileWithRangeSupport(
+            input.req,
+            input.res,
+            streamFile.filePath,
+            streamFile.mimeType,
+        );
+        return "served";
+    } finally {
+        await cleanup?.();
+        service.destroy();
+    }
+}
+
 async function proxySubsonicFederatedStream(input: {
     req: Request;
     res: Response;
@@ -371,14 +491,20 @@ async function proxySubsonicFederatedStream(input: {
     return true;
 }
 
-/** Executes handleStream. */
-export async function handleStream(req: Request, res: Response): Promise<void> {
-    const { format, callback } = getRequestContext(req);
-    const rawId = getRequiredQueryString(req, res, "id", format, callback);
-    if (!rawId) {
-        return;
-    }
+type StreamRequest = {
+    trackId: string;
+    quality: Quality;
+    timeOffsetSeconds: number;
+};
 
+function parseStreamRequest(
+    req: Request,
+    res: Response,
+    format: ResponseFormat,
+    callback?: string,
+): StreamRequest | null {
+    const rawId = getRequiredQueryString(req, res, "id", format, callback);
+    if (!rawId) return null;
     const trackId = parseEntityIdOrNotFound(
         req,
         res,
@@ -388,137 +514,74 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
         format,
         callback,
     );
-    if (!trackId) {
+    if (!trackId) return null;
+    return {
+        trackId,
+        quality: resolveSubsonicStreamQuality(
+            req.query.maxBitRate,
+            req.query.format,
+        ),
+        timeOffsetSeconds: parseTimeOffsetSeconds(req.query.timeOffset),
+    };
+}
+
+async function executeStreamRequest(
+    req: Request,
+    res: Response,
+    request: StreamRequest,
+    format: ResponseFormat,
+    callback?: string,
+): Promise<void> {
+    const track = await loadSubsonicStreamTrack(request.trackId);
+    if (!track) {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.NOT_FOUND,
+            "Song not found",
+            format,
+            callback,
+        );
         return;
     }
 
-    const quality = resolveSubsonicStreamQuality(
-        req.query.maxBitRate,
-        req.query.format,
-    );
-
-    let streamingService: AudioStreamingService | null = null;
-
-    try {
-        const track = await prisma.track.findFirst({
-            where: {
-                ...LIBRARY_TRACK_WHERE,
-                id: trackId,
-                album: {
-                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                },
-            },
-            select: {
-                id: true,
-                origin: true,
-                remoteId: true,
-                mime: true,
-                filePath: true,
-                fileModified: true,
-                federationPeer: {
-                    select: {
-                        id: true,
-                        baseUrl: true,
-                        outboundToken: true,
-                        outboundStatus: true,
-                    },
-                },
-            },
-        });
-
-        if (!track) {
-            sendSubsonicError(
-                res,
-                SubsonicErrorCode.NOT_FOUND,
-                "Song not found",
-                format,
-                callback,
-            );
-            return;
-        }
-
-        if (
-            await proxySubsonicFederatedStream({
-                req,
-                res,
-                track,
-                quality,
-                format,
-                callback,
-            })
-        ) {
-            return;
-        }
-
-        if (!track.filePath || !track.fileModified) {
-            sendSubsonicError(
-                res,
-                SubsonicErrorCode.NOT_FOUND,
-                "Song not found",
-                format,
-                callback,
-            );
-            return;
-        }
-
-        const absolutePath = resolveTrackPathWithinRoot(
-            config.music.musicPath,
-            track.filePath,
-        );
-
-        if (!absolutePath || !fs.existsSync(absolutePath)) {
-            sendSubsonicError(
-                res,
-                SubsonicErrorCode.NOT_FOUND,
-                "File not found",
-                format,
-                callback,
-            );
-            return;
-        }
-
-        streamingService = new AudioStreamingService(
-            config.music.musicPath,
-            config.music.transcodeCachePath,
-            config.music.transcodeCacheMaxGb,
-        );
-
-        let streamFile;
-        if (quality === "original") {
-            streamFile = await streamingService.getStreamFilePath(
-                track.id,
-                quality,
-                track.fileModified,
-                absolutePath,
-            );
-        } else {
-            try {
-                streamFile = await streamingService.getStreamFilePath(
-                    track.id,
-                    quality,
-                    track.fileModified,
-                    absolutePath,
-                );
-            } catch (error) {
-                if ((error as { code?: string }).code === "FFMPEG_NOT_FOUND") {
-                    streamFile = await streamingService.getStreamFilePath(
-                        track.id,
-                        "original",
-                        track.fileModified,
-                        absolutePath,
-                    );
-                } else {
-                    throw error;
-                }
-            }
-        }
-
-        await streamingService.streamFileWithRangeSupport(
+    if (
+        await proxySubsonicFederatedStream({
             req,
             res,
-            streamFile.filePath,
-            streamFile.mimeType,
+            track,
+            quality: request.quality,
+            format,
+            callback,
+        })
+    ) {
+        return;
+    }
+
+    const result = await serveLocalSubsonicStream({
+        req,
+        res,
+        track,
+        quality: request.quality,
+        timeOffsetSeconds: request.timeOffsetSeconds,
+    });
+    if (result !== "served") {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.NOT_FOUND,
+            result === "song-missing" ? "Song not found" : "File not found",
+            format,
+            callback,
         );
+    }
+}
+
+/** Executes handleStream. */
+export async function handleStream(req: Request, res: Response): Promise<void> {
+    const { format, callback } = getRequestContext(req);
+    const request = parseStreamRequest(req, res, format, callback);
+    if (!request) return;
+    try {
+        await executeStreamRequest(req, res, request, format, callback);
     } catch {
         if (!res.headersSent) {
             sendSubsonicError(
@@ -529,8 +592,6 @@ export async function handleStream(req: Request, res: Response): Promise<void> {
                 callback,
             );
         }
-    } finally {
-        streamingService?.destroy();
     }
 }
 

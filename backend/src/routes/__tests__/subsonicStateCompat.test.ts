@@ -42,6 +42,12 @@ jest.mock("../../utils/db", () => ({
         likedTrack: {
             findMany: jest.fn(),
         },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
+        play: {
+            groupBy: jest.fn(),
+        },
     },
 }));
 
@@ -107,6 +113,28 @@ function buildRes(): Response {
     return {} as Response;
 }
 
+function buildQueueTrack(id: string, title: string) {
+    return {
+        id,
+        title,
+        trackNo: 1,
+        discNo: 1,
+        duration: 180,
+        fileSize: 1700,
+        mime: "audio/mpeg",
+        filePath: `Artist One/Album One/${title}.mp3`,
+        album: {
+            id: "album-1",
+            title: "Album One",
+            year: 2023,
+            coverUrl: null,
+            genres: [],
+            userGenres: [],
+            artist: { id: "artist-1", name: "Artist One" },
+        },
+    };
+}
+
 describe("subsonic state/admin compatibility handlers", () => {
     const bookmarkModel = (
         prisma as unknown as {
@@ -128,6 +156,7 @@ describe("subsonic state/admin compatibility handlers", () => {
     const mockAlbumFindMany = prisma.album.findMany as jest.Mock;
     const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
     const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+    const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockGetActive = scanQueue.getActive as jest.Mock;
     const mockGetWaiting = scanQueue.getWaiting as jest.Mock;
     const mockGetDelayed = scanQueue.getDelayed as jest.Mock;
@@ -148,6 +177,7 @@ describe("subsonic state/admin compatibility handlers", () => {
         mockAlbumFindMany.mockResolvedValue([]);
         mockArtistFindMany.mockResolvedValue([]);
         mockLikedTrackFindMany.mockResolvedValue([]);
+        mockPlayGroupBy.mockResolvedValue([]);
         mockGetActive.mockResolvedValue([]);
         mockGetWaiting.mockResolvedValue([]);
         mockGetDelayed.mockResolvedValue([]);
@@ -161,10 +191,64 @@ describe("subsonic state/admin compatibility handlers", () => {
             expect.anything(),
             expect.objectContaining({
                 playQueue: expect.objectContaining({
-                    current: 0,
                     position: 0,
                     entry: [],
                 }),
+            }),
+            "json",
+            undefined,
+        );
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            playQueue: Record<string, unknown>;
+        };
+        expect(payload.playQueue).not.toHaveProperty("current");
+    });
+
+    it("returns the classic play queue current entry as a song ID", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [{ id: "tr-track-1" }, { id: "tr-track-2" }],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+            buildQueueTrack("track-2", "Song Two"),
+        ]);
+
+        await handleGetPlayQueue(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playQueue: expect.objectContaining({
+                    current: "tr-track-2",
+                    position: 12000,
+                }),
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("keeps numeric current semantics for getPlayQueueByIndex", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [{ id: "tr-track-1" }, { id: "tr-track-2" }],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+            buildQueueTrack("track-2", "Song Two"),
+        ]);
+
+        await handleGetPlayQueueByIndex(buildReq({ index: "2" }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playQueue: expect.objectContaining({ current: 1 }),
             }),
             "json",
             undefined,
@@ -229,6 +313,59 @@ describe("subsonic state/admin compatibility handlers", () => {
             {},
             "json",
             undefined,
+        );
+    });
+
+    it.each(["tr-track-2", "track-2"])(
+        "resolves classic savePlayQueue current song ID %s to its first queue index",
+        async (current) => {
+            mockTrackFindMany.mockResolvedValue([
+                buildQueueTrack("track-1", "Song One"),
+                buildQueueTrack("track-2", "Song Two"),
+            ]);
+
+            await handleSavePlayQueue(
+                buildReq({
+                    id: ["tr-track-1", "tr-track-2", "tr-track-2"],
+                    current,
+                    position: "12000",
+                }),
+                buildRes(),
+            );
+
+            expect(mockPlaybackUpsert).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    create: expect.objectContaining({
+                        currentIndex: 1,
+                        trackId: "track-2",
+                    }),
+                }),
+            );
+        },
+    );
+
+    it("retains legacy integer current semantics when no submitted song ID matches", async () => {
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-a", "Song A"),
+            buildQueueTrack("track-b", "Song B"),
+        ]);
+
+        await handleSavePlayQueue(
+            buildReq({
+                id: ["tr-track-a", "tr-track-b"],
+                current: "1",
+                position: "12000",
+            }),
+            buildRes(),
+        );
+
+        expect(mockPlaybackUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    currentIndex: 1,
+                    trackId: "track-b",
+                }),
+            }),
         );
     });
 
@@ -704,6 +841,7 @@ describe("subsonic state/admin compatibility handlers", () => {
 
         await handleGetStarred2(buildReq({}), buildRes());
 
+        expect(mockLikedTrackFindMany).toHaveBeenCalledTimes(1);
         const albumQuery = mockAlbumFindMany.mock.calls[0][0];
         expect(albumQuery.select).not.toHaveProperty("tracks");
         const artistQuery = mockArtistFindMany.mock.calls[0][0];

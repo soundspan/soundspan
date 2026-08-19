@@ -40,6 +40,15 @@ jest.mock("../../utils/db", () => ({
         playlistItem: {
             findMany: jest.fn(),
         },
+        play: {
+            groupBy: jest.fn(),
+        },
+        likedTrack: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
     },
 }));
 
@@ -137,6 +146,7 @@ describe("subsonic collections/core compatibility handlers", () => {
     const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
     const mockTrackAggregate = prisma.track.aggregate as jest.Mock;
     const mockPlaylistItemFindMany = prisma.playlistItem.findMany as jest.Mock;
+    const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockSendError = sendSubsonicError as jest.Mock;
     const mockSendSuccess = sendSubsonicSuccess as jest.Mock;
 
@@ -148,6 +158,7 @@ describe("subsonic collections/core compatibility handlers", () => {
         mockPlaybackStateFindMany.mockResolvedValue([]);
         mockTrackFindMany.mockResolvedValue([]);
         mockTrackFindFirst.mockResolvedValue(null);
+        mockPlayGroupBy.mockResolvedValue([]);
         mockTrackAggregate.mockResolvedValue({ _sum: { duration: null } });
         mockPlaylistItemFindMany.mockResolvedValue([]);
     });

@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 const mockGetStreamFilePath = jest.fn();
 const mockStreamFileWithRangeSupport = jest.fn();
 const mockDestroyStreamingService = jest.fn();
+const mockCleanupStreamFile = jest.fn();
 const mockLookup = jest.fn();
 const mockProxyFederatedTrackStream = jest.fn();
 const mockProxyFederatedCover = jest.fn();
@@ -158,6 +159,7 @@ beforeEach(() => {
     mockGetStreamFilePath.mockReset();
     mockStreamFileWithRangeSupport.mockReset();
     mockDestroyStreamingService.mockReset();
+    mockCleanupStreamFile.mockReset();
     mockAudioServiceConstructor.mockClear();
     mockTrackFindFirst.mockReset();
     mockAlbumFindFirst.mockReset();
@@ -175,6 +177,116 @@ afterEach(() => {
 });
 
 describe("handleStream", () => {
+    it("passes a positive integer timeOffset to an uncached transcode tier", async () => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-1",
+            origin: "LOCAL",
+            remoteId: null,
+            mime: "audio/flac",
+            filePath: "Artist/Track.flac",
+            fileModified: new Date("2024-02-02T00:00:00Z"),
+            federationPeer: null,
+        });
+        jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        mockGetStreamFilePath.mockResolvedValue({
+            filePath: "/tmp/offset-track.mp3",
+            mimeType: "audio/mpeg",
+            cleanup: mockCleanupStreamFile,
+        });
+        mockStreamFileWithRangeSupport.mockResolvedValue(undefined);
+
+        const req = buildReq({
+            id: "tr-track-1",
+            maxBitRate: "128",
+            timeOffset: "42",
+        });
+        const res = buildRes();
+
+        await handleStream(req, res);
+
+        expect(mockGetStreamFilePath).toHaveBeenCalledWith(
+            "track-1",
+            "low",
+            expect.any(Date),
+            expect.stringContaining("/music"),
+            42,
+        );
+        expect(mockStreamFileWithRangeSupport).toHaveBeenCalledWith(
+            req,
+            res,
+            "/tmp/offset-track.mp3",
+            "audio/mpeg",
+        );
+        expect(mockCleanupStreamFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores timeOffset when original quality is selected", async () => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-1",
+            origin: "LOCAL",
+            remoteId: null,
+            mime: "audio/flac",
+            filePath: "Artist/Track.flac",
+            fileModified: new Date("2024-02-02T00:00:00Z"),
+            federationPeer: null,
+        });
+        jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        mockGetStreamFilePath.mockResolvedValue({
+            filePath: "/music/Artist/Track.flac",
+            mimeType: "audio/flac",
+        });
+        mockStreamFileWithRangeSupport.mockResolvedValue(undefined);
+
+        await handleStream(
+            buildReq({ id: "tr-track-1", timeOffset: "42" }),
+            buildRes(),
+        );
+
+        expect(mockGetStreamFilePath).toHaveBeenCalledWith(
+            "track-1",
+            "original",
+            expect.any(Date),
+            expect.stringContaining("/music"),
+        );
+    });
+
+    it.each(["-1", "1.5", "invalid"])(
+        "normalizes invalid timeOffset %s to zero",
+        async (timeOffset) => {
+            mockTrackFindFirst.mockResolvedValue({
+                id: "track-1",
+                origin: "LOCAL",
+                remoteId: null,
+                mime: "audio/flac",
+                filePath: "Artist/Track.flac",
+                fileModified: new Date("2024-02-02T00:00:00Z"),
+                federationPeer: null,
+            });
+            jest.spyOn(fs, "existsSync").mockReturnValue(true);
+            mockGetStreamFilePath.mockResolvedValue({
+                filePath: "/var/soundspan/transcode/track.mp3",
+                mimeType: "audio/mpeg",
+            });
+            mockStreamFileWithRangeSupport.mockResolvedValue(undefined);
+
+            await handleStream(
+                buildReq({
+                    id: "tr-track-1",
+                    maxBitRate: "128",
+                    timeOffset,
+                }),
+                buildRes(),
+            );
+
+            expect(mockGetStreamFilePath).toHaveBeenCalledWith(
+                "track-1",
+                "low",
+                expect.any(Date),
+                expect.stringContaining("/music"),
+            );
+        },
+    );
+
     it("proxies a federated Range request to its active peer", async () => {
         const track = {
             id: "federated-track",

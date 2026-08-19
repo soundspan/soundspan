@@ -19,6 +19,7 @@ import {
     parseTrackIdsFromQueryValues,
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
+import { setSongUserRating } from "./songEnrichment";
 
 async function resolveStarMutationTrackIds(input: {
     songTrackIds: string[];
@@ -240,24 +241,7 @@ export async function handleSetRating(
             return;
         }
 
-        if (rating === 0) {
-            await prisma.likedTrack.deleteMany({
-                where: {
-                    userId: req.user!.id,
-                    trackId,
-                },
-            });
-        } else {
-            await prisma.likedTrack.createMany({
-                data: [
-                    {
-                        userId: req.user!.id,
-                        trackId,
-                    },
-                ],
-                skipDuplicates: true,
-            });
-        }
+        await setSongUserRating(req.user!.id, trackId, rating);
 
         sendSubsonicSuccess(res, {}, format, callback);
     } catch {

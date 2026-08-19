@@ -10,6 +10,8 @@ jest.mock("../../middleware/subsonicAuth", () => ({
 }));
 
 const findUser = jest.fn();
+const findArtist = jest.fn();
+const findAlbum = jest.fn();
 const comparePassword = jest.fn();
 const runDummyBcrypt = jest.fn().mockResolvedValue(undefined);
 const traceLog = { warn: jest.fn() };
@@ -18,6 +20,8 @@ const authLog = { debug: jest.fn() };
 jest.mock("../../utils/db", () => ({
     prisma: {
         user: { findUnique: (...args: unknown[]) => findUser(...args) },
+        artist: { findFirst: (...args: unknown[]) => findArtist(...args) },
+        album: { findFirst: (...args: unknown[]) => findAlbum(...args) },
         appPassword: {
             findMany: jest.fn().mockResolvedValue([]),
             update: jest.fn().mockResolvedValue({}),
@@ -239,6 +243,17 @@ describe("Subsonic form POST routing", () => {
             passwordHash: "stored-hash",
             subsonicPassword: null,
         });
+        findArtist.mockResolvedValue({
+            mbid: "artist-mbid",
+            summary: "Artist biography",
+            heroUrl: null,
+            similarFrom: [],
+        });
+        findAlbum.mockResolvedValue({
+            rgMbid: "album-mbid",
+            title: "Album notes",
+            coverUrl: null,
+        });
         comparePassword.mockImplementation(
             async (provided: string) => provided === "correct-password",
         );
@@ -270,6 +285,42 @@ describe("Subsonic form POST routing", () => {
         const response = await executePost("/scrobble");
 
         expect(response.jsonBody).toEqual({ method: "POST" });
+    });
+
+    it.each([
+        "/getArtistInfo",
+        "/getArtistInfo.view",
+        "/rest/getArtistInfo",
+        "/rest/getArtistInfo.view",
+    ])("routes classic artist-info alias %s", async (path) => {
+        const response = await executePost(path, {
+            body: { ...validFormCredentials, id: "ar-artist-1" },
+        });
+
+        expect(parseJsonEnvelope(response)).toEqual(
+            expect.objectContaining({
+                artistInfo: expect.objectContaining({
+                    biography: "Artist biography",
+                }),
+            }),
+        );
+    });
+
+    it.each([
+        "/getAlbumInfo",
+        "/getAlbumInfo.view",
+        "/rest/getAlbumInfo",
+        "/rest/getAlbumInfo.view",
+    ])("routes classic album-info alias %s", async (path) => {
+        const response = await executePost(path, {
+            body: { ...validFormCredentials, id: "al-album-1" },
+        });
+
+        expect(parseJsonEnvelope(response)).toEqual(
+            expect.objectContaining({
+                albumInfo: expect.objectContaining({ notes: "Album notes" }),
+            }),
+        );
     });
 
     it("authenticates valid form credentials through the real middleware", async () => {

@@ -45,6 +45,7 @@ model User {
   plays                  Play[]
   playbackStates         PlaybackState[]
   playlists              Playlist[]
+  trackRatings           TrackRating[]
   podcastDownloads       PodcastDownload[]
   podcastProgress        PodcastProgress[]
   podcastSubscriptions   PodcastSubscription[]
@@ -448,6 +449,7 @@ model Track {
   deduplicatedFederatedTracks Track[] @relation("FederationTrackDedup")
   trackGenres     TrackGenre[]
   transcodedFiles TranscodedFile[]
+  ratings         TrackRating[]
   embeddings      TrackEmbedding[]
   lyrics          TrackLyrics?
   syncGroups      SyncGroup[]      @relation("SyncGroupTrack")
@@ -897,6 +899,17 @@ model LikedTrack {
   @@id([userId, trackId])
   @@index([userId])
   @@index([likedAt])
+}
+
+model TrackRating {
+  userId  String
+  trackId String
+  rating  Int
+  track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trackId])
+  @@index([trackId])
 }
 
 model LikedRemoteTrack {

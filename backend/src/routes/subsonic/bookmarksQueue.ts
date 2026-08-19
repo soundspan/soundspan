@@ -6,6 +6,7 @@ import {
     sendSubsonicError,
     sendSubsonicSuccess,
     SubsonicErrorCode,
+    type ResponseFormat,
 } from "../../utils/subsonicResponse";
 import {
     bookmarkTrackSelect,
@@ -16,6 +17,7 @@ import {
     getRequestContext,
     getRequiredQueryString,
     LIBRARY_TRACK_WHERE,
+    loadSongEnrichmentByTrackId,
     parseBookmarkPositionOrError,
     parseEntityIdOrNotFound,
     parseTrackIdsPreserveOrder,
@@ -70,16 +72,182 @@ function getLegacyPlaybackDeviceId(playbackIndex = 0): string {
 
     return `legacy-${playbackIndex}`;
 }
-/**
- * Executes handleGetPlayQueue.
- */
-export async function handleGetPlayQueue(
+
+function sendQueueError(
+    res: Response,
+    code: SubsonicErrorCode,
+    message: string,
+    format: ResponseFormat,
+    callback?: string,
+): void {
+    sendSubsonicError(res, code, message, format, callback);
+}
+
+function resolveReturnedQueueCurrent(
+    indexBasedCurrent: boolean,
+    currentIndex: number,
+    entry: Record<string, unknown>[],
+): number | string | undefined {
+    return indexBasedCurrent
+        ? currentIndex
+        : (entry[currentIndex]?.id as string | undefined);
+}
+
+function buildPlayQueueResponse(
+    state: {
+        currentIndex: number;
+        currentTime: number;
+        updatedAt: Date;
+    } | null,
+    entry: Record<string, unknown>[],
+    username: string,
+    indexBasedCurrent: boolean,
+): Record<string, unknown> {
+    const currentIndex = Math.min(
+        Math.max(0, state?.currentIndex ?? 0),
+        entry.length > 0 ? entry.length - 1 : 0,
+    );
+    const current = resolveReturnedQueueCurrent(
+        indexBasedCurrent,
+        currentIndex,
+        entry,
+    );
+    return {
+        playQueue: {
+            ...(current === undefined ? {} : { current }),
+            position: Math.max(0, Math.round((state?.currentTime ?? 0) * 1000)),
+            username,
+            changed: state?.updatedAt.toISOString(),
+            entry,
+        },
+    };
+}
+
+function parseSubmittedQueueTrackIds(
     req: Request,
     res: Response,
+    format: ResponseFormat,
+    callback?: string,
+): string[] | null {
+    try {
+        return parseTrackIdsPreserveOrder(getQueryValues(req.query.id));
+    } catch {
+        sendQueueError(
+            res,
+            SubsonicErrorCode.NOT_FOUND,
+            "Song not found",
+            format,
+            callback,
+        );
+        return null;
+    }
+}
+
+function resolveClassicCurrentIndex(
+    value: unknown,
+    trackIds: string[],
+): number {
+    if (typeof value !== "string") return 0;
+    try {
+        const requestedTrackId = parseSubsonicId(value, "track").id;
+        const matchingIndex = trackIds.indexOf(requestedTrackId);
+        if (matchingIndex >= 0) return matchingIndex;
+    } catch {
+        // Fall through to the legacy integer interpretation.
+    }
+    if (!/^\d+$/.test(value)) return 0;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed < trackIds.length ? parsed : 0;
+}
+
+const playQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
+    id: true,
+    title: true,
+    trackNo: true,
+    discNo: true,
+    duration: true,
+    fileSize: true,
+    mime: true,
+    filePath: true,
+    ...SONG_LOUDNESS_TRACK_SELECT,
+    album: {
+        select: {
+            id: true,
+            title: true,
+            year: true,
+            coverUrl: true,
+            genres: true,
+            userGenres: true,
+            ...SONG_LOUDNESS_ALBUM_SELECT,
+            artist: { select: { id: true, name: true } },
+        },
+    },
+});
+
+type PlayQueueTrack = Prisma.TrackGetPayload<{
+    select: typeof playQueueTrackSelect;
+}>;
+
+function parseQueueTrackIds(queue: unknown): string[] {
+    if (!Array.isArray(queue)) return [];
+    return queue.flatMap((item) => {
+        if (
+            typeof item !== "object" ||
+            item === null ||
+            !("id" in item) ||
+            typeof (item as { id?: unknown }).id !== "string"
+        ) {
+            return [];
+        }
+        const id = (item as { id: string }).id;
+        try {
+            return [parseSubsonicId(id, "track").id];
+        } catch {
+            return [id];
+        }
+    });
+}
+
+async function loadPlayQueueTracks(trackIds: string[]): Promise<PlayQueueTrack[]> {
+    const uniqueTrackIds = Array.from(new Set(trackIds));
+    if (uniqueTrackIds.length === 0) return [];
+    return prisma.track.findMany({
+        where: {
+            ...LIBRARY_TRACK_WHERE,
+            id: { in: uniqueTrackIds },
+            album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
+        },
+        select: playQueueTrackSelect,
+    });
+}
+
+async function formatPlayQueueEntries(
+    userId: string,
+    queueTrackIds: string[],
+    tracks: PlayQueueTrack[],
+): Promise<Record<string, unknown>[]> {
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+    const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+        userId,
+        tracks.map((track) => track.id),
+    );
+    return queueTrackIds.flatMap((trackId) => {
+        const track = trackById.get(trackId);
+        return track
+            ? [formatSongForSubsonic(track, playedAtByTrackId.get(track.id))]
+            : [];
+    });
+}
+
+async function handleGetPlayQueueWithMode(
+    req: Request,
+    res: Response,
+    indexBasedCurrent: boolean,
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
-    const playbackIndex = parsePlaybackDeviceIndex(req.query.index);
-    const deviceId = getLegacyPlaybackDeviceId(playbackIndex);
+    const deviceId = getLegacyPlaybackDeviceId(
+        parsePlaybackDeviceIndex(req.query.index),
+    );
 
     try {
         const state = await prisma.playbackState.findUnique({
@@ -91,103 +259,26 @@ export async function handleGetPlayQueue(
             },
         });
 
-        const queueItems = Array.isArray(state?.queue) ? state.queue : [];
-
-        const queueTrackIds = queueItems
-            .map((item) =>
-                typeof item === "object" &&
-                item !== null &&
-                "id" in item &&
-                typeof (item as { id?: unknown }).id === "string"
-                    ? (item as { id: string }).id
-                    : null,
-            )
-            .filter((id): id is string => Boolean(id))
-            .map((id) => {
-                try {
-                    return parseSubsonicId(id, "track").id;
-                } catch {
-                    return id;
-                }
-            });
-
-        const uniqueTrackIds = Array.from(new Set(queueTrackIds));
-        const tracks =
-            uniqueTrackIds.length > 0
-                ? await prisma.track.findMany({
-                      where: {
-                          ...LIBRARY_TRACK_WHERE,
-                          id: {
-                              in: uniqueTrackIds,
-                          },
-                          album: {
-                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                          },
-                      },
-                      select: {
-                          id: true,
-                          title: true,
-                          trackNo: true,
-                          discNo: true,
-                          duration: true,
-                          fileSize: true,
-                          mime: true,
-                          filePath: true,
-                          ...SONG_LOUDNESS_TRACK_SELECT,
-                          album: {
-                              select: {
-                                  id: true,
-                                  title: true,
-                                  year: true,
-                                  coverUrl: true,
-                                  genres: true,
-                                  userGenres: true,
-                                  ...SONG_LOUDNESS_ALBUM_SELECT,
-                                  artist: {
-                                      select: {
-                                          id: true,
-                                          name: true,
-                                      },
-                                  },
-                              },
-                          },
-                      },
-                  })
-                : [];
-
-        const trackById = new Map(tracks.map((track) => [track.id, track]));
-        const entry = queueTrackIds
-            .map((trackId) => trackById.get(trackId))
-            .filter((track): track is NonNullable<typeof track> =>
-                Boolean(track),
-            )
-            .map((track) => formatSongForSubsonic(track));
-
-        const current = Math.min(
-            Math.max(0, state?.currentIndex ?? 0),
-            entry.length > 0 ? entry.length - 1 : 0,
+        const queueTrackIds = parseQueueTrackIds(state?.queue);
+        const tracks = await loadPlayQueueTracks(queueTrackIds);
+        const entry = await formatPlayQueueEntries(
+            req.user!.id,
+            queueTrackIds,
+            tracks,
         );
-        const position = Math.max(
-            0,
-            Math.round((state?.currentTime ?? 0) * 1000),
-        );
-
         sendSubsonicSuccess(
             res,
-            {
-                playQueue: {
-                    current,
-                    position,
-                    username: req.user!.username,
-                    changed: state?.updatedAt.toISOString(),
-                    entry,
-                },
-            },
+            buildPlayQueueResponse(
+                state,
+                entry,
+                req.user!.username,
+                indexBasedCurrent,
+            ),
             format,
             callback,
         );
     } catch {
-        sendSubsonicError(
+        sendQueueError(
             res,
             SubsonicErrorCode.GENERIC,
             "Failed to fetch play queue",
@@ -197,39 +288,131 @@ export async function handleGetPlayQueue(
     }
 }
 
-/**
- * Executes handleSavePlayQueue.
- */
-export async function handleSavePlayQueue(
+/** Executes the classic ID-based getPlayQueue endpoint. */
+export async function handleGetPlayQueue(
     req: Request,
     res: Response,
 ): Promise<void> {
+    await handleGetPlayQueueWithMode(req, res, false);
+}
+
+const savedQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
+    id: true,
+    title: true,
+    duration: true,
+    album: {
+        select: {
+            id: true,
+            title: true,
+            coverUrl: true,
+            artist: { select: { id: true, name: true } },
+        },
+    },
+});
+
+type SavedQueueTrack = Prisma.TrackGetPayload<{
+    select: typeof savedQueueTrackSelect;
+}>;
+
+type SavedQueueEntry = {
+    id: string;
+    title: string;
+    duration: number;
+    artist: { id: string; name: string };
+    album: { id: string; title: string; coverArt: string | null };
+};
+
+function formatSavedQueue(
+    trackIds: string[],
+    tracks: SavedQueueTrack[],
+): SavedQueueEntry[] {
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+    return trackIds.flatMap((trackId) => {
+        const track = trackById.get(trackId);
+        if (!track) return [];
+        return [{
+            id: toSubsonicId("track", track.id),
+            title: track.title,
+            duration: track.duration,
+            artist: {
+                id: toSubsonicId("artist", track.album.artist.id),
+                name: track.album.artist.name,
+            },
+            album: {
+                id: toSubsonicId("album", track.album.id),
+                title: track.album.title,
+                coverArt: track.album.coverUrl ?? null,
+            },
+        }];
+    });
+}
+
+async function buildSavedQueue(trackIds: string[]): Promise<{
+    valid: boolean;
+    queue: SavedQueueEntry[];
+}> {
+    const uniqueTrackIds = Array.from(new Set(trackIds));
+    if (!(await ensureLibraryTracksExist(uniqueTrackIds))) {
+        return { valid: false, queue: [] };
+    }
+    const tracks = uniqueTrackIds.length
+        ? await prisma.track.findMany({
+              where: {
+                  ...LIBRARY_TRACK_WHERE,
+                  id: { in: uniqueTrackIds },
+                  album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
+              },
+              select: savedQueueTrackSelect,
+          })
+        : [];
+    return { valid: true, queue: formatSavedQueue(trackIds, tracks) };
+}
+
+async function persistSavedQueue(input: {
+    userId: string;
+    deviceId: string;
+    queue: SavedQueueEntry[];
+    currentIndex: number;
+    positionMs: number;
+}): Promise<void> {
+    const currentTrackId = input.queue.length
+        ? parseSubsonicId(input.queue[input.currentIndex].id, "track").id
+        : null;
+    const state = {
+        playbackType: "track" as const,
+        trackId: currentTrackId,
+        queue: input.queue.length ? input.queue : Prisma.DbNull,
+        currentIndex: input.currentIndex,
+        currentTime: input.positionMs / 1000,
+        isShuffle: false,
+    };
+    await prisma.playbackState.upsert({
+        where: {
+            userId_deviceId: { userId: input.userId, deviceId: input.deviceId },
+        },
+        update: state,
+        create: { userId: input.userId, deviceId: input.deviceId, ...state },
+    });
+}
+
+async function handleSavePlayQueueWithMode(
+    req: Request,
+    res: Response,
+    indexBasedCurrent: boolean,
+): Promise<void> {
     const { format, callback } = getRequestContext(req);
-    const playbackIndex = parsePlaybackDeviceIndex(req.query.index);
-    const deviceId = getLegacyPlaybackDeviceId(playbackIndex);
-    const rawIds = getQueryValues(req.query.id);
+    const deviceId = getLegacyPlaybackDeviceId(
+        parsePlaybackDeviceIndex(req.query.index),
+    );
     const rawCurrent = req.query.current;
     const rawPosition = req.query.position;
-
-    let trackIds: string[] = [];
-    try {
-        trackIds = parseTrackIdsPreserveOrder(rawIds);
-    } catch {
-        sendSubsonicError(
-            res,
-            SubsonicErrorCode.NOT_FOUND,
-            "Song not found",
-            format,
-            callback,
-        );
-        return;
-    }
+    const trackIds = parseSubmittedQueueTrackIds(req, res, format, callback);
+    if (!trackIds) return;
 
     try {
-        const uniqueTrackIds = Array.from(new Set(trackIds));
-        const tracksExist = await ensureLibraryTracksExist(uniqueTrackIds);
-        if (!tracksExist) {
-            sendSubsonicError(
+        const savedQueue = await buildSavedQueue(trackIds);
+        if (!savedQueue.valid) {
+            sendQueueError(
                 res,
                 SubsonicErrorCode.NOT_FOUND,
                 "Song not found",
@@ -238,104 +421,25 @@ export async function handleSavePlayQueue(
             );
             return;
         }
-
-        const tracks =
-            uniqueTrackIds.length > 0
-                ? await prisma.track.findMany({
-                      where: {
-                          ...LIBRARY_TRACK_WHERE,
-                          id: {
-                              in: uniqueTrackIds,
-                          },
-                          album: {
-                              location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                          },
-                      },
-                      select: {
-                          id: true,
-                          title: true,
-                          duration: true,
-                          album: {
-                              select: {
-                                  id: true,
-                                  title: true,
-                                  coverUrl: true,
-                                  genres: true,
-                                  userGenres: true,
-                                  artist: {
-                                      select: {
-                                          id: true,
-                                          name: true,
-                                      },
-                                  },
-                              },
-                          },
-                      },
-                  })
-                : [];
-
-        const trackById = new Map(tracks.map((track) => [track.id, track]));
-        const queue = trackIds
-            .map((trackId) => trackById.get(trackId))
-            .filter((track): track is NonNullable<typeof track> =>
-                Boolean(track),
-            )
-            .map((track) => ({
-                id: toSubsonicId("track", track.id),
-                title: track.title,
-                duration: track.duration,
-                artist: {
-                    id: toSubsonicId("artist", track.album.artist.id),
-                    name: track.album.artist.name,
-                },
-                album: {
-                    id: toSubsonicId("album", track.album.id),
-                    title: track.album.title,
-                    coverArt: track.album.coverUrl ?? null,
-                },
-            }));
-
-        const requestedCurrent = parseQueueIndex(rawCurrent);
+        const requestedCurrent = indexBasedCurrent
+            ? parseQueueIndex(rawCurrent)
+            : resolveClassicCurrentIndex(rawCurrent, trackIds);
         const requestedPositionMs = parseQueuePositionMs(rawPosition);
         const currentIndex = Math.min(
             requestedCurrent,
-            queue.length > 0 ? queue.length - 1 : 0,
+            savedQueue.queue.length > 0 ? savedQueue.queue.length - 1 : 0,
         );
-        const currentTrackId =
-            queue.length > 0
-                ? parseSubsonicId(queue[currentIndex].id, "track").id
-                : null;
-
-        await prisma.playbackState.upsert({
-            where: {
-                userId_deviceId: {
-                    userId: req.user!.id,
-                    deviceId,
-                },
-            },
-            update: {
-                playbackType: "track",
-                trackId: currentTrackId,
-                queue: queue.length > 0 ? queue : Prisma.DbNull,
-                currentIndex,
-                currentTime: requestedPositionMs / 1000,
-                isShuffle: false,
-            },
-            create: {
-                userId: req.user!.id,
-                deviceId,
-                playbackType: "track",
-                trackId: currentTrackId,
-                queue: queue.length > 0 ? queue : Prisma.DbNull,
-                currentIndex,
-                currentTime: requestedPositionMs / 1000,
-                isShuffle: false,
-            },
+        await persistSavedQueue({
+            userId: req.user!.id,
+            deviceId,
+            queue: savedQueue.queue,
+            currentIndex,
+            positionMs: requestedPositionMs,
         });
 
         sendSubsonicSuccess(res, {}, format, callback);
     } catch {
-        sendSubsonicError(
+        sendQueueError(
             res,
             SubsonicErrorCode.GENERIC,
             "Failed to save play queue",
@@ -345,6 +449,14 @@ export async function handleSavePlayQueue(
     }
 }
 
+/** Executes the classic ID-based savePlayQueue endpoint. */
+export async function handleSavePlayQueue(
+    req: Request,
+    res: Response,
+): Promise<void> {
+    await handleSavePlayQueueWithMode(req, res, false);
+}
+
 /**
  * Executes handleGetPlayQueueByIndex.
  */
@@ -352,7 +464,7 @@ export async function handleGetPlayQueueByIndex(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetPlayQueue(req, res);
+    await handleGetPlayQueueWithMode(req, res, true);
 }
 
 /**
@@ -362,7 +474,7 @@ export async function handleSavePlayQueueByIndex(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleSavePlayQueue(req, res);
+    await handleSavePlayQueueWithMode(req, res, true);
 }
 
 /**
@@ -390,13 +502,21 @@ export async function handleGetBookmarks(
             },
             orderBy: [{ updatedAt: "desc" }, { trackId: "asc" }],
         });
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            bookmarks.map((bookmark) => bookmark.track.id),
+        );
 
         sendSubsonicSuccess(
             res,
             {
                 bookmarks: {
                     bookmark: bookmarks.map((bookmark) =>
-                        formatBookmarkForSubsonic(bookmark, req.user!.username),
+                        formatBookmarkForSubsonic(
+                            bookmark,
+                            req.user!.username,
+                            playedAtByTrackId.get(bookmark.track.id),
+                        ),
                     ),
                 },
             },

@@ -106,6 +106,7 @@ const mockFfmpeg = jest.fn((sourcePath: string) => {
         audioBitrate: jest.fn().mockReturnThis(),
         audioCodec: jest.fn().mockReturnThis(),
         format: jest.fn().mockReturnThis(),
+        inputOptions: jest.fn().mockReturnThis(),
         kill: jest.fn().mockReturnThis(),
         on: jest.fn((event: string, handler: (...args: any[]) => any) => {
             handlers[event] = handler;
@@ -364,6 +365,35 @@ describe("AudioStreamingService", () => {
     });
 
     describe("getStreamFilePath", () => {
+        it("transcodes a time offset to an uncached temporary file", async () => {
+            const service = createService();
+
+            const result = await service.getStreamFilePath(
+                "track-offset",
+                "low",
+                new Date("2025-01-01T00:00:00.000Z"),
+                "/music/source.flac",
+                42,
+            );
+
+            expect(mockPrisma.transcodedFile.findFirst).not.toHaveBeenCalled();
+            expect(mockPrisma.transcodedFile.findMany).not.toHaveBeenCalled();
+            expect(mockPrisma.transcodedFile.upsert).not.toHaveBeenCalled();
+            expect(mockParseFile).not.toHaveBeenCalled();
+            expect(ffmpegControl.lastCommand.inputOptions).toHaveBeenCalledWith(
+                "-ss",
+                "42",
+            );
+            expect(ffmpegControl.lastCommand.save).toHaveBeenCalledWith(
+                expect.stringMatching(/soundspan-offset-.*\.mp3$/),
+            );
+            expect(result).toEqual({
+                filePath: expect.stringMatching(/soundspan-offset-.*\.mp3$/),
+                mimeType: "audio/mpeg",
+                cleanup: expect.any(Function),
+            });
+        });
+
         it("returns source path and mime type when original quality is requested", async () => {
             const service = createService();
 

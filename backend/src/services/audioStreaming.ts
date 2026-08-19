@@ -6,6 +6,7 @@ import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import * as crypto from "crypto";
+import * as os from "os";
 import { prisma } from "../utils/db";
 import ffmpeg from "fluent-ffmpeg";
 import PQueue from "p-queue";
@@ -47,6 +48,7 @@ export type Quality = keyof typeof QUALITY_SETTINGS;
 interface StreamFileInfo {
     filePath: string;
     mimeType: string;
+    cleanup?: () => Promise<void>;
 }
 
 /** Complete peer response metadata needed to decide cache fill or passthrough. */
@@ -122,24 +124,24 @@ export class AudioStreamingService {
         quality: Quality,
         sourceModified: Date,
         sourceAbsolutePath: string,
+        timeOffsetSeconds = 0,
     ): Promise<StreamFileInfo> {
         logger.debug(
             `[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`,
         );
 
-        // If original quality requested, return source file
         if (quality === "original") {
-            const mimeType = this.getMimeType(sourceAbsolutePath);
-            logger.debug(
-                `[AudioStreaming] Serving original: mimeType=${mimeType}`,
+            return this.originalStreamFile(sourceAbsolutePath);
+        }
+        if (timeOffsetSeconds > 0) {
+            return this.transcodeWithoutCache(
+                trackId,
+                quality,
+                sourceAbsolutePath,
+                timeOffsetSeconds,
             );
-            return {
-                filePath: sourceAbsolutePath,
-                mimeType,
-            };
         }
 
-        // Check if we have a valid cached transcode
         const cachedPath = await this.getCachedTranscode(
             trackId,
             quality,
@@ -156,44 +158,11 @@ export class AudioStreamingService {
             };
         }
 
-        // Check source file bitrate to avoid pointless upsampling
-        const targetBitrate = QUALITY_SETTINGS[quality].bitrate;
-        if (targetBitrate) {
-            try {
-                const metadata = await parseFile(sourceAbsolutePath);
-                const sourceBitrate = metadata.format.bitrate
-                    ? Math.round(metadata.format.bitrate / 1000)
-                    : null;
-
-                if (sourceBitrate && sourceBitrate <= targetBitrate) {
-                    logger.debug(
-                        `[STREAM] Source bitrate (${sourceBitrate}kbps) <= target (${targetBitrate}kbps), serving original`,
-                    );
-                    return {
-                        filePath: sourceAbsolutePath,
-                        mimeType: this.getMimeType(sourceAbsolutePath),
-                    };
-                }
-            } catch (err) {
-                logger.warn(
-                    `[STREAM] Failed to read source metadata, will transcode anyway:`,
-                    err,
-                );
-            }
+        if (await this.shouldServeOriginal(sourceAbsolutePath, quality)) {
+            return this.originalStreamFile(sourceAbsolutePath);
         }
 
-        // Need to transcode - check cache size first
-        const currentSize = await this.getCacheSize();
-        if (currentSize > this.transcodeCacheMaxGb * 0.9) {
-            logger.debug(
-                `[STREAM] Cache near full (${currentSize.toFixed(
-                    2,
-                )}GB), evicting to 80%...`,
-            );
-            await this.evictCache(this.transcodeCacheMaxGb * 0.8);
-        }
-
-        // Transcode to cache
+        await this.ensureTranscodeCacheCapacity();
         logger.debug(
             `[STREAM] Transcoding to ${quality} quality: ${sourceAbsolutePath}`,
         );
@@ -207,6 +176,82 @@ export class AudioStreamingService {
         return {
             filePath: transcodedPath,
             mimeType: "audio/mpeg",
+        };
+    }
+
+    private originalStreamFile(sourcePath: string): StreamFileInfo {
+        const mimeType = this.getMimeType(sourcePath);
+        logger.debug(`[AudioStreaming] Serving original: mimeType=${mimeType}`);
+        return { filePath: sourcePath, mimeType };
+    }
+
+    private async shouldServeOriginal(
+        sourcePath: string,
+        quality: Quality,
+    ): Promise<boolean> {
+        const targetBitrate = QUALITY_SETTINGS[quality].bitrate;
+        if (!targetBitrate) return false;
+        try {
+            const metadata = await parseFile(sourcePath);
+            const sourceBitrate = metadata.format.bitrate
+                ? Math.round(metadata.format.bitrate / 1000)
+                : null;
+            if (!sourceBitrate || sourceBitrate > targetBitrate) return false;
+            logger.debug(
+                `[STREAM] Source bitrate (${sourceBitrate}kbps) <= target (${targetBitrate}kbps), serving original`,
+            );
+            return true;
+        } catch (error) {
+            logger.warn(
+                "[STREAM] Failed to read source metadata, will transcode anyway:",
+                error,
+            );
+            return false;
+        }
+    }
+
+    private async ensureTranscodeCacheCapacity(): Promise<void> {
+        const currentSize = await this.getCacheSize();
+        if (currentSize <= this.transcodeCacheMaxGb * 0.9) return;
+        logger.debug(
+            `[STREAM] Cache near full (${currentSize.toFixed(2)}GB), evicting to 80%...`,
+        );
+        await this.evictCache(this.transcodeCacheMaxGb * 0.8);
+    }
+
+    private async transcodeWithoutCache(
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+        timeOffsetSeconds: number,
+    ): Promise<StreamFileInfo> {
+        const settings = QUALITY_SETTINGS[quality];
+        if (!settings.bitrate || !settings.format) {
+            throw this.invalidQualityError(quality);
+        }
+        const temporaryPath = path.join(
+            os.tmpdir(),
+            `soundspan-offset-${crypto.randomUUID()}.${settings.format}`,
+        );
+        try {
+            await this.runFfmpeg(
+                sourcePath,
+                temporaryPath,
+                settings.bitrate,
+                settings.format,
+                trackId,
+                quality,
+                timeOffsetSeconds,
+            );
+        } catch (error) {
+            await fs.promises.unlink(temporaryPath).catch(() => undefined);
+            throw error;
+        }
+        return {
+            filePath: temporaryPath,
+            mimeType: "audio/mpeg",
+            cleanup: () =>
+                fs.promises.unlink(temporaryPath).catch(() => undefined),
         };
     }
 
@@ -431,11 +476,7 @@ export class AudioStreamingService {
     ): Promise<string> {
         const settings = QUALITY_SETTINGS[quality];
         if (!settings.bitrate || !settings.format) {
-            throw new AppError(
-                ErrorCode.INVALID_CONFIG,
-                ErrorCategory.FATAL,
-                `Invalid quality setting: ${quality}`,
-            );
+            throw this.invalidQualityError(quality);
         }
 
         const hash = crypto
@@ -470,6 +511,7 @@ export class AudioStreamingService {
         format: string,
         trackId: string,
         quality: Quality,
+        timeOffsetSeconds = 0,
     ): Promise<void> {
         return new Promise((resolve, reject) => {
             let settled = false;
@@ -487,10 +529,12 @@ export class AudioStreamingService {
             };
 
             try {
-                const command = ffmpeg(sourcePath)
-                    .audioBitrate(bitrate)
-                    .audioCodec("libmp3lame")
-                    .format(format);
+                const command = this.createFfmpegCommand(
+                    sourcePath,
+                    bitrate,
+                    format,
+                    timeOffsetSeconds,
+                );
                 command.on("error", (error) => {
                     rejectOnce(
                         this.toFfmpegError(error, trackId, quality, sourcePath),
@@ -516,16 +560,42 @@ export class AudioStreamingService {
                 }, config.transcodeTimeoutMs);
                 command.save(cachePath);
             } catch {
-                rejectOnce(
-                    new AppError(
-                        ErrorCode.FFMPEG_NOT_FOUND,
-                        ErrorCategory.FATAL,
-                        "FFmpeg not available. Please install FFmpeg to enable transcoding.",
-                        { trackId, quality },
-                    ),
-                );
+                rejectOnce(this.ffmpegUnavailableError(trackId, quality));
             }
         });
+    }
+
+    private ffmpegUnavailableError(trackId: string, quality: Quality): AppError {
+        return new AppError(
+            ErrorCode.FFMPEG_NOT_FOUND,
+            ErrorCategory.FATAL,
+            "FFmpeg not available. Please install FFmpeg to enable transcoding.",
+            { trackId, quality },
+        );
+    }
+
+    private createFfmpegCommand(
+        sourcePath: string,
+        bitrate: number,
+        format: string,
+        timeOffsetSeconds: number,
+    ): ReturnType<typeof ffmpeg> {
+        const command = ffmpeg(sourcePath);
+        if (timeOffsetSeconds > 0) {
+            command.inputOptions("-ss", String(timeOffsetSeconds));
+        }
+        return command
+            .audioBitrate(bitrate)
+            .audioCodec("libmp3lame")
+            .format(format);
+    }
+
+    private invalidQualityError(quality: Quality): AppError {
+        return new AppError(
+            ErrorCode.INVALID_CONFIG,
+            ErrorCategory.FATAL,
+            `Invalid quality setting: ${quality}`,
+        );
     }
 
     private cleanupTimedOutTranscode(

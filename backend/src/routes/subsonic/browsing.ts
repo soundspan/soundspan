@@ -20,6 +20,9 @@ import {
     isUnsupportedMusicFolderId,
     LIBRARY_ALBUM_WHERE,
     LIBRARY_TRACK_WHERE,
+    combineSongEnrichmentForAlbum,
+    loadSongEnrichmentByTrackId,
+    parseCountParam,
     parseEntityIdOrNotFound,
     parseTimestampParam,
     SONG_LOUDNESS_ALBUM_SELECT,
@@ -270,6 +273,7 @@ export async function handleGetArtist(
                         tracks: {
                             where: LIBRARY_TRACK_WHERE,
                             select: {
+                                id: true,
                                 duration: true,
                             },
                         },
@@ -297,25 +301,37 @@ export async function handleGetArtist(
             return;
         }
 
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            artist.albums.flatMap((album) =>
+                album.tracks.map((track) => track.id),
+            ),
+        );
         const albums = artist.albums.map((album) =>
-            formatAlbumForSubsonic({
-                id: album.id,
-                title: album.title,
-                year: album.year,
-                lastSynced: album.lastSynced,
-                coverUrl: album.coverUrl,
-                genres: album.genres,
-                userGenres: album.userGenres,
-                artist: {
-                    id: artist.id,
-                    name: artist.name,
+            formatAlbumForSubsonic(
+                {
+                    id: album.id,
+                    title: album.title,
+                    year: album.year,
+                    lastSynced: album.lastSynced,
+                    coverUrl: album.coverUrl,
+                    genres: album.genres,
+                    userGenres: album.userGenres,
+                    artist: {
+                        id: artist.id,
+                        name: artist.name,
+                    },
+                    songCount: album._count.tracks,
+                    duration: album.tracks.reduce(
+                        (sum, track) => sum + (track.duration ?? 0),
+                        0,
+                    ),
                 },
-                songCount: album._count.tracks,
-                duration: album.tracks.reduce(
-                    (sum, track) => sum + (track.duration ?? 0),
-                    0,
+                combineSongEnrichmentForAlbum(
+                    album.tracks.map((track) => track.id),
+                    playedAtByTrackId,
                 ),
-            }),
+            ),
         );
 
         sendSubsonicSuccess(
@@ -421,40 +437,53 @@ export async function handleGetAlbum(
             return;
         }
 
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            album.tracks.map((track) => track.id),
+        );
         const songs = album.tracks.map((track) =>
-            formatSongForSubsonic({
-                ...track,
-                album: {
-                    id: album.id,
-                    title: album.title,
-                    year: album.year,
-                    coverUrl: album.coverUrl,
-                    genres: album.genres,
-                    userGenres: album.userGenres,
-                    artist: album.artist,
+            formatSongForSubsonic(
+                {
+                    ...track,
+                    album: {
+                        id: album.id,
+                        title: album.title,
+                        year: album.year,
+                        coverUrl: album.coverUrl,
+                        genres: album.genres,
+                        userGenres: album.userGenres,
+                        artist: album.artist,
+                    },
                 },
-            }),
+                playedAtByTrackId.get(track.id),
+            ),
         );
 
         sendSubsonicSuccess(
             res,
             {
                 album: {
-                    ...formatAlbumForSubsonic({
-                        id: album.id,
-                        title: album.title,
-                        year: album.year,
-                        lastSynced: album.lastSynced,
-                        coverUrl: album.coverUrl,
-                        genres: album.genres,
-                        userGenres: album.userGenres,
-                        artist: album.artist,
-                        songCount: album.tracks.length,
-                        duration: album.tracks.reduce(
-                            (sum, track) => sum + (track.duration ?? 0),
-                            0,
+                    ...formatAlbumForSubsonic(
+                        {
+                            id: album.id,
+                            title: album.title,
+                            year: album.year,
+                            lastSynced: album.lastSynced,
+                            coverUrl: album.coverUrl,
+                            genres: album.genres,
+                            userGenres: album.userGenres,
+                            artist: album.artist,
+                            songCount: album.tracks.length,
+                            duration: album.tracks.reduce(
+                                (sum, track) => sum + (track.duration ?? 0),
+                                0,
+                            ),
+                        },
+                        combineSongEnrichmentForAlbum(
+                            album.tracks.map((track) => track.id),
+                            playedAtByTrackId,
                         ),
-                    }),
+                    ),
                     song: songs,
                 },
             },
@@ -548,10 +577,17 @@ export async function handleGetSong(
             return;
         }
 
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            [track.id],
+        );
         sendSubsonicSuccess(
             res,
             {
-                song: formatSongForSubsonic(track),
+                song: formatSongForSubsonic(
+                    track,
+                    playedAtByTrackId.get(track.id),
+                ),
             },
             format,
             callback,
@@ -566,12 +602,57 @@ export async function handleGetSong(
         );
     }
 }
-/**
- * Executes handleGetArtistInfo2.
- */
-export async function handleGetArtistInfo2(
+async function loadArtistInfo(artistId: string, count: number) {
+    const artist = await prisma.artist.findFirst({
+        where: { id: artistId, albums: { some: LIBRARY_ALBUM_WHERE } },
+        select: {
+            mbid: true,
+            summary: true,
+            heroUrl: true,
+            similarFrom: {
+                select: {
+                    toArtist: {
+                        select: {
+                            id: true,
+                            name: true,
+                            heroUrl: true,
+                            albums: {
+                                where: LIBRARY_ALBUM_WHERE,
+                                select: { id: true },
+                            },
+                        },
+                    },
+                },
+                orderBy: { weight: "desc" },
+                take: count,
+            },
+        },
+    });
+    if (!artist) return null;
+    return {
+        biography: artist.summary ?? "",
+        musicBrainzId: artist.mbid,
+        smallImageUrl: artist.heroUrl ?? undefined,
+        mediumImageUrl: artist.heroUrl ?? undefined,
+        largeImageUrl: artist.heroUrl ?? undefined,
+        similarArtist: artist.similarFrom
+            .map((entry) => entry.toArtist)
+            .filter((similar) => similar.albums.length > 0)
+            .map((similar) =>
+                formatArtistForSubsonic({
+                    id: similar.id,
+                    name: similar.name,
+                    albumCount: similar.albums.length,
+                    heroUrl: similar.heroUrl,
+                }),
+            ),
+    };
+}
+
+async function handleGetArtistInfoLike(
     req: Request,
     res: Response,
+    responseKey: "artistInfo" | "artistInfo2",
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const rawId = getRequiredQueryString(req, res, "id", format, callback);
@@ -593,45 +674,11 @@ export async function handleGetArtistInfo2(
     }
 
     try {
-        const artist = await prisma.artist.findFirst({
-            where: {
-                id: artistId,
-                albums: {
-                    some: LIBRARY_ALBUM_WHERE,
-                },
-            },
-            select: {
-                id: true,
-                name: true,
-                mbid: true,
-                summary: true,
-                heroUrl: true,
-                similarFrom: {
-                    select: {
-                        weight: true,
-                        toArtist: {
-                            select: {
-                                id: true,
-                                name: true,
-                                heroUrl: true,
-                                albums: {
-                                    where: LIBRARY_ALBUM_WHERE,
-                                    select: {
-                                        id: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    orderBy: {
-                        weight: "desc",
-                    },
-                    take: 20,
-                },
-            },
-        });
-
-        if (!artist) {
+        const artistInfo = await loadArtistInfo(
+            artistId,
+            parseCountParam(req.query.count, 20, 500),
+        );
+        if (!artistInfo) {
             sendSubsonicError(
                 res,
                 SubsonicErrorCode.NOT_FOUND,
@@ -642,30 +689,9 @@ export async function handleGetArtistInfo2(
             return;
         }
 
-        const similarArtist = artist.similarFrom
-            .map((entry) => entry.toArtist)
-            .filter((similar) => similar.albums.length > 0)
-            .map((similar) =>
-                formatArtistForSubsonic({
-                    id: similar.id,
-                    name: similar.name,
-                    albumCount: similar.albums.length,
-                    heroUrl: similar.heroUrl,
-                }),
-            );
-
         sendSubsonicSuccess(
             res,
-            {
-                artistInfo2: {
-                    biography: artist.summary ?? "",
-                    musicBrainzId: artist.mbid,
-                    smallImageUrl: artist.heroUrl ?? undefined,
-                    mediumImageUrl: artist.heroUrl ?? undefined,
-                    largeImageUrl: artist.heroUrl ?? undefined,
-                    similarArtist,
-                },
-            },
+            { [responseKey]: artistInfo },
             format,
             callback,
         );
@@ -680,12 +706,26 @@ export async function handleGetArtistInfo2(
     }
 }
 
-/**
- * Executes handleGetAlbumInfo2.
- */
-export async function handleGetAlbumInfo2(
+/** Return classic folder-mode artist metadata. */
+export async function handleGetArtistInfo(
     req: Request,
     res: Response,
+): Promise<void> {
+    await handleGetArtistInfoLike(req, res, "artistInfo");
+}
+
+/** Return ID3-mode artist metadata. */
+export async function handleGetArtistInfo2(
+    req: Request,
+    res: Response,
+): Promise<void> {
+    await handleGetArtistInfoLike(req, res, "artistInfo2");
+}
+
+async function handleGetAlbumInfoLike(
+    req: Request,
+    res: Response,
+    responseKey: "albumInfo" | "albumInfo2",
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const rawId = getRequiredQueryString(req, res, "id", format, callback);
@@ -707,20 +747,7 @@ export async function handleGetAlbumInfo2(
     }
 
     try {
-        const album = await prisma.album.findFirst({
-            where: {
-                id: albumId,
-                ...LIBRARY_ALBUM_WHERE,
-            },
-            select: {
-                rgMbid: true,
-                title: true,
-                coverUrl: true,
-                genres: true,
-                userGenres: true,
-            },
-        });
-
+        const album = await loadAlbumInfo(albumId);
         if (!album) {
             sendSubsonicError(
                 res,
@@ -732,20 +759,7 @@ export async function handleGetAlbumInfo2(
             return;
         }
 
-        sendSubsonicSuccess(
-            res,
-            {
-                albumInfo: {
-                    notes: album.title,
-                    musicBrainzId: album.rgMbid,
-                    smallImageUrl: album.coverUrl ?? undefined,
-                    mediumImageUrl: album.coverUrl ?? undefined,
-                    largeImageUrl: album.coverUrl ?? undefined,
-                },
-            },
-            format,
-            callback,
-        );
+        sendSubsonicSuccess(res, { [responseKey]: album }, format, callback);
     } catch {
         sendSubsonicError(
             res,
@@ -755,6 +769,37 @@ export async function handleGetAlbumInfo2(
             callback,
         );
     }
+}
+
+async function loadAlbumInfo(albumId: string) {
+    const album = await prisma.album.findFirst({
+        where: { id: albumId, ...LIBRARY_ALBUM_WHERE },
+        select: { rgMbid: true, title: true, coverUrl: true },
+    });
+    if (!album) return null;
+    return {
+        notes: album.title,
+        musicBrainzId: album.rgMbid,
+        smallImageUrl: album.coverUrl ?? undefined,
+        mediumImageUrl: album.coverUrl ?? undefined,
+        largeImageUrl: album.coverUrl ?? undefined,
+    };
+}
+
+/** Return classic folder-mode album metadata. */
+export async function handleGetAlbumInfo(
+    req: Request,
+    res: Response,
+): Promise<void> {
+    await handleGetAlbumInfoLike(req, res, "albumInfo");
+}
+
+/** Return ID3-mode album metadata. */
+export async function handleGetAlbumInfo2(
+    req: Request,
+    res: Response,
+): Promise<void> {
+    await handleGetAlbumInfoLike(req, res, "albumInfo2");
 }
 async function getRootMusicDirectoryChildren(): Promise<
     Record<string, unknown>[]
@@ -798,6 +843,7 @@ async function getRootMusicDirectoryChildren(): Promise<
 
 async function getArtistMusicDirectory(
     artistId: string,
+    userId: string,
 ): Promise<Record<string, unknown> | null> {
     const artist = await prisma.artist.findFirst({
         where: {
@@ -822,6 +868,7 @@ async function getArtistMusicDirectory(
                     tracks: {
                         where: LIBRARY_TRACK_WHERE,
                         select: {
+                            id: true,
                             duration: true,
                         },
                     },
@@ -835,35 +882,46 @@ async function getArtistMusicDirectory(
         return null;
     }
 
+    const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+        userId,
+        artist.albums.flatMap((album) => album.tracks.map((track) => track.id)),
+    );
     return {
         id: toSubsonicId("artist", artist.id),
         parent: SUBSONIC_MUSIC_FOLDER_ID,
         name: artist.name,
         child: artist.albums.map((album) =>
-            formatAlbumForSubsonic({
-                id: album.id,
-                title: album.title,
-                year: album.year,
-                lastSynced: album.lastSynced,
-                coverUrl: album.coverUrl,
-                genres: album.genres,
-                userGenres: album.userGenres,
-                artist: {
-                    id: artist.id,
-                    name: artist.name,
+            formatAlbumForSubsonic(
+                {
+                    id: album.id,
+                    title: album.title,
+                    year: album.year,
+                    lastSynced: album.lastSynced,
+                    coverUrl: album.coverUrl,
+                    genres: album.genres,
+                    userGenres: album.userGenres,
+                    artist: {
+                        id: artist.id,
+                        name: artist.name,
+                    },
+                    songCount: album.tracks.length,
+                    duration: album.tracks.reduce(
+                        (sum, track) => sum + (track.duration ?? 0),
+                        0,
+                    ),
                 },
-                songCount: album.tracks.length,
-                duration: album.tracks.reduce(
-                    (sum, track) => sum + (track.duration ?? 0),
-                    0,
+                combineSongEnrichmentForAlbum(
+                    album.tracks.map((track) => track.id),
+                    playedAtByTrackId,
                 ),
-            }),
+            ),
         ),
     };
 }
 
 async function getAlbumMusicDirectory(
     albumId: string,
+    userId: string,
 ): Promise<Record<string, unknown> | null> {
     const album = await prisma.album.findFirst({
         where: {
@@ -906,23 +964,30 @@ async function getAlbumMusicDirectory(
         return null;
     }
 
+    const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+        userId,
+        album.tracks.map((track) => track.id),
+    );
     return {
         id: toSubsonicId("album", album.id),
         parent: toSubsonicId("artist", album.artist.id),
         name: album.title,
         child: album.tracks.map((track) =>
-            formatSongForSubsonic({
-                ...track,
-                album: {
-                    id: album.id,
-                    title: album.title,
-                    year: album.year,
-                    coverUrl: album.coverUrl,
-                    genres: album.genres,
-                    userGenres: album.userGenres,
-                    artist: album.artist,
+            formatSongForSubsonic(
+                {
+                    ...track,
+                    album: {
+                        id: album.id,
+                        title: album.title,
+                        year: album.year,
+                        coverUrl: album.coverUrl,
+                        genres: album.genres,
+                        userGenres: album.userGenres,
+                        artist: album.artist,
+                    },
                 },
-            }),
+                playedAtByTrackId.get(track.id),
+            ),
         ),
     };
 }
@@ -982,13 +1047,16 @@ export async function handleGetMusicDirectory(
         let directory: Record<string, unknown> | null = null;
 
         if (parsedType === "artist") {
-            directory = await getArtistMusicDirectory(entityId);
+            directory = await getArtistMusicDirectory(entityId, req.user!.id);
         } else if (parsedType === "album") {
-            directory = await getAlbumMusicDirectory(entityId);
+            directory = await getAlbumMusicDirectory(entityId, req.user!.id);
         } else if (parsedType === null) {
-            directory = await getArtistMusicDirectory(entityId);
+            directory = await getArtistMusicDirectory(entityId, req.user!.id);
             if (!directory) {
-                directory = await getAlbumMusicDirectory(entityId);
+                directory = await getAlbumMusicDirectory(
+                    entityId,
+                    req.user!.id,
+                );
             }
         }
 

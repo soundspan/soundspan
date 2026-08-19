@@ -32,6 +32,15 @@ jest.mock("../../utils/db", () => ({
             findMany: jest.fn(),
             findFirst: jest.fn(),
         },
+        play: {
+            groupBy: jest.fn(),
+        },
+        likedTrack: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
     },
 }));
 
@@ -94,6 +103,7 @@ function buildRes(): Response {
 }
 
 describe("subsonic entity compatibility handlers", () => {
+    const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
     const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
     const mockAlbumFindFirst = prisma.album.findFirst as jest.Mock;
@@ -105,6 +115,7 @@ describe("subsonic entity compatibility handlers", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPlayGroupBy.mockResolvedValue([]);
         mockArtistFindMany.mockResolvedValue([]);
         mockArtistFindFirst.mockResolvedValue(null);
         mockAlbumFindFirst.mockResolvedValue(null);

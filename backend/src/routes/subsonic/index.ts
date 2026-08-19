@@ -22,8 +22,10 @@ import {
 } from "./system";
 import {
     handleGetAlbum,
+    handleGetAlbumInfo,
     handleGetAlbumInfo2,
     handleGetArtist,
+    handleGetArtistInfo,
     handleGetArtistInfo2,
     handleGetArtists,
     handleGetGenres,
@@ -146,8 +148,10 @@ const SUBSONIC_FORM_POST_READ_ENDPOINTS = new Set([
     "getIndexes",
     "getArtists",
     "getArtist",
+    "getArtistInfo",
     "getArtistInfo2",
     "getAlbum",
+    "getAlbumInfo",
     "getAlbumInfo2",
     "getSong",
     "getTopSongs",
@@ -220,8 +224,10 @@ router.get(endpointAliases("getMusicDirectory"), handleGetMusicDirectory);
 router.get(endpointAliases("getIndexes"), handleGetIndexes);
 router.get(endpointAliases("getArtists"), handleGetArtists);
 router.get(endpointAliases("getArtist"), handleGetArtist);
+router.get(endpointAliases("getArtistInfo"), handleGetArtistInfo);
 router.get(endpointAliases("getArtistInfo2"), handleGetArtistInfo2);
 router.get(endpointAliases("getAlbum"), handleGetAlbum);
+router.get(endpointAliases("getAlbumInfo"), handleGetAlbumInfo);
 router.get(endpointAliases("getAlbumInfo2"), handleGetAlbumInfo2);
 router.get(endpointAliases("getSong"), handleGetSong);
 router.get(endpointAliases("getTopSongs"), handleGetTopSongs);

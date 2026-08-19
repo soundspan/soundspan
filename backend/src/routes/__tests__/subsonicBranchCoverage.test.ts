@@ -65,8 +65,13 @@ jest.mock("../../utils/db", () => ({
             deleteMany: jest.fn(),
         },
         likedTrack: {
-            findMany: jest.fn(),
+            findMany: jest.fn().mockResolvedValue([]),
             createMany: jest.fn(),
+            deleteMany: jest.fn(),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+            upsert: jest.fn(),
             deleteMany: jest.fn(),
         },
         user: { findUnique: jest.fn() },

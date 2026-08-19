@@ -26,6 +26,15 @@ jest.mock("../../utils/db", () => ({
         track: {
             findMany: jest.fn(),
         },
+        play: {
+            groupBy: jest.fn(),
+        },
+        likedTrack: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
+        trackRating: {
+            findMany: jest.fn().mockResolvedValue([]),
+        },
     },
 }));
 
@@ -87,6 +96,7 @@ describe("subsonic runtime focused handlers", () => {
     const mockPlaybackFindUnique = prisma.playbackState.findUnique as jest.Mock;
     const mockPlaybackUpsert = prisma.playbackState.upsert as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
+    const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
     const mockScanGetActive = scanQueue.getActive as jest.Mock;
     const mockScanGetWaiting = scanQueue.getWaiting as jest.Mock;
     const mockScanGetDelayed = scanQueue.getDelayed as jest.Mock;
@@ -129,6 +139,7 @@ describe("subsonic runtime focused handlers", () => {
             },
         ]);
         mockPlaybackUpsert.mockResolvedValue({});
+        mockPlayGroupBy.mockResolvedValue([]);
         mockScanGetActive.mockResolvedValue([]);
         mockScanGetWaiting.mockResolvedValue([]);
         mockScanGetDelayed.mockResolvedValue([]);
@@ -339,7 +350,6 @@ describe("subsonic runtime focused handlers", () => {
             expect.anything(),
             expect.objectContaining({
                 playQueue: expect.objectContaining({
-                    current: 0,
                     position: 0,
                     username: "alice",
                     changed: undefined,
@@ -603,7 +613,6 @@ describe("subsonic runtime focused handlers", () => {
             expect.anything(),
             expect.objectContaining({
                 playQueue: expect.objectContaining({
-                    current: 0,
                     position: 12400,
                     changed: "2026-01-01T00:00:00.000Z",
                     entry: [],
@@ -652,7 +661,7 @@ describe("subsonic runtime focused handlers", () => {
                 },
             ]);
 
-        await handleSavePlayQueue(
+        await handleSavePlayQueueByIndex(
             buildReq({
                 id: ["tr-track-1", "tr-track-1", "tr-track-2"],
                 current: "10",

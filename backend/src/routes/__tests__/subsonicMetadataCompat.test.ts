@@ -34,6 +34,12 @@ jest.mock("../../utils/db", () => ({
         play: {
             groupBy: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        trackRating: {
+            findMany: jest.fn(),
+        },
         track: {
             findFirst: jest.fn(),
             findMany: jest.fn(),
@@ -78,7 +84,9 @@ import {
 } from "../../utils/subsonicResponse";
 import { getLyrics } from "../../services/lyrics";
 import {
+    handleGetAlbumInfo,
     handleGetAlbumInfo2,
+    handleGetArtistInfo,
     handleGetArtistInfo2,
     handleGetSimilarSongs,
     handleGetSimilarSongs2,
@@ -107,6 +115,10 @@ describe("subsonic metadata compatibility handlers", () => {
     const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
     const mockAlbumFindFirst = prisma.album.findFirst as jest.Mock;
     const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
+    const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+    const mockTrackRatingFindMany = (
+        prisma as unknown as { trackRating: { findMany: jest.Mock } }
+    ).trackRating.findMany;
     const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
     const mockPlaylistFindFirst = prisma.playlist.findFirst as jest.Mock;
@@ -117,6 +129,8 @@ describe("subsonic metadata compatibility handlers", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockPlayGroupBy.mockResolvedValue([]);
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockTrackRatingFindMany.mockResolvedValue([]);
         mockTrackFindFirst.mockResolvedValue(null);
         mockTrackFindMany.mockResolvedValue([]);
         mockPlaylistFindFirst.mockResolvedValue(null);
@@ -183,7 +197,7 @@ describe("subsonic metadata compatibility handlers", () => {
         );
     });
 
-    it("returns albumInfo payload", async () => {
+    it("returns albumInfo2 payload", async () => {
         mockAlbumFindFirst.mockResolvedValue({
             rgMbid: "mbid-album-1",
             title: "Album One",
@@ -200,11 +214,56 @@ describe("subsonic metadata compatibility handlers", () => {
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
-                albumInfo: expect.objectContaining({
+                albumInfo2: expect.objectContaining({
                     musicBrainzId: "mbid-album-1",
                     notes: "Album One",
                 }),
             }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("returns classic artistInfo and albumInfo envelope keys", async () => {
+        mockArtistFindFirst.mockResolvedValue({
+            id: "artist-1",
+            name: "Artist One",
+            mbid: "mbid-artist-1",
+            summary: "Artist summary",
+            heroUrl: null,
+            similarFrom: [],
+        });
+        mockAlbumFindFirst.mockResolvedValue({
+            rgMbid: "mbid-album-1",
+            title: "Album One",
+            coverUrl: null,
+        });
+
+        await handleGetArtistInfo(
+            buildReq({
+                id: "ar-artist-1",
+                count: "5",
+                includeNotPresent: "true",
+            }),
+            buildRes(),
+        );
+        await handleGetAlbumInfo(buildReq({ id: "al-album-1" }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenNthCalledWith(
+            1,
+            expect.anything(),
+            {
+                artistInfo: expect.objectContaining({
+                    biography: "Artist summary",
+                }),
+            },
+            "json",
+            undefined,
+        );
+        expect(mockSendSuccess).toHaveBeenNthCalledWith(
+            2,
+            expect.anything(),
+            { albumInfo: expect.objectContaining({ notes: "Album One" }) },
             "json",
             undefined,
         );

@@ -12,6 +12,7 @@ import {
     getQueryValues,
     getRequestContext,
     getRequiredQueryString,
+    loadSongEnrichmentByTrackId,
     parseTrackIdsFromQueryValues,
     PLAYLIST_TRACK_WHERE,
     SONG_LOUDNESS_ALBUM_SELECT,
@@ -235,8 +236,12 @@ export async function handleGetPlaylist(
         const libraryTracks = playlist.items.flatMap((item) =>
             item.track ? [item.track] : [],
         );
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            libraryTracks.map((track) => track.id),
+        );
         const entries = libraryTracks.map((track) =>
-            formatSongForSubsonic(track),
+            formatSongForSubsonic(track, playedAtByTrackId.get(track.id)),
         );
         const duration = libraryTracks.reduce(
             (sum, track) => sum + (track.duration ?? 0),

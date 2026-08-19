@@ -19,6 +19,8 @@ import {
     getRequestContext,
     LIBRARY_ALBUM_WHERE,
     LIBRARY_TRACK_WHERE,
+    combineSongEnrichmentForAlbum,
+    loadSongEnrichmentByTrackId,
     mapAlbumsForSubsonic,
     parseAlbumListType,
     parseCountParam,
@@ -30,6 +32,7 @@ import {
     SUBSONIC_ALBUM_LOCATION_WHERE,
     SUBSONIC_MUSIC_FOLDER_ID,
     type AlbumListRecord,
+    type SongEnrichment,
 } from "./shared";
 
 async function handleGetAlbumListLike(
@@ -71,6 +74,7 @@ async function handleGetAlbumListLike(
 
     try {
         let albums: AlbumListRecord[] = [];
+        let enrichmentByAlbumId = new Map<string, SongEnrichment>();
 
         if (type === "starred") {
             albums = [];
@@ -91,6 +95,15 @@ async function handleGetAlbumListLike(
             type === "recent"
         ) {
             const albumStats = await buildAlbumPlayStats(req.user!.id);
+            enrichmentByAlbumId = new Map(
+                Array.from(albumStats, ([albumId, stats]) => [
+                    albumId,
+                    {
+                        playedAt: stats.lastPlayed ?? undefined,
+                        playCount: stats.playCount || undefined,
+                    },
+                ]),
+            );
             const sortedAlbumIds = Array.from(albumStats.entries())
                 .sort(([leftId, left], [rightId, right]) => {
                     if (type === "recent") {
@@ -228,8 +241,27 @@ async function handleGetAlbumListLike(
         }
 
         const payload: Record<string, unknown> = {};
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            albums.flatMap((album) => album.tracks.map((track) => track.id)),
+        );
+        for (const album of albums) {
+            const aggregate = combineSongEnrichmentForAlbum(
+                album.tracks.map((track) => track.id),
+                playedAtByTrackId,
+            );
+            enrichmentByAlbumId.set(album.id, {
+                ...aggregate,
+                ...enrichmentByAlbumId.get(album.id),
+                starredAt: aggregate.starredAt,
+            });
+        }
         payload[responseKey] = {
-            album: mapAlbumsForSubsonic(albums),
+            album: mapAlbumsForSubsonic(
+                albums,
+                playedAtByTrackId,
+                enrichmentByAlbumId,
+            ),
         };
 
         sendSubsonicSuccess(res, payload, format, callback);
@@ -381,16 +413,23 @@ export async function handleGetSongsByGenre(
         const tracks = pageIds
             .map((id) => trackRowById.get(id))
             .filter((row): row is NonNullable<typeof row> => row !== undefined);
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            tracks.map((track) => track.id),
+        );
 
         sendSubsonicSuccess(
             res,
             {
                 songsByGenre: {
                     song: tracks.map((track) =>
-                        formatSongForSubsonic({
-                            ...track,
-                            genre,
-                        }),
+                        formatSongForSubsonic(
+                            {
+                                ...track,
+                                genre,
+                            },
+                            playedAtByTrackId.get(track.id),
+                        ),
                     ),
                 },
             },
@@ -530,11 +569,18 @@ export async function handleGetRandomSongs(
             );
         }
         shuffleInPlace(selectedCandidates);
+        const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+            req.user!.id,
+            selectedCandidates.map((track) => track.id),
+        );
         const songs = selectedCandidates.map((track) =>
-            formatSongForSubsonic({
-                ...track,
-                genre: genre || undefined,
-            }),
+            formatSongForSubsonic(
+                {
+                    ...track,
+                    genre: genre || undefined,
+                },
+                playedAtByTrackId.get(track.id),
+            ),
         );
 
         sendSubsonicSuccess(
@@ -613,11 +659,6 @@ async function buildStarredPayload(userId: string): Promise<{
         },
     });
 
-    const songs = likedTracks.map((likedTrack) => ({
-        ...formatSongForSubsonic(likedTrack.track),
-        starred: likedTrack.likedAt.toISOString(),
-    }));
-
     const albumStarredAt = new Map<string, Date>();
     const artistStarredAt = new Map<string, Date>();
 
@@ -638,7 +679,7 @@ async function buildStarredPayload(userId: string): Promise<{
     }
 
     const albumIds = Array.from(albumStarredAt.keys());
-    const [albums, artists, albumTrackStats] = await Promise.all([
+    const [albums, artists, albumTrackStats, albumTracks] = await Promise.all([
         albumStarredAt.size > 0
             ? prisma.album.findMany({
                   where: {
@@ -699,27 +740,68 @@ async function buildStarredPayload(userId: string): Promise<{
                   _sum: { duration: true },
               })
             : Promise.resolve([]),
+        albumIds.length > 0
+            ? prisma.track.findMany({
+                  where: {
+                      ...LIBRARY_TRACK_WHERE,
+                      albumId: { in: albumIds },
+                  },
+                  select: { id: true, albumId: true },
+              })
+            : Promise.resolve([]),
     ]);
     const albumTrackStatsById = new Map(
         albumTrackStats.map((row) => [row.albumId, row]),
     );
+    const trackIdsByAlbumId = new Map<string, string[]>();
+    for (const track of albumTracks) {
+        const trackIds = trackIdsByAlbumId.get(track.albumId) ?? [];
+        trackIds.push(track.id);
+        trackIdsByAlbumId.set(track.albumId, trackIds);
+    }
+    const playedAtByTrackId = await loadSongEnrichmentByTrackId(
+        userId,
+        [
+            ...likedTracks.map((likedTrack) => likedTrack.track.id),
+            ...albumTracks.map((track) => track.id),
+        ],
+        new Map(
+            likedTracks.map((likedTrack) => [
+                likedTrack.track.id,
+                likedTrack.likedAt,
+            ]),
+        ),
+    );
+    const songs = likedTracks.map((likedTrack) => ({
+        ...formatSongForSubsonic(
+            likedTrack.track,
+            playedAtByTrackId.get(likedTrack.track.id),
+        ),
+        starred: likedTrack.likedAt.toISOString(),
+    }));
 
     const albumEntries = albums
         .map((album) => {
             const stats = albumTrackStatsById.get(album.id);
             return {
-                ...formatAlbumForSubsonic({
-                    id: album.id,
-                    title: album.title,
-                    year: album.year,
-                    lastSynced: album.lastSynced,
-                    coverUrl: album.coverUrl,
-                    genres: album.genres,
-                    userGenres: album.userGenres,
-                    artist: album.artist,
-                    songCount: stats?._count._all ?? 0,
-                    duration: stats?._sum.duration ?? 0,
-                }),
+                ...formatAlbumForSubsonic(
+                    {
+                        id: album.id,
+                        title: album.title,
+                        year: album.year,
+                        lastSynced: album.lastSynced,
+                        coverUrl: album.coverUrl,
+                        genres: album.genres,
+                        userGenres: album.userGenres,
+                        artist: album.artist,
+                        songCount: stats?._count._all ?? 0,
+                        duration: stats?._sum.duration ?? 0,
+                    },
+                    combineSongEnrichmentForAlbum(
+                        trackIdsByAlbumId.get(album.id) ?? [],
+                        playedAtByTrackId,
+                    ),
+                ),
                 starred: albumStarredAt.get(album.id)?.toISOString(),
             };
         })

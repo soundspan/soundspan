@@ -1,6 +1,6 @@
 # OpenSubsonic Compatibility (Current Fork Status)
 
-Last updated: 2026-08-18
+Last updated: 2026-08-19
 
 ## Scope
 
@@ -39,9 +39,16 @@ Create app passwords under **Settings > Sign-in & Security**. Each generated sec
 - `transcodeOffset`
 - `songPlayedDate`
 - `albumPlayedDate`
+- `indexBasedQueue`
 
-`transcodeOffset` is supported. It is distinct from the missing
-`getTranscodeDecision` and `getTranscodeStream` endpoint extensions.
+`transcodeOffset` is supported through the `stream` endpoint's integer-second
+`timeOffset` parameter. Positive offsets apply only when the resolved quality
+is a transcode tier. Offset transcodes use ffmpeg input seeking and bypass the
+track-and-quality disk cache; raw/original streams ignore the offset. Federated
+stream proxy requests currently ignore `timeOffset` because the peer stream API
+forwards quality and Range metadata rather than arbitrary Subsonic parameters.
+This extension is distinct from the missing `getTranscodeDecision` and
+`getTranscodeStream` endpoint extensions.
 
 `formPost` is honored across the surface: `/rest` accepts form-encoded POST
 requests (validated with Music Assistant). Mutating endpoints serve POST
@@ -60,7 +67,7 @@ measures them. Peaks are linear true-peak amplitudes.
 Tier A foundation and browse/search/media:
 
 - `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo`, `getMusicFolders`, `getIndexes`
-- `getArtists`, `getArtist`, `getArtistInfo2`, `getAlbum`, `getAlbumInfo2`, `getSong`, `getTopSongs`, `getSimilarSongs`, `getSimilarSongs2`, `getMusicDirectory`, `getAlbumList`, `getAlbumList2`, `getGenres`, `getSongsByGenre`, `getRandomSongs`, `search`, `search2`, `search3`
+- `getArtists`, `getArtist`, `getArtistInfo`, `getArtistInfo2`, `getAlbum`, `getAlbumInfo`, `getAlbumInfo2`, `getSong`, `getTopSongs`, `getSimilarSongs`, `getSimilarSongs2`, `getMusicDirectory`, `getAlbumList`, `getAlbumList2`, `getGenres`, `getSongsByGenre`, `getRandomSongs`, `search`, `search2`, `search3`
 - `stream`, `download`, `getCoverArt`, `getLyrics`, `getLyricsBySongId`
 
 Tier B mutation/readiness:
@@ -230,8 +237,11 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - `star` / `unstar` support `albumId` and `artistId` via track-like projection (all matching library tracks are starred/unstarred), not separate album/artist favorite tables.
 - `getStarred`/`getStarred2` `artist` and `album` arrays are derived from liked-track projection state.
 - `getNowPlaying` currently reports only the authenticated user's active playback state, not global multi-user now-playing.
-- `getPlayQueue`/`savePlayQueue` currently use the legacy playback-state device bucket (`deviceId=legacy`) for compatibility clients.
-- `getPlayQueueByIndex`/`savePlayQueueByIndex` map index `0` to `deviceId=legacy` and index `N` to `deviceId=legacy-N`.
+- Song payloads include the authenticated user's latest `played` timestamp for that track, and album payloads include the latest `played` timestamp across that album's tracks. Both fields are omitted when no matching play exists.
+- Song payloads also include `starred`, `userRating`, and `playCount` from authenticated-user state. `bitRate` is derived from stored byte size and duration because the scanner does not persist bitrate. These optional fields are omitted when their source state or derivation is unavailable. Album `starred` and `playCount` values are projections across the album's visible tracks.
+- Remaining optional song fields not currently projected include `path`, `sortName`, `mediaType`, and `averageRating`.
+- Classic `getPlayQueue`/`savePlayQueue` use the legacy playback-state device bucket (`deviceId=legacy`). `getPlayQueue.current` is the current protocol song ID, and `savePlayQueue.current` resolves a protocol or raw song ID to its first submitted queue position. A bare in-range integer remains accepted as this server's legacy index form when it does not match a submitted song ID.
+- `getPlayQueueByIndex`/`savePlayQueueByIndex` retain numeric `current` semantics and map index `0` to `deviceId=legacy` and index `N` to `deviceId=legacy-N`.
 - `getBookmarks`/`createBookmark`/`deleteBookmark` now persist per-user bookmark state keyed by track id, with bookmark positions stored in seconds and returned in protocol milliseconds.
 - `startScan` is compatibility-throttled with a cooldown window; repeated requests during cooldown return current scan status and do not enqueue new scan jobs.
 - `getIndexes` now honors `musicFolderId` filtering and `ifModifiedSince` no-change semantics.
@@ -245,6 +255,7 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - `getLyrics` currently resolves by best-match library track (artist/title query), then returns plain lyrics or synced lyrics flattened to plain text lines.
 - Auth middleware now supports `u/p`, `u/t/s`, and `apiKey`; bearer-token style OpenSubsonic auth variants remain unsupported.
 - `getAlbumInfo2` `notes` currently use mapped library metadata (album title fallback) because soundspan does not maintain dedicated album notes fields.
+- Local streams, including transcode tiers, are fully materialized to a file before the response starts. The streaming service therefore sends the exact file length. `estimateContentLength=true` does not replace that known value with an estimate, and Range responses continue to use their exact range length. This avoids an inaccurate HTTP message length that could truncate playback or leave a client waiting for bytes that will never arrive.
 - `getPodcasts` / `getNewestPodcasts` are empty-response compatibility stubs: soundspan's native podcast domain is not exposed over `/rest`, and stub responses keep probing clients (Music Assistant) from failing.
 - Album payload `created` reports `Album.lastSynced` — the same timestamp `getAlbumList type=newest` orders by — not the release date; `year` carries release metadata.
 - Some optional query keys outside the validated client matrix may still be ignored.
@@ -253,9 +264,9 @@ Promote a deferred gap to in-scope when at least one of these is true:
 
 Spec coverage snapshot (current):
 
-- Implemented endpoints: `54` (2 of these are empty-response podcast stubs)
+- Implemented endpoints: `56` (2 of these are empty-response podcast stubs)
 - Catalog endpoints tracked for compatibility: `84`
-- Missing endpoints: `30`
+- Missing endpoints: `28`
 
 ### System (missing)
 
@@ -265,8 +276,6 @@ Spec coverage snapshot (current):
 
 - `getVideos`
 - `getVideoInfo`
-- `getArtistInfo`
-- `getAlbumInfo`
 
 ### Lists (missing)
 
