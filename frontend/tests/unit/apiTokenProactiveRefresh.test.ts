@@ -313,6 +313,64 @@ test("does not replay a stale session mutation after a replacement login", async
     }
 });
 
+test("a pre-login request cannot replay under a later session", async (testContext) => {
+    let resolveAnonymousRequest: ((response: Response) => void) | undefined;
+    const anonymousResponse = new Promise<Response>((resolve) => {
+        resolveAnonymousRequest = resolve;
+    });
+    let dangerRequestCount = 0;
+    let refreshRequestCount = 0;
+    const fetchMock = testContext.mock.method(
+        globalThis,
+        "fetch",
+        async (input: RequestInfo | URL) => {
+            if (String(input).endsWith("/api/auth/refresh")) {
+                refreshRequestCount += 1;
+                return Response.json({
+                    token: "access-b-rotated",
+                    refreshToken: "refresh-b-rotated",
+                });
+            }
+            dangerRequestCount += 1;
+            return dangerRequestCount === 1
+                ? anonymousResponse
+                : Response.json({ ok: true });
+        },
+    );
+    const sessionExpiry = trackSessionExpiry();
+    const client = createClient();
+
+    try {
+        const anonymousRequest = client.post("/danger", { destructive: true });
+        await flushAsyncWork();
+        assert.equal(fetchMock.mock.callCount(), 1);
+
+        client.setToken("access-b", "refresh-b");
+        assert.ok(resolveAnonymousRequest);
+        resolveAnonymousRequest(
+            Response.json(
+                { error: "Not authenticated", code: "AUTH_REQUIRED" },
+                { status: 401 },
+            ),
+        );
+
+        await assert.rejects(anonymousRequest, (error: unknown) => {
+            assert.ok(error instanceof Error);
+            const apiError = error as Error & { status?: number };
+            assert.equal(apiError.status, 401);
+            return true;
+        });
+
+        assert.equal(dangerRequestCount, 1);
+        assert.equal(refreshRequestCount, 0);
+        assert.equal(client.getToken(), "access-b");
+        assert.equal(client.getRefreshToken(), "refresh-b");
+        assert.equal(sessionExpiry.count(), 0);
+    } finally {
+        sessionExpiry.stop();
+    }
+});
+
 test("stale refresh success cannot overwrite a replacement session", async (testContext) => {
     let resolveSessionARefresh: ((response: Response) => void) | undefined;
     const sessionARefresh = new Promise<Response>((resolve) => {

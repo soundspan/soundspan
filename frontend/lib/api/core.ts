@@ -575,7 +575,7 @@ export abstract class ApiClientCore {
             silent404?: boolean;
             _retryCount?: number;
             _timeoutRetryCount?: number;
-            _authSessionGeneration?: number | null;
+            _authSessionGeneration?: number;
             timeoutMs?: number;
         } = {},
     ): Promise<T> {
@@ -583,7 +583,7 @@ export abstract class ApiClientCore {
             silent404,
             _retryCount = 0,
             _timeoutRetryCount = 0,
-            _authSessionGeneration = this.token ? this.sessionGeneration : null,
+            _authSessionGeneration = this.sessionGeneration,
             timeoutMs = DEFAULT_API_TIMEOUT_MS,
             ...fetchOptions
         } = options;
@@ -639,10 +639,7 @@ export abstract class ApiClientCore {
                     _timeoutRetryCount < MAX_TIMEOUT_RETRIES
                 ) {
                     await this.delay(DEFAULT_TIMEOUT_RETRY_BACKOFF_MS);
-                    if (
-                        _authSessionGeneration !== null &&
-                        !this.isCurrentSession(_authSessionGeneration)
-                    ) {
+                    if (!this.isCurrentSession(_authSessionGeneration)) {
                         throw error;
                     }
                     return this.request<T>(endpoint, {
@@ -681,19 +678,13 @@ export abstract class ApiClientCore {
                     _retryCount < 2 &&
                     endpoint !== "/auth/refresh"
                 ) {
-                    if (
-                        _authSessionGeneration !== null &&
-                        !this.isCurrentSession(_authSessionGeneration)
-                    ) {
+                    if (!this.isCurrentSession(_authSessionGeneration)) {
                         throw requestError;
                     }
                     const refreshResult = await this.refreshAccessToken();
 
                     if (refreshResult === "ok") {
-                        if (
-                            _authSessionGeneration !== null &&
-                            !this.isCurrentSession(_authSessionGeneration)
-                        ) {
+                        if (!this.isCurrentSession(_authSessionGeneration)) {
                             throw requestError;
                         }
                         // Retry the request with new token
