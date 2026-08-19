@@ -621,9 +621,12 @@ export default function SearchPage() {
                               (!libraryResults.artists?.length &&
                                   !libraryResults.albums?.length &&
                                   !libraryResults.tracks?.length &&
-                                  !libraryResults.podcasts?.length &&
                                   !libraryResults.audiobooks?.length &&
-                                  !libraryResults.episodes?.length))) && (
+                                  // Library podcasts render only on the All
+                                  // and Podcasts tabs; episodes only under
+                                  // the podcast tab handled above.
+                                  (!showPodcastResults ||
+                                      !libraryResults.podcasts?.length)))) && (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
                             <SearchIcon className="w-16 h-16 text-gray-400 mb-4" />
                             <h3 className="text-xl font-bold text-white mb-2">
