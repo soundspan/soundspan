@@ -246,18 +246,25 @@ test("a settings-event reload ignores the superseded in-flight response", async 
         window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
         await flushAsync();
     });
+    // Serialization: the reload's fetch must not start while the stale
+    // request is still pending (GET coalescing would reuse its response).
+    assert.equal(getSettings.mock.callCount(), 1);
 
-    // The stale auto response settles first; the reload's own request
-    // (serialized behind it) then resolves with off.
+    // The stale auto response settles first and must be IGNORED before the
+    // fresh response arrives (a last-writer-wins loader fails here).
     await React.act(async () => {
         settingsResolvers[0]?.();
-        await flushAsync();
-        settingsResolvers[1]?.();
         await flushAsync();
     });
     await settleRamp(t);
     assert.equal(gainRef.current, 1);
     assert.equal(getSettings.mock.callCount(), 2);
+    await React.act(async () => {
+        settingsResolvers[1]?.();
+        await flushAsync();
+    });
+    await settleRamp(t);
+    assert.equal(gainRef.current, 1);
 
     await mounted.unmount();
 });
@@ -298,6 +305,31 @@ test("unmount cancels pending retries entirely", async (t) => {
 
     await React.act(async () => {
         t.mock.timers.tick(60_000);
+        await flushAsync();
+    });
+    assert.equal(getSettings.mock.callCount(), 1);
+});
+
+test("queued obsolete generations never fetch after disposal", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    audioState.currentTrack = LOUD_TRACK;
+    deferSettings = true;
+
+    const mounted = await mountProbe();
+    assert.equal(getSettings.mock.callCount(), 1);
+
+    // Two reloads queue behind the pending initial request, then the hook
+    // unmounts. Releasing the initial response must not trigger the queued
+    // generations' fetches.
+    await React.act(async () => {
+        window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
+        window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
+        await flushAsync();
+    });
+    await mounted.unmount();
+    await React.act(async () => {
+        settingsResolvers[0]?.();
+        await flushAsync();
         await flushAsync();
     });
     assert.equal(getSettings.mock.callCount(), 1);

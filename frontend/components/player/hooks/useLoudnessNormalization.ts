@@ -105,16 +105,66 @@ function useLoudnessPrefs(): LoudnessPrefs {
     return prefs;
 }
 
+type AudioStateSlice = Pick<
+    ReturnType<typeof useAudioState>,
+    "currentTrack" | "playbackType" | "queue" | "isShuffle"
+>;
+
+interface GainSyncInput extends AudioStateSlice {
+    prefs: LoudnessPrefs;
+    loudnessGainFactorRef: MutableRefObject<number>;
+    applyCurrentOutputState: () => void;
+    transitionRef: MutableRefObject<GainTransitionHandle | null>;
+    lastTrackIdRef: MutableRefObject<string | null>;
+}
+
+/**
+ * Recomputes the gain decision and applies it: immediately when the track
+ * changed (the content changes anyway), through a short ramp for a
+ * mid-track mode/target/queue-context change so the volume never jumps.
+ */
+function syncLoudnessGain(input: GainSyncInput): void {
+    // A queue containing podcast episodes is never an album context.
+    const trackItems = input.queue.filter((item) => !isEpisodeQueueItem(item));
+    const isTrack = input.playbackType === "track";
+    const decision = resolveLoudnessGain({
+        mode: input.prefs.mode,
+        targetLufs: input.prefs.targetLufs,
+        isAlbumContext:
+            trackItems.length === input.queue.length &&
+            isAlbumOrderedQueue(trackItems, input.isShuffle),
+        track: isTrack ? input.currentTrack : null,
+    });
+    const trackId = isTrack ? (input.currentTrack?.id ?? null) : null;
+    const trackChanged = trackId !== input.lastTrackIdRef.current;
+    input.lastTrackIdRef.current = trackId;
+
+    input.transitionRef.current?.cancel();
+    input.transitionRef.current = null;
+    const previous = input.loudnessGainFactorRef.current;
+    if (previous === decision.gainFactor) return;
+
+    if (trackChanged || typeof window === "undefined") {
+        input.loudnessGainFactorRef.current = decision.gainFactor;
+        input.applyCurrentOutputState();
+        return;
+    }
+    input.transitionRef.current = startGainTransition({
+        from: previous,
+        to: decision.gainFactor,
+        setGain: (value) => {
+            input.loudnessGainFactorRef.current = value;
+        },
+        applyOutputState: input.applyCurrentOutputState,
+    });
+}
+
 /**
  * Keeps the loudness-normalization gain factor in sync with the current
  * track, the user's mode (Settings → Playback), and the server target
  * (issue #526). The factor is composited with user volume inside
  * applyCurrentOutputState; this hook only recomputes it and re-applies the
  * output state when the applied gain actually changes.
- *
- * A gain change caused by a track change applies immediately (the content
- * changes anyway); a mid-track change (mode, target, or queue context)
- * ramps over a short interval so the volume never jumps audibly.
  *
  * Audiobooks and podcasts are never normalized.
  */
@@ -123,50 +173,24 @@ export function useLoudnessNormalization({
     applyCurrentOutputState,
 }: UseLoudnessNormalizationOptions): void {
     const { currentTrack, playbackType, queue, isShuffle } = useAudioState();
-    const { mode, targetLufs } = useLoudnessPrefs();
+    const prefs = useLoudnessPrefs();
     const transitionRef = useRef<GainTransitionHandle | null>(null);
     const lastTrackIdRef = useRef<string | null>(null);
 
     useEffect(() => {
-        // A queue containing podcast episodes is never an album context.
-        const trackItems = queue.filter((item) => !isEpisodeQueueItem(item));
-        const isAlbumContext =
-            trackItems.length === queue.length &&
-            isAlbumOrderedQueue(trackItems, isShuffle);
-        const decision = resolveLoudnessGain({
-            mode,
-            targetLufs,
-            isAlbumContext,
-            track: playbackType === "track" ? currentTrack : null,
-        });
-
-        const trackId =
-            playbackType === "track" ? (currentTrack?.id ?? null) : null;
-        const trackChanged = trackId !== lastTrackIdRef.current;
-        lastTrackIdRef.current = trackId;
-
-        transitionRef.current?.cancel();
-        transitionRef.current = null;
-        const previous = loudnessGainFactorRef.current;
-        if (previous === decision.gainFactor) return;
-
-        if (trackChanged || typeof window === "undefined") {
-            loudnessGainFactorRef.current = decision.gainFactor;
-            applyCurrentOutputState();
-            return;
-        }
-
-        transitionRef.current = startGainTransition({
-            from: previous,
-            to: decision.gainFactor,
-            setGain: (value) => {
-                loudnessGainFactorRef.current = value;
-            },
-            applyOutputState: applyCurrentOutputState,
+        syncLoudnessGain({
+            prefs,
+            currentTrack,
+            playbackType,
+            queue,
+            isShuffle,
+            loudnessGainFactorRef,
+            applyCurrentOutputState,
+            transitionRef,
+            lastTrackIdRef,
         });
     }, [
-        mode,
-        targetLufs,
+        prefs,
         currentTrack,
         playbackType,
         queue,

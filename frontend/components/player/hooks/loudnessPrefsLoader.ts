@@ -3,9 +3,10 @@
 /**
  * Serialized, generation-fenced loader for the loudness preference
  * snapshot. Each reload starts a new generation: responses and retry
- * timers from older generations are ignored, and every fetch is chained
- * behind the previous one so the API client's in-flight GET coalescing
- * can never hand a post-save reload the pre-save response.
+ * timers from older generations are ignored, obsolete queued loads skip
+ * before any I/O, and every fetch is chained behind the previous one so
+ * the API client's in-flight GET coalescing can never hand a post-save
+ * reload the pre-save response.
  */
 
 export interface LoudnessPrefsSnapshot {
@@ -35,73 +36,106 @@ export interface LoudnessPrefsLoader {
     dispose: () => void;
 }
 
+interface LoaderState {
+    generation: number;
+    retriesUsed: number;
+    disposed: boolean;
+    retryTimer: ReturnType<typeof setTimeout> | null;
+    inFlight: Promise<void>;
+}
+
+function clearRetry(state: LoaderState): void {
+    if (state.retryTimer !== null) {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+    }
+}
+
+function publishSnapshot(
+    options: LoudnessPrefsLoaderOptions,
+    settingsResult: PromiseSettledResult<unknown>,
+    featuresResult: PromiseSettledResult<unknown>,
+): boolean {
+    const settingsOk =
+        settingsResult.status === "fulfilled" && Boolean(settingsResult.value);
+    const featuresOk =
+        featuresResult.status === "fulfilled" && Boolean(featuresResult.value);
+    options.onSnapshot({
+        mode: settingsOk ? options.extractMode(settingsResult.value) : null,
+        targetLufs: featuresOk
+            ? options.extractTarget(featuresResult.value)
+            : null,
+        complete: settingsOk && featuresOk,
+    });
+    return settingsOk && featuresOk;
+}
+
+function scheduleRetry(
+    state: LoaderState,
+    options: LoudnessPrefsLoaderOptions,
+    loadGeneration: number,
+): void {
+    if (state.retriesUsed >= options.retryDelaysMs.length) return;
+    const delay = options.retryDelaysMs[state.retriesUsed];
+    state.retriesUsed += 1;
+    state.retryTimer = setTimeout(() => {
+        state.retryTimer = null;
+        if (loadGeneration === state.generation) {
+            enqueue(state, options, loadGeneration);
+        }
+    }, delay);
+}
+
+async function run(
+    state: LoaderState,
+    options: LoudnessPrefsLoaderOptions,
+    loadGeneration: number,
+): Promise<void> {
+    // Obsolete queued generations skip before any I/O: a disposed loader
+    // or a superseded generation never fetches.
+    if (state.disposed || loadGeneration !== state.generation) return;
+    const [settingsResult, featuresResult] = await Promise.allSettled([
+        options.fetchSettings(),
+        options.fetchFeatures(),
+    ]);
+    if (state.disposed || loadGeneration !== state.generation) return;
+    const complete = publishSnapshot(options, settingsResult, featuresResult);
+    if (!complete) scheduleRetry(state, options, loadGeneration);
+}
+
+function enqueue(
+    state: LoaderState,
+    options: LoudnessPrefsLoaderOptions,
+    loadGeneration: number,
+): void {
+    state.inFlight = state.inFlight
+        .catch(() => undefined)
+        .then(() => run(state, options, loadGeneration));
+}
+
 export function createLoudnessPrefsLoader(
     options: LoudnessPrefsLoaderOptions,
 ): LoudnessPrefsLoader {
-    let generation = 0;
-    let retriesUsed = 0;
-    let disposed = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let inFlight: Promise<void> = Promise.resolve();
-
-    const clearRetry = () => {
-        if (retryTimer !== null) {
-            clearTimeout(retryTimer);
-            retryTimer = null;
-        }
+    const state: LoaderState = {
+        generation: 0,
+        retriesUsed: 0,
+        disposed: false,
+        retryTimer: null,
+        inFlight: Promise.resolve(),
     };
-
-    const run = async (loadGeneration: number): Promise<void> => {
-        const [settingsResult, featuresResult] = await Promise.allSettled([
-            options.fetchSettings(),
-            options.fetchFeatures(),
-        ]);
-        if (disposed || loadGeneration !== generation) return;
-        const settingsOk =
-            settingsResult.status === "fulfilled" &&
-            Boolean(settingsResult.value);
-        const featuresOk =
-            featuresResult.status === "fulfilled" &&
-            Boolean(featuresResult.value);
-        options.onSnapshot({
-            mode: settingsOk ? options.extractMode(settingsResult.value) : null,
-            targetLufs: featuresOk
-                ? options.extractTarget(featuresResult.value)
-                : null,
-            complete: settingsOk && featuresOk,
-        });
-        const shouldRetry =
-            (!settingsOk || !featuresOk) &&
-            retriesUsed < options.retryDelaysMs.length;
-        if (shouldRetry) {
-            const delay = options.retryDelaysMs[retriesUsed];
-            retriesUsed += 1;
-            retryTimer = setTimeout(() => {
-                retryTimer = null;
-                if (loadGeneration === generation) enqueue(loadGeneration);
-            }, delay);
-        }
-    };
-
-    const enqueue = (loadGeneration: number) => {
-        inFlight = inFlight
-            .catch(() => undefined)
-            .then(() => run(loadGeneration));
-    };
-
     return {
         start: () => {
-            enqueue(generation);
+            enqueue(state, options, state.generation);
         },
         reload: () => {
-            generation += 1;
-            retriesUsed = 0;
-            clearRetry();
-            enqueue(generation);
+            state.generation += 1;
+            state.retriesUsed = 0;
+            clearRetry(state);
+            enqueue(state, options, state.generation);
         },
         dispose: () => {
-            disposed = true;
-            clearRetry();
+            state.disposed = true;
+            clearRetry(state);
         },
     };
 }

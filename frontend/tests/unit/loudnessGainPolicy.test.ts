@@ -257,3 +257,15 @@ test("computeGainRampSteps collapses degenerate and invalid transitions", () => 
         Number.POSITIVE_INFINITY,
     ]);
 });
+
+test("computeGainRampSteps clamps hostile step counts", () => {
+    assert.equal(
+        computeGainRampSteps(0, 1, Number.POSITIVE_INFINITY).length,
+        8,
+    );
+    assert.equal(computeGainRampSteps(0, 1, Number.NaN).length, 8);
+    assert.equal(computeGainRampSteps(0, 1, 2.5).length, 3);
+    assert.deepEqual(computeGainRampSteps(0, 1, 0), [1]);
+    assert.deepEqual(computeGainRampSteps(0, 1, -5), [1]);
+    assert.equal(computeGainRampSteps(0, 1, 10_000).length, 32);
+});
