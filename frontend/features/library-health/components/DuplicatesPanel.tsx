@@ -7,7 +7,7 @@ import {
     type LibraryHealthSummary,
 } from "@/lib/api";
 import { formatBytes } from "../format";
-import { usePanelLoader } from "../hooks/usePanelLoader";
+import { useInsightPanelLoader } from "../hooks/useInsightPanelLoader";
 import { InsightPanel } from "./InsightPanel";
 
 const TIER_LABELS: Record<LibraryHealthDuplicateTier, string> = {
@@ -18,24 +18,30 @@ const TIER_LABELS: Record<LibraryHealthDuplicateTier, string> = {
 
 interface DuplicatesPanelProps {
     duplicates: LibraryHealthSummary["duplicates"];
+    refreshToken: number;
 }
 
 /** Report-only duplicate/version clusters found via durable track identity. */
 export function DuplicatesPanel({
     duplicates,
+    refreshToken,
 }: Readonly<DuplicatesPanelProps>) {
     const fetchPage = useCallback(
         () => api.getLibraryHealthDuplicates({ limit: 25 }),
         [],
     );
-    const page = usePanelLoader(fetchPage, "Failed to load duplicate clusters");
+    const page = useInsightPanelLoader(
+        fetchPage,
+        "Failed to load duplicate clusters",
+        refreshToken,
+    );
 
     return (
         <InsightPanel
             title="Duplicates and versions"
             subtitle={`${duplicates.clusters} clusters · ${duplicates.byTier.audioHash} exact · ${duplicates.byTier.recordingMbid} same recording · ${duplicates.byTier.isrc} same ISRC`}
             isTruncated={duplicates.isTruncated}
-            onFirstExpand={page.load}
+            onFirstExpand={page.onFirstExpand}
             onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}

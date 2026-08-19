@@ -75,18 +75,23 @@ async function renderPanels() {
             null,
             React.createElement(gaps.MetadataGapsPanel, {
                 gaps: SUMMARY.metadataGaps,
+                refreshToken: 0,
             }),
             React.createElement(analysis.AnalysisCoveragePanel, {
                 coverage: SUMMARY.analysisCoverage,
+                refreshToken: 0,
             }),
             React.createElement(duplicates.DuplicatesPanel, {
                 duplicates: SUMMARY.duplicates,
+                refreshToken: 0,
             }),
             React.createElement(storage.StoragePanel, {
                 storage: SUMMARY.storage,
+                refreshToken: 0,
             }),
             React.createElement(quality.QualityPanel, {
                 quality: SUMMARY.quality,
+                refreshToken: 0,
             }),
         ),
     );

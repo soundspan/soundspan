@@ -3,24 +3,32 @@
 import { useCallback } from "react";
 import { api, type LibraryHealthSummary } from "@/lib/api";
 import { formatBytes, formatKbps } from "../format";
-import { usePanelLoader } from "../hooks/usePanelLoader";
+import { useInsightPanelLoader } from "../hooks/useInsightPanelLoader";
 import { InsightPanel } from "./InsightPanel";
 
 interface StoragePanelProps {
     storage: LibraryHealthSummary["storage"];
+    refreshToken: number;
 }
 
 /** Storage breakdown by format plus the artists using the most space. */
-export function StoragePanel({ storage }: Readonly<StoragePanelProps>) {
+export function StoragePanel({
+    storage,
+    refreshToken,
+}: Readonly<StoragePanelProps>) {
     const fetchReport = useCallback(() => api.getLibraryHealthStorage(), []);
-    const report = usePanelLoader(fetchReport, "Failed to load storage report");
+    const report = useInsightPanelLoader(
+        fetchReport,
+        "Failed to load storage report",
+        refreshToken,
+    );
 
     return (
         <InsightPanel
             title="Storage"
             subtitle={`${storage.tracks} tracks · ${formatBytes(storage.totalFileSize)} across ${storage.mimeTypes} formats`}
             isTruncated={storage.isTruncated}
-            onFirstExpand={report.load}
+            onFirstExpand={report.onFirstExpand}
             onRetry={report.load}
             isLoading={report.isLoading}
             error={report.error}

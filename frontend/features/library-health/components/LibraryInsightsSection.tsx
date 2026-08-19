@@ -14,7 +14,7 @@ import { StoragePanel } from "./StoragePanel";
  * duplicate clusters, and storage/quality analytics from the read-model API.
  */
 export function LibraryInsightsSection() {
-    const { summary, isLoading, isRefreshing, error, refresh } =
+    const { summary, isLoading, isRefreshing, error, refresh, refreshToken } =
         useLibraryInsights();
 
     return (
@@ -46,13 +46,27 @@ export function LibraryInsightsSection() {
             {error && <p className="py-2 text-sm text-red-400">{error}</p>}
             {summary && (
                 <div className="space-y-3">
-                    <MetadataGapsPanel gaps={summary.metadataGaps} />
+                    <MetadataGapsPanel
+                        gaps={summary.metadataGaps}
+                        refreshToken={refreshToken}
+                    />
                     <AnalysisCoveragePanel
                         coverage={summary.analysisCoverage}
+                        refreshToken={refreshToken}
+                        onRemediated={refresh}
                     />
-                    <DuplicatesPanel duplicates={summary.duplicates} />
-                    <StoragePanel storage={summary.storage} />
-                    <QualityPanel quality={summary.quality} />
+                    <DuplicatesPanel
+                        duplicates={summary.duplicates}
+                        refreshToken={refreshToken}
+                    />
+                    <StoragePanel
+                        storage={summary.storage}
+                        refreshToken={refreshToken}
+                    />
+                    <QualityPanel
+                        quality={summary.quality}
+                        refreshToken={refreshToken}
+                    />
                 </div>
             )}
         </SettingsSection>

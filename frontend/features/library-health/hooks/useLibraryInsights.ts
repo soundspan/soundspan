@@ -9,6 +9,8 @@ export interface LibraryInsightsState {
     isRefreshing: boolean;
     error: string | null;
     refresh: () => void;
+    /** Increments when a cache-busting refresh succeeds; expanded panels reload on change. */
+    refreshToken: number;
 }
 
 /** Loads the cached dashboard summary and exposes a cache-busting refresh. */
@@ -17,6 +19,7 @@ export function useLibraryInsights(): LibraryInsightsState {
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [refreshToken, setRefreshToken] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -43,7 +46,10 @@ export function useLibraryInsights(): LibraryInsightsState {
         setError(null);
         void api
             .refreshLibraryHealthDashboard()
-            .then(setSummary)
+            .then((data) => {
+                setSummary(data);
+                setRefreshToken((token) => token + 1);
+            })
             .catch(() => {
                 setError("Failed to refresh library insights");
             })
@@ -52,5 +58,5 @@ export function useLibraryInsights(): LibraryInsightsState {
             });
     }, []);
 
-    return { summary, isLoading, isRefreshing, error, refresh };
+    return { summary, isLoading, isRefreshing, error, refresh, refreshToken };
 }

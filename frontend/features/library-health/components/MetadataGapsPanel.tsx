@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
     api,
     type LibraryHealthGapKind,
     type LibraryHealthSummary,
 } from "@/lib/api";
 import { gapItemLine } from "../format";
-import { usePanelLoader } from "../hooks/usePanelLoader";
+import { useInsightPanelLoader } from "../hooks/useInsightPanelLoader";
 import { InsightPanel } from "./InsightPanel";
 
 const GAP_TABS: Array<{ kind: LibraryHealthGapKind; label: string }> = [
@@ -19,23 +19,25 @@ const GAP_TABS: Array<{ kind: LibraryHealthGapKind; label: string }> = [
 
 interface MetadataGapsPanelProps {
     gaps: LibraryHealthSummary["metadataGaps"];
+    refreshToken: number;
 }
 
 /** Metadata-gap counts with a tabbed drill-down into each category. */
-export function MetadataGapsPanel({ gaps }: Readonly<MetadataGapsPanelProps>) {
+export function MetadataGapsPanel({
+    gaps,
+    refreshToken,
+}: Readonly<MetadataGapsPanelProps>) {
     const [activeKind, setActiveKind] =
         useState<LibraryHealthGapKind>("missing-art");
-    const [hasExpanded, setHasExpanded] = useState(false);
     const fetchPage = useCallback(
         () => api.getLibraryHealthGaps(activeKind, { limit: 50 }),
         [activeKind],
     );
-    const page = usePanelLoader(fetchPage, "Failed to load metadata gaps");
-    const { load } = page;
-
-    useEffect(() => {
-        if (hasExpanded) load();
-    }, [hasExpanded, load]);
+    const page = useInsightPanelLoader(
+        fetchPage,
+        "Failed to load metadata gaps",
+        refreshToken,
+    );
 
     const totalGaps =
         gaps.missingArt.albums +
@@ -47,7 +49,7 @@ export function MetadataGapsPanel({ gaps }: Readonly<MetadataGapsPanelProps>) {
         <InsightPanel
             title="Metadata gaps"
             subtitle={`${gaps.missingArt.albums} albums without art · ${gaps.missingMbid.albums} albums without MBIDs · ${gaps.missingGenres} tracks without genres · ${gaps.missingLyrics} tracks without lyrics`}
-            onFirstExpand={() => setHasExpanded(true)}
+            onFirstExpand={page.onFirstExpand}
             onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}

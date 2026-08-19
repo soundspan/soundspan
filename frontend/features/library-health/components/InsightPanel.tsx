@@ -85,7 +85,7 @@ export function InsightPanel({
                             )}
                         </div>
                     )}
-                    {!isLoading && !error && children}
+                    {!error && children}
                 </div>
             )}
         </div>

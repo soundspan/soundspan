@@ -91,11 +91,42 @@ const getLibraryHealthGaps = mock.fn(async (kind: string) => {
 const getLibraryHealthAnalysis = mock.fn(async () => ANALYSIS_PAGE);
 const retryFailedAnalysis = mock.fn(async () => ({ enqueued: 1 }));
 
+function qualityPage(floor: number) {
+    return {
+        floorKbps: floor,
+        items: [
+            {
+                albumId: "album-q",
+                title: `Album under ${floor}`,
+                artist: { id: "artist-q", name: "Lossy Artist" },
+                averageBitrateKbps: floor - 20,
+                trackCount: 9,
+            },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+        sampledTracks: 10,
+        sampleLimit: 100_000,
+        isTruncated: false,
+    };
+}
+
+let deferQualityLoads = false;
+let qualityResolvers: Array<() => void> = [];
+const getLibraryHealthQuality = mock.fn((floor: number) => {
+    if (!deferQualityLoads) return Promise.resolve(qualityPage(floor));
+    return new Promise((resolve) => {
+        qualityResolvers.push(() => resolve(qualityPage(floor)));
+    });
+});
+
 mock.module("@/lib/api", {
     namedExports: {
         api: {
             getLibraryHealthGaps,
             getLibraryHealthAnalysis,
+            getLibraryHealthQuality,
             retryFailedAnalysis,
         },
     },
@@ -130,8 +161,12 @@ after(() => {
 
 beforeEach(() => {
     failGapLoads = 0;
+    deferQualityLoads = false;
+    qualityResolvers = [];
     getLibraryHealthGaps.mock.resetCalls();
     getLibraryHealthAnalysis.mock.resetCalls();
+    getLibraryHealthQuality.mock.resetCalls();
+    retryFailedAnalysis.mock.resetCalls();
     document.body.replaceChildren();
 });
 
@@ -149,6 +184,13 @@ async function mountPanel(
     });
     return {
         container,
+        rerender: async (nextElement: React.ReactElement) => {
+            await React.act(async () => {
+                root.render(nextElement);
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+        },
         unmount: async () => {
             await React.act(async () => root.unmount());
             container.remove();
@@ -186,6 +228,7 @@ test("metadata gaps drill-down renders backend album and track shapes", async ()
         return {
             element: React.createElement(MetadataGapsPanel, {
                 gaps: SUMMARY_GAPS,
+                refreshToken: 0,
             }),
         };
     });
@@ -215,6 +258,7 @@ test("a failed panel load shows an error with a working Retry control", async ()
         return {
             element: React.createElement(MetadataGapsPanel, {
                 gaps: SUMMARY_GAPS,
+                refreshToken: 0,
             }),
         };
     });
@@ -244,6 +288,7 @@ test("analysis coverage drill-down renders backend failed-track shape", async ()
         return {
             element: React.createElement(AnalysisCoveragePanel, {
                 coverage: SUMMARY_COVERAGE,
+                refreshToken: 0,
             }),
         };
     });
@@ -253,6 +298,90 @@ test("analysis coverage drill-down renders backend failed-track shape", async ()
     assert.match(document.body.textContent ?? "", /Broken Track/);
     assert.match(document.body.textContent ?? "", /Failing Artist/);
     assert.match(document.body.textContent ?? "", /decode failed/);
+
+    await mounted.unmount();
+});
+
+test("quality panel fetches on expand and floor selection, latest selection wins", async () => {
+    const { QualityPanel } =
+        await import("../../features/library-health/components/QualityPanel");
+    const mounted = await mountPanel(async () => ({
+        element: React.createElement(QualityPanel, {
+            quality: {
+                floorKbps: 192,
+                albumsBelowFloor: 1,
+                isTruncated: false,
+            },
+            refreshToken: 0,
+        }),
+    }));
+
+    await click(panelHeader());
+    assert.equal(getLibraryHealthQuality.mock.callCount(), 1);
+    assert.equal(getLibraryHealthQuality.mock.calls[0]?.arguments[0], 192);
+    assert.match(document.body.textContent ?? "", /Album under 192/);
+
+    deferQualityLoads = true;
+    await click(tabButton("128 kbps"));
+    await click(tabButton("256 kbps"));
+    assert.equal(getLibraryHealthQuality.mock.callCount(), 3);
+    assert.equal(getLibraryHealthQuality.mock.calls[1]?.arguments[0], 128);
+    assert.equal(getLibraryHealthQuality.mock.calls[2]?.arguments[0], 256);
+
+    // Resolve out of order: the superseded 128 response must not render.
+    const [resolve128, resolve256] = qualityResolvers;
+    await React.act(async () => {
+        resolve256?.();
+        await Promise.resolve();
+        resolve128?.();
+        await Promise.resolve();
+    });
+    assert.match(document.body.textContent ?? "", /Album under 256/);
+    assert.doesNotMatch(document.body.textContent ?? "", /Album under 128/);
+
+    await mounted.unmount();
+});
+
+test("a refresh-token bump reloads an expanded panel", async () => {
+    const { MetadataGapsPanel } =
+        await import("../../features/library-health/components/MetadataGapsPanel");
+    const mounted = await mountPanel(async () => ({
+        element: React.createElement(MetadataGapsPanel, {
+            gaps: SUMMARY_GAPS,
+            refreshToken: 0,
+        }),
+    }));
+
+    await click(panelHeader());
+    assert.equal(getLibraryHealthGaps.mock.callCount(), 1);
+
+    await mounted.rerender(
+        React.createElement(MetadataGapsPanel, {
+            gaps: SUMMARY_GAPS,
+            refreshToken: 1,
+        }),
+    );
+    assert.equal(getLibraryHealthGaps.mock.callCount(), 2);
+
+    await mounted.unmount();
+});
+
+test("analysis retry action reports remediation to the section", async () => {
+    const { AnalysisCoveragePanel } =
+        await import("../../features/library-health/components/AnalysisCoveragePanel");
+    const onRemediated = mock.fn();
+    const mounted = await mountPanel(async () => ({
+        element: React.createElement(AnalysisCoveragePanel, {
+            coverage: SUMMARY_COVERAGE,
+            refreshToken: 0,
+            onRemediated,
+        }),
+    }));
+
+    await click(panelHeader());
+    await click(tabButton("Retry failed audio analysis"));
+    assert.equal(retryFailedAnalysis.mock.callCount(), 1);
+    assert.equal(onRemediated.mock.callCount(), 1);
 
     await mounted.unmount();
 });

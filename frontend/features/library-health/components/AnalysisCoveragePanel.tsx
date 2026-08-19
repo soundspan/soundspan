@@ -4,22 +4,31 @@ import { useCallback, useState } from "react";
 import { api, type LibraryHealthSummary } from "@/lib/api";
 import { enrichmentApi } from "@/lib/enrichmentApi";
 import { formatCoveragePercent } from "../format";
-import { usePanelLoader } from "../hooks/usePanelLoader";
+import { useInsightPanelLoader } from "../hooks/useInsightPanelLoader";
 import { InsightPanel } from "./InsightPanel";
 
 interface AnalysisCoveragePanelProps {
     coverage: LibraryHealthSummary["analysisCoverage"];
+    refreshToken: number;
+    /** Called after a retry action changes backend state; refreshes the section counts. */
+    onRemediated?: () => void;
 }
 
 /** Analysis, vibe, and loudness coverage with retry actions for failures. */
 export function AnalysisCoveragePanel({
     coverage,
+    refreshToken,
+    onRemediated,
 }: Readonly<AnalysisCoveragePanelProps>) {
     const fetchPage = useCallback(
         () => api.getLibraryHealthAnalysis({ limit: 50 }),
         [],
     );
-    const page = usePanelLoader(fetchPage, "Failed to load analysis coverage");
+    const page = useInsightPanelLoader(
+        fetchPage,
+        "Failed to load analysis coverage",
+        refreshToken,
+    );
     const [actionNotice, setActionNotice] = useState<string | null>(null);
     const [isActing, setIsActing] = useState(false);
 
@@ -29,7 +38,11 @@ export function AnalysisCoveragePanel({
         void action()
             .then(() => {
                 setActionNotice(done);
-                page.load();
+                if (onRemediated) {
+                    onRemediated();
+                } else {
+                    page.load();
+                }
             })
             .catch(() => {
                 setActionNotice("Action failed — check the server logs.");
@@ -48,7 +61,7 @@ export function AnalysisCoveragePanel({
         <InsightPanel
             title="Analysis coverage"
             subtitle={`Audio ${formatCoveragePercent(analysisDone, coverage.total)} · Vibe ${formatCoveragePercent(vibeDone, coverage.total)} · Loudness ${formatCoveragePercent(coverage.loudness.measured, loudnessTotal)} · ${coverage.analysisStatus.failed} failed`}
-            onFirstExpand={page.load}
+            onFirstExpand={page.onFirstExpand}
             onRetry={page.load}
             isLoading={page.isLoading}
             error={page.error}
