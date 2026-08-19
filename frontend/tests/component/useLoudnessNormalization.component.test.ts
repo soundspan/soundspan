@@ -334,3 +334,36 @@ test("queued obsolete generations never fetch after disposal", async (t) => {
     });
     assert.equal(getSettings.mock.callCount(), 1);
 });
+
+test("a reload burst coalesces into a single queued fetch", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    audioState.currentTrack = LOUD_TRACK;
+    deferSettings = true;
+
+    const mounted = await mountProbe();
+    assert.equal(getSettings.mock.callCount(), 1);
+
+    currentMode = "off";
+    await React.act(async () => {
+        for (let index = 0; index < 50; index += 1) {
+            window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
+        }
+        await flushAsync();
+    });
+    assert.equal(getSettings.mock.callCount(), 1);
+
+    await React.act(async () => {
+        settingsResolvers[0]?.();
+        await flushAsync();
+    });
+    // Fifty reloads produced exactly one follow-up fetch.
+    assert.equal(getSettings.mock.callCount(), 2);
+    await React.act(async () => {
+        settingsResolvers[1]?.();
+        await flushAsync();
+    });
+    await settleRamp(t);
+    assert.equal(gainRef.current, 1);
+
+    await mounted.unmount();
+});

@@ -42,6 +42,8 @@ interface LoaderState {
     disposed: boolean;
     retryTimer: ReturnType<typeof setTimeout> | null;
     inFlight: Promise<void>;
+    /** True while a continuation is queued but not yet running. */
+    queued: boolean;
 }
 
 function clearRetry(state: LoaderState): void {
@@ -80,9 +82,7 @@ function scheduleRetry(
     state.retriesUsed += 1;
     state.retryTimer = setTimeout(() => {
         state.retryTimer = null;
-        if (loadGeneration === state.generation) {
-            enqueue(state, options, loadGeneration);
-        }
+        if (loadGeneration === state.generation) enqueue(state, options);
     }, delay);
 }
 
@@ -91,8 +91,8 @@ async function run(
     options: LoudnessPrefsLoaderOptions,
     loadGeneration: number,
 ): Promise<void> {
-    // Obsolete queued generations skip before any I/O: a disposed loader
-    // or a superseded generation never fetches.
+    // Obsolete generations skip before any I/O: a disposed loader or a
+    // superseded generation never fetches.
     if (state.disposed || loadGeneration !== state.generation) return;
     const [settingsResult, featuresResult] = await Promise.allSettled([
         options.fetchSettings(),
@@ -106,11 +106,18 @@ async function run(
 function enqueue(
     state: LoaderState,
     options: LoudnessPrefsLoaderOptions,
-    loadGeneration: number,
 ): void {
+    // Coalesce: at most one continuation waits behind the in-flight load,
+    // and it executes whatever generation is current when it starts — a
+    // reload burst therefore costs one queued continuation, not one each.
+    if (state.queued) return;
+    state.queued = true;
     state.inFlight = state.inFlight
         .catch(() => undefined)
-        .then(() => run(state, options, loadGeneration));
+        .then(() => {
+            state.queued = false;
+            return run(state, options, state.generation);
+        });
 }
 
 export function createLoudnessPrefsLoader(
@@ -122,16 +129,17 @@ export function createLoudnessPrefsLoader(
         disposed: false,
         retryTimer: null,
         inFlight: Promise.resolve(),
+        queued: false,
     };
     return {
         start: () => {
-            enqueue(state, options, state.generation);
+            enqueue(state, options);
         },
         reload: () => {
             state.generation += 1;
             state.retriesUsed = 0;
             clearRetry(state);
-            enqueue(state, options, state.generation);
+            enqueue(state, options);
         },
         dispose: () => {
             state.disposed = true;
