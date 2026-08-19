@@ -1584,7 +1584,42 @@ describe("library cover-art proxy compatibility", () => {
         expect(mockDeezerCover).not.toHaveBeenCalled();
     });
 
-    it("streams cover-art directly when id path already encodes an absolute cover URL", async () => {
+    it.each(["album-100%", "album%2Fpart", "\u30a2\u30eb\u30d0\u30e0"])(
+        "preserves the Express-decoded opaque cover ID %s verbatim",
+        async (coverId) => {
+            mockAlbumFindUnique.mockImplementation(
+                async ({ where }: { where: { id: string } }) =>
+                    where.id === coverId
+                        ? {
+                              id: coverId,
+                              title: "Opaque ID Album",
+                              rgMbid: null,
+                              coverUrl: "https://images.example/opaque-id.jpg",
+                              artist: { name: "Opaque ID Artist" },
+                          }
+                        : null,
+            );
+
+            const req = {
+                query: {},
+                params: { id: coverId },
+                headers: {},
+            } as any;
+            const res = createRes();
+
+            await coverArtHandler(req, res);
+
+            expect(mockAlbumFindUnique).toHaveBeenCalledTimes(1);
+            expect(mockAlbumFindUnique).toHaveBeenCalledWith(
+                expect.objectContaining({ where: { id: coverId } }),
+            );
+            expect(res.redirect).toHaveBeenCalledWith(
+                "https://images.example/opaque-id.jpg",
+            );
+        },
+    );
+
+    it("streams a path URL from a legacy double-encoded client after the raw ID misses", async () => {
         mockFetchExternalImage.mockResolvedValueOnce({
             ok: true,
             buffer: Buffer.from("id-direct-cover"),
@@ -1604,7 +1639,15 @@ describe("library cover-art proxy compatibility", () => {
 
         await coverArtHandler(req, res);
 
-        expect(mockAlbumFindUnique).not.toHaveBeenCalled();
+        expect(mockAlbumFindUnique).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    id: encodeURIComponent(
+                        "https://images.example/direct-id.jpg",
+                    ),
+                },
+            }),
+        );
         expect(mockFetchExternalImage).toHaveBeenCalledWith(
             expect.objectContaining({
                 url: "https://images.example/direct-id.jpg",

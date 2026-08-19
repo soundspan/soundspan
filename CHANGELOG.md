@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audiobook series and library cover-art routes now preserve Express-decoded percent signs, encoded-looking sequences, and Unicode while retaining compatibility with legacy double-encoded route parameters (#632).
 - Artist detail and discovery routes now preserve artist names with percent signs while retaining lookup compatibility for legacy double-encoded names (#632).
 - Popular Artists cards (home and Explore) now open the artist page directly, matching the Related Artists behavior, instead of running a name search.
 - Trending Community Playlists cards (home and Explore) no longer show a play-button overlay on hover; the cards only navigate to the playlist and never started playback.

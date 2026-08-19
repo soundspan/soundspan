@@ -568,9 +568,8 @@ describe("audiobooks route runtime", () => {
         expect(res.body).toEqual([]);
     });
 
-    it("decodes series name and maps series progress response", async () => {
-        const decodedName = "The Expanse: Saga";
-        const encodedName = encodeURIComponent(decodedName);
+    it("uses the Express-decoded series name and maps series progress response", async () => {
+        const seriesName = "The Expanse: Saga";
         const lastPlayedAt = new Date("2026-01-16T10:00:00.000Z");
 
         prisma.audiobook.findMany.mockResolvedValueOnce([
@@ -584,7 +583,7 @@ describe("audiobooks route runtime", () => {
                 coverUrl: null,
                 duration: null,
                 libraryId: "lib-series",
-                series: decodedName,
+                series: seriesName,
                 seriesSequence: "2",
                 genres: null,
             },
@@ -602,13 +601,13 @@ describe("audiobooks route runtime", () => {
 
         const req = {
             user: { id: "user-1" },
-            params: { seriesName: encodedName },
+            params: { seriesName },
         } as any;
         const res = createRes();
         await seriesHandler(req, res);
 
         expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
-            where: { series: decodedName },
+            where: { series: seriesName },
             orderBy: { seriesSequence: "asc" },
         });
         expect(prisma.audiobookProgress.findMany).toHaveBeenCalledWith({
@@ -628,7 +627,7 @@ describe("audiobooks route runtime", () => {
                 coverUrl: "/audiobooks/series-1/cover",
                 duration: 0,
                 libraryId: "lib-series",
-                series: { name: decodedName, sequence: "2" },
+                series: { name: seriesName, sequence: "2" },
                 genres: [],
                 progress: {
                     currentTime: 90,
@@ -637,6 +636,109 @@ describe("audiobooks route runtime", () => {
                     lastPlayedAt,
                 },
             },
+        ]);
+    });
+
+    it.each([
+        "100% Series",
+        "Volume%2FPart",
+        "\u65e5\u672c\u8a9e\u30b7\u30ea\u30fc\u30ba",
+    ])(
+        "preserves the Express-decoded series lookup key %s verbatim",
+        async (seriesName) => {
+            prisma.audiobook.findMany.mockImplementation(
+                async ({ where }: { where: { series: string } }) =>
+                    where.series === seriesName
+                        ? [
+                              {
+                                  id: "matching-book",
+                                  title: "Matching Book",
+                                  author: "Author",
+                                  narrator: null,
+                                  description: null,
+                                  localCoverPath: null,
+                                  coverUrl: null,
+                                  duration: 120,
+                                  libraryId: "library-1",
+                                  series: seriesName,
+                                  seriesSequence: "1",
+                                  genres: [],
+                              },
+                          ]
+                        : [],
+            );
+
+            const req = {
+                user: { id: "user-1" },
+                params: { seriesName },
+            } as any;
+            const res = createRes();
+
+            await seriesHandler(req, res);
+
+            expect(prisma.audiobook.findMany).toHaveBeenCalledTimes(1);
+            expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+                where: { series: seriesName },
+                orderBy: { seriesSequence: "asc" },
+            });
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual([
+                expect.objectContaining({
+                    id: "matching-book",
+                    series: { name: seriesName, sequence: "1" },
+                }),
+            ]);
+        },
+    );
+
+    it("falls back to a decoded series key for legacy double-encoded clients", async () => {
+        const legacyRouteName = "Legacy%20Series";
+        prisma.audiobook.findMany.mockImplementation(
+            async ({ where }: { where: { series: string } }) =>
+                where.series === "Legacy Series"
+                    ? [
+                          {
+                              id: "legacy-book",
+                              title: "Legacy Book",
+                              author: "Author",
+                              narrator: null,
+                              description: null,
+                              localCoverPath: null,
+                              coverUrl: null,
+                              duration: 120,
+                              libraryId: "library-1",
+                              series: "Legacy Series",
+                              seriesSequence: "1",
+                              genres: [],
+                          },
+                      ]
+                    : [],
+        );
+
+        const req = {
+            user: { id: "user-1" },
+            params: { seriesName: legacyRouteName },
+        } as any;
+        const res = createRes();
+
+        await seriesHandler(req, res);
+
+        expect(prisma.audiobook.findMany.mock.calls).toEqual([
+            [
+                {
+                    where: { series: legacyRouteName },
+                    orderBy: { seriesSequence: "asc" },
+                },
+            ],
+            [
+                {
+                    where: { series: "Legacy Series" },
+                    orderBy: { seriesSequence: "asc" },
+                },
+            ],
+        ]);
+        expect(res.body).toEqual([
+            expect.objectContaining({ id: "legacy-book" }),
         ]);
     });
 });

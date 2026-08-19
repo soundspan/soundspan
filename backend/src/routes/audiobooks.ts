@@ -28,6 +28,7 @@ import {
     parseStoredSections,
     type AudiobookSections,
 } from "../services/audiobookSections";
+import { findRouteNameMatch } from "./routeParamName";
 
 const router = Router();
 
@@ -563,17 +564,15 @@ router.get<{ seriesName: string }>(
             }
 
             const { seriesName } = req.params;
-            const decodedSeriesName = decodeURIComponent(seriesName);
 
-            // Read from cached database
-            const audiobooks = await prisma.audiobook.findMany({
-                where: {
-                    series: decodedSeriesName,
-                },
-                orderBy: {
-                    seriesSequence: "asc",
-                },
-            });
+            const audiobooks =
+                (await findRouteNameMatch(seriesName, async (candidate) => {
+                    const matches = await prisma.audiobook.findMany({
+                        where: { series: candidate },
+                        orderBy: { seriesSequence: "asc" },
+                    });
+                    return matches.length > 0 ? matches : null;
+                })) ?? [];
 
             const seriesIds = audiobooks.map((book) => book.id);
             const seriesProgressEntries =

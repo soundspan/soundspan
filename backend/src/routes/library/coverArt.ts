@@ -38,6 +38,61 @@ import {
     sendAudiobookCover,
     trySendResizedNativeCover,
 } from "../../utils/libraryCoverArt";
+import { normalizeRouteName } from "../routeParamName";
+
+const coverAlbumSelect = {
+    id: true,
+    title: true,
+    rgMbid: true,
+    coverUrl: true,
+    peerId: true,
+    remoteId: true,
+    federationPeer: {
+        select: {
+            id: true,
+            baseUrl: true,
+            outboundToken: true,
+            outboundStatus: true,
+        },
+    },
+    artist: { select: { name: true } },
+} satisfies Prisma.AlbumSelect;
+
+function isDirectCoverResource(id: string): boolean {
+    return (
+        id.startsWith("native:") ||
+        id.startsWith("audiobook__") ||
+        id.startsWith("http://") ||
+        id.startsWith("https://")
+    );
+}
+
+function findCoverAlbum(id: string) {
+    return prisma.album.findUnique({
+        where: { id },
+        select: coverAlbumSelect,
+    });
+}
+
+async function resolveCoverId(raw: string) {
+    const [routeId, legacyId] = normalizeRouteName(raw);
+    if (isDirectCoverResource(routeId)) {
+        return { id: routeId, album: null };
+    }
+
+    const album = await findCoverAlbum(routeId);
+    if (album || !legacyId) {
+        return { id: routeId, album };
+    }
+    if (isDirectCoverResource(legacyId)) {
+        return { id: legacyId, album: null };
+    }
+
+    const legacyAlbum = await findCoverAlbum(legacyId);
+    return legacyAlbum
+        ? { id: legacyId, album: legacyAlbum }
+        : { id: routeId, album: null };
+}
 
 /**
  * Router segment for coverArt routes registered at this position.
@@ -200,11 +255,12 @@ export async function handleGetCoverArt(
                 .json({ error: "No cover ID or URL provided" });
         }
 
-        const decodedId = decodeURIComponent(coverId);
+        const { id: resolvedId, album: resolvedAlbum } =
+            await resolveCoverId(coverId);
 
         // Check if this is a native cover (prefixed with "native:")
-        if (decodedId.startsWith("native:")) {
-            const nativePath = decodedId.replace("native:", "");
+        if (resolvedId.startsWith("native:")) {
+            const nativePath = resolvedId.replace("native:", "");
 
             const nativeCacheHit = resolveNativeCoverCacheHit(nativePath);
             if (nativeCacheHit) {
@@ -278,38 +334,19 @@ export async function handleGetCoverArt(
         }
 
         // Check if this is an audiobook cover (prefixed with "audiobook__")
-        if (decodedId.startsWith("audiobook__")) {
-            const audiobookPath = decodedId.replace("audiobook__", "");
+        if (resolvedId.startsWith("audiobook__")) {
+            const audiobookPath = resolvedId.replace("audiobook__", "");
             return sendAudiobookCover(req, res, audiobookPath);
         }
         // Check if coverId is already a full URL (from Cover Art Archive or elsewhere)
         else if (
-            decodedId.startsWith("http://") ||
-            decodedId.startsWith("https://")
+            resolvedId.startsWith("http://") ||
+            resolvedId.startsWith("https://")
         ) {
-            coverUrl = decodedId;
+            coverUrl = resolvedId;
         } else {
             // Treat as album ID — on-demand cover art fetch for albums with null coverUrl
-            const album = await prisma.album.findUnique({
-                where: { id: decodedId },
-                select: {
-                    id: true,
-                    title: true,
-                    rgMbid: true,
-                    coverUrl: true,
-                    peerId: true,
-                    remoteId: true,
-                    federationPeer: {
-                        select: {
-                            id: true,
-                            baseUrl: true,
-                            outboundToken: true,
-                            outboundStatus: true,
-                        },
-                    },
-                    artist: { select: { name: true } },
-                },
-            });
+            const album = resolvedAlbum;
 
             if (!album) {
                 return sendRouteError(res, 404, "Album not found");
