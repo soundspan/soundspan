@@ -2208,11 +2208,13 @@ test("transient recovery anchors resume to zero before startup progress", async 
     assert.equal(engine.reloadCalls, 1);
 
     // The recovered load must NOT seek back to the stale 12s position:
-    // the startup guard forces the resume anchor to zero.
+    // the startup guard forces the resume anchor to zero, and the
+    // correlated-resume listener restarts playback.
+    const playCallsBeforeRecoveredLoad = engine.playCalls;
     engine.playing = false;
     engine.emit("load", { durationSec: 210 });
     await flushAsync();
 
     assert.equal(engine.seekCalls.includes(12), false);
-    assert.ok(engine.playCalls >= 1);
+    assert.ok(engine.playCalls > playCallsBeforeRecoveredLoad);
 });
