@@ -200,6 +200,17 @@ async function flushMicrotasks(turns = 10): Promise<void> {
     }
 }
 
+function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+} {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((promiseResolve) => {
+        resolve = promiseResolve;
+    });
+    return { promise, resolve };
+}
+
 function cachedPayload(): {
     tracks: unknown[];
     trackCount: number;
@@ -323,6 +334,55 @@ describe("computeMapProjection", () => {
             { keys: [LEASE_KEY], arguments: [expect.any(String)] },
         );
         expect(workers).toHaveLength(0);
+    });
+
+    it("releases the lease when the post-acquisition state read fails", async () => {
+        jest.useFakeTimers();
+        const readError = new Error("redis read failed");
+        let projectionReads = 0;
+        mockRedisGet.mockImplementation(async (key) => {
+            if (key !== PROJECTION_KEY) return null;
+            projectionReads += 1;
+            if (projectionReads === 2) throw readError;
+            return null;
+        });
+
+        await expect(loadModule().computeMapProjection()).rejects.toBe(
+            readError,
+        );
+
+        expect(mockRedisEval).toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            { keys: [LEASE_KEY], arguments: [expect.any(String)] },
+        );
+        mockRedisEval.mockClear();
+        await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+        expect(mockRedisEval).not.toHaveBeenCalled();
+        expect(workers).toHaveLength(0);
+    });
+
+    it("treats a malformed cached projection as a cache miss", async () => {
+        const rows = makeRows(5);
+        mockRedisGet.mockImplementation(async (key) =>
+            key === PROJECTION_KEY ? "{malformed" : null,
+        );
+        workerBehavior = (worker) =>
+            emitResult(
+                worker,
+                rows,
+                rows.map((_, index) => [index, index]),
+            );
+
+        await expect(loadModule().computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        await flushMicrotasks();
+
+        expect(cachedPayload().trackCount).toBe(5);
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Ignoring malformed vibe map projection cache",
+            { spaceId: SPACE_ID },
+        );
     });
 
     it("prevents a second replica module from building while the Redis NX lease is held", async () => {
@@ -611,30 +671,45 @@ describe("computeMapProjection", () => {
         );
     });
 
-    it("terminates the active worker and releases its lease during shutdown", async () => {
+    it("releases its lease only after worker termination settles", async () => {
         let leaseHeld = false;
+        let terminationResolved = false;
+        const termination = createDeferred<number>();
+        const releaseObservedAfterTermination: boolean[] = [];
         mockRedisSet.mockImplementation(async () => {
             if (leaseHeld) return null;
             leaseHeld = true;
             return "OK";
         });
         mockRedisEval.mockImplementation(async (script) => {
-            if (script.includes("DEL")) leaseHeld = false;
+            if (script.includes("DEL")) {
+                releaseObservedAfterTermination.push(terminationResolved);
+                leaseHeld = false;
+            }
             return 1;
         });
         const { computeMapProjection, shutdownUmapProjection } = loadModule();
         await expect(computeMapProjection()).resolves.toEqual({
             status: "building",
         });
-        workers[0].terminate.mockImplementation(async () => {
-            workers[0].emit("exit", 1);
-            return 1;
-        });
+        workers[0].terminate.mockImplementation(() => termination.promise);
 
-        await shutdownUmapProjection();
+        const shutdown = shutdownUmapProjection();
+        await flushMicrotasks();
 
         expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+        expect(leaseHeld).toBe(true);
+        expect(mockRedisEval).not.toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            expect.anything(),
+        );
+        workers[0].emit("exit", 1);
+        terminationResolved = true;
+        termination.resolve(1);
+        await shutdown;
+
         expect(leaseHeld).toBe(false);
+        expect(releaseObservedAfterTermination).toEqual([true]);
         expect(mockLoggerError).not.toHaveBeenCalled();
         mockRedisGet.mockClear();
         await expect(computeMapProjection()).resolves.toEqual({
@@ -646,6 +721,59 @@ describe("computeMapProjection", () => {
         const replacementLease = await acquireVibeMapBuildLease(SPACE_ID);
         expect(replacementLease).not.toBeNull();
         await replacementLease?.release();
+    });
+
+    it("leaves the lease to expire when worker termination exceeds shutdown", async () => {
+        jest.useFakeTimers();
+        workers = [];
+        const { computeMapProjection, shutdownUmapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        workers[0].terminate.mockImplementation(
+            () => new Promise<number>(() => undefined),
+        );
+
+        const shutdown = shutdownUmapProjection();
+        await jest.advanceTimersByTimeAsync(3 * 1000);
+        await shutdown;
+
+        expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+        expect(mockRedisEval).not.toHaveBeenCalledWith(
+            expect.stringContaining("DEL"),
+            expect.anything(),
+        );
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "UMAP projection shutdown timed out",
+            expect.objectContaining({ timeoutMs: 3000, heldLeases: 1 }),
+        );
+        mockRedisEval.mockClear();
+        await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+        expect(mockRedisEval).not.toHaveBeenCalled();
+    });
+
+    it("does not publish a worker result after shutdown starts", async () => {
+        const rows = makeRows(5);
+        const termination = createDeferred<number>();
+        const { computeMapProjection, shutdownUmapProjection } = loadModule();
+        await expect(computeMapProjection()).resolves.toEqual({
+            status: "building",
+        });
+        workers[0].terminate.mockImplementation(() => termination.promise);
+
+        const shutdown = shutdownUmapProjection();
+        emitResult(
+            workers[0],
+            rows,
+            rows.map((_, index) => [index, index]),
+        );
+        await flushMicrotasks();
+
+        expect(pipeline.setEx).not.toHaveBeenCalled();
+        expect(pipeline.exec).not.toHaveBeenCalled();
+        workers[0].emit("exit", 0);
+        termination.resolve(0);
+        await shutdown;
     });
 });
 

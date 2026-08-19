@@ -170,6 +170,7 @@ async function cacheResult(
     trackIds: string[],
     ttlSeconds: number = CACHE_TTL_SECONDS,
 ): Promise<void> {
+    if (!acceptingBuilds) return;
     const trackIdsKey = trackIdsKeyForSpace(spaceId);
     const pipeline = redisClient.multi();
     pipeline.setEx(
@@ -542,6 +543,7 @@ async function superviseBuild(
 ): Promise<void> {
     try {
         await doCompute(spaceId);
+        if (!acceptingBuilds) return;
         try {
             await clearVibeMapBuildFailures(spaceId);
         } catch (error) {
@@ -554,7 +556,7 @@ async function superviseBuild(
             log.debug("Vibe map build stopped during shutdown", { spaceId });
         }
     } finally {
-        await releaseLease(lease);
+        if (acceptingBuilds) await releaseLease(lease);
     }
 }
 
@@ -572,37 +574,50 @@ async function readPublishedState(
         readVibeMapBuildFailure(spaceId),
     ]);
     if (cached) {
-        log.debug("Vibe map cache hit", { spaceId });
-        return {
-            status: "ready",
-            data: JSON.parse(cached) as VibeMapResponse,
-        };
+        try {
+            const data = JSON.parse(cached) as VibeMapResponse;
+            log.debug("Vibe map cache hit", { spaceId });
+            return { status: "ready", data };
+        } catch {
+            log.warn("Ignoring malformed vibe map projection cache", {
+                spaceId,
+            });
+        }
     }
     return failure ? { status: "failed", ...failure } : null;
 }
 
-async function settleShutdownWork(): Promise<void> {
+async function settleShutdownWork(
+    canReleaseLeases: () => boolean,
+): Promise<void> {
     await Promise.allSettled(Array.from(activeAdmissions));
     const terminations = Array.from(activeWorkers, terminateWorker);
-    const releases = Array.from(heldLeases, releaseLease);
+    await Promise.allSettled(terminations);
     const builds = Array.from(activeBuilds.values());
-    await Promise.allSettled([...terminations, ...releases, ...builds]);
+    await Promise.allSettled(builds);
+    // A missed shutdown deadline leaves residual work uncertain. Stop lease
+    // refreshes, but let Redis TTL recovery prevent overlap with that work.
+    if (!canReleaseLeases()) return;
+    const releases = Array.from(heldLeases, releaseLease);
+    await Promise.allSettled(releases);
 }
 
 async function settleWithinShutdownTimeout(): Promise<boolean> {
     return new Promise((resolve) => {
         let settled = false;
+        let deadlineExpired = false;
         const finish = (completed: boolean) => {
             if (settled) return;
             settled = true;
             clearTimeout(timeoutId);
             resolve(completed);
         };
-        const timeoutId = setTimeout(
-            () => finish(false),
-            UMAP_SHUTDOWN_TIMEOUT_MS,
-        );
-        settleShutdownWork().then(
+        const timeoutId = setTimeout(() => {
+            deadlineExpired = true;
+            for (const lease of heldLeases) lease.abandon();
+            finish(false);
+        }, UMAP_SHUTDOWN_TIMEOUT_MS);
+        settleShutdownWork(() => !deadlineExpired).then(
             () => finish(true),
             () => finish(true),
         );
@@ -641,20 +656,22 @@ async function admitMapProjection(): Promise<VibeMapProjectionState> {
         return { status: "building" };
     }
     heldLeases.add(lease);
-    if (!acceptingBuilds) {
-        await releaseLease(lease);
+    let buildStarted = false;
+    try {
+        if (!acceptingBuilds) return { status: "building" };
+        const publishedWhileAcquiring = await readPublishedState(spaceId);
+        if (publishedWhileAcquiring || !acceptingBuilds) {
+            return publishedWhileAcquiring ?? { status: "building" };
+        }
+        const build = superviseBuild(spaceId, lease).finally(() => {
+            activeBuilds.delete(spaceId);
+        });
+        activeBuilds.set(spaceId, build);
+        buildStarted = true;
         return { status: "building" };
+    } finally {
+        if (!buildStarted) await releaseLease(lease);
     }
-    const publishedWhileAcquiring = await readPublishedState(spaceId);
-    if (publishedWhileAcquiring || !acceptingBuilds) {
-        await releaseLease(lease);
-        return publishedWhileAcquiring ?? { status: "building" };
-    }
-    const build = superviseBuild(spaceId, lease).finally(() => {
-        activeBuilds.delete(spaceId);
-    });
-    activeBuilds.set(spaceId, build);
-    return { status: "building" };
 }
 
 /** Serve cached data or supervise one leased background build per space. */

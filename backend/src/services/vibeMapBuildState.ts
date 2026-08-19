@@ -62,10 +62,15 @@ export class VibeMapBuildLease {
         }
     }
 
-    /** Stop refreshes and release the lease only when this owner still holds it. */
-    async release(): Promise<void> {
+    /** Stop refreshes without deleting the lease so its TTL can recover ownership. */
+    abandon(): void {
         if (this.refreshTimer) clearInterval(this.refreshTimer);
         this.refreshTimer = null;
+    }
+
+    /** Stop refreshes and release the lease only when this owner still holds it. */
+    async release(): Promise<void> {
+        this.abandon();
         await redisClient.eval(RELEASE_LEASE_SCRIPT, {
             keys: [buildLeaseKey(this.spaceId)],
             arguments: [this.token],
