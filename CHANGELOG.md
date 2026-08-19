@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.3.3] - 2026-08-18
 
+### Added
+
+- Added a pre-release scale smoke tier that checks production-volume PostgreSQL
+  and Redis query paths plus 45-minute analyzer and DCLAP audio processing
+  against real dependencies without extending per-merge verification.
+
 ### Changed
 
 - Frontend component-test commands now fail fast with Node.js 24 upgrade
@@ -40,13 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the 2.3.2 audio-analyzer images failing to start because new loudness
   modules were missing from both the standalone and all-in-one images.
 
+### Security
+
+- Federation consumer tokens are now encrypted at rest with an automatic,
+  idempotent startup backfill, and outbound peer URLs reject literal localhost,
+  private, loopback, and link-local addresses by default. Internal peer
+  deployments can opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
+- Credential-guarding rate limiters now use bounded per-process memory windows
+  during Redis outages instead of allowing unlimited authentication attempts.
+
 ## [2.3.2] - 2026-08-18
 
 ### Added
 
-- Added a pre-release scale smoke tier that checks production-volume PostgreSQL
-  and Redis query paths plus 45-minute analyzer and DCLAP audio processing
-  against real dependencies without extending per-merge verification.
 - Added the OpenSubsonic ReplayGain extension, a configurable server loudness
   target, and per-user normalization-mode groundwork. Web-player application
   lands next.
@@ -81,19 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-### Security
-
-- Federation consumer tokens are now encrypted at rest with an automatic,
-  idempotent startup backfill, and outbound peer URLs reject literal localhost,
-  private, loopback, and link-local addresses by default. Internal peer
-  deployments can opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
-
-### Deprecated
-
-- The dedicated per-user "Subsonic password" is deprecated in favor of app
-  passwords (Settings → Sign-in & Security). The settings field for it has
-  been removed; existing Subsonic passwords keep authenticating token-mode
-  clients until the legacy credential is removed in a future release.
 - Restructured the upgrade guides: UPGRADING.md sections are now grouped by
   release version with a plain-language index and AIO-Compose-first
   procedures, and the 2.0.0 guide explains which steps the AIO image handles
@@ -101,6 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The vibe map endpoint now answers immediately with a building status while
   the projection is computed in the background, and the map page shows build
   progress instead of timing out on first load.
+
+### Deprecated
+
+- The dedicated per-user "Subsonic password" is deprecated in favor of app
+  passwords (Settings → Sign-in & Security). The settings field for it has
+  been removed; existing Subsonic passwords keep authenticating token-mode
+  clients until the legacy credential is removed in a future release.
 
 ### Fixed
 
@@ -127,19 +133,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually outstanding (audio, vibe embeddings, or both), Re-run and
   Re-enrich controls carry explanatory tooltips, and Re-enrich All asks for
   confirmation before starting an hours-long rebuild.
-
-### Fixed
-
 - Enrichment progress, failure counts, and completion no longer include
   soft-removed tracks, so cleared or purged tracks stop showing as failed
   analysis and the live status no longer sticks on "Processing podcasts"
   after a cycle. Retry Failed Analysis skips removed tracks instead of
   re-queueing files that no longer exist.
-
-### Security
-
-- Credential-guarding rate limiters now use bounded per-process memory windows
-  during Redis outages instead of allowing unlimited authentication attempts.
 
 ## [2.3.1] - 2026-08-18
 

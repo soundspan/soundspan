@@ -191,6 +191,14 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 **⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #16
 
+> **Superseded (2026-08-18, issues #607/#534).** The measurements and plan below
+> predate the engine-removal campaign. The orchestrator is now ~1,640 lines with
+> the playback lifecycle extracted into `components/player/hooks/*` and pure
+> policies in `lib/audio-engine/playbackRecoveryPolicy.ts`; every segmented
+> hook named below (startup ramp, handoff, prewarm, representation policies)
+> was deleted with the segmented engine. Any remaining work here should be
+> re-scoped against the current tree, not this entry.
+
 **Files:** `frontend/components/player/AudioPlaybackOrchestrator.tsx`
 
 **Problem.** The orchestrator returns null and exists only to wire engine events to context state, yet it concentrates the entire playback lifecycle into 97 useRefs, 24 useEffects and 43 useCallbacks in one 7080-line closure. No single concern (segmented startup recovery, handoff/circuit breakers, prewarm validation, foreground recovery, progress persistence) can be read or tested in isolation. The central effect that registers all 9 engine handlers (ends at line 4993) has a ~40-entry dependency array (lines 4994-5034) including isPlaying, queue, currentIndex, shuffleIndices and dozens of callbacks, so React tears down and re-attaches every engine listener whenever any of these change — a rebind-race readability/correctness hazard. The dep array is simultaneously huge AND partly redundant because most live state is already mirrored into \*Ref values.
@@ -759,6 +767,15 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 **⬜ open · DEFERRED-WITH-NOTE (Wave 1)** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
 
+> **Superseded approach (2026-08-18, issue #534).** The segmented-streaming
+> `sessionService` this entry recommends building on was deleted with the
+> segmented engine, and the Tauri client it worries about was removed with
+> issue #607. The problem (long-lived full-privilege JWT in `?token=` media
+> URLs) is still real and still deferred, but the fix must now be designed
+> against the surviving direct-streaming surface: mint a short-lived,
+> audience-scoped media token with a dedicated config-wired secret; there is
+> no session-token machinery left to reuse.
+>
 > **Why deferred (Wave 1).** This is a cross-cutting redesign, not a contained fix: it replaces the full-privilege access token in `?token=` media URLs with short-lived, audience-scoped media tokens across the streaming AND cover-art paths (`requireAuthOrToken` query-token branch + `getStreamUrl`/`getCoverArtUrl` in `frontend/lib/api.ts`). The audit (appendix, F37 flag) explicitly warns it is **riskier than "lowest-risk"**: the cover-art→token migration risks breaking canvas/`<img>` cross-origin loads and the Tauri native client, and it touches both backend auth and the frontend API boundary. Deferred by operator decision to a focused follow-up PR with its own verification (real-app run on web + Tauri), rather than a tail-end change.
 >
 > **Approach when picked up.** The repo already has the right pattern to build on: the segmented-streaming `sessionService` mints short-lived tokens bound to `sessionId`+`trackId` delivered via the `x-streaming-session-token` header (the same `SESSION_TOKEN_SECRET` jwt.verify sites at `sessionService.ts:387/790` that F36 left unpinned — pin `algorithms:["HS256"]` there as part of this work). Mint a short-lived (minutes), audience-scoped (`media`/`cover`) token per resource instead of reusing the 24h account JWT; prefer a header or a per-resource signed token over the query param where the client allows it; verify canvas/Tauri/cross-origin cover loads still work before cutover.
@@ -824,6 +841,13 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 ### F41 — AudioEngine interface declares ~13 optional methods, forcing runtime typeof-capability checks instead of a typed capability split
 
 **⬜ open** · dimension: extensibility · severity: medium · effort: M · risk: low · epic: #18
+
+> **Superseded (2026-08-18, issues #607/#534).** The video.js segmented engine
+> and the Tauri adapter discussed below were removed; the DASH-only capability
+> trio (`refreshManifest`, `quarantineRepresentation`,
+> `clearRepresentationQuarantine`) no longer exists, and the engine matrix is
+> native + Howler behind a single direct slot. If a capability split is ever
+> wanted again, re-scope it against the current `lib/audio-engine/index.ts`.
 
 > **Audit note.** Per audit: ~11 optional methods (not ~13); the Tauri adapter does not implement `reload`. The capability-split argument holds.
 

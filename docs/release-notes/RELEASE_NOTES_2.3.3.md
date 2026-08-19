@@ -11,7 +11,12 @@ complete analyzer images and adds a build-time check so an incomplete image
 can never pass CI again. The release also makes federation tolerant of
 version differences between peers: a newer peer's extra fields no longer
 cause tracks to be skipped, and servers now only send fields a peer
-understands. Upgrading from 2.3.x is a plain rolling update.
+understands. Two security hardenings ship as well: federation tokens are
+now encrypted at rest, and outbound federation now refuses private and
+local peer addresses unless you opt in. Upgrading from 2.3.x is a plain
+rolling update for most deployments — but if you federate with a peer on
+a private LAN or VPN address, set `FEDERATION_ALLOW_PRIVATE_PEERS=true`
+before upgrading or that peer stops syncing.
 
 ## Before you upgrade
 
@@ -22,6 +27,11 @@ to 2.3.3. Complete the 2.0.0 breaking changes first. See
 - Straightforward rolling upgrade from 2.3.x - a small database migration
   runs automatically and no special procedure is needed. If you are coming
   from 2.2.x or earlier, follow the 2.3.0 upgrade steps first.
+- **If you federate with a peer on a private address** (a LAN IP, VPN
+  address, localhost, or an internal hostname that resolves to one),
+  set `FEDERATION_ALLOW_PRIVATE_PEERS=true` before upgrading. Outbound
+  federation now blocks private and local peer addresses by default, and
+  a private peer stops syncing until you opt in.
 - If you are on 2.3.2, upgrade promptly: loudness measurement has not been
   running since you upgraded. It resumes automatically on 2.3.3 and catches
   up in the background.
@@ -40,6 +50,21 @@ to 2.3.3. Complete the 2.0.0 breaking changes first. See
 - Federation peers now advertise what they understand ("capabilities")
   when pairing and during regular health checks, so servers on different
   versions only exchange fields both sides support.
+- A pre-release scale smoke tier now exercises production-volume PostgreSQL
+  and Redis query paths, plus 45-minute analyzer and DCLAP audio processing,
+  against real dependencies before a release is cut. This is release
+  evidence only; per-merge CI is unchanged.
+
+## Security
+
+- Federation consumer tokens are now encrypted at rest. Existing plaintext
+  tokens are re-encrypted automatically at startup; no action needed.
+- Outbound federation peer URLs now reject localhost, private, loopback,
+  and link-local addresses by default. Deployments that intentionally
+  federate over a LAN or VPN opt in with `FEDERATION_ALLOW_PRIVATE_PEERS=true`.
+- Sign-in rate limiting keeps working during a Redis outage: credential
+  endpoints now fall back to bounded in-memory limits instead of allowing
+  unlimited attempts while Redis is unavailable.
 
 ## Changed
 
@@ -106,5 +131,5 @@ and complete the
 
 ## Full Changelog
 
-- Compare changes: [2.3.2...HEAD](https://github.com/soundspan/soundspan/compare/2.3.2...HEAD)
-- Full changelog: https://github.com/soundspan/soundspan/blob/HEAD/CHANGELOG.md
+- Compare changes: [2.3.2...2.3.3](https://github.com/soundspan/soundspan/compare/2.3.2...2.3.3)
+- Full changelog: https://github.com/soundspan/soundspan/blob/2.3.3/CHANGELOG.md

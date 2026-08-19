@@ -79,5 +79,5 @@ and complete the
 
 ## Full Changelog
 
-- Compare changes: [2.3.0...HEAD](https://github.com/soundspan/soundspan/compare/2.3.0...HEAD)
-- Full changelog: https://github.com/soundspan/soundspan/blob/HEAD/CHANGELOG.md
+- Compare changes: [2.3.0...2.3.1](https://github.com/soundspan/soundspan/compare/2.3.0...2.3.1)
+- Full changelog: https://github.com/soundspan/soundspan/blob/2.3.1/CHANGELOG.md

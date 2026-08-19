@@ -82,8 +82,8 @@ interface HybridRuntimeAudioEngineOptions {
 
 /**
  * Runtime engine router: owns the direct-playback slot (HowlerEngineAdapter
- * by default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native),
- * forwards its events, and supports hot-swapping the slot engine.
+ * by default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native)
+ * and forwards its events. The slot engine is fixed at construction.
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     private howlerEngine: AudioEngine;

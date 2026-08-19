@@ -40,9 +40,7 @@ export function logPlaybackClientMetric(
     // Engine tags for the native-engine soak (GH #42): engineMode is the
     // deployment flag (cohort), activeEngine is what is actually driving
     // playback at this moment — platform pins make the two legitimately
-    // diverge, and the disagreements are themselves diagnostic. Read at event time so
-    // errors are attributed to the engine that produced them, not to
-    // whatever a recovery switch installs afterwards.
+    // diverge, and the disagreements are themselves diagnostic.
     const activeEngine = audioEngine.getActiveEngineDescriptor();
     sharedFrontendLogger.info("[Playback][ClientMetric]", {
         event,

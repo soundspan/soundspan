@@ -24,6 +24,7 @@
             "explore",
             "home",
             "library",
+            "library-health",
             "podcast",
             "search",
             "settings"
@@ -109,8 +110,22 @@
             "name": "Library Health Dashboard",
             "description": "Admin-only read model for metadata gaps, analysis coverage, duplicate clusters, storage use, and lossy quality outliers",
             "frontend": {
-                "feature_dirs": [],
-                "routes": []
+                "feature_dirs": ["library-health"],
+                "routes": ["/admin"],
+                "components": [
+                    "library-health/components/LibraryInsightsSection.tsx",
+                    "library-health/components/InsightPanel.tsx",
+                    "library-health/components/MetadataGapsPanel.tsx",
+                    "library-health/components/AnalysisCoveragePanel.tsx",
+                    "library-health/components/DuplicatesPanel.tsx",
+                    "library-health/components/StoragePanel.tsx",
+                    "library-health/components/QualityPanel.tsx"
+                ],
+                "hooks": [
+                    "library-health/hooks/useLibraryInsights.ts",
+                    "library-health/hooks/usePanelLoader.ts"
+                ],
+                "api": ["lib/api/libraryHealth.ts"]
             },
             "backend": {
                 "routes": ["libraryHealthDashboard.ts"],
@@ -134,7 +149,9 @@
                     "metadataGaps.test.ts",
                     "qualityOutliers.test.ts",
                     "storageAnalytics.test.ts"
-                ]
+                ],
+                "frontend_component": ["libraryInsightsSection.component.test.ts"],
+                "frontend_unit": ["libraryHealthFormat.test.ts"]
             }
         },
         {
