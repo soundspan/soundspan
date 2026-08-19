@@ -186,24 +186,33 @@ describe("subsonic state/admin compatibility handlers", () => {
     });
 
     it.each([
-        ["classic", handleGetPlayQueue, "playQueue"],
-        ["index-based", handleGetPlayQueueByIndex, "playQueueByIndex"],
+        ["classic", handleGetPlayQueue, "playQueue", "current"],
+        [
+            "index-based",
+            handleGetPlayQueueByIndex,
+            "playQueueByIndex",
+            "currentIndex",
+        ],
     ])(
-        "omits the %s play queue object when no playback state exists",
-        async (_label, handler, responseKey) => {
+        "returns an empty %s play queue when no playback state exists",
+        async (_label, handler, responseKey, currentKey) => {
             await handler(buildReq({}), buildRes());
 
-            expect(mockSendSuccess).toHaveBeenCalledWith(
-                expect.anything(),
-                {},
-                "json",
-                undefined,
-            );
             const payload = mockSendSuccess.mock.calls[0][1] as Record<
                 string,
                 unknown
             >;
-            expect(payload).not.toHaveProperty(responseKey);
+            const queue = payload[responseKey] as Record<string, unknown>;
+            expect(queue).toEqual({
+                position: 0,
+                username: "alice",
+                changed: expect.stringMatching(
+                    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+                ),
+                changedBy: "soundspan",
+                entry: [],
+            });
+            expect(queue).not.toHaveProperty(currentKey);
         },
     );
 

@@ -82,6 +82,22 @@ type FormattedPlayQueue = {
 };
 
 const PLAY_QUEUE_CHANGED_BY = "soundspan";
+type PlayQueueResponseKey = "playQueue" | "playQueueByIndex";
+
+function buildEmptyPlayQueueResponse(
+    responseKey: PlayQueueResponseKey,
+    username: string,
+): Record<string, unknown> {
+    return {
+        [responseKey]: {
+            position: 0,
+            username,
+            changed: new Date().toISOString(),
+            changedBy: PLAY_QUEUE_CHANGED_BY,
+            entry: [],
+        },
+    };
+}
 
 function findSurvivingCurrentIndex(
     state: PlayQueueState,
@@ -324,6 +340,7 @@ async function loadPlayQueue(req: Request): Promise<{
 async function sendLoadedPlayQueue(
     req: Request,
     res: Response,
+    responseKey: PlayQueueResponseKey,
     buildResponse: (
         state: PlayQueueState,
         queueTrackIds: string[],
@@ -335,7 +352,12 @@ async function sendLoadedPlayQueue(
     try {
         const { state, queueTrackIds, formatted } = await loadPlayQueue(req);
         if (!state) {
-            sendSubsonicSuccess(res, {}, format, callback);
+            sendSubsonicSuccess(
+                res,
+                buildEmptyPlayQueueResponse(responseKey, req.user!.username),
+                format,
+                callback,
+            );
             return;
         }
         sendSubsonicSuccess(
@@ -360,7 +382,12 @@ export async function handleGetPlayQueue(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await sendLoadedPlayQueue(req, res, buildClassicPlayQueueResponse);
+    await sendLoadedPlayQueue(
+        req,
+        res,
+        "playQueue",
+        buildClassicPlayQueueResponse,
+    );
 }
 
 const savedQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
@@ -538,7 +565,12 @@ export async function handleGetPlayQueueByIndex(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await sendLoadedPlayQueue(req, res, buildIndexPlayQueueResponse);
+    await sendLoadedPlayQueue(
+        req,
+        res,
+        "playQueueByIndex",
+        buildIndexPlayQueueResponse,
+    );
 }
 
 /**

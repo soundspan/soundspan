@@ -341,7 +341,7 @@ describe("subsonic runtime focused handlers", () => {
         );
     });
 
-    it("omits the play queue object when no playback state exists", async () => {
+    it("returns an empty classic queue when no playback state exists", async () => {
         mockPlaybackFindUnique.mockResolvedValueOnce(null);
 
         await handleGetPlayQueue(buildReq({ index: "1" }), buildRes());
@@ -349,7 +349,17 @@ describe("subsonic runtime focused handlers", () => {
         expect(mockTrackFindMany).not.toHaveBeenCalled();
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
-            {},
+            {
+                playQueue: {
+                    position: 0,
+                    username: "alice",
+                    changed: expect.stringMatching(
+                        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+                    ),
+                    changedBy: "soundspan",
+                    entry: [],
+                },
+            },
             "json",
             undefined,
         );

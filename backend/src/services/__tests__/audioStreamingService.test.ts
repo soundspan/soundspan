@@ -407,6 +407,76 @@ describe("AudioStreamingService", () => {
             expect(mockFsReaddir).toHaveBeenCalledTimes(1);
         });
 
+        it("does not enumerate the offset directory twice while a sweep is in flight", async () => {
+            let releaseReaddir: (() => void) | undefined;
+            mockFsReaddir.mockImplementationOnce(
+                () =>
+                    new Promise((resolve) => {
+                        releaseReaddir = () => resolve([]);
+                    }),
+            );
+
+            createService();
+            createService();
+
+            expect(mockFsReaddir).toHaveBeenCalledTimes(1);
+            if (!releaseReaddir) throw new Error("readdir did not start");
+            releaseReaddir();
+            await waitForOffsetSweepForTests();
+        });
+
+        it("attempts to remove at most 1000 entries during one sweep", async () => {
+            mockFsReaddir.mockResolvedValueOnce(
+                Array.from({ length: 1001 }, (_, index) => ({
+                    name: `stale-${index}.mp3`,
+                    isFile: () => true,
+                })),
+            );
+            mockFsStat.mockResolvedValue({
+                size: 1024,
+                mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
+            });
+
+            createService();
+            await waitForOffsetSweepForTests();
+
+            expect(mockFsStat).toHaveBeenCalledTimes(1000);
+            expect(mockFsUnlink).toHaveBeenCalledTimes(1000);
+        });
+
+        it.each(["readdir", "stat", "unlink"] as const)(
+            "absorbs rejected %s operations during an offset sweep",
+            async (operation) => {
+                if (operation === "readdir") {
+                    mockFsReaddir.mockRejectedValueOnce(
+                        new Error("readdir failed"),
+                    );
+                } else {
+                    mockFsReaddir.mockResolvedValueOnce([
+                        { name: "stale.mp3", isFile: () => true },
+                    ]);
+                    if (operation === "stat") {
+                        mockFsStat.mockRejectedValueOnce(
+                            new Error("stat failed"),
+                        );
+                    } else {
+                        mockFsStat.mockResolvedValueOnce({
+                            size: 1024,
+                            mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
+                        });
+                        mockFsUnlink.mockRejectedValueOnce(
+                            new Error("unlink failed"),
+                        );
+                    }
+                }
+
+                expect(() => createService()).not.toThrow();
+                await expect(
+                    waitForOffsetSweepForTests(),
+                ).resolves.toBeUndefined();
+            },
+        );
+
         it("skips an active offset file even when its mtime is stale", async () => {
             const now = Date.now();
             const dateNowSpy = jest.spyOn(Date, "now").mockReturnValue(now);
@@ -534,6 +604,50 @@ describe("AudioStreamingService", () => {
                 ),
                 expect.any(Function),
             );
+        });
+
+        it("releases offset ownership after a failed transcode", async () => {
+            const now = Date.now();
+            const dateNowSpy = jest.spyOn(Date, "now").mockReturnValue(now);
+            const service = createService();
+            await waitForOffsetSweepForTests();
+            ffmpegControl.mode = "error";
+            ffmpegControl.errorMessage = "encoding failed";
+
+            try {
+                await expect(
+                    service.getStreamFilePath(
+                        "track-offset-failure",
+                        "low",
+                        new Date("2025-01-01T00:00:00.000Z"),
+                        "/music/source.flac",
+                        42,
+                    ),
+                ).rejects.toMatchObject({ code: ErrorCode.TRANSCODE_FAILED });
+                const temporaryPath = ffmpegControl.outputPath;
+                if (!temporaryPath) {
+                    throw new Error("offset output path was not set");
+                }
+                mockFsUnlink.mockClear();
+                mockFsReaddir.mockResolvedValueOnce([
+                    {
+                        name: path.basename(temporaryPath),
+                        isFile: () => true,
+                    },
+                ]);
+                mockFsStat.mockResolvedValueOnce({
+                    size: 1024,
+                    mtimeMs: now - 2 * 60 * 60 * 1000,
+                });
+                dateNowSpy.mockReturnValue(now + 16 * 60 * 1000);
+
+                createService();
+                await waitForOffsetSweepForTests();
+
+                expect(mockFsUnlink).toHaveBeenCalledWith(temporaryPath);
+            } finally {
+                dateNowSpy.mockRestore();
+            }
         });
 
         it("returns source path and mime type when original quality is requested", async () => {
