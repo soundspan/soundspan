@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, mock, test } from "node:test";
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 GlobalRegistrator.register();
@@ -9,8 +8,8 @@ GlobalRegistrator.register();
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-after(() => {
-    GlobalRegistrator.unregister();
+after(async () => {
+    await GlobalRegistrator.unregister();
 });
 
 const pushCalls: string[] = [];
@@ -49,40 +48,24 @@ const playlists = [
         id: "pl-1",
         title: "Community Favorites",
         type: "playlist",
-        imageUrl: "",
+        imageUrl: "https://example.com/cover.jpg",
         trackCount: 12,
     },
 ];
 
-async function renderGrid() {
-    const { FeaturedPlaylistsGrid } =
-        await import("../../features/home/components/FeaturedPlaylistsGrid");
-    return renderToStaticMarkup(
-        React.createElement(FeaturedPlaylistsGrid, {
-            playlists,
-        } as never),
-    );
-}
-
-test("renders playlist cards without a play-button affordance", async () => {
-    const html = await renderGrid();
-
-    assert.match(html, /Community Favorites/);
-    assert.match(html, /12 songs/);
-    assert.match(html, /data-tv-card/);
-    assert.match(html, /tabindex="0"/i);
-    assert.doesNotMatch(html, /bg-brand-hover/);
-    assert.doesNotMatch(html, /M8 5v14l11-7z/);
-    assert.doesNotMatch(html, /animate-spin/);
-});
-
-test("clicking a card navigates to the playlist page", async () => {
+async function renderIntoDom(t: {
+    after: (fn: () => Promise<void> | void) => void;
+}) {
     const { createRoot } = await import("react-dom/client");
     const { FeaturedPlaylistsGrid } =
         await import("../../features/home/components/FeaturedPlaylistsGrid");
     const container = document.createElement("div");
     const root = createRoot(container);
-
+    t.after(async () => {
+        await React.act(async () => {
+            root.unmount();
+        });
+    });
     await React.act(async () => {
         root.render(
             React.createElement(FeaturedPlaylistsGrid, {
@@ -90,6 +73,31 @@ test("clicking a card navigates to the playlist page", async () => {
             } as never),
         );
     });
+    return container;
+}
+
+test("renders playlist cards with artwork only — no overlaid controls", async (t) => {
+    const container = await renderIntoDom(t);
+
+    const card = container.querySelector("[data-tv-card]");
+    assert.ok(card, "expected a playlist card to render");
+    assert.match(card.textContent ?? "", /Community Favorites/);
+    assert.match(card.textContent ?? "", /12 songs/);
+    assert.equal(card.getAttribute("tabindex"), "0");
+
+    // Behavioral invariant: nothing interactive or decorative sits on top
+    // of the artwork. The artwork wrapper holds exactly the image (or the
+    // fallback icon) and no buttons or overlay elements of any styling.
+    const artworkWrapper = card.querySelector("img")?.parentElement;
+    assert.ok(artworkWrapper, "expected the artwork wrapper to render");
+    assert.equal(artworkWrapper.children.length, 1);
+    assert.equal(artworkWrapper.children[0]?.tagName.toLowerCase(), "img");
+    assert.equal(card.querySelectorAll("button").length, 0);
+    assert.equal(card.querySelectorAll("svg").length, 0);
+});
+
+test("clicking a card navigates to the playlist page", async (t) => {
+    const container = await renderIntoDom(t);
 
     const card = container.querySelector("[data-tv-card]");
     assert.ok(card, "expected a playlist card to render");
@@ -99,8 +107,4 @@ test("clicking a card navigates to the playlist page", async () => {
     });
 
     assert.deepEqual(pushCalls, ["/explore/yt-playlist/pl-1"]);
-
-    await React.act(async () => {
-        root.unmount();
-    });
 });
