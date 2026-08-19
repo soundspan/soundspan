@@ -109,10 +109,7 @@ def test_redis_bookkeeping_persists_failures_and_outcomes() -> None:
     assert bookkeeping.increment_failures(attempt_key) == 2
     assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_ATTEMPT_TTL_SECONDS
     bookkeeping.start_transient_cooldown(attempt_key)
-    assert (
-        redis.expirations[attempt_key]
-        == loudness_backfill.LOUDNESS_TRANSIENT_COOLDOWN_SECONDS
-    )
+    assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_TRANSIENT_COOLDOWN_SECONDS
     bookkeeping.increment_outcome("transient_failure")
     bookkeeping.clear_failures(attempt_key)
 
