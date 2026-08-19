@@ -175,11 +175,13 @@ describe("artists preview (YT Music) routes", () => {
     // ── GET /preview/:artistName/:trackTitle ───────────────────────
 
     describe("GET /preview/:artistName/:trackTitle", () => {
+        // Express decodes route params once before handlers run, so
+        // req.params carries the plain (already-decoded) values.
         const buildReq = (artist: string, track: string) =>
             ({
                 params: {
-                    artistName: encodeURIComponent(artist),
-                    trackTitle: encodeURIComponent(track),
+                    artistName: artist,
+                    trackTitle: track,
                 },
             }) as any;
 

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Artist detail and discovery routes now preserve artist names with percent signs while retaining lookup compatibility for legacy double-encoded names (#632).
 - Popular Artists cards (home and Explore) now open the artist page directly, matching the Related Artists behavior, instead of running a name search.
 - The audio analyzer now reconnects to PostgreSQL after a server-side connection close instead of waiting for multiple worker failures, so loudness backfill jobs no longer spend retry budget on a stale connection.
 - OpenSubsonic `stream` requests now honor `timeOffset` for transcoded audio with fast ffmpeg input seeking. Offset work bypasses the reusable track-and-quality cache, shares the global ffmpeg concurrency cap, uses interval-gated stale sweeping that excludes active temporary files, and cancels and cleans up when clients disconnect (#624).

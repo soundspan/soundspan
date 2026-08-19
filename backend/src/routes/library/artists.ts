@@ -44,6 +44,7 @@ import {
     isSafeRecursiveDeletionTarget,
     libraryDeletionLogger,
 } from "../../utils/libraryDeletion";
+import { findRouteNameMatch } from "../artistRouteName";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -485,22 +486,21 @@ export async function handleGetArtist(
         federationPeer: {
             select: { id: true, name: true, outboundStatus: true },
         },
-        // Note: similarFrom (FK-based) is no longer used for display
-        // We now use similarArtistsJson which is fetched by default
+        // similarFrom is retired; similarArtistsJson is fetched by default.
     };
 
-    // Single query with OR to find artist by ID, name, or MBID
-    const decodedName = decodeURIComponent(idParam);
-    const artist = await prisma.artist.findFirst({
-        where: {
-            OR: [
-                { id: idParam },
-                { name: { equals: decodedName, mode: "insensitive" } },
-                { mbid: idParam },
-            ],
-        },
-        include: artistInclude,
-    });
+    const artist = await findRouteNameMatch(idParam, (name) =>
+        prisma.artist.findFirst({
+            where: {
+                OR: [
+                    { id: idParam },
+                    { name: { equals: name, mode: "insensitive" } },
+                    { mbid: idParam },
+                ],
+            },
+            include: artistInclude,
+        }),
+    );
 
     if (!artist) {
         return sendRouteError(res, 404, "Artist not found");

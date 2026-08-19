@@ -197,8 +197,8 @@ describe("artists routes runtime", () => {
 
         const req = {
             params: {
-                artistName: encodeURIComponent("AC/DC"),
-                trackTitle: encodeURIComponent("Back In Black"),
+                artistName: "AC/DC",
+                trackTitle: "Back In Black",
             },
         } as any;
         const res = createRes();
@@ -219,8 +219,8 @@ describe("artists routes runtime", () => {
 
         const req = {
             params: {
-                artistName: encodeURIComponent("No Artist"),
-                trackTitle: encodeURIComponent("No Track"),
+                artistName: "No Artist",
+                trackTitle: "No Track",
             },
         } as any;
         const res = createRes();
@@ -236,8 +236,8 @@ describe("artists routes runtime", () => {
 
         const req = {
             params: {
-                artistName: encodeURIComponent("Artist"),
-                trackTitle: encodeURIComponent("Track"),
+                artistName: "Artist",
+                trackTitle: "Track",
             },
         } as any;
         const res = createRes();
@@ -289,7 +289,7 @@ describe("artists routes runtime", () => {
         ]);
 
         const req = {
-            params: { nameOrMbid: encodeURIComponent("Recovery Artist") },
+            params: { nameOrMbid: "Recovery Artist" },
             query: {
                 includeDiscography: "0",
                 includeTopTracks: "0",
@@ -317,9 +317,85 @@ describe("artists routes runtime", () => {
             }),
         );
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "discovery:artist:Recovery%20Artist:disc:0:top:0:sim:0",
+            "discovery:artist:Recovery Artist:disc:0:top:0:sim:0",
             24 * 60 * 60,
             expect.any(String),
+        );
+    });
+
+    it.each(["100% Pure", "A/B", "Earth, Wind & Fire", "Björk", "A%2FB"])(
+        "preserves the Express-decoded artist name %s for /discover",
+        async (routeName) => {
+            mockSearchArtist.mockImplementation(async (candidate: string) =>
+                candidate === routeName
+                    ? [{ id: "resolved-mbid", name: routeName }]
+                    : [],
+            );
+
+            const req = {
+                params: { nameOrMbid: routeName },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+            } as any;
+            const res = createRes();
+
+            await getDiscover(req, res);
+
+            expect(mockSearchArtist).toHaveBeenNthCalledWith(1, routeName, 1);
+            expect(mockGetArtistInfo).toHaveBeenCalledWith(
+                routeName,
+                "resolved-mbid",
+            );
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual(
+                expect.objectContaining({
+                    mbid: "resolved-mbid",
+                    name: routeName,
+                }),
+            );
+        },
+    );
+
+    it("falls back to a decoded artist name for legacy double-encoded /discover requests", async () => {
+        const storedName = "Legacy / Artist";
+        const legacyRouteParam = encodeURIComponent(storedName);
+        mockSearchArtist.mockImplementation(async (candidate: string) =>
+            candidate === storedName
+                ? [{ id: "legacy-mbid", name: storedName }]
+                : [],
+        );
+
+        const req = {
+            params: { nameOrMbid: legacyRouteParam },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+        } as any;
+        const res = createRes();
+
+        await getDiscover(req, res);
+
+        expect(mockSearchArtist).toHaveBeenNthCalledWith(
+            1,
+            legacyRouteParam,
+            1,
+        );
+        expect(mockSearchArtist).toHaveBeenNthCalledWith(2, storedName, 1);
+        expect(mockGetArtistInfo).toHaveBeenCalledWith(
+            storedName,
+            "legacy-mbid",
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                mbid: "legacy-mbid",
+                name: storedName,
+            }),
         );
     });
 
@@ -483,7 +559,7 @@ describe("artists routes runtime", () => {
         );
 
         const req = {
-            params: { nameOrMbid: encodeURIComponent("The Artist") },
+            params: { nameOrMbid: "The Artist" },
             query: {
                 includeDiscography: "yes",
                 includeTopTracks: "1",
@@ -559,7 +635,7 @@ describe("artists routes runtime", () => {
 
         expect(mockRedisSetEx).toHaveBeenCalledTimes(1);
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "discovery:artist:The%20Artist:disc:1:top:1:sim:1",
+            "discovery:artist:The Artist:disc:1:top:1:sim:1",
             24 * 60 * 60,
             expect.any(String),
         );

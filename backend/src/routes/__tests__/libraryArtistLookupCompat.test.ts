@@ -197,10 +197,10 @@ function createRes() {
     return res;
 }
 
-function createMockArtist() {
+function createMockArtist(name = "AC/DC") {
     return {
         id: "artist-1",
-        name: "AC/DC",
+        name,
         mbid: "mbid-artist-1",
         heroUrl: null,
         userHeroUrl: null,
@@ -229,8 +229,8 @@ describe("library artist lookup compatibility", () => {
             decodedName: "artist-local-id-123",
         },
         {
-            label: "url-encoded artist name",
-            routeParam: encodeURIComponent("AC/DC"),
+            label: "Express-decoded artist name",
+            routeParam: "AC/DC",
             decodedName: "AC/DC",
         },
         {
@@ -288,6 +288,94 @@ describe("library artist lookup compatibility", () => {
             );
         },
     );
+
+    it.each(["100% Pure", "A/B", "Earth, Wind & Fire", "Björk", "A%2FB"])(
+        "finds the stored artist named %s without decoding the route param again",
+        async (storedName) => {
+            mockArtistFindFirst.mockImplementation(async (args: any) => {
+                const nameCandidate = args.where.OR.find(
+                    (candidate: any) => candidate.name,
+                )?.name.equals;
+                return nameCandidate === storedName
+                    ? createMockArtist(storedName)
+                    : null;
+            });
+
+            const req = {
+                params: { id: storedName },
+                query: {
+                    includeDiscography: "false",
+                    includeTopTracks: "false",
+                    includeSimilarArtists: "false",
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await artistHandler(req, res);
+
+            expect(mockArtistFindFirst).toHaveBeenCalledTimes(1);
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual(
+                expect.objectContaining({
+                    id: "artist-1",
+                    name: storedName,
+                }),
+            );
+        },
+    );
+
+    it("falls back to the decoded artist name for legacy double-encoded library requests", async () => {
+        const storedName = "Legacy / Artist";
+        const legacyRouteParam = encodeURIComponent(storedName);
+        mockArtistFindFirst.mockImplementation(async (args: any) => {
+            const nameCandidate = args.where.OR.find(
+                (candidate: any) => candidate.name,
+            )?.name.equals;
+            return nameCandidate === storedName
+                ? createMockArtist(storedName)
+                : null;
+        });
+
+        const req = {
+            params: { id: legacyRouteParam },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "false",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(mockArtistFindFirst).toHaveBeenCalledTimes(2);
+        expect(mockArtistFindFirst.mock.calls[0][0].where.OR).toEqual(
+            expect.arrayContaining([
+                {
+                    name: {
+                        equals: legacyRouteParam,
+                        mode: "insensitive",
+                    },
+                },
+            ]),
+        );
+        expect(mockArtistFindFirst.mock.calls[1][0].where.OR).toEqual(
+            expect.arrayContaining([
+                {
+                    name: { equals: storedName, mode: "insensitive" },
+                },
+            ]),
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                id: "artist-1",
+                name: storedName,
+            }),
+        );
+    });
 
     it("returns 404 when artist does not exist", async () => {
         mockArtistFindFirst.mockResolvedValueOnce(null);

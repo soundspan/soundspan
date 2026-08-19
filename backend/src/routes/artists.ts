@@ -11,6 +11,7 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { ytMusicStreamLimiter } from "../middleware/rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
+import { findRouteNameMatch } from "./artistRouteName";
 
 const router = Router();
 
@@ -84,9 +85,8 @@ router.get<{ artistName: string; trackTitle: string }>(
     requireAuthOrToken,
     async (req, res) => {
         try {
-            const { artistName, trackTitle } = req.params;
-            const decodedArtist = decodeURIComponent(artistName);
-            const decodedTrack = decodeURIComponent(trackTitle);
+            const { artistName: decodedArtist, trackTitle: decodedTrack } =
+                req.params;
 
             const settings = await getSystemSettings();
             if (!settings.ytMusicEnabled) {
@@ -372,19 +372,23 @@ router.get<{ nameOrMbid: string }>(
                 );
 
             let mbid: string | null = isMbid ? nameOrMbid : null;
-            let artistName: string = isMbid
-                ? ""
-                : decodeURIComponent(nameOrMbid);
+            let artistName = isMbid ? "" : nameOrMbid;
 
             // If we have a name but no MBID, search for it
             if (!mbid && artistName) {
-                const mbResults = await musicBrainzService.searchArtist(
+                const mbResult = await findRouteNameMatch(
                     artistName,
-                    1,
+                    async (candidate) => {
+                        const [result] = await musicBrainzService.searchArtist(
+                            candidate,
+                            1,
+                        );
+                        return result ?? null;
+                    },
                 );
-                if (mbResults.length > 0) {
-                    mbid = mbResults[0].id;
-                    artistName = mbResults[0].name;
+                if (mbResult) {
+                    mbid = mbResult.id;
+                    artistName = mbResult.name;
                 }
             }
 
