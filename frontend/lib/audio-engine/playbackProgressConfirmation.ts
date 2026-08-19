@@ -1,21 +1,114 @@
 const CONFIRMED_PLAYBACK_PROGRESS_THRESHOLD_SECONDS = 0.5;
 
+/** Movement tracked for one media item until playback is confirmed. */
+export interface PlaybackProgressConfirmationState {
+    mediaId: string | null;
+    baselineTimeSeconds: number | null;
+    lastTimeSeconds: number | null;
+    cumulativeAdvancementSeconds: number;
+    confirmed: boolean;
+}
+
+/** A position observation or an explicit seek discontinuity. */
+export interface PlaybackProgressConfirmationEvent {
+    type: "position" | "seek";
+    mediaId: string | null;
+    currentTimeSeconds: number;
+    isPlaying: boolean;
+}
+
+/** Result of applying one playback-progress event. */
+export interface PlaybackProgressConfirmationResult {
+    nextState: PlaybackProgressConfirmationState;
+    confirmed: boolean;
+}
+
+/** Creates an unarmed playback-progress confirmation state. */
+export function createPlaybackProgressConfirmationState(): PlaybackProgressConfirmationState {
+    return {
+        mediaId: null,
+        baselineTimeSeconds: null,
+        lastTimeSeconds: null,
+        cumulativeAdvancementSeconds: 0,
+        confirmed: false,
+    };
+}
+
+const createBaselineState = (
+    mediaId: string,
+    currentTimeSeconds: number | null,
+): PlaybackProgressConfirmationState => ({
+    mediaId,
+    baselineTimeSeconds: currentTimeSeconds,
+    lastTimeSeconds: currentTimeSeconds,
+    cumulativeAdvancementSeconds: 0,
+    confirmed: false,
+});
+
 /**
- * Decides whether a time update proves playback for an unconfirmed media item.
+ * Advances confirmation state from one engine position event.
  *
- * Engine time-update payloads do not identify seek-originated updates. A seek
- * can therefore confirm progress; manual play still resets the breaker.
+ * The first valid position establishes a baseline. Only later, strictly
+ * increasing positions observed while playing contribute toward confirmation.
+ * Seek discontinuities and backward movement establish a new baseline.
  */
-export function shouldConfirmPlaybackProgress(
-    lastConfirmedMediaId: string | null,
-    currentMediaId: string | null,
-    currentTimeSeconds: number,
-    isPlaying: boolean,
-): boolean {
-    if (!isPlaying || !currentMediaId) return false;
-    if (lastConfirmedMediaId === currentMediaId) return false;
-    return (
-        Number.isFinite(currentTimeSeconds) &&
-        currentTimeSeconds >= CONFIRMED_PLAYBACK_PROGRESS_THRESHOLD_SECONDS
-    );
+export function transitionPlaybackProgressConfirmation(
+    previousState: PlaybackProgressConfirmationState,
+    event: PlaybackProgressConfirmationEvent,
+): PlaybackProgressConfirmationResult {
+    if (!event.mediaId) {
+        return {
+            nextState: createPlaybackProgressConfirmationState(),
+            confirmed: false,
+        };
+    }
+
+    const hasValidPosition =
+        Number.isFinite(event.currentTimeSeconds) &&
+        event.currentTimeSeconds >= 0;
+    if (previousState.mediaId !== event.mediaId) {
+        return {
+            nextState: createBaselineState(
+                event.mediaId,
+                hasValidPosition ? event.currentTimeSeconds : null,
+            ),
+            confirmed: false,
+        };
+    }
+    if (!hasValidPosition || previousState.confirmed) {
+        return { nextState: previousState, confirmed: false };
+    }
+    if (
+        event.type === "seek" ||
+        previousState.lastTimeSeconds === null ||
+        !event.isPlaying ||
+        event.currentTimeSeconds < previousState.lastTimeSeconds
+    ) {
+        return {
+            nextState: createBaselineState(
+                event.mediaId,
+                event.currentTimeSeconds,
+            ),
+            confirmed: false,
+        };
+    }
+    if (event.currentTimeSeconds === previousState.lastTimeSeconds) {
+        return { nextState: previousState, confirmed: false };
+    }
+
+    const cumulativeAdvancementSeconds =
+        previousState.cumulativeAdvancementSeconds +
+        (event.currentTimeSeconds - previousState.lastTimeSeconds);
+    const confirmed =
+        cumulativeAdvancementSeconds >=
+        CONFIRMED_PLAYBACK_PROGRESS_THRESHOLD_SECONDS;
+    return {
+        nextState: {
+            ...previousState,
+            lastTimeSeconds: event.currentTimeSeconds,
+            cumulativeAdvancementSeconds,
+            confirmed,
+        },
+        confirmed,
+    };
 }

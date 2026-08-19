@@ -4,11 +4,33 @@ import type {
     AudioEngineEventHandler,
 } from "@/lib/audio-engine/types";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
+import { transitionPlaybackProgressConfirmation } from "@/lib/audio-engine/playbackProgressConfirmation";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 
 interface UseAudioEngineBindingsOptions {
     refs: PlaybackOrchestratorRefs;
 }
+
+const createPlaybackConfirmationSeekHandler = (
+    refs: PlaybackOrchestratorRefs,
+): AudioEngineEventHandler<"seek"> => {
+    return (payload) => {
+        const mediaId =
+            refs.playbackTypeRef.current === "track"
+                ? (refs.currentTrackRef.current?.id ?? null)
+                : null;
+        refs.playbackProgressConfirmationRef.current =
+            transitionPlaybackProgressConfirmation(
+                refs.playbackProgressConfirmationRef.current,
+                {
+                    type: "seek",
+                    mediaId,
+                    currentTimeSeconds: payload.timeSec,
+                    isPlaying: audioEngine.isPlaying(),
+                },
+            ).nextState;
+    };
+};
 
 /** Binds the stable runtime-engine facade to the latest delegated handlers. */
 export function useAudioEngineBindings({
@@ -32,6 +54,7 @@ export function useAudioEngineBindings({
             engineEventHandlersRef.current?.handlePlay();
         const stableHandlePause: AudioEngineEventHandler<"pause"> = () =>
             engineEventHandlersRef.current?.handlePause();
+        const stableHandleSeek = createPlaybackConfirmationSeekHandler(refs);
 
         audioEngine.on("timeupdate", stableHandleTimeUpdate);
         audioEngine.on("load", stableHandleLoad);
@@ -40,6 +63,7 @@ export function useAudioEngineBindings({
         audioEngine.on("playerror", stableHandleError);
         audioEngine.on("play", stableHandlePlay);
         audioEngine.on("pause", stableHandlePause);
+        audioEngine.on("seek", stableHandleSeek);
 
         return () => {
             // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
@@ -53,6 +77,7 @@ export function useAudioEngineBindings({
             audioEngine.off("playerror", stableHandleError);
             audioEngine.off("play", stableHandlePlay);
             audioEngine.off("pause", stableHandlePause);
+            audioEngine.off("seek", stableHandleSeek);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
     }, []);

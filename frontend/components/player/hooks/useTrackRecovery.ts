@@ -300,6 +300,8 @@ export function useTrackRecovery({
 
                 const ltSession = getListenTogetherSessionSnapshot();
                 if (ltSession?.groupId) {
+                    trackErrorAdvanceFromTrackIdRef.current = failedTrackId;
+                    advancePlayIntentAtMsRef.current = Date.now();
                     if (ltSession.isHost && queueLengthRef.current > 1) {
                         enqueueLatestListenTogetherHostTrackOperation({
                             action: "next",

@@ -1,131 +1,147 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { shouldConfirmPlaybackProgress } from "../../lib/audio-engine/playbackProgressConfirmation";
+import {
+    createPlaybackProgressConfirmationState,
+    transitionPlaybackProgressConfirmation,
+    type PlaybackProgressConfirmationEvent,
+} from "../../lib/audio-engine/playbackProgressConfirmation";
 
-const cases = [
-    {
-        name: "does not confirm below the progress threshold",
-        lastConfirmedMediaId: null,
-        currentMediaId: "track-1",
-        currentTimeSeconds: 0.49,
-        isPlaying: true,
-        expected: false,
-    },
-    {
-        name: "confirms when progress reaches the threshold",
-        lastConfirmedMediaId: null,
-        currentMediaId: "track-1",
-        currentTimeSeconds: 0.5,
-        isPlaying: true,
-        expected: true,
-    },
-    {
-        name: "does not confirm a paused media item",
-        lastConfirmedMediaId: null,
-        currentMediaId: "track-1",
-        currentTimeSeconds: 0.5,
-        isPlaying: false,
-        expected: false,
-    },
-    {
-        name: "does not confirm the same media twice",
-        lastConfirmedMediaId: "track-1",
-        currentMediaId: "track-1",
-        currentTimeSeconds: 5,
-        isPlaying: true,
-        expected: false,
-    },
-    {
-        name: "re-arms confirmation when the media changes",
-        lastConfirmedMediaId: "track-1",
-        currentMediaId: "track-2",
-        currentTimeSeconds: 0.5,
-        isPlaying: true,
-        expected: true,
-    },
-    {
-        name: "does not confirm zero progress",
-        lastConfirmedMediaId: null,
-        currentMediaId: "track-1",
-        currentTimeSeconds: 0,
-        isPlaying: true,
-        expected: false,
-    },
-    {
-        name: "does not confirm non-finite progress",
-        lastConfirmedMediaId: null,
-        currentMediaId: "track-1",
-        currentTimeSeconds: Number.NaN,
-        isPlaying: true,
-        expected: false,
-    },
-] as const;
-
-for (const testCase of cases) {
-    test(testCase.name, () => {
-        assert.equal(
-            shouldConfirmPlaybackProgress(
-                testCase.lastConfirmedMediaId,
-                testCase.currentMediaId,
-                testCase.currentTimeSeconds,
-                testCase.isPlaying,
-            ),
-            testCase.expected,
-        );
-    });
-}
-
-test("crossing the threshold confirms a media item only once", () => {
-    let lastConfirmedMediaId: string | null = null;
-
-    assert.equal(
-        shouldConfirmPlaybackProgress(
-            lastConfirmedMediaId,
-            "track-1",
-            0.49,
-            true,
-        ),
-        false,
-    );
-    assert.equal(
-        shouldConfirmPlaybackProgress(
-            lastConfirmedMediaId,
-            "track-1",
-            0.5,
-            true,
-        ),
-        true,
-    );
-
-    lastConfirmedMediaId = "track-1";
-    assert.equal(
-        shouldConfirmPlaybackProgress(lastConfirmedMediaId, "track-1", 1, true),
-        false,
-    );
+const positionEvent = (
+    currentTimeSeconds: number,
+    overrides: Partial<PlaybackProgressConfirmationEvent> = {},
+): PlaybackProgressConfirmationEvent => ({
+    type: "position",
+    mediaId: "track-1",
+    currentTimeSeconds,
+    isPlaying: true,
+    ...overrides,
 });
 
-test("repeat-one re-arms only after the restarted media progresses", () => {
-    assert.equal(
-        shouldConfirmPlaybackProgress("track-1", "track-1", 0.5, true),
-        false,
+test("frozen positions never confirm playback", () => {
+    let state = createPlaybackProgressConfirmationState();
+
+    for (const currentTimeSeconds of [30, 30, 30, 30]) {
+        const result = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(currentTimeSeconds),
+        );
+        state = result.nextState;
+        assert.equal(result.confirmed, false);
+    }
+});
+
+test("strictly increasing positions confirm once cumulative movement reaches the threshold", () => {
+    let state = createPlaybackProgressConfirmationState();
+    const cases = [
+        { currentTimeSeconds: 10, expected: false },
+        { currentTimeSeconds: 10.2, expected: false },
+        { currentTimeSeconds: 10.49, expected: false },
+        { currentTimeSeconds: 10.5, expected: true },
+        { currentTimeSeconds: 11, expected: false },
+    ] as const;
+
+    for (const testCase of cases) {
+        const result = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(testCase.currentTimeSeconds),
+        );
+        state = result.nextState;
+        assert.equal(result.confirmed, testCase.expected);
+    }
+});
+
+test("a seek jump re-baselines and frozen positions after it never confirm", () => {
+    let state = createPlaybackProgressConfirmationState();
+
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(2),
+    ).nextState;
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(2.25),
+    ).nextState;
+
+    const seekResult = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(30, { type: "seek" }),
     );
-    const restartedLastConfirmedMediaId = null;
-    assert.equal(
-        shouldConfirmPlaybackProgress(
-            restartedLastConfirmedMediaId,
-            "track-1",
-            0,
-            true,
-        ),
-        false,
+    state = seekResult.nextState;
+    assert.equal(seekResult.confirmed, false);
+
+    for (const currentTimeSeconds of [30, 30]) {
+        const frozenResult = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(currentTimeSeconds),
+        );
+        state = frozenResult.nextState;
+        assert.equal(frozenResult.confirmed, false);
+    }
+});
+
+test("media change resets confirmation and requires a fresh baseline", () => {
+    let state = createPlaybackProgressConfirmationState();
+
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0),
+    ).nextState;
+    const firstConfirmation = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0.5),
     );
-    assert.equal(
-        shouldConfirmPlaybackProgress(
-            restartedLastConfirmedMediaId,
-            "track-1",
-            0.5,
-            true,
-        ),
-        true,
+    assert.equal(firstConfirmation.confirmed, true);
+
+    const changedMedia = transitionPlaybackProgressConfirmation(
+        firstConfirmation.nextState,
+        positionEvent(40, { mediaId: "track-2" }),
     );
+    assert.equal(changedMedia.confirmed, false);
+
+    const frozenChangedMedia = transitionPlaybackProgressConfirmation(
+        changedMedia.nextState,
+        positionEvent(40, { mediaId: "track-2" }),
+    );
+    assert.equal(frozenChangedMedia.confirmed, false);
+});
+
+test("repeat-one restart resets confirmation for the same media", () => {
+    let state = createPlaybackProgressConfirmationState();
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0),
+    ).nextState;
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0.5),
+    ).nextState;
+
+    state = createPlaybackProgressConfirmationState();
+    const baseline = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0),
+    );
+    assert.equal(baseline.confirmed, false);
+    const confirmed = transitionPlaybackProgressConfirmation(
+        baseline.nextState,
+        positionEvent(0.5),
+    );
+    assert.equal(confirmed.confirmed, true);
+});
+
+test("invalid positions and non-playing movement do not confirm", () => {
+    let state = createPlaybackProgressConfirmationState();
+    const cases = [
+        positionEvent(Number.NaN),
+        positionEvent(-1),
+        positionEvent(0),
+        positionEvent(1, { isPlaying: false }),
+        positionEvent(1, { mediaId: null }),
+    ];
+
+    for (const event of cases) {
+        const result = transitionPlaybackProgressConfirmation(state, event);
+        state = result.nextState;
+        assert.equal(result.confirmed, false);
+    }
 });

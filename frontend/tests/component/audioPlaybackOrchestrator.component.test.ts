@@ -436,6 +436,7 @@ const preemptChecks: Array<{
 }> = [];
 
 const toastErrors: string[] = [];
+const listenTogetherHostTrackOperations: string[] = [];
 const listenTogetherResyncCalls: string[] = [];
 const migratingStorageItems = new Map<string, string>();
 
@@ -444,6 +445,7 @@ let listenTogetherSnapshot: {
     groupId?: string;
     isHost?: boolean;
 } | null = null;
+let listenTogetherFollowerTransientRecoveryEnabled = true;
 let podcastCacheStatus = {
     cached: true,
     downloading: false,
@@ -537,11 +539,13 @@ const resetHarnessState = (): void => {
     }
     preemptChecks.length = 0;
     toastErrors.length = 0;
+    listenTogetherHostTrackOperations.length = 0;
     listenTogetherResyncCalls.length = 0;
     migratingStorageItems.clear();
 
     runtimeEngineMode = "howler";
     listenTogetherSnapshot = null;
+    listenTogetherFollowerTransientRecoveryEnabled = true;
     podcastCacheStatus = {
         cached: true,
         downloading: false,
@@ -913,13 +917,19 @@ mock.module("@/lib/query-events", {
 
 mock.module("@/lib/listen-together-session", {
     exports: {
-        enqueueLatestListenTogetherHostTrackOperation: async () => undefined,
+        enqueueLatestListenTogetherHostTrackOperation: async (operation: {
+            action: string;
+        }) => {
+            listenTogetherHostTrackOperations.push(operation.action);
+        },
         getListenTogetherSessionSnapshot: () => listenTogetherSnapshot,
         isListenTogetherActiveOrPending: () => false,
         resolveListenTogetherFollowerGroupId: (
             snapshot: { groupId?: string; isHost?: boolean } | null,
         ) =>
-            snapshot?.groupId && snapshot.isHost !== true
+            listenTogetherFollowerTransientRecoveryEnabled &&
+            snapshot?.groupId &&
+            snapshot.isHost !== true
                 ? snapshot.groupId
                 : null,
         requestListenTogetherGroupResync: async (groupId?: string) => {
@@ -1194,6 +1204,19 @@ const selectTrack = (tracks: Track[], index: number): void => {
     rerenderOrchestrator();
 };
 
+const applyListenTogetherResume = async (
+    tracks: Track[],
+    index: number,
+): Promise<void> => {
+    selectTrack(tracks, index);
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+    playbackState.isPlaying = true;
+    rerenderOrchestrator();
+    await flushAsync();
+};
+
 const extractedHookNames = [
     "usePlaybackOrchestratorRefs",
     "useApplyCurrentOutputState",
@@ -1336,6 +1359,110 @@ test("three play events without playback progress trip the error breaker", async
     assert.equal(controlCalls.next, 2);
 });
 
+test("listen-together host error advances preserve consecutive failures until the breaker trips", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("lt-host-failure-1"),
+        makeTrack("lt-host-failure-2"),
+        makeTrack("lt-host-failure-3"),
+        makeTrack("lt-host-unreached"),
+    ];
+    listenTogetherSnapshot = { groupId: "lt-host-breaker", isHost: true };
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    for (let index = 0; index < 3; index += 1) {
+        await failPlayingTrack();
+        if (index < 2) {
+            await applyListenTogetherResume(tracks, index + 1);
+        }
+    }
+
+    assert.deepEqual(listenTogetherHostTrackOperations, ["next", "next"]);
+    assert.ok(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+    );
+});
+
+test("listen-together follower resync preserves consecutive failures until the breaker trips", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("lt-follower-failure-1"),
+        makeTrack("lt-follower-failure-2"),
+        makeTrack("lt-follower-failure-3"),
+        makeTrack("lt-follower-unreached"),
+    ];
+    listenTogetherSnapshot = {
+        groupId: "lt-follower-breaker",
+        isHost: false,
+    };
+    listenTogetherFollowerTransientRecoveryEnabled = false;
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    for (let index = 0; index < 3; index += 1) {
+        await failPlayingTrack();
+        if (index < 2) {
+            await applyListenTogetherResume(tracks, index + 1);
+        }
+    }
+
+    assert.deepEqual(listenTogetherResyncCalls, [
+        "lt-follower-breaker",
+        "lt-follower-breaker",
+    ]);
+    assert.ok(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+    );
+});
+
+test("manual listen-together track changes still reset prior failures", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("lt-before-manual-1"),
+        makeTrack("lt-before-manual-2"),
+        makeTrack("lt-before-manual-3"),
+        makeTrack("lt-manual-selection"),
+        makeTrack("lt-after-manual"),
+    ];
+    listenTogetherSnapshot = { groupId: "lt-manual-reset", isHost: true };
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    for (let index = 0; index < 2; index += 1) {
+        await failPlayingTrack();
+        await applyListenTogetherResume(tracks, index + 1);
+    }
+
+    await applyListenTogetherResume(tracks, 3);
+    await failPlayingTrack();
+
+    assert.deepEqual(listenTogetherHostTrackOperations, [
+        "next",
+        "next",
+        "next",
+    ]);
+    assert.equal(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+        false,
+    );
+});
+
 test("confirmed playback progress resets prior consecutive errors", async () => {
     mock.timers.enable();
     const tracks = [
@@ -1360,6 +1487,7 @@ test("confirmed playback progress resets prior consecutive errors", async () => 
     engine.playing = true;
     engine.emit("play");
     engine.emit("timeupdate", { timeSec: 0.5 });
+    engine.emit("timeupdate", { timeSec: 1 });
     await emitFatalLoadError();
     mock.timers.tick(1_201);
     await flushAsync();

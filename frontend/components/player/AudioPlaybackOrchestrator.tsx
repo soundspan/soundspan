@@ -11,7 +11,10 @@ import {
 import { api } from "@/lib/api";
 import type { AudioEngineErrorPayload } from "@/lib/audio-engine/types";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
-import { shouldConfirmPlaybackProgress } from "@/lib/audio-engine/playbackProgressConfirmation";
+import {
+    createPlaybackProgressConfirmationState,
+    transitionPlaybackProgressConfirmation,
+} from "@/lib/audio-engine/playbackProgressConfirmation";
 import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
 import {
     getListenTogetherSessionSnapshot,
@@ -128,7 +131,7 @@ export const AudioPlaybackOrchestrator = memo(
             loadErrorListenerRef,
             lastPreloadedTrackIdRef,
             consecutiveErrorBreakerRef,
-            lastConfirmedPlaybackMediaIdRef,
+            playbackProgressConfirmationRef,
             wasPlayingWhenHiddenRef,
             currentTrackRef,
             currentTimeSnapshotRef,
@@ -255,16 +258,20 @@ export const AudioPlaybackOrchestrator = memo(
                 }
                 if (playbackTypeRef.current === "track") {
                     const liveTrackId = currentTrackRef.current?.id ?? null;
-                    if (
-                        shouldConfirmPlaybackProgress(
-                            lastConfirmedPlaybackMediaIdRef.current,
-                            liveTrackId,
-                            currentTimeValue,
-                            audioEngine.isPlaying(),
-                        )
-                    ) {
+                    const progressConfirmation =
+                        transitionPlaybackProgressConfirmation(
+                            playbackProgressConfirmationRef.current,
+                            {
+                                type: "position",
+                                mediaId: liveTrackId,
+                                currentTimeSeconds: currentTimeValue,
+                                isPlaying: audioEngine.isPlaying(),
+                            },
+                        );
+                    playbackProgressConfirmationRef.current =
+                        progressConfirmation.nextState;
+                    if (progressConfirmation.confirmed) {
                         consecutiveErrorBreakerRef.current.recordSuccess();
-                        lastConfirmedPlaybackMediaIdRef.current = liveTrackId;
                     }
 
                     // Real progress can precede the synthetic load callback. Treat it
@@ -508,7 +515,8 @@ export const AudioPlaybackOrchestrator = memo(
                     pause();
                 } else if (playbackType === "track") {
                     if (repeatMode === "one" && !isListenTogether) {
-                        lastConfirmedPlaybackMediaIdRef.current = null;
+                        playbackProgressConfirmationRef.current =
+                            createPlaybackProgressConfirmationState();
                         audioEngine.seek(0);
                         audioEngine.play();
                     } else {
@@ -1056,7 +1064,8 @@ export const AudioPlaybackOrchestrator = memo(
             const previousMediaId = lastTrackIdRef.current;
             if (currentMediaId !== previousMediaId) {
                 trackEndWatchdogRef.current?.clear();
-                lastConfirmedPlaybackMediaIdRef.current = null;
+                playbackProgressConfirmationRef.current =
+                    createPlaybackProgressConfirmationState();
             }
 
             if (currentMediaId === previousMediaId) {
