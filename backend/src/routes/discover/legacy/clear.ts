@@ -715,6 +715,8 @@ export async function handleLegacyClear(
         const orphanedAlbums = await prisma.album.findMany({
             where: {
                 location: "DISCOVER",
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
             include: { artist: true, tracks: true },
         });
@@ -749,13 +751,20 @@ export async function handleLegacyClear(
                     where: { albumId: orphanAlbum.id },
                 });
                 // Delete album
-                await prisma.album.delete({
-                    where: { id: orphanAlbum.id },
+                const deletedAlbum = await prisma.album.deleteMany({
+                    where: {
+                        id: orphanAlbum.id,
+                        location: "DISCOVER",
+                        tracksTidal: { none: {} },
+                        tracksYtMusic: { none: {} },
+                    },
                 });
-                orphanedAlbumsDeleted++;
-                logger.debug(
-                    `    Deleted orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`,
-                );
+                if (deletedAlbum.count > 0) {
+                    orphanedAlbumsDeleted += deletedAlbum.count;
+                    logger.debug(
+                        `    Deleted orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`,
+                    );
+                }
             }
         }
 
@@ -788,12 +797,19 @@ export async function handleLegacyClear(
                 },
             });
 
-            await prisma.artist.deleteMany({
-                where: { id: { in: orphanIds } },
+            const deletedArtists = await prisma.artist.deleteMany({
+                where: {
+                    id: { in: orphanIds },
+                    albums: { none: {} },
+                    tracksTidal: { none: {} },
+                    tracksYtMusic: { none: {} },
+                },
             });
-            logger.debug(
-                `  Cleaned up ${orphanedArtists.length} orphaned artists`,
-            );
+            if (deletedArtists.count > 0) {
+                logger.debug(
+                    `  Cleaned up ${deletedArtists.count} orphaned artists`,
+                );
+            }
         }
 
         // Clean up orphaned DiscoveryTrack records (tracks whose album was deleted)

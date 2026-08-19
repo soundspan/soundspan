@@ -56,6 +56,7 @@ const prisma = {
         update: jest.fn(async () => undefined),
         updateMany: jest.fn(async () => ({ count: 0 })),
         delete: jest.fn(async () => undefined),
+        deleteMany: jest.fn(async () => ({ count: 1 })),
     },
     ownedAlbum: {
         findFirst: jest.fn(async () => null),
@@ -888,6 +889,29 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.album.delete).toHaveBeenCalledWith({
             where: { id: "album-active" },
         });
+        expect(prisma.album.findMany).toHaveBeenCalledWith({
+            where: {
+                location: "DISCOVER",
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+            include: { artist: true, tracks: true },
+        });
+        expect(prisma.album.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: "orphan-album-1",
+                location: "DISCOVER",
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+        });
+        expect(prisma.artist.findMany).toHaveBeenCalledWith({
+            where: {
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+        });
         expect(prisma.similarArtist.deleteMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: {
@@ -898,6 +922,14 @@ describe("discover legacy-mode runtime behavior", () => {
                 },
             }),
         );
+        expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: { in: ["artist-orphan"] },
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+        });
         expect(scanQueue.add).toHaveBeenCalledWith("scan", {
             userId: "user-1",
             musicPath: "/music",

@@ -55,6 +55,7 @@ describe("dataIntegrity worker", () => {
                     .mockResolvedValueOnce([]),
                 update: jest.fn(async () => undefined),
                 delete: jest.fn(async () => undefined),
+                deleteMany: jest.fn(async () => ({ count: 1 })),
                 updateMany: jest.fn(async () => ({ count: 0 })),
             },
             ownedAlbum: {
@@ -308,14 +309,40 @@ describe("dataIntegrity worker", () => {
             }),
         );
 
+        expect(prisma.album.findMany).toHaveBeenNthCalledWith(1, {
+            where: {
+                location: "DISCOVER",
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+            include: { artist: true },
+        });
+        expect(prisma.album.findMany).toHaveBeenNthCalledWith(3, {
+            where: {
+                tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+            include: { artist: true },
+        });
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: { albumId: "discover-album-1" },
         });
-        expect(prisma.album.delete).toHaveBeenCalledWith({
-            where: { id: "discover-album-1" },
+        expect(prisma.album.deleteMany).toHaveBeenNthCalledWith(1, {
+            where: {
+                id: "discover-album-1",
+                location: "DISCOVER",
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
         });
-        expect(prisma.album.delete).toHaveBeenCalledWith({
-            where: { id: "empty-album-1" },
+        expect(prisma.album.deleteMany).toHaveBeenNthCalledWith(2, {
+            where: {
+                id: "empty-album-1",
+                tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
         });
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
             where: { rgMbid: "rg-empty" },
@@ -339,6 +366,9 @@ describe("dataIntegrity worker", () => {
             id: "real-artist-1",
             mbid: "real-mbid",
         });
+        (prisma.artist.deleteMany as jest.Mock).mockResolvedValueOnce({
+            count: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
@@ -354,8 +384,20 @@ describe("dataIntegrity worker", () => {
         expect(prisma.artist.delete).toHaveBeenCalledWith({
             where: { id: "temp-artist-1" },
         });
+        expect(prisma.artist.findMany).toHaveBeenNthCalledWith(2, {
+            where: {
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
+        });
         expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
-            where: { id: { in: ["orphan-artist-1"] } },
+            where: {
+                id: { in: ["orphan-artist-1"] },
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
         });
     });
 
