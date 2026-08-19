@@ -81,6 +81,13 @@ export function DuplicatesPanel({
                                         </span>
                                     </li>
                                 ))}
+                                {cluster.memberCount >
+                                    cluster.members.length && (
+                                    <li className="text-xs text-gray-500">
+                                        Showing {cluster.members.length} of{" "}
+                                        {cluster.memberCount} tracks.
+                                    </li>
+                                )}
                             </ul>
                         </li>
                     ))}

@@ -432,14 +432,40 @@ const getLibraryHealthStorage = mock.fn(async () => ({
     sampleLimit: 100_000,
     isTruncated: false,
 }));
-const getLibraryHealthDuplicates = mock.fn(async () => ({
-    clusters: [],
-    total: 0,
-    byTier: { audioHash: 0, recordingMbid: 0, isrc: 0 },
+function duplicateMember(index: number) {
+    return {
+        id: `dup-${index}`,
+        title: `Copy ${index}`,
+        albumTitle: "Dup Album",
+        artistName: "Dup Artist",
+        filePath: `/music/copy-${index}.flac`,
+        fileSize: 1024,
+        mime: "FLAC",
+    };
+}
+
+// Mirrors the backend's capped preview: memberCount counts every member,
+// members embeds only the preview subset.
+const DUPLICATES_PAGE = {
+    clusters: [
+        {
+            tier: "audioHash",
+            identity: "hash-1",
+            memberCount: 11,
+            totalFileSize: 11 * 1024,
+            members: Array.from({ length: 8 }, (_, index) =>
+                duplicateMember(index),
+            ),
+        },
+    ],
+    total: 1,
+    byTier: { audioHash: 1, recordingMbid: 0, isrc: 0 },
     isTruncated: false,
     limit: 25,
     offset: 0,
-}));
+};
+
+const getLibraryHealthDuplicates = mock.fn(async () => DUPLICATES_PAGE);
 
 Object.assign(apiMock, {
     getLibraryHealthSummary,
@@ -522,6 +548,29 @@ test("analysis retry refreshes the section headline through the real wiring", as
     assert.equal(refreshLibraryHealthDashboard.mock.callCount(), 1);
     assert.match(document.body.textContent ?? "", /0 failed/);
     assert.equal(getLibraryHealthAnalysis.mock.callCount(), 2);
+
+    await mounted.unmount();
+});
+
+test("duplicate clusters disclose capped member previews", async () => {
+    const { DuplicatesPanel } =
+        await import("../../features/library-health/components/DuplicatesPanel");
+    const mounted = await mountPanel(async () => ({
+        element: React.createElement(DuplicatesPanel, {
+            duplicates: {
+                clusters: 1,
+                byTier: { audioHash: 1, recordingMbid: 0, isrc: 0 },
+                isTruncated: false,
+            },
+            refreshToken: 0,
+        }),
+    }));
+
+    await click(panelHeader());
+    assert.equal(getLibraryHealthDuplicates.mock.callCount(), 1);
+    assert.match(document.body.textContent ?? "", /11 tracks/);
+    assert.match(document.body.textContent ?? "", /Copy 0/);
+    assert.match(document.body.textContent ?? "", /Showing 8 of 11 tracks\./);
 
     await mounted.unmount();
 });
