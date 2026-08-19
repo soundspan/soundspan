@@ -146,11 +146,19 @@ def loaded_analyzer() -> Iterator[ModuleType]:
     psycopg2_stub = ModuleType("psycopg2")
     extras_stub = ModuleType("psycopg2.extras")
 
+    class InterfaceError(Exception):
+        """Represent a closed PostgreSQL connection in analyzer tests."""
+
+    class OperationalError(Exception):
+        """Represent a transient PostgreSQL connection failure in analyzer tests."""
+
     def connect(*args: Any, **kwargs: Any) -> None:
         """Reject attempts to construct a real PostgreSQL connection."""
         raise AssertionError("PostgreSQL must not be created by these unit tests")
 
     psycopg2_stub.connect = connect  # type: ignore[attr-defined]
+    psycopg2_stub.InterfaceError = InterfaceError  # type: ignore[attr-defined]
+    psycopg2_stub.OperationalError = OperationalError  # type: ignore[attr-defined]
     psycopg2_stub.extras = extras_stub  # type: ignore[attr-defined]
     extras_stub.RealDictCursor = RealDictCursor  # type: ignore[attr-defined]
     extras_stub.Json = Json  # type: ignore[attr-defined]
@@ -161,6 +169,9 @@ def loaded_analyzer() -> Iterator[ModuleType]:
     monkeypatch.setitem(sys.modules, "redis", redis_stub)
     monkeypatch.setitem(sys.modules, "psycopg2", psycopg2_stub)
     monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_stub)
+    connection_module = sys.modules.get("database_connection")
+    if connection_module is not None:
+        monkeypatch.setattr(connection_module, "psycopg2", psycopg2_stub)
 
     spec = importlib.util.spec_from_file_location("audio_analyzer_behavior_module", ANALYZER_PATH)
     assert spec is not None

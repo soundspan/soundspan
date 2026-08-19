@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping, Sequence
+from hashlib import sha256
 from typing import Any, Literal, Protocol, TypedDict
 
 from loudness import (
@@ -289,16 +290,31 @@ def _process_job(
     return "measured" if persisted else "already_measured"
 
 
-def _validated_attempt_key(job: AnalysisQueueJob) -> str | None:
-    """Return a bounded producer-owned attempt key from an internal queue job."""
+def _legacy_attempt_key(track_id: str) -> str:
+    """Return a bounded track-scoped attempt key for a legacy queue job."""
+    # Producer keys reset per file revision. This transitional fallback intentionally
+    # shares one failure budget across every legacy revision of the same track.
+    digest = sha256(track_id.encode()).hexdigest()
+    return f"{LOUDNESS_ATTEMPT_KEY_PREFIX}legacy:{digest}"
+
+
+def _attempt_key_for_job(job: AnalysisQueueJob) -> str:
+    """Return a validated producer key or a bounded compatibility fallback."""
     attempt_key = job.get("loudnessAttemptKey")
-    if not isinstance(attempt_key, str):
-        return None
-    if not attempt_key.startswith(LOUDNESS_ATTEMPT_KEY_PREFIX):
-        return None
-    if len(attempt_key.encode("utf-8")) > MAX_LOUDNESS_ATTEMPT_KEY_BYTES:
-        return None
-    return attempt_key
+    if (
+        isinstance(attempt_key, str)
+        and attempt_key.startswith(LOUDNESS_ATTEMPT_KEY_PREFIX)
+        and len(attempt_key.encode("utf-8")) <= MAX_LOUDNESS_ATTEMPT_KEY_BYTES
+    ):
+        return attempt_key
+    track_id = job["trackId"]
+    if "loudnessAttemptKey" in job:
+        logger.warning(
+            "Using legacy fallback attempt key for loudness track %s "
+            "after an invalid producer attempt key",
+            track_id,
+        )
+    return _legacy_attempt_key(track_id)
 
 
 def _record_job_result(
@@ -307,12 +323,8 @@ def _record_job_result(
     bookkeeping: LoudnessBackfillBookkeeping,
 ) -> None:
     """Persist the bounded attempt transition and its final outcome."""
-    attempt_key = _validated_attempt_key(job)
+    attempt_key = _attempt_key_for_job(job)
     track_id = job["trackId"]
-    if attempt_key is None:
-        logger.warning("Permanently skipping loudness backfill with invalid attempt key")
-        bookkeeping.increment_outcome("permanently_skipped")
-        return
     if result == "already_measured":
         bookkeeping.clear_failures(attempt_key)
         return
@@ -348,7 +360,10 @@ def process_loudness_backfill_jobs(
     path_size: PathSize = os.path.getsize,
 ) -> None:
     """Process loudness-only jobs sequentially and always release reservations."""
+    legacy_fallback_jobs = 0
     for job in jobs:
+        if "loudnessAttemptKey" not in job:
+            legacy_fallback_jobs += 1
         track = (job["trackId"], job.get("filePath", ""))
         result: JobResult
         try:
@@ -379,3 +394,8 @@ def process_loudness_backfill_jobs(
             )
         finally:
             release_reservations([track])
+    if legacy_fallback_jobs > 0:
+        logger.info(
+            "Using legacy fallback attempt keys for %d loudness jobs without a producer key",
+            legacy_fallback_jobs,
+        )

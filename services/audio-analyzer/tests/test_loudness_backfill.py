@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from hashlib import sha256
 from types import ModuleType
 from typing import Any
 
@@ -100,6 +101,12 @@ def _job(track_id: str, loudness_only: bool = True) -> dict[str, Any]:
         "loudnessOnly": loudness_only,
         "loudnessAttemptKey": f"audio:analysis:loudness:attempts:{track_id}",
     }
+
+
+def _legacy_attempt_key(track_id: str) -> str:
+    """Build the expected compatibility key for a legacy queue payload."""
+    digest = sha256(track_id.encode()).hexdigest()
+    return f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}legacy:{digest}"
 
 
 def _release_recorder() -> tuple[
@@ -265,6 +272,145 @@ def test_loudness_job_releases_reservation_after_measurement_failure() -> None:
     assert bookkeeping.attempts[_job("track-failed")["loudnessAttemptKey"]] == 1
     assert bookkeeping.outcomes == ["transient_failure"]
     assert releases == [[("track-failed", "Artist/track-failed.flac")]]
+
+
+def test_keyless_legacy_jobs_share_a_bounded_track_failure_budget() -> None:
+    """Apply bounded retries to legacy jobs under one track-scoped fallback key."""
+    database = FakeDatabaseConnection(
+        [[{"loudnessLufs": None}], [{"loudnessLufs": None}], [{"loudnessLufs": None}]]
+    )
+    bookkeeping = _Bookkeeping()
+    releases, release = _release_recorder()
+    legacy_job = _job("legacy-track")
+    del legacy_job["loudnessAttemptKey"]
+    measure_calls: list[str] = []
+
+    loudness_backfill.process_loudness_backfill_jobs(
+        [legacy_job, legacy_job, legacy_job],
+        database=database,
+        release_reservations=release,
+        resolve_path=lambda _path: "/music/Artist/legacy-track.flac",
+        max_file_size_mb=500,
+        timeout_seconds=120,
+        bookkeeping=bookkeeping,
+        measure=lambda path, _timeout: (
+            measure_calls.append(path) or {"measurement": None, "failure": "transient"}
+        ),
+        path_exists=lambda _path: True,
+        path_size=lambda _path: 1024,
+    )
+
+    attempt_key = _legacy_attempt_key("legacy-track")
+    assert measure_calls == ["/music/Artist/legacy-track.flac"] * 3
+    assert bookkeeping.attempts == {attempt_key: 3}
+    assert bookkeeping.cooldowns == [attempt_key]
+    assert bookkeeping.permanent == set()
+    assert bookkeeping.outcomes == ["transient_failure"] * 3
+    assert releases == [[("legacy-track", "Artist/legacy-track.flac")]] * 3
+
+
+@pytest.mark.parametrize(
+    "malformed_key",
+    [
+        "wrong-prefix:revision",
+        f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{'x' * 161}",
+    ],
+)
+def test_malformed_attempt_key_uses_fallback_and_warns_once(
+    malformed_key: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Recover malformed producer keys while retaining one diagnostic warning."""
+    database = FakeDatabaseConnection([[{"loudnessLufs": None}]])
+    bookkeeping = _Bookkeeping()
+    _releases, release = _release_recorder()
+    job = _job("malformed-track")
+    job["loudnessAttemptKey"] = malformed_key
+
+    with caplog.at_level(logging.WARNING):
+        loudness_backfill.process_loudness_backfill_jobs(
+            [job],
+            database=database,
+            release_reservations=release,
+            resolve_path=lambda _path: "/music/Artist/malformed-track.flac",
+            max_file_size_mb=500,
+            timeout_seconds=120,
+            bookkeeping=bookkeeping,
+            measure=lambda _path, _timeout: {"measurement": None, "failure": "transient"},
+            path_exists=lambda _path: True,
+            path_size=lambda _path: 1024,
+        )
+
+    warning_records = [
+        record for record in caplog.records if "invalid producer attempt key" in record.getMessage()
+    ]
+    assert bookkeeping.attempts == {_legacy_attempt_key("malformed-track"): 1}
+    assert bookkeeping.outcomes == ["transient_failure"]
+    assert len(warning_records) == 1
+    assert "malformed-track" in warning_records[0].getMessage()
+
+
+def test_valid_producer_attempt_key_keeps_revision_scoped_bookkeeping() -> None:
+    """Preserve the producer key for current queue payloads."""
+    database = FakeDatabaseConnection([[{"loudnessLufs": None}]])
+    bookkeeping = _Bookkeeping()
+    _releases, release = _release_recorder()
+    job = _job("current-track")
+
+    loudness_backfill.process_loudness_backfill_jobs(
+        [job],
+        database=database,
+        release_reservations=release,
+        resolve_path=lambda _path: "/music/Artist/current-track.flac",
+        max_file_size_mb=500,
+        timeout_seconds=120,
+        bookkeeping=bookkeeping,
+        measure=lambda _path, _timeout: {"measurement": None, "failure": "transient"},
+        path_exists=lambda _path: True,
+        path_size=lambda _path: 1024,
+    )
+
+    assert bookkeeping.attempts == {job["loudnessAttemptKey"]: 1}
+    assert bookkeeping.outcomes == ["transient_failure"]
+
+
+def test_mixed_batch_logs_one_keyless_fallback_summary(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Summarize keyless compatibility handling once for the complete batch."""
+    database = FakeDatabaseConnection(
+        [[{"loudnessLufs": -17.0}], [{"loudnessLufs": -18.0}], [{"loudnessLufs": -19.0}]]
+    )
+    bookkeeping = _Bookkeeping()
+    _releases, release = _release_recorder()
+    keyed_job = _job("current-track")
+    legacy_jobs = [_job("legacy-one"), _job("legacy-two")]
+    for job in legacy_jobs:
+        del job["loudnessAttemptKey"]
+
+    with caplog.at_level(logging.INFO):
+        loudness_backfill.process_loudness_backfill_jobs(
+            [keyed_job, *legacy_jobs],
+            database=database,
+            release_reservations=release,
+            resolve_path=lambda path: f"/music/{path}",
+            max_file_size_mb=500,
+            timeout_seconds=120,
+            bookkeeping=bookkeeping,
+            path_exists=lambda _path: True,
+            path_size=lambda _path: 1024,
+        )
+
+    summary_records = [
+        record
+        for record in caplog.records
+        if "Using legacy fallback attempt keys" in record.getMessage()
+    ]
+    assert len(summary_records) == 1
+    assert summary_records[0].levelno == logging.INFO
+    assert summary_records[0].getMessage() == (
+        "Using legacy fallback attempt keys for 2 loudness jobs without a producer key"
+    )
 
 
 def test_loudness_job_releases_reservation_after_unexpected_failure() -> None:

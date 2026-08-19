@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The audio analyzer now reconnects to PostgreSQL after a server-side connection close instead of waiting for multiple worker failures, so loudness backfill jobs no longer spend retry budget on a stale connection.
+- Loudness backfill now accepts legacy queued jobs without revision-scoped attempt keys, summarizes compatibility handling once per batch, and applies track-scoped bounded retry budgets instead of flooding logs and skipping failure bookkeeping.
 - DCLAP replicas now share one immutable 1,800-second decode cap without changing the established embedding-space identity; leftover `DCLAP_MAX_AUDIO_SECONDS` overrides are ignored with a warning.
 - DCLAP inference now decodes bounded waveforms outside the model lock under a separate two-request limit, creates mel segments lazily during serialized inference, reserves queue capacity before executor submission, returns promptly after its 100-second audio budget, and leaves 15 seconds before the backend client abort.
 - Retryable vibe-provider failures now persist a bounded retry not-before, keep provider `Retry-After` guidance between the attempt baseline and five minutes, suppress premature producer enqueue attempts, and remain subject to the existing three-attempt limit.

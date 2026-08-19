@@ -103,7 +103,8 @@ except RuntimeError:
 
 import psycopg2
 import redis
-from psycopg2.extras import Json, RealDictCursor
+from database_connection import DatabaseConnection
+from psycopg2.extras import Json
 
 # Essentia imports (will fail gracefully if not installed for testing)
 ESSENTIA_AVAILABLE = False
@@ -181,45 +182,9 @@ def _resolve_music_path(file_path: str) -> str | None:
     return resolve_music_path(MUSIC_PATH, file_path)
 
 
-class DatabaseConnection:
-    """PostgreSQL connection manager"""
-
-    def __init__(self, url: str):
-        """Store connection URL and initialize disconnected state."""
-        self.url = url
-        self.conn: Any | None = None
-
-    def connect(self):
-        """Establish database connection with explicit UTF-8 encoding"""
-        if not self.url:
-            raise ValueError("DATABASE_URL not set")
-
-        self.conn = psycopg2.connect(self.url, options="-c client_encoding=UTF8")
-        self.conn.set_client_encoding("UTF8")
-        self.conn.autocommit = False
-        logger.info("Connected to PostgreSQL with UTF-8 encoding")
-
-    def get_cursor(self) -> RealDictCursor:
-        """Lazily connect and return a RealDictCursor-factory cursor."""
-        if not self.conn:
-            self.connect()
-        return self.conn.cursor(cursor_factory=RealDictCursor)
-
-    def commit(self):
-        """Commit transaction"""
-        if self.conn:
-            self.conn.commit()
-
-    def rollback(self):
-        """Rollback transaction"""
-        if self.conn:
-            self.conn.rollback()
-
-    def close(self):
-        """Close connection"""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+def _is_connection_error(error: BaseException) -> bool:
+    """Return whether a worker failure represents PostgreSQL connection loss."""
+    return isinstance(error, (psycopg2.InterfaceError, psycopg2.OperationalError))
 
 
 def _get_workers_from_db() -> int:
@@ -1756,6 +1721,32 @@ class AnalysisWorker:
         finally:
             cursor.close()
 
+    def _recover_worker(self) -> None:
+        """Reconnect dependencies and run maintenance after repeated failures."""
+        try:
+            self.db.close()
+            time.sleep(2)
+            self.db.connect()
+            self._cleanup_stale_processing()
+            self._retry_failed_tracks()
+            if self.pool_active and not self._check_pool_health():
+                self._recreate_pool()
+        except Exception as reconnect_error:
+            logger.error(f"Recovery failed: {reconnect_error}")
+
+    def _handle_worker_error(self, error: Exception) -> None:
+        """Apply immediate database recovery or the general five-error threshold."""
+        logger.error(f"Worker error: {error}")
+        traceback.print_exc()
+        self.consecutive_empty += 1
+        connection_error = _is_connection_error(error)
+        if connection_error or self.consecutive_empty >= 5:
+            reason = "PostgreSQL connection error" if connection_error else "Multiple errors"
+            logger.info(f"{reason}, attempting recovery...")
+            self._recover_worker()
+            self.consecutive_empty = 0
+        time.sleep(BRPOP_TIMEOUT)
+
     def start(self):
         """Start processing jobs with BRPOP-driven event loop"""
         cpu_count = os.cpu_count() or 4
@@ -1859,25 +1850,7 @@ class AnalysisWorker:
                     self._cleanup_stale_processing()
                     continue
                 except Exception as e:
-                    logger.error(f"Worker error: {e}")
-                    traceback.print_exc()
-                    self.consecutive_empty += 1
-
-                    if self.consecutive_empty >= 5:
-                        logger.info("Multiple consecutive errors, attempting recovery...")
-                        try:
-                            self.db.close()
-                            time.sleep(2)
-                            self.db.connect()
-                            self._cleanup_stale_processing()
-                            self._retry_failed_tracks()
-                            if self.pool_active and not self._check_pool_health():
-                                self._recreate_pool()
-                        except Exception as reconnect_err:
-                            logger.error(f"Recovery failed: {reconnect_err}")
-                        self.consecutive_empty = 0
-
-                    time.sleep(BRPOP_TIMEOUT)
+                    self._handle_worker_error(e)
         finally:
             self._shutdown_pool()
             if self.pubsub:
