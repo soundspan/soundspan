@@ -88,6 +88,7 @@ For deployment variants, release channels, compose files, and updates, see [`doc
 - Kubernetes deployment: [`docs/KUBERNETES.md`](docs/KUBERNETES.md)
 - Reverse proxy and tunnel routing: [`docs/REVERSE_PROXY_AND_TUNNELS.md`](docs/REVERSE_PROXY_AND_TUNNELS.md)
 - OpenSubsonic compatibility contract: [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)
+- Subsonic client matrix and mobile guide: [`docs/SUBSONIC_CLIENTS.md`](docs/SUBSONIC_CLIENTS.md)
 - Brand usage policy: [`docs/BRAND_POLICY.md`](docs/BRAND_POLICY.md)
 
 ---
@@ -122,9 +123,11 @@ All integration endpoints below require soundspan auth (session or API key where
 
 soundspan is browser-first. Use it from your desktop or mobile browser, or install it through your browser's PWA flow for app-like behavior, background playback, media controls, and faster repeat loads.
 
-### OpenSubsonic clients
+### On mobile
 
-For third-party clients, use OpenSubsonic-compatible apps through soundspan's `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
+soundspan's mobile story is deliberate: there is no native app, and none is planned. Install the PWA for the full soundspan experience, and use a Subsonic client when you want native ergonomics — offline caching, Android Auto / CarPlay, and platform audio integration through the OpenSubsonic-compatible `/rest` API. Both are first-class.
+
+A per-client compatibility matrix (Symfonium, Tempo, DSub2000, Ultrasonic, play:Sub), connection quickstart, and the extension roadmap live in [`docs/SUBSONIC_CLIENTS.md`](docs/SUBSONIC_CLIENTS.md). The authoritative protocol contract is [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md).
 
 ### Android TV
 

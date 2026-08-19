@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Subsonic client guide (`docs/SUBSONIC_CLIENTS.md`): the mobile positioning statement, a per-feature compatibility matrix for Symfonium, Tempo, DSub2000, Ultrasonic, and play:Sub with per-release re-verification instructions, and the OpenSubsonic extension roadmap.
 - Library Health dashboard read model and admin API (metadata gaps, analysis coverage, duplicate clusters, storage and quality analytics).
 - Library Insights section on the Admin page: browsable panels for metadata gaps, analysis coverage with retry actions, report-only duplicate clusters, storage breakdown, and low-bitrate album detection.
 

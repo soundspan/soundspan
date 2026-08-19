@@ -100,6 +100,7 @@ This index is the central navigation page for all project documentation under `d
 | [`../CHANGELOG.md`](../CHANGELOG.md)                             | Canonical release and feature change log for this repository                                                                    |
 | [`release-notes/`](release-notes/)                               | Per-release human-readable notes (summary, known issues, compatibility notes), generated from the CHANGELOG at release-cut time |
 | [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) | Supported `/rest` compatibility contract, known gaps, and validation evidence                                                   |
+| [`SUBSONIC_CLIENTS.md`](SUBSONIC_CLIENTS.md) | Mobile positioning, per-client compatibility matrix, connection quickstart, and extension roadmap |
 | [`BRAND_POLICY.md`](BRAND_POLICY.md)                             | Brand usage rules, naming constraints, and attribution guidance for soundspan                                                   |
 
 ---

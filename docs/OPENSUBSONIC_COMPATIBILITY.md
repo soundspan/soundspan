@@ -13,6 +13,10 @@ This document defines the current `/rest` compatibility contract implemented in 
 - Current OpenSubsonic compatibility milestone: `Complete` (for soundspan's in-scope music client surface)
 - Remaining missing domains are intentionally out-of-scope for this milestone unless real client demand requires promotion.
 
+## Client-Facing Companion
+
+The per-client compatibility matrix, connection quickstart, and extension roadmap live in [`SUBSONIC_CLIENTS.md`](SUBSONIC_CLIENTS.md). Update that matrix when this contract changes.
+
 ## Client Connection URL
 
 - Split frontend/backend deployments: use the frontend base URL for clients (for example `http://host:3030` in deployment, `http://host:3031` in local dev). Frontend proxies `/rest` to backend.
