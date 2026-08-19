@@ -819,7 +819,22 @@ mock.module("@/lib/api", {
                     downloadProgress: podcastCacheStatus.downloadProgress,
                 };
             },
-            getStreamingAuthToken: () => "test-auth-token",
+            updateAudiobookProgress: async () => undefined,
+            updatePodcastProgress: async (
+                podcastId: string,
+                episodeId: string,
+                positionSec: number,
+                durationSec: number,
+                isFinished: boolean,
+            ) => {
+                apiCalls.updatePodcastProgress.push({
+                    podcastId,
+                    episodeId,
+                    positionSec,
+                    durationSec,
+                    isFinished,
+                });
+            },
             reportPlaybackClientMetric: async (
                 payload: Record<string, unknown>,
             ) => {
@@ -2137,13 +2152,14 @@ test("heartbeat stall buffers and buffer timeout runs transient recovery", async
     assert.equal(playbackMachine.state, "BUFFERING");
     assert.ok(playbackCalls.setIsBuffering.includes(true));
 
-    // Buffer timeout ("Connection lost...") is transient → reload, not death.
+    // A buffer timeout is a hard connection failure, not a transient
+    // stream error: playback fails explicitly instead of retrying.
     heartbeatInstances[0].triggerBufferTimeout();
     await flushAsync();
-    t.mock.timers.tick(450);
-    await flushAsync();
-    assert.equal(engine.reloadCalls, 1);
-    assert.equal(playbackMachine.state, "LOADING");
+    assert.equal(engine.reloadCalls, 0);
+    assert.equal(playbackMachine.state, "ERROR");
+    assert.ok(playbackCalls.setIsPlaying.includes(false));
+    assert.ok(playbackCalls.setIsBuffering.includes(false));
 });
 
 test("startup guard suppresses a second unexpected stop after progress begins", async (t) => {
