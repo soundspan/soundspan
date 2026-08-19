@@ -135,6 +135,8 @@ describe("target-space selection through claim", () => {
             recordOutcome: jest.fn(),
             describeFailure: jest.fn(() => "failed"),
             isTransientFailure: jest.fn(() => false),
+            isRetryEligible: jest.fn(async () => true),
+            scheduleRetry: jest.fn(async () => undefined),
             now: () => new Date("2026-08-16T12:00:00.000Z"),
         });
     }

@@ -15,7 +15,6 @@ from model_provider import (
     DclapProvider,
     InferenceCancellation,
     InferenceCancelledError,
-    InferenceQueueFullError,
     ModelBundle,
 )
 
@@ -129,7 +128,7 @@ def test_cancelled_audio_stops_between_segments_and_releases_lock(
     monkeypatch.setattr(
         model_provider,
         "load_segmented_log_mels",
-        lambda _path: iter([object(), object()]),
+        lambda _path, **_kwargs: iter([object(), object()]),
     )
     provider = DclapProvider(
         load_models=lambda: ModelBundle(
@@ -169,44 +168,65 @@ def test_cancelled_audio_stops_between_segments_and_releases_lock(
     )
 
 
-def test_queue_full_rejects_without_waiting_for_inference_lock() -> None:
-    """Reject above the configured queued-request bound before a thread stacks."""
-    active_started = threading.Event()
-    release_active = threading.Event()
+def test_blocking_audio_decode_does_not_hold_inference_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow text inference while an audio request remains blocked in decode."""
+    decode_started = threading.Event()
+    release_decode = threading.Event()
+    text_finished = threading.Event()
 
-    class BlockingTextSession(TextSession):
-        def run(
-            self,
-            _outputs: list[str] | None,
-            _feed: dict[str, object],
-        ) -> list[object]:
-            active_started.set()
-            assert release_active.wait(timeout=1)
-            return [np.ones((1, 512), dtype=np.float32)]
+    def blocking_decoder(
+        _path: str,
+        check_cancelled: object | None = None,
+    ) -> object:
+        del check_cancelled
+        decode_started.set()
+        assert release_decode.wait(timeout=1)
+        return iter([object()])
 
+    monkeypatch.setattr(model_provider, "load_segmented_log_mels", blocking_decoder)
     provider = DclapProvider(
-        load_models=lambda: ModelBundle(
-            AudioSession(),
-            BlockingTextSession(),
-            Tokenizer(),
-        ),
+        load_models=lambda: ModelBundle(AudioSession(), TextSession(), Tokenizer()),
+        idle_timeout=0,
+    )
+    audio = threading.Thread(
+        target=provider.get_audio_embedding,
+        args=("track.flac", InferenceCancellation(deadline=None)),
+    )
+
+    def embed_text() -> None:
+        provider.get_text_embedding(
+            "decode must not own lock",
+            InferenceCancellation(deadline=None),
+        )
+        text_finished.set()
+
+    text = threading.Thread(target=embed_text)
+    audio.start()
+    assert decode_started.wait(timeout=1)
+    text.start()
+    completed_before_decode = text_finished.wait(timeout=0.25)
+    release_decode.set()
+    audio.join(timeout=1)
+    text.join(timeout=1)
+
+    assert completed_before_decode
+    assert not audio.is_alive()
+    assert not text.is_alive()
+
+
+def test_admission_reservation_rejects_before_executor_submission() -> None:
+    """Expose a non-blocking capacity reservation for the HTTP boundary."""
+    provider = DclapProvider(
+        load_models=lambda: ModelBundle(AudioSession(), TextSession(), Tokenizer()),
         idle_timeout=0,
         max_queued_requests=0,
     )
-    active = threading.Thread(
-        target=provider.get_text_embedding,
-        args=("active", InferenceCancellation(deadline=None)),
-    )
-    active.start()
-    assert active_started.wait(timeout=1)
 
-    with pytest.raises(InferenceQueueFullError):
-        provider.get_text_embedding(
-            "rejected",
-            InferenceCancellation(deadline=None),
-        )
-
-    release_active.set()
-    active.join(timeout=1)
-    assert not active.is_alive()
+    assert provider.try_reserve_inference()
+    assert not provider.try_reserve_inference()
+    provider.release_inference()
+    assert provider.try_reserve_inference()
+    provider.release_inference()
     assert MAX_QUEUED_INFERENCE_REQUESTS == 4

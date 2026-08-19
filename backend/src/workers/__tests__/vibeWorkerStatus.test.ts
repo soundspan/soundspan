@@ -7,10 +7,58 @@ import {
 } from "../vibeWorkerStatus";
 
 class InMemoryStatusRedis implements VibeWorkerStatusRedis {
-    readonly registry = new Map<string, number>();
+    readonly registries = new Map<string, Map<string, number>>();
     readonly values = new Map<string, string>();
+    readonly mGetBatchSizes: number[] = [];
+    legacyCleanupRuns = 0;
+
+    get registry(): Map<string, number> {
+        return this.registryFor(VIBE_WORKER_STATUS_REGISTRY_KEY);
+    }
+
+    registryFor(key: string): Map<string, number> {
+        let registry = this.registries.get(key);
+        if (!registry) {
+            registry = new Map<string, number>();
+            this.registries.set(key, registry);
+        }
+        return registry;
+    }
+
+    async eval(
+        _script: string,
+        options: { keys: string[]; arguments?: string[] },
+    ): Promise<unknown> {
+        if (options.keys.length === 1) {
+            const [registryKey] = options.keys;
+            const [cutoff, maximum] = options.arguments ?? [];
+            if (!registryKey || !cutoff || !maximum) return 0;
+            await this.zRemRangeByScore(registryKey, "-inf", Number(cutoff));
+            const excess = this.registryFor(registryKey).size - Number(maximum);
+            if (excess > 0) {
+                await this.zRemRangeByRank(registryKey, 0, excess - 1);
+            }
+            return 1;
+        }
+        const [legacyRegistryKey, markerKey] = options.keys;
+        if (!legacyRegistryKey || !markerKey) return 0;
+        if (this.values.get(markerKey) === "done") return 0;
+        const [legacyPrefix] = options.arguments ?? [];
+        if (legacyPrefix) {
+            for (const key of this.registryFor(legacyRegistryKey).keys()) {
+                if (key.startsWith(legacyPrefix) && key !== legacyRegistryKey) {
+                    this.values.delete(key);
+                }
+            }
+        }
+        this.registries.delete(legacyRegistryKey);
+        this.values.set(markerKey, "done");
+        this.legacyCleanupRuns += 1;
+        return 1;
+    }
 
     async mGet(keys: string[]): Promise<Array<string | null>> {
+        this.mGetBatchSizes.push(keys.length);
         return keys.map((key) => this.values.get(key) ?? null);
     }
 
@@ -24,15 +72,15 @@ class InMemoryStatusRedis implements VibeWorkerStatusRedis {
     }
 
     async zAdd(
-        _key: string,
+        key: string,
         member: { score: number; value: string },
     ): Promise<unknown> {
-        this.registry.set(member.value, member.score);
+        this.registryFor(key).set(member.value, member.score);
         return 1;
     }
 
-    async zRange(_key: string, start: number, stop: number): Promise<string[]> {
-        const members = [...this.registry]
+    async zRange(key: string, start: number, stop: number): Promise<string[]> {
+        const members = [...this.registryFor(key)]
             .sort(
                 ([leftKey, leftScore], [rightKey, rightScore]) =>
                     leftScore - rightScore || leftKey.localeCompare(rightKey),
@@ -42,21 +90,42 @@ class InMemoryStatusRedis implements VibeWorkerStatusRedis {
         return members.slice(start, inclusiveStop);
     }
 
-    async zRem(_key: string, members: string[]): Promise<unknown> {
-        for (const member of members) this.registry.delete(member);
+    async zRem(key: string, members: string[]): Promise<unknown> {
+        const registry = this.registryFor(key);
+        for (const member of members) registry.delete(member);
         return members.length;
     }
 
+    async zRemRangeByRank(
+        key: string,
+        start: number,
+        stop: number,
+    ): Promise<unknown> {
+        const registry = this.registryFor(key);
+        const members = [...registry]
+            .sort(
+                ([leftKey, leftScore], [rightKey, rightScore]) =>
+                    leftScore - rightScore || leftKey.localeCompare(rightKey),
+            )
+            .map(([member]) => member);
+        const normalizedStop = stop < 0 ? members.length + stop : stop;
+        if (normalizedStop < start) return 0;
+        const removed = members.slice(start, normalizedStop + 1);
+        for (const member of removed) registry.delete(member);
+        return removed.length;
+    }
+
     async zRemRangeByScore(
-        _key: string,
+        key: string,
         minimum: number | string,
         maximum: number | string,
     ): Promise<unknown> {
         const minimumScore = minimum === "-inf" ? -Infinity : Number(minimum);
         const maximumScore = maximum === "+inf" ? Infinity : Number(maximum);
-        for (const [member, score] of this.registry) {
+        const registry = this.registryFor(key);
+        for (const [member, score] of registry) {
             if (score >= minimumScore && score <= maximumScore) {
-                this.registry.delete(member);
+                registry.delete(member);
             }
         }
         return 1;
@@ -172,6 +241,55 @@ describe("vibe worker status cache", () => {
             providerReachability: { checkedAt: now.toISOString() },
         });
         expect(redis.registry.size).toBe(2);
+    });
+
+    it.each(["read", "write"])(
+        "caps the %s path MGET at 256 fresh registry members",
+        async (path) => {
+            const redis = new InMemoryStatusRedis();
+            const now = new Date("2026-08-17T12:00:00.000Z");
+            for (let index = 0; index < 300; index += 1) {
+                addStatus(redis, `fresh-${index}`, now.getTime() + index);
+            }
+
+            if (path === "read") {
+                await readVibeWorkerStatus(redis, now);
+            } else {
+                await writeVibeWorkerStatus(redis, status, "writer", now);
+            }
+
+            expect(Math.max(...redis.mGetBatchSizes)).toBeLessThanOrEqual(256);
+            expect(redis.registry.size).toBeLessThanOrEqual(256);
+        },
+    );
+
+    it("removes the v2 registry once without disturbing v3 status", async () => {
+        const redis = new InMemoryStatusRedis();
+        const v2RegistryKey = "soundspan:vibe-worker-status:v2:registry";
+        redis
+            .registryFor(v2RegistryKey)
+            .set(
+                "soundspan:vibe-worker-status:v2:old-worker",
+                Date.parse("2026-08-17T11:59:00.000Z"),
+            );
+        redis.values.set(
+            "soundspan:vibe-worker-status:v2:old-worker",
+            JSON.stringify(status),
+        );
+        const now = new Date("2026-08-17T12:00:00.000Z");
+        addStatus(redis, "worker-v3", now.getTime());
+
+        await expect(readVibeWorkerStatus(redis, now)).resolves.toEqual(status);
+        await expect(readVibeWorkerStatus(redis, now)).resolves.toEqual(status);
+
+        expect(redis.registries.has(v2RegistryKey)).toBe(false);
+        expect(
+            redis.values.has("soundspan:vibe-worker-status:v2:old-worker"),
+        ).toBe(false);
+        expect(redis.legacyCleanupRuns).toBe(1);
+        expect(
+            redis.registry.has(`${VIBE_WORKER_STATUS_KEY_PREFIX}worker-v3`),
+        ).toBe(true);
     });
 
     it("keeps repeated restart identities bounded by timestamp expiry", async () => {

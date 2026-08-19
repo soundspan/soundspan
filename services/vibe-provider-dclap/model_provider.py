@@ -27,6 +27,7 @@ IDLE_POLL_SECONDS = 5.0
 MAX_IDLE_MONITOR_POLLS = 2**63 - 1
 MAX_QUEUED_INFERENCE_REQUESTS = 4
 MAX_CONFIGURED_QUEUED_REQUESTS = 64
+MAX_CONCURRENT_AUDIO_DECODES = 2
 INFERENCE_LOCK_POLL_SECONDS = 0.1
 MAX_INFERENCE_LOCK_POLLS = 1_102
 ResultT = TypeVar("ResultT")
@@ -143,8 +144,17 @@ class DclapProvider:
         self._last_work_at = clock()
         self._lock = threading.RLock()
         self._admission = threading.BoundedSemaphore(max_queued_requests + 1)
+        self._decode_slots = threading.BoundedSemaphore(MAX_CONCURRENT_AUDIO_DECODES)
         self._stop_event = threading.Event()
         self._monitor_thread: threading.Thread | None = None
+
+    def try_reserve_inference(self) -> bool:
+        """Reserve bounded HTTP admission before executor submission."""
+        return self._admission.acquire(blocking=False)
+
+    def release_inference(self) -> None:
+        """Release one HTTP-owned inference admission slot."""
+        self._admission.release()
 
     @property
     def models_loaded(self) -> bool:
@@ -164,27 +174,44 @@ class DclapProvider:
         operation: Callable[[], ResultT],
         cancellation: InferenceCancellation,
     ) -> ResultT:
-        """Admit bounded work, serialize it, and release capacity on every path."""
+        """Serialize tokenizer and ONNX state with cancellation safe points."""
         cancellation.raise_if_cancelled()
-        if not self._admission.acquire(blocking=False):
-            raise InferenceQueueFullError("Inference queue is full")
+        for _poll in range(MAX_INFERENCE_LOCK_POLLS):
+            cancellation.raise_if_cancelled()
+            if self._lock.acquire(timeout=INFERENCE_LOCK_POLL_SECONDS):
+                break
+        else:
+            raise InferenceDeadlineExceededError("Inference lock wait exceeded")
         try:
-            for _poll in range(MAX_INFERENCE_LOCK_POLLS):
-                cancellation.raise_if_cancelled()
-                if self._lock.acquire(timeout=INFERENCE_LOCK_POLL_SECONDS):
-                    break
-            else:
-                raise InferenceDeadlineExceededError("Inference lock wait exceeded")
-            try:
-                cancellation.raise_if_cancelled()
-                result = operation()
-                cancellation.raise_if_cancelled()
-                self._last_work_at = self._clock()
-                return result
-            finally:
-                self._lock.release()
+            cancellation.raise_if_cancelled()
+            result = operation()
+            cancellation.raise_if_cancelled()
+            self._last_work_at = self._clock()
+            return result
         finally:
-            self._admission.release()
+            self._lock.release()
+
+    def _decode_audio(
+        self,
+        audio_path: str,
+        cancellation: InferenceCancellation,
+    ) -> list[object]:
+        """Preprocess audio under its own small concurrency bound."""
+        for _poll in range(MAX_INFERENCE_LOCK_POLLS):
+            cancellation.raise_if_cancelled()
+            if self._decode_slots.acquire(timeout=INFERENCE_LOCK_POLL_SECONDS):
+                break
+        else:
+            raise InferenceDeadlineExceededError("Audio decode wait exceeded")
+        try:
+            return list(
+                load_segmented_log_mels(
+                    audio_path,
+                    check_cancelled=cancellation.raise_if_cancelled,
+                )
+            )
+        finally:
+            self._decode_slots.release()
 
     def get_text_embedding(
         self,
@@ -207,10 +234,11 @@ class DclapProvider:
     ) -> object:
         """Return one normalized, chunk-aggregated student audio embedding."""
         control = cancellation or InferenceCancellation(deadline=None)
+        mel_tensors = self._decode_audio(audio_path, control)
+        control.raise_if_cancelled()
 
         def infer() -> object:
             models = self._models_locked()
-            mel_tensors = load_segmented_log_mels(audio_path)
             return run_audio_chunks(
                 models.audio_session,
                 mel_tensors,

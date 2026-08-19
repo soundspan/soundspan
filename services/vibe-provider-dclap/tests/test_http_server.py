@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -49,6 +51,15 @@ class StubProvider:
         self.audio_calls: list[str] = []
         self.started = 0
         self.stopped = 0
+        self._admission = threading.BoundedSemaphore(1)
+
+    def try_reserve_inference(self) -> bool:
+        """Reserve one HTTP-owned inference admission slot."""
+        return self._admission.acquire(blocking=False)
+
+    def release_inference(self) -> None:
+        """Release one HTTP-owned inference admission slot."""
+        self._admission.release()
 
     def start_idle_monitor(self) -> None:
         """Record app startup."""
@@ -163,6 +174,11 @@ def test_space_is_the_distinct_pinned_student_space() -> None:
     }
 
 
+def test_audio_budget_leaves_backend_abort_margin() -> None:
+    """Keep fifteen seconds for cancellation mapping before the backend aborts."""
+    assert http_server.AUDIO_INFERENCE_BUDGET_SECONDS == 100.0
+
+
 @pytest.mark.parametrize("header", [None, "wrong-secret"])
 def test_auth_rejects_missing_or_wrong_secret(
     monkeypatch: pytest.MonkeyPatch,
@@ -264,6 +280,91 @@ def test_text_inference_control_failures_have_retryable_http_mappings(
     assert response.json() == body
     if status == 429:
         assert response.headers["retry-after"] == "1"
+
+
+def test_http_admission_rejects_before_executor_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return 429 without submitting excess work to the thread executor."""
+    submissions = 0
+
+    async def send_requests() -> tuple[httpx.Response, httpx.Response]:
+        nonlocal submissions
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocking_to_thread(function: Callable[..., object], *args: object) -> object:
+            nonlocal submissions
+            submissions += 1
+            started.set()
+            await release.wait()
+            return function(*args)
+
+        monkeypatch.setattr(http_server.asyncio, "to_thread", blocking_to_thread)
+        provider = StubProvider(text_result=np.ones(512, dtype=np.float32))
+        app = http_server.create_app(provider)
+        transport = httpx.ASGITransport(app=app)
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+        ):
+            active = asyncio.create_task(client.post("/v1/embed/text", json={"text": "active"}))
+            await asyncio.wait_for(started.wait(), timeout=1)
+            release_timer = asyncio.get_running_loop().call_later(0.2, release.set)
+            try:
+                rejected = await client.post("/v1/embed/text", json={"text": "excess"})
+            finally:
+                release_timer.cancel()
+                release.set()
+            return await active, rejected
+
+    active_response, rejected_response = asyncio.run(send_requests())
+
+    assert active_response.status_code == 200
+    assert rejected_response.status_code == 429
+    assert submissions == 1
+
+
+def test_budget_expiry_returns_cancelled_response_without_waiting_for_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop awaiting timed-out blocking work while its thread reaches a safe point."""
+    finished = threading.Event()
+
+    class SlowProvider(StubProvider):
+        def get_text_embedding(
+            self,
+            _text: str,
+            _cancellation: InferenceCancellation,
+        ) -> object:
+            return np.ones(512, dtype=np.float32)
+
+    async def slow_to_thread(function: Callable[..., object], *args: object) -> object:
+        release = asyncio.Event()
+        timer = asyncio.get_running_loop().call_later(0.4, release.set)
+        try:
+            await release.wait()
+            return function(*args)
+        finally:
+            timer.cancel()
+            finished.set()
+
+    monkeypatch.setattr(http_server.asyncio, "to_thread", slow_to_thread)
+    monkeypatch.setattr(http_server, "TEXT_INFERENCE_BUDGET_SECONDS", 0.02)
+    started_at = time.monotonic()
+
+    response = _request(
+        SlowProvider(),
+        "POST",
+        "/v1/embed/text",
+        json={"text": "slow"},
+    )
+
+    elapsed = time.monotonic() - started_at
+    assert response.status_code == 503
+    assert response.json() == {"error": "Inference cancelled"}
+    assert elapsed < 0.2
+    assert finished.wait(timeout=1)
 
 
 def test_invalid_model_vector_is_unavailable() -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -107,8 +107,11 @@ def create_log_mel(segment: object, backend: LibrosaBackend) -> object:
 def load_segmented_log_mels(
     audio_path: str,
     backend: LibrosaBackend | None = None,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> Iterator[object]:
     """Load a bounded prefix and yield one quantized segment's log mel at a time."""
+    if check_cancelled is not None:
+        check_cancelled()
     librosa_backend = backend or _load_librosa()
     max_audio_seconds = settings.MAX_AUDIO_SECONDS
     try:
@@ -120,9 +123,13 @@ def load_segmented_log_mels(
         )
     except Exception as error:
         raise AudioDecodeError("Audio could not be decoded") from error
+    if check_cancelled is not None:
+        check_cancelled()
     decoded_samples = int(np.asarray(audio).size)
     quantized = int16_round_trip(audio)
     del audio
+    if check_cancelled is not None:
+        check_cancelled()
     if decoded_samples >= max_audio_seconds * settings.SAMPLE_RATE_HZ:
         logger.warning(
             "Audio reached the %d-second decode cap; embedding the capped prefix: %s",
@@ -130,4 +137,9 @@ def load_segmented_log_mels(
             Path(audio_path).name,
         )
     for segment in segment_audio(quantized):
-        yield create_log_mel(segment, librosa_backend)
+        if check_cancelled is not None:
+            check_cancelled()
+        log_mel = create_log_mel(segment, librosa_backend)
+        if check_cancelled is not None:
+            check_cancelled()
+        yield log_mel

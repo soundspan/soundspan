@@ -11,7 +11,11 @@ import {
     VibeEmbeddingGenerationMismatchError,
     type VibeEmbeddingWriteClaim,
 } from "./trackEmbeddings";
-import { embedAudio, VibeProviderError } from "./vibeProvider";
+import {
+    embedAudio,
+    VibeProviderBackpressureError,
+    VibeProviderError,
+} from "./vibeProvider";
 import type { EmbeddingVectorSpace } from "./vibeProvider";
 import { vibeEmbeddingTargetGateWhere } from "./vibeEmbeddingEligibility";
 
@@ -19,6 +23,8 @@ const VIBE_QUEUE = "audio:clap:queue";
 const MAX_ERROR_LENGTH = 500;
 const INVALID_PAYLOAD_ERROR = "Invalid vibe embedding job payload";
 export const MAX_VIBE_ANALYSIS_RETRIES = 3;
+const VIBE_RETRY_KEY_PREFIX = "soundspan:vibe-retry-after:v1:";
+const VIBE_RETRY_BACKOFF_MS = [30_000, 120_000, 300_000] as const;
 const jobLog =
     typeof (logger as { child?: unknown }).child === "function"
         ? logger.child("VibeEmbedJobs")
@@ -92,6 +98,8 @@ interface VibeEmbedJobDependencies {
     recordOutcome(outcome: VibeEmbedJobOutcome): void;
     describeFailure(error: unknown): string;
     isTransientFailure(error: unknown): boolean;
+    isRetryEligible(trackId: string): Promise<boolean>;
+    scheduleRetry(trackId: string, notBefore: Date): Promise<void>;
     now(): Date;
 }
 
@@ -305,6 +313,7 @@ async function resetTransientFailure(
     ) {
         return false;
     }
+    const updatedAt = dependencies.now();
     const updated = await dependencies.prisma.track.updateMany({
         where: {
             ...activeTrackWhere(track.id),
@@ -317,10 +326,28 @@ async function resetTransientFailure(
             vibeAnalysisError: failureMessage(dependencies, error),
             vibeAnalysisRetryCount: { increment: 1 },
             vibeAnalysisStartedAt: null,
-            vibeAnalysisStatusUpdatedAt: dependencies.now(),
+            vibeAnalysisStatusUpdatedAt: updatedAt,
         },
     });
-    return updated.count === 1;
+    if (updated.count !== 1) return false;
+    const retryDelayMs = retryDelayForFailure(error, retryCount);
+    await dependencies.scheduleRetry(
+        track.id,
+        new Date(updatedAt.getTime() + retryDelayMs),
+    );
+    return true;
+}
+
+function retryDelayForFailure(error: unknown, retryCount: number): number {
+    if (
+        error instanceof VibeProviderBackpressureError &&
+        error.retryAfterMs !== undefined
+    ) {
+        return Math.min(VIBE_RETRY_BACKOFF_MS[2], error.retryAfterMs);
+    }
+    return VIBE_RETRY_BACKOFF_MS[
+        Math.min(retryCount, VIBE_RETRY_BACKOFF_MS.length - 1)
+    ];
 }
 
 async function handleGenerationFailure(
@@ -381,6 +408,13 @@ async function processValidJob(
     job: VibeEmbedJob,
     dependencies: VibeEmbedJobDependencies,
 ): Promise<VibeEmbedJobOutcome> {
+    if (!(await dependencies.isRetryEligible(job.trackId))) {
+        await releaseReservation(dependencies, job.trackId);
+        jobLog.debug("Skipped vibe embedding job before retry not-before", {
+            trackId: job.trackId,
+        });
+        return finish(dependencies, "stale_claim");
+    }
     const track = await findActiveTrack(dependencies.prisma, job.trackId);
     if (!track) {
         await releaseReservation(dependencies, job.trackId);
@@ -526,6 +560,22 @@ export async function processVibeEmbedJob(
         recordOutcome: recordVibeEmbedJobOutcome,
         describeFailure: describeVibeEmbedFailure,
         isTransientFailure: isTransientVibeProviderFailure,
+        isRetryEligible: async (trackId) => {
+            const stored = await redisClient.get(
+                `${VIBE_RETRY_KEY_PREFIX}${trackId}`,
+            );
+            if (stored === null) return true;
+            const notBeforeMs = Number(stored);
+            return !Number.isFinite(notBeforeMs) || notBeforeMs <= Date.now();
+        },
+        scheduleRetry: async (trackId, notBefore) => {
+            const ttlMs = Math.max(1, notBefore.getTime() - Date.now());
+            await redisClient.set(
+                `${VIBE_RETRY_KEY_PREFIX}${trackId}`,
+                String(notBefore.getTime()),
+                { PX: ttlMs },
+            );
+        },
         now: () => new Date(),
     })(rawJob);
 }

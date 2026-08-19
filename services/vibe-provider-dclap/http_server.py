@@ -38,9 +38,9 @@ from services.common.logging_utils import configure_service_logger
 
 logger = configure_service_logger("vibe-provider-dclap-http")
 TEXT_INFERENCE_BUDGET_SECONDS = 25.0
-AUDIO_INFERENCE_BUDGET_SECONDS = 110.0
+AUDIO_INFERENCE_BUDGET_SECONDS = 100.0
 DISCONNECT_POLL_SECONDS = 0.1
-MAX_INFERENCE_POLLS = 1_102
+MAX_INFERENCE_POLLS = 1_002
 
 
 class Provider(Protocol):
@@ -59,6 +59,12 @@ class Provider(Protocol):
         cancellation: InferenceCancellation,
     ) -> object:
         """Generate one audio embedding."""
+
+    def try_reserve_inference(self) -> bool:
+        """Reserve admission before work reaches the executor."""
+
+    def release_inference(self) -> None:
+        """Release one reserved inference slot."""
 
     def start_idle_monitor(self) -> None:
         """Start idle model unloading."""
@@ -184,30 +190,85 @@ async def _run_provider_call(
     argument: str,
     budget_seconds: float,
 ) -> object:
-    """Run blocking inference with a monotonic budget and disconnect signal."""
+    """Reserve and await blocking inference within the HTTP-owned budget."""
+    provider = _provider(request)
+    if not provider.try_reserve_inference():
+        raise InferenceQueueFullError("Inference queue is full")
     provider_call = cast(ProtocolProviderCall, operation)
     cancellation = InferenceCancellation(
         deadline=time.monotonic() + budget_seconds,
     )
-    task = asyncio.create_task(
-        asyncio.to_thread(provider_call, argument, cancellation),
-    )
     try:
-        for _poll in range(MAX_INFERENCE_POLLS):
-            done, _pending = await asyncio.wait(
-                {task},
-                timeout=DISCONNECT_POLL_SECONDS,
+        task = asyncio.create_task(
+            _run_reserved_provider_call(
+                provider,
+                provider_call,
+                argument,
+                cancellation,
             )
-            if done:
-                return await task
-            if await request.is_disconnected():
-                cancellation.cancel()
-        return await task
+        )
+    except BaseException:
+        provider.release_inference()
+        raise
+    _track_provider_task(request, task)
+    try:
+        return await asyncio.wait_for(
+            _poll_provider_task(request, task, cancellation),
+            timeout=budget_seconds,
+        )
+    except TimeoutError as error:
+        cancellation.cancel()
+        raise InferenceCancelledError("Inference budget expired") from error
     except asyncio.CancelledError:
         cancellation.cancel()
-        with suppress(Exception):
-            await task
         raise
+
+
+async def _run_reserved_provider_call(
+    provider: Provider,
+    provider_call: ProtocolProviderCall,
+    argument: str,
+    cancellation: InferenceCancellation,
+) -> object:
+    """Run one admitted thread task and release its slot when the task settles."""
+    try:
+        return await asyncio.to_thread(provider_call, argument, cancellation)
+    finally:
+        provider.release_inference()
+
+
+async def _poll_provider_task(
+    request: Request,
+    task: asyncio.Task[object],
+    cancellation: InferenceCancellation,
+) -> object:
+    """Observe completion and disconnects at fixed bounded intervals."""
+    for _poll in range(MAX_INFERENCE_POLLS):
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=DISCONNECT_POLL_SECONDS,
+        )
+        if done:
+            return await task
+        if await request.is_disconnected():
+            cancellation.cancel()
+            raise InferenceCancelledError("Inference client disconnected")
+    raise InferenceDeadlineExceededError("Inference polling bound exceeded")
+
+
+def _track_provider_task(request: Request, task: asyncio.Task[object]) -> None:
+    """Keep timed-out provider tasks owned and observe their final result."""
+    tasks = cast(set[asyncio.Task[object]], request.app.state.provider_tasks)
+    tasks.add(task)
+
+    def observe(completed: asyncio.Task[object]) -> None:
+        tasks.discard(completed)
+        if completed.cancelled():
+            return
+        with suppress(Exception):
+            completed.result()
+
+    task.add_done_callback(observe)
 
 
 class ProtocolProviderCall(Protocol):
@@ -293,6 +354,7 @@ def create_app(provider: Provider) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.provider = provider
+    app.state.provider_tasks = set()
     _register_error_handlers(app)
     app.add_api_route("/health", health, methods=["GET"])
     app.add_api_route("/v1/space", space, methods=["GET"])

@@ -78,6 +78,8 @@ describe("vibe embed job processor", () => {
             error instanceof Error ? error.message : "Embedding failed",
         );
         const isTransientFailure = jest.fn(() => false);
+        const isRetryEligible = jest.fn(async () => true);
+        const scheduleRetry = jest.fn(async () => undefined);
         const now = jest.fn(() => new Date("2026-08-16T12:00:00.000Z"));
         const processJob = createVibeEmbedJobProcessor({
             targetSpaceId: "space-provider",
@@ -90,6 +92,8 @@ describe("vibe embed job processor", () => {
             recordOutcome,
             describeFailure,
             isTransientFailure,
+            isRetryEligible,
+            scheduleRetry,
             now,
         });
 
@@ -102,6 +106,8 @@ describe("vibe embed job processor", () => {
             releaseReservation,
             recordOutcome,
             isTransientFailure,
+            isRetryEligible,
+            scheduleRetry,
             processJob,
         };
     }
@@ -257,6 +263,55 @@ describe("vibe embed job processor", () => {
             },
         });
         expect(harness.recordFailure).not.toHaveBeenCalled();
+        expect(harness.scheduleRetry).toHaveBeenCalledWith(
+            "track-retry",
+            new Date("2026-08-16T12:00:30.000Z"),
+        );
+    });
+
+    it("skips a pending candidate until its retry not-before passes", async () => {
+        const harness = createHarness();
+        harness.isRetryEligible.mockResolvedValue(false);
+
+        await expect(
+            harness.processJob(
+                JSON.stringify({
+                    trackId: "track-delayed",
+                    filePath: "artist/delayed.flac",
+                }),
+            ),
+        ).resolves.toBe("stale_claim");
+
+        expect(harness.releaseReservation).toHaveBeenCalledWith(
+            "track-delayed",
+        );
+        expect(harness.prisma.track.findFirst).not.toHaveBeenCalled();
+        expect(harness.embedAudio).not.toHaveBeenCalled();
+    });
+
+    it("honors a bounded provider Retry-After before retrying", async () => {
+        const harness = createHarness();
+        harness.prisma.track.findFirst.mockResolvedValue({
+            id: "track-backpressure",
+            title: "Backpressure Track",
+            vibeAnalysisRetryCount: 0,
+        });
+        harness.embedAudio.mockRejectedValue(
+            new VibeProviderBackpressureError(429, "queue full", 300_000),
+        );
+        harness.isTransientFailure.mockReturnValue(true);
+
+        await harness.processJob(
+            JSON.stringify({
+                trackId: "track-backpressure",
+                filePath: "artist/backpressure.flac",
+            }),
+        );
+
+        expect(harness.scheduleRetry).toHaveBeenCalledWith(
+            "track-backpressure",
+            new Date("2026-08-16T12:05:00.000Z"),
+        );
     });
 
     it("marks transient provider failures terminal at the retry bound", async () => {
@@ -287,6 +342,7 @@ describe("vibe embed job processor", () => {
         expect(harness.recordFailure).toHaveBeenCalledWith(
             expect.objectContaining({ entityId: "track-exhausted" }),
         );
+        expect(harness.scheduleRetry).not.toHaveBeenCalled();
     });
 
     it.each(["not-json", JSON.stringify({ filePath: "track.flac" })])(

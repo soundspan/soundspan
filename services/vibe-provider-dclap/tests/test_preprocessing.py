@@ -154,6 +154,24 @@ def test_loader_passes_default_duration_cap_to_librosa() -> None:
     ]
 
 
+def test_loader_checks_cancellation_immediately_after_blocking_decode() -> None:
+    """Stop before quantization and mel work when decode consumed the request budget."""
+    backend = StubLibrosa()
+    checks = 0
+
+    def check_cancelled() -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("cancelled after decode")
+
+    with pytest.raises(RuntimeError, match="cancelled after decode"):
+        list(load_segmented_log_mels("track.flac", backend, check_cancelled))
+
+    assert len(backend.load_calls) == 1
+    assert backend.feature.calls == []
+
+
 def test_loader_passes_configured_duration_cap_to_librosa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

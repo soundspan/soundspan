@@ -19,6 +19,33 @@ export const VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS = 60_000;
 export const VIBE_WORKER_STATUS_TTL_MS =
     3 * VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS;
 const MAX_STATUS_REGISTRY_SIZE = 256;
+const V2_STATUS_KEY_PREFIX = "soundspan:vibe-worker-status:v2:";
+const V2_STATUS_REGISTRY_KEY = `${V2_STATUS_KEY_PREFIX}registry`;
+const V2_CLEANUP_MARKER_KEY =
+    "soundspan:vibe-worker-status:v2-registry-cleanup:v1";
+const CLEANUP_V2_REGISTRY_SCRIPT = `
+if redis.call('GET', KEYS[2]) == 'done' then
+    return 0
+end
+local members = redis.call('ZRANGE', KEYS[1], -256, -1)
+for _, key in ipairs(members) do
+    if string.sub(key, 1, string.len(ARGV[1])) == ARGV[1] and key ~= KEYS[1] then
+        redis.call('DEL', key)
+    end
+end
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[2], 'done')
+return 1
+`;
+const PRUNE_STATUS_REGISTRY_SCRIPT = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+local count = redis.call('ZCARD', KEYS[1])
+local maximum = tonumber(ARGV[2])
+if count > maximum then
+    redis.call('ZREMRANGEBYRANK', KEYS[1], 0, count - maximum - 1)
+end
+return count
+`;
 const WORKER_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const log = logger.child("VibeWorkerStatus");
 
@@ -48,6 +75,10 @@ export type VibeWorkerStatus = z.infer<typeof workerStatusSchema>;
 
 /** Minimal Redis surface for TTL-bound worker status aggregation. */
 export interface VibeWorkerStatusRedis {
+    eval(
+        script: string,
+        options: { keys: string[]; arguments?: string[] },
+    ): Promise<unknown>;
     mGet(keys: string[]): Promise<Array<string | null>>;
     set(key: string, value: string, options: { PX: number }): Promise<unknown>;
     zAdd(
@@ -56,11 +87,25 @@ export interface VibeWorkerStatusRedis {
     ): Promise<unknown>;
     zRange(key: string, start: number, stop: number): Promise<string[]>;
     zRem(key: string, members: string[]): Promise<unknown>;
-    zRemRangeByScore(
-        key: string,
-        minimum: number | string,
-        maximum: number | string,
-    ): Promise<unknown>;
+}
+
+async function cleanupV2StatusRegistry(
+    redis: VibeWorkerStatusRedis,
+): Promise<void> {
+    await redis.eval(CLEANUP_V2_REGISTRY_SCRIPT, {
+        keys: [V2_STATUS_REGISTRY_KEY, V2_CLEANUP_MARKER_KEY],
+        arguments: [V2_STATUS_KEY_PREFIX],
+    });
+}
+
+async function pruneStatusRegistry(
+    redis: VibeWorkerStatusRedis,
+    expiryCutoffMs: number,
+): Promise<void> {
+    await redis.eval(PRUNE_STATUS_REGISTRY_SCRIPT, {
+        keys: [VIBE_WORKER_STATUS_REGISTRY_KEY],
+        arguments: [String(expiryCutoffMs), String(MAX_STATUS_REGISTRY_SIZE)],
+    });
 }
 
 function workerStatusKey(workerId: string): string {
@@ -131,11 +176,8 @@ async function loadFreshStatusValues(
     nowMs: number,
 ): Promise<string[]> {
     const expiryCutoffMs = nowMs - VIBE_WORKER_STATUS_TTL_MS;
-    await redis.zRemRangeByScore(
-        VIBE_WORKER_STATUS_REGISTRY_KEY,
-        "-inf",
-        expiryCutoffMs,
-    );
+    await cleanupV2StatusRegistry(redis);
+    await pruneStatusRegistry(redis, expiryCutoffMs);
     const members = await redis.zRange(VIBE_WORKER_STATUS_REGISTRY_KEY, 0, -1);
     const keys = members.filter(isRegisteredStatusKey);
     const invalidKeys = members.filter((key) => !isRegisteredStatusKey(key));

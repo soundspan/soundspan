@@ -33,10 +33,14 @@ import {
 
 const mockFetch = jest.fn();
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(
+    body: unknown,
+    status = 200,
+    headers: Record<string, string> = {},
+): Response {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...headers },
     });
 }
 
@@ -283,6 +287,25 @@ describe("vibe provider client", () => {
                 expectedError,
             );
             expectMetric("text", status === 408 ? "timeout" : "error");
+        },
+    );
+
+    it.each([
+        ["120", 120_000],
+        ["9999", 300_000],
+    ])(
+        "honors and caps Retry-After %s for backpressure",
+        async (retryAfter, expectedMs) => {
+            mockFetch.mockResolvedValueOnce(
+                jsonResponse({ error: "Inference queue is full" }, 429, {
+                    "retry-after": retryAfter,
+                }),
+            );
+
+            await expect(embedText("quiet focus")).rejects.toMatchObject({
+                name: "VibeProviderBackpressureError",
+                retryAfterMs: expectedMs,
+            });
         },
     );
 
