@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -29,7 +30,7 @@ async function countRemovedLocalTracks(): Promise<number> {
 async function addPurgeAt(cutoff: Date): Promise<void> {
     await schedulerQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
-        { cutoffAt: cutoff.toISOString() },
+        { cutoffAt: cutoff.toISOString(), sweepRunId: randomUUID() },
         PURGE_NOW_JOB_OPTIONS,
     );
 }
@@ -59,6 +60,7 @@ async function enqueuePurgeAt(cutoff: Date): Promise<void> {
 
 const PURGE_STATES_IN_FLIGHT = new Set(["waiting", "delayed", "active"]);
 const FAILED_SCAN_LIMIT = 50;
+const IN_FLIGHT_SCAN_LIMIT = 500;
 const FAILURE_REASON_LIMIT = 200;
 const CONTINUATION_JOB_ID_PREFIX = "scheduler:track-removal-purge:";
 const continuationCountSchema = z
@@ -71,7 +73,7 @@ const continuationDataSchema = z
         startAfterId: z.string().trim().min(1).max(128).optional(),
         cutoffAt: z.iso.datetime({ offset: true }),
         deletedSoFar: continuationCountSchema,
-        sweepId: z.string().trim().min(1).max(256),
+        sweepRunId: z.string().trim().min(1).max(256),
         initialTotal: continuationCountSchema,
         processedSoFar: continuationCountSchema,
         remaining: continuationCountSchema,
@@ -128,9 +130,11 @@ async function isPurgeInFlight(): Promise<boolean> {
         const state = await purgeNowJob.getState();
         if (PURGE_STATES_IN_FLIGHT.has(state)) return true;
     }
+    // The marker is the primary signal. This bounded queue fallback covers
+    // marker loss during Redis flaps, with residual risk beyond 500 jobs.
     const [active, waitingOrDelayed] = await Promise.all([
-        schedulerQueue.getJobs(["active"], 0, FAILED_SCAN_LIMIT),
-        schedulerQueue.getJobs(["waiting", "delayed"], 0, FAILED_SCAN_LIMIT),
+        schedulerQueue.getJobs(["active"], 0, IN_FLIGHT_SCAN_LIMIT),
+        schedulerQueue.getJobs(["waiting", "delayed"], 0, IN_FLIGHT_SCAN_LIMIT),
     ]);
     return (
         active.some((job) => job?.name === TRACK_REMOVAL_PURGE_JOB_NAME) ||

@@ -7,6 +7,7 @@ import { cleanupOrphanedLibraryEntities } from "../../services/libraryOrphanClea
 import {
     clearLibraryHealthPurgeMarker,
     refreshLibraryHealthPurgeMarker,
+    startLibraryHealthPurgeMarker,
 } from "../../services/libraryHealthDashboard/purgeMarker";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -32,6 +33,7 @@ const safeCountSchema = z
 const rootPurgeJobDataSchema = z.strictObject({
     mode: z.enum(["startup", "repeat"]).optional(),
     cutoffAt: z.iso.datetime({ offset: true }).optional(),
+    sweepRunId: z.string().trim().min(1).max(256),
 });
 const continuationPurgeJobDataSchema = z
     .strictObject({
@@ -39,7 +41,7 @@ const continuationPurgeJobDataSchema = z
         startAfterId: z.string().trim().min(1).max(128).optional(),
         cutoffAt: z.iso.datetime({ offset: true }),
         deletedSoFar: safeCountSchema,
-        sweepId: z.string().trim().min(1).max(256),
+        sweepRunId: z.string().trim().min(1).max(256),
         initialTotal: safeCountSchema,
         processedSoFar: safeCountSchema,
         remaining: safeCountSchema,
@@ -73,7 +75,7 @@ export interface TrackRemovalPurgeJobData {
     startAfterId?: string;
     cutoffAt?: string;
     deletedSoFar?: number;
-    sweepId?: string;
+    sweepRunId: string;
     initialTotal?: number;
     processedSoFar?: number;
     remaining?: number;
@@ -90,11 +92,12 @@ type PurgeCursor = {
     startAfterId?: string;
     cutoff: Date;
     deletedSoFar: number;
+    sweepRunId: string;
     progress?: SweepProgress;
 };
 
 type SweepProgress = {
-    sweepId: string;
+    sweepRunId: string;
     initialTotal: number;
     processedSoFar: number;
     remaining: number;
@@ -108,10 +111,10 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
         : new Date(
               Date.now() - config.workers.trackRemovalRetentionDays * DAY_MS,
           );
-    const isContinuation = "sweepId" in parsed;
+    const isContinuation = "initialTotal" in parsed;
     const progress = isContinuation
         ? {
-              sweepId: parsed.sweepId,
+              sweepRunId: parsed.sweepRunId,
               initialTotal: parsed.initialTotal,
               processedSoFar: parsed.processedSoFar,
               remaining: parsed.remaining,
@@ -122,6 +125,7 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
         startAfterId: isContinuation ? parsed.startAfterId : undefined,
         cutoff,
         deletedSoFar: isContinuation ? parsed.deletedSoFar : 0,
+        sweepRunId: parsed.sweepRunId,
         progress,
     };
 }
@@ -236,10 +240,13 @@ async function enqueueContinuation(
         },
         {
             ...CONTINUATION_OPTIONS,
-            jobId: `scheduler:track-removal-purge:${cutoff.toISOString()}:${cursorKey}`,
+            jobId: `scheduler:track-removal-purge:${progress.sweepRunId}:${cutoff.toISOString()}:${cursorKey}`,
         },
     );
-    await refreshLibraryHealthPurgeMarker(progress.sweepId, progress.remaining);
+    await refreshLibraryHealthPurgeMarker(
+        progress.sweepRunId,
+        progress.remaining,
+    );
 }
 
 async function countPurgeTracks(
@@ -255,25 +262,13 @@ async function countPurgeTracks(
     });
 }
 
-function requireSweepId(jobId: Job["id"]): string {
-    if (jobId === undefined || jobId === null) {
-        throw new Error("Track removal purge job id is missing");
-    }
-    const sweepId = String(jobId);
-    if (sweepId.length === 0 || sweepId.length > 256) {
-        throw new Error("Track removal purge job id is invalid");
-    }
-    return sweepId;
-}
-
 async function initializeSweepProgress(
-    job: Job<TrackRemovalPurgeJobData>,
     cursor: PurgeCursor,
 ): Promise<SweepProgress> {
     if (cursor.progress) return cursor.progress;
     const initialTotal = await countPurgeTracks(cursor.cutoff);
     return {
-        sweepId: requireSweepId(job.id),
+        sweepRunId: cursor.sweepRunId,
         initialTotal,
         processedSoFar: 0,
         remaining: initialTotal,
@@ -333,13 +328,13 @@ async function continuePurge(
 
 async function finishPurge(
     sweepDeleted: number,
-    sweepId: string,
+    sweepRunId: string,
 ): Promise<void> {
     if (sweepDeleted > 0) {
         await refreshCatalogAfterPurge(sweepDeleted);
     }
     await cleanupExpiredFederationTombstones(new Date());
-    await clearLibraryHealthPurgeMarker(sweepId);
+    await clearLibraryHealthPurgeMarker(sweepRunId);
 }
 
 async function refreshCatalogAfterPurge(deleted: number): Promise<void> {
@@ -382,7 +377,7 @@ async function finishOrRestartPurge(
 ): Promise<boolean> {
     const remaining = await countPurgeTracks(cursor.cutoff);
     if (remaining === 0) {
-        await finishPurge(sweepDeleted, progress.sweepId);
+        await finishPurge(sweepDeleted, progress.sweepRunId);
         return false;
     }
     const nextProgress = advanceProgress(progress, batch.length, remaining);
@@ -400,8 +395,18 @@ export async function processTrackRemovalPurge(
     job: Job<TrackRemovalPurgeJobData>,
 ): Promise<TrackRemovalPurgeResult> {
     const cursor = parsePurgeCursor(job.data);
-    const progress = await initializeSweepProgress(job, cursor);
-    await refreshLibraryHealthPurgeMarker(progress.sweepId, progress.remaining);
+    const progress = await initializeSweepProgress(cursor);
+    if (cursor.progress) {
+        await refreshLibraryHealthPurgeMarker(
+            progress.sweepRunId,
+            progress.remaining,
+        );
+    } else {
+        await startLibraryHealthPurgeMarker(
+            progress.sweepRunId,
+            progress.remaining,
+        );
+    }
     const candidates = await loadPurgePage(cursor);
     const batch = candidates.slice(0, BATCH_SIZE);
     const deleted = await deletePurgeBatch(batch, cursor.cutoff);

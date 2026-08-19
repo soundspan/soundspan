@@ -125,7 +125,10 @@ describe("trackRemovalPurgeProcessor", () => {
     }
 
     function buildJob(data: Record<string, unknown> = {}) {
-        return { id: "track-removal-purge-1", data } as any;
+        return {
+            id: "track-removal-purge-1",
+            data: { sweepRunId: "unique-run-a", ...data },
+        } as any;
     }
 
     it("derives the legacy retention cutoff when the payload is absent", async () => {
@@ -177,11 +180,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 "library-health:purge-active:owners",
                 "library-health:purge-active:remaining",
             ],
-            arguments: expect.arrayContaining([
-                "track-removal-purge-1",
-                "1",
-                "3600",
-            ]),
+            arguments: expect.arrayContaining(["unique-run-a", "1", "3600"]),
         });
         const enqueueOrder = schedulerQueue.add.mock.invocationCallOrder[0];
         const refreshOrder = redisClient.eval.mock.invocationCallOrder.at(-1);
@@ -198,7 +197,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 "library-health:purge-active:owners",
                 "library-health:purge-active:remaining",
             ],
-            arguments: ["track-removal-purge-1"],
+            arguments: ["unique-run-a"],
         });
     });
 
@@ -347,7 +346,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 startAfterId: "track-099",
                 cutoffAt: "2026-05-16T12:00:00.000Z",
                 deletedSoFar: 100,
-                sweepId: "track-removal-purge-1",
+                sweepRunId: "unique-run-a",
                 initialTotal: 101,
                 processedSoFar: 100,
                 remaining: 1,
@@ -356,13 +355,30 @@ describe("trackRemovalPurgeProcessor", () => {
             {
                 attempts: 3,
                 backoff: { type: "exponential", delay: 5_000 },
-                jobId: "scheduler:track-removal-purge:2026-05-16T12:00:00.000Z:track-099",
+                jobId: "scheduler:track-removal-purge:unique-run-a:2026-05-16T12:00:00.000Z:track-099",
                 removeOnComplete: true,
                 removeOnFail: 10,
             },
         );
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
         expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+    });
+
+    it("propagates the root sweep run id to its continuation", async () => {
+        const candidates = Array.from({ length: 101 }, (_, index) => ({
+            id: `track-${index.toString().padStart(3, "0")}`,
+        }));
+        const { module, schedulerQueue } = loadProcessor(candidates);
+
+        await module.processTrackRemovalPurge(
+            buildJob({ mode: "startup", sweepRunId: "unique-run-a" }),
+        );
+
+        expect(schedulerQueue.add).toHaveBeenCalledWith(
+            "track-removal-purge",
+            expect.objectContaining({ sweepRunId: "unique-run-a" }),
+            expect.any(Object),
+        );
     });
 
     it("resumes after a validated cursor with the persisted cutoff", async () => {
@@ -374,7 +390,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 startAfterId: "track-100",
                 cutoffAt,
                 deletedSoFar: 100,
-                sweepId: "track-removal-purge-root",
+                sweepRunId: "track-removal-purge-root",
                 initialTotal: 200,
                 processedSoFar: 100,
                 remaining: 100,
@@ -427,7 +443,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 startAfterId: "track-0900",
                 cutoffAt: "2026-05-16T12:00:00.000Z",
                 deletedSoFar: 900,
-                sweepId: "track-removal-purge-root",
+                sweepRunId: "track-removal-purge-root",
                 initialTotal: 2_000,
                 processedSoFar: 900,
                 remaining: 1_100,

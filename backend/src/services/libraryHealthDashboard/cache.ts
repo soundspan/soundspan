@@ -3,7 +3,7 @@ import type { LibraryHealthCachePanel } from "../../metrics/libraryHealthMetrics
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { coalesceInFlightByKey } from "../../utils/singleflight";
-import { LIBRARY_HEALTH_CACHE_SCHEMAS } from "./cacheSchemas";
+import { LIBRARY_HEALTH_CACHE_ENVELOPE_SCHEMAS } from "./cacheSchemas";
 import { withLibraryHealthRedisDeadline } from "./redisDeadline";
 
 const log = logger.child("LibraryHealthDashboard");
@@ -40,7 +40,9 @@ async function deleteCachedPanel(
     }
 }
 
-async function readCachedPanel(panel: LibraryHealthCachePanel) {
+async function readRawCachedPanel(
+    panel: LibraryHealthCachePanel,
+): Promise<string | null | undefined> {
     let value: string | null;
     try {
         value = await withLibraryHealthRedisDeadline(
@@ -53,22 +55,45 @@ async function readCachedPanel(panel: LibraryHealthCachePanel) {
     }
     if (value === null) {
         recordLibraryHealthCacheResult(panel, "miss");
-        return undefined;
+        return null;
+    }
+    return value;
+}
+
+async function readCachedPanel(panel: LibraryHealthCachePanel): Promise<{
+    cached?: unknown;
+    fillGeneration?: string;
+}> {
+    const [value, generation] = await Promise.all([
+        readRawCachedPanel(panel),
+        readCacheGeneration(panel),
+    ]);
+    if (value === null || value === undefined) {
+        return { fillGeneration: generation };
+    }
+    if (generation === undefined) {
+        await deleteCachedPanel(panel);
+        return {};
     }
     try {
-        const result = LIBRARY_HEALTH_CACHE_SCHEMAS[panel].safeParse(
+        const result = LIBRARY_HEALTH_CACHE_ENVELOPE_SCHEMAS[panel].safeParse(
             JSON.parse(value) as unknown,
         );
-        if (result.success) {
+        if (result.success && result.data.generation === generation) {
             recordLibraryHealthCacheResult(panel, "hit");
-            return result.data;
+            return { cached: result.data.payload };
+        }
+        if (result.success) {
+            recordLibraryHealthCacheResult(panel, "miss");
+            await deleteCachedPanel(panel);
+            return { fillGeneration: generation };
         }
         throw new Error("Library Health cache payload failed validation");
     } catch (error) {
         recordLibraryHealthCacheResult(panel, "error");
         log.warn("Library Health cache payload invalid", { panel, error });
         await deleteCachedPanel(panel);
-        return undefined;
+        return { fillGeneration: generation };
     }
 }
 
@@ -84,7 +109,7 @@ async function writeCachedPanel(
                 arguments: [
                     generation,
                     String(CACHE_TTL_SECONDS),
-                    JSON.stringify(value),
+                    JSON.stringify({ generation, payload: value }),
                 ],
             }),
         );
@@ -131,9 +156,8 @@ async function loadCachedPanel<T>(
     panel: LibraryHealthCachePanel,
     loader: () => Promise<T>,
 ): Promise<T> {
-    const cached = await readCachedPanel(panel);
+    const { cached, fillGeneration } = await readCachedPanel(panel);
     if (cached !== undefined) return cached as T;
-    const fillGeneration = await readCacheGeneration(panel);
     const value = await loader();
     if (fillGeneration !== undefined) {
         scheduleCacheWrite(panel, value, fillGeneration);
@@ -153,7 +177,7 @@ export function getCachedLibraryHealthPanel<T>(
     ) as Promise<T>;
 }
 
-/** Advances the shared generation fence and deletes every dashboard cache key. */
+/** Advances the shared generation fence, then deletes panel keys best-effort. */
 export async function invalidateLibraryHealthDashboardCache(): Promise<void> {
     try {
         await withLibraryHealthRedisDeadline(

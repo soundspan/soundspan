@@ -413,7 +413,7 @@ describe("workers runtime behavior", () => {
         );
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
-            { mode: "startup" },
+            { mode: "startup", sweepRunId: expect.any(String) },
             {
                 jobId: "scheduler:track-removal-purge:startup",
                 delay: 60_000,
@@ -425,7 +425,7 @@ describe("workers runtime behavior", () => {
         );
         expect(mocks.schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
-            { mode: "repeat" },
+            { mode: "repeat", sweepRunId: expect.any(String) },
             {
                 jobId: "scheduler:track-removal-purge:repeat",
                 repeat: { every: 24 * 60 * 60 * 1000 },

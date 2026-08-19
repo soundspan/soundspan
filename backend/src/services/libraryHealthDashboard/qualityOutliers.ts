@@ -9,36 +9,55 @@ import {
     LIBRARY_HEALTH_TRACK_SAMPLE_LIMIT,
 } from "./storageAnalytics";
 
-const LOSSY_AUDIO_MIMES = new Set([
-    "audio/mpeg",
-    "audio/mp4",
-    "audio/aac",
-    "audio/ogg",
-    "audio/opus",
+const LOSSLESS_CODEC_TOKENS = new Set([
+    "flac",
+    "alac",
+    "pcm",
+    "wav",
+    "wave",
+    "wav-pcm",
+    "aiff",
+    "ape",
+    "wavpack",
+    "wavpack4",
+    "dsd",
+    "tak",
+    "tta",
+    "tta1",
+    "ieee",
+    "ieee_float",
+    "float",
+    "lossless",
+    "mlp",
+    "ralf",
+    "truehd",
 ]);
-const LOSSLESS_CODEC_PATTERN =
-    /(?:^|[^a-z0-9])(flac|alac|pcm|wav|wave|aiff|ape|wavpack|dsd|tak|tta|ieee_float|lossless)(?=$|[^a-z0-9])/i;
-const LOSSY_CODEC_PATTERN =
-    /(?:^|[^a-z0-9])(mp3|aac|m4a|opus|vorbis|ogg|wma|speex|mace\s+(?:3|6):1)(?=$|[^a-z0-9])/i;
-const MPEG_LAYER_PATTERN =
-    /\bmpeg(?:[\s._-]*\d+)?[\s._-]+layer[\s._-]+(?:[123]|i{1,3})\b/i;
-const WINDOWS_MEDIA_AUDIO_PATTERN = /^windows media audio(?:\b|$)/i;
-const LOSSY_CODEC_NAMES = new Set([
-    "mace 3:1",
-    "mace 6:1",
-    "ima 4:1",
-    "ulaw 2:1",
-    "µlaw 2:1",
-    "alaw 2:1",
-    "ccitt g.711 u-law",
-    "ccitt g.711 a-law",
-    "qualcomm purevoice",
+const LOSSY_CODEC_TOKENS = new Set([
+    "mp3",
+    "mp4",
+    "m4a",
+    "aac",
+    "opus",
+    "vorbis",
+    "ogg",
+    "wma",
+    "speex",
+    "alaw",
+    "ulaw",
+    "µlaw",
+    "mulaw",
+    "a-law",
+    "u-law",
+    "purevoice",
+    "ac3",
     "ac-3",
-    "mpeg-4/aac",
+    "eac3",
+    "dts",
+    "dts2",
+    "mpeg",
+    "mpeglayer3",
     "mp4s",
     "adpcm",
-    "alaw",
-    "mulaw",
     "dvi_adpcm",
     "gsm610",
     "mpeg_adts_aac",
@@ -49,22 +68,36 @@ const LOSSY_CODEC_NAMES = new Set([
     "raw_sport",
     "esst_ac3",
     "drm",
-    "dts2",
-    "mpeg",
-    "mpeglayer3",
+    "14_4",
+    "28_8",
+    "at1",
+    "atrc",
+    "cook",
+    "sipr",
+    "qdmc",
+    "qdm2",
 ]);
+const MACE_LOSSY_PATTERN = /(?:^|\s)mace\s+(?:3|6):1(?:$|[\s+])/i;
+const IMA_LOSSY_PATTERN = /(?:^|\s)ima\s+4:1(?:$|[\s+])/i;
+const WINDOWS_MEDIA_AUDIO_PATTERN = /^windows media audio(?:\b|$)/i;
+
+function tokenizeCodecLabel(value: string): string[] {
+    return value.split(/[\s/+,;()[\]]+/u).filter((token) => token.length > 0);
+}
 
 /** Classifies scanner codec labels and legacy MIME values without guessing unknowns. */
 export function isLossyAudioCodec(value: string | null): boolean {
     if (value === null) return false;
     const normalized = value.trim().toLowerCase();
     if (normalized.length === 0) return false;
-    const hasLosslessToken = LOSSLESS_CODEC_PATTERN.test(normalized);
+    const tokens = tokenizeCodecLabel(normalized);
+    const hasLosslessToken = tokens.some((token) =>
+        LOSSLESS_CODEC_TOKENS.has(token),
+    );
     const hasLossyToken =
-        LOSSY_AUDIO_MIMES.has(normalized) ||
-        LOSSY_CODEC_NAMES.has(normalized) ||
-        LOSSY_CODEC_PATTERN.test(normalized) ||
-        MPEG_LAYER_PATTERN.test(normalized) ||
+        tokens.some((token) => LOSSY_CODEC_TOKENS.has(token)) ||
+        MACE_LOSSY_PATTERN.test(normalized) ||
+        IMA_LOSSY_PATTERN.test(normalized) ||
         WINDOWS_MEDIA_AUDIO_PATTERN.test(normalized);
     // The dashboard is report-only. Exclude ambiguous mixed labels instead of
     // presenting a file with any lossless stream as definitively lossy.

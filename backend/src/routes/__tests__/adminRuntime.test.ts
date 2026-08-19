@@ -246,9 +246,26 @@ describe("admin library health routes", () => {
 
         expect(mockSchedulerAdd).toHaveBeenCalledWith(
             "track-removal-purge",
-            { cutoffAt: now.toISOString() },
+            {
+                cutoffAt: now.toISOString(),
+                sweepRunId: expect.any(String),
+            },
             expect.any(Object),
         );
+    });
+
+    it("assigns a unique run id when a reusable purge-now id is enqueued again", async () => {
+        const firstRes = createRes();
+        const secondRes = createRes();
+
+        await purgeRemovedTracksHandler({} as any, firstRes);
+        await purgeRemovedTracksHandler({} as any, secondRes);
+
+        const firstData = mockSchedulerAdd.mock.calls[0]?.[1];
+        const secondData = mockSchedulerAdd.mock.calls[1]?.[1];
+        expect(firstData.sweepRunId).toEqual(expect.any(String));
+        expect(secondData.sweepRunId).toEqual(expect.any(String));
+        expect(secondData.sweepRunId).not.toBe(firstData.sweepRunId);
     });
 
     it.each(["failed", "waiting"])(
@@ -270,7 +287,10 @@ describe("admin library health routes", () => {
             expect(remove).toHaveBeenCalledTimes(1);
             expect(mockSchedulerAdd).toHaveBeenCalledWith(
                 "track-removal-purge",
-                { cutoffAt: now.toISOString() },
+                {
+                    cutoffAt: now.toISOString(),
+                    sweepRunId: expect.any(String),
+                },
                 expect.objectContaining({
                     jobId: "scheduler:track-removal-purge:purge-now",
                 }),
@@ -409,7 +429,7 @@ describe("admin library health routes", () => {
                                   startAfterId: "track-100",
                                   cutoffAt: "2026-08-18T12:00:00.000Z",
                                   deletedSoFar: 100,
-                                  sweepId: "purge-root",
+                                  sweepRunId: "purge-root",
                                   initialTotal: 117,
                                   processedSoFar: 100,
                                   remaining: 17,
@@ -441,7 +461,7 @@ describe("admin library health routes", () => {
             expect(mockSchedulerGetJobs).toHaveBeenCalledWith(
                 ["active"],
                 0,
-                50,
+                500,
             );
             expect(res.body).toEqual({
                 remaining: 3,

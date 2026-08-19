@@ -167,3 +167,25 @@ export const LIBRARY_HEALTH_CACHE_SCHEMAS = {
     quality: qualitySchema,
     duplicates: duplicatesSchema,
 } as const satisfies Record<LibraryHealthCachePanel, z.ZodType>;
+
+const cacheGenerationSchema = z.string().regex(/^(0|[1-9]\d*)$/);
+
+/** Strict generation-bearing envelopes keyed by Library Health panel. */
+export const LIBRARY_HEALTH_CACHE_ENVELOPE_SCHEMAS = {
+    summary: z.strictObject({
+        generation: cacheGenerationSchema,
+        payload: summarySchema,
+    }),
+    storage: z.strictObject({
+        generation: cacheGenerationSchema,
+        payload: storageSchema,
+    }),
+    quality: z.strictObject({
+        generation: cacheGenerationSchema,
+        payload: qualitySchema,
+    }),
+    duplicates: z.strictObject({
+        generation: cacheGenerationSchema,
+        payload: duplicatesSchema,
+    }),
+} as const satisfies Record<LibraryHealthCachePanel, z.ZodType>;

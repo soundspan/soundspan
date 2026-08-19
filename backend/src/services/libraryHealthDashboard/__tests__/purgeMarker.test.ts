@@ -12,6 +12,7 @@ import {
     clearLibraryHealthPurgeMarker,
     readLibraryHealthPurgeMarker,
     refreshLibraryHealthPurgeMarker,
+    startLibraryHealthPurgeMarker,
 } from "../purgeMarker";
 
 describe("library health purge marker", () => {
@@ -32,6 +33,9 @@ describe("library health purge marker", () => {
             ) => {
                 if (options.arguments.length === 4) {
                     const [sweepId, count, expiresAt] = options.arguments;
+                    if (_script.includes("ZSCORE") && !expiries.has(sweepId)) {
+                        return 0;
+                    }
                     expiries.set(sweepId, Number(expiresAt));
                     remaining.set(sweepId, Number(count));
                     return 1;
@@ -61,7 +65,7 @@ describe("library health purge marker", () => {
     afterEach(() => jest.useRealTimers());
 
     it("refreshes an owner's one-hour expiry", async () => {
-        await refreshLibraryHealthPurgeMarker("sweep-a", 12);
+        await startLibraryHealthPurgeMarker("sweep-a", 12);
         jest.advanceTimersByTime(30 * 60 * 1000);
         await refreshLibraryHealthPurgeMarker("sweep-a", 11);
         jest.advanceTimersByTime(31 * 60 * 1000);
@@ -76,15 +80,48 @@ describe("library health purge marker", () => {
         });
     });
 
-    it("clears only the completing owner during interleaved sweeps", async () => {
-        await refreshLibraryHealthPurgeMarker("sweep-a", 7);
-        await refreshLibraryHealthPurgeMarker("sweep-b", 19);
+    it("keeps distinct run ownership when a reusable root job id interleaves", async () => {
+        await startLibraryHealthPurgeMarker("run-a", 7);
+        await startLibraryHealthPurgeMarker("run-b", 19);
 
-        await clearLibraryHealthPurgeMarker("sweep-a");
+        await clearLibraryHealthPurgeMarker("run-a");
 
         await expect(readLibraryHealthPurgeMarker()).resolves.toBe(19);
 
-        await clearLibraryHealthPurgeMarker("sweep-b");
+        await clearLibraryHealthPurgeMarker("run-b");
+        await expect(readLibraryHealthPurgeMarker()).resolves.toBeNull();
+    });
+
+    it("does not resurrect an owner when a delayed refresh lands after clear", async () => {
+        await startLibraryHealthPurgeMarker("sweep-a", 7);
+        let landRefresh!: () => void;
+        evalScript.mockImplementationOnce(
+            (
+                script: string,
+                options: { keys: string[]; arguments: string[] },
+            ) =>
+                new Promise<number>((resolve) => {
+                    landRefresh = () => {
+                        const [sweepId, count, expiresAt] = options.arguments;
+                        if (
+                            !script.includes("ZSCORE") ||
+                            expiries.has(sweepId)
+                        ) {
+                            expiries.set(sweepId, Number(expiresAt));
+                            remaining.set(sweepId, Number(count));
+                        }
+                        resolve(1);
+                    };
+                }),
+        );
+
+        const refresh = refreshLibraryHealthPurgeMarker("sweep-a", 6);
+        await jest.advanceTimersByTimeAsync(1_500);
+        await refresh;
+        await clearLibraryHealthPurgeMarker("sweep-a");
+        landRefresh();
+        await Promise.resolve();
+
         await expect(readLibraryHealthPurgeMarker()).resolves.toBeNull();
     });
 });

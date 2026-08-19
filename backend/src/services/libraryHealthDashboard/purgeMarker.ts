@@ -7,7 +7,15 @@ const PURGE_OWNER_KEY = "library-health:purge-active:owners";
 const PURGE_REMAINING_KEY = "library-health:purge-active:remaining";
 const PURGE_ACTIVE_TTL_SECONDS = 60 * 60;
 const NONNEGATIVE_INTEGER_PATTERN = /^(0|[1-9]\d*)$/;
+const START_OWNER_SCRIPT = `
+redis.call("ZADD", KEYS[1], ARGV[3], ARGV[1])
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[1])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return 1
+`;
 const REFRESH_OWNER_SCRIPT = `
+if not redis.call("ZSCORE", KEYS[1], ARGV[1]) then return 0 end
 redis.call("ZADD", KEYS[1], ARGV[3], ARGV[1])
 redis.call("ZADD", KEYS[2], ARGV[2], ARGV[1])
 redis.call("EXPIRE", KEYS[1], ARGV[4])
@@ -82,8 +90,8 @@ export async function readLibraryHealthPurgeMarker(): Promise<number | null> {
     }
 }
 
-/** Refreshes one active sweep's count and one-hour ownership lease. */
-export async function refreshLibraryHealthPurgeMarker(
+async function writeLibraryHealthPurgeMarker(
+    script: string,
     sweepId: string,
     remaining: number,
 ): Promise<void> {
@@ -92,7 +100,7 @@ export async function refreshLibraryHealthPurgeMarker(
         validateRemaining(remaining);
         const expiresAt = Date.now() + PURGE_ACTIVE_TTL_SECONDS * 1000;
         await withLibraryHealthRedisDeadline(
-            redisClient.eval(REFRESH_OWNER_SCRIPT, {
+            redisClient.eval(script, {
                 keys: [PURGE_OWNER_KEY, PURGE_REMAINING_KEY],
                 arguments: [
                     sweepId,
@@ -105,6 +113,30 @@ export async function refreshLibraryHealthPurgeMarker(
     } catch (error) {
         log.warn("Library Health purge marker refresh failed", { error });
     }
+}
+
+/** Establishes one uniquely owned purge-run marker. */
+export function startLibraryHealthPurgeMarker(
+    sweepRunId: string,
+    remaining: number,
+): Promise<void> {
+    return writeLibraryHealthPurgeMarker(
+        START_OWNER_SCRIPT,
+        sweepRunId,
+        remaining,
+    );
+}
+
+/** Refreshes an existing purge run without recreating a cleared owner. */
+export function refreshLibraryHealthPurgeMarker(
+    sweepRunId: string,
+    remaining: number,
+): Promise<void> {
+    return writeLibraryHealthPurgeMarker(
+        REFRESH_OWNER_SCRIPT,
+        sweepRunId,
+        remaining,
+    );
 }
 
 /** Removes only the completing sweep's ownership marker. */

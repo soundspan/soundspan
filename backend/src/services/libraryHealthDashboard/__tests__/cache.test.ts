@@ -124,6 +124,8 @@ const duplicates = {
 };
 
 const validPanels = { summary, storage, quality, duplicates } as const;
+const cacheEnvelope = (payload: unknown, generation = "0") =>
+    JSON.stringify({ generation, payload });
 
 describe("library health cache", () => {
     let generation: number;
@@ -168,7 +170,7 @@ describe("library health cache", () => {
     it.each(Object.entries(validPanels))(
         "round-trips a valid %s payload",
         async (panel, payload) => {
-            get.mockResolvedValueOnce(JSON.stringify(payload));
+            get.mockResolvedValueOnce(cacheEnvelope(payload));
             const loader = jest.fn();
 
             await expect(
@@ -215,7 +217,7 @@ describe("library health cache", () => {
         expect(atomicWrites).toEqual([
             {
                 key: LIBRARY_HEALTH_CACHE_KEYS.storage,
-                value: JSON.stringify(storage),
+                value: cacheEnvelope(storage),
             },
         ]);
         expect(evalScript).toHaveBeenCalledWith(expect.any(String), {
@@ -223,7 +225,7 @@ describe("library health cache", () => {
                 "library-health:v2:generation",
                 LIBRARY_HEALTH_CACHE_KEYS.storage,
             ],
-            arguments: ["0", "900", JSON.stringify(storage)],
+            arguments: ["0", "900", cacheEnvelope(storage)],
         });
     });
 
@@ -266,6 +268,65 @@ describe("library health cache", () => {
         expect(warn).toHaveBeenCalled();
     });
 
+    it("recomputes after DEL fails following a successful generation advance", async () => {
+        let cachedValue: string | null = null;
+        const refreshedStorage = {
+            ...storage,
+            sampledTracks: 3,
+        };
+        get.mockImplementation(async (key: string) =>
+            key === "library-health:v2:generation"
+                ? String(generation)
+                : cachedValue,
+        );
+        evalScript.mockImplementation(
+            async (
+                _script: string,
+                options: { keys: string[]; arguments: string[] },
+            ) => {
+                if (options.arguments[0] !== String(generation)) return 0;
+                cachedValue = options.arguments[2];
+                return 1;
+            },
+        );
+        const loader = jest
+            .fn()
+            .mockResolvedValueOnce(storage)
+            .mockResolvedValueOnce(refreshedStorage);
+
+        await expect(
+            getCachedLibraryHealthPanel("storage", loader),
+        ).resolves.toEqual(storage);
+        del.mockRejectedValueOnce(new Error("delete unavailable"));
+        await invalidateLibraryHealthDashboardCache();
+
+        await expect(
+            getCachedLibraryHealthPanel("storage", loader),
+        ).resolves.toEqual(refreshedStorage);
+        expect(loader).toHaveBeenCalledTimes(2);
+    });
+
+    it("recomputes instead of serving a cache entry when generation verification fails", async () => {
+        const refreshedStorage = {
+            ...storage,
+            sampledTracks: 3,
+        };
+        get.mockImplementation(async (key: string) => {
+            if (key === "library-health:v2:generation") {
+                throw new Error("generation unavailable");
+            }
+            return cacheEnvelope(storage);
+        });
+        const loader = jest.fn(async () => refreshedStorage);
+
+        await expect(
+            getCachedLibraryHealthPanel("storage", loader),
+        ).resolves.toEqual(refreshedStorage);
+
+        expect(loader).toHaveBeenCalledTimes(1);
+        expect(record).toHaveBeenCalledWith("storage", "error");
+    });
+
     it("suppresses a stale fill after another replica bumps the generation", async () => {
         let releaseLoader!: (value: typeof duplicates) => void;
         let markStarted!: () => void;
@@ -299,7 +360,7 @@ describe("library health cache", () => {
         expect(atomicWrites).toEqual([
             {
                 key: LIBRARY_HEALTH_CACHE_KEYS.duplicates,
-                value: JSON.stringify(duplicates),
+                value: cacheEnvelope(duplicates, "1"),
             },
         ]);
     });
@@ -432,7 +493,7 @@ describe("library health cache", () => {
             },
         ],
     ])("recomputes a duplicate catalog with %s", async (_name, payload) => {
-        get.mockResolvedValueOnce(JSON.stringify(payload));
+        get.mockResolvedValueOnce(cacheEnvelope(payload));
         const loader = jest.fn(async () => duplicates);
 
         await expect(
