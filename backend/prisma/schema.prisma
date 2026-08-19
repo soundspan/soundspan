@@ -1456,6 +1456,7 @@ model TrackMapping {
   confidence     Float
   source         String        // "gap-fill" | "isrc" | "import-match" | "manual" | "federation"
   stale          Boolean       @default(false)
+  staleAt        DateTime?
   createdAt      DateTime      @default(now())
   track          Track?        @relation(fields: [trackId], references: [id], onDelete: SetNull)
   trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
@@ -1465,4 +1466,5 @@ model TrackMapping {
   @@index([trackTidalId])
   @@index([trackYtMusicId])
   @@index([stale])
+  @@index([stale, staleAt])
 }

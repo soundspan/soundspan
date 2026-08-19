@@ -14,6 +14,11 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { Prisma } from "@prisma/client";
 import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
+import { config } from "../config";
+import {
+    parentHasNoLiveProviderTracksWhere,
+    providerTrackRetentionCutoff,
+} from "../services/providerTrackRetention";
 
 const DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS = 3;
 
@@ -86,6 +91,12 @@ interface IntegrityReport {
  */
 export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     logger.debug("\nRunning data integrity check...");
+    const providerWhere = parentHasNoLiveProviderTracksWhere(
+        providerTrackRetentionCutoff(
+            new Date(),
+            config.workers.providerTrackRetentionDays,
+        ),
+    );
 
     const report: IntegrityReport = {
         expiredExclusions: 0,
@@ -138,8 +149,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             prisma.album.findMany({
                 where: {
                     location: "DISCOVER",
-                    tracksTidal: { none: {} },
-                    tracksYtMusic: { none: {} },
+                    ...providerWhere,
                 },
                 include: { artist: true },
             }),
@@ -199,8 +209,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                         where: {
                             id: album.id,
                             location: "DISCOVER",
-                            tracksTidal: { none: {} },
-                            tracksYtMusic: { none: {} },
+                            ...providerWhere,
                         },
                     }),
             );
@@ -369,8 +378,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             prisma.album.findMany({
                 where: {
                     tracks: { none: {} },
-                    tracksTidal: { none: {} },
-                    tracksYtMusic: { none: {} },
+                    ...providerWhere,
                 },
                 include: { artist: true },
             }),
@@ -385,8 +393,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                     where: {
                         id: album.id,
                         tracks: { none: {} },
-                        tracksTidal: { none: {} },
-                        tracksYtMusic: { none: {} },
+                        ...providerWhere,
                     },
                 }),
         );
@@ -498,8 +505,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             prisma.artist.findMany({
                 where: {
                     albums: { none: {} },
-                    tracksTidal: { none: {} },
-                    tracksYtMusic: { none: {} },
+                    ...providerWhere,
                 },
             }),
     );
@@ -535,8 +541,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                     where: {
                         id: { in: orphanedArtists.map((a) => a.id) },
                         albums: { none: {} },
-                        tracksTidal: { none: {} },
-                        tracksYtMusic: { none: {} },
+                        ...providerWhere,
                     },
                 }),
         );

@@ -976,6 +976,7 @@ describe("config module", () => {
             ENRICHMENT_CLAIM_TTL_MS: "900001",
             TRACK_RECONCILIATION_MAX_ROWS: "10001",
             TRACK_RECONCILIATION_TIMEOUT_MS: "600001",
+            PROVIDER_TRACK_RETENTION_DAYS: "45",
             FEDERATION_ENABLED: "true",
             FEDERATION_ALLOW_PRIVATE_PEERS: "true",
             FEDERATION_TOMBSTONE_RETENTION_DAYS: "30",
@@ -998,6 +999,7 @@ describe("config module", () => {
             enrichmentClaimTtlMs: 900_001,
             trackReconciliationMaxRows: 10_001,
             trackReconciliationTimeoutMs: 600_001,
+            providerTrackRetentionDays: 45,
             trackRemovalRetentionDays: 90,
             federationTombstoneRetentionDays: 30,
             federationSyncIntervalMinutes: 7,
@@ -1043,6 +1045,7 @@ describe("config module", () => {
             enrichmentClaimTtlMs: 900_000,
             trackReconciliationMaxRows: 10_000,
             trackReconciliationTimeoutMs: 10 * 60 * 1000,
+            providerTrackRetentionDays: 30,
             trackRemovalRetentionDays: 90,
             federationTombstoneRetentionDays: 90,
             federationSyncIntervalMinutes: 15,
@@ -1158,6 +1161,26 @@ describe("config module", () => {
             loadConfigModule({ FEDERATION_TOMBSTONE_RETENTION_DAYS: "2" }),
         ).rejects.toThrow("process.exit:1");
         exitSpy.mockRestore();
+    });
+
+    it("bounds provider-track retention days", async () => {
+        const minimum = await loadConfigModule({
+            PROVIDER_TRACK_RETENTION_DAYS: "1",
+        });
+        expect(minimum.config.workers.providerTrackRetentionDays).toBe(1);
+        const maximum = await loadConfigModule({
+            PROVIDER_TRACK_RETENTION_DAYS: "3650",
+        });
+        expect(maximum.config.workers.providerTrackRetentionDays).toBe(3650);
+
+        await expectStartupValidationFailure(
+            { PROVIDER_TRACK_RETENTION_DAYS: "0" },
+            "PROVIDER_TRACK_RETENTION_DAYS",
+        );
+        await expectStartupValidationFailure(
+            { PROVIDER_TRACK_RETENTION_DAYS: "3651" },
+            "PROVIDER_TRACK_RETENTION_DAYS",
+        );
     });
 
     it("logs and exits when post-schema encryption validation throws", async () => {

@@ -1,0 +1,106 @@
+import type { Prisma } from "@prisma/client";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Default grace period for stale provider tracks and their recent plays. */
+export const DEFAULT_PROVIDER_TRACK_RETENTION_DAYS = 30;
+const MAX_PROVIDER_TRACK_RETENTION_DAYS = 3650;
+
+/** Mapping state needed by the pure provider-track retention decision. */
+export interface ProviderTrackRetentionMapping {
+    stale: boolean;
+    staleAt: Date | null;
+}
+
+/** Provider-row state needed by the pure retention decision. */
+export interface ProviderTrackRetentionInput {
+    createdAt: Date;
+    mappings: readonly ProviderTrackRetentionMapping[];
+    hasLikedReference: boolean;
+    hasPlaylistReference: boolean;
+    latestPlayedAt: Date | null;
+}
+
+export type ProviderTrackRetentionState = "live" | "collectable";
+
+type ProviderTrackWhereInput = Prisma.TrackTidalWhereInput &
+    Prisma.TrackYtMusicWhereInput;
+
+function mappingIsRetained(
+    mapping: ProviderTrackRetentionMapping,
+    cutoff: Date,
+): boolean {
+    if (!mapping.stale) return true;
+    if (mapping.staleAt === null) return true;
+    return mapping.staleAt.getTime() >= cutoff.getTime();
+}
+
+/** Classifies one provider row without I/O or ambient clock access. */
+export function classifyProviderTrackRetention(
+    input: ProviderTrackRetentionInput,
+    cutoff: Date,
+): ProviderTrackRetentionState {
+    if (input.hasLikedReference || input.hasPlaylistReference) return "live";
+    if (
+        input.latestPlayedAt !== null &&
+        input.latestPlayedAt.getTime() >= cutoff.getTime()
+    ) {
+        return "live";
+    }
+    if (input.createdAt.getTime() >= cutoff.getTime()) return "live";
+    return input.mappings.some((mapping) => mappingIsRetained(mapping, cutoff))
+        ? "live"
+        : "collectable";
+}
+
+/** Computes the UTC retention cutoff for a validated positive day count. */
+export function providerTrackRetentionCutoff(
+    now: Date,
+    retentionDays: number,
+): Date {
+    if (
+        !Number.isSafeInteger(retentionDays) ||
+        retentionDays < 1 ||
+        retentionDays > MAX_PROVIDER_TRACK_RETENTION_DAYS
+    ) {
+        throw new Error(
+            "Provider track retention days must be from 1 through 3650",
+        );
+    }
+    return new Date(now.getTime() - retentionDays * DAY_MS);
+}
+
+/** Prisma predicate selecting rows that are safe to collect at the cutoff. */
+export function providerTrackCollectableWhere(
+    cutoff: Date,
+): ProviderTrackWhereInput {
+    return {
+        createdAt: { lt: cutoff },
+        mappings: {
+            none: {
+                OR: [
+                    { stale: false },
+                    { staleAt: null },
+                    { staleAt: { gte: cutoff } },
+                ],
+            },
+        },
+        likedBy: { none: {} },
+        playlistItems: { none: {} },
+        plays: { none: { playedAt: { gte: cutoff } } },
+    };
+}
+
+/** Prisma predicate selecting provider rows retained by the GC policy. */
+export function providerTrackLiveWhere(cutoff: Date): ProviderTrackWhereInput {
+    return { NOT: providerTrackCollectableWhere(cutoff) };
+}
+
+/** Parent-relation guards that ignore provider rows classified as collectable. */
+export function parentHasNoLiveProviderTracksWhere(cutoff: Date) {
+    const live = providerTrackLiveWhere(cutoff);
+    return {
+        tracksTidal: { none: live },
+        tracksYtMusic: { none: live },
+    } satisfies Pick<Prisma.AlbumWhereInput, "tracksTidal" | "tracksYtMusic">;
+}

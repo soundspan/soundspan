@@ -11,6 +11,10 @@ import { safeResolvePath } from "../../../utils/safeResolvePath";
 import { getSystemSettings } from "../../../utils/systemSettings";
 import { scanQueue } from "../../../workers/queues";
 import { sendClearPlaylistFailure } from "../shared";
+import {
+    parentHasNoLiveProviderTracksWhere,
+    providerTrackRetentionCutoff,
+} from "../../../services/providerTrackRetention";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
@@ -710,13 +714,18 @@ export async function handleLegacyClear(
         // These are Album/Track records with location="DISCOVER" that weren't linked to a DiscoveryAlbum
         // This can happen if downloads failed or playlist build failed
         logger.debug(`\n Cleaning up orphaned discovery records...`);
+        const providerWhere = parentHasNoLiveProviderTracksWhere(
+            providerTrackRetentionCutoff(
+                new Date(),
+                config.workers.providerTrackRetentionDays,
+            ),
+        );
 
         // Find all DISCOVER albums that don't have a corresponding DiscoveryAlbum record
         const orphanedAlbums = await prisma.album.findMany({
             where: {
                 location: "DISCOVER",
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...providerWhere,
             },
             include: { artist: true, tracks: true },
         });
@@ -755,8 +764,7 @@ export async function handleLegacyClear(
                     where: {
                         id: orphanAlbum.id,
                         location: "DISCOVER",
-                        tracksTidal: { none: {} },
-                        tracksYtMusic: { none: {} },
+                        ...providerWhere,
                     },
                 });
                 if (deletedAlbum.count > 0) {
@@ -778,8 +786,7 @@ export async function handleLegacyClear(
         const orphanedArtists = await prisma.artist.findMany({
             where: {
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...providerWhere,
             },
         });
 
@@ -801,8 +808,7 @@ export async function handleLegacyClear(
                 where: {
                     id: { in: orphanIds },
                     albums: { none: {} },
-                    tracksTidal: { none: {} },
-                    tracksYtMusic: { none: {} },
+                    ...providerWhere,
                 },
             });
             if (deletedArtists.count > 0) {

@@ -796,7 +796,7 @@ describe("TrackMappingService", () => {
             expect(mockPrisma.trackMapping.update).not.toHaveBeenCalled();
             expect(mockPrisma.trackMapping.updateMany).toHaveBeenCalledWith({
                 where: { id: { in: ["cm_dup"] } },
-                data: { stale: true },
+                data: { stale: true, staleAt: expect.any(Date) },
             });
         });
 
@@ -837,6 +837,7 @@ describe("TrackMappingService", () => {
                     confidence: 0.9,
                     source: "manual",
                     stale: false,
+                    staleAt: null,
                 },
             });
             expect(mockPrisma.trackMapping.updateMany).not.toHaveBeenCalled();
@@ -1067,7 +1068,7 @@ describe("TrackMappingService", () => {
             expect(result.stale).toBe(true);
             expect(mockPrisma.trackMapping.update).toHaveBeenCalledWith({
                 where: { id: "cm_1" },
-                data: { stale: true },
+                data: { stale: true, staleAt: expect.any(Date) },
             });
         });
 

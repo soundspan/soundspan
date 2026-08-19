@@ -29,6 +29,9 @@ jest.mock("../../config", () => ({
         music: {
             musicPath: "/music",
         },
+        workers: {
+            providerTrackRetentionDays: 30,
+        },
     },
 }));
 
@@ -892,8 +895,8 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
                 location: "DISCOVER",
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             include: { artist: true, tracks: true },
         });
@@ -901,15 +904,15 @@ describe("discover legacy-mode runtime behavior", () => {
             where: {
                 id: "orphan-album-1",
                 location: "DISCOVER",
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
             where: {
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.similarArtist.deleteMany).toHaveBeenCalledWith(
@@ -926,8 +929,8 @@ describe("discover legacy-mode runtime behavior", () => {
             where: {
                 id: { in: ["artist-orphan"] },
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(scanQueue.add).toHaveBeenCalledWith("scan", {

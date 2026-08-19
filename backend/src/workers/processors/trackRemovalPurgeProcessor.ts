@@ -5,6 +5,7 @@ import { z } from "zod";
 import { config } from "../../config";
 import { backfillAllArtistCounts } from "../../services/artistCountsService";
 import { cleanupOrphanedLibraryEntities } from "../../services/libraryOrphanCleanup";
+import { collectProviderTracks } from "../../services/providerTrackGc";
 import {
     clearLibraryHealthPurgeMarker,
     refreshLibraryHealthPurgeMarker,
@@ -402,6 +403,7 @@ export async function processTrackRemovalPurge(
     job: Job<TrackRemovalPurgeJobData>,
 ): Promise<TrackRemovalPurgeResult> {
     const cursor = parsePurgeCursor(job.data);
+    await collectProviderTracks();
     // Persist a minted run id back into the job so Bull retries of this
     // same job reuse one marker owner instead of stranding the previous
     // attempt's marker under a fresh id.

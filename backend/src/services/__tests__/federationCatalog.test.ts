@@ -792,6 +792,53 @@ describe("federation catalog exports", () => {
         );
     });
 
+    it("exports orphaned album and artist tombstones to peers", async () => {
+        prisma.artist.findMany.mockResolvedValue([]);
+        prisma.album.findMany.mockResolvedValue([]);
+        prisma.track.findMany.mockResolvedValue([]);
+        prisma.podcast.findMany.mockResolvedValue([]);
+        prisma.audiobook.findMany.mockResolvedValue([]);
+        prisma.federationTombstone.findMany.mockResolvedValue([
+            {
+                id: "orphan-album-event",
+                entityType: "album",
+                entityId: "orphan-album",
+                deletedAt: at,
+            },
+            {
+                id: "orphan-artist-event",
+                entityType: "artist",
+                entityId: "orphan-artist",
+                deletedAt: at,
+            },
+        ]);
+
+        const result = await getFederationCatalogDelta({
+            since: new Date("2026-08-15T11:00:00.000Z"),
+            epoch: "epoch-1",
+            limit: 200,
+            includeEmbeddings: false,
+            now: new Date("2026-08-15T12:01:00.000Z"),
+        });
+
+        expect(result.body.kind).toBe("ok");
+        if (result.body.kind !== "ok") {
+            throw new Error("expected delta payload");
+        }
+        expect(result.body.tombstones).toEqual([
+            {
+                entityType: "album",
+                entityId: "orphan-album",
+                deletedAt: at,
+            },
+            {
+                entityType: "artist",
+                entityId: "orphan-artist",
+                deletedAt: at,
+            },
+        ]);
+    });
+
     it("omits the delta header when embeddings are excluded", async () => {
         prisma.artist.findMany.mockResolvedValue([]);
         prisma.album.findMany.mockResolvedValue([]);

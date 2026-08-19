@@ -103,6 +103,7 @@ describe("trackRemovalPurgeProcessor", () => {
                 features: { federation: federationEnabled },
                 workers: {
                     trackRemovalRetentionDays: retentionDays,
+                    providerTrackRetentionDays: 30,
                     federationTombstoneRetentionDays: 90,
                 },
             },
@@ -115,6 +116,14 @@ describe("trackRemovalPurgeProcessor", () => {
         jest.doMock("../../../services/artistCountsService", () => ({
             backfillAllArtistCounts,
         }));
+        const collectProviderTracks = jest.fn(async () => ({
+            selected: { tidal: 0, youtube: 0 },
+            deleted: { tidal: 0, youtube: 0 },
+            orphanedParents: { albums: 0, artists: 0 },
+        }));
+        jest.doMock("../../../services/providerTrackGc", () => ({
+            collectProviderTracks,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../trackRemovalPurgeProcessor");
@@ -126,6 +135,7 @@ describe("trackRemovalPurgeProcessor", () => {
             redisClient,
             cleanupOrphanedLibraryEntities,
             backfillAllArtistCounts,
+            collectProviderTracks,
             randomUUID,
         };
     }

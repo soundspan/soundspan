@@ -86,6 +86,7 @@ spec:
             "AUTO_PLAYLISTS_ENABLED" true
             "FEDERATION_ENABLED" true
             "FEDERATION_TOMBSTONE_RETENTION_DAYS" true
+            "PROVIDER_TRACK_RETENTION_DAYS" true
             "FEDERATION_SYNC_INTERVAL_MINUTES" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
@@ -202,6 +203,13 @@ spec:
             {{- else }}
             - name: FEDERATION_TOMBSTONE_RETENTION_DAYS
               value: {{ .Values.config.federationTombstoneRetentionDays | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "PROVIDER_TRACK_RETENTION_DAYS" }}
+            - name: PROVIDER_TRACK_RETENTION_DAYS
+              value: {{ index $aioEnv "PROVIDER_TRACK_RETENTION_DAYS" | quote }}
+            {{- else }}
+            - name: PROVIDER_TRACK_RETENTION_DAYS
+              value: {{ .Values.config.providerTrackRetentionDays | quote }}
             {{- end }}
             {{- if hasKey $aioEnv "FEDERATION_SYNC_INTERVAL_MINUTES" }}
             - name: FEDERATION_SYNC_INTERVAL_MINUTES

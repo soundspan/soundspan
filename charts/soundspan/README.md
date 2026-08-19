@@ -4,10 +4,10 @@ Deploy [soundspan](https://github.com/soundspan/soundspan) — a self-hosted mus
 
 ## Deployment Modes
 
-| Mode | Description |
-|------|-------------|
+| Mode                     | Description                                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | **All-in-One** (default) | Single pod with backend, frontend, PostgreSQL, Redis, and audio analyzer bundled together. Simplest setup — just mount your music library. |
-| **Individual** | Separate pods for each service. More flexible scaling, independent upgrades, and the ability to use external PostgreSQL/Redis. |
+| **Individual**           | Separate pods for each service. More flexible scaling, independent upgrades, and the ability to use external PostgreSQL/Redis.             |
 
 ## Quick Start
 
@@ -47,6 +47,7 @@ helm install soundspan ./charts/soundspan \
 ```
 
 When `haMode.enabled=true`, the chart automatically applies HA-oriented defaults:
+
 - backend replicas: `2`
 - frontend replicas: `2`
 - backend worker enabled: `true`
@@ -54,20 +55,22 @@ When `haMode.enabled=true`, the chart automatically applies HA-oriented defaults
 - PDBs auto-enabled for backend/frontend/worker when replicas > 1
 - backend cache/log volumes auto-fallback to `emptyDir` when RWX PVC is not provided for multi-replica backend
 - Listen Together cross-pod runtime guards forced on:
-  - Redis adapter
-  - state sync
-  - authoritative Redis state store
-  - mutation locks
-  - websocket-only transport (`polling=false`)
+    - Redis adapter
+    - state sync
+    - authoritative Redis state store
+    - mutation locks
+    - websocket-only transport (`polling=false`)
 - readiness dependency gating forced on (`READINESS_REQUIRE_DEPENDENCIES=true`)
 
 You can still override HA defaults under `haMode.*` (for example `haMode.backendReplicas=3`).
 
 When `backendWorker.enabled=true`, the chart automatically sets:
+
 - backend API pods: `BACKEND_PROCESS_ROLE=api`
 - backend worker pod(s): `BACKEND_PROCESS_ROLE=worker`
 
 By default, worker pods use the dedicated worker image:
+
 - `ghcr.io/soundspan/soundspan-backend-worker:<tag>`
 
 That image starts a compiled worker entrypoint (`dist/worker.js`) and avoids
@@ -75,6 +78,7 @@ booting the API runtime stack in worker-only pods.
 
 Worker pods also expose an internal health server (default `:3010`) used by
 Kubernetes probes:
+
 - Liveness: `GET /health/live`
 - Readiness: `GET /health/ready`
 
@@ -92,6 +96,7 @@ isolated private network.
 For Listen Together in multi-replica backend deployments, `haMode.enabled=true`
 is recommended because it auto-applies the required cross-pod guardrails.
 If you keep `haMode.enabled=false`, ensure these remain set manually:
+
 - `config.listenTogetherRedisAdapterEnabled=true`
 - `config.listenTogetherStateSyncEnabled=true`
 - `config.listenTogetherStateStoreEnabled=true`
@@ -117,17 +122,17 @@ Example:
 
 ```yaml
 backend:
-  replicas: 2
-  pdb:
-    enabled: true
-    minAvailable: 1
-  topologySpreadConstraints:
-    - maxSkew: 1
-      topologyKey: kubernetes.io/hostname
-      whenUnsatisfiable: DoNotSchedule
-      labelSelector:
-        matchLabels:
-          app.kubernetes.io/component: backend
+    replicas: 2
+    pdb:
+        enabled: true
+        minAvailable: 1
+    topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+              matchLabels:
+                  app.kubernetes.io/component: backend
 ```
 
 When `backend.replicas > 1`, pay attention to backend cache/log persistence:
@@ -135,21 +140,21 @@ When `backend.replicas > 1`, pay attention to backend cache/log persistence:
 - `backend.persistence.cache` and `backend.persistence.logs` default to PVC mode with `ReadWriteOnce`
 - this is not safe for multi-replica scheduling unless you provide RWX storage
 - chart validation now fails early unless one of these is true:
-  - access mode is `ReadWriteMany`
-  - an explicit `existingClaim` is provided
-  - storage type is `emptyDir`
-  - persistence is disabled for that volume
+    - access mode is `ReadWriteMany`
+    - an explicit `existingClaim` is provided
+    - storage type is `emptyDir`
+    - persistence is disabled for that volume
 
 Ephemeral (non-persistent) scale-out example:
 
 ```yaml
 backend:
-  replicas: 2
-  persistence:
-    cache:
-      type: emptyDir
-    logs:
-      type: emptyDir
+    replicas: 2
+    persistence:
+        cache:
+            type: emptyDir
+        logs:
+            type: emptyDir
 ```
 
 Native covers and transcode artifacts are stored under
@@ -210,18 +215,18 @@ Secrets (SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET, PostgreSQ
 
 ```yaml
 secrets:
-  sessionSecret: "<openssl rand -hex 32>"
-  settingsEncryptionKey: "<openssl rand -hex 32>"
-  internalApiSecret: "<openssl rand -hex 32>"
-  oidcClientSecret: "<OIDC client secret>" # Required only when OIDC is enabled
-  postgresPassword: "secure-password"
+    sessionSecret: "<openssl rand -hex 32>"
+    settingsEncryptionKey: "<openssl rand -hex 32>"
+    internalApiSecret: "<openssl rand -hex 32>"
+    oidcClientSecret: "<OIDC client secret>" # Required only when OIDC is enabled
+    postgresPassword: "secure-password"
 ```
 
 Or use a pre-existing Kubernetes secret:
 
 ```yaml
 secrets:
-  existingSecret: my-soundspan-secrets
+    existingSecret: my-soundspan-secrets
 ```
 
 Expected keys: `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `INTERNAL_API_SECRET`.
@@ -233,23 +238,23 @@ Set the public callback URL exactly as it is registered at the identity provider
 
 ```yaml
 config:
-  localLoginEnabled: true
-  oidc:
-    enabled: true
-    issuerUrl: https://idp.example/realms/soundspan
-    clientId: soundspan
-    redirectUri: https://soundspan.example/api/auth/oidc/callback
-    webBaseUrl: ""
-    scopes: openid profile email
-    autoProvision: false
-    manageRoles: false
-    groupsClaim: groups
-    adminGroup: ""
-    emailClaim: email
-    nameClaim: name
-    providerName: SSO
+    localLoginEnabled: true
+    oidc:
+        enabled: true
+        issuerUrl: https://idp.example/realms/soundspan
+        clientId: soundspan
+        redirectUri: https://soundspan.example/api/auth/oidc/callback
+        webBaseUrl: ""
+        scopes: openid profile email
+        autoProvision: false
+        manageRoles: false
+        groupsClaim: groups
+        adminGroup: ""
+        emailClaim: email
+        nameClaim: name
+        providerName: SSO
 secrets:
-  oidcClientSecret: "<OIDC client secret>"
+    oidcClientSecret: "<OIDC client secret>"
 ```
 
 Keep `localLoginEnabled: true` until SSO works. Set `webBaseUrl` to the web origin when the callback uses a sibling API subdomain or another port. Keep `autoProvision: false` unless a private IdP restricts access to the soundspan application. See [`docs/OIDC_SSO.md`](../../docs/OIDC_SSO.md) for the full setup, topology matrix, and recovery guide.
@@ -267,8 +272,8 @@ you add them to your Secret (`LIDARR_API_KEY`, `AUDIOBOOKSHELF_TOKEN`,
 
 ```yaml
 secrets:
-  existingSecret: my-soundspan-secrets
-  apiKeysInExistingSecret: true
+    existingSecret: my-soundspan-secrets
+    apiKeysInExistingSecret: true
 ```
 
 #### Pod security
@@ -304,10 +309,10 @@ Enable TIDAL and YouTube Music streaming:
 
 ```yaml
 tidalSidecar:
-  enabled: true
+    enabled: true
 
 ytmusicStreamer:
-  enabled: true
+    enabled: true
 ```
 
 These **sidecars** work in both AIO and Individual modes.
@@ -323,6 +328,7 @@ written to `YT_DOWNLOAD_DIR` (default `/music/YouTube Downloads`) and
 imported by the backend's library scan.
 
 Notes:
+
 - In multi-node clusters the music volume must be **RWX**
   (`ReadWriteMany`), because the backend and ytmusic-streamer pods mount
   it read-write concurrently and may be scheduled on different nodes.
@@ -336,7 +342,7 @@ Notes:
 
 ```yaml
 audioAnalyzer:
-  enabled: true
+    enabled: true
 ```
 
 > Unlike the sidecars above, this analyzer Deployment is only used in Individual mode.
@@ -350,7 +356,7 @@ vibe similarity features:
 
 ```yaml
 vibeProviderDclap:
-  enabled: true
+    enabled: true
 ```
 
 The chart automatically sets `VIBE_PROVIDER_URL` on the backend and on an
@@ -360,16 +366,15 @@ different provider endpoint:
 
 ```yaml
 backend:
-  env:
-    VIBE_PROVIDER_URL: https://vibe-provider.example
+    env:
+        VIBE_PROVIDER_URL: https://vibe-provider.example
 ```
 
 An explicit `backend.env.VIBE_PROVIDER_URL` or
 `backendWorker.env.VIBE_PROVIDER_URL` takes precedence over the generated URL.
 The backend worker sets `VIBE_EMBED_CONCURRENCY` from
 `backendWorker.vibeEmbedConcurrency`. Its default is twice the configured
-`vibeProviderDclap.replicas`, clamped to the backend's supported range of 1 to
-32. Set an explicit value when provider capacity or worker replica count calls
+`vibeProviderDclap.replicas`, clamped to the backend's supported range of 1 to 32. Set an explicit value when provider capacity or worker replica count calls
 for a different ratio; `backendWorker.env.VIBE_EMBED_CONCURRENCY` remains the
 highest-precedence per-workload override.
 `vibeProviderDclap.env.DCLAP_HTTP_PORT` is reserved; set
@@ -400,13 +405,14 @@ Existing ML/recommendation flags default to `true`. Federation defaults to
 
 ```yaml
 config:
-  features:
-    audioAnalysis: true   # audio analysis queueing, mood buckets, /api/analysis, /api/vibe
-    discovery: true       # Discover Weekly cron/processor, /api/discover, /api/recommendations
-    autoPlaylists: true   # Made For You mixes, /api/mixes
-    federation: false     # scoped peer credentials and /api/federation host API
-  federationTombstoneRetentionDays: 90
-  federationSyncIntervalMinutes: 15
+    features:
+        audioAnalysis: true # audio analysis queueing, mood buckets, /api/analysis, /api/vibe
+        discovery: true # Discover Weekly cron/processor, /api/discover, /api/recommendations
+        autoPlaylists: true # Made For You mixes, /api/mixes
+        federation: false # scoped peer credentials and /api/federation host API
+    federationTombstoneRetentionDays: 90
+    providerTrackRetentionDays: 30
+    federationSyncIntervalMinutes: 15
 ```
 
 When a flag is `false`, the backend does not mount the corresponding API
@@ -429,26 +435,26 @@ matching background workers.
 
 ```yaml
 postgresql:
-  enabled: false
-  external:
-    # Option A: host/port + POSTGRES_* secret values
-    host: postgres.example.com
-    port: 5432
-    # Option B (preferred for managed DBs): full URL with SSL/query params
-    # url: "postgresql://user:pass@postgres.example.com:5432/soundspan?sslmode=require"
+    enabled: false
+    external:
+        # Option A: host/port + POSTGRES_* secret values
+        host: postgres.example.com
+        port: 5432
+        # Option B (preferred for managed DBs): full URL with SSL/query params
+        # url: "postgresql://user:pass@postgres.example.com:5432/soundspan?sslmode=require"
 
 redis:
-  enabled: false
-  external:
-    # Option A: host/port
-    host: redis.example.com
-    port: 6379
-    # Option B: full URL (auth/TLS supported)
-    # url: "rediss://:password@redis.example.com:6380/0"
+    enabled: false
+    external:
+        # Option A: host/port
+        host: redis.example.com
+        port: 6379
+        # Option B: full URL (auth/TLS supported)
+        # url: "rediss://:password@redis.example.com:6380/0"
 
 config:
-  # Default is false. Keep false for shared/HA Redis.
-  redisFlushOnStartup: false
+    # Default is false. Keep false for shared/HA Redis.
+    redisFlushOnStartup: false
 ```
 
 If `config.redisFlushOnStartup` is left unset, it defaults to `false` (recommended for shared/HA Redis and analyzer stream reliability).
@@ -465,69 +471,70 @@ Use `envFrom` when you want the container to import variables directly from an e
 ```yaml
 # Global to all containers (AIO + individual services)
 global:
-  env:
-    HTTP_PROXY: http://proxy.internal:3128
-    HTTPS_PROXY: http://proxy.internal:3128
-  envFrom:
-    - secretRef:
-        name: soundspan-global-env
+    env:
+        HTTP_PROXY: http://proxy.internal:3128
+        HTTPS_PROXY: http://proxy.internal:3128
+    envFrom:
+        - secretRef:
+              name: soundspan-global-env
 
 # All-in-one mode
 aio:
-  envFrom:
-    - secretRef:
-        name: soundspan-aio-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-aio-extra-env
 
 # Individual mode API/worker
 backend:
-  envFrom:
-    - secretRef:
-        name: soundspan-backend-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-backend-extra-env
 
 backendWorker:
-  envFrom:
-    - secretRef:
-        name: soundspan-worker-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-worker-extra-env
 
 # Individual mode app services
 frontend:
-  envFrom:
-    - secretRef:
-        name: soundspan-frontend-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-frontend-extra-env
 
 audioAnalyzer:
-  envFrom:
-    - secretRef:
-        name: soundspan-audio-analyzer-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-audio-analyzer-extra-env
 
 vibeProviderDclap:
-  envFrom:
-    - secretRef:
-        name: soundspan-vibe-provider-dclap-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-vibe-provider-dclap-extra-env
 
 tidalSidecar:
-  envFrom:
-    - secretRef:
-        name: soundspan-tidal-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-tidal-extra-env
 
 ytmusicStreamer:
-  envFrom:
-    - secretRef:
-        name: soundspan-ytmusic-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-ytmusic-extra-env
 
 # Individual mode chart-managed DB/cache services
 postgresql:
-  envFrom:
-    - secretRef:
-        name: soundspan-postgresql-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-postgresql-extra-env
 
 redis:
-  envFrom:
-    - secretRef:
-        name: soundspan-redis-extra-env
+    envFrom:
+        - secretRef:
+              name: soundspan-redis-extra-env
 ```
 
 Notes:
+
 - `global.env` is rendered into a chart-managed ConfigMap (`<release>-global-env`) and injected via `envFrom` into every container.
 - `global.envFrom` is also injected into every container.
 - Service-specific `*.envFrom` entries are appended after global sources.
@@ -540,16 +547,19 @@ chart also sets by default. The reserved
 `vibeProviderDclap.port` instead.
 
 For chart-managed containers, precedence is:
+
 - Service `*.env` key/value pairs
 - Chart default/generated values (including secret refs and computed URLs)
 - `envFrom` sources (`global.env` ConfigMap, `global.envFrom`, then service `*.envFrom`)
 
 Practical implications:
+
 - If you set a key in a service `*.env` map, that value is rendered directly into the Pod `env` list and takes precedence over chart defaults for that key.
 - If a key is not set in service `*.env`, the chart falls back to its default/generated behavior.
 - `envFrom` remains additive and cannot override keys already present in explicit `env` entries.
 
 This applies to:
+
 - `aio.env`
 - `backend.env`
 - `backendWorker.env`
@@ -567,32 +577,33 @@ Use `global.*` to avoid repeating pod metadata and scheduling config on each ser
 
 ```yaml
 global:
-  labels:
-    app.kubernetes.io/part-of: media
-    team: platform
-  podAnnotations:
-    prometheus.io/scrape: "true"
-  imagePullSecrets:
-    - name: regcred
-  serviceAccount:
-    create: true
-    name: ""
-    annotations: {}
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
-  securityContext:
-    readOnlyRootFilesystem: false
-    allowPrivilegeEscalation: false
-  nodeSelector:
-    kubernetes.io/arch: amd64
-  tolerations: []
-  affinity: {}
+    labels:
+        app.kubernetes.io/part-of: media
+        team: platform
+    podAnnotations:
+        prometheus.io/scrape: "true"
+    imagePullSecrets:
+        - name: regcred
+    serviceAccount:
+        create: true
+        name: ""
+        annotations: {}
+    podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+    securityContext:
+        readOnlyRootFilesystem: false
+        allowPrivilegeEscalation: false
+    nodeSelector:
+        kubernetes.io/arch: amd64
+    tolerations: []
+    affinity: {}
 ```
 
 Scheduling precedence:
+
 - Service-specific values (for example `backend.nodeSelector`)
 - `global.nodeSelector` / `global.tolerations` / `global.affinity`
 
@@ -609,51 +620,53 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 
 #### Worker Startup Required
 
-| Env Var | Source | Required | Default |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | chart-generated (`postgresql`/`postgresql.external`) | Yes | none |
-| `REDIS_URL` | chart-generated (`redis`/`redis.external`) | Yes | none |
-| `SESSION_SECRET` | chart secret (`SESSION_SECRET`) | Yes | auto-generated if not provided |
-| `MUSIC_PATH` | fixed by chart | Yes | `/music` |
+| Env Var                | Source                                                    | Required    | Default                        |
+| ---------------------- | --------------------------------------------------------- | ----------- | ------------------------------ |
+| `DATABASE_URL`         | chart-generated (`postgresql`/`postgresql.external`)      | Yes         | none                           |
+| `REDIS_URL`            | chart-generated (`redis`/`redis.external`)                | Yes         | none                           |
+| `SESSION_SECRET`       | chart secret (`SESSION_SECRET`)                           | Yes         | auto-generated if not provided |
+| `MUSIC_PATH`           | fixed by chart                                            | Yes         | `/music`                       |
 | `TRANSCODE_CACHE_PATH` | chart default or `backendWorker.env.TRANSCODE_CACHE_PATH` | Recommended | `/music/.soundspan/transcodes` |
-| `BACKEND_PROCESS_ROLE` | `backendWorker.processRole` | Recommended | `worker` |
-| `WORKER_HEALTH_PORT` | `backendWorker.health.port` | No | `3010` |
+| `BACKEND_PROCESS_ROLE` | `backendWorker.processRole`                               | Recommended | `worker`                       |
+| `WORKER_HEALTH_PORT`   | `backendWorker.health.port`                               | No          | `3010`                         |
 
 #### Worker Scheduling/Claim Controls
 
-| Env Var | Helm Value | Required | Default |
-| --- | --- | --- | --- |
-| `SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD` | `config.schedulerClaimSkipWarnThreshold` | No | `3` |
-| `READINESS_REQUIRE_DEPENDENCIES` | `config.readinessRequireDependencies` | No | `true` |
-| `READINESS_DEPENDENCY_CHECK_INTERVAL_MS` | `config.readinessDependencyCheckIntervalMs` | No | `5000` |
-| `READINESS_DEPENDENCY_CHECK_TIMEOUT_MS` | `config.readinessDependencyCheckTimeoutMs` | No | `2000` |
-| `DISCOVER_PROCESSOR_LOCK_TTL_MS` | `backendWorker.env.DISCOVER_PROCESSOR_LOCK_TTL_MS` | No | `2700000` |
-| `ENRICHMENT_CLAIM_TTL_MS` | `backendWorker.env.ENRICHMENT_CLAIM_TTL_MS` | No | `900000` |
-| `MOOD_BUCKET_CLAIM_TTL_MS` | `backendWorker.env.MOOD_BUCKET_CLAIM_TTL_MS` | No | `120000` |
-| `TRACK_RECONCILIATION_MAX_ROWS` | `backendWorker.env.TRACK_RECONCILIATION_MAX_ROWS` | No | `10000` |
-| `TRACK_RECONCILIATION_TIMEOUT_MS` | `backendWorker.env.TRACK_RECONCILIATION_TIMEOUT_MS` | No | `600000` |
+| Env Var                                  | Helm Value                                          | Required | Default   |
+| ---------------------------------------- | --------------------------------------------------- | -------- | --------- |
+| `SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD`    | `config.schedulerClaimSkipWarnThreshold`            | No       | `3`       |
+| `READINESS_REQUIRE_DEPENDENCIES`         | `config.readinessRequireDependencies`               | No       | `true`    |
+| `READINESS_DEPENDENCY_CHECK_INTERVAL_MS` | `config.readinessDependencyCheckIntervalMs`         | No       | `5000`    |
+| `READINESS_DEPENDENCY_CHECK_TIMEOUT_MS`  | `config.readinessDependencyCheckTimeoutMs`          | No       | `2000`    |
+| `DISCOVER_PROCESSOR_LOCK_TTL_MS`         | `backendWorker.env.DISCOVER_PROCESSOR_LOCK_TTL_MS`  | No       | `2700000` |
+| `ENRICHMENT_CLAIM_TTL_MS`                | `backendWorker.env.ENRICHMENT_CLAIM_TTL_MS`         | No       | `900000`  |
+| `MOOD_BUCKET_CLAIM_TTL_MS`               | `backendWorker.env.MOOD_BUCKET_CLAIM_TTL_MS`        | No       | `120000`  |
+| `TRACK_RECONCILIATION_MAX_ROWS`          | `backendWorker.env.TRACK_RECONCILIATION_MAX_ROWS`   | No       | `10000`   |
+| `TRACK_RECONCILIATION_TIMEOUT_MS`        | `backendWorker.env.TRACK_RECONCILIATION_TIMEOUT_MS` | No       | `600000`  |
 
 #### Common Optional Worker Feature Vars
 
-| Env Var | Helm Value | Required | Default |
-| --- | --- | --- | --- |
-| `AUDIO_ANALYSIS_ENABLED` | `config.features.audioAnalysis` | No | `true` |
-| `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
-| `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
-| `FEDERATION_ENABLED` | `config.features.federation` | No | `false` |
-| `FEDERATION_TOMBSTONE_RETENTION_DAYS` | `config.federationTombstoneRetentionDays` | No | `90` |
-| `FEDERATION_SYNC_INTERVAL_MINUTES` | `config.federationSyncIntervalMinutes` | No | `15` |
-| `LIDARR_ENABLED` | `config.lidarrEnabled` | No | `false` |
-| `LIDARR_URL` | `config.lidarrUrl` | If Lidarr enabled | none |
-| `LIDARR_API_KEY` | `config.lidarrApiKey` | If Lidarr enabled | none |
-| `LASTFM_API_KEY` | `config.lastfmApiKey` | No | app built-in key if unset |
-| `FANART_API_KEY` | `config.fanartApiKey` | No | unset |
-| `OPENAI_API_KEY` | `config.openaiApiKey` | No | unset |
-| `AUDIOBOOKSHELF_URL` | `config.audiobookshelfUrl` | No | unset |
-| `AUDIOBOOKSHELF_TOKEN` | `config.audiobookshelfToken` | If URL set | unset |
-| `AUDIOBOOKSHELF_API_KEY` | `backendWorker.env.AUDIOBOOKSHELF_API_KEY` or `backendWorker.envFrom` | If using env-based Audiobookshelf fallback | unset |
+| Env Var                               | Helm Value                                                            | Required                                   | Default                   |
+| ------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------ | ------------------------- |
+| `AUDIO_ANALYSIS_ENABLED`              | `config.features.audioAnalysis`                                       | No                                         | `true`                    |
+| `DISCOVERY_ENABLED`                   | `config.features.discovery`                                           | No                                         | `true`                    |
+| `AUTO_PLAYLISTS_ENABLED`              | `config.features.autoPlaylists`                                       | No                                         | `true`                    |
+| `FEDERATION_ENABLED`                  | `config.features.federation`                                          | No                                         | `false`                   |
+| `FEDERATION_TOMBSTONE_RETENTION_DAYS` | `config.federationTombstoneRetentionDays`                             | No                                         | `90`                      |
+| `PROVIDER_TRACK_RETENTION_DAYS`       | `config.providerTrackRetentionDays`                                   | No                                         | `30`                      |
+| `FEDERATION_SYNC_INTERVAL_MINUTES`    | `config.federationSyncIntervalMinutes`                                | No                                         | `15`                      |
+| `LIDARR_ENABLED`                      | `config.lidarrEnabled`                                                | No                                         | `false`                   |
+| `LIDARR_URL`                          | `config.lidarrUrl`                                                    | If Lidarr enabled                          | none                      |
+| `LIDARR_API_KEY`                      | `config.lidarrApiKey`                                                 | If Lidarr enabled                          | none                      |
+| `LASTFM_API_KEY`                      | `config.lastfmApiKey`                                                 | No                                         | app built-in key if unset |
+| `FANART_API_KEY`                      | `config.fanartApiKey`                                                 | No                                         | unset                     |
+| `OPENAI_API_KEY`                      | `config.openaiApiKey`                                                 | No                                         | unset                     |
+| `AUDIOBOOKSHELF_URL`                  | `config.audiobookshelfUrl`                                            | No                                         | unset                     |
+| `AUDIOBOOKSHELF_TOKEN`                | `config.audiobookshelfToken`                                          | If URL set                                 | unset                     |
+| `AUDIOBOOKSHELF_API_KEY`              | `backendWorker.env.AUDIOBOOKSHELF_API_KEY` or `backendWorker.envFrom` | If using env-based Audiobookshelf fallback | unset                     |
 
 You can inject additional values with:
+
 - `backendWorker.env` for direct key/value pairs
 - `backendWorker.envFrom` for Secret/ConfigMap `envFrom`
 
@@ -669,18 +682,17 @@ runtime for GPU pods.
 ```yaml
 # AIO mode
 aio:
-  gpu:
-    enabled: true
-    count: 1              # nvidia.com/gpu limit
-    runtimeClassName: ""  # e.g. "nvidia" if your cluster requires it
+    gpu:
+        enabled: true
+        count: 1 # nvidia.com/gpu limit
+        runtimeClassName: "" # e.g. "nvidia" if your cluster requires it
 
 # Individual mode
 audioAnalyzer:
-  gpu:
-    enabled: true
-    count: 1
-    runtimeClassName: ""
-
+    gpu:
+        enabled: true
+        count: 1
+        runtimeClassName: ""
 ```
 
 ## All Values

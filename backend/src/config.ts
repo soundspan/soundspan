@@ -102,6 +102,16 @@ const positiveIntegerEnvSchema = z
     })
     .optional();
 const booleanEnvSchema = z.enum(["true", "false"]).optional();
+const providerTrackRetentionEnvSchema = z
+    .string()
+    .regex(/^[1-9]\d*$/, "must be an integer from 1 through 3650")
+    .refine((value) => Number.isSafeInteger(Number(value)), {
+        message: "must be a safe integer",
+    })
+    .refine((value) => Number(value) <= 3650, {
+        message: "must be an integer from 1 through 3650",
+    })
+    .optional();
 const federationTombstoneRetentionEnvSchema = z
     .string()
     .regex(/^[1-9]\d*$/, "must be an integer greater than or equal to 3")
@@ -410,6 +420,7 @@ const envSchema = z
         PORT: z.string().optional(),
         NODE_ENV: z.enum(["development", "production", "test"]).optional(),
         MUSIC_PATH: z.string().min(1, "MUSIC_PATH is required"),
+        PROVIDER_TRACK_RETENTION_DAYS: providerTrackRetentionEnvSchema,
         TRACK_REMOVAL_RETENTION_DAYS: nonnegativeIntegerEnvSchema,
         FEDERATION_TOMBSTONE_RETENTION_DAYS:
             federationTombstoneRetentionEnvSchema,
@@ -469,6 +480,10 @@ try {
 
 const trackRemovalRetentionDays = Number.parseInt(
     process.env.TRACK_REMOVAL_RETENTION_DAYS ?? "90",
+    10,
+);
+const providerTrackRetentionDays = Number.parseInt(
+    process.env.PROVIDER_TRACK_RETENTION_DAYS ?? "30",
     10,
 );
 const federationTombstoneRetentionDays = Number.parseInt(
@@ -891,6 +906,7 @@ export const config = {
     },
 
     workers: {
+        providerTrackRetentionDays,
         trackRemovalRetentionDays,
         federationTombstoneRetentionDays,
         federationSyncIntervalMinutes,

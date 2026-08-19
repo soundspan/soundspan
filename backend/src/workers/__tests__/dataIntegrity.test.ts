@@ -89,6 +89,9 @@ describe("dataIntegrity worker", () => {
 
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../utils/db", () => ({ prisma }));
+        jest.doMock("../../config", () => ({
+            config: { workers: { providerTrackRetentionDays: 30 } },
+        }));
         const Prisma = {
             PrismaClientKnownRequestError,
             PrismaClientRustPanicError,
@@ -312,16 +315,16 @@ describe("dataIntegrity worker", () => {
         expect(prisma.album.findMany).toHaveBeenNthCalledWith(1, {
             where: {
                 location: "DISCOVER",
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             include: { artist: true },
         });
         expect(prisma.album.findMany).toHaveBeenNthCalledWith(3, {
             where: {
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             include: { artist: true },
         });
@@ -332,16 +335,16 @@ describe("dataIntegrity worker", () => {
             where: {
                 id: "discover-album-1",
                 location: "DISCOVER",
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.album.deleteMany).toHaveBeenNthCalledWith(2, {
             where: {
                 id: "empty-album-1",
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
@@ -387,16 +390,16 @@ describe("dataIntegrity worker", () => {
         expect(prisma.artist.findMany).toHaveBeenNthCalledWith(2, {
             where: {
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["orphan-artist-1"] },
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
     });

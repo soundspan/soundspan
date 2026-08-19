@@ -41,7 +41,10 @@ describe("cleanupOrphanedLibraryEntities", () => {
         jest.doMock("../../utils/db", () => ({ prisma }));
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../config", () => ({
-            config: { features: { federation: federationEnabled } },
+            config: {
+                features: { federation: federationEnabled },
+                workers: { providerTrackRetentionDays: 30 },
+            },
         }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -61,8 +64,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
             where: {
                 peerId: null,
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -73,16 +76,16 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 id: { in: ["local-album"] },
                 peerId: null,
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
             where: {
                 peerId: null,
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -93,8 +96,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 id: { in: ["local-artist"] },
                 peerId: null,
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
     });

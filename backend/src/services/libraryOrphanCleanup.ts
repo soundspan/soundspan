@@ -2,6 +2,10 @@ import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import {
+    parentHasNoLiveProviderTracksWhere,
+    providerTrackRetentionCutoff,
+} from "./providerTrackRetention";
 
 const cleanupLogger = logger.child("LibraryOrphanCleanup");
 const ORPHAN_CLEANUP_BATCH_SIZE = 10_000;
@@ -18,13 +22,14 @@ type CleanupClient = Prisma.TransactionClient | typeof prisma;
 async function deleteOrphanedAlbums(
     client: CleanupClient,
     writeTombstones: boolean,
+    cutoff: Date,
 ): Promise<number> {
+    const providerWhere = parentHasNoLiveProviderTracksWhere(cutoff);
     const orphanedAlbums = await client.album.findMany({
         where: {
             peerId: null,
             tracks: { none: {} },
-            tracksTidal: { none: {} },
-            tracksYtMusic: { none: {} },
+            ...providerWhere,
         },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
@@ -36,8 +41,7 @@ async function deleteOrphanedAlbums(
             id: { in: orphanedAlbums.map((album) => album.id) },
             peerId: null,
             tracks: { none: {} },
-            tracksTidal: { none: {} },
-            tracksYtMusic: { none: {} },
+            ...providerWhere,
         },
     });
     if (writeTombstones && result.count > 0) {
@@ -79,13 +83,14 @@ async function resolveDeletedAlbums(
 async function deleteOrphanedArtists(
     client: CleanupClient,
     writeTombstones: boolean,
+    cutoff: Date,
 ): Promise<number> {
+    const providerWhere = parentHasNoLiveProviderTracksWhere(cutoff);
     const orphanedArtists = await client.artist.findMany({
         where: {
             peerId: null,
             albums: { none: {} },
-            tracksTidal: { none: {} },
-            tracksYtMusic: { none: {} },
+            ...providerWhere,
         },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
@@ -97,8 +102,7 @@ async function deleteOrphanedArtists(
             id: { in: orphanedArtists.map((artist) => artist.id) },
             peerId: null,
             albums: { none: {} },
-            tracksTidal: { none: {} },
-            tracksYtMusic: { none: {} },
+            ...providerWhere,
         },
     });
     if (writeTombstones && result.count > 0) {
@@ -140,19 +144,34 @@ async function resolveDeletedArtists(
 async function cleanupWithClient(
     client: CleanupClient,
     writeTombstones: boolean,
+    cutoff: Date,
 ): Promise<LibraryOrphanCleanupResult> {
-    const albumsDeleted = await deleteOrphanedAlbums(client, writeTombstones);
-    const artistsDeleted = await deleteOrphanedArtists(client, writeTombstones);
+    const albumsDeleted = await deleteOrphanedAlbums(
+        client,
+        writeTombstones,
+        cutoff,
+    );
+    const artistsDeleted = await deleteOrphanedArtists(
+        client,
+        writeTombstones,
+        cutoff,
+    );
     return { albumsDeleted, artistsDeleted };
 }
 
-/** Deletes albums without track rows, then artists without album rows. */
-export async function cleanupOrphanedLibraryEntities(): Promise<LibraryOrphanCleanupResult> {
+/** Deletes parents without local tracks or provider tracks retained by policy. */
+export async function cleanupOrphanedLibraryEntities(
+    now: Date = new Date(),
+): Promise<LibraryOrphanCleanupResult> {
+    const cutoff = providerTrackRetentionCutoff(
+        now,
+        config.workers.providerTrackRetentionDays,
+    );
     const result = config.features.federation
         ? await prisma.$transaction((transaction) =>
-              cleanupWithClient(transaction, true),
+              cleanupWithClient(transaction, true, cutoff),
           )
-        : await cleanupWithClient(prisma, false);
+        : await cleanupWithClient(prisma, false, cutoff);
 
     if (result.albumsDeleted > 0 || result.artistsDeleted > 0) {
         cleanupLogger.info(

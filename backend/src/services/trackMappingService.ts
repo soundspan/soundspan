@@ -670,6 +670,7 @@ class TrackMappingService {
                               confidence: data.confidence,
                               source: data.source,
                               stale: false,
+                              staleAt: null,
                           },
                       })
                     : preferredExisting;
@@ -681,7 +682,7 @@ class TrackMappingService {
                 if (duplicateIds.length > 0) {
                     await tx.trackMapping.updateMany({
                         where: { id: { in: duplicateIds } },
-                        data: { stale: true },
+                        data: { stale: true, staleAt: new Date() },
                     });
                     log.warn(
                         `Deduplicated ${duplicateIds.length} TrackMapping rows for linkage tuple ` +
@@ -775,7 +776,7 @@ class TrackMappingService {
         try {
             const result = await prisma.trackMapping.update({
                 where: { id: mappingId },
-                data: { stale: true },
+                data: { stale: true, staleAt: new Date() },
             });
             log.info(`Marked TrackMapping id=${mappingId} as stale`);
             return result;
