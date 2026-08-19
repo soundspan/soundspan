@@ -495,7 +495,6 @@ describe("subsonic Tier B handlers", () => {
         expect(mockExecuteRaw).toHaveBeenCalledWith(
             expect.anything(),
             "playlist-1",
-            1000,
         );
         expect(mockPlaylistItemUpdate).not.toHaveBeenCalled();
         expect(mockTransaction).toHaveBeenCalledWith(expect.any(Function), {

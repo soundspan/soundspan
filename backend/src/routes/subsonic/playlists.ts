@@ -2,7 +2,6 @@ import type { Prisma } from "@prisma/client";
 import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
 import {
-    PLAYLIST_REORDER_MAX_ITEMS,
     PlaylistMutationLockNotFoundError,
     requirePlaylistMutationLock,
 } from "../../services/playlistMutationLock";
@@ -511,6 +510,8 @@ async function reindexLockedPlaylistItems(
     tx: Prisma.TransactionClient,
     playlistId: string,
 ): Promise<void> {
+    // One set-based statement over the complete item set: a partial
+    // (capped) reindex could leave sort gaps on oversized playlists.
     await tx.$executeRaw`
         WITH ranked AS (
             SELECT
@@ -520,8 +521,6 @@ async function reindexLockedPlaylistItems(
                 ) - 1)::integer AS "nextSort"
             FROM "PlaylistItem" item
             WHERE item."playlistId" = ${playlistId}
-            ORDER BY item.sort ASC, item.id ASC
-            LIMIT ${PLAYLIST_REORDER_MAX_ITEMS}
         )
         UPDATE "PlaylistItem" item
         SET sort = ranked."nextSort"
