@@ -302,7 +302,7 @@
             "id": 12,
             "targets": [
                 {
-                    "expr": "max(soundspan_federation_peer_sync_lag_seconds) by (peer)",
+                    "expr": "max(soundspan_federation_peer_sync_lag_seconds) by (peer) and on (peer) (max(soundspan_federation_peer_last_sync_success_timestamp_seconds) by (peer) > 0)",
                     "legendFormat": "{{peer}}",
                     "refId": "A"
                 }

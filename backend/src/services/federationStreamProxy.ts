@@ -73,25 +73,25 @@ function parseContentLength(headers: Record<string, unknown>): number | null {
 async function markPeerOffline(peerId: string, error: unknown): Promise<void> {
     const lastError = safeFederationErrorMessage(error);
     const lastErrorAt = new Date();
-    const result = await prisma.federationPeer.updateMany({
-        where: { id: peerId, outboundStatus: "ACTIVE" },
-        data: {
-            outboundStatus: "OFFLINE",
-            lastError,
-            lastErrorAt,
-        },
-    });
-    if (result.count === 1) {
-        log.info(`peerId=${peerId} status=OFFLINE previous=ACTIVE`);
-        return;
-    }
     try {
+        const result = await prisma.federationPeer.updateMany({
+            where: { id: peerId, outboundStatus: "ACTIVE" },
+            data: {
+                outboundStatus: "OFFLINE",
+                lastError,
+                lastErrorAt,
+            },
+        });
+        if (result.count === 1) {
+            log.info(`peerId=${peerId} status=OFFLINE previous=ACTIVE`);
+            return;
+        }
         await prisma.federationPeer.updateMany({
             where: { id: peerId, outboundStatus: { not: "REVOKED" } },
             data: { lastError, lastErrorAt },
         });
     } catch (cause) {
-        log.debug("Failed to persist federation peer stream diagnostic", {
+        log.warn("Failed to persist federation peer stream diagnostic", {
             peerId,
             cause,
         });

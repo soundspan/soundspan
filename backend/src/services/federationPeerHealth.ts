@@ -22,7 +22,7 @@ const warnedCappedCollectors = new Set<CappedCollector>();
 type CappedCollector = "admin_health" | "worker_metrics" | "lease_metrics";
 
 export type FederationCatalogType = (typeof CATALOG_TYPES)[number];
-export type FederationHealthState = "green" | "amber" | "red";
+export type FederationHealthState = "green" | "amber" | "red" | "revoked";
 export type FederationCatalogCounts = Record<FederationCatalogType, number>;
 
 /** Inputs used by the pure federation health-state decision. */
@@ -87,12 +87,21 @@ function activeForDirection(input: FederationHealthStateInput): boolean {
     return inboundActive && outboundActive;
 }
 
+function revokedForDirection(input: FederationHealthStateInput): boolean {
+    const inboundRevoked =
+        input.direction !== "CONSUMER" && input.inboundStatus === "REVOKED";
+    const outboundRevoked =
+        input.direction !== "HOST" && input.outboundStatus === "REVOKED";
+    return inboundRevoked || outboundRevoked;
+}
+
 /** Derives the bounded admin health state from peer status and freshness. */
 export function deriveFederationHealthState(
     input: FederationHealthStateInput,
     syncIntervalMinutes: number,
     now = new Date(),
 ): FederationHealthState {
+    if (revokedForDirection(input)) return "revoked";
     const intervalMinutes = Number.isFinite(syncIntervalMinutes)
         ? Math.max(1, syncIntervalMinutes)
         : 1;
@@ -326,7 +335,10 @@ export async function collectFederationWorkerMetricSnapshot(): Promise<
     FederationWorkerMetricSnapshot[]
 > {
     const peers = await prisma.federationPeer.findMany({
-        where: { direction: { in: ["CONSUMER", "BOTH"] } },
+        where: {
+            direction: { in: ["CONSUMER", "BOTH"] },
+            outboundStatus: { not: "REVOKED" },
+        },
         orderBy: { id: "asc" },
         take: MAX_HEALTH_PEERS,
         select: { id: true, lastSyncSuccessAt: true },
@@ -345,7 +357,10 @@ export async function collectFederationLeaseMetricSnapshot(): Promise<
     FederationLeaseMetricSnapshot[]
 > {
     const peers = await prisma.federationPeer.findMany({
-        where: { direction: { in: ["HOST", "BOTH"] } },
+        where: {
+            direction: { in: ["HOST", "BOTH"] },
+            inboundStatus: { not: "REVOKED" },
+        },
         orderBy: { id: "asc" },
         take: MAX_HEALTH_PEERS,
         select: { id: true },

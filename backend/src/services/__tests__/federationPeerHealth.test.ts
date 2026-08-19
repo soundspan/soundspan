@@ -23,6 +23,7 @@ import {
     collectFederationLeaseMetricSnapshot,
     collectFederationWorkerMetricSnapshot,
     deriveFederationHealthState,
+    listFederationPeerHealth,
     safeFederationErrorMessage,
 } from "../federationPeerHealth";
 
@@ -53,6 +54,7 @@ describe("federation peer health", () => {
         ["amber", input({ syncLagSeconds: 2 * HOUR_SECONDS })],
         ["red", input({ syncLagSeconds: 6 * HOUR_SECONDS })],
         ["red", input({ outboundStatus: "OFFLINE" })],
+        ["revoked", input({ outboundStatus: "REVOKED" })],
         ["red", input({ syncLagSeconds: null })],
         [
             "amber",
@@ -142,7 +144,10 @@ describe("federation peer health", () => {
 
         expect(findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { direction: { in: ["CONSUMER", "BOTH"] } },
+                where: {
+                    direction: { in: ["CONSUMER", "BOTH"] },
+                    outboundStatus: { not: "REVOKED" },
+                },
             }),
         );
         expect(logWarn).toHaveBeenCalledWith(
@@ -169,11 +174,42 @@ describe("federation peer health", () => {
 
         expect(findMany).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: { direction: { in: ["HOST", "BOTH"] } },
+                where: {
+                    direction: { in: ["HOST", "BOTH"] },
+                    inboundStatus: { not: "REVOKED" },
+                },
             }),
         );
         expect(snapshots).toHaveLength(51);
         expect(zCount).toHaveBeenCalledTimes(51);
         expect(maximum).toBe(25);
+    });
+
+    it("keeps a revoked peer in admin health with a distinct state", async () => {
+        findMany.mockResolvedValueOnce([
+            {
+                id: "peer-revoked",
+                name: "Revoked Library",
+                direction: "BOTH",
+                inboundStatus: "REVOKED",
+                outboundStatus: "REVOKED",
+                lastSeenAt: null,
+                lastSyncSuccessAt: null,
+                lastSyncDurationMs: null,
+                maxConcurrentStreams: 2,
+                lastError: null,
+                lastErrorAt: null,
+            },
+        ]);
+
+        const peers = await listFederationPeerHealth();
+
+        expect(peers).toHaveLength(1);
+        expect(peers[0]).toEqual(
+            expect.objectContaining({
+                id: "peer-revoked",
+                health: "revoked",
+            }),
+        );
     });
 });

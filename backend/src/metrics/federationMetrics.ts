@@ -4,9 +4,12 @@ import type {
     FederationLeaseMetricSnapshot,
     FederationWorkerMetricSnapshot,
 } from "../services/federationPeerHealth";
+import { logger } from "../utils/logger";
 
 const DEFAULT_MAX_PEER_LABELS = 100;
 const MAX_COLLECTED_PEERS = 500;
+const COLLECTOR_TIMEOUT_MS = 5_000;
+const COLLECTOR_WARNING_INTERVAL_MS = 5 * 60 * 1_000;
 const CATALOG_TYPES = [
     "artist",
     "album",
@@ -18,6 +21,7 @@ const DURATION_BUCKETS = [
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 900,
     1_800, 3_600,
 ];
+const log = logger.child("FederationMetrics");
 
 async function defaultWorkerSnapshot(): Promise<
     FederationWorkerMetricSnapshot[]
@@ -52,6 +56,11 @@ export type FederationAuthFailureReason =
     | "inactive";
 export type FederationQuotaKind = "concurrency" | "bandwidth";
 export type FederationCacheResult = "hit" | "miss";
+type FederationCollector = "worker_snapshot" | "lease_snapshot";
+type RecordCollectorFailure = (
+    collector: FederationCollector,
+    cause: unknown,
+) => void;
 
 /** Role and dependency seams for process-local federation instrumentation. */
 export interface FederationMetricsOptions {
@@ -77,6 +86,59 @@ interface ApiInstruments {
     authFailures: Counter<"peer" | "reason">;
     streamLeases: Gauge<"peer">;
     quotaRejections: Counter<"peer" | "kind">;
+}
+
+async function collectWithTimeout<T>(
+    collector: FederationCollector,
+    collect: () => Promise<T>,
+): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(
+                new Error(
+                    `Federation ${collector} collector timed out after ${COLLECTOR_TIMEOUT_MS} ms`,
+                ),
+            );
+        }, COLLECTOR_TIMEOUT_MS);
+    });
+    try {
+        return await Promise.race([collect(), timeout]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
+function registerCollectorFailureReporter(
+    registry: Registry,
+    now: () => Date,
+): RecordCollectorFailure {
+    const failures = new Counter({
+        name: "soundspan_federation_collector_failures_total",
+        help: "Federation scrape-time collector failures by bounded collector name.",
+        labelNames: ["collector"] as const,
+        registers: [registry],
+    });
+    const lastWarningAt: Record<FederationCollector, number | null> = {
+        worker_snapshot: null,
+        lease_snapshot: null,
+    };
+    return (collector, cause): void => {
+        failures.inc({ collector });
+        const nowMs = now().getTime();
+        const lastWarning = lastWarningAt[collector];
+        if (
+            lastWarning !== null &&
+            nowMs - lastWarning < COLLECTOR_WARNING_INTERVAL_MS
+        ) {
+            return;
+        }
+        lastWarningAt[collector] = nowMs;
+        log.warn(
+            "Federation metric collector failed; retaining last-good samples",
+            { collector, cause },
+        );
+    };
 }
 
 /** Process-local federation metrics and thin recording operations. */
@@ -197,26 +259,32 @@ function workerCollector(
     collectSnapshot: () => Promise<FederationWorkerMetricSnapshot[]>,
     boundPeer: (peerId: string) => string,
     now: () => Date,
+    recordFailure: RecordCollectorFailure,
 ): () => Promise<void> {
     let pending: Promise<void> | null = null;
+    let lastGood: readonly FederationWorkerMetricSnapshot[] | null = null;
     return () => {
         if (pending) return pending;
         pending = (async () => {
             try {
-                const snapshots = await collectSnapshot();
-                instruments.syncLag.reset();
-                instruments.lastSyncSuccess.reset();
-                instruments.catalogItems.reset();
-                setWorkerSnapshot(
-                    instruments,
-                    snapshots,
-                    boundPeer,
-                    now().getTime(),
+                const snapshots = await collectWithTimeout(
+                    "worker_snapshot",
+                    collectSnapshot,
                 );
-            } catch {
-                // Keep the last successful samples. Telemetry dependency
-                // failures must not make the complete scrape unavailable.
+                lastGood = snapshots.slice(0, MAX_COLLECTED_PEERS);
+            } catch (cause) {
+                recordFailure("worker_snapshot", cause);
             }
+            if (lastGood === null) return;
+            instruments.syncLag.reset();
+            instruments.lastSyncSuccess.reset();
+            instruments.catalogItems.reset();
+            setWorkerSnapshot(
+                instruments,
+                lastGood,
+                boundPeer,
+                now().getTime(),
+            );
         })();
         pending.then(
             () => (pending = null),
@@ -231,6 +299,7 @@ function registerWorkerMetrics(
     collectSnapshot: () => Promise<FederationWorkerMetricSnapshot[]>,
     boundPeer: (peerId: string) => string,
     now: () => Date,
+    recordFailure: RecordCollectorFailure,
 ): WorkerInstruments {
     let collectAll: () => Promise<void> = async () => undefined;
     const syncLag = new Gauge({
@@ -273,7 +342,13 @@ function registerWorkerMetrics(
         catalogItems,
         syncDuration,
     };
-    collectAll = workerCollector(instruments, collectSnapshot, boundPeer, now);
+    collectAll = workerCollector(
+        instruments,
+        collectSnapshot,
+        boundPeer,
+        now,
+        recordFailure,
+    );
     return instruments;
 }
 
@@ -301,17 +376,21 @@ function leaseCollector(
     gauge: Gauge<"peer">,
     collectLeases: () => Promise<FederationLeaseMetricSnapshot[]>,
     leasePeer: (peerId: string) => string,
+    recordFailure: RecordCollectorFailure,
 ): () => Promise<void> {
     let pending: Promise<void> | null = null;
     return () => {
         if (pending) return pending;
         pending = (async () => {
             try {
-                const snapshots = await collectLeases();
+                const snapshots = await collectWithTimeout(
+                    "lease_snapshot",
+                    collectLeases,
+                );
                 gauge.reset();
                 setLeaseSnapshot(gauge, snapshots, leasePeer);
-            } catch {
-                // Keep the last successful samples without failing the scrape.
+            } catch (cause) {
+                recordFailure("lease_snapshot", cause);
             }
         })();
         pending.then(
@@ -352,6 +431,7 @@ function registerHostMetrics(
     registry: Registry,
     collectLeases: () => Promise<FederationLeaseMetricSnapshot[]>,
     leasePeer: (peerId: string) => string,
+    recordFailure: RecordCollectorFailure,
 ): Pick<
     ApiInstruments,
     "hostRequests" | "authFailures" | "streamLeases" | "quotaRejections"
@@ -383,6 +463,7 @@ function registerHostMetrics(
         streamLeases,
         collectLeases,
         leasePeer,
+        recordFailure,
     );
     const quotaRejections = new Counter({
         name: "soundspan_federation_quota_rejections_total",
@@ -397,10 +478,16 @@ function registerApiMetrics(
     registry: Registry,
     collectLeases: () => Promise<FederationLeaseMetricSnapshot[]>,
     leasePeer: (peerId: string) => string,
+    recordFailure: RecordCollectorFailure,
 ): ApiInstruments {
     return {
         ...registerProxyMetrics(registry),
-        ...registerHostMetrics(registry, collectLeases, leasePeer),
+        ...registerHostMetrics(
+            registry,
+            collectLeases,
+            leasePeer,
+            recordFailure,
+        ),
     };
 }
 
@@ -411,6 +498,8 @@ export function createFederationMetrics(
 ): FederationMetrics {
     const role = options.role ?? "all";
     const maxPeers = boundedPeerLimit(options.maxPeerLabels);
+    const now = options.now ?? (() => new Date());
+    const recordFailure = registerCollectorFailureReporter(registry, now);
     const workerPeer = peerLabelGuard(maxPeers);
     const syncPeer = peerLabelGuard(maxPeers);
     const worker =
@@ -419,7 +508,8 @@ export function createFederationMetrics(
                   registry,
                   options.collectWorkerSnapshot ?? defaultWorkerSnapshot,
                   workerPeer,
-                  options.now ?? (() => new Date()),
+                  now,
+                  recordFailure,
               )
             : null;
     const api =
@@ -428,6 +518,7 @@ export function createFederationMetrics(
                   registry,
                   options.collectLeaseSnapshot ?? defaultLeaseSnapshot,
                   peerLabelGuard(maxPeers),
+                  recordFailure,
               )
             : null;
     const proxyPeer = peerLabelGuard(maxPeers);

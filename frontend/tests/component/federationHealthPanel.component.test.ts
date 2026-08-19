@@ -65,6 +65,44 @@ test("federation health cards render an empty state", async () => {
     assert.match(html, /No federation peer health data/);
 });
 
+test("federation health cards present revoked peers distinctly", async () => {
+    const { FederationHealthCards } =
+        await import("../../features/settings/components/sections/FederationHealthPanel");
+    const html = renderToStaticMarkup(
+        React.createElement(FederationHealthCards, {
+            peers: [
+                {
+                    id: "peer-revoked",
+                    name: "Revoked Library",
+                    direction: "CONSUMER",
+                    inboundStatus: null,
+                    outboundStatus: "REVOKED",
+                    lastSeenAt: null,
+                    lastSyncSuccessAt: null,
+                    lastSyncDurationMs: null,
+                    syncLagSeconds: null,
+                    catalog: {
+                        artist: 0,
+                        album: 0,
+                        track: 0,
+                        audiobook: 0,
+                        podcast: 0,
+                    },
+                    activeStreamLeases: 0,
+                    maxConcurrentStreams: null,
+                    lastError: null,
+                    lastErrorAt: null,
+                    health: "revoked",
+                },
+            ],
+        }),
+    );
+
+    assert.match(html, /REVOKED/);
+    assert.match(html, /bg-gray-500/);
+    assert.doesNotMatch(html, /bg-red-500/);
+});
+
 test("federation health cards render only direction-applicable details", async () => {
     const { FederationHealthCards } =
         await import("../../features/settings/components/sections/FederationHealthPanel");

@@ -33,7 +33,7 @@ export interface FederationPeer {
     updatedAt: string;
 }
 
-export type FederationHealthState = "green" | "amber" | "red";
+export type FederationHealthState = "green" | "amber" | "red" | "revoked";
 
 /** Per-peer federation health read model returned to administrators. */
 export interface FederationPeerHealth {

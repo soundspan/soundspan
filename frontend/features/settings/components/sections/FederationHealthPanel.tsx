@@ -12,6 +12,7 @@ const stateTone: Record<FederationHealthState, string> = {
     green: "bg-green-500/15 text-green-300",
     amber: "bg-amber-500/15 text-amber-300",
     red: "bg-red-500/15 text-red-300",
+    revoked: "bg-gray-500/15 text-gray-300",
 };
 const MAX_HEALTH_PEERS = 500;
 

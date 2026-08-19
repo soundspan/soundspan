@@ -9,15 +9,28 @@ quota metrics. An all-in-one backend exports both sets from one registry.
 Every `peer` label is the stable federation peer ID. Scrape-time gauges collect
 the first 500 direction-applicable peers in stable ID order: consumer and
 two-way peers for sync/catalog gauges, and host and two-way peers for lease
-gauges. Within that collection cap, each metric family retains at most 100 peer
-IDs and aggregates additional IDs under `peer="other"`. Applicable peers after
-the first 500 are omitted, and the owning process logs one warning when it
-reaches that cap.
+gauges. Peers whose relevant directional status is `REVOKED` drop out of these
+series, while the administrator health panel retains them with a distinct
+revoked state. Within that collection cap, each metric family retains at most
+100 peer IDs and aggregates additional IDs under `peer="other"`. Applicable
+peers after the first 500 are omitted, and the owning process logs one warning
+when it reaches that cap.
+
+Worker-snapshot and lease-snapshot collection each stop waiting after five
+seconds. A failed or timed-out collection increments
+`soundspan_federation_collector_failures_total{collector}` with the bounded
+`worker_snapshot` or `lease_snapshot` label. The owning process retains the
+last successful samples and rate-limits its degradation warning to once per
+five minutes per collector. Sync lag is recalculated from the cached success
+timestamp on every scrape, so it continues to increase while PostgreSQL is
+unavailable.
 
 The last-success gauge emits `0` for a consumer peer that has never completed a
 sync. Its sync-lag gauge consequently reports the elapsed time since the Unix
 epoch. Both freshness alerts below therefore fire for never-synced peers instead
-of treating the missing success as an absent series.
+of treating the missing success as an absent series. The Grafana lag graph
+excludes these epoch-scale values because the last-success panel and alert
+already expose never-synced peers; alert expressions remain unchanged.
 
 The following Prometheus Operator rule pack is an example. It assumes the
 default 15-minute `FEDERATION_SYNC_INTERVAL_MINUTES`. Replace the 1,800-second

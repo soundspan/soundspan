@@ -9,6 +9,7 @@ const streamFileWithRangeSupport = jest.fn();
 const destroyStreamingService = jest.fn();
 const logDebug = jest.fn();
 const logInfo = jest.fn();
+const logWarn = jest.fn();
 const recordFederationStreamProxy = jest.fn();
 const recordFederationStreamProxyCache = jest.fn();
 const prisma = {
@@ -53,6 +54,7 @@ jest.mock("../../utils/logger", () => ({
         child: jest.fn(() => ({
             debug: logDebug,
             info: logInfo,
+            warn: logWarn,
         })),
     },
 }));
@@ -258,7 +260,34 @@ describe("federated stream proxy", () => {
                 quality: "original",
             }),
         ).rejects.toThrow("peer error");
-        expect(logDebug).toHaveBeenCalledWith(
+        expect(logWarn).toHaveBeenCalledWith(
+            "Failed to persist federation peer stream diagnostic",
+            expect.objectContaining({ peerId: "peer-1" }),
+        );
+    });
+
+    it("preserves the upstream error when the offline status write fails", async () => {
+        const { FederationHttpError } = jest.requireMock("../federationClient");
+        const upstreamError = new FederationHttpError(503, true);
+        getStream.mockRejectedValueOnce(upstreamError);
+        prisma.federationPeer.updateMany.mockRejectedValueOnce(
+            new Error("postgres unavailable"),
+        );
+
+        await expect(
+            proxyFederatedTrackStream({
+                req: createRequest() as never,
+                res: createResponse() as never,
+                peer,
+                remoteId: "remote-track-1",
+                trackId: "fed-track-1",
+                sourceModified: new Date("2026-08-15T12:00:00.000Z"),
+                sourceMime: "audio/flac",
+                quality: "original",
+            }),
+        ).rejects.toBe(upstreamError);
+        expect(prisma.federationPeer.updateMany).toHaveBeenCalledTimes(1);
+        expect(logWarn).toHaveBeenCalledWith(
             "Failed to persist federation peer stream diagnostic",
             expect.objectContaining({ peerId: "peer-1" }),
         );

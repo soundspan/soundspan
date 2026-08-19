@@ -1,7 +1,21 @@
 import { Registry } from "prom-client";
+
+const logWarn = jest.fn();
+jest.mock("../../utils/logger", () => ({
+    logger: { child: () => ({ warn: logWarn }) },
+}));
+
 import { createFederationMetrics } from "../federationMetrics";
 
 describe("federation metrics", () => {
+    beforeEach(() => {
+        logWarn.mockClear();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     it("collects worker peer freshness and catalog gauges lazily", async () => {
         const collectWorkerSnapshot = jest.fn().mockResolvedValue([
             {
@@ -68,7 +82,8 @@ describe("federation metrics", () => {
         );
     });
 
-    it("keeps worker last-good samples when collection fails", async () => {
+    it("advances worker lag from the last-good snapshot when collection fails", async () => {
+        let now = new Date("2026-08-19T12:00:00.000Z");
         const collectWorkerSnapshot = jest
             .fn()
             .mockResolvedValueOnce([
@@ -89,16 +104,74 @@ describe("federation metrics", () => {
         createFederationMetrics(registry, {
             role: "worker",
             collectWorkerSnapshot,
-            now: () => new Date("2026-08-19T12:00:00.000Z"),
+            now: () => now,
         });
 
         await registry.metrics();
+        now = new Date("2026-08-19T12:05:00.000Z");
         const exposition = await registry.metrics();
+        const failureExposition = await registry.getSingleMetricAsString(
+            "soundspan_federation_collector_failures_total",
+        );
 
         expect(collectWorkerSnapshot).toHaveBeenCalledTimes(2);
         expect(exposition).toContain(
             'soundspan_federation_peer_catalog_items{peer="peer-1",type="track"} 3',
         );
+        expect(exposition).toContain(
+            'soundspan_federation_peer_sync_lag_seconds{peer="peer-1"} 360',
+        );
+        expect(failureExposition).toContain(
+            'soundspan_federation_collector_failures_total{collector="worker_snapshot"} 1',
+        );
+        expect(logWarn).toHaveBeenCalledTimes(1);
+        expect(logWarn).toHaveBeenCalledWith(
+            "Federation metric collector failed; retaining last-good samples",
+            expect.objectContaining({ collector: "worker_snapshot" }),
+        );
+    });
+
+    it("releases a timed-out worker collection before the next scrape", async () => {
+        jest.useFakeTimers();
+        const collectWorkerSnapshot = jest
+            .fn()
+            .mockReturnValueOnce(new Promise(() => undefined))
+            .mockResolvedValueOnce([
+                {
+                    peerId: "peer-recovered",
+                    lastSyncSuccessAt: new Date("2026-08-19T11:59:00.000Z"),
+                    catalog: {
+                        artist: 1,
+                        album: 1,
+                        track: 1,
+                        audiobook: 1,
+                        podcast: 1,
+                    },
+                },
+            ]);
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "worker",
+            collectWorkerSnapshot,
+            now: () => new Date("2026-08-19T12:00:00.000Z"),
+        });
+
+        const timedOutScrape = registry.metrics();
+        await jest.advanceTimersByTimeAsync(5_000);
+        await timedOutScrape;
+        const failureExposition = await registry.getSingleMetricAsString(
+            "soundspan_federation_collector_failures_total",
+        );
+        const recoveredExposition = await registry.metrics();
+
+        expect(failureExposition).toContain(
+            'soundspan_federation_collector_failures_total{collector="worker_snapshot"} 1',
+        );
+        expect(recoveredExposition).toContain(
+            'soundspan_federation_peer_catalog_items{peer="peer-recovered",type="track"} 1',
+        );
+        expect(collectWorkerSnapshot).toHaveBeenCalledTimes(2);
+        expect(jest.getTimerCount()).toBe(0);
     });
 
     it("coalesces concurrent lease collection and keeps last-good samples", async () => {
@@ -129,6 +202,9 @@ describe("federation metrics", () => {
             concurrent,
         ]);
         const afterFailure = await registry.metrics();
+        const failureExposition = await registry.getSingleMetricAsString(
+            "soundspan_federation_collector_failures_total",
+        );
 
         expect(firstExposition).toContain(
             'soundspan_federation_stream_leases{peer="peer-1"} 2',
@@ -140,6 +216,63 @@ describe("federation metrics", () => {
             'soundspan_federation_stream_leases{peer="peer-1"} 2',
         );
         expect(collectLeaseSnapshot).toHaveBeenCalledTimes(2);
+        expect(failureExposition).toContain(
+            'soundspan_federation_collector_failures_total{collector="lease_snapshot"} 1',
+        );
+    });
+
+    it("releases a timed-out lease collection before the next scrape", async () => {
+        jest.useFakeTimers();
+        const collectLeaseSnapshot = jest
+            .fn()
+            .mockReturnValueOnce(new Promise(() => undefined))
+            .mockResolvedValueOnce([
+                { peerId: "peer-recovered", activeLeases: 2 },
+            ]);
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "api",
+            collectLeaseSnapshot,
+        });
+
+        const timedOutScrape = registry.metrics();
+        await jest.advanceTimersByTimeAsync(5_000);
+        await timedOutScrape;
+        const failureExposition = await registry.getSingleMetricAsString(
+            "soundspan_federation_collector_failures_total",
+        );
+        const recoveredExposition = await registry.metrics();
+
+        expect(failureExposition).toContain(
+            'soundspan_federation_collector_failures_total{collector="lease_snapshot"} 1',
+        );
+        expect(recoveredExposition).toContain(
+            'soundspan_federation_stream_leases{peer="peer-recovered"} 2',
+        );
+        expect(collectLeaseSnapshot).toHaveBeenCalledTimes(2);
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("rate-limits repeated collector failure warnings", async () => {
+        const registry = new Registry();
+        createFederationMetrics(registry, {
+            role: "api",
+            collectLeaseSnapshot: jest
+                .fn()
+                .mockRejectedValue(new Error("redis unavailable")),
+            now: () => new Date("2026-08-19T12:00:00.000Z"),
+        });
+
+        await registry.metrics();
+        await registry.metrics();
+        const exposition = await registry.getSingleMetricAsString(
+            "soundspan_federation_collector_failures_total",
+        );
+
+        expect(exposition).toContain(
+            'soundspan_federation_collector_failures_total{collector="lease_snapshot"} 2',
+        );
+        expect(logWarn).toHaveBeenCalledTimes(1);
     });
 
     it("records bounded worker and API outcomes", async () => {
