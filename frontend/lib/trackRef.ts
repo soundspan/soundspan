@@ -1,4 +1,7 @@
-import type { CanonicalMediaSource } from "@soundspan/media-metadata-contract";
+import type {
+    CanonicalMediaSource,
+    UnifiedTrackSource,
+} from "@soundspan/media-metadata-contract";
 
 export type TrackRef =
     | { trackId: string }
@@ -28,6 +31,8 @@ type ProviderSource = CanonicalMediaSource;
 
 type TrackRefInput = {
     id?: string | null;
+    hasLocalFile?: boolean;
+    source?: UnifiedTrackSource | null;
     title?: string | null;
     displayTitle?: string | null;
     duration?: number | string | null;
@@ -166,6 +171,62 @@ function resolveTidalTrackId(input: TrackRefInput): number | null {
     }
 
     return null;
+}
+
+function hasPersistedPreferenceIdentity(input: TrackRefInput): boolean {
+    return (
+        input.hasLocalFile === true ||
+        input.source === "local" ||
+        input.source === "federated" ||
+        resolveStreamSource(input) === "local"
+    );
+}
+
+/**
+ * Resolves the stable track identity shared by preferences and player surfaces.
+ * Persisted local and federated rows retain their database id even when provider
+ * metadata has enriched the row for fallback playback.
+ */
+export function resolvePreferenceTrackId(
+    input: TrackRefInput & { id: string },
+): string {
+    if (hasPersistedPreferenceIdentity(input)) {
+        return input.id;
+    }
+
+    const prefixed = prefixedTrackIdRef(input.id);
+    if (prefixed && "tidalTrackId" in prefixed) {
+        return `tidal:${prefixed.tidalTrackId}`;
+    }
+    if (prefixed && "youtubeVideoId" in prefixed) {
+        return `yt:${prefixed.youtubeVideoId}`;
+    }
+
+    const providerSource =
+        resolveStreamSource(input) ??
+        (input.source === "tidal" || input.source === "youtube"
+            ? input.source
+            : null);
+    const tidalTrackId = resolveTidalTrackId(input);
+    const youtubeVideoId = resolveYouTubeVideoId(input);
+
+    if (providerSource === "tidal" && tidalTrackId !== null) {
+        return `tidal:${tidalTrackId}`;
+    }
+    if (
+        (providerSource === "youtube" || providerSource === "youtube-direct") &&
+        youtubeVideoId
+    ) {
+        return `yt:${youtubeVideoId}`;
+    }
+    if (tidalTrackId !== null) {
+        return `tidal:${tidalTrackId}`;
+    }
+    if (youtubeVideoId) {
+        return `yt:${youtubeVideoId}`;
+    }
+
+    return input.id;
 }
 
 /**

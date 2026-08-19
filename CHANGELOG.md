@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Artist Popular Tracks now preserve persisted local and federated preference IDs after provider enrichment and use the same canonical remote ID for playback and heart state, preventing likes from switching identity (#642).
 - Audiobook series and library cover-art routes now preserve Express-decoded percent signs, encoded-looking sequences, and Unicode while retaining compatibility with legacy double-encoded route parameters (#632).
 - Artist detail and discovery routes now preserve artist names with percent signs while retaining lookup compatibility for legacy double-encoded names (#632).
 - Transient authentication-backend, rate-limit, network, and timeout failures no longer clear browser sessions when Explore triggers concurrent API requests; refresh retries now distinguish temporary unavailability from rejected credentials (#635).

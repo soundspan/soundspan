@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { resolvePreferenceTrackId } from "@/lib/trackRef";
 
 // Hooks
 import { useArtistData } from "@/features/artist/hooks/useArtistData";
@@ -199,7 +200,11 @@ export default function ArtistPage() {
     }
 
     const formatTrackForPlayback = (t: Track) => ({
-        id: t.id,
+        id: resolvePreferenceTrackId({
+            ...t,
+            hasLocalFile:
+                typeof t.filePath === "string" && t.filePath.trim().length > 0,
+        }),
         title: t.title,
         artist: {
             name: t.artist?.name || artist!.name,
