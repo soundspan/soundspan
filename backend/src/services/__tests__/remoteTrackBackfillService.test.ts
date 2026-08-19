@@ -261,6 +261,7 @@ describe("remoteTrackBackfillService", () => {
                 .mockResolvedValueOnce([
                     {
                         id: "tt-3",
+                        title: "Track D",
                         artist: "Artist D",
                         album: "Album D",
                         artistId: "existing-artist",
@@ -285,6 +286,7 @@ describe("remoteTrackBackfillService", () => {
                 "Album D",
                 "existing-artist",
                 "tidal",
+                { artistName: "Artist D", trackTitle: "Track D" },
             );
             expect(result.tidalProcessed).toBe(1);
         });

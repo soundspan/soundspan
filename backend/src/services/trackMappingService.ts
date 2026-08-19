@@ -337,13 +337,15 @@ class TrackMappingService {
                         : await resolveArtistForRemoteTrack(data.artist);
                     const albumResult = result.albumId
                         ? null
-                        : data.album
-                          ? await resolveAlbumForRemoteTrack(
-                                data.album,
-                                artistResult.id,
-                                "tidal",
-                            )
-                          : null;
+                        : await resolveAlbumForRemoteTrack(
+                              result.album,
+                              artistResult.id,
+                              "tidal",
+                              {
+                                  artistName: result.artist,
+                                  trackTitle: result.title,
+                              },
+                          );
 
                     await prisma.trackTidal.update({
                         where: { id: result.id },
@@ -450,13 +452,15 @@ class TrackMappingService {
                         : await resolveArtistForRemoteTrack(data.artist);
                     const albumResult = result.albumId
                         ? null
-                        : data.album
-                          ? await resolveAlbumForRemoteTrack(
-                                data.album,
-                                artistResult.id,
-                                "youtube",
-                            )
-                          : null;
+                        : await resolveAlbumForRemoteTrack(
+                              result.album,
+                              artistResult.id,
+                              "youtube",
+                              {
+                                  artistName: result.artist,
+                                  trackTitle: result.title,
+                              },
+                          );
 
                     await prisma.trackYtMusic.update({
                         where: { id: result.id },

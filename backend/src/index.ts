@@ -39,6 +39,7 @@ import artistsRoutes from "./routes/artists";
 import soulseekRoutes from "./routes/soulseek";
 import apiKeysRoutes from "./routes/apiKeys";
 import enrichmentRoutes from "./routes/enrichment";
+import metadataRoutes from "./routes/metadata";
 import homepageRoutes from "./routes/homepage";
 import deviceLinkRoutes from "./routes/deviceLink";
 import notificationsRoutes from "./routes/notifications";
@@ -297,6 +298,7 @@ if (config.features.autoPlaylists) {
     app.use("/api/mixes", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
+app.use("/api/metadata", apiLimiter, metadataRoutes);
 app.use("/api/homepage", apiLimiter, homepageRoutes);
 app.use("/api/browse", apiLimiter, browseRoutes);
 if (config.features.federation) {

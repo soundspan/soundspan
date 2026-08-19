@@ -86,6 +86,7 @@ route file is intentionally incremental (per touched file), not a big-bang.
 | `backend/src/routes/listeningState.ts`     | `/api/listening-state`                                                                                |
 | `backend/src/routes/listenTogether.ts`     | `/api/listen-together`                                                                                |
 | `backend/src/routes/lyrics.ts`             | `/api/lyrics`                                                                                         |
+| `backend/src/routes/metadata.ts`           | `/api/metadata`                                                                                       |
 | `backend/src/routes/mixes.ts`              | `/api/mixes`                                                                                          |
 | `backend/src/routes/notifications.ts`      | `/api/notifications`                                                                                  |
 | `backend/src/routes/offline.ts`            | `/api/offline`                                                                                        |

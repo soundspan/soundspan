@@ -1,8 +1,29 @@
-import { type ApiClientConstructor, type ApiData } from "./core";
+import {
+    type ApiClientConstructor,
+    type ApiData,
+    toSearchParams,
+} from "./core";
+
+/** Canonical release-group album returned for an external track. */
+export interface TrackAlbumResolution {
+    albumTitle: string;
+    rgMbid: string;
+    artistName: string;
+    source: "musicbrainz-album" | "musicbrainz-recording" | "lastfm" | "deezer";
+}
 
 /** Add metadata-domain operations to an API client base class. */
 export function WithMetadata<TBase extends ApiClientConstructor>(Base: TBase) {
     abstract class MetadataApi extends Base {
+        async getTrackAlbum(
+            artist: string,
+            title: string,
+            album?: string,
+        ): Promise<TrackAlbumResolution> {
+            const query = toSearchParams({ artist, title, album });
+            return this.request(`/metadata/track-album?${query.toString()}`);
+        }
+
         async updateArtistMetadata(
             artistId: string,
             data: {

@@ -165,6 +165,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getTopPodcasts",
     "getTrack",
     "getTrackAnalysis",
+    "getTrackAlbum",
     "getTrackPreference",
     "getTrackPreview",
     "getTracks",

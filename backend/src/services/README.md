@@ -14,6 +14,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | --- | --- |
 | `backend/src/services/acquisitionService.ts` | Core |
 | `backend/src/services/albumResolutionService.ts` | Core |
+| `backend/src/services/albumTitleGuards.ts` | Shared remote-album placeholder-title classification |
 | `backend/src/services/albumLoudness.ts` | Transactional active-track loudness rollups and per-album serialization |
 | `backend/src/services/artistCountsService.ts` | Core |
 | `backend/src/services/artistResolutionService.ts` | Core |
@@ -150,6 +151,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
+| `backend/src/services/trackAlbumResolution.ts` | Bounded external-track to MusicBrainz release-group resolution |
 | `backend/src/services/trackDeletion.ts` | Transactional track deletion and former-album loudness refresh |
 | `backend/src/services/trackEmbeddings.ts` | Transactional vibe pgvector reads, writes, generation finalization, ANN queries, and embedding counts |
 | `backend/src/services/trackIdentityMatcher.ts` | Durable track move identity matching |

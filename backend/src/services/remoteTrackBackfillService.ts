@@ -15,6 +15,7 @@ const MAX_BACKFILL_ITERATIONS = 100_000;
 
 interface RemoteTrackRow {
     id: string;
+    title: string;
     artist: string;
     album: string;
     artistId: string | null;
@@ -64,13 +65,12 @@ async function backfillPhase(
                 const artistResult = row.artistId
                     ? { id: row.artistId }
                     : await resolveArtistForRemoteTrack(row.artist);
-                const albumResult = row.album
-                    ? await resolveAlbumForRemoteTrack(
-                          row.album,
-                          artistResult.id,
-                          config.albumSource,
-                      )
-                    : null;
+                const albumResult = await resolveAlbumForRemoteTrack(
+                    row.album,
+                    artistResult.id,
+                    config.albumSource,
+                    { artistName: row.artist, trackTitle: row.title },
+                );
                 await config.update(
                     row.id,
                     artistResult.id,
@@ -114,7 +114,13 @@ function findTidalBatch(lastId: string): Promise<RemoteTrackRow[]> {
         },
         take: BATCH_SIZE,
         orderBy: { id: "asc" },
-        select: { id: true, artist: true, album: true, artistId: true },
+        select: {
+            id: true,
+            title: true,
+            artist: true,
+            album: true,
+            artistId: true,
+        },
     });
 }
 
@@ -128,7 +134,13 @@ function findYtMusicBatch(lastId: string): Promise<RemoteTrackRow[]> {
         },
         take: BATCH_SIZE,
         orderBy: { id: "asc" },
-        select: { id: true, artist: true, album: true, artistId: true },
+        select: {
+            id: true,
+            title: true,
+            artist: true,
+            album: true,
+            artistId: true,
+        },
     });
 }
 

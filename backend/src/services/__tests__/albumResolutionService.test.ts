@@ -4,8 +4,11 @@ const mockPrisma = {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         createMany: jest.fn(),
+        update: jest.fn(),
     },
 };
+
+const mockResolveExternalAlbum = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: mockPrisma,
@@ -22,6 +25,10 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
+jest.mock("../trackAlbumResolution", () => ({
+    resolveAlbumForExternalTrack: mockResolveExternalAlbum,
+}));
+
 import {
     resolveAlbumForRemoteTrack,
     buildSyntheticRgMbid,
@@ -30,6 +37,7 @@ import {
 describe("albumResolutionService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockResolveExternalAlbum.mockResolvedValue(null);
     });
 
     describe("resolveAlbumForRemoteTrack", () => {
@@ -67,6 +75,128 @@ describe("albumResolutionService", () => {
                 "tidal",
             );
             expect(result).toBeNull();
+        });
+
+        it("persists a real rgMbid when a missing tag resolves externally", async () => {
+            mockResolveExternalAlbum.mockResolvedValueOnce({
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "musicbrainz-recording",
+            });
+            mockPrisma.album.findUnique
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({
+                    id: "resolved-album",
+                    title: "OK Computer",
+                });
+            mockPrisma.album.findFirst.mockResolvedValueOnce(null);
+            mockPrisma.album.createMany.mockResolvedValueOnce({ count: 1 });
+
+            const result = await resolveAlbumForRemoteTrack(
+                "",
+                "artist-1",
+                "tidal",
+                {
+                    artistName: "Radiohead",
+                    trackTitle: "Paranoid Android",
+                },
+            );
+
+            expect(result).toEqual({
+                id: "resolved-album",
+                title: "OK Computer",
+                created: false,
+            });
+            expect(mockPrisma.album.createMany).toHaveBeenCalledWith({
+                data: expect.objectContaining({
+                    title: "OK Computer",
+                    rgMbid: "rg-ok-computer",
+                }),
+                skipDuplicates: true,
+            });
+        });
+
+        it("upgrades an existing synthetic album to the resolved rgMbid", async () => {
+            mockResolveExternalAlbum.mockResolvedValueOnce({
+                albumTitle: "OK Computer",
+                rgMbid: "rg-ok-computer",
+                artistName: "Radiohead",
+                source: "musicbrainz-recording",
+            });
+            mockPrisma.album.findUnique.mockResolvedValueOnce(null);
+            mockPrisma.album.findFirst.mockResolvedValueOnce({
+                id: "synthetic-album",
+                title: "OK Computer",
+                rgMbid: "remote:abc123",
+            });
+            mockPrisma.album.update.mockResolvedValueOnce({
+                id: "synthetic-album",
+                title: "OK Computer",
+            });
+
+            const result = await resolveAlbumForRemoteTrack(
+                "Unknown Album",
+                "artist-1",
+                "youtube",
+                {
+                    artistName: "Radiohead",
+                    trackTitle: "Paranoid Android",
+                },
+            );
+
+            expect(result?.id).toBe("synthetic-album");
+            expect(mockPrisma.album.update).toHaveBeenCalledWith({
+                where: { id: "synthetic-album" },
+                data: { rgMbid: "rg-ok-computer" },
+                select: { id: true, title: true },
+            });
+        });
+
+        it("keeps a generic album unlinked when external resolution fails", async () => {
+            mockResolveExternalAlbum.mockRejectedValueOnce(
+                new Error("provider unavailable"),
+            );
+
+            const result = await resolveAlbumForRemoteTrack(
+                "Single",
+                "artist-1",
+                "tidal",
+                { artistName: "Radiohead", trackTitle: "Creep" },
+            );
+
+            expect(result).toBeNull();
+            expect(mockPrisma.album.createMany).not.toHaveBeenCalled();
+        });
+
+        it("keeps synthetic creation for a usable remote album title", async () => {
+            mockPrisma.album.findFirst.mockResolvedValue(null);
+            mockPrisma.album.findMany.mockResolvedValueOnce([]);
+            mockPrisma.album.createMany.mockResolvedValueOnce({ count: 1 });
+            mockPrisma.album.findUnique.mockResolvedValueOnce({
+                id: "synthetic-album",
+                title: "Garbage Tag",
+            });
+
+            const result = await resolveAlbumForRemoteTrack(
+                "Garbage Tag",
+                "artist-1",
+                "youtube",
+                {
+                    artistName: "Radiohead",
+                    trackTitle: "Paranoid Android",
+                },
+            );
+
+            expect(result?.id).toBe("synthetic-album");
+            expect(mockPrisma.album.createMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: expect.objectContaining({
+                        rgMbid: expect.stringMatching(/^remote:/),
+                    }),
+                }),
+            );
+            expect(mockResolveExternalAlbum).not.toHaveBeenCalled();
         });
 
         it("exact match (case-insensitive)", async () => {
