@@ -3,9 +3,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { api } from "@/lib/api";
 import {
-    computeGainRampSteps,
     DEFAULT_LOUDNESS_TARGET_LUFS,
-    GAIN_RAMP_STEP_MS,
     isAlbumOrderedQueue,
     LOUDNESS_MODES,
     resolveLoudnessGain,
@@ -14,6 +12,11 @@ import {
 import { useAudioState } from "@/lib/audio-state-context";
 import { isEpisodeQueueItem } from "@/lib/queue-item";
 import { USER_SETTINGS_UPDATED_EVENT } from "@/lib/userSettingsEvents";
+import {
+    startGainTransition,
+    type GainTransitionHandle,
+} from "./gainTransition";
+import { createLoudnessPrefsLoader } from "./loudnessPrefsLoader";
 
 function parseLoudnessMode(value: unknown): LoudnessMode | null {
     return LOUDNESS_MODES.includes(value as LoudnessMode)
@@ -31,7 +34,7 @@ interface LoudnessPrefs {
     targetLufs: number;
 }
 
-/** Bounded retry backoff for the initial preference snapshot. */
+/** Bounded retry backoff for the preference snapshot. */
 const PREFS_RETRY_DELAYS_MS = [2_000, 5_000, 15_000] as const;
 
 function extractLoudnessMode(settings: unknown): LoudnessMode {
@@ -51,9 +54,9 @@ function extractTargetLufs(features: unknown): number | null {
  * Reads the user's loudness mode and the server target directly from the
  * API (deliberately not through react-query or the features context: this
  * hook mounts inside the playback orchestrator, whose component harness
- * provides neither). The two values load as one snapshot, retry with
- * bounded backoff when either request fails, and refresh when the settings
- * page announces a save.
+ * provides neither). The snapshot loads through a serialized,
+ * generation-fenced loader with bounded retries, and refreshes when the
+ * settings page announces a save.
  */
 function useLoudnessPrefs(): LoudnessPrefs {
     // Mode stays "off" until the stored preference loads, so gain is never
@@ -64,69 +67,38 @@ function useLoudnessPrefs(): LoudnessPrefs {
     });
 
     useEffect(() => {
-        let cancelled = false;
-        let retryTimer: ReturnType<typeof setTimeout> | null = null;
-        let retriesUsed = 0;
-
-        const load = () => {
-            void Promise.allSettled([
+        const loader = createLoudnessPrefsLoader({
+            fetchSettings: () =>
                 Promise.resolve().then(() => api.getSettings?.()),
+            fetchFeatures: () =>
                 Promise.resolve().then(() => api.getFeatures?.()),
-            ]).then(([settingsResult, featuresResult]) => {
-                if (cancelled) return;
-                const settingsOk =
-                    settingsResult.status === "fulfilled" &&
-                    Boolean(settingsResult.value);
-                const featuresOk =
-                    featuresResult.status === "fulfilled" &&
-                    Boolean(featuresResult.value);
-                const mode = settingsOk
-                    ? extractLoudnessMode(settingsResult.value)
-                    : null;
-                const target = featuresOk
-                    ? extractTargetLufs(featuresResult.value)
-                    : null;
+            extractMode: extractLoudnessMode,
+            extractTarget: extractTargetLufs,
+            retryDelaysMs: PREFS_RETRY_DELAYS_MS,
+            onSnapshot: ({ mode, targetLufs }) => {
                 setPrefs((prev) => {
                     const next = {
-                        mode: mode ?? prev.mode,
-                        targetLufs: target ?? prev.targetLufs,
+                        mode: (mode as LoudnessMode | null) ?? prev.mode,
+                        targetLufs: targetLufs ?? prev.targetLufs,
                     };
                     return next.mode === prev.mode &&
                         next.targetLufs === prev.targetLufs
                         ? prev
                         : next;
                 });
-                const shouldRetry =
-                    (!settingsOk || !featuresOk) &&
-                    retriesUsed < PREFS_RETRY_DELAYS_MS.length &&
-                    typeof window !== "undefined";
-                if (shouldRetry) {
-                    retryTimer = setTimeout(
-                        load,
-                        PREFS_RETRY_DELAYS_MS[retriesUsed],
-                    );
-                    retriesUsed += 1;
-                }
-            });
-        };
-
-        const reload = () => {
-            retriesUsed = 0;
-            if (retryTimer !== null) clearTimeout(retryTimer);
-            load();
-        };
-
-        load();
+            },
+        });
+        loader.start();
         if (typeof window === "undefined") {
-            return () => {
-                cancelled = true;
-            };
+            return loader.dispose;
         }
-        window.addEventListener(USER_SETTINGS_UPDATED_EVENT, reload);
+        window.addEventListener(USER_SETTINGS_UPDATED_EVENT, loader.reload);
         return () => {
-            cancelled = true;
-            if (retryTimer !== null) clearTimeout(retryTimer);
-            window.removeEventListener(USER_SETTINGS_UPDATED_EVENT, reload);
+            loader.dispose();
+            window.removeEventListener(
+                USER_SETTINGS_UPDATED_EVENT,
+                loader.reload,
+            );
         };
     }, []);
 
@@ -152,7 +124,7 @@ export function useLoudnessNormalization({
 }: UseLoudnessNormalizationOptions): void {
     const { currentTrack, playbackType, queue, isShuffle } = useAudioState();
     const { mode, targetLufs } = useLoudnessPrefs();
-    const rampTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const transitionRef = useRef<GainTransitionHandle | null>(null);
     const lastTrackIdRef = useRef<string | null>(null);
 
     useEffect(() => {
@@ -173,10 +145,8 @@ export function useLoudnessNormalization({
         const trackChanged = trackId !== lastTrackIdRef.current;
         lastTrackIdRef.current = trackId;
 
-        if (rampTimerRef.current !== null) {
-            clearInterval(rampTimerRef.current);
-            rampTimerRef.current = null;
-        }
+        transitionRef.current?.cancel();
+        transitionRef.current = null;
         const previous = loudnessGainFactorRef.current;
         if (previous === decision.gainFactor) return;
 
@@ -186,18 +156,14 @@ export function useLoudnessNormalization({
             return;
         }
 
-        const steps = computeGainRampSteps(previous, decision.gainFactor);
-        let stepIndex = 0;
-        rampTimerRef.current = setInterval(() => {
-            loudnessGainFactorRef.current =
-                steps[stepIndex] ?? decision.gainFactor;
-            applyCurrentOutputState();
-            stepIndex += 1;
-            if (stepIndex >= steps.length && rampTimerRef.current !== null) {
-                clearInterval(rampTimerRef.current);
-                rampTimerRef.current = null;
-            }
-        }, GAIN_RAMP_STEP_MS);
+        transitionRef.current = startGainTransition({
+            from: previous,
+            to: decision.gainFactor,
+            setGain: (value) => {
+                loudnessGainFactorRef.current = value;
+            },
+            applyOutputState: applyCurrentOutputState,
+        });
     }, [
         mode,
         targetLufs,
@@ -211,9 +177,7 @@ export function useLoudnessNormalization({
 
     useEffect(
         () => () => {
-            if (rampTimerRef.current !== null) {
-                clearInterval(rampTimerRef.current);
-            }
+            transitionRef.current?.cancel();
         },
         [],
     );

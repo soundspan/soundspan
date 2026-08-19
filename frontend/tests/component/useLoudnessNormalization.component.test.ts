@@ -13,13 +13,19 @@ let settingsFailures = 0;
 let featuresFailures = 0;
 let currentMode = "auto";
 let currentTarget = -18;
+let deferSettings = false;
+let settingsResolvers: Array<() => void> = [];
 
-const getSettings = mock.fn(async () => {
+const getSettings = mock.fn(() => {
     if (settingsFailures > 0) {
         settingsFailures -= 1;
-        throw new Error("settings down");
+        return Promise.reject(new Error("settings down"));
     }
-    return { loudnessMode: currentMode };
+    if (!deferSettings) return Promise.resolve({ loudnessMode: currentMode });
+    return new Promise((resolve) => {
+        const mode = currentMode;
+        settingsResolvers.push(() => resolve({ loudnessMode: mode }));
+    });
 });
 const getFeatures = mock.fn(async () => {
     if (featuresFailures > 0) {
@@ -88,6 +94,8 @@ after(() => {
 beforeEach(() => {
     settingsFailures = 0;
     featuresFailures = 0;
+    deferSettings = false;
+    settingsResolvers = [];
     currentMode = "auto";
     currentTarget = -18;
     gainRef.current = 1;
@@ -221,4 +229,76 @@ test("a track change applies the new gain immediately with no ramp", async (t) =
     assert.equal(applyCalls.length, applied + 1);
 
     await mounted.unmount();
+});
+
+test("a settings-event reload ignores the superseded in-flight response", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    audioState.currentTrack = LOUD_TRACK;
+    deferSettings = true;
+
+    const mounted = await mountProbe();
+    assert.equal(settingsResolvers.length, 1);
+    assert.equal(gainRef.current, 1);
+
+    // The user saves mode=off before the initial (auto) response arrives.
+    currentMode = "off";
+    await React.act(async () => {
+        window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
+        await flushAsync();
+    });
+
+    // The stale auto response settles first; the reload's own request
+    // (serialized behind it) then resolves with off.
+    await React.act(async () => {
+        settingsResolvers[0]?.();
+        await flushAsync();
+        settingsResolvers[1]?.();
+        await flushAsync();
+    });
+    await settleRamp(t);
+    assert.equal(gainRef.current, 1);
+    assert.equal(getSettings.mock.callCount(), 2);
+
+    await mounted.unmount();
+});
+
+test("a reload cancels the previous generation's pending retry", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    audioState.currentTrack = LOUD_TRACK;
+    settingsFailures = 1;
+
+    const mounted = await mountProbe();
+    assert.equal(getSettings.mock.callCount(), 1);
+
+    // Reload succeeds before the failed generation's 2s retry fires.
+    await React.act(async () => {
+        window.dispatchEvent(new Event(USER_SETTINGS_UPDATED_EVENT));
+        await flushAsync();
+    });
+    assert.equal(getSettings.mock.callCount(), 2);
+
+    await React.act(async () => {
+        t.mock.timers.tick(20_000);
+        await flushAsync();
+    });
+    // No zombie retry from the superseded generation.
+    assert.equal(getSettings.mock.callCount(), 2);
+
+    await mounted.unmount();
+});
+
+test("unmount cancels pending retries entirely", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    audioState.currentTrack = LOUD_TRACK;
+    settingsFailures = 4;
+
+    const mounted = await mountProbe();
+    assert.equal(getSettings.mock.callCount(), 1);
+    await mounted.unmount();
+
+    await React.act(async () => {
+        t.mock.timers.tick(60_000);
+        await flushAsync();
+    });
+    assert.equal(getSettings.mock.callCount(), 1);
 });
