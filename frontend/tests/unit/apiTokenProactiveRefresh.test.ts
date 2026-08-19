@@ -243,6 +243,169 @@ test("simultaneous proactive triggers share one in-flight refresh", async (testC
     await flushAsyncWork();
 });
 
+test("stale refresh success cannot overwrite a replacement session", async (testContext) => {
+    let resolveSessionARefresh: ((response: Response) => void) | undefined;
+    const sessionARefresh = new Promise<Response>((resolve) => {
+        resolveSessionARefresh = resolve;
+    });
+    let sessionBRefreshCount = 0;
+    const fetchMock = testContext.mock.method(
+        globalThis,
+        "fetch",
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url.endsWith("/api/auth/refresh")) {
+                const body = JSON.parse(String(init?.body)) as {
+                    refreshToken: string;
+                };
+                if (body.refreshToken === "refresh-a") {
+                    return sessionARefresh;
+                }
+                assert.equal(body.refreshToken, "refresh-b");
+                sessionBRefreshCount += 1;
+                return Response.json({
+                    token: "access-b-rotated",
+                    refreshToken: "refresh-b-rotated",
+                });
+            }
+
+            const authorization = new Headers(init?.headers).get(
+                "Authorization",
+            );
+            if (authorization?.endsWith("-rotated")) {
+                return Response.json({ ok: true });
+            }
+            return Response.json(
+                { error: "Not authenticated", code: "AUTH_REQUIRED" },
+                { status: 401 },
+            );
+        },
+    );
+    const client = createClient();
+
+    client.setToken("access-a", "refresh-a");
+    const sessionARequest = client.get("/session-a");
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+
+    client.clearToken();
+    client.setToken("access-b", "refresh-b");
+    const sessionBRequest = client.get("/session-b");
+    await flushAsyncWork();
+    const detachedRefreshCount = sessionBRefreshCount;
+    if (detachedRefreshCount === 1) {
+        await sessionBRequest;
+    }
+
+    assert.ok(resolveSessionARefresh);
+    resolveSessionARefresh(
+        Response.json({
+            token: "access-a-rotated",
+            refreshToken: "refresh-a-rotated",
+        }),
+    );
+    await Promise.allSettled([sessionARequest, sessionBRequest]);
+
+    assert.equal(detachedRefreshCount, 1);
+    assert.equal(client.getToken(), "access-b-rotated");
+    assert.equal(client.getRefreshToken(), "refresh-b-rotated");
+});
+
+test("stale refresh rejection cannot expire a replacement session", async (testContext) => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const refreshResponse = new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+    });
+    const sessionExpiry = trackSessionExpiry();
+    const fetchMock = testContext.mock.method(
+        globalThis,
+        "fetch",
+        async (input: RequestInfo | URL) => {
+            if (String(input).endsWith("/api/auth/refresh")) {
+                return refreshResponse;
+            }
+            return Response.json(
+                { error: "Not authenticated", code: "AUTH_REQUIRED" },
+                { status: 401 },
+            );
+        },
+    );
+    const client = createClient();
+
+    try {
+        client.setToken("access-a", "refresh-a");
+        const sessionARequest = client.get("/session-a");
+        await flushAsyncWork();
+        assert.equal(fetchMock.mock.callCount(), 2);
+
+        client.clearToken();
+        client.setToken("access-b", "refresh-b");
+        assert.ok(resolveRefresh);
+        resolveRefresh(
+            Response.json({ error: "Invalid refresh token" }, { status: 401 }),
+        );
+        await assert.rejects(sessionARequest);
+
+        assert.equal(client.getToken(), "access-b");
+        assert.equal(client.getRefreshToken(), "refresh-b");
+        assert.equal(sessionExpiry.count(), 0);
+    } finally {
+        sessionExpiry.stop();
+    }
+});
+
+test("stale transient refresh cannot alter replacement session scheduling or backoff", async (testContext) => {
+    let resolveSessionARefresh: ((response: Response) => void) | undefined;
+    const sessionARefresh = new Promise<Response>((resolve) => {
+        resolveSessionARefresh = resolve;
+    });
+    let refreshCount = 0;
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () => {
+        refreshCount += 1;
+        if (refreshCount === 1) {
+            return sessionARefresh;
+        }
+        if (refreshCount === 2) {
+            return Response.json({ error: "Unavailable" }, { status: 503 });
+        }
+        return Response.json({
+            token: createToken(Date.now() + DAY_MS),
+            refreshToken: "refresh-b-rotated",
+        });
+    });
+    const client = createClient();
+
+    client.setToken(createToken(START_TIME_MS + DAY_MS), "refresh-a");
+    testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    client.clearToken();
+    client.setToken(createToken(Date.now() + DAY_MS), "refresh-b");
+    assert.ok(resolveSessionARefresh);
+    resolveSessionARefresh(
+        Response.json({ error: "Unavailable" }, { status: 503 }),
+    );
+    await flushAsyncWork();
+
+    testContext.mock.timers.tick(INITIAL_REFRESH_BACKOFF_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    testContext.mock.timers.tick(
+        PROACTIVE_REFRESH_DELAY_MS - INITIAL_REFRESH_BACKOFF_MS,
+    );
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+
+    testContext.mock.timers.tick(INITIAL_REFRESH_BACKOFF_MS - 1);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+    testContext.mock.timers.tick(1);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 3);
+});
+
 test("proactive refresh rejection expires the session exactly once", async (testContext) => {
     const sessionExpiry = trackSessionExpiry();
     const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>

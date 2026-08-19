@@ -194,6 +194,7 @@ test("explore data reports degraded results and retries failed queries", async (
     const result = await renderHook();
 
     assert.equal(result.hasDegradedResults, true);
+    assert.equal(result.degradedFailureSignature, "liked|ytCharts");
     await result.retryAll();
     assert.deepEqual(refetchCalls.sort(), ["liked", "ytCharts"]);
 });
@@ -202,4 +203,5 @@ test("explore data is not degraded when every query succeeds", async () => {
     const result = await renderHook();
 
     assert.equal(result.hasDegradedResults, false);
+    assert.equal(result.degradedFailureSignature, "");
 });

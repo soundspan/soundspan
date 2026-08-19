@@ -87,6 +87,7 @@ export abstract class ApiClientCore {
     protected tokenInitialized: boolean = false;
     private readonly inFlightGetRequests = new Map<string, Promise<unknown>>();
     private refreshPromise: Promise<TokenRefreshResult> | null = null;
+    private sessionGeneration = 0;
     private proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private proactiveRefreshAtMs: number | null = null;
     private proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
@@ -168,6 +169,15 @@ export abstract class ApiClientCore {
 
     // Store JWT token and optionally refresh token
     setToken(token: string, refreshToken?: string) {
+        this.sessionGeneration += 1;
+        this.refreshPromise = null;
+        this.storeTokensForCurrentSession(token, refreshToken);
+    }
+
+    private storeTokensForCurrentSession(
+        token: string,
+        refreshToken?: string,
+    ): void {
         this.token = token;
         this.proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
         if (typeof window !== "undefined") {
@@ -189,6 +199,8 @@ export abstract class ApiClientCore {
 
     // Clear both JWT tokens
     clearToken() {
+        this.sessionGeneration += 1;
+        this.refreshPromise = null;
         this.token = null;
         this.proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
         this.clearProactiveRefreshSchedule();
@@ -321,7 +333,17 @@ export abstract class ApiClientCore {
         );
     }
 
-    private unavailableRefresh(response?: Response): TokenRefreshResult {
+    private isCurrentSession(generation: number): boolean {
+        return generation === this.sessionGeneration;
+    }
+
+    private unavailableRefresh(
+        generation: number,
+        response?: Response,
+    ): TokenRefreshResult {
+        if (!this.isCurrentSession(generation)) {
+            return "unavailable";
+        }
         const retryAfterMs =
             response?.status === 429 ? this.parseRetryAfterMs(response) : null;
         this.scheduleProactiveRefreshRetry(retryAfterMs);
@@ -361,69 +383,95 @@ export abstract class ApiClientCore {
      * @returns `ok` on rotation, `rejected` for invalid refresh credentials,
      * or `unavailable` when refresh could not be completed temporarily.
      */
-    private async performTokenRefresh(): Promise<TokenRefreshResult> {
+    private rejectRefreshForCurrentSession(): TokenRefreshResult {
+        this.clearToken();
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("auth:session-expired"));
+        }
+        return "rejected";
+    }
+
+    private async applyRefreshResponse(
+        response: Response,
+        generation: number,
+    ): Promise<TokenRefreshResult> {
+        if (!this.isCurrentSession(generation)) {
+            return "unavailable";
+        }
+        if (!response.ok) {
+            return response.status === 401 || response.status === 403
+                ? this.rejectRefreshForCurrentSession()
+                : this.unavailableRefresh(generation, response);
+        }
+
+        const data: unknown = await response.json();
+        if (!this.isCurrentSession(generation)) {
+            return "unavailable";
+        }
+        if (!data || typeof data !== "object") {
+            return this.unavailableRefresh(generation, response);
+        }
+
+        const tokens = data as Record<string, unknown>;
+        if (typeof tokens.token !== "string") {
+            return this.unavailableRefresh(generation, response);
+        }
+        const refreshToken =
+            typeof tokens.refreshToken === "string"
+                ? tokens.refreshToken
+                : undefined;
+        this.storeTokensForCurrentSession(tokens.token, refreshToken);
+        return "ok";
+    }
+
+    private async performTokenRefresh(
+        generation: number,
+    ): Promise<TokenRefreshResult> {
         const refreshToken = this.getRefreshToken();
         if (!refreshToken) {
-            this.clearProactiveRefreshSchedule();
+            if (this.isCurrentSession(generation)) {
+                this.clearProactiveRefreshSchedule();
+            }
             return "unavailable";
         }
 
-        try {
-            let response: Response | null = null;
-            for (let attempt = 0; attempt <= MAX_TIMEOUT_RETRIES; attempt++) {
-                try {
-                    response = await this.fetchWithTimeout(
-                        `${this.getBaseUrl()}/api/auth/refresh`,
-                        {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ refreshToken }),
-                            credentials: "include",
-                            priority: "high",
-                        },
-                        AUTH_REFRESH_TIMEOUT_MS,
-                    );
-                    break;
-                } catch (error) {
-                    if (
-                        this.isTimeoutError(error) &&
-                        attempt < MAX_TIMEOUT_RETRIES
-                    ) {
-                        await this.delay(DEFAULT_TIMEOUT_RETRY_BACKOFF_MS);
-                        continue;
-                    }
-                    throw error;
+        for (let attempt = 0; attempt <= MAX_TIMEOUT_RETRIES; attempt++) {
+            try {
+                const response = await this.fetchWithTimeout(
+                    `${this.getBaseUrl()}/api/auth/refresh`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ refreshToken }),
+                        credentials: "include",
+                        priority: "high",
+                    },
+                    AUTH_REFRESH_TIMEOUT_MS,
+                );
+                return await this.applyRefreshResponse(response, generation);
+            } catch (error) {
+                if (!this.isCurrentSession(generation)) {
+                    return "unavailable";
                 }
-            }
-
-            if (!response) {
-                return this.unavailableRefresh();
-            }
-
-            if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
-                    this.clearToken();
-                    if (typeof window !== "undefined") {
-                        window.dispatchEvent(new Event("auth:session-expired"));
+                if (
+                    this.isTimeoutError(error) &&
+                    attempt < MAX_TIMEOUT_RETRIES
+                ) {
+                    await this.delay(DEFAULT_TIMEOUT_RETRY_BACKOFF_MS);
+                    if (!this.isCurrentSession(generation)) {
+                        return "unavailable";
                     }
-                    return "rejected";
+                    continue;
                 }
-                return this.unavailableRefresh(response);
+                sharedFrontendLogger.error(
+                    "[API] Token refresh failed:",
+                    error,
+                );
+                return this.unavailableRefresh(generation);
             }
-
-            const data = await response.json();
-
-            // Store new tokens
-            if (data.token) {
-                this.setToken(data.token, data.refreshToken);
-                return "ok";
-            }
-
-            return this.unavailableRefresh(response);
-        } catch (error) {
-            sharedFrontendLogger.error("[API] Token refresh failed:", error);
-            return this.unavailableRefresh();
         }
+
+        return this.unavailableRefresh(generation);
     }
 
     /**
@@ -438,11 +486,14 @@ export abstract class ApiClientCore {
         if (this.refreshPromise) {
             return this.refreshPromise;
         }
-        this.refreshPromise = this.performTokenRefresh();
+        const refreshPromise = this.performTokenRefresh(this.sessionGeneration);
+        this.refreshPromise = refreshPromise;
         try {
-            return await this.refreshPromise;
+            return await refreshPromise;
         } finally {
-            this.refreshPromise = null;
+            if (this.refreshPromise === refreshPromise) {
+                this.refreshPromise = null;
+            }
         }
     }
 

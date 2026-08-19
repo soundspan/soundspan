@@ -18,7 +18,10 @@ after(() => {
     GlobalRegistrator.unregister();
 });
 
-async function mountNotice(onRetry: () => Promise<void>) {
+async function mountNotice(
+    onRetry: () => Promise<void>,
+    failureSignature = "liked",
+) {
     const { ExploreDegradedNotice } =
         await import("../../features/explore/components/ExploreDegradedNotice");
     const { createRoot } = await import("react-dom/client");
@@ -26,11 +29,26 @@ async function mountNotice(onRetry: () => Promise<void>) {
     const root = createRoot(container);
 
     await React.act(async () => {
-        root.render(React.createElement(ExploreDegradedNotice, { onRetry }));
+        root.render(
+            React.createElement(ExploreDegradedNotice, {
+                key: failureSignature,
+                onRetry,
+            }),
+        );
     });
 
     return {
         container,
+        rerender: async (nextFailureSignature: string) => {
+            await React.act(async () => {
+                root.render(
+                    React.createElement(ExploreDegradedNotice, {
+                        key: nextFailureSignature,
+                        onRetry,
+                    }),
+                );
+            });
+        },
         unmount: async () => {
             await React.act(async () => root.unmount());
         },
@@ -59,4 +77,24 @@ test("offers retry and can be dismissed", async (testContext) => {
     assert.ok(dismiss instanceof HTMLButtonElement);
     await React.act(async () => dismiss.click());
     assert.equal(harness.container.textContent, "");
+});
+
+test("keeps the same failure dismissed and reappears for a different failure", async (testContext) => {
+    const harness = await mountNotice(async () => undefined, "liked|ytCharts");
+    testContext.after(harness.unmount);
+
+    const dismiss = harness.container.querySelector(
+        'button[aria-label="Dismiss degraded results notice"]',
+    );
+    assert.ok(dismiss instanceof HTMLButtonElement);
+    await React.act(async () => dismiss.click());
+
+    await harness.rerender("liked|ytCharts");
+    assert.equal(harness.container.textContent, "");
+
+    await harness.rerender("liked|popularArtists");
+    assert.match(
+        harness.container.textContent ?? "",
+        /Some sections failed to load — Retry/,
+    );
 });

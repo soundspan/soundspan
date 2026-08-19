@@ -48,6 +48,7 @@ export default function ExplorePage() {
         isRefreshingMixes,
         isMoodsLoading,
         hasDegradedResults,
+        degradedFailureSignature,
         handleRefreshMixes,
         retryAll,
     } = useExploreData({ showYtMusicExplore, showTidalExplore });
@@ -77,7 +78,10 @@ export default function ExplorePage() {
 
                 {hasDegradedResults && (
                     <div className="mb-6">
-                        <ExploreDegradedNotice onRetry={retryAll} />
+                        <ExploreDegradedNotice
+                            key={degradedFailureSignature}
+                            onRetry={retryAll}
+                        />
                     </div>
                 )}
 
