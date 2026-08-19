@@ -11,6 +11,7 @@ import {
 import { api } from "@/lib/api";
 import type { AudioEngineErrorPayload } from "@/lib/audio-engine/types";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
+import { shouldConfirmPlaybackProgress } from "@/lib/audio-engine/playbackProgressConfirmation";
 import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
 import {
     getListenTogetherSessionSnapshot,
@@ -127,6 +128,7 @@ export const AudioPlaybackOrchestrator = memo(
             loadErrorListenerRef,
             lastPreloadedTrackIdRef,
             consecutiveErrorBreakerRef,
+            lastConfirmedPlaybackMediaIdRef,
             wasPlayingWhenHiddenRef,
             currentTrackRef,
             currentTimeSnapshotRef,
@@ -242,12 +244,9 @@ export const AudioPlaybackOrchestrator = memo(
                     playbackType === "track"
                         ? (currentTrack?.id ?? null)
                         : null;
-                // Use setCurrentTimeFromEngine to respect seek lock
-                // This prevents stale timeupdate events from overwriting optimistic seek updates
-                // and blocks stale callbacks from a prior track listener closure.
-                // Skip during loading: the engine may still report the previous track's position
-                // after React refreshes this delegated closure with the new track's ID but before
-                // audioEngine.load() replaces the source.
+                // Respect the seek lock and reject stale prior-track callbacks.
+                // Loading may still expose the prior position before load replaces
+                // the source, so engine time must not update UI in that window.
                 if (!isLoadingRef.current) {
                     setCurrentTimeFromEngine(
                         currentTimeValue,
@@ -256,10 +255,20 @@ export const AudioPlaybackOrchestrator = memo(
                 }
                 if (playbackTypeRef.current === "track") {
                     const liveTrackId = currentTrackRef.current?.id ?? null;
+                    if (
+                        shouldConfirmPlaybackProgress(
+                            lastConfirmedPlaybackMediaIdRef.current,
+                            liveTrackId,
+                            currentTimeValue,
+                            audioEngine.isPlaying(),
+                        )
+                    ) {
+                        consecutiveErrorBreakerRef.current.recordSuccess();
+                        lastConfirmedPlaybackMediaIdRef.current = liveTrackId;
+                    }
 
-                    // Some engine/runtime combinations can emit audible progress before
-                    // the synthetic "load" callback. Treat first real progress as loaded
-                    // to avoid startup timeout retries that restart healthy playback.
+                    // Real progress can precede the synthetic load callback. Treat it
+                    // as loaded so startup retries do not restart healthy playback.
                     if (
                         isLoadingRef.current &&
                         liveTrackId &&
@@ -499,15 +508,13 @@ export const AudioPlaybackOrchestrator = memo(
                     pause();
                 } else if (playbackType === "track") {
                     if (repeatMode === "one" && !isListenTogether) {
+                        lastConfirmedPlaybackMediaIdRef.current = null;
                         audioEngine.seek(0);
                         audioEngine.play();
                     } else {
-                        // Eagerly preload the next track's audio before the React
-                        // state update cycle to eliminate the silence gap on iOS
-                        // where the OS reclaims the audio session between tracks.
-                        // Uses preload() (not load()) so the subsequent track-change
-                        // effect's load() call promotes the preloaded instance
-                        // instantly instead of creating a redundant new one.
+                        // Preload before React updates to retain the iOS audio session.
+                        // The track-change load promotes this instance instead of
+                        // creating a redundant stream.
                         const preloadDecision = resolveNextTrackPreloadDecision(
                             {
                                 playbackType,
@@ -755,7 +762,6 @@ export const AudioPlaybackOrchestrator = memo(
             const handlePlay = () => {
                 // Transition state machine to PLAYING
                 playbackStateMachine.transition("PLAYING");
-                consecutiveErrorBreakerRef.current.recordSuccess();
                 clearUnexpectedPauseRecoveryCheck();
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
@@ -1050,6 +1056,7 @@ export const AudioPlaybackOrchestrator = memo(
             const previousMediaId = lastTrackIdRef.current;
             if (currentMediaId !== previousMediaId) {
                 trackEndWatchdogRef.current?.clear();
+                lastConfirmedPlaybackMediaIdRef.current = null;
             }
 
             if (currentMediaId === previousMediaId) {
@@ -1058,10 +1065,8 @@ export const AudioPlaybackOrchestrator = memo(
                     return;
                 }
 
-                // Skip if the track is still loading — the load-complete handler
-                // will start playback.  Without this guard, a second play click
-                // during loading can race with the load callback and produce
-                // overlapping audio streams.
+                // The load-complete handler starts playback; a second play click
+                // here could race it and produce overlapping streams.
                 if (isLoadingRef.current) {
                     return;
                 }
@@ -1077,8 +1082,7 @@ export const AudioPlaybackOrchestrator = memo(
             }
 
             if (previousMediaId !== null) {
-                // Selection changed: stop any audible tail from the previous source
-                // while startup/session resolution for the next track is in-flight.
+                // Stop the previous source while the next source resolves.
                 audioEngine.stop();
                 activeEngineTrackIdRef.current = null;
             }
@@ -1090,8 +1094,7 @@ export const AudioPlaybackOrchestrator = memo(
                     isLoading: isLoadingRef.current,
                 })
             ) {
-                // Track switches must preempt in-flight loads; otherwise the new
-                // selection can be dropped and old audio continues playing.
+                // Preempt in-flight loads so the new selection is not dropped.
                 clearPendingTrackErrorSkip();
                 clearStartupPlaybackRecovery();
                 clearTransientTrackRecovery(true);

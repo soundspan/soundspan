@@ -1179,6 +1179,21 @@ const emitFatalLoadError = async (): Promise<void> => {
     await flushAsync(10);
 };
 
+const failPlayingTrack = async (): Promise<void> => {
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+};
+
+const selectTrack = (tracks: Track[], index: number): void => {
+    audioState.currentTrack = tracks[index];
+    audioState.currentIndex = index;
+    rerenderOrchestrator();
+};
+
 const extractedHookNames = [
     "usePlaybackOrchestratorRefs",
     "useApplyCurrentOutputState",
@@ -1292,6 +1307,63 @@ test("foreground visibility reset re-enables fatal-error skips after the breaker
     await emitFatalLoadError();
     mock.timers.tick(1_201);
     await flushAsync();
+    assert.equal(controlCalls.next, 3);
+});
+
+test("three play events without playback progress trip the error breaker", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("failed-play-1"),
+        makeTrack("failed-play-2"),
+        makeTrack("failed-play-3"),
+        makeTrack("unreached-track"),
+    ];
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    for (let index = 0; index < 3; index += 1) {
+        await failPlayingTrack();
+
+        if (index < 2) {
+            selectTrack(tracks, index + 1);
+            await flushAsync();
+        }
+    }
+
+    assert.equal(controlCalls.next, 2);
+});
+
+test("confirmed playback progress resets prior consecutive errors", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("failed-before-progress-1"),
+        makeTrack("failed-before-progress-2"),
+        makeTrack("progress-then-failure"),
+        makeTrack("next-after-progress"),
+    ];
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    for (let index = 0; index < 2; index += 1) {
+        await failPlayingTrack();
+        selectTrack(tracks, index + 1);
+        await flushAsync();
+    }
+
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    engine.emit("timeupdate", { timeSec: 0.5 });
+    await emitFatalLoadError();
+    mock.timers.tick(1_201);
+    await flushAsync();
+
     assert.equal(controlCalls.next, 3);
 });
 

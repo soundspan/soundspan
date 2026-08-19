@@ -78,6 +78,7 @@ export function usePlaybackOrchestratorRefs({
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const trackErrorAdvanceFromTrackIdRef = useRef<string | null>(null);
     const consecutiveErrorBreakerRef = useRef(createConsecutiveErrorBreaker());
+    const lastConfirmedPlaybackMediaIdRef = useRef<string | null>(null);
     // Snapshot of whether the audio engine was playing at the moment the page
     // went hidden (visibilitychange → "hidden"). Used by foreground recovery
     // to decide if playback should be retried on return to visible.
@@ -224,6 +225,7 @@ export function usePlaybackOrchestratorRefs({
         pendingTrackErrorTrackIdRef,
         trackErrorAdvanceFromTrackIdRef,
         consecutiveErrorBreakerRef,
+        lastConfirmedPlaybackMediaIdRef,
         wasPlayingWhenHiddenRef,
         currentTrackRef,
         currentTimeSnapshotRef,
