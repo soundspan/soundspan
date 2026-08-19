@@ -104,7 +104,7 @@ async function seedRegisteredStatuses(redis: Redis): Promise<void> {
         const end = Math.min(start + PIPELINE_BATCH_SIZE, STATUS_KEY_COUNT);
         for (let index = start; index < end; index += 1) {
             const key = `${VIBE_WORKER_STATUS_KEY_PREFIX}scale-${index}`;
-            pipeline.sadd(VIBE_WORKER_STATUS_REGISTRY_KEY, key);
+            pipeline.zadd(VIBE_WORKER_STATUS_REGISTRY_KEY, Date.now(), key);
             pipeline.set(key, statusPayload(index), "PX", 600_000);
         }
         await executePipeline(pipeline);
@@ -158,11 +158,18 @@ async function seedVolume(redis: Redis): Promise<void> {
 
 function statusRedisAdapter(redis: Redis): VibeWorkerStatusRedis {
     return {
+        eval: (script, options) =>
+            redis.eval(
+                script,
+                options.keys.length,
+                ...options.keys,
+                ...(options.arguments ?? []),
+            ),
         mGet: (keys) => redis.mget(...keys),
-        sAdd: (key, member) => redis.sadd(key, member),
-        sMembers: (key) => redis.smembers(key),
-        sRem: (key, members) => redis.srem(key, ...members),
         set: (key, value, options) => redis.set(key, value, "PX", options.PX),
+        zAdd: (key, member) => redis.zadd(key, member.score, member.value),
+        zRange: (key, start, stop) => redis.zrange(key, start, stop),
+        zRem: (key, members) => redis.zrem(key, ...members),
     };
 }
 
