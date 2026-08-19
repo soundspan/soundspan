@@ -86,7 +86,7 @@ const subsonicTraceLog = logger.child("SubsonicTrace");
 function sanitizeTraceField(value: unknown, maxLength = 64): string {
     if (typeof value !== "string") return "-";
     const sanitized = value
-        .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+        .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "")
         .slice(0, maxLength);
     return sanitized.trim().length > 0 ? sanitized : "-";
 }

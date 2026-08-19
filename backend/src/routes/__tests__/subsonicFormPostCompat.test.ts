@@ -339,9 +339,9 @@ describe("Subsonic form POST routing", () => {
             body: {
                 ...validFormCredentials,
                 ...secrets,
-                c: "client\r\nforged-entry",
+                c: "client\r\n\u2028forged\u2029-entry",
                 v: "v".repeat(100),
-                f: "json\r\nforged-format",
+                f: "json\r\n\u2028forged\u2029-format",
             },
         });
 
@@ -354,7 +354,7 @@ describe("Subsonic form POST routing", () => {
             }),
         );
         const serializedLogs = JSON.stringify(traceLog.warn.mock.calls);
-        expect(serializedLogs).not.toMatch(/[\r\n]/);
+        expect(serializedLogs).not.toMatch(/[\r\n\u2028\u2029]/);
         for (const secret of Object.values(secrets)) {
             expect(serializedLogs).not.toContain(secret);
         }

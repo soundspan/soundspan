@@ -125,14 +125,22 @@ describe("outboundUrlSafety", () => {
     });
 
     describe("resolveSafeOutboundUrl (DNS-resolving guard)", () => {
-        it("allows a host that resolves to a public address", async () => {
-            mockLookup.mockResolvedValue([
-                { address: "93.184.216.34", family: 4 },
-            ]);
-            expect(
-                await resolveSafeOutboundUrl("https://example.com/feed.xml"),
-            ).toBe("https://example.com/feed.xml");
-        });
+        it.each([
+            ["93.184.216.34", 4],
+            ["2001:4860:4860::8888", 6],
+            ["192.0.0.9", 4],
+            ["192.0.0.10", 4],
+        ])(
+            "allows a host that resolves to globally reachable address %s",
+            async (address, family) => {
+                mockLookup.mockResolvedValue([{ address, family }]);
+                expect(
+                    await resolveSafeOutboundUrl(
+                        "https://globally-reachable.example.com/feed.xml",
+                    ),
+                ).toBe("https://globally-reachable.example.com/feed.xml");
+            },
+        );
 
         it("rejects a host that resolves to a private/loopback address", async () => {
             mockLookup.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
@@ -148,6 +156,36 @@ describe("outboundUrlSafety", () => {
                 expect(
                     await resolveSafeOutboundUrl(
                         "https://reserved.example.com",
+                    ),
+                ).toBeNull();
+            },
+        );
+
+        it.each([
+            ["192.0.0.8", 4],
+            ["192.0.2.1", 4],
+            ["192.88.99.2", 4],
+            ["198.51.100.7", 4],
+            ["203.0.113.9", 4],
+            ["240.0.0.1", 4],
+            ["224.0.0.5", 4],
+            ["64:ff9b:1::1", 6],
+            ["100::1", 6],
+            ["100:0:0:1::1", 6],
+            ["2001::4", 6],
+            ["2001:20::1", 6],
+            ["2001:db8::1", 6],
+            ["2002::1", 6],
+            ["3fff::1", 6],
+            ["5f00::1", 6],
+            ["ff02::1", 6],
+        ])(
+            "rejects a host that resolves to special-purpose address %s",
+            async (address, family) => {
+                mockLookup.mockResolvedValue([{ address, family }]);
+                expect(
+                    await resolveSafeOutboundUrl(
+                        "https://special-purpose.example.com",
                     ),
                 ).toBeNull();
             },
