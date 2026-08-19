@@ -21,6 +21,7 @@ const baseSidebarItems: SidebarItem[] = [
     { id: "storage", label: "Storage" },
     { id: "library-safety", label: "Library Safety" },
     { id: "library-health", label: "Library Health" },
+    { id: "library-insights", label: "Library Insights" },
     { id: "cache", label: "Cache & Automation" },
     { id: "users", label: "Users" },
 ];
@@ -93,6 +94,14 @@ const LibraryHealthSection = dynamic(
     () =>
         import("@/features/settings/components/sections/LibraryHealthSection").then(
             (mod) => mod.LibraryHealthSection,
+        ),
+    { loading: renderSectionFallback },
+);
+
+const LibraryInsightsSection = dynamic(
+    () =>
+        import("@/features/library-health/components/LibraryInsightsSection").then(
+            (mod) => mod.LibraryInsightsSection,
         ),
     { loading: renderSectionFallback },
 );
@@ -312,6 +321,8 @@ export default function AdminPage() {
                 />
 
                 <LibraryHealthSection />
+
+                <LibraryInsightsSection />
 
                 <CacheSection
                     settings={systemSettings}

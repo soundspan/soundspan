@@ -103,6 +103,12 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getInviteCodes",
     "getLibraryDeletePolicy",
     "getLibraryHealth",
+    "getLibraryHealthAnalysis",
+    "getLibraryHealthDuplicates",
+    "getLibraryHealthGaps",
+    "getLibraryHealthQuality",
+    "getLibraryHealthStorage",
+    "getLibraryHealthSummary",
     "getLikedPlaylist",
     "getLocalTrackAudioInfo",
     "getLyrics",
@@ -224,6 +230,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "redeemOidcInvite",
     "refreshAllPodcasts",
     "refreshBaseUrl",
+    "refreshLibraryHealthDashboard",
     "refreshMixes",
     "register",
     "removeDiscoverExclusion",
@@ -308,5 +315,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 288);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 295);
 });

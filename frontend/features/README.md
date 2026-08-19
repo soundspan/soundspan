@@ -20,6 +20,7 @@ Start-here index for domain modules under `frontend/features`.
 | `explore`   | `frontend/features/explore/README.md`   | `frontend/app/explore/page.tsx`<br>`frontend/app/library/page.tsx`<br>`frontend/app/page.tsx`<br>`frontend/app/radio/page.tsx` |
 | `home`      | `frontend/features/home/README.md`      | `frontend/app/explore/page.tsx`<br>`frontend/app/library/page.tsx`<br>`frontend/app/page.tsx`<br>`frontend/app/radio/page.tsx` |
 | `library`   | `frontend/features/library/README.md`   | `frontend/app/explore/page.tsx`<br>`frontend/app/library/page.tsx`<br>`frontend/app/page.tsx`<br>`frontend/app/radio/page.tsx` |
+| `library-health` | `frontend/features/library-health/README.md` | `frontend/app/admin/page.tsx`                                                                                             |
 | `podcast`   | `frontend/features/podcast/README.md`   | `frontend/app/podcasts/page.tsx`                                                                                               |
 | `search`    | `frontend/features/search/README.md`    | `frontend/app/playlists/page.tsx`<br>`frontend/app/search/page.tsx`                                                            |
 | `settings`  | `frontend/features/settings/README.md`  | `frontend/app/device/page.tsx`<br>`frontend/app/settings/page.tsx`                                                             |
