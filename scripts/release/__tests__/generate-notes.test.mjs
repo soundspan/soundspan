@@ -3,6 +3,7 @@ import {
     copyFileSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
@@ -17,11 +18,21 @@ const template = path.join(
     "docs/maintainers/RELEASE_NOTES_TEMPLATE.md",
 );
 const fixtureTag = "2.3.3";
+const gitEnvironment = { ...process.env };
+
+for (const key of Object.keys(gitEnvironment)) {
+    if (/^GIT_/.test(key)) {
+        delete gitEnvironment[key];
+    }
+}
+gitEnvironment.GIT_CONFIG_GLOBAL = "/dev/null";
+gitEnvironment.GIT_CONFIG_SYSTEM = "/dev/null";
 
 function runGit(fixtureRoot, args) {
     const result = spawnSync("git", args, {
         cwd: fixtureRoot,
         encoding: "utf8",
+        env: gitEnvironment,
     });
 
     assert.equal(result.status, 0, result.stderr || result.error?.message);
@@ -78,7 +89,11 @@ function runGenerator(
                 fixtureTag,
                 ...additionalArgs,
             ],
-            { cwd: fixtureRoot, encoding: "utf8" },
+            {
+                cwd: fixtureRoot,
+                encoding: "utf8",
+                env: gitEnvironment,
+            },
         );
     } finally {
         rmSync(fixtureRoot, { recursive: true, force: true });
@@ -89,6 +104,36 @@ const minimalChangelog = `# Changelog
 
 ## [9.9.9] - 2026-08-13
 `;
+
+test("ignores ambient Git repository environment", () => {
+    const decoyRoot = mkdtempSync(
+        path.join(repoRoot, ".release-notes-decoy-"),
+    );
+    const previousGitDirectory = process.env.GIT_DIR;
+    const previousGitWorkTree = process.env.GIT_WORK_TREE;
+
+    try {
+        process.env.GIT_DIR = decoyRoot;
+        process.env.GIT_WORK_TREE = decoyRoot;
+
+        const result = runGenerator(minimalChangelog);
+
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(readdirSync(decoyRoot), []);
+    } finally {
+        if (previousGitDirectory === undefined) {
+            delete process.env.GIT_DIR;
+        } else {
+            process.env.GIT_DIR = previousGitDirectory;
+        }
+        if (previousGitWorkTree === undefined) {
+            delete process.env.GIT_WORK_TREE;
+        } else {
+            process.env.GIT_WORK_TREE = previousGitWorkTree;
+        }
+        rmSync(decoyRoot, { recursive: true, force: true });
+    }
+});
 
 test("always renders the standing upgrade warning and upgrade path", () => {
     const result = runGenerator(minimalChangelog);
