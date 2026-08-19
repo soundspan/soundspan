@@ -171,9 +171,11 @@ export const applyTrackPreferenceSignalToTrackIds = async (
     });
 };
 
+/** Loads per-track preference scores through the supplied database client. */
 export const buildTrackPreferenceScoreMapForUser = async (
     userId: string | undefined,
     trackIds: string[],
+    client: Pick<typeof prisma, "likedTrack" | "dislikedEntity"> = prisma,
 ): Promise<Map<string, number>> => {
     if (!userId || trackIds.length === 0) {
         return new Map<string, number>();
@@ -192,7 +194,7 @@ export const buildTrackPreferenceScoreMapForUser = async (
     }
 
     const [likedEntries, dislikedEntries] = await Promise.all([
-        prisma.likedTrack.findMany({
+        client.likedTrack.findMany({
             where: {
                 userId,
                 trackId: { in: uniqueTrackIds },
@@ -202,7 +204,7 @@ export const buildTrackPreferenceScoreMapForUser = async (
                 likedAt: true,
             },
         }),
-        prisma.dislikedEntity.findMany({
+        client.dislikedEntity.findMany({
             where: {
                 userId,
                 entityType: TRACK_DISLIKE_ENTITY_TYPE,

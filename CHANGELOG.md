@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Explore Quick Start (except Shuffle All), Genre, and Decade tiles now open user-scoped generated playlists without autoplay. Generated radio playlists support deduplicated "Add more tracks" and full "Regenerate" actions (#636).
+- Explore Quick Start (except Shuffle All), Genre, and Decade tiles now open user-scoped generated playlists without autoplay. Reopening a tile returns its existing station playlist without rebuilding it, station playlists stay out of ordinary playlist listings, and explicit "Add more tracks" and "Regenerate" actions serialize each playlist's mutations (#636).
 - Per-peer federation health observability: bounded Prometheus sync, catalog, stream, authentication, lease, and quota metrics; an administrator health panel and API; persisted sync/error diagnostics; Grafana panels; and an example federation alert pack (#531).
 - Search results now surface external discovery: all matching Last.fm artists render in an Artists section, external track matches render in a Songs to Discover section linking to artist pages, and an exact-name external match wins the Top result over a fuzzy library match (searching "Drake" no longer tops out at an owned "Nick Drake").
 

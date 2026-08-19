@@ -126,7 +126,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/providerFidelity.ts` | Pure provider-fidelity cosine, recall-overlap, and gate evaluation metrics |
 | `backend/src/services/providerFidelityValidation.ts` | Testable provider-fidelity sampling, orchestration, reporting, and CLI parsing |
 | `backend/src/services/radioVibeEngine.ts` | Core |
-| `backend/src/services/radioPlaylistIdentity.ts` | Generated-radio playlist discriminator prefix |
+| `backend/src/services/radioPlaylistIdentity.ts` | Generated-radio playlist discriminator and standard-list exclusion filter |
 | `backend/src/services/radioPlaylistService.ts` | User-scoped generated-radio playlist persistence and mutation |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |

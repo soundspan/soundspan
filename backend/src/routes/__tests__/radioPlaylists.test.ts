@@ -15,6 +15,7 @@ jest.mock("../../utils/logger", () => {
 const prisma = {
     playlist: {
         findUnique: jest.fn(),
+        create: jest.fn(),
         upsert: jest.fn(),
         update: jest.fn(),
     },
@@ -23,6 +24,7 @@ const prisma = {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
     },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(),
 };
 
@@ -88,6 +90,15 @@ describe("radio-generated playlist routes", () => {
         prisma.$transaction.mockImplementation(async (operation: any) =>
             operation(prisma),
         );
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-1",
+                mixId: "radio-ephemeral:genre:Rock",
+            },
+        ]);
+        prisma.playlist.findUnique.mockResolvedValue(null);
+        prisma.playlist.create.mockResolvedValue({ id: "playlist-1" });
         prisma.playlist.upsert.mockResolvedValue({
             id: "playlist-1",
             name: "Rock Radio",
@@ -99,7 +110,35 @@ describe("radio-generated playlist routes", () => {
         selectLibraryRadioStationTracks.mockResolvedValue({ tracks: [] });
     });
 
-    it("generates by the shared selector and replaces the same station playlist", async () => {
+    it("returns an existing station playlist without selecting or mutating tracks", async () => {
+        prisma.playlist.findUnique.mockResolvedValue({
+            id: "playlist-existing",
+            items: [{ trackId: "track-1" }, { trackId: "track-2" }],
+        });
+        const res = createRes();
+
+        await invoke(
+            "/radio/playlists",
+            {
+                user: { id: "user-1" },
+                body: { filter: { type: "genre", value: "Rock" } },
+            },
+            res,
+        );
+
+        expect(res.body).toEqual({
+            playlistId: "playlist-existing",
+            entries: [{ id: "track-1" }, { id: "track-2" }],
+        });
+        expect(selectLibraryRadioStationTracks).not.toHaveBeenCalled();
+        expect(prisma.playlist.create).not.toHaveBeenCalled();
+        expect(prisma.playlist.upsert).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.playlistItem.createMany).not.toHaveBeenCalled();
+    });
+
+    it("generates by the shared selector when the station playlist is absent", async () => {
+        prisma.playlist.findUnique.mockResolvedValue(null);
         const tracks = [{ id: "track-1" }, { id: "track-2" }];
         selectLibraryRadioStationTracks.mockResolvedValue({ tracks });
         prisma.playlistItem.createMany.mockResolvedValue({ count: 2 });
@@ -116,19 +155,22 @@ describe("radio-generated playlist routes", () => {
             res,
         );
 
-        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith({
-            type: "genre",
-            value: "rock",
-            limit: 25,
-            userId: "user-1",
-        });
-        expect(prisma.playlist.upsert).toHaveBeenCalledWith(
+        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith(
+            {
+                type: "genre",
+                value: "rock",
+                limit: 25,
+                userId: "user-1",
+            },
+            prisma,
+        );
+        expect(prisma.playlist.create).toHaveBeenCalledWith(
             expect.objectContaining({
-                where: {
-                    userId_mixId: {
-                        userId: "user-1",
-                        mixId: "radio-ephemeral:genre:rock",
-                    },
+                data: {
+                    userId: "user-1",
+                    mixId: "radio-ephemeral:genre:rock",
+                    name: "Rock Radio",
+                    isPublic: false,
                 },
             }),
         );
@@ -176,11 +218,13 @@ describe("radio-generated playlist routes", () => {
     });
 
     it("validates playlist ownership before append", async () => {
-        prisma.playlist.findUnique.mockResolvedValue({
-            id: "playlist-1",
-            userId: "user-2",
-            mixId: "radio-ephemeral:genre:Rock",
-        });
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-2",
+                mixId: "radio-ephemeral:genre:Rock",
+            },
+        ]);
         const res = createRes();
 
         await invoke(
@@ -198,11 +242,13 @@ describe("radio-generated playlist routes", () => {
     });
 
     it("validates playlist ownership before regeneration", async () => {
-        prisma.playlist.findUnique.mockResolvedValue({
-            id: "playlist-1",
-            userId: "user-2",
-            mixId: "radio-ephemeral:decade:1990",
-        });
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-2",
+                mixId: "radio-ephemeral:decade:1990",
+            },
+        ]);
         const res = createRes();
 
         await invoke(
@@ -220,11 +266,13 @@ describe("radio-generated playlist routes", () => {
     });
 
     it("appends only new tracks and assigns consecutive sort positions", async () => {
-        prisma.playlist.findUnique.mockResolvedValue({
-            id: "playlist-1",
-            userId: "user-1",
-            mixId: "radio-ephemeral:genre:Rock",
-        });
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-1",
+                mixId: "radio-ephemeral:genre:Rock",
+            },
+        ]);
         prisma.playlistItem.findMany.mockResolvedValue([
             { trackId: "track-1", sort: 0 },
             { trackId: "track-2", sort: 1 },
@@ -245,12 +293,15 @@ describe("radio-generated playlist routes", () => {
             res,
         );
 
-        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith({
-            type: "genre",
-            value: "Rock",
-            limit: 4,
-            userId: "user-1",
-        });
+        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith(
+            {
+                type: "genre",
+                value: "Rock",
+                limit: 4,
+                userId: "user-1",
+            },
+            prisma,
+        );
         expect(prisma.playlistItem.createMany).toHaveBeenCalledWith({
             data: [
                 { playlistId: "playlist-1", trackId: "track-3", sort: 2 },
@@ -264,12 +315,69 @@ describe("radio-generated playlist routes", () => {
         });
     });
 
-    it("regenerates an owned playlist by replacing its entries", async () => {
-        prisma.playlist.findUnique.mockResolvedValue({
-            id: "playlist-1",
-            userId: "user-1",
-            mixId: "radio-ephemeral:decade:1990",
+    it("reports only the rows accepted by createMany", async () => {
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-1",
+                mixId: "radio-ephemeral:genre:Rock",
+            },
+        ]);
+        prisma.playlistItem.findMany.mockResolvedValue([
+            { trackId: "track-1", sort: 0 },
+        ]);
+        selectLibraryRadioStationTracks.mockResolvedValue({
+            tracks: [{ id: "track-2" }, { id: "track-3" }],
         });
+        prisma.playlistItem.createMany.mockResolvedValue({ count: 1 });
+        const res = createRes();
+
+        await invoke(
+            "/radio/playlists/:id/append",
+            {
+                user: { id: "user-1" },
+                params: { id: "playlist-1" },
+                body: { count: 2 },
+            },
+            res,
+        );
+
+        expect(res.body).toEqual({
+            playlistId: "playlist-1",
+            entries: [{ id: "track-2" }],
+        });
+    });
+
+    it("retries a bounded playlist transaction after a lock timeout", async () => {
+        prisma.$transaction
+            .mockRejectedValueOnce(new Error("lock timeout"))
+            .mockImplementationOnce(async (operation: any) =>
+                operation(prisma),
+            );
+        const res = createRes();
+
+        await invoke(
+            "/radio/playlists/:id/append",
+            {
+                user: { id: "user-1" },
+                params: { id: "playlist-1" },
+                body: { count: 2 },
+            },
+            res,
+        );
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(res.body).toEqual({ playlistId: "playlist-1", entries: [] });
+    });
+
+    it("regenerates an owned playlist by replacing its entries", async () => {
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "playlist-1",
+                userId: "user-1",
+                mixId: "radio-ephemeral:decade:1990",
+            },
+        ]);
         prisma.playlistItem.findMany.mockResolvedValue([
             { trackId: "old-1", sort: 0 },
             { trackId: "old-2", sort: 1 },
@@ -277,6 +385,7 @@ describe("radio-generated playlist routes", () => {
         selectLibraryRadioStationTracks.mockResolvedValue({
             tracks: [{ id: "new-1" }, { id: "new-2" }],
         });
+        prisma.playlistItem.createMany.mockResolvedValue({ count: 2 });
         const res = createRes();
 
         await invoke(
@@ -289,12 +398,15 @@ describe("radio-generated playlist routes", () => {
             res,
         );
 
-        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith({
-            type: "decade",
-            value: "1990",
-            limit: 2,
-            userId: "user-1",
-        });
+        expect(selectLibraryRadioStationTracks).toHaveBeenCalledWith(
+            {
+                type: "decade",
+                value: "1990",
+                limit: 2,
+                userId: "user-1",
+            },
+            prisma,
+        );
         expect(prisma.playlistItem.deleteMany).toHaveBeenCalledWith({
             where: { playlistId: "playlist-1" },
         });

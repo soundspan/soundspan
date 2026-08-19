@@ -18,6 +18,7 @@ import {
     type UserProviderProfile,
 } from "../services/listenTogetherResolution";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
+import { standardPlaylistListWhere } from "../services/radioPlaylistIdentity";
 
 const router = Router();
 
@@ -656,9 +657,7 @@ router.get("/", async (req, res) => {
         );
 
         const playlists = await prisma.playlist.findMany({
-            where: {
-                OR: [{ userId }, { isPublic: true }],
-            },
+            where: standardPlaylistListWhere(userId),
             orderBy: { createdAt: "desc" },
             take: limit,
             skip: offset,

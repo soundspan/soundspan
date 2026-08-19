@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { allocateTracksWithArtistWeighting } from "./artistSlotAllocation";
 import { buildTrackPreferenceScoreMapForUser } from "./libraryTrackPreferences";
 import { applyTrackPreferenceOrderBias } from "./trackPreference";
@@ -18,6 +19,7 @@ import {
 import { transformRadioTrack } from "./libraryRadioTrackResponse";
 
 const selectionLogger = logger.child("LibraryRadioStationSelection");
+type RadioSelectionClient = Prisma.TransactionClient | typeof prisma;
 
 export const LIBRARY_RADIO_PLAYLIST_TYPES = [
     "genre",
@@ -53,8 +55,11 @@ export interface LibraryRadioStationSelection {
     tracks: LibraryRadioStationTrack[];
 }
 
-async function selectDiscoveryIds(limit: number): Promise<string[]> {
-    const unplayed = await prisma.$queryRaw<{ id: string }[]>`
+async function selectDiscoveryIds(
+    client: RadioSelectionClient,
+    limit: number,
+): Promise<string[]> {
+    const unplayed = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND NOT EXISTS (
             SELECT 1 FROM "Play" p WHERE p."trackId" = t.id
@@ -64,7 +69,7 @@ async function selectDiscoveryIds(limit: number): Promise<string[]> {
     `;
     if (unplayed.length >= limit) return unplayed.map((track) => track.id);
 
-    const leastPlayed = await prisma.$queryRaw<{ id: string }[]>`
+    const leastPlayed = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id
         FROM "Track" t
         LEFT JOIN "Play" p ON p."trackId" = t.id
@@ -76,8 +81,11 @@ async function selectDiscoveryIds(limit: number): Promise<string[]> {
     return leastPlayed.map((track) => track.id);
 }
 
-async function selectFavoritesIds(limit: number): Promise<string[]> {
-    const mostPlayed = await prisma.$queryRaw<
+async function selectFavoritesIds(
+    client: RadioSelectionClient,
+    limit: number,
+): Promise<string[]> {
+    const mostPlayed = await client.$queryRaw<
         { id: string; play_count: bigint }[]
     >`
         SELECT t.id, COUNT(p.id) as play_count
@@ -92,7 +100,7 @@ async function selectFavoritesIds(limit: number): Promise<string[]> {
     if (mostPlayed.length > 0) return mostPlayed.map((track) => track.id);
 
     selectionLogger.debug("No favorites play data; using random tracks");
-    const randomTracks = await prisma.$queryRaw<{ id: string }[]>`
+    const randomTracks = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
         ORDER BY random()
@@ -101,9 +109,13 @@ async function selectFavoritesIds(limit: number): Promise<string[]> {
     return randomTracks.map((track) => track.id);
 }
 
-async function selectDecadeIds(value: string | undefined, limit: number) {
+async function selectDecadeIds(
+    client: RadioSelectionClient,
+    value: string | undefined,
+    limit: number,
+) {
     const decadeStart = Number.parseInt(value ?? "2000", 10) || 2000;
-    const tracks = await prisma.$queryRaw<{ id: string }[]>`
+    const tracks = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
@@ -116,8 +128,12 @@ async function selectDecadeIds(value: string | undefined, limit: number) {
     return tracks.map((track) => track.id);
 }
 
-async function selectTrackLevelGenreIds(pattern: string, limit: number) {
-    const tracks = await prisma.$queryRaw<{ id: string }[]>`
+async function selectTrackLevelGenreIds(
+    client: RadioSelectionClient,
+    pattern: string,
+    limit: number,
+) {
+    const tracks = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id
         FROM "Track" t
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND (
@@ -136,8 +152,12 @@ async function selectTrackLevelGenreIds(pattern: string, limit: number) {
     return tracks.map((track) => track.id);
 }
 
-async function selectArtistLevelGenreIds(pattern: string, limit: number) {
-    const tracks = await prisma.$queryRaw<{ id: string }[]>`
+async function selectArtistLevelGenreIds(
+    client: RadioSelectionClient,
+    pattern: string,
+    limit: number,
+) {
+    const tracks = await client.$queryRaw<{ id: string }[]>`
         SELECT DISTINCT t.id, random() AS sort_key
         FROM "Artist" ar
         JOIN "Album" a ON a."artistId" = ar.id
@@ -158,13 +178,25 @@ async function selectArtistLevelGenreIds(pattern: string, limit: number) {
     return tracks.map((track) => track.id);
 }
 
-async function selectGenreIds(value: string | undefined, limit: number) {
+async function selectGenreIds(
+    client: RadioSelectionClient,
+    value: string | undefined,
+    limit: number,
+) {
     const genre = (value ?? "").toLowerCase();
     const pattern = `%${escapeLikePattern(genre)}%`;
-    const trackLevelIds = await selectTrackLevelGenreIds(pattern, limit);
+    const trackLevelIds = await selectTrackLevelGenreIds(
+        client,
+        pattern,
+        limit,
+    );
     if (trackLevelIds.length >= limit) return trackLevelIds;
 
-    const artistLevelIds = await selectArtistLevelGenreIds(pattern, limit);
+    const artistLevelIds = await selectArtistLevelGenreIds(
+        client,
+        pattern,
+        limit,
+    );
     const ids = [...new Set([...trackLevelIds, ...artistLevelIds])];
     selectionLogger.debug(`Found ${ids.length} tracks for genre "${genre}"`);
     return ids;
@@ -193,8 +225,11 @@ const WORKOUT_GENRES = [
     "pop punk",
 ] as const;
 
-async function selectAnalyzedWorkoutIds(limit: number) {
-    const tracks = await prisma.$queryRaw<{ id: string }[]>`
+async function selectAnalyzedWorkoutIds(
+    client: RadioSelectionClient,
+    limit: number,
+) {
+    const tracks = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL}
           AND t."analysisStatus" = ${"completed"}
@@ -206,8 +241,10 @@ async function selectAnalyzedWorkoutIds(limit: number) {
     return tracks.map((track) => track.id);
 }
 
-async function selectWorkoutGenreIds(): Promise<string[]> {
-    const genres = await prisma.genre.findMany({
+async function selectWorkoutGenreIds(
+    client: RadioSelectionClient,
+): Promise<string[]> {
+    const genres = await client.genre.findMany({
         where: { name: { in: [...WORKOUT_GENRES], mode: "insensitive" } },
         include: { trackGenres: { select: { trackId: true }, take: 50 } },
     });
@@ -216,8 +253,11 @@ async function selectWorkoutGenreIds(): Promise<string[]> {
     );
 }
 
-async function selectWorkoutAlbumGenreIds(limit: number) {
-    const tracks = await prisma.$queryRaw<{ id: string }[]>`
+async function selectWorkoutAlbumGenreIds(
+    client: RadioSelectionClient,
+    limit: number,
+) {
+    const tracks = await client.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
         WHERE ${VISIBLE_TRACK_SQL} AND ${TRACK_BROWSE_SQL} AND a.genres IS NOT NULL
@@ -231,43 +271,48 @@ async function selectWorkoutAlbumGenreIds(limit: number) {
     return tracks.map((track) => track.id);
 }
 
-async function selectWorkoutIds(limit: number): Promise<string[]> {
-    const analyzedIds = await selectAnalyzedWorkoutIds(limit);
+async function selectWorkoutIds(
+    client: RadioSelectionClient,
+    limit: number,
+): Promise<string[]> {
+    const analyzedIds = await selectAnalyzedWorkoutIds(client, limit);
     if (analyzedIds.length >= limit) return analyzedIds;
 
-    const genreIds = await selectWorkoutGenreIds();
+    const genreIds = await selectWorkoutGenreIds(client);
     const combinedIds = [...new Set([...analyzedIds, ...genreIds])];
     if (combinedIds.length >= limit) return combinedIds;
 
-    const albumGenreIds = await selectWorkoutAlbumGenreIds(limit);
+    const albumGenreIds = await selectWorkoutAlbumGenreIds(client, limit);
     return [...new Set([...combinedIds, ...albumGenreIds])];
 }
 
 async function selectCandidateIds(
     input: LibraryRadioStationSelectionInput,
+    client: RadioSelectionClient,
 ): Promise<string[]> {
     switch (input.type) {
         case "discovery":
-            return selectDiscoveryIds(input.limit);
+            return selectDiscoveryIds(client, input.limit);
         case "favorites":
-            return selectFavoritesIds(input.limit);
+            return selectFavoritesIds(client, input.limit);
         case "decade":
-            return selectDecadeIds(input.value, input.limit);
+            return selectDecadeIds(client, input.value, input.limit);
         case "genre":
-            return selectGenreIds(input.value, input.limit);
+            return selectGenreIds(client, input.value, input.limit);
         case "workout":
-            return selectWorkoutIds(input.limit);
+            return selectWorkoutIds(client, input.limit);
     }
 }
 
 async function diversifyIds(
     trackIds: string[],
     limit: number,
+    client: RadioSelectionClient,
 ): Promise<string[]> {
     const baseIds = shuffleArray(trackIds).slice(0, Math.max(limit * 4, limit));
     if (baseIds.length === 0) return [];
 
-    const artistRows = await prisma.track.findMany({
+    const artistRows = await client.track.findMany({
         where: {
             ...TRACK_VISIBLE_WHERE,
             ...TRACK_BROWSE_WHERE,
@@ -292,16 +337,24 @@ async function diversifyIds(
 async function applyPreferences(
     trackIds: string[],
     userId: string,
+    client: RadioSelectionClient,
 ): Promise<string[]> {
-    const scores = await buildTrackPreferenceScoreMapForUser(userId, trackIds);
+    const scores = await buildTrackPreferenceScoreMapForUser(
+        userId,
+        trackIds,
+        client,
+    );
     return scores.size > 0
         ? applyTrackPreferenceOrderBias(trackIds, scores)
         : trackIds;
 }
 
-async function loadRadioTracks(trackIds: string[]) {
+async function loadRadioTracks(
+    trackIds: string[],
+    client: RadioSelectionClient,
+) {
     if (trackIds.length === 0) return [];
-    return prisma.track.findMany({
+    return client.track.findMany({
         where: {
             ...TRACK_VISIBLE_WHERE,
             ...TRACK_BROWSE_WHERE,
@@ -320,15 +373,24 @@ async function loadRadioTracks(trackIds: string[]) {
     });
 }
 
-/** Selects the local-library tracks used by radio tiles and generated playlists. */
+/** Selects radio tracks through the supplied client, including locked transactions. */
 export async function selectLibraryRadioStationTracks(
     input: LibraryRadioStationSelectionInput,
+    client: RadioSelectionClient = prisma,
 ): Promise<LibraryRadioStationSelection> {
-    const candidateIds = await selectCandidateIds(input);
-    const diversifiedIds = await diversifyIds(candidateIds, input.limit);
-    const preferredIds = await applyPreferences(diversifiedIds, input.userId);
+    const candidateIds = await selectCandidateIds(input, client);
+    const diversifiedIds = await diversifyIds(
+        candidateIds,
+        input.limit,
+        client,
+    );
+    const preferredIds = await applyPreferences(
+        diversifiedIds,
+        input.userId,
+        client,
+    );
     const finalIds = preferredIds.slice(0, input.limit);
-    const rows = await loadRadioTracks(finalIds);
+    const rows = await loadRadioTracks(finalIds, client);
     const transformed = rows.map((track) => transformRadioTrack(track, null));
     const tracks = separateArtists(
         shuffleArray(transformed),

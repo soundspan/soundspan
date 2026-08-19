@@ -111,7 +111,7 @@ export async function handleRegenerateRadioPlaylist(
  * @openapi
  * /api/library/radio/playlists:
  *   post:
- *     summary: Generate or replace a user-scoped radio playlist
+ *     summary: Return or generate a user-scoped radio playlist
  *     tags: [Library]
  *     security: [{ apiKeyAuth: [] }]
  *     requestBody:

@@ -491,7 +491,7 @@ describe("playlists route runtime", () => {
         expect(res.body[0]).not.toHaveProperty("_count");
     });
 
-    it("uses bounded playlist pages and lightweight cover previews by default", async () => {
+    it("excludes station rows from bounded playlist pages and cover previews", async () => {
         const req = { user: { id: "u1" }, query: {} } as any;
         const res = createRes();
 
@@ -499,6 +499,23 @@ describe("playlists route runtime", () => {
 
         expect(prisma.playlist.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
+                where: {
+                    AND: [
+                        { OR: [{ userId: "u1" }, { isPublic: true }] },
+                        {
+                            OR: [
+                                { mixId: null },
+                                {
+                                    NOT: {
+                                        mixId: {
+                                            startsWith: "radio-ephemeral:",
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                },
                 take: 500,
                 skip: 0,
                 include: {
