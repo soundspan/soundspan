@@ -5,7 +5,7 @@ import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 import { isSecretsDbOnlyEnabled } from "./config/secretsPolicy";
-import { metricsRegistry } from "./metrics";
+import { initializeFederationMetrics, metricsRegistry } from "./metrics";
 import { isMetricsRequestAuthorized } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
 import { backfillFederationOutboundTokens } from "./services/federationCredentials";
@@ -38,6 +38,7 @@ function resolveWorkerProcessRole(): WorkerProcessRole {
 }
 
 const workerProcessRole = resolveWorkerProcessRole();
+initializeFederationMetrics("worker");
 warnIfLegacyDiscoveryMode("Worker");
 let isShuttingDown = false;
 let workersInitialized = false;

@@ -69,7 +69,11 @@ describe("federation peer health processor", () => {
         await processFederationHealth();
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1", outboundStatus: { not: "REVOKED" } },
-            data: { outboundStatus: "OFFLINE" },
+            data: {
+                outboundStatus: "OFFLINE",
+                lastError: "timeout",
+                lastErrorAt: expect.any(Date),
+            },
         });
         expect(log.info).toHaveBeenCalledTimes(1);
 

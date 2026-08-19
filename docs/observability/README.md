@@ -6,6 +6,9 @@ for the starter Grafana dashboard. Load
 Prometheus rule file for the matching vibe provider, migration, queue,
 collection-error, and federation alerts.
 
+Use the dedicated [federation alert pack](federation-alerts.md) for per-peer
+sync freshness, proxy failures, and authentication bursts.
+
 Prometheus must scrape every backend and worker replica because each process
 owns its registry. The queue-capacity series is published by workers, and the
 alert expressions aggregate process-local series before evaluating thresholds.

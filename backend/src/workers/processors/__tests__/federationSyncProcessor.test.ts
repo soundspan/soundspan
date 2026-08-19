@@ -490,8 +490,13 @@ describe("federation sync processor", () => {
                 catalogEpoch: "epoch-1",
                 lastSyncCursor: "2026-08-15T11:59:59.000Z",
                 lastSeenAt: expect.any(Date),
+                lastSyncSuccessAt: expect.any(Date),
+                lastSyncDurationMs: expect.any(Number),
             }),
         });
+        const completion = prisma.federationPeer.update.mock.lastCall?.[0].data;
+        expect(completion.lastSyncSuccessAt).toEqual(completion.lastSeenAt);
+        expect(completion.lastSyncDurationMs).toBeGreaterThanOrEqual(0);
         expect(result).toMatchObject({
             mode: "full",
             artists: 1,

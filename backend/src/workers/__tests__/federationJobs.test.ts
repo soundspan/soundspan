@@ -10,6 +10,8 @@ const prisma = {
 const processFederationSync = jest.fn();
 const processFederationHealth = jest.fn();
 const recordFederationSyncOutcome = jest.fn();
+const recordFederationPeerSync = jest.fn();
+const recordFederationPeerError = jest.fn();
 
 jest.mock("../queues", () => ({ federationQueue }));
 jest.mock("../../utils/db", () => ({ prisma }));
@@ -22,7 +24,13 @@ jest.mock("../processors/federationSyncProcessor", () => ({
 jest.mock("../processors/federationHealthProcessor", () => ({
     processFederationHealth,
 }));
-jest.mock("../../metrics", () => ({ recordFederationSyncOutcome }));
+jest.mock("../../metrics", () => ({
+    recordFederationPeerSync,
+    recordFederationSyncOutcome,
+}));
+jest.mock("../../services/federationPeerHealth", () => ({
+    recordFederationPeerError,
+}));
 
 import {
     enqueueFederationSyncNow,
@@ -44,6 +52,7 @@ describe("federation queue registration", () => {
             { id: "peer-2" },
         ]);
         processFederationSync.mockResolvedValue({ mode: "incremental" });
+        recordFederationPeerError.mockResolvedValue(undefined);
     });
 
     it("registers bounded sync, health, and tick processors", () => {
@@ -76,12 +85,21 @@ describe("federation queue registration", () => {
             syncHandler({ data: { peerId: "peer-1" } }),
         ).resolves.toEqual({ mode: "incremental" });
         expect(recordFederationSyncOutcome).toHaveBeenCalledWith("success");
+        expect(recordFederationPeerSync).toHaveBeenCalledWith(
+            "peer-1",
+            "success",
+            expect.any(Number),
+        );
 
         processFederationSync.mockRejectedValueOnce(new Error("sync failed"));
         await expect(
             syncHandler({ data: { peerId: "peer-1" } }),
         ).rejects.toThrow("sync failed");
         expect(recordFederationSyncOutcome).toHaveBeenCalledWith("failure");
+        expect(recordFederationPeerError).toHaveBeenCalledWith(
+            "peer-1",
+            expect.objectContaining({ message: "sync failed" }),
+        );
     });
 
     it("registers startup plus hourly health and configured sync repeats", async () => {

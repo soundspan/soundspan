@@ -27,6 +27,7 @@ import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsSection } from "../ui";
 import { PeerDedupList, PeerSettingsPanel } from "./federationPeerSettings";
+import { FederationHealthPanel } from "./FederationHealthPanel";
 
 type AddMode = "host" | "link" | "pair";
 
@@ -923,6 +924,7 @@ function FederationSettingsContent(props: FederationSettingsContentProps) {
                 setDeletePeer={props.setDeletePeer}
                 loadPeers={props.loadPeers}
             />
+            <FederationHealthPanel />
             <FederationAddControls
                 busy={props.addBusy}
                 pairingCode={props.pairingCode}

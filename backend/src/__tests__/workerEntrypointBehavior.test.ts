@@ -164,7 +164,11 @@ describe("worker entrypoint behavior", () => {
                 metrics: jest.fn(async () => "soundspan_test_metric 1\n"),
             } as const);
         const registerQueueMetrics = jest.fn();
-        jest.doMock("../metrics", () => ({ metricsRegistry }));
+        const initializeFederationMetrics = jest.fn();
+        jest.doMock("../metrics", () => ({
+            initializeFederationMetrics,
+            metricsRegistry,
+        }));
         jest.doMock("../metrics/endpoint", () => ({
             isMetricsRequestAuthorized: (authorization: string | undefined) =>
                 authorization === "Bearer metrics-token",
@@ -187,6 +191,7 @@ describe("worker entrypoint behavior", () => {
             createDependencyReadinessTracker,
             metricsRegistry,
             registerQueueMetrics,
+            initializeFederationMetrics,
         };
     }
 
@@ -233,6 +238,7 @@ describe("worker entrypoint behavior", () => {
             redisClient,
             exitMock,
             createDependencyReadinessTracker,
+            initializeFederationMetrics,
         } = setupWorkerRuntime();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -248,6 +254,7 @@ describe("worker entrypoint behavior", () => {
         expect(prisma.$queryRaw).toHaveBeenCalled();
         expect(redisClient.ping).toHaveBeenCalled();
         expect(createDependencyReadinessTracker).toHaveBeenCalledWith("worker");
+        expect(initializeFederationMetrics).toHaveBeenCalledWith("worker");
         expect(exitMock).not.toHaveBeenCalled();
     });
 

@@ -281,6 +281,112 @@
             ],
             "title": "Federation embedding exports suppressed",
             "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 40
+            },
+            "id": 12,
+            "targets": [
+                {
+                    "expr": "max(soundspan_federation_peer_sync_lag_seconds) by (peer)",
+                    "legendFormat": "{{peer}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation peer sync lag",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 40
+            },
+            "id": 13,
+            "targets": [
+                {
+                    "expr": "sum(rate(soundspan_federation_stream_proxy_requests_total{outcome!=\"ok\"}[$__rate_interval])) by (peer) / clamp_min(sum(rate(soundspan_federation_stream_proxy_requests_total[$__rate_interval])) by (peer), 1e-9)",
+                    "legendFormat": "{{peer}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation stream proxy error rate",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 48
+            },
+            "id": 14,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum(rate(soundspan_federation_stream_proxy_duration_seconds_bucket[$__rate_interval])) by (le, peer))",
+                    "legendFormat": "{{peer}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation stream proxy p95 latency",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 48
+            },
+            "id": 15,
+            "targets": [
+                {
+                    "expr": "max(soundspan_federation_peer_catalog_items) by (peer, type)",
+                    "legendFormat": "{{peer}} {{type}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Federation peer catalog items",
+            "type": "timeseries"
         }
     ],
     "schemaVersion": 41,

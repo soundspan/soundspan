@@ -19,6 +19,7 @@ const dedupService = {
 };
 
 const enqueueFederationSyncNow = jest.fn();
+const listFederationPeerHealth = jest.fn();
 
 jest.mock("../../services/federationPeers", () => ({
     ...service,
@@ -32,6 +33,9 @@ jest.mock("../../workers/federationJobs", () => ({
     enqueueFederationSyncNow,
 }));
 jest.mock("../../services/federationDedupArbitration", () => dedupService);
+jest.mock("../../services/federationPeerHealth", () => ({
+    listFederationPeerHealth,
+}));
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: Request, res: Response, next: NextFunction) => {
         if (req.headers.authorization !== "Bearer admin") {
@@ -99,6 +103,7 @@ describe("federation admin routes", () => {
             pinned: true,
         });
         enqueueFederationSyncNow.mockResolvedValue(undefined);
+        listFederationPeerHealth.mockResolvedValue([]);
     });
 
     it("requires administrator authentication for management", async () => {
@@ -207,6 +212,34 @@ describe("federation admin routes", () => {
             ],
         });
         expect(JSON.stringify(response.body)).not.toContain("credentialHash");
+    });
+
+    it("returns the administrator-only peer health read model", async () => {
+        listFederationPeerHealth.mockResolvedValueOnce([
+            {
+                id: "peer-1",
+                name: "Remote Library",
+                health: "amber",
+                syncLagSeconds: 7_200,
+                catalog: { track: 42 },
+                activeStreamLeases: 1,
+                maxConcurrentStreams: 2,
+            },
+        ]);
+
+        const unauthenticated = await request(app).get(
+            "/api/federation/admin/peers/health",
+        );
+        const response = await request(app)
+            .get("/api/federation/admin/peers/health")
+            .set("Authorization", "Bearer admin");
+
+        expect(unauthenticated.status).toBe(401);
+        expect(response.status).toBe(200);
+        expect(response.body.peers[0]).toEqual(
+            expect.objectContaining({ id: "peer-1", health: "amber" }),
+        );
+        expect(listFederationPeerHealth).toHaveBeenCalledTimes(1);
     });
 
     it("rotates, revokes, and deletes peers with uniform missing responses", async () => {

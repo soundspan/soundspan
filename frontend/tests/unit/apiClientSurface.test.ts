@@ -93,6 +93,7 @@ const EXPECTED_PUBLIC_METHODS: readonly string[] = [
     "getExternalIdentities",
     "getFeatures",
     "getFederationPeers",
+    "getFederationPeerHealth",
     "getFreshPreviewUrl",
     "getHomepageGenres",
     "getHomepageTopPodcasts",
@@ -309,5 +310,5 @@ test("api facade exposes every pinned public method", () => {
 });
 
 test("api facade public surface count is pinned", () => {
-    assert.equal(EXPECTED_PUBLIC_METHODS.length, 289);
+    assert.equal(EXPECTED_PUBLIC_METHODS.length, 290);
 });

@@ -9,6 +9,7 @@ const mockLogger = {
     error: jest.fn(),
     child: jest.fn(),
 };
+const recordFederationAuthFailure = jest.fn();
 mockLogger.child.mockReturnValue(mockLogger);
 
 jest.mock("../../utils/db", () => ({
@@ -20,6 +21,7 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 jest.mock("../../utils/logger", () => ({ logger: mockLogger }));
+jest.mock("../../metrics", () => ({ recordFederationAuthFailure }));
 
 import type { NextFunction, Request, Response } from "express";
 import { hashApiKey } from "../../utils/apiKeyHash";
@@ -159,6 +161,35 @@ describe("requireFederationPeer", () => {
         expect(res.statusCode).toBe(403);
         expect(res.body).toEqual({ error: "Federation peer scope required" });
         expect(next).not.toHaveBeenCalled();
+        expect(recordFederationAuthFailure).toHaveBeenCalledWith(
+            "peer-1",
+            "scope",
+        );
+    });
+
+    it.each([
+        [undefined, null, "no_token"],
+        [`Bearer ${rawToken}`, null, "unknown_credential"],
+        [
+            `Bearer ${rawToken}`,
+            peer({ direction: "CONSUMER" }),
+            "wrong_direction",
+        ],
+        [`Bearer ${rawToken}`, peer({ inboundStatus: "OFFLINE" }), "inactive"],
+    ])("records bounded 401 auth reason %s", async (auth, record, reason) => {
+        mockFindUnique.mockResolvedValue(record);
+        const req = { headers: { authorization: auth } } as Request;
+
+        await requireFederationPeer("library:read")(
+            req,
+            createResponse() as unknown as Response,
+            jest.fn(),
+        );
+
+        expect(recordFederationAuthFailure).toHaveBeenCalledWith(
+            "unknown",
+            reason,
+        );
     });
 
     it("treats malformed persisted scopes as invalid credentials", async () => {

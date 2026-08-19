@@ -11,6 +11,10 @@ import {
     federationCapabilitiesSchema,
     type FederationCapability,
 } from "../services/federationCapabilities";
+import {
+    recordFederationAuthFailure,
+    type FederationAuthFailureReason,
+} from "../metrics";
 
 const authLogger = logger.child("FederationAuth");
 const LAST_SEEN_THROTTLE_MS = 60_000;
@@ -95,6 +99,17 @@ function hasScopes(peer: AuthPeer, required: FederationScope[]): boolean {
     return required.every((scope) => peer.scopes.includes(scope));
 }
 
+function rejectedPeerReason(
+    token: string | null,
+    peer: AuthPeer | null,
+): FederationAuthFailureReason | null {
+    if (!token) return "no_token";
+    if (!peer) return "unknown_credential";
+    if (!["HOST", "BOTH"].includes(peer.direction)) return "wrong_direction";
+    if (peer.inboundStatus !== "ACTIVE") return "inactive";
+    return null;
+}
+
 /** Authenticates an active peer and enforces every requested federation scope. */
 export function requireFederationPeer(
     ...requiredScopes: FederationScope[]
@@ -102,11 +117,12 @@ export function requireFederationPeer(
     return async (req: Request, res: Response, next: NextFunction) => {
         const token = bearerToken(req);
         const peer = token ? await resolvePeer(token) : null;
-        if (
-            !peer ||
-            !["HOST", "BOTH"].includes(peer.direction) ||
-            peer.inboundStatus !== "ACTIVE"
-        ) {
+        const rejection = rejectedPeerReason(token, peer);
+        if (!peer || rejection) {
+            recordFederationAuthFailure(
+                "unknown",
+                rejection ?? "unknown_credential",
+            );
             return sendRouteError(
                 res,
                 401,
@@ -114,6 +130,7 @@ export function requireFederationPeer(
             );
         }
         if (!hasScopes(peer, requiredScopes)) {
+            recordFederationAuthFailure(peer.id, "scope");
             return sendRouteError(res, 403, "Federation peer scope required");
         }
         req.federationPeer = {

@@ -24,6 +24,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/sections/DownloadPreferencesSection.tsx` | components |
 | `components/sections/DownloadServicesSection.tsx` | components |
 | `components/sections/FederationSection.tsx` | components |
+| `components/sections/FederationHealthPanel.tsx` | components |
 | `components/sections/IntegrationsSection.tsx` | components |
 | `components/sections/LibraryHealthSection.tsx` | components |
 | `components/sections/libraryHealthDetails.tsx` | components |

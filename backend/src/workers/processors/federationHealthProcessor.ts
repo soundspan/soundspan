@@ -2,6 +2,7 @@ import { createFederationClient } from "../../services/federationClient";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { safeFederationErrorMessage } from "../../services/federationPeerHealth";
 
 const log = logger.child("FederationHealthProcessor");
 const MAX_CONSUMER_PEERS = 500;
@@ -34,13 +35,17 @@ async function markPeerActive(
     }
 }
 
-async function markPeerOffline(peer: {
-    id: string;
-    outboundStatus: string | null;
-}): Promise<void> {
+async function markPeerOffline(
+    peer: { id: string; outboundStatus: string | null },
+    error: unknown,
+): Promise<void> {
     await prisma.federationPeer.updateMany({
         where: { id: peer.id, outboundStatus: { not: "REVOKED" } },
-        data: { outboundStatus: "OFFLINE" },
+        data: {
+            outboundStatus: "OFFLINE",
+            lastError: safeFederationErrorMessage(error),
+            lastErrorAt: new Date(),
+        },
     });
     if (peer.outboundStatus !== "OFFLINE") {
         log.info(
@@ -78,8 +83,8 @@ export async function processFederationHealth(): Promise<HealthCounts> {
             }).getManifest();
             await markPeerActive(peer, manifest.capabilities);
             counts.online += 1;
-        } catch (_error: unknown) {
-            await markPeerOffline(peer);
+        } catch (error: unknown) {
+            await markPeerOffline(peer, error);
             counts.offline += 1;
         }
     }

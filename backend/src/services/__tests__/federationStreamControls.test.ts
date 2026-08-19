@@ -7,6 +7,12 @@ jest.mock("../../utils/logger", () => ({
         child: () => ({ warn: jest.fn() }),
     },
 }));
+const recordFederationHostStream = jest.fn();
+const recordFederationQuotaRejection = jest.fn();
+jest.mock("../../metrics", () => ({
+    recordFederationHostStream,
+    recordFederationQuotaRejection,
+}));
 
 import {
     createStreamPacingTransform,
@@ -126,6 +132,14 @@ describe("federation stream controls", () => {
             code: "FEDERATION_STREAM_LIMIT",
             retryAfterSeconds: 1,
         });
+        expect(recordFederationQuotaRejection).toHaveBeenCalledWith(
+            "peer-1",
+            "concurrency",
+        );
+        expect(recordFederationHostStream).toHaveBeenCalledWith(
+            "peer-1",
+            "http_4xx",
+        );
     });
 
     it.each([

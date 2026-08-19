@@ -5,6 +5,16 @@ import {
 } from "./domainMetrics";
 import { createHttpRequestMetrics } from "./httpMetrics";
 import {
+    createFederationMetrics,
+    type FederationAuthFailureReason,
+    type FederationCacheResult,
+    type FederationMetrics,
+    type FederationMetricsRole,
+    type FederationQuotaKind,
+    type FederationStreamOutcome,
+    type FederationSyncOutcome,
+} from "./federationMetrics";
+import {
     createLoudnessMetrics,
     LOUDNESS_BACKFILL_OUTCOMES,
     loudnessBackfillOutcomeKey,
@@ -34,6 +44,14 @@ import {
 } from "./vibeEmbedMetrics";
 import { VIBE_PROVIDER_QUEUE_KEY } from "../workers/legacyVibeRedisCleanup";
 import { prisma } from "../utils/db";
+
+export type {
+    FederationAuthFailureReason,
+    FederationCacheResult,
+    FederationQuotaKind,
+    FederationStreamOutcome,
+    FederationSyncOutcome,
+} from "./federationMetrics";
 
 /** Single process-local Prometheus registry. */
 export const metricsRegistry = new Registry();
@@ -75,6 +93,22 @@ const vibeEmbedMetrics = createVibeEmbedMetrics(metricsRegistry, {
         return (await readVibeWorkerStatus(redisClient)) !== null;
     },
 });
+let federationMetrics: FederationMetrics | null = null;
+
+/** Registers federation instruments once for the process role that owns them. */
+export function initializeFederationMetrics(role: FederationMetricsRole): void {
+    if (federationMetrics) {
+        throw new Error("Federation metrics are already initialized");
+    }
+    federationMetrics = createFederationMetrics(metricsRegistry, { role });
+}
+
+function activeFederationMetrics(): FederationMetrics {
+    if (!federationMetrics) {
+        throw new Error("Federation metrics are not initialized");
+    }
+    return federationMetrics;
+}
 
 /** Express middleware recording bounded HTTP request duration labels. */
 export const httpMetricsMiddleware = httpMetrics.middleware;
@@ -97,6 +131,60 @@ export function recordFederationSyncOutcome(
     outcome: "success" | "failure",
 ): void {
     domainMetrics.federationSyncs.inc({ outcome });
+}
+
+/** Records one completed peer sync duration in the worker registry. */
+export function recordFederationPeerSync(
+    peerId: string,
+    outcome: FederationSyncOutcome,
+    durationSeconds: number,
+): void {
+    activeFederationMetrics().recordPeerSync(peerId, outcome, durationSeconds);
+}
+
+/** Records one completed consumer-side federation stream proxy request. */
+export function recordFederationStreamProxy(
+    peerId: string,
+    outcome: FederationStreamOutcome,
+    durationSeconds: number,
+): void {
+    activeFederationMetrics().recordStreamProxy(
+        peerId,
+        outcome,
+        durationSeconds,
+    );
+}
+
+/** Records one consumer-side federation stream cache lookup. */
+export function recordFederationStreamProxyCache(
+    peerId: string,
+    result: FederationCacheResult,
+): void {
+    activeFederationMetrics().recordStreamProxyCache(peerId, result);
+}
+
+/** Records one completed host-side federation stream request. */
+export function recordFederationHostStream(
+    peerId: string,
+    outcome: FederationStreamOutcome,
+): void {
+    activeFederationMetrics().recordHostStream(peerId, outcome);
+}
+
+/** Records one bounded federation authentication or scope failure. */
+export function recordFederationAuthFailure(
+    peerId: string,
+    reason: FederationAuthFailureReason,
+): void {
+    activeFederationMetrics().recordAuthFailure(peerId, reason);
+}
+
+/** Records one host-side federation stream quota rejection. */
+export function recordFederationQuotaRejection(
+    peerId: string,
+    kind: FederationQuotaKind,
+): void {
+    activeFederationMetrics().recordQuotaRejection(peerId, kind);
 }
 
 /** Records bounded federation data discarded during compatibility parsing. */

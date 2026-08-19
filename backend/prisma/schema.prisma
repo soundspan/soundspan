@@ -499,6 +499,10 @@ model FederationPeer {
   inboundStatus  PeerStatus?
   outboundStatus PeerStatus?
   lastSeenAt     DateTime?
+  lastSyncSuccessAt DateTime?
+  lastSyncDurationMs Int?
+  lastErrorAt    DateTime?
+  lastError      String?
   lastSyncCursor String?
   catalogEpoch   String?
   showDedupedCopies Boolean @default(false)

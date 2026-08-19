@@ -55,13 +55,11 @@ const MAX_REMOTE_PAGES = 10_000;
 const CLEANUP_BATCH_SIZE = 200;
 const MAX_CLEANUP_PAGES = 10_000;
 const MAX_SEEN_ITEMS = 2_000_000;
-
 const jobDataSchema = z.strictObject({
     peerId: z.string().trim().min(1).max(128),
 });
 type MediaType = FederationEnvelope["mediaType"];
 type ParentMediaType = "artist" | "album";
-
 interface SyncCounts {
     artists: number;
     albums: number;
@@ -70,9 +68,9 @@ interface SyncCounts {
     audiobooks: number;
     tombstones: number;
 }
-
 interface SyncContext {
     peerId: string;
+    startedAtMs: number;
     scopes: string[];
     counts: SyncCounts;
     seen: Record<MediaType, Set<string>>;
@@ -85,7 +83,6 @@ interface SyncContext {
     localEmbeddingSpace: ActiveEmbeddingSpace | null;
     embeddingWarningEmitted: boolean;
 }
-
 /** Bounded summary of one completed peer sync. */
 export interface FederationSyncResult extends SyncCounts {
     mode: "full" | "incremental";
@@ -93,14 +90,15 @@ export interface FederationSyncResult extends SyncCounts {
     skippedInvalid: number;
     skippedUnknownTombstones: number;
 }
-
 function newSyncContext(
     peerId: string,
     scopes: string[],
     localEmbeddingSpace: ActiveEmbeddingSpace | null,
+    startedAtMs: number,
 ): SyncContext {
     return {
         peerId,
+        startedAtMs,
         scopes,
         counts: {
             artists: 0,
@@ -127,7 +125,6 @@ function newSyncContext(
         embeddingWarningEmitted: localEmbeddingSpace === null,
     };
 }
-
 async function resolveLocalEmbeddingSpace(
     peerId: string,
 ): Promise<ActiveEmbeddingSpace | null> {
@@ -142,7 +139,6 @@ async function resolveLocalEmbeddingSpace(
         return null;
     }
 }
-
 function incrementCount(context: SyncContext, mediaType: MediaType): void {
     if (mediaType === "artist") context.counts.artists += 1;
     else if (mediaType === "album") context.counts.albums += 1;
@@ -150,7 +146,6 @@ function incrementCount(context: SyncContext, mediaType: MediaType): void {
     else if (mediaType === "podcast") context.counts.podcasts += 1;
     else context.counts.audiobooks += 1;
 }
-
 function rememberSeen(context: SyncContext, item: FederationEnvelope): void {
     const seen = context.seen[item.mediaType];
     if (seen.size >= MAX_SEEN_ITEMS) {
@@ -158,12 +153,10 @@ function rememberSeen(context: SyncContext, item: FederationEnvelope): void {
     }
     seen.add(item.id);
 }
-
 function placeholderIdentity(peerId: string, value: string): string {
     const encoded = Buffer.from(value, "utf8").toString("base64url");
     return `federation:${peerId}:${encoded}`;
 }
-
 function warnParentRecovery(
     context: SyncContext,
     mediaType: ParentMediaType,
@@ -177,11 +170,9 @@ function warnParentRecovery(
         `peerId=${context.peerId} missing parent ${mediaType}=${remoteId}; ${action}`,
     );
 }
-
 function isMissingExportedParent(error: unknown): boolean {
     return error instanceof FederationHttpError && error.status === 404;
 }
-
 async function hasArtistCollision(
     context: SyncContext,
     state: PageState,
@@ -199,7 +190,6 @@ async function hasArtistCollision(
     });
     return collision !== null;
 }
-
 async function upsertArtist(
     context: SyncContext,
     state: PageState,
@@ -236,7 +226,6 @@ async function upsertArtist(
     context.touchedArtistIds.add(row.id);
     return normalized;
 }
-
 async function ensureRemoteArtistId(
     context: SyncContext,
     state: PageState,
@@ -266,7 +255,6 @@ async function ensureRemoteArtistId(
     if (remember) rememberSeen(context, parent);
     return imported.id;
 }
-
 async function resolveAlbumRgMbid(
     context: SyncContext,
     state: PageState,
@@ -1278,6 +1266,8 @@ async function finishSync(
     cursor: string,
     catalogEpoch: string,
 ): Promise<FederationSyncResult> {
+    const completedAtMs = Date.now();
+    const completedAt = new Date(completedAtMs);
     const changed =
         context.counts.artists +
         context.counts.albums +
@@ -1294,7 +1284,12 @@ async function finishSync(
         data: {
             lastSyncCursor: cursor,
             catalogEpoch,
-            lastSeenAt: new Date(),
+            lastSeenAt: completedAt,
+            lastSyncSuccessAt: completedAt,
+            lastSyncDurationMs: Math.max(
+                0,
+                completedAtMs - context.startedAtMs,
+            ),
             outboundStatus: "ACTIVE",
         },
     });
@@ -1449,7 +1444,12 @@ export async function processFederationSync(
     });
     const manifest = await client.getManifest();
     const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);
-    const context = newSyncContext(peer.id, peer.scopes, localEmbeddingSpace);
+    const context = newSyncContext(
+        peer.id,
+        peer.scopes,
+        localEmbeddingSpace,
+        startedAt.getTime(),
+    );
     const fullProgress = parseFullProgress(peer.lastSyncCursor);
     if (
         fullProgress &&

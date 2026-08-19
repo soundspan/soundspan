@@ -9,11 +9,21 @@ const streamFileWithRangeSupport = jest.fn();
 const destroyStreamingService = jest.fn();
 const logDebug = jest.fn();
 const logInfo = jest.fn();
+const recordFederationStreamProxy = jest.fn();
+const recordFederationStreamProxyCache = jest.fn();
 const prisma = {
     federationPeer: { updateMany: jest.fn() },
 };
 
 jest.mock("../../utils/db", () => ({ prisma }));
+jest.mock("../../metrics", () => ({
+    recordFederationStreamProxy,
+    recordFederationStreamProxyCache,
+}));
+jest.mock("../federationPeerHealth", () => ({
+    safeFederationErrorMessage: (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+}));
 jest.mock("../federationClient", () => ({
     createFederationClient,
     FederationHttpError: class FederationHttpError extends Error {
@@ -157,6 +167,15 @@ describe("federated stream proxy", () => {
             });
             expect(body).toBe("audio");
             expect(cacheFederatedStream).not.toHaveBeenCalled();
+            expect(recordFederationStreamProxyCache).toHaveBeenCalledWith(
+                "peer-1",
+                "miss",
+            );
+            expect(recordFederationStreamProxy).toHaveBeenCalledWith(
+                "peer-1",
+                status >= 400 ? "http_4xx" : "ok",
+                expect.any(Number),
+            );
             expect(JSON.stringify(res.headers)).not.toContain("must-not-leak");
         },
     );
@@ -207,8 +226,17 @@ describe("federated stream proxy", () => {
         ).rejects.toThrow("peer error");
         expect(prisma.federationPeer.updateMany).toHaveBeenCalledWith({
             where: { id: "peer-1", outboundStatus: "ACTIVE" },
-            data: { outboundStatus: "OFFLINE" },
+            data: {
+                outboundStatus: "OFFLINE",
+                lastError: "peer error",
+                lastErrorAt: expect.any(Date),
+            },
         });
+        expect(recordFederationStreamProxy).toHaveBeenCalledWith(
+            "peer-1",
+            "http_5xx",
+            expect.any(Number),
+        );
     });
 
     it("fills a non-Range miss and serves the completed cached file", async () => {

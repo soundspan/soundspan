@@ -3,6 +3,11 @@ import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import {
+    recordFederationHostStream,
+    recordFederationQuotaRejection,
+    type FederationStreamOutcome,
+} from "../metrics";
 
 const log = logger.child("FederationStreamControls");
 const STREAM_LEASE_KEY_PREFIX = "federation:stream-leases:v2";
@@ -201,6 +206,17 @@ function sendLimitExceeded(res: Response): Response {
     });
 }
 
+function hostStreamOutcome(
+    req: Request,
+    res: Response,
+    failed: boolean,
+): FederationStreamOutcome {
+    if (req.aborted) return "aborted";
+    if (res.statusCode >= 500) return "http_5xx";
+    if (res.statusCode >= 400) return "http_4xx";
+    return failed ? "error" : "ok";
+}
+
 function attachLeaseCleanup(
     req: Request,
     res: Response,
@@ -244,7 +260,11 @@ export async function withFederationStreamControls<T>(
             limits.peerId,
             limits.maxConcurrentStreams,
         );
-        if (!lease) return sendLimitExceeded(res);
+        if (!lease) {
+            recordFederationQuotaRejection(limits.peerId, "concurrency");
+            recordFederationHostStream(limits.peerId, "http_4xx");
+            return sendLimitExceeded(res);
+        }
     }
     const detach = lease
         ? attachLeaseCleanup(req, res, lease)
@@ -252,9 +272,17 @@ export async function withFederationStreamControls<T>(
     const pacing = limits.maxStreamKbps
         ? createStreamPacingTransform(limits.maxStreamKbps)
         : null;
+    let failed = false;
     try {
         return await operation(pacing);
+    } catch (error) {
+        failed = true;
+        throw error;
     } finally {
+        recordFederationHostStream(
+            limits.peerId,
+            hostStreamOutcome(req, res, failed),
+        );
         detach();
         if (lease) await releaseLease(lease);
     }

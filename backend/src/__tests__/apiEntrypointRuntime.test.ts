@@ -258,6 +258,7 @@ describe("api entrypoint runtime behavior", () => {
         const createMetricsRouter = jest.fn(() => metricsRouter);
         const metricsRegistry = { contentType: "text/plain" };
         const httpMetricsMiddleware = "http-metrics-middleware";
+        const initializeFederationMetrics = jest.fn();
         const shutdownWorkers = jest.fn(
             shutdownWorkersImpl || (async () => undefined),
         );
@@ -328,6 +329,7 @@ describe("api entrypoint runtime behavior", () => {
         }));
         jest.doMock("../metrics", () => ({
             httpMetricsMiddleware,
+            initializeFederationMetrics,
             metricsRegistry,
         }));
         jest.doMock("../metrics/endpoint", () => ({ createMetricsRouter }));
@@ -378,6 +380,7 @@ describe("api entrypoint runtime behavior", () => {
             metricsRegistry,
             metricsRouter,
             httpMetricsMiddleware,
+            initializeFederationMetrics,
             sessionMiddleware,
             redisStoreCtor,
         };
@@ -471,6 +474,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.app.use).toHaveBeenCalledWith("compression-middleware");
         expect(mocks.app.use).toHaveBeenCalledWith(mocks.httpMetricsMiddleware);
         expect(mocks.app.use).toHaveBeenCalledWith(mocks.metricsRouter);
+        expect(mocks.initializeFederationMetrics).toHaveBeenCalledWith("api");
         expect(mocks.createMetricsRouter).toHaveBeenCalledWith({
             registry: mocks.metricsRegistry,
             token: "metrics-token",

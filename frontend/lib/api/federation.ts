@@ -23,10 +23,41 @@ export interface FederationPeer {
     maxConcurrentStreams: number | null;
     maxStreamKbps: number | null;
     lastSeenAt: string | null;
+    lastSyncSuccessAt: string | null;
+    lastSyncDurationMs: number | null;
+    lastErrorAt: string | null;
+    lastError: string | null;
     lastSyncCursor: string | null;
     catalogEpoch: string | null;
     createdAt: string;
     updatedAt: string;
+}
+
+export type FederationHealthState = "green" | "amber" | "red";
+
+/** Per-peer federation health read model returned to administrators. */
+export interface FederationPeerHealth {
+    id: string;
+    name: string;
+    direction: FederationPeerDirection;
+    inboundStatus: FederationPeerStatus | null;
+    outboundStatus: FederationPeerStatus | null;
+    lastSeenAt: string | null;
+    lastSyncSuccessAt: string | null;
+    lastSyncDurationMs: number | null;
+    syncLagSeconds: number | null;
+    catalog: {
+        artist: number;
+        album: number;
+        track: number;
+        audiobook: number;
+        podcast: number;
+    };
+    activeStreamLeases: number;
+    maxConcurrentStreams: number | null;
+    lastError: string | null;
+    lastErrorAt: string | null;
+    health: FederationHealthState;
 }
 
 export interface FederationPeerSettingsInput {
@@ -92,6 +123,14 @@ export function WithFederation<TBase extends ApiClientConstructor>(
         async getFederationPeers(): Promise<{ peers: FederationPeer[] }> {
             return this.request<{ peers: FederationPeer[] }>(
                 "/federation/admin/peers",
+            );
+        }
+
+        async getFederationPeerHealth(): Promise<{
+            peers: FederationPeerHealth[];
+        }> {
+            return this.request<{ peers: FederationPeerHealth[] }>(
+                "/federation/admin/peers/health",
             );
         }
 

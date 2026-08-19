@@ -4,21 +4,43 @@ import { prisma } from "../utils/db";
 import { federationQueue } from "./queues";
 import { processFederationHealth } from "./processors/federationHealthProcessor";
 import { processFederationSync } from "./processors/federationSyncProcessor";
-import { recordFederationSyncOutcome } from "../metrics";
+import {
+    recordFederationPeerSync,
+    recordFederationSyncOutcome,
+} from "../metrics";
+import { recordFederationPeerError } from "../services/federationPeerHealth";
+import { logger } from "../utils/logger";
 
 export const FEDERATION_SYNC_JOB_NAME = "peer-sync";
 export const FEDERATION_SYNC_TICK_JOB_NAME = "sync-tick";
 export const FEDERATION_HEALTH_JOB_NAME = "peer-health";
 const ONE_HOUR_MS = 60 * 60 * 1_000;
 const MAX_CONSUMER_PEERS = 500;
+const log = logger.child("FederationJobs");
 
 async function processFederationSyncWithMetrics(job: Job<{ peerId: string }>) {
+    const startedAt = process.hrtime.bigint();
     try {
         const result = await processFederationSync(job);
         recordFederationSyncOutcome("success");
+        recordFederationPeerSync(
+            job.data.peerId,
+            "success",
+            Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+        );
         return result;
     } catch (error) {
         recordFederationSyncOutcome("failure");
+        recordFederationPeerSync(
+            job.data.peerId,
+            "failure",
+            Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+        );
+        try {
+            await recordFederationPeerError(job.data.peerId, error);
+        } catch (captureError) {
+            log.warn("Failed to capture federation sync error", captureError);
+        }
         throw error;
     }
 }

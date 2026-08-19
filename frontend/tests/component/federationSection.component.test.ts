@@ -8,6 +8,8 @@ const Icon = (props: Record<string, unknown> = {}) =>
 
 mock.module("lucide-react", {
     namedExports: {
+        Activity: Icon,
+        AlertTriangle: Icon,
         ArrowLeftRight: Icon,
         Check: Icon,
         Clipboard: Icon,
@@ -55,6 +57,10 @@ test("federation peer list renders active, offline, and revoked status chips", a
         maxConcurrentStreams: null,
         maxStreamKbps: null,
         lastSeenAt: "2026-08-15T12:00:00.000Z",
+        lastSyncSuccessAt: null,
+        lastSyncDurationMs: null,
+        lastErrorAt: null,
+        lastError: null,
         lastSyncCursor: null,
         catalogEpoch: null,
         createdAt: "2026-08-15T12:00:00.000Z",

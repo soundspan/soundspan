@@ -21,6 +21,7 @@ import {
     arbitrateFederationTrackDedup,
     listFederationPeerDedup,
 } from "../services/federationDedupArbitration";
+import { listFederationPeerHealth } from "../services/federationPeerHealth";
 import { enqueueFederationSyncNow } from "../workers/federationJobs";
 import { sendRouteError } from "./routeErrorResponse";
 
@@ -123,6 +124,24 @@ router.get(
     "/peers",
     asyncHandler(async (_req, res) => {
         return res.json({ peers: await listFederationPeers() });
+    }),
+);
+
+/** @openapi
+ * /api/federation/admin/peers/health:
+ *   get:
+ *     summary: List bounded per-peer federation health and catalog status
+ *     tags: [Federation Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Federation peer health list }
+ *       403: { description: Administrator access required }
+ *       429: { description: Request rate limit exceeded }
+ */
+router.get(
+    "/peers/health",
+    asyncHandler(async (_req, res) => {
+        return res.json({ peers: await listFederationPeerHealth() });
     }),
 );
 

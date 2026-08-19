@@ -159,7 +159,9 @@ Do not set `metrics.public=true` or `METRICS_PUBLIC=true` on an internet-routed
 service. That opt-out is intended only for isolated private networks. The
 starter [Grafana dashboard](observability/grafana-soundspan-prometheus.json)
 covers request latency and errors, queue state, cache results, federation syncs,
-and process resources.
+per-peer federation health, and process resources. See the
+[federation alert pack](observability/federation-alerts.md) for example
+PrometheusRule definitions and the API-versus-worker metric ownership map.
 
 ## Resource Starting Point
 

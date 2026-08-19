@@ -83,7 +83,11 @@ import {
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger";
 import { BRAND_API_DOCS_TITLE, BRAND_NAME } from "./config/brand";
-import { httpMetricsMiddleware, metricsRegistry } from "./metrics";
+import {
+    httpMetricsMiddleware,
+    initializeFederationMetrics,
+    metricsRegistry,
+} from "./metrics";
 import { createMetricsRouter } from "./metrics/endpoint";
 import { registerQueueMetrics } from "./metrics/queueMetrics";
 import { backfillFederationOutboundTokens } from "./services/federationCredentials";
@@ -144,6 +148,8 @@ if (backendProcessRole === "worker") {
     );
     process.exit(1);
 }
+
+initializeFederationMetrics(backendProcessRole === "all" ? "all" : "api");
 
 warnIfLegacyDiscoveryMode("API");
 
