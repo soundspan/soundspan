@@ -9,6 +9,7 @@ import { ApiClientCore } from "../../lib/api/core";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PROACTIVE_REFRESH_DELAY_MS = DAY_MS * 0.8;
+const INITIAL_REFRESH_BACKOFF_MS = 60_000;
 const START_TIME_MS = 1_800_000_000_000;
 
 class TestApiClient extends ApiClientCore {}
@@ -108,6 +109,19 @@ function mockRefreshEndpoint(testContext: TestContext) {
         const token = createToken(Date.now() + DAY_MS);
         return Response.json({ token, refreshToken: "rotated-refresh" });
     });
+}
+
+function trackSessionExpiry(): { count: () => number; stop: () => void } {
+    let eventCount = 0;
+    const listener = () => {
+        eventCount += 1;
+    };
+    browserWindow.addEventListener("auth:session-expired", listener);
+    return {
+        count: () => eventCount,
+        stop: () =>
+            browserWindow.removeEventListener("auth:session-expired", listener),
+    };
 }
 
 async function flushAsyncWork(): Promise<void> {
@@ -227,6 +241,145 @@ test("simultaneous proactive triggers share one in-flight refresh", async (testC
     assert.ok(releaseFetch);
     releaseFetch();
     await flushAsyncWork();
+});
+
+test("proactive refresh rejection expires the session exactly once", async (testContext) => {
+    const sessionExpiry = trackSessionExpiry();
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>
+        Response.json({ error: "Invalid refresh token" }, { status: 401 }),
+    );
+    const client = createClient();
+
+    try {
+        client.setToken(
+            createToken(START_TIME_MS + DAY_MS),
+            "rejected-refresh",
+        );
+        testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+        await flushAsyncWork();
+
+        assert.equal(fetchMock.mock.callCount(), 1);
+        assert.equal(client.getToken(), null);
+        assert.equal(storage.getItem("refresh_token"), null);
+        assert.equal(sessionExpiry.count(), 1);
+    } finally {
+        sessionExpiry.stop();
+    }
+});
+
+test("visibility catch-up rejection expires the session", async (testContext) => {
+    const sessionExpiry = trackSessionExpiry();
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>
+        Response.json({ error: "Invalid refresh token" }, { status: 403 }),
+    );
+    const client = createClient();
+
+    try {
+        setVisibility("hidden");
+        client.setToken(
+            createToken(START_TIME_MS + DAY_MS),
+            "rejected-refresh",
+        );
+        testContext.mock.timers.setTime(
+            START_TIME_MS + PROACTIVE_REFRESH_DELAY_MS + 1,
+        );
+        setVisibility("visible");
+        await flushAsyncWork();
+
+        assert.equal(fetchMock.mock.callCount(), 1);
+        assert.equal(sessionExpiry.count(), 1);
+    } finally {
+        sessionExpiry.stop();
+    }
+});
+
+test("transient proactive failure defers timer and visibility retries", async (testContext) => {
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>
+        Response.json(
+            { error: "Authentication temporarily unavailable" },
+            { status: 503 },
+        ),
+    );
+    const client = createClient();
+
+    client.setToken(createToken(START_TIME_MS + DAY_MS), "refresh-token");
+    testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    setVisibility("hidden");
+    setVisibility("visible");
+    setVisibility("hidden");
+    setVisibility("visible");
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    testContext.mock.timers.tick(INITIAL_REFRESH_BACKOFF_MS - 1);
+    setVisibility("visible");
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    testContext.mock.timers.tick(1);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+});
+
+test("429 retry scheduling honors Retry-After", async (testContext) => {
+    const retryAfterSeconds = 5 * 60;
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () =>
+        Response.json(
+            { error: "Too many token refresh attempts", code: "RATE_LIMITED" },
+            {
+                status: 429,
+                headers: { "Retry-After": String(retryAfterSeconds) },
+            },
+        ),
+    );
+    const client = createClient();
+
+    client.setToken(createToken(START_TIME_MS + DAY_MS), "refresh-token");
+    testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    testContext.mock.timers.tick(retryAfterSeconds * 1000 - 1);
+    setVisibility("visible");
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 1);
+
+    testContext.mock.timers.tick(1);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+});
+
+test("successful refresh resets transient backoff", async (testContext) => {
+    let refreshCount = 0;
+    const fetchMock = testContext.mock.method(globalThis, "fetch", async () => {
+        refreshCount += 1;
+        if (refreshCount === 2 || refreshCount === 4) {
+            return Response.json({
+                token: createToken(Date.now() + DAY_MS),
+                refreshToken: `rotated-${refreshCount}`,
+            });
+        }
+        return Response.json({ error: "Unavailable" }, { status: 503 });
+    });
+    const client = createClient();
+
+    client.setToken(createToken(START_TIME_MS + DAY_MS), "refresh-token");
+    testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+    await flushAsyncWork();
+    testContext.mock.timers.tick(INITIAL_REFRESH_BACKOFF_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 2);
+
+    testContext.mock.timers.tick(PROACTIVE_REFRESH_DELAY_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 3);
+
+    testContext.mock.timers.tick(INITIAL_REFRESH_BACKOFF_MS);
+    await flushAsyncWork();
+    assert.equal(fetchMock.mock.callCount(), 4);
 });
 
 test("ignores malformed tokens without throwing or scheduling refresh", async (testContext) => {

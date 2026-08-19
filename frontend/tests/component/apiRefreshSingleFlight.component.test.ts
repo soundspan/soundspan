@@ -115,6 +115,11 @@ test("keeps the session when refresh is temporarily unavailable", async () => {
                     ok: false,
                     status: unavailableCase,
                     statusText: "Unavailable",
+                    headers: new Headers(
+                        unavailableCase === 429
+                            ? { "Retry-After": "300" }
+                            : undefined,
+                    ),
                     json: async () => ({
                         error: "Authentication temporarily unavailable",
                     }),

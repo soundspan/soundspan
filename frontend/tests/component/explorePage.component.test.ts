@@ -7,6 +7,7 @@ const state = {
     isLoading: false,
     isRefreshingMixes: false,
     isMoodsLoading: false,
+    hasDegradedResults: false,
     showYtMusicExplore: true,
     showTidalExplore: false,
     mixes: [{ id: "mix-1" }],
@@ -53,9 +54,11 @@ mock.module("@/features/explore/hooks/useExploreData", {
             isLoading: state.isLoading,
             isRefreshingMixes: state.isRefreshingMixes,
             isMoodsLoading: state.isMoodsLoading,
+            hasDegradedResults: state.hasDegradedResults,
             showYtMusicExplore: state.showYtMusicExplore,
             showTidalExplore: state.showTidalExplore,
             handleRefreshMixes: async () => undefined,
+            retryAll: async () => undefined,
         }),
     },
 });
@@ -160,6 +163,8 @@ mock.module("lucide-react", {
         RefreshCw: Icon,
         AudioWaveform: Icon,
         Compass: Icon,
+        AlertTriangle: Icon,
+        X: Icon,
     },
 });
 
@@ -167,6 +172,7 @@ beforeEach(() => {
     state.isLoading = false;
     state.isRefreshingMixes = false;
     state.isMoodsLoading = false;
+    state.hasDegradedResults = false;
     state.showYtMusicExplore = true;
     state.showTidalExplore = false;
     state.mixes = [{ id: "mix-1" }];
@@ -199,6 +205,15 @@ test("explore page renders all sections when data is populated", async () => {
     assert.match(html, /artists-grid/);
     assert.match(html, /Popular Artists/);
     assert.match(html, /popular-artists-grid/);
+});
+
+test("explore page shows degraded-results notice only after a query failure", async () => {
+    state.hasDegradedResults = true;
+    const ExplorePage = (await import("../../app/explore/page")).default;
+    const html = renderToStaticMarkup(React.createElement(ExplorePage));
+
+    assert.match(html, /Some sections failed to load/);
+    assert.match(html, />Retry</);
 });
 
 test("explore page hides recommended section when empty", async () => {

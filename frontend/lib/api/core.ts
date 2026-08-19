@@ -10,6 +10,8 @@ export const IMPORT_PREVIEW_TIMEOUT_MS = 60_000;
 const DEFAULT_TIMEOUT_RETRY_BACKOFF_MS = 350;
 const MAX_TIMEOUT_RETRIES = 1;
 const PROACTIVE_REFRESH_LIFETIME_RATIO = 0.8;
+const INITIAL_PROACTIVE_REFRESH_BACKOFF_MS = 60_000;
+const MAX_PROACTIVE_REFRESH_BACKOFF_MS = 10 * 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 interface ApiError extends Error {
@@ -87,6 +89,7 @@ export abstract class ApiClientCore {
     private refreshPromise: Promise<TokenRefreshResult> | null = null;
     private proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private proactiveRefreshAtMs: number | null = null;
+    private proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
 
     private readonly handleVisibilityChange = (): void => {
         if (
@@ -166,6 +169,7 @@ export abstract class ApiClientCore {
     // Store JWT token and optionally refresh token
     setToken(token: string, refreshToken?: string) {
         this.token = token;
+        this.proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
         if (typeof window !== "undefined") {
             localStorage.setItem(AUTH_TOKEN_KEY, token);
             if (refreshToken) {
@@ -186,6 +190,7 @@ export abstract class ApiClientCore {
     // Clear both JWT tokens
     clearToken() {
         this.token = null;
+        this.proactiveRefreshBackoffMs = INITIAL_PROACTIVE_REFRESH_BACKOFF_MS;
         this.clearProactiveRefreshSchedule();
         if (typeof window !== "undefined") {
             localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -201,6 +206,13 @@ export abstract class ApiClientCore {
         if (typeof window !== "undefined") {
             window.dispatchEvent(new Event("auth:session-expired"));
         }
+        return this.createAuthError(status, data);
+    }
+
+    private createAuthError(
+        status: number,
+        data: Record<string, unknown>,
+    ): ApiError {
         const authError = new Error("Not authenticated") as ApiError;
         authError.status = status;
         authError.data = data;
@@ -275,6 +287,47 @@ export abstract class ApiClientCore {
         this.proactiveRefreshAtMs = null;
     }
 
+    private parseRetryAfterMs(response: Response): number | null {
+        const retryAfter = response.headers.get("Retry-After")?.trim();
+        if (!retryAfter) {
+            return null;
+        }
+
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds >= 0) {
+            return seconds * 1000;
+        }
+
+        const retryAtMs = Date.parse(retryAfter);
+        return Number.isFinite(retryAtMs)
+            ? Math.max(0, retryAtMs - Date.now())
+            : null;
+    }
+
+    private scheduleProactiveRefreshRetry(retryAfterMs: number | null): void {
+        this.cancelProactiveRefreshTimer();
+        const retryDelayMs = Math.min(
+            MAX_PROACTIVE_REFRESH_BACKOFF_MS,
+            Math.max(this.proactiveRefreshBackoffMs, retryAfterMs ?? 0),
+        );
+        this.proactiveRefreshAtMs = Date.now() + retryDelayMs;
+        this.proactiveRefreshTimer = setTimeout(() => {
+            this.proactiveRefreshTimer = null;
+            void this.refreshAccessToken();
+        }, retryDelayMs);
+        this.proactiveRefreshBackoffMs = Math.min(
+            retryDelayMs * 2,
+            MAX_PROACTIVE_REFRESH_BACKOFF_MS,
+        );
+    }
+
+    private unavailableRefresh(response?: Response): TokenRefreshResult {
+        const retryAfterMs =
+            response?.status === 429 ? this.parseRetryAfterMs(response) : null;
+        this.scheduleProactiveRefreshRetry(retryAfterMs);
+        return "unavailable";
+    }
+
     // Get the base URL dynamically to support switching between localhost and IP
     protected getBaseUrl(): string {
         if (this.baseUrl) {
@@ -311,6 +364,7 @@ export abstract class ApiClientCore {
     private async performTokenRefresh(): Promise<TokenRefreshResult> {
         const refreshToken = this.getRefreshToken();
         if (!refreshToken) {
+            this.clearProactiveRefreshSchedule();
             return "unavailable";
         }
 
@@ -343,15 +397,18 @@ export abstract class ApiClientCore {
             }
 
             if (!response) {
-                return "unavailable";
+                return this.unavailableRefresh();
             }
 
             if (!response.ok) {
                 if (response.status === 401 || response.status === 403) {
                     this.clearToken();
+                    if (typeof window !== "undefined") {
+                        window.dispatchEvent(new Event("auth:session-expired"));
+                    }
                     return "rejected";
                 }
-                return "unavailable";
+                return this.unavailableRefresh(response);
             }
 
             const data = await response.json();
@@ -362,10 +419,10 @@ export abstract class ApiClientCore {
                 return "ok";
             }
 
-            return "unavailable";
+            return this.unavailableRefresh(response);
         } catch (error) {
             sharedFrontendLogger.error("[API] Token refresh failed:", error);
-            return "unavailable";
+            return this.unavailableRefresh();
         }
     }
 
@@ -578,7 +635,7 @@ export abstract class ApiClientCore {
                         throw requestError;
                     }
 
-                    throw this.expireSession(response.status, error);
+                    throw this.createAuthError(response.status, error);
                 }
 
                 if (response.status === 401 && endpoint === "/auth/refresh") {

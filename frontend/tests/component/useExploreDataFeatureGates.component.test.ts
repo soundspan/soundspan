@@ -21,6 +21,20 @@ const queryCalls = {
     discoverWeekly: [] as unknown[][],
     mixes: [] as unknown[][],
 };
+const failedQueries = new Set<string>();
+const refetchCalls: string[] = [];
+
+function queryResult<T>(key: string, data: T) {
+    return {
+        data,
+        isLoading: false,
+        isError: failedQueries.has(key),
+        refetch: async () => {
+            refetchCalls.push(key);
+            return { data };
+        },
+    };
+}
 
 mock.module("@/lib/features-context", {
     namedExports: {
@@ -66,45 +80,44 @@ mock.module("@/hooks/useQueries", {
     namedExports: {
         useRecommendationsQuery: (limit: number, enabled: boolean) => {
             queryCalls.recommendations.push([limit, enabled]);
-            return {
-                data: { artists: [{ id: "artist-1" }] },
-                isLoading: false,
-            };
+            return queryResult("recommendations", {
+                artists: [{ id: "artist-1" }],
+            });
         },
         useDiscoverWeeklySummaryQuery: (enabled: boolean) => {
             queryCalls.discoverWeekly.push([enabled]);
-            return {
-                data: {
-                    weekStart: "2026-06-01",
-                    weekEnd: "2026-06-07",
-                    totalCount: 25,
-                    tracks: [],
-                },
-                isLoading: false,
-            };
+            return queryResult("discoverWeekly", {
+                weekStart: "2026-06-01",
+                weekEnd: "2026-06-07",
+                totalCount: 25,
+                tracks: [],
+            });
         },
         useMixesQuery: (enabled: boolean) => {
             queryCalls.mixes.push([enabled]);
-            return { data: [{ id: "mix-1" }], isLoading: false };
+            return queryResult("mixes", [{ id: "mix-1" }]);
         },
-        useLikedPlaylistQuery: () => ({ data: { total: 3, tracks: [] } }),
-        usePopularArtistsQuery: () => ({ data: { artists: [] } }),
+        useLikedPlaylistQuery: () =>
+            queryResult("liked", { total: 3, tracks: [] }),
+        usePopularArtistsQuery: () =>
+            queryResult("popularArtists", { artists: [] }),
         useRefreshMixesMutation: () => ({
             mutateAsync: async () => undefined,
             isPending: false,
         }),
-        useYtMusicHomeShelvesQuery: () => ({ data: [] }),
-        useYtMusicChartsQuery: () => ({ data: {} }),
-        useYtMusicCategoriesQuery: () => ({
-            data: { moodCategories: [], genreCategories: [] },
-            isLoading: false,
-        }),
-        useYtMusicMixesQuery: () => ({ data: [] }),
-        useTidalHomeShelvesQuery: () => ({ data: [] }),
-        useTidalExploreShelvesQuery: () => ({ data: [] }),
-        useTidalGenresQuery: () => ({ data: [] }),
-        useTidalMoodsQuery: () => ({ data: [] }),
-        useTidalMixesQuery: () => ({ data: [] }),
+        useYtMusicHomeShelvesQuery: () => queryResult("ytHome", []),
+        useYtMusicChartsQuery: () => queryResult("ytCharts", {}),
+        useYtMusicCategoriesQuery: () =>
+            queryResult("ytCategories", {
+                moodCategories: [],
+                genreCategories: [],
+            }),
+        useYtMusicMixesQuery: () => queryResult("ytMixes", []),
+        useTidalHomeShelvesQuery: () => queryResult("tidalHome", []),
+        useTidalExploreShelvesQuery: () => queryResult("tidalExplore", []),
+        useTidalGenresQuery: () => queryResult("tidalGenres", []),
+        useTidalMoodsQuery: () => queryResult("tidalMoods", []),
+        useTidalMixesQuery: () => queryResult("tidalMixes", []),
         queryKeys: { mixes: () => ["mixes"] },
     },
 });
@@ -137,6 +150,8 @@ beforeEach(() => {
     queryCalls.recommendations.length = 0;
     queryCalls.discoverWeekly.length = 0;
     queryCalls.mixes.length = 0;
+    failedQueries.clear();
+    refetchCalls.length = 0;
 });
 
 test("explore data enables gated queries and passes data through when flags are on", async () => {
@@ -171,4 +186,20 @@ test("explore data disables mixes query and hides mixes when autoPlaylists is of
     // discovery is untouched
     assert.equal(result.recommended.length, 1);
     assert.notEqual(result.discoverWeekly, null);
+});
+
+test("explore data reports degraded results and retries failed queries", async () => {
+    failedQueries.add("liked");
+    failedQueries.add("ytCharts");
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, true);
+    await result.retryAll();
+    assert.deepEqual(refetchCalls.sort(), ["liked", "ytCharts"]);
+});
+
+test("explore data is not degraded when every query succeeds", async () => {
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, false);
 });

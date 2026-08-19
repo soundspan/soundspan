@@ -16,6 +16,7 @@ Start-here guide for `frontend/features/explore`.
 | Path | Kind |
 | --- | --- |
 | `components/FeaturedShelvesSection.tsx` | components |
+| `components/ExploreDegradedNotice.tsx` | components |
 | `components/MadeForYouSection.tsx` | components |
 | `components/MoodPills.tsx` | components |
 | `components/MoodsGenresSection.tsx` | components |

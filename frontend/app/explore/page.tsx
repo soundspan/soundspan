@@ -12,6 +12,7 @@ import {
 } from "@/features/home/components/LibraryRadioStations";
 import { PopularArtistsGrid } from "@/features/home/components/PopularArtistsGrid";
 import { MadeForYouSection } from "@/features/explore/components/MadeForYouSection";
+import { ExploreDegradedNotice } from "@/features/explore/components/ExploreDegradedNotice";
 import { MoodPills } from "@/features/explore/components/MoodPills";
 import { ProviderTabSection } from "@/features/explore/components/ProviderTabSection";
 import { LastFmBadge } from "@/components/ui/LastFmBadge";
@@ -46,7 +47,9 @@ export default function ExplorePage() {
         isLoading,
         isRefreshingMixes,
         isMoodsLoading,
+        hasDegradedResults,
         handleRefreshMixes,
+        retryAll,
     } = useExploreData({ showYtMusicExplore, showTidalExplore });
 
     const {
@@ -71,6 +74,12 @@ export default function ExplorePage() {
                 <div className="mb-6">
                     <MoodPills />
                 </div>
+
+                {hasDegradedResults && (
+                    <div className="mb-6">
+                        <ExploreDegradedNotice onRetry={retryAll} />
+                    </div>
+                )}
 
                 <div className="space-y-8">
                     {/* Made For You */}
