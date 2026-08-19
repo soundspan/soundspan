@@ -246,26 +246,19 @@ describe("admin library health routes", () => {
 
         expect(mockSchedulerAdd).toHaveBeenCalledWith(
             "track-removal-purge",
-            {
-                cutoffAt: now.toISOString(),
-                sweepRunId: expect.any(String),
-            },
+            { cutoffAt: now.toISOString() },
             expect.any(Object),
         );
     });
 
-    it("assigns a unique run id when a reusable purge-now id is enqueued again", async () => {
-        const firstRes = createRes();
-        const secondRes = createRes();
+    it("leaves purge-now run id ownership to the processor", async () => {
+        const res = createRes();
 
-        await purgeRemovedTracksHandler({} as any, firstRes);
-        await purgeRemovedTracksHandler({} as any, secondRes);
+        await purgeRemovedTracksHandler({} as any, res);
 
-        const firstData = mockSchedulerAdd.mock.calls[0]?.[1];
-        const secondData = mockSchedulerAdd.mock.calls[1]?.[1];
-        expect(firstData.sweepRunId).toEqual(expect.any(String));
-        expect(secondData.sweepRunId).toEqual(expect.any(String));
-        expect(secondData.sweepRunId).not.toBe(firstData.sweepRunId);
+        expect(mockSchedulerAdd.mock.calls[0]?.[1]).not.toHaveProperty(
+            "sweepRunId",
+        );
     });
 
     it.each(["failed", "waiting"])(
@@ -287,10 +280,7 @@ describe("admin library health routes", () => {
             expect(remove).toHaveBeenCalledTimes(1);
             expect(mockSchedulerAdd).toHaveBeenCalledWith(
                 "track-removal-purge",
-                {
-                    cutoffAt: now.toISOString(),
-                    sweepRunId: expect.any(String),
-                },
+                { cutoffAt: now.toISOString() },
                 expect.objectContaining({
                     jobId: "scheduler:track-removal-purge:purge-now",
                 }),

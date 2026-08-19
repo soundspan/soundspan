@@ -29,9 +29,9 @@ import {
 import { rebindMovedTrack } from "./trackRebinding";
 import { recomputeAlbumLoudness } from "./albumLoudness";
 import { persistScannedTrack } from "./scannedTrackPersistence";
+import { deriveAudioFormatLabel } from "./audioFormatLabel";
 
 const scanLogger = logger.child("MusicScannerService");
-
 const TRACK_IDENTITY_SELECT = {
     id: true,
     filePath: true,
@@ -1026,7 +1026,7 @@ export class MusicScannerService {
         const trackNo = metadata.common.track.no || 0;
         const discNo = metadata.common.disk?.no || 1;
         const duration = Math.floor(metadata.format.duration || 0);
-        const mime = metadata.format.codec || "audio/mpeg";
+        const mime = deriveAudioFormatLabel(metadata.format, relativePath);
         const { recordingMbid, isrc } = extractTrackIdentityTags(metadata);
 
         // Artist and album info

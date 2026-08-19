@@ -1,5 +1,6 @@
 import type { Job } from "bull";
 import type { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { config } from "../../config";
 import { backfillAllArtistCounts } from "../../services/artistCountsService";
@@ -33,7 +34,7 @@ const safeCountSchema = z
 const rootPurgeJobDataSchema = z.strictObject({
     mode: z.enum(["startup", "repeat"]).optional(),
     cutoffAt: z.iso.datetime({ offset: true }).optional(),
-    sweepRunId: z.string().trim().min(1).max(256),
+    sweepRunId: z.string().trim().min(1).max(256).optional(),
 });
 const continuationPurgeJobDataSchema = z
     .strictObject({
@@ -41,7 +42,7 @@ const continuationPurgeJobDataSchema = z
         startAfterId: z.string().trim().min(1).max(128).optional(),
         cutoffAt: z.iso.datetime({ offset: true }),
         deletedSoFar: safeCountSchema,
-        sweepRunId: z.string().trim().min(1).max(256),
+        sweepRunId: z.string().trim().min(1).max(256).optional(),
         initialTotal: safeCountSchema,
         processedSoFar: safeCountSchema,
         remaining: safeCountSchema,
@@ -75,7 +76,7 @@ export interface TrackRemovalPurgeJobData {
     startAfterId?: string;
     cutoffAt?: string;
     deletedSoFar?: number;
-    sweepRunId: string;
+    sweepRunId?: string;
     initialTotal?: number;
     processedSoFar?: number;
     remaining?: number;
@@ -112,9 +113,15 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
               Date.now() - config.workers.trackRemovalRetentionDays * DAY_MS,
           );
     const isContinuation = "initialTotal" in parsed;
+    const sweepRunId = parsed.sweepRunId ?? randomUUID();
+    if (isContinuation && parsed.sweepRunId === undefined) {
+        log.warn(
+            "Legacy track removal purge continuation lacked sweepRunId; minted a replacement run id",
+        );
+    }
     const progress = isContinuation
         ? {
-              sweepRunId: parsed.sweepRunId,
+              sweepRunId,
               initialTotal: parsed.initialTotal,
               processedSoFar: parsed.processedSoFar,
               remaining: parsed.remaining,
@@ -125,7 +132,7 @@ function parsePurgeCursor(data: unknown): PurgeCursor {
         startAfterId: isContinuation ? parsed.startAfterId : undefined,
         cutoff,
         deletedSoFar: isContinuation ? parsed.deletedSoFar : 0,
-        sweepRunId: parsed.sweepRunId,
+        sweepRunId,
         progress,
     };
 }

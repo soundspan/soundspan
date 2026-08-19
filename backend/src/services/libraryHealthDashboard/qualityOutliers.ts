@@ -18,6 +18,7 @@ const LOSSLESS_CODEC_TOKENS = new Set([
     "wav-pcm",
     "aiff",
     "ape",
+    "monkey's",
     "wavpack",
     "wavpack4",
     "dsd",
@@ -90,6 +91,8 @@ export function isLossyAudioCodec(value: string | null): boolean {
     if (value === null) return false;
     const normalized = value.trim().toLowerCase();
     if (normalized.length === 0) return false;
+    // The scanner reserves this legacy fallback for genuinely unknown formats.
+    if (normalized === "audio/mpeg") return false;
     const tokens = tokenizeCodecLabel(normalized);
     const hasLosslessToken = tokens.some((token) =>
         LOSSLESS_CODEC_TOKENS.has(token),
@@ -101,6 +104,8 @@ export function isLossyAudioCodec(value: string | null): boolean {
         WINDOWS_MEDIA_AUDIO_PATTERN.test(normalized);
     // The dashboard is report-only. Exclude ambiguous mixed labels instead of
     // presenting a file with any lossless stream as definitively lossy.
+    // music-metadata 11 reports hybrid (lossy) WavPack as PCM, so it remains
+    // indistinguishable from common lossless WavPack on this report-only surface.
     if (hasLosslessToken && hasLossyToken) return false;
     return hasLossyToken;
 }

@@ -797,7 +797,7 @@ async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
 
 type SchedulerRegistration = {
     type: (typeof SCHEDULER_JOB_TYPES)[keyof typeof SCHEDULER_JOB_TYPES];
-    data: { mode: "startup" | "repeat"; sweepStartedAt?: string; sweepRunId?: string };
+    data: { mode: "startup" | "repeat"; sweepStartedAt?: string };
     opts: Bull.JobOptions;
 };
 
@@ -969,7 +969,7 @@ async function registerSchedulerJobs(): Promise<void> {
         loudnessBackfillRepeatSchedule,
         {
             type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
-            data: { mode: "startup", sweepRunId: randomUUID() },
+            data: { mode: "startup" },
             opts: {
                 jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeStartup,
                 delay: ONE_MINUTE_MS,
@@ -981,7 +981,7 @@ async function registerSchedulerJobs(): Promise<void> {
         },
         {
             type: SCHEDULER_JOB_TYPES.trackRemovalPurge,
-            data: { mode: "repeat", sweepRunId: randomUUID() },
+            data: { mode: "repeat" },
             opts: {
                 jobId: SCHEDULER_JOB_IDS.trackRemovalPurgeRepeat,
                 repeat: { every: 24 * ONE_HOUR_MS },

@@ -20,7 +20,6 @@ describe("library health quality outliers", () => {
         "Vorbis",
         "ogg",
         "WMA",
-        "audio/mpeg",
         "audio/mp4",
         "audio/aac",
         "audio/ogg",
@@ -101,6 +100,7 @@ describe("library health quality outliers", () => {
         "AIFF",
         "APE",
         "WavPack",
+        "Monkey's Audio",
         "DSD",
         "TAK",
         "TTA",
@@ -125,6 +125,7 @@ describe("library health quality outliers", () => {
         "MS/ACM",
         "QUICKTIME",
         "unknown-codec",
+        "audio/mpeg",
         "",
         null,
     ])("does not classify %s as lossy", (codec) => {

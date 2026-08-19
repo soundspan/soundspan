@@ -90,7 +90,12 @@ describe("trackRemovalPurgeProcessor", () => {
             processed: 2,
             errors: 0,
         }));
+        let generatedRunNumber = 0;
+        const randomUUID = jest.fn(
+            () => `generated-run-${(generatedRunNumber += 1)}`,
+        );
 
+        jest.doMock("crypto", () => ({ randomUUID }));
         jest.doMock("../../../utils/logger", () => ({ logger }));
         jest.doMock("../../../utils/db", () => ({ prisma }));
         jest.doMock("../../../config", () => ({
@@ -121,6 +126,7 @@ describe("trackRemovalPurgeProcessor", () => {
             redisClient,
             cleanupOrphanedLibraryEntities,
             backfillAllArtistCounts,
+            randomUUID,
         };
     }
 
@@ -130,6 +136,57 @@ describe("trackRemovalPurgeProcessor", () => {
             data: { sweepRunId: "unique-run-a", ...data },
         } as any;
     }
+
+    function buildLegacyJob(data: Record<string, unknown>) {
+        return { id: "legacy-track-removal-purge", data } as any;
+    }
+
+    it("processes a persisted legacy repeat root without a sweep run id", async () => {
+        const { module } = loadProcessor([]);
+
+        await expect(
+            module.processTrackRemovalPurge(buildLegacyJob({ mode: "repeat" })),
+        ).resolves.toEqual({ deleted: 0, continued: false });
+    });
+
+    it("mints a different run id for each repeat occurrence", async () => {
+        const { module, randomUUID, redisClient } = loadProcessor([]);
+        const repeatJob = buildLegacyJob({ mode: "repeat" });
+
+        await module.processTrackRemovalPurge(repeatJob);
+        await module.processTrackRemovalPurge(repeatJob);
+
+        expect(randomUUID).toHaveBeenCalledTimes(2);
+        const markerCalls = redisClient.eval.mock.calls as unknown as Array<
+            [string, { arguments: string[] }]
+        >;
+        const startRunIds = markerCalls
+            .filter((call) => call[1]?.arguments?.length === 4)
+            .map((call) => call[1].arguments[0]);
+        expect(startRunIds).toEqual(["generated-run-1", "generated-run-2"]);
+    });
+
+    it("mints a run id with a warning for a legacy continuation", async () => {
+        const { module, logger, randomUUID } = loadProcessor([]);
+
+        await expect(
+            module.processTrackRemovalPurge(
+                buildLegacyJob({
+                    cutoffAt: "2026-05-16T12:00:00.000Z",
+                    deletedSoFar: 100,
+                    initialTotal: 100,
+                    processedSoFar: 100,
+                    remaining: 0,
+                    pageNumber: 1,
+                }),
+            ),
+        ).resolves.toEqual({ deleted: 0, continued: false });
+
+        expect(randomUUID).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("lacked sweepRunId"),
+        );
+    });
 
     it("derives the legacy retention cutoff when the payload is absent", async () => {
         jest.useFakeTimers().setSystemTime(
@@ -364,19 +421,19 @@ describe("trackRemovalPurgeProcessor", () => {
         expect(backfillAllArtistCounts).not.toHaveBeenCalled();
     });
 
-    it("propagates the root sweep run id to its continuation", async () => {
+    it("propagates the processor-minted root run id to its continuation", async () => {
         const candidates = Array.from({ length: 101 }, (_, index) => ({
             id: `track-${index.toString().padStart(3, "0")}`,
         }));
         const { module, schedulerQueue } = loadProcessor(candidates);
 
         await module.processTrackRemovalPurge(
-            buildJob({ mode: "startup", sweepRunId: "unique-run-a" }),
+            buildLegacyJob({ mode: "startup" }),
         );
 
         expect(schedulerQueue.add).toHaveBeenCalledWith(
             "track-removal-purge",
-            expect.objectContaining({ sweepRunId: "unique-run-a" }),
+            expect.objectContaining({ sweepRunId: "generated-run-1" }),
             expect.any(Object),
         );
     });

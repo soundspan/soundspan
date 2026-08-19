@@ -1,5 +1,4 @@
 import type { Request, Response } from "express";
-import { randomUUID } from "crypto";
 import { z } from "zod";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -30,7 +29,7 @@ async function countRemovedLocalTracks(): Promise<number> {
 async function addPurgeAt(cutoff: Date): Promise<void> {
     await schedulerQueue.add(
         TRACK_REMOVAL_PURGE_JOB_NAME,
-        { cutoffAt: cutoff.toISOString(), sweepRunId: randomUUID() },
+        { cutoffAt: cutoff.toISOString() },
         PURGE_NOW_JOB_OPTIONS,
     );
 }

@@ -170,6 +170,8 @@ jest.mock("../../config", () => ({
 
 const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
+const { isLossyAudioCodec } =
+    require("../libraryHealthDashboard/qualityOutliers") as typeof import("../libraryHealthDashboard/qualityOutliers");
 
 interface TestIdentityTrack {
     id: string;
@@ -915,6 +917,64 @@ describe("MusicScannerService.scanLibrary", () => {
             }),
         );
         expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        { extension: "ape", expectedLabel: "APE" },
+        { extension: "wv", expectedLabel: "WavPack" },
+    ])(
+        "derives a lossless $expectedLabel label when .$extension metadata has no codec or container",
+        async ({ extension, expectedLabel }) => {
+            const scanner = new MusicScannerService();
+            const audioFile = `/music/Artist/Test Track.${extension}`;
+            jest.spyOn(
+                MusicScannerService.prototype as any,
+                "findAudioFiles",
+            ).mockResolvedValue([audioFile]);
+            mockParseFile.mockResolvedValue({
+                common: {
+                    title: "Test Track",
+                    track: { no: 1 },
+                    disk: { no: 1 },
+                    albumartist: "Test Artist",
+                    album: "Test Album",
+                },
+                format: { duration: 218.7 },
+            } as any);
+
+            await scanner.scanLibrary("/music");
+
+            const storedLabel =
+                mockPrisma.track.upsert.mock.calls[0]?.[0]?.create?.mime;
+            expect(storedLabel).toBe(expectedLabel);
+            expect(isLossyAudioCodec(storedLabel)).toBe(false);
+        },
+    );
+
+    it("keeps the unknown-format fallback out of lossy quality results", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Test Track.unknown";
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Test Track",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Test Album",
+            },
+            format: { duration: 218.7 },
+        } as any);
+
+        await scanner.scanLibrary("/music");
+
+        const storedLabel =
+            mockPrisma.track.upsert.mock.calls[0]?.[0]?.create?.mime;
+        expect(storedLabel).toBe("audio/mpeg");
+        expect(isLossyAudioCodec(storedLabel)).toBe(false);
     });
 
     it("populates identity keys (audioHash, recordingMbid, isrc) for new files", async () => {
