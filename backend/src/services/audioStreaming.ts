@@ -35,7 +35,80 @@ const inflightFederatedStreams = new Map<
 const BYTES_PER_GIBIBYTE = 1024 * 1024 * 1024;
 const OFFSET_TEMP_DIRECTORY = "offset-tmp";
 const OFFSET_TEMP_MAX_AGE_MS = 60 * 60 * 1000;
+const OFFSET_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const OFFSET_SWEEP_FILE_LIMIT = 1000;
+const activeOffsetFiles = new Set<string>();
+let lastOffsetSweepAt = 0;
+let offsetSweepInFlight = false;
+let offsetSweepPromise: Promise<void> | null = null;
+
+async function removeOffsetFile(filePath: string): Promise<void> {
+    try {
+        await fsPromises.unlink(filePath);
+    } catch {
+        // Temporary-file cleanup is best effort.
+    }
+}
+
+async function releaseActiveOffsetFile(filePath: string): Promise<void> {
+    await removeOffsetFile(filePath);
+    activeOffsetFiles.delete(filePath);
+}
+
+async function sweepStaleOffsetFiles(
+    offsetTempPath: string,
+    nowMs: number,
+): Promise<void> {
+    try {
+        const entries = await fsPromises.readdir(offsetTempPath, {
+            withFileTypes: true,
+        });
+        const cutoff = nowMs - OFFSET_TEMP_MAX_AGE_MS;
+        const boundedEntries = entries.slice(0, OFFSET_SWEEP_FILE_LIMIT);
+        for (const entry of boundedEntries) {
+            if (!entry.isFile()) continue;
+            const filePath = path.join(offsetTempPath, entry.name);
+            if (activeOffsetFiles.has(filePath)) continue;
+            try {
+                const stats = await fsPromises.stat(filePath);
+                if (stats.mtimeMs < cutoff) await fsPromises.unlink(filePath);
+            } catch {
+                // Cleanup tolerates concurrent removal and permission failures.
+            }
+        }
+    } catch (issue) {
+        logger.warn("Offset transcode cleanup failed:", issue);
+    }
+}
+
+function startOffsetSweep(offsetTempPath: string): void {
+    const nowMs = Date.now();
+    const sweepIsRecent =
+        lastOffsetSweepAt !== 0 &&
+        nowMs - lastOffsetSweepAt <= OFFSET_SWEEP_INTERVAL_MS;
+    if (offsetSweepInFlight || sweepIsRecent) return;
+
+    lastOffsetSweepAt = nowMs;
+    offsetSweepInFlight = true;
+    const sweep = sweepStaleOffsetFiles(offsetTempPath, nowMs).finally(() => {
+        offsetSweepInFlight = false;
+        if (offsetSweepPromise === sweep) offsetSweepPromise = null;
+    });
+    offsetSweepPromise = sweep;
+}
+
+/** Resets process-wide offset sweep bookkeeping for deterministic tests. */
+export function resetOffsetSweepStateForTests(): void {
+    lastOffsetSweepAt = 0;
+    offsetSweepInFlight = false;
+    offsetSweepPromise = null;
+    activeOffsetFiles.clear();
+}
+
+/** Waits for the current process-wide offset sweep during deterministic tests. */
+export function waitForOffsetSweepForTests(): Promise<void> {
+    return offsetSweepPromise ?? Promise.resolve();
+}
 
 // Quality settings
 export const QUALITY_SETTINGS = {
@@ -59,6 +132,17 @@ type FfmpegExecution = {
     trackId: string;
     quality: Quality;
     sourcePath: string;
+    signal?: AbortSignal;
+};
+
+type OffsetTranscodeInput = {
+    trackId: string;
+    quality: Quality;
+    sourcePath: string;
+    temporaryPath: string;
+    bitrate: number;
+    format: string;
+    timeOffsetSeconds: number;
     signal?: AbortSignal;
 };
 
@@ -121,9 +205,7 @@ export class AudioStreamingService {
             fs.mkdirSync(this.transcodeCachePath, { recursive: true });
         }
         fs.mkdirSync(this.offsetTempPath, { recursive: true });
-        void this.sweepStaleOffsetFiles().catch((issue) => {
-            logger.warn("Offset transcode cleanup failed:", issue);
-        });
+        startOffsetSweep(this.offsetTempPath);
 
         // Start cache eviction timer (every 6 hours)
         this.evictionInterval = setInterval(
@@ -256,49 +338,46 @@ export class AudioStreamingService {
             this.offsetTempPath,
             `soundspan-offset-${crypto.randomUUID()}.${settings.format}`,
         );
+        activeOffsetFiles.add(temporaryPath);
         try {
-            await transcodeQueue.add(
-                () =>
-                    this.runFfmpeg(
-                        sourcePath,
-                        temporaryPath,
-                        settings.bitrate,
-                        settings.format,
-                        trackId,
-                        quality,
-                        timeOffsetSeconds,
-                        signal,
-                    ),
-                signal ? { signal } : undefined,
-            );
-        } catch (error) {
-            await fs.promises.unlink(temporaryPath).catch(() => undefined);
-            throw error;
+            await this.enqueueOffsetTranscode({
+                trackId,
+                quality,
+                sourcePath,
+                temporaryPath,
+                bitrate: settings.bitrate,
+                format: settings.format,
+                timeOffsetSeconds,
+                signal,
+            });
+        } catch (issue) {
+            await releaseActiveOffsetFile(temporaryPath);
+            throw issue;
         }
         return {
             filePath: temporaryPath,
             mimeType: "audio/mpeg",
-            cleanup: () =>
-                fs.promises.unlink(temporaryPath).catch(() => undefined),
+            cleanup: () => releaseActiveOffsetFile(temporaryPath),
         };
     }
 
-    private async sweepStaleOffsetFiles(): Promise<void> {
-        const entries = await fsPromises.readdir(this.offsetTempPath, {
-            withFileTypes: true,
-        });
-        const cutoff = Date.now() - OFFSET_TEMP_MAX_AGE_MS;
-        const boundedEntries = entries.slice(0, OFFSET_SWEEP_FILE_LIMIT);
-        for (const entry of boundedEntries) {
-            if (!entry.isFile()) continue;
-            const filePath = path.join(this.offsetTempPath, entry.name);
-            try {
-                const stats = await fsPromises.stat(filePath);
-                if (stats.mtimeMs < cutoff) await fsPromises.unlink(filePath);
-            } catch {
-                // Best-effort startup cleanup tolerates races and permissions.
-            }
-        }
+    private async enqueueOffsetTranscode(
+        input: OffsetTranscodeInput,
+    ): Promise<void> {
+        await transcodeQueue.add(
+            () =>
+                this.runFfmpeg(
+                    input.sourcePath,
+                    input.temporaryPath,
+                    input.bitrate,
+                    input.format,
+                    input.trackId,
+                    input.quality,
+                    input.timeOffsetSeconds,
+                    input.signal,
+                ),
+            input.signal ? { signal: input.signal } : undefined,
+        );
     }
 
     /** Returns a complete peer stream cache hit without source staleness checks. */

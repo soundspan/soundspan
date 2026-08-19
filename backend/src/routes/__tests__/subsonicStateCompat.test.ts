@@ -185,25 +185,27 @@ describe("subsonic state/admin compatibility handlers", () => {
         mockScanAdd.mockResolvedValue({ id: "job-1" });
     });
 
-    it("returns empty play queue when no playback state exists", async () => {
-        await handleGetPlayQueue(buildReq({}), buildRes());
+    it.each([
+        ["classic", handleGetPlayQueue, "playQueue"],
+        ["index-based", handleGetPlayQueueByIndex, "playQueueByIndex"],
+    ])(
+        "omits the %s play queue object when no playback state exists",
+        async (_label, handler, responseKey) => {
+            await handler(buildReq({}), buildRes());
 
-        expect(mockSendSuccess).toHaveBeenCalledWith(
-            expect.anything(),
-            expect.objectContaining({
-                playQueue: expect.objectContaining({
-                    position: 0,
-                    entry: [],
-                }),
-            }),
-            "json",
-            undefined,
-        );
-        const payload = mockSendSuccess.mock.calls[0][1] as {
-            playQueue: Record<string, unknown>;
-        };
-        expect(payload.playQueue).not.toHaveProperty("current");
-    });
+            expect(mockSendSuccess).toHaveBeenCalledWith(
+                expect.anything(),
+                {},
+                "json",
+                undefined,
+            );
+            const payload = mockSendSuccess.mock.calls[0][1] as Record<
+                string,
+                unknown
+            >;
+            expect(payload).not.toHaveProperty(responseKey);
+        },
+    );
 
     it("returns the classic play queue current entry as a song ID", async () => {
         mockPlaybackFindUnique.mockResolvedValue({
@@ -225,6 +227,9 @@ describe("subsonic state/admin compatibility handlers", () => {
                 playQueue: expect.objectContaining({
                     current: "tr-track-2",
                     position: 12000,
+                    username: "alice",
+                    changed: "2026-08-18T12:00:00.000Z",
+                    changedBy: "soundspan",
                 }),
             }),
             "json",
@@ -254,6 +259,9 @@ describe("subsonic state/admin compatibility handlers", () => {
             playQueueByIndex: expect.objectContaining({
                 currentIndex: 1,
                 position: 12000,
+                username: "alice",
+                changed: "2026-08-18T12:00:00.000Z",
+                changedBy: "soundspan",
                 entry: expect.any(Array),
             }),
         });

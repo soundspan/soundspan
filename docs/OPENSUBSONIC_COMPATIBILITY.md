@@ -47,8 +47,10 @@ is a transcode tier. Offset transcodes use ffmpeg input seeking and bypass the
 track-and-quality disk cache, but share the same global ffmpeg concurrency cap
 as cached transcodes. Temporary offset output lives under the configured
 transcode cache volume in `offset-tmp/`; request aborts kill ffmpeg, every
-response path removes its temporary output, and startup removes bounded stale
-files older than one hour. Raw/original streams ignore the offset. Federated
+response path removes its temporary output, and a process-wide 15-minute gate
+limits stale-file sweeps. Each bounded sweep removes orphaned files older than
+one hour while excluding files owned by active responses. Raw/original streams
+ignore the offset. Federated
 stream proxy requests currently ignore `timeOffset` because the peer stream API
 forwards quality and Range metadata rather than arbitrary Subsonic parameters.
 This extension is distinct from the missing `getTranscodeDecision` and
@@ -246,7 +248,7 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - Remaining optional song fields not currently projected include `path`, `sortName`, `mediaType`, and `averageRating`.
 - Classic `getPlayQueue`/`savePlayQueue` use the legacy playback-state device bucket (`deviceId=legacy`). `getPlayQueue.current` is the current protocol song ID, and `savePlayQueue.current` resolves a protocol or raw song ID to its first submitted queue position. A bare in-range integer remains accepted as this server's legacy index form when it does not match a submitted song ID.
 - `getPlayQueueByIndex` returns a `playQueueByIndex` envelope whose `currentIndex` is 0-based into the returned `entry` list. `savePlayQueueByIndex` reads the required `currentIndex` parameter for a non-empty queue and returns Subsonic error 10 when it is missing, negative, non-integral, or outside the submitted `id` list. Calls without `id` clear the queue and omit `currentIndex`. The optional device-bucket `index` still maps `0` to `deviceId=legacy` and `N` to `deviceId=legacy-N`.
-- Queue reads resolve persisted current state against the unfiltered queue before projecting visible entries. Classic reads omit `current` when that track was filtered. Index-based reads select the nearest following surviving entry, or index `0` when none follows. Both forms reset `position` to `0` when the persisted current track was filtered.
+- Queue reads omit the complete queue object when no playback state exists. Populated classic and index-based responses include `username`, the state's ISO `changed` timestamp, and `changedBy=soundspan` because playback state does not persist a client name. Reads resolve persisted current state against the unfiltered queue before projecting visible entries. Classic reads omit `current` when that track was filtered. Index-based reads select the nearest following surviving entry, or index `0` when none follows. Both forms reset `position` to `0` when the persisted current track was filtered.
 - `getBookmarks`/`createBookmark`/`deleteBookmark` now persist per-user bookmark state keyed by track id, with bookmark positions stored in seconds and returned in protocol milliseconds.
 - `startScan` is compatibility-throttled with a cooldown window; repeated requests during cooldown return current scan status and do not enqueue new scan jobs.
 - `getIndexes` now honors `musicFolderId` filtering and `ifModifiedSince` no-change semantics.

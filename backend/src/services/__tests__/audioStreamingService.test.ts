@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import * as path from "path";
 import { Readable } from "node:stream";
 
 const mockLogger = {
@@ -231,7 +232,12 @@ jest.mock("fluent-ffmpeg", () => ({
     }),
 }));
 
-import { AudioStreamingService, QUALITY_SETTINGS } from "../audioStreaming";
+import {
+    AudioStreamingService,
+    QUALITY_SETTINGS,
+    resetOffsetSweepStateForTests,
+    waitForOffsetSweepForTests,
+} from "../audioStreaming";
 import { AppError, ErrorCategory, ErrorCode } from "../../utils/errors";
 
 const configuredFfmpegPath = mockSetFfmpegPath.mock.calls[0]?.[0];
@@ -311,7 +317,9 @@ describe("AudioStreamingService", () => {
         expect(configuredFfmpegPath).toBe("/usr/bin/ffmpeg");
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
+        await waitForOffsetSweepForTests();
+        resetOffsetSweepStateForTests();
         jest.clearAllMocks();
 
         ffmpegControl.mode = "success";
@@ -357,7 +365,8 @@ describe("AudioStreamingService", () => {
         mockConfig.allowedOrigins = [];
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+        await waitForOffsetSweepForTests();
         for (const service of createdServices) {
             service.destroy();
         }
@@ -369,10 +378,6 @@ describe("AudioStreamingService", () => {
 
     describe("getStreamFilePath", () => {
         it("sweeps stale offset files from the transcode volume", async () => {
-            let resolveSweep!: (filePath: string) => void;
-            const sweptPath = new Promise<string>((resolve) => {
-                resolveSweep = resolve;
-            });
             mockFsReaddir.mockResolvedValueOnce([
                 { name: "stale.mp3", isFile: () => true },
             ]);
@@ -380,18 +385,62 @@ describe("AudioStreamingService", () => {
                 size: 1024,
                 mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
             });
-            mockFsUnlink.mockImplementationOnce(async (filePath: string) => {
-                resolveSweep(filePath);
-            });
 
             createService();
+            await waitForOffsetSweepForTests();
 
-            await expect(sweptPath).resolves.toBe(
+            expect(mockFsUnlink).toHaveBeenCalledWith(
                 "/cache/offset-tmp/stale.mp3",
             );
             expect(mockFsMkdirSync).toHaveBeenCalledWith("/cache/offset-tmp", {
                 recursive: true,
             });
+        });
+
+        it("does not start a second offset sweep within the interval", async () => {
+            createService();
+            await waitForOffsetSweepForTests();
+
+            createService();
+            await waitForOffsetSweepForTests();
+
+            expect(mockFsReaddir).toHaveBeenCalledTimes(1);
+        });
+
+        it("skips an active offset file even when its mtime is stale", async () => {
+            const now = Date.now();
+            const dateNowSpy = jest.spyOn(Date, "now").mockReturnValue(now);
+            const service = createService();
+            await waitForOffsetSweepForTests();
+            ffmpegControl.mode = "pending";
+
+            const transcode = service.getStreamFilePath(
+                "track-active-offset",
+                "low",
+                new Date("2025-01-01T00:00:00.000Z"),
+                "/music/source.flac",
+                42,
+            );
+            await waitForFfmpegCommandCount(1);
+            const activePath = ffmpegControl.outputPath;
+            if (!activePath) throw new Error("offset output path was not set");
+            mockFsReaddir.mockResolvedValueOnce([
+                { name: path.basename(activePath), isFile: () => true },
+            ]);
+            mockFsStat.mockResolvedValueOnce({
+                size: 1024,
+                mtimeMs: now - 2 * 60 * 60 * 1000,
+            });
+            dateNowSpy.mockReturnValue(now + 16 * 60 * 1000);
+
+            createService();
+            await waitForOffsetSweepForTests();
+
+            expect(mockFsUnlink).not.toHaveBeenCalledWith(activePath);
+            ffmpegControl.commands[0].__handlers.end();
+            const result = await transcode;
+            await result.cleanup?.();
+            dateNowSpy.mockRestore();
         });
 
         it("transcodes a time offset to an uncached temporary file", async () => {

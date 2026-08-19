@@ -81,33 +81,36 @@ type FormattedPlayQueue = {
     sourceIndexes: number[];
 };
 
+const PLAY_QUEUE_CHANGED_BY = "soundspan";
+
 function findSurvivingCurrentIndex(
-    state: PlayQueueState | null,
+    state: PlayQueueState,
     queueTrackIds: string[],
     formatted: FormattedPlayQueue,
 ): number {
-    if (!state || !queueTrackIds[state.currentIndex]) return -1;
+    if (!queueTrackIds[state.currentIndex]) return -1;
     return formatted.sourceIndexes.indexOf(state.currentIndex);
 }
 
 function buildSharedQueueFields(
-    state: PlayQueueState | null,
+    state: PlayQueueState,
     formatted: FormattedPlayQueue,
     username: string,
     currentSurvived: boolean,
 ): Record<string, unknown> {
     return {
         position: currentSurvived
-            ? Math.max(0, Math.round((state?.currentTime ?? 0) * 1000))
+            ? Math.max(0, Math.round(state.currentTime * 1000))
             : 0,
         username,
-        changed: state?.updatedAt.toISOString(),
+        changed: state.updatedAt.toISOString(),
+        changedBy: PLAY_QUEUE_CHANGED_BY,
         entry: formatted.entry,
     };
 }
 
 function buildClassicPlayQueueResponse(
-    state: PlayQueueState | null,
+    state: PlayQueueState,
     queueTrackIds: string[],
     formatted: FormattedPlayQueue,
     username: string,
@@ -132,7 +135,7 @@ function buildClassicPlayQueueResponse(
 }
 
 function buildIndexPlayQueueResponse(
-    state: PlayQueueState | null,
+    state: PlayQueueState,
     queueTrackIds: string[],
     formatted: FormattedPlayQueue,
     username: string,
@@ -143,7 +146,7 @@ function buildIndexPlayQueueResponse(
         formatted,
     );
     const nextIndex = formatted.sourceIndexes.findIndex(
-        (sourceIndex) => sourceIndex > (state?.currentIndex ?? 0),
+        (sourceIndex) => sourceIndex > state.currentIndex,
     );
     const currentIndex =
         survivingCurrent >= 0 ? survivingCurrent : Math.max(0, nextIndex);
@@ -322,7 +325,7 @@ async function sendLoadedPlayQueue(
     req: Request,
     res: Response,
     buildResponse: (
-        state: PlayQueueState | null,
+        state: PlayQueueState,
         queueTrackIds: string[],
         formatted: FormattedPlayQueue,
         username: string,
@@ -331,6 +334,10 @@ async function sendLoadedPlayQueue(
     const { format, callback } = getRequestContext(req);
     try {
         const { state, queueTrackIds, formatted } = await loadPlayQueue(req);
+        if (!state) {
+            sendSubsonicSuccess(res, {}, format, callback);
+            return;
+        }
         sendSubsonicSuccess(
             res,
             buildResponse(state, queueTrackIds, formatted, req.user!.username),
