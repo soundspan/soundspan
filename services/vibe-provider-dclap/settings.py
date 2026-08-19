@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 
 from services.common.analyzer_env import configure_thread_env, get_int_env
+from services.common.logging_utils import configure_service_logger
+
+logger = configure_service_logger("vibe-provider-dclap")
 
 MODEL_VERSION = os.getenv("DCLAP_IMAGE_VERSION", "dclap-student-v1")
 EMBEDDING_SPACE_FAMILY = "clap-music-audioset-dclap-student"
@@ -20,21 +23,14 @@ MODEL_IDLE_TIMEOUT = get_int_env("MODEL_IDLE_TIMEOUT", 300)
 ONNX_INTRA_OP_THREADS = get_int_env("DCLAP_ONNX_INTRA_OP_THREADS", 1)
 MODEL_DIRECTORY = os.getenv("DCLAP_MODEL_PATH", "/app/models")
 TOKENIZER_DIRECTORY = os.getenv("DCLAP_TOKENIZER_PATH", "/app/tokenizer")
-MAX_AUDIO_SECONDS_DEFAULT = 1800
-MAX_AUDIO_SECONDS_FLOOR = 60
-MAX_AUDIO_SECONDS_CEILING = 7200
-
-
-def _max_audio_seconds() -> int:
-    """Read the bounded operational audio decode limit."""
-    try:
-        configured = get_int_env("DCLAP_MAX_AUDIO_SECONDS", MAX_AUDIO_SECONDS_DEFAULT)
-    except ValueError:
-        return MAX_AUDIO_SECONDS_DEFAULT
-    return min(MAX_AUDIO_SECONDS_CEILING, max(MAX_AUDIO_SECONDS_FLOOR, configured))
-
-
-MAX_AUDIO_SECONDS = _max_audio_seconds()
+# This undeclared cap is part of the de-facto preprocessing contract. Changing
+# it requires a new declared embedding space and a managed vector migration.
+MAX_AUDIO_SECONDS = 1800
+if "DCLAP_MAX_AUDIO_SECONDS" in os.environ:
+    logger.warning(
+        "DCLAP_MAX_AUDIO_SECONDS is ignored; the embedding contract pins the cap to %d seconds",
+        MAX_AUDIO_SECONDS,
+    )
 
 if HTTP_PORT <= 0 or HTTP_PORT > 65535:
     raise ValueError("DCLAP_HTTP_PORT must be between 1 and 65535")
@@ -45,6 +41,8 @@ if ONNX_INTRA_OP_THREADS <= 0:
 
 configure_thread_env(ONNX_INTRA_OP_THREADS)
 
+# MAX_AUDIO_SECONDS intentionally remains absent to preserve the established
+# space identity. Any future cap change must declare a new embedding space.
 EMBEDDING_PREPROCESSING: dict[str, object] = {
     "sampleRateHz": SAMPLE_RATE_HZ,
     "mono": True,

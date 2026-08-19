@@ -100,7 +100,7 @@ def test_capped_dclap_preprocessing_streams_a_45_minute_tone(
         load_segmented_log_mels,
     )
 
-    assert settings.MAX_AUDIO_SECONDS == settings.MAX_AUDIO_SECONDS_DEFAULT
+    assert settings.MAX_AUDIO_SECONDS == 1800
     tone_path = tmp_path / "long-dclap-tone.flac"
     generate_long_tone(tone_path)
     embedding = np.ones((1, settings.EMBEDDING_DIM), dtype=np.float32)

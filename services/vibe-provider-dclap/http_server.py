@@ -5,15 +5,23 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
+import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Protocol, cast
+from contextlib import asynccontextmanager, suppress
+from typing import Never, Protocol, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from inference import normalize_vector
-from model_provider import AudioDecodeError
+from model_provider import (
+    AudioDecodeError,
+    InferenceCancellation,
+    InferenceCancelledError,
+    InferenceControlError,
+    InferenceDeadlineExceededError,
+    InferenceQueueFullError,
+)
 from music_path import resolve_music_path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from settings import (
@@ -29,15 +37,27 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from services.common.logging_utils import configure_service_logger
 
 logger = configure_service_logger("vibe-provider-dclap-http")
+TEXT_INFERENCE_BUDGET_SECONDS = 25.0
+AUDIO_INFERENCE_BUDGET_SECONDS = 110.0
+DISCONNECT_POLL_SECONDS = 0.1
+MAX_INFERENCE_POLLS = 1_102
 
 
 class Provider(Protocol):
     """Model and lifecycle methods required by the HTTP transport."""
 
-    def get_text_embedding(self, text: str) -> object:
+    def get_text_embedding(
+        self,
+        text: str,
+        cancellation: InferenceCancellation,
+    ) -> object:
         """Generate one text embedding."""
 
-    def get_audio_embedding(self, audio_path: str) -> object:
+    def get_audio_embedding(
+        self,
+        audio_path: str,
+        cancellation: InferenceCancellation,
+    ) -> object:
         """Generate one audio embedding."""
 
     def start_idle_monitor(self) -> None:
@@ -87,7 +107,11 @@ def _register_error_handlers(app: FastAPI) -> None:
         _request: Request,
         error: StarletteHTTPException,
     ) -> JSONResponse:
-        return JSONResponse({"error": str(error.detail)}, status_code=error.status_code)
+        return JSONResponse(
+            {"error": str(error.detail)},
+            status_code=error.status_code,
+            headers=error.headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(
@@ -139,16 +163,78 @@ def _model_vector(value: object) -> list[float]:
         raise HTTPException(status_code=503, detail="Model unavailable") from error
 
 
+def _raise_inference_control_error(error: InferenceControlError) -> Never:
+    """Map expected model-control outcomes to stable retryable HTTP responses."""
+    if isinstance(error, InferenceDeadlineExceededError):
+        raise HTTPException(status_code=408, detail="Inference deadline exceeded") from error
+    if isinstance(error, InferenceQueueFullError):
+        raise HTTPException(
+            status_code=429,
+            detail="Inference queue is full",
+            headers={"Retry-After": "1"},
+        ) from error
+    if isinstance(error, InferenceCancelledError):
+        raise HTTPException(status_code=503, detail="Inference cancelled") from error
+    raise HTTPException(status_code=503, detail="Model unavailable") from error
+
+
+async def _run_provider_call(
+    request: Request,
+    operation: object,
+    argument: str,
+    budget_seconds: float,
+) -> object:
+    """Run blocking inference with a monotonic budget and disconnect signal."""
+    provider_call = cast(ProtocolProviderCall, operation)
+    cancellation = InferenceCancellation(
+        deadline=time.monotonic() + budget_seconds,
+    )
+    task = asyncio.create_task(
+        asyncio.to_thread(provider_call, argument, cancellation),
+    )
+    try:
+        for _poll in range(MAX_INFERENCE_POLLS):
+            done, _pending = await asyncio.wait(
+                {task},
+                timeout=DISCONNECT_POLL_SECONDS,
+            )
+            if done:
+                return await task
+            if await request.is_disconnected():
+                cancellation.cancel()
+        return await task
+    except asyncio.CancelledError:
+        cancellation.cancel()
+        with suppress(Exception):
+            await task
+        raise
+
+
+class ProtocolProviderCall(Protocol):
+    """One synchronous provider inference call accepted by the thread runner."""
+
+    def __call__(
+        self,
+        argument: str,
+        cancellation: InferenceCancellation,
+    ) -> object:
+        """Run one controlled inference operation."""
+
+
 async def embed_text(
     payload: TextEmbeddingRequest,
     request: Request,
 ) -> dict[str, list[float]]:
     """Generate one normalized teacher text-tower embedding."""
     try:
-        embedding = await asyncio.to_thread(
+        embedding = await _run_provider_call(
+            request,
             _provider(request).get_text_embedding,
             payload.text,
+            TEXT_INFERENCE_BUDGET_SECONDS,
         )
+    except InferenceControlError as error:
+        _raise_inference_control_error(error)
     except Exception as error:
         raise HTTPException(status_code=503, detail="Model unavailable") from error
     return {"vector": _model_vector(embedding)}
@@ -171,12 +257,16 @@ async def embed_audio(
     """Resolve a library track and generate one student audio embedding."""
     audio_path = _audio_path(payload.track_ref)
     try:
-        embedding = await asyncio.to_thread(
+        embedding = await _run_provider_call(
+            request,
             _provider(request).get_audio_embedding,
             audio_path,
+            AUDIO_INFERENCE_BUDGET_SECONDS,
         )
     except AudioDecodeError as error:
         raise HTTPException(status_code=422, detail="Audio could not be decoded") from error
+    except InferenceControlError as error:
+        _raise_inference_control_error(error)
     except Exception as error:
         raise HTTPException(status_code=503, detail="Model unavailable") from error
     return {"vector": _model_vector(embedding)}

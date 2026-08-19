@@ -488,6 +488,8 @@ function describeVibeEmbedFailure(error: unknown): string {
             return "Vibe provider returned an invalid response";
         case "provider_5xx":
             return "Vibe provider reported an internal failure";
+        case "backpressure":
+            return "Vibe provider inference queue is full";
         case "request_rejected":
             return "Vibe provider rejected the audio reference";
         case "space_mismatch":
@@ -501,7 +503,8 @@ export function isTransientVibeProviderFailure(error: unknown): boolean {
         error instanceof VibeProviderError &&
         (error.code === "timeout" ||
             error.code === "unreachable" ||
-            error.code === "provider_5xx")
+            error.code === "provider_5xx" ||
+            error.code === "backpressure")
     );
 }
 

@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeVar, cast
 
 from inference import InferenceSession, TextTokenizer, run_audio_chunks, run_text
 from preprocessing import AudioDecodeError, load_segmented_log_mels
@@ -25,6 +25,52 @@ logger = configure_service_logger("vibe-provider-dclap")
 
 IDLE_POLL_SECONDS = 5.0
 MAX_IDLE_MONITOR_POLLS = 2**63 - 1
+MAX_QUEUED_INFERENCE_REQUESTS = 4
+MAX_CONFIGURED_QUEUED_REQUESTS = 64
+INFERENCE_LOCK_POLL_SECONDS = 0.1
+MAX_INFERENCE_LOCK_POLLS = 1_102
+ResultT = TypeVar("ResultT")
+
+
+class InferenceControlError(RuntimeError):
+    """Base class for expected inference admission and cancellation outcomes."""
+
+
+class InferenceCancelledError(InferenceControlError):
+    """Raised after the request owner cancels admitted inference."""
+
+
+class InferenceDeadlineExceededError(InferenceControlError):
+    """Raised after admitted inference exceeds its monotonic deadline."""
+
+
+class InferenceQueueFullError(InferenceControlError):
+    """Raised when active and queued inference already consume capacity."""
+
+
+class InferenceCancellation:
+    """Thread-safe cooperative cancellation and monotonic deadline token."""
+
+    def __init__(
+        self,
+        *,
+        deadline: float | None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._deadline = deadline
+        self._clock = clock
+        self._cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        """Request cancellation from the async transport owner."""
+        self._cancelled.set()
+
+    def raise_if_cancelled(self) -> None:
+        """Raise the distinct cancellation or deadline outcome at a safe point."""
+        if self._cancelled.is_set():
+            raise InferenceCancelledError("Inference was cancelled")
+        if self._deadline is not None and self._clock() >= self._deadline:
+            raise InferenceDeadlineExceededError("Inference deadline exceeded")
 
 
 @dataclass(frozen=True)
@@ -84,15 +130,19 @@ class DclapProvider:
         load_models: Callable[[], ModelBundle] = load_model_bundle,
         idle_timeout: int = MODEL_IDLE_TIMEOUT,
         clock: Callable[[], float] = time.monotonic,
+        max_queued_requests: int = MAX_QUEUED_INFERENCE_REQUESTS,
     ) -> None:
         if idle_timeout < 0:
             raise ValueError("idle_timeout must not be negative")
+        if not 0 <= max_queued_requests <= MAX_CONFIGURED_QUEUED_REQUESTS:
+            raise ValueError("max_queued_requests is outside the supported range")
         self._load_models = load_models
         self._idle_timeout = idle_timeout
         self._clock = clock
         self._models: ModelBundle | None = None
         self._last_work_at = clock()
         self._lock = threading.RLock()
+        self._admission = threading.BoundedSemaphore(max_queued_requests + 1)
         self._stop_event = threading.Event()
         self._monitor_thread: threading.Thread | None = None
 
@@ -109,22 +159,65 @@ class DclapProvider:
             self._models = self._load_models()
         return self._models
 
-    def get_text_embedding(self, text: str) -> object:
-        """Return one normalized teacher text-tower embedding."""
-        with self._lock:
-            models = self._models_locked()
-            vector = run_text(models.text_session, models.tokenizer, text)
-            self._last_work_at = self._clock()
-            return vector
+    def _run_serialized(
+        self,
+        operation: Callable[[], ResultT],
+        cancellation: InferenceCancellation,
+    ) -> ResultT:
+        """Admit bounded work, serialize it, and release capacity on every path."""
+        cancellation.raise_if_cancelled()
+        if not self._admission.acquire(blocking=False):
+            raise InferenceQueueFullError("Inference queue is full")
+        try:
+            for _poll in range(MAX_INFERENCE_LOCK_POLLS):
+                cancellation.raise_if_cancelled()
+                if self._lock.acquire(timeout=INFERENCE_LOCK_POLL_SECONDS):
+                    break
+            else:
+                raise InferenceDeadlineExceededError("Inference lock wait exceeded")
+            try:
+                cancellation.raise_if_cancelled()
+                result = operation()
+                cancellation.raise_if_cancelled()
+                self._last_work_at = self._clock()
+                return result
+            finally:
+                self._lock.release()
+        finally:
+            self._admission.release()
 
-    def get_audio_embedding(self, audio_path: str) -> object:
+    def get_text_embedding(
+        self,
+        text: str,
+        cancellation: InferenceCancellation | None = None,
+    ) -> object:
+        """Return one normalized teacher text-tower embedding."""
+        control = cancellation or InferenceCancellation(deadline=None)
+
+        def infer() -> object:
+            models = self._models_locked()
+            return run_text(models.text_session, models.tokenizer, text)
+
+        return self._run_serialized(infer, control)
+
+    def get_audio_embedding(
+        self,
+        audio_path: str,
+        cancellation: InferenceCancellation | None = None,
+    ) -> object:
         """Return one normalized, chunk-aggregated student audio embedding."""
-        with self._lock:
+        control = cancellation or InferenceCancellation(deadline=None)
+
+        def infer() -> object:
             models = self._models_locked()
             mel_tensors = load_segmented_log_mels(audio_path)
-            vector = run_audio_chunks(models.audio_session, mel_tensors)
-            self._last_work_at = self._clock()
-            return vector
+            return run_audio_chunks(
+                models.audio_session,
+                mel_tensors,
+                control.raise_if_cancelled,
+            )
+
+        return self._run_serialized(infer, control)
 
     def unload_if_idle(self) -> bool:
         """Release loaded models once the configured idle timeout expires."""
@@ -168,4 +261,14 @@ class DclapProvider:
         self._monitor_thread = None
 
 
-__all__ = ["AudioDecodeError", "DclapProvider", "ModelBundle"]
+__all__ = [
+    "MAX_QUEUED_INFERENCE_REQUESTS",
+    "AudioDecodeError",
+    "DclapProvider",
+    "InferenceCancellation",
+    "InferenceCancelledError",
+    "InferenceControlError",
+    "InferenceDeadlineExceededError",
+    "InferenceQueueFullError",
+    "ModelBundle",
+]

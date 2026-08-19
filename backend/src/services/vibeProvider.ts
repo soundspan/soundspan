@@ -16,7 +16,7 @@ export const PROVIDER_SPACE_HEALTH_TIMEOUT_MS = 5_000;
 /** Deadline for provider text inference. */
 export const PROVIDER_TEXT_TIMEOUT_MS = 30_000;
 /** Deadline for provider audio inference. */
-export const PROVIDER_AUDIO_TIMEOUT_MS = 120_000;
+export const PROVIDER_AUDIO_TIMEOUT_MS = 115_000;
 
 const UNIT_NORM_TOLERANCE = 1e-3;
 const MAX_PROVIDER_VECTOR_DIMENSION = 8_192;
@@ -50,6 +50,7 @@ type VibeProviderErrorCode =
     | "auth"
     | "contract"
     | "provider_5xx"
+    | "backpressure"
     | "request_rejected"
     | "space_mismatch";
 
@@ -107,6 +108,17 @@ export class VibeProviderServerError extends VibeProviderError {
     ) {
         super("provider_5xx", message);
         this.name = "VibeProviderServerError";
+    }
+}
+
+/** Raised when the provider rejects work because local inference is saturated. */
+export class VibeProviderBackpressureError extends VibeProviderError {
+    constructor(
+        public readonly status = 429,
+        message = "Vibe provider inference queue is full",
+    ) {
+        super("backpressure", message);
+        this.name = "VibeProviderBackpressureError";
     }
 }
 
@@ -198,6 +210,9 @@ async function parseJson(response: Response): Promise<unknown> {
 function throwForStatus(status: number, body: unknown): never {
     const parsedError = errorResponseSchema.safeParse(body);
     const message = parsedError.success ? parsedError.data.error : undefined;
+    if (status === 408) throw new VibeProviderTimeoutError();
+    if (status === 429)
+        throw new VibeProviderBackpressureError(status, message);
     if (status === 401) throw new VibeProviderAuthError(message);
     if (status >= 500) throw new VibeProviderServerError(status, message);
     throw new VibeProviderRequestError(status, message);

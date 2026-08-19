@@ -24,6 +24,7 @@ import {
     isTransientVibeProviderFailure,
 } from "../vibeEmbedJobs";
 import {
+    VibeProviderBackpressureError,
     VibeProviderContractError,
     VibeProviderRequestError,
     VibeProviderServerError,
@@ -40,6 +41,7 @@ describe("vibe provider retry classification", () => {
         new VibeProviderTimeoutError(),
         new VibeProviderUnavailableError(),
         new VibeProviderServerError(503),
+        new VibeProviderBackpressureError(429),
     ])("classifies %s as transient", (error) => {
         expect(isTransientVibeProviderFailure(error)).toBe(true);
     });

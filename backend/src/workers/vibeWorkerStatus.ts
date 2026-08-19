@@ -9,10 +9,10 @@ function registryErrorClass(error: unknown): string {
 }
 
 /** Namespace for TTL-bound per-worker provider status keys. */
-export const VIBE_WORKER_STATUS_KEY_PREFIX = "soundspan:vibe-worker-status:v2:";
-/** Exact-key registry used to discover TTL-bound worker snapshots. */
+export const VIBE_WORKER_STATUS_KEY_PREFIX = "soundspan:vibe-worker-status:v3:";
+/** Timestamped registry used to discover and expire worker snapshots. */
 export const VIBE_WORKER_STATUS_REGISTRY_KEY =
-    "soundspan:vibe-worker-status:v2:registry";
+    "soundspan:vibe-worker-status:v3:registry";
 /** Cadence shared by worker publishing and reader-side freshness checks. */
 export const VIBE_WORKER_STATUS_PUBLISH_INTERVAL_MS = 60_000;
 /** Three missed one-minute refreshes expire a dead worker's verdict. */
@@ -49,10 +49,18 @@ export type VibeWorkerStatus = z.infer<typeof workerStatusSchema>;
 /** Minimal Redis surface for TTL-bound worker status aggregation. */
 export interface VibeWorkerStatusRedis {
     mGet(keys: string[]): Promise<Array<string | null>>;
-    sAdd(key: string, member: string): Promise<unknown>;
-    sMembers(key: string): Promise<string[]>;
-    sRem(key: string, members: string[]): Promise<unknown>;
     set(key: string, value: string, options: { PX: number }): Promise<unknown>;
+    zAdd(
+        key: string,
+        member: { score: number; value: string },
+    ): Promise<unknown>;
+    zRange(key: string, start: number, stop: number): Promise<string[]>;
+    zRem(key: string, members: string[]): Promise<unknown>;
+    zRemRangeByScore(
+        key: string,
+        minimum: number | string,
+        maximum: number | string,
+    ): Promise<unknown>;
 }
 
 function workerStatusKey(workerId: string): string {
@@ -67,12 +75,17 @@ export async function writeVibeWorkerStatus(
     redis: VibeWorkerStatusRedis,
     status: VibeWorkerStatus,
     workerId: string,
+    now: Date = new Date(),
 ): Promise<void> {
     const key = workerStatusKey(workerId);
-    await redis.sAdd(VIBE_WORKER_STATUS_REGISTRY_KEY, key);
     await redis.set(key, JSON.stringify(status), {
         PX: VIBE_WORKER_STATUS_TTL_MS,
     });
+    await redis.zAdd(VIBE_WORKER_STATUS_REGISTRY_KEY, {
+        score: now.getTime(),
+        value: key,
+    });
+    await loadFreshStatusValues(redis, now.getTime());
 }
 
 function parseWorkerStatus(stored: string | null): VibeWorkerStatus | null {
@@ -105,7 +118,7 @@ async function removeDeadRegistryKeys(
 ): Promise<void> {
     if (keys.length === 0) return;
     try {
-        await redis.sRem(VIBE_WORKER_STATUS_REGISTRY_KEY, keys);
+        await redis.zRem(VIBE_WORKER_STATUS_REGISTRY_KEY, keys);
     } catch (error) {
         log.warn("Vibe worker status registry cleanup failed", {
             errorClass: registryErrorClass(error),
@@ -115,13 +128,15 @@ async function removeDeadRegistryKeys(
 
 async function loadFreshStatusValues(
     redis: VibeWorkerStatusRedis,
+    nowMs: number,
 ): Promise<string[]> {
-    const members = await redis.sMembers(VIBE_WORKER_STATUS_REGISTRY_KEY);
-    if (members.length > MAX_STATUS_REGISTRY_SIZE) {
-        throw new Error(
-            "Vibe worker status registry exceeded its cardinality bound",
-        );
-    }
+    const expiryCutoffMs = nowMs - VIBE_WORKER_STATUS_TTL_MS;
+    await redis.zRemRangeByScore(
+        VIBE_WORKER_STATUS_REGISTRY_KEY,
+        "-inf",
+        expiryCutoffMs,
+    );
+    const members = await redis.zRange(VIBE_WORKER_STATUS_REGISTRY_KEY, 0, -1);
     const keys = members.filter(isRegisteredStatusKey);
     const invalidKeys = members.filter((key) => !isRegisteredStatusKey(key));
     if (keys.length === 0) {
@@ -134,7 +149,14 @@ async function loadFreshStatusValues(
     }
     const deadKeys = keys.filter((_key, index) => values[index] === null);
     await removeDeadRegistryKeys(redis, [...invalidKeys, ...deadKeys]);
-    return values.filter((value): value is string => value !== null);
+    const liveValues = values.filter(
+        (value): value is string => value !== null,
+    );
+    const liveKeys = keys.filter((_key, index) => values[index] !== null);
+    const excess = liveKeys.length - MAX_STATUS_REGISTRY_SIZE;
+    if (excess <= 0) return liveValues;
+    await removeDeadRegistryKeys(redis, liveKeys.slice(0, excess));
+    return liveValues.slice(excess);
 }
 
 /** Read the newest validated, unexpired worker snapshot. */
@@ -143,7 +165,7 @@ export async function readVibeWorkerStatus(
     now: Date = new Date(),
 ): Promise<VibeWorkerStatus | null> {
     const nowMs = now.getTime();
-    const statuses = (await loadFreshStatusValues(redis))
+    const statuses = (await loadFreshStatusValues(redis, nowMs))
         .map(parseWorkerStatus)
         .filter(
             (status): status is VibeWorkerStatus =>

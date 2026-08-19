@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 
 import pytest
 import settings
@@ -21,43 +22,23 @@ def test_checkpoint_hash_combines_all_pinned_model_artifacts() -> None:
     assert derived == settings.EMBEDDING_CHECKPOINT_HASH
 
 
-def test_max_audio_seconds_defaults_to_thirty_minutes(
+def test_max_audio_seconds_is_an_immutable_thirty_minute_contract() -> None:
+    """Keep the undeclared de-facto preprocessing cap pinned to 1,800 seconds."""
+    assert settings.MAX_AUDIO_SECONDS == 1800
+    assert "maxAudioSeconds" not in settings.EMBEDDING_PREPROCESSING
+    assert "max_audio_seconds" not in settings.EMBEDDING_PREPROCESSING
+
+
+def test_max_audio_seconds_ignores_leftover_environment_override(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Use a safe decode cap when no deployment override is present."""
-    with monkeypatch.context() as env:
-        env.delenv("DCLAP_MAX_AUDIO_SECONDS", raising=False)
-        reloaded = importlib.reload(settings)
-
-        assert reloaded.MAX_AUDIO_SECONDS == 1800
-    importlib.reload(settings)
-
-
-def test_max_audio_seconds_respects_valid_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Use a deployment override inside the supported range."""
+    """Ignore and warn about a leftover override without changing space behavior."""
     with monkeypatch.context() as env:
         env.setenv("DCLAP_MAX_AUDIO_SECONDS", "600")
-        reloaded = importlib.reload(settings)
+        with caplog.at_level(logging.WARNING, logger="vibe-provider-dclap"):
+            reloaded = importlib.reload(settings)
 
-        assert reloaded.MAX_AUDIO_SECONDS == 600
-    importlib.reload(settings)
-
-
-@pytest.mark.parametrize(
-    ("configured", "expected"),
-    [("59", 60), ("7201", 7200), ("not-an-integer", 1800)],
-)
-def test_max_audio_seconds_falls_back_within_supported_bounds(
-    monkeypatch: pytest.MonkeyPatch,
-    configured: str,
-    expected: int,
-) -> None:
-    """Clamp numeric limits and recover to the default from malformed input."""
-    with monkeypatch.context() as env:
-        env.setenv("DCLAP_MAX_AUDIO_SECONDS", configured)
-        reloaded = importlib.reload(settings)
-
-        assert expected == reloaded.MAX_AUDIO_SECONDS
+        assert reloaded.MAX_AUDIO_SECONDS == 1800
+        assert "DCLAP_MAX_AUDIO_SECONDS is ignored" in caplog.text
     importlib.reload(settings)

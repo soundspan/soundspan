@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Protocol
 
 import numpy as np
@@ -65,12 +65,20 @@ def normalize_vector(value: object, *, epsilon: float = 0.0) -> list[float]:
     return _normalize_row(value, epsilon=epsilon, dtype=np.float32)
 
 
-def run_audio_chunks(session: InferenceSession, mel_tensors: Iterable[object]) -> list[float]:
+def run_audio_chunks(
+    session: InferenceSession,
+    mel_tensors: Iterable[object],
+    check_cancelled: Callable[[], None] | None = None,
+) -> list[float]:
     """Infer and accumulate chunks before pinned mean-plus-L2 aggregation."""
     embedding_sum = np.zeros(EMBEDDING_DIM, dtype=np.float64)
     segment_count = 0
     for mel_tensor in mel_tensors:
+        if check_cancelled is not None:
+            check_cancelled()
         outputs = session.run(None, {"mel_spectrogram": mel_tensor})
+        if check_cancelled is not None:
+            check_cancelled()
         embedding = np.asarray(_embedding_row(_output_value(outputs)), dtype=np.float64)
         embedding_sum += embedding
         segment_count += 1

@@ -12,7 +12,13 @@ import httpx
 import music_path
 import numpy as np
 import pytest
-from model_provider import AudioDecodeError
+from model_provider import (
+    AudioDecodeError,
+    InferenceCancellation,
+    InferenceCancelledError,
+    InferenceDeadlineExceededError,
+    InferenceQueueFullError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -52,14 +58,22 @@ class StubProvider:
         """Record app shutdown."""
         self.stopped += 1
 
-    def get_text_embedding(self, text: str) -> object:
+    def get_text_embedding(
+        self,
+        text: str,
+        _cancellation: InferenceCancellation,
+    ) -> object:
         """Record and fulfill one text embedding."""
         self.text_calls.append(text)
         if self.error is not None:
             raise self.error
         return self.text_result
 
-    def get_audio_embedding(self, audio_path: str) -> object:
+    def get_audio_embedding(
+        self,
+        audio_path: str,
+        _cancellation: InferenceCancellation,
+    ) -> object:
         """Record and fulfill one audio embedding."""
         self.audio_calls.append(audio_path)
         if self.error is not None:
@@ -211,6 +225,45 @@ def test_text_model_load_failure_is_unavailable() -> None:
 
     assert response.status_code == 503
     assert response.json() == {"error": "Model unavailable"}
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "body"),
+    [
+        (
+            InferenceDeadlineExceededError("deadline exceeded"),
+            408,
+            {"error": "Inference deadline exceeded"},
+        ),
+        (
+            InferenceCancelledError("request cancelled"),
+            503,
+            {"error": "Inference cancelled"},
+        ),
+        (
+            InferenceQueueFullError("queue full"),
+            429,
+            {"error": "Inference queue is full"},
+        ),
+    ],
+)
+def test_text_inference_control_failures_have_retryable_http_mappings(
+    error: Exception,
+    status: int,
+    body: dict[str, str],
+) -> None:
+    """Expose deadline, cancellation, and admission outcomes as stable responses."""
+    response = _request(
+        StubProvider(error=error),
+        "POST",
+        "/v1/embed/text",
+        json={"text": "mellow jazz"},
+    )
+
+    assert response.status_code == status
+    assert response.json() == body
+    if status == 429:
+        assert response.headers["retry-after"] == "1"
 
 
 def test_invalid_model_vector_is_unavailable() -> None:

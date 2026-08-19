@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import sys
+import threading
 from types import SimpleNamespace
 
 import model_provider
 import numpy as np
 import pytest
 import settings
-from model_provider import DclapProvider, ModelBundle
+from model_provider import (
+    MAX_QUEUED_INFERENCE_REQUESTS,
+    DclapProvider,
+    InferenceCancellation,
+    InferenceCancelledError,
+    InferenceQueueFullError,
+    ModelBundle,
+)
 
 
 class Clock:
@@ -99,3 +107,106 @@ def test_session_options_apply_default_onnx_thread_cap(
     assert settings.ONNX_INTRA_OP_THREADS == 1
     assert isinstance(options, Options)
     assert options.intra_op_num_threads == 1
+
+
+def test_cancelled_audio_stops_between_segments_and_releases_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop before the next ONNX batch and leave serialized inference usable."""
+    first_segment_started = threading.Event()
+    release_first_segment = threading.Event()
+
+    class BlockingAudioSession(AudioSession):
+        def run(
+            self,
+            _outputs: list[str] | None,
+            _feed: dict[str, object],
+        ) -> list[object]:
+            first_segment_started.set()
+            assert release_first_segment.wait(timeout=1)
+            return [np.ones((1, 512), dtype=np.float32)]
+
+    monkeypatch.setattr(
+        model_provider,
+        "load_segmented_log_mels",
+        lambda _path: iter([object(), object()]),
+    )
+    provider = DclapProvider(
+        load_models=lambda: ModelBundle(
+            BlockingAudioSession(),
+            TextSession(),
+            Tokenizer(),
+        ),
+        idle_timeout=0,
+    )
+    cancellation = InferenceCancellation(deadline=None)
+    errors: list[BaseException] = []
+
+    def embed_audio() -> None:
+        try:
+            provider.get_audio_embedding("track.flac", cancellation)
+        except BaseException as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=embed_audio)
+    worker.start()
+    assert first_segment_started.wait(timeout=1)
+    cancellation.cancel()
+    release_first_segment.set()
+    worker.join(timeout=1)
+
+    assert not worker.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], InferenceCancelledError)
+    assert (
+        len(
+            provider.get_text_embedding(
+                "lock remains usable",
+                InferenceCancellation(deadline=None),
+            )
+        )
+        == 512
+    )
+
+
+def test_queue_full_rejects_without_waiting_for_inference_lock() -> None:
+    """Reject above the configured queued-request bound before a thread stacks."""
+    active_started = threading.Event()
+    release_active = threading.Event()
+
+    class BlockingTextSession(TextSession):
+        def run(
+            self,
+            _outputs: list[str] | None,
+            _feed: dict[str, object],
+        ) -> list[object]:
+            active_started.set()
+            assert release_active.wait(timeout=1)
+            return [np.ones((1, 512), dtype=np.float32)]
+
+    provider = DclapProvider(
+        load_models=lambda: ModelBundle(
+            AudioSession(),
+            BlockingTextSession(),
+            Tokenizer(),
+        ),
+        idle_timeout=0,
+        max_queued_requests=0,
+    )
+    active = threading.Thread(
+        target=provider.get_text_embedding,
+        args=("active", InferenceCancellation(deadline=None)),
+    )
+    active.start()
+    assert active_started.wait(timeout=1)
+
+    with pytest.raises(InferenceQueueFullError):
+        provider.get_text_embedding(
+            "rejected",
+            InferenceCancellation(deadline=None),
+        )
+
+    release_active.set()
+    active.join(timeout=1)
+    assert not active.is_alive()
+    assert MAX_QUEUED_INFERENCE_REQUESTS == 4

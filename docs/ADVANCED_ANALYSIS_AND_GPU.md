@@ -61,12 +61,13 @@ not need PostgreSQL or Redis credentials.
 | `VIBE_PROVIDER_URL`           | `http://vibe-provider-dclap:8092` | Provider base URL used by the backend and worker.         |
 | `DCLAP_HTTP_PORT`             | `8092`                            | Internal HTTP port; Compose does not publish it.          |
 | `DCLAP_ONNX_INTRA_OP_THREADS` | `1`                               | ONNX Runtime intra-operation CPU thread limit.            |
-| `DCLAP_MAX_AUDIO_SECONDS`     | `1800`                            | Maximum decoded prefix per track, from 60 to 7200 seconds. |
 | `DCLAP_MODEL_IDLE_TIMEOUT`    | `300`                             | Seconds before idle models unload; `0` keeps them loaded. |
 
-The provider streams mel segments through inference and uses
-`DCLAP_MAX_AUDIO_SECONDS` as a memory guard; tracks beyond the cap are embedded
-from their first N seconds.
+The provider streams mel segments through inference. It embeds at most the
+first 1,800 seconds of each track. This cap is immutable because it is part of
+the embedding-space preprocessing contract; changing it requires a new
+declared space and a managed vector migration. A leftover
+`DCLAP_MAX_AUDIO_SECONDS` environment variable is ignored with a warning.
 
 ### Usage
 
