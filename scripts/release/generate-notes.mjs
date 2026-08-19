@@ -349,19 +349,27 @@ function main() {
     const options = parseArgs(process.argv.slice(2));
     const version = options.version ?? "";
     const fromRef = options.from ?? "";
-    const toRef = options.to ?? "HEAD";
+    const releaseRef = version || "HEAD";
+    const toRef = options.to ?? releaseRef;
     const outputPath = options.output;
 
+    if (!version) {
+        console.warn(
+            "Warning: no release version was provided; release links fall back to mutable HEAD.",
+        );
+    }
     ensureReleaseVersion(version);
     ensureRefExists(fromRef, "--from");
-    ensureRefExists(toRef, "--to");
+    if (options.to) {
+        ensureRefExists(toRef, "--to");
+    }
 
     const repoWebUrl = resolveRepoWebUrl();
     const compareUrl = `${repoWebUrl}/compare/${encodeURIComponent(fromRef)}...${encodeURIComponent(toRef)}`;
     const categorized = loadReleaseItemsFromChangelog(version);
     const releaseDate =
         categorized.releaseDate ?? new Date().toISOString().slice(0, 10);
-    const fullChangelogUrl = `${repoWebUrl}/blob/HEAD/${CHANGELOG_PATH}`;
+    const fullChangelogUrl = `${repoWebUrl}/blob/${encodeURIComponent(releaseRef)}/${CHANGELOG_PATH}`;
     const fixedItems = [
         ...categorized.fixed,
         ...normalizeSecurityBullets(categorized.security),

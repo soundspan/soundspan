@@ -21,7 +21,7 @@ concurrency:
 jobs:
   backend-scale:
     name: Backend Scale Smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
@@ -77,9 +77,38 @@ jobs:
       - name: Run backend scale smoke
         run: npm --prefix backend run test:scale
 
-  python-scale:
-    name: Python Long-Audio Scale Smoke
-    runs-on: ubuntu-latest
+  analyzer-scale:
+    name: Audio Analyzer Long-Audio Scale Smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SCALE_TESTS: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/audio-analyzer/requirements-test.lock
+
+      - name: Install ffmpeg
+        # Accepted drift: ffmpeg remains sourced from the Ubuntu 24.04 apt repository.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install analyzer scale-test dependencies
+        run: pip install --require-hashes -r services/audio-analyzer/requirements-test.lock
+
+      - name: Run analyzer long-audio scale smoke
+        run: pytest services/audio-analyzer/tests-scale -q
+
+  dclap-scale:
+    name: DCLAP Long-Audio Scale Smoke
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       SCALE_TESTS: "1"
@@ -92,29 +121,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            services/audio-analyzer/requirements-test.txt
-            services/vibe-provider-dclap/requirements-test.txt
-            services/vibe-provider-dclap/requirements.txt
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
+          cache-dependency-path: services/vibe-provider-dclap/requirements-scale.lock
 
       - name: Install ffmpeg
+        # Accepted drift: ffmpeg remains sourced from the Ubuntu 24.04 apt repository.
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install scale-test dependencies
-        # Ordinary DCLAP tests fake decoding. The scale tier adds only the
-        # real librosa decoder/mel dependency; NumPy is in requirements-test.
-        run: |
-          pip install \
-            -r services/audio-analyzer/requirements-test.txt \
-            -r services/vibe-provider-dclap/requirements-test.txt \
-            "librosa>=0.11.0,<1.0"
+      - name: Install DCLAP scale-test dependencies
+        run: pip install --require-hashes -r services/vibe-provider-dclap/requirements-scale.lock
 
-      - name: Run long-audio scale smoke
-        run: npm run verify:scale:python
+      - name: Run DCLAP long-audio scale smoke
+        run: pytest services/vibe-provider-dclap/tests-scale -q

@@ -42,9 +42,7 @@ function runGenerator(changelogContent, additionalArgs = []) {
                 "--version",
                 "9.9.9",
                 "--from",
-                "HEAD",
-                "--to",
-                "HEAD",
+                "2.3.3",
                 ...additionalArgs,
             ],
             { cwd: fixtureRoot, encoding: "utf8" },
@@ -109,6 +107,20 @@ test("renders the standing sections in release-note order", () => {
     assert.match(
         result.stdout,
         /## Upgrading from an earlier version[\s\S]*## Full Changelog/,
+    );
+});
+
+test("links the comparison and changelog to the staged release version", () => {
+    const result = runGenerator(minimalChangelog);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+        result.stdout,
+        /\[2\.3\.3\.\.\.9\.9\.9\]\(https:\/\/github\.com\/soundspan\/soundspan\/compare\/2\.3\.3\.\.\.9\.9\.9\)/,
+    );
+    assert.match(
+        result.stdout,
+        /https:\/\/github\.com\/soundspan\/soundspan\/blob\/9\.9\.9\/CHANGELOG\.md/,
     );
 });
 
