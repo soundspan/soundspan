@@ -150,27 +150,31 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
     });
 
     it("preserves provider-backed and raced entities while deleting true orphans", async () => {
-        const findAlbums = prisma.album.findMany.bind(prisma.album) as (
+        const findAlbums = prisma.album.findMany.bind(
+            prisma.album,
+        ) as unknown as (
             args: Prisma.AlbumFindManyArgs,
         ) => Promise<Array<{ id: string }>>;
-        const findArtists = prisma.artist.findMany.bind(prisma.artist) as (
+        const findArtists = prisma.artist.findMany.bind(
+            prisma.artist,
+        ) as unknown as (
             args: Prisma.ArtistFindManyArgs,
         ) => Promise<Array<{ id: string }>>;
 
-        jest.spyOn(prisma.album, "findMany").mockImplementationOnce(
-            async (args: Prisma.AlbumFindManyArgs) => {
-                const candidates = await findAlbums(args);
-                await insertRacedAlbumLink(database);
-                return candidates;
-            },
-        );
-        jest.spyOn(prisma.artist, "findMany").mockImplementationOnce(
-            async (args: Prisma.ArtistFindManyArgs) => {
-                const candidates = await findArtists(args);
-                await insertRacedArtistLink(database);
-                return candidates;
-            },
-        );
+        jest.spyOn(prisma.album, "findMany").mockImplementationOnce((async (
+            args?: Prisma.AlbumFindManyArgs,
+        ) => {
+            const candidates = await findAlbums(args ?? {});
+            await insertRacedAlbumLink(database);
+            return candidates;
+        }) as never);
+        jest.spyOn(prisma.artist, "findMany").mockImplementationOnce((async (
+            args?: Prisma.ArtistFindManyArgs,
+        ) => {
+            const candidates = await findArtists(args ?? {});
+            await insertRacedArtistLink(database);
+            return candidates;
+        }) as never);
 
         await expect(cleanupOrphanedLibraryEntities()).resolves.toEqual({
             albumsDeleted: 1,

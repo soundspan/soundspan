@@ -1990,13 +1990,23 @@ describe("MusicScannerService.scanLibrary", () => {
             },
         });
         expect(mockPrisma.album.findMany).toHaveBeenCalledWith({
-            where: { peerId: null, tracks: { none: {} } },
+            where: {
+                peerId: null,
+                tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
             orderBy: { id: "asc" },
             take: 10_000,
             select: { id: true },
         });
         expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
-            where: { peerId: null, albums: { none: {} } },
+            where: {
+                peerId: null,
+                albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
+            },
             orderBy: { id: "asc" },
             take: 10_000,
             select: { id: true },
@@ -2021,6 +2031,8 @@ describe("MusicScannerService.scanLibrary", () => {
                 id: { in: ["album-1"] },
                 peerId: null,
                 tracks: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
         });
         expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
@@ -2028,6 +2040,8 @@ describe("MusicScannerService.scanLibrary", () => {
                 id: { in: ["artist-1"] },
                 peerId: null,
                 albums: { none: {} },
+                tracksTidal: { none: {} },
+                tracksYtMusic: { none: {} },
             },
         });
     });
