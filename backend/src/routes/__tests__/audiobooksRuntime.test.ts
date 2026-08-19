@@ -13,7 +13,8 @@ jest.mock("../../middleware/auth", () => ({
 
 jest.mock("../../middleware/rateLimiter", () => ({
     apiLimiter: (_req: Request, _res: Response, next: () => void) => next(),
-    imageLimiter: (_req: Request, _res: Response, next: () => void) => next(),
+    coverArtLimiter: (_req: Request, _res: Response, next: () => void) =>
+        next(),
     streamingLimiter: (_req: Request, _res: Response, next: () => void) =>
         next(),
 }));

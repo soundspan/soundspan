@@ -75,7 +75,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(17);
+        expect(mockRateLimit).toHaveBeenCalledTimes(19);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.adminSurfaceLimiter).toBeDefined();
         expect(mod.shareLinkLimiter).toBeDefined();
@@ -83,7 +83,9 @@ describe("rateLimiter middleware config", () => {
         expect(mod.authLimiter).toBeDefined();
         expect(mod.refreshLimiter).toBeDefined();
         expect(mod.oidcFlowLimiter).toBeDefined();
+        expect(mod.libraryMetadataLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
+        expect(mod.coverArtLimiter).toBeDefined();
         expect(mod.streamingLimiter).toBeDefined();
         expect(mod.downloadLimiter).toBeDefined();
         expect(mod.lyricsLimiter).toBeDefined();
@@ -103,15 +105,17 @@ describe("rateLimiter middleware config", () => {
             { index: 5, windowMs: 300_000, max: 60 },
             { index: 6, windowMs: 900_000, max: 40 },
             { index: 7, windowMs: 60_000, max: 5000 },
-            { index: 8, windowMs: 60_000, max: 10_000 },
-            { index: 9, windowMs: 60_000, max: 100 },
-            { index: 10, windowMs: 60_000, max: 120 },
-            { index: 11, windowMs: 900_000, max: 20 },
-            { index: 12, windowMs: 60_000, max: 30 },
-            { index: 13, windowMs: 60_000, max: 20 },
-            { index: 14, windowMs: 60_000, max: 60 },
-            { index: 15, windowMs: 60_000, max: 1000 },
-            { index: 16, windowMs: 900_000, max: 20 },
+            { index: 8, windowMs: 60_000, max: 500 },
+            { index: 9, windowMs: 60_000, max: 5000 },
+            { index: 10, windowMs: 60_000, max: 10_000 },
+            { index: 11, windowMs: 60_000, max: 100 },
+            { index: 12, windowMs: 60_000, max: 120 },
+            { index: 13, windowMs: 900_000, max: 20 },
+            { index: 14, windowMs: 60_000, max: 30 },
+            { index: 15, windowMs: 60_000, max: 20 },
+            { index: 16, windowMs: 60_000, max: 60 },
+            { index: 17, windowMs: 60_000, max: 1000 },
+            { index: 18, windowMs: 900_000, max: 20 },
         ];
 
         for (const config of expectedConfigs) {
@@ -134,11 +138,11 @@ describe("rateLimiter middleware config", () => {
         ["auth", 4],
         ["auth-refresh", 5],
         ["oidc-flow", 6],
-        ["image-surface", 7],
-        ["streaming-surface", 8],
-        ["webhook", 14],
-        ["federation-peer", 15],
-        ["federation-pairing", 16],
+        ["cover-art-surface", 9],
+        ["streaming-surface", 10],
+        ["webhook", 16],
+        ["federation-peer", 17],
+        ["federation-pairing", 18],
     ])("uses the namespaced shared store for %s", async (name, index) => {
         await loadRateLimiterModule();
 
@@ -150,7 +154,7 @@ describe("rateLimiter middleware config", () => {
         "auth",
         "auth-refresh",
         "oidc-flow",
-        "image-surface",
+        "cover-art-surface",
         "streaming-surface",
         "webhook",
         "federation-pairing",
@@ -174,11 +178,13 @@ describe("rateLimiter middleware config", () => {
     it.each([
         ["general API", 0],
         ["playback state", 3],
-        ["download", 9],
-        ["lyrics lookup", 10],
-        ["lyrics mutation", 11],
-        ["YouTube Music search", 12],
-        ["YouTube Music stream", 13],
+        ["library metadata", 7],
+        ["external image proxy", 8],
+        ["download", 11],
+        ["lyrics lookup", 12],
+        ["lyrics mutation", 13],
+        ["YouTube Music search", 14],
+        ["YouTube Music stream", 15],
     ])("keeps the %s limiter in memory", async (_name, index) => {
         await loadRateLimiterModule();
 
@@ -187,7 +193,7 @@ describe("rateLimiter middleware config", () => {
 
     it("keys authenticated federation limits by peer identity", async () => {
         await loadRateLimiterModule();
-        const keyGenerator = getOptions(15).keyGenerator!;
+        const keyGenerator = getOptions(17).keyGenerator!;
 
         expect(
             keyGenerator({ ip: "10.0.0.1", federationPeer: { id: "peer-1" } }),
@@ -215,7 +221,6 @@ describe("rateLimiter middleware config", () => {
 
         expect(skip({ path: "/health" })).toBe(true);
         expect(skip({ path: "/api/health" })).toBe(true);
-        expect(skip({ path: "/api/library/tracks/track-1/stream" })).toBe(true);
         expect(
             skip({ path: "/api/podcasts/podcast-1/episodes/episode-2/stream" }),
         ).toBe(true);
@@ -229,9 +234,6 @@ describe("rateLimiter middleware config", () => {
         );
 
         expect(skip({ path: "/health/check" })).toBe(false);
-        expect(skip({ path: "/api/library/tracks/track-1/stream/extra" })).toBe(
-            false,
-        );
         expect(
             skip({
                 path: "/api/podcasts/podcast-1/episodes/episode-2/download",

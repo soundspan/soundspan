@@ -78,7 +78,6 @@ import {
     refreshLimiter,
     adminSurfaceLimiter,
     apiLimiter,
-    imageLimiter,
     lyricsLimiter,
     shareLinkLimiter,
 } from "./middleware/rateLimiter";

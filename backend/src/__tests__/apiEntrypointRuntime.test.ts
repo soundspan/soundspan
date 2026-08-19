@@ -213,7 +213,6 @@ describe("api entrypoint runtime behavior", () => {
         const apiLimiter = "api-limiter";
         const adminSurfaceLimiter = "admin-surface-limiter";
         const shareLinkLimiter = "share-link-limiter";
-        const imageLimiter = "image-limiter";
         const lyricsLimiter = "lyrics-limiter";
         const swaggerSetup = jest.fn(() => "swagger-setup-middleware");
         const swaggerServe = "swagger-serve-middleware";
@@ -310,7 +309,6 @@ describe("api entrypoint runtime behavior", () => {
             apiLimiter,
             adminSurfaceLimiter,
             shareLinkLimiter,
-            imageLimiter,
             lyricsLimiter,
         }));
         jest.doMock("swagger-ui-express", () => ({

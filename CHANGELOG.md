@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Library and audiobook metadata, cover-art, and audio-stream handlers now use separate rate-limit budgets, preserving large cover grids, offline caching, gapless prefetch, and seeking while bounding every handler. The backend also overrides vulnerable `deepmerge-ts` 7.1.5 with 8.0.0 (#647).
+- Library and audiobook metadata, local cover-art, and audio-stream handlers now run rate limiting before authentication and use exactly one surface-specific budget per request. Local covers retain a high-volume shared budget without weakening the original 500/minute in-memory protection on external browse image proxies. The backend also overrides vulnerable `deepmerge-ts` 7.1.5 with 8.0.0 (#647).
 - OpenSubsonic playlist replacement and update mutations now share the Playlist-first transaction lock with generated-radio regeneration, preventing concurrent edits from deadlocking, mixing contents, or producing duplicate sort positions.
 - Artist Popular Tracks now preserve persisted local and federated preference IDs after provider enrichment and use the same canonical remote ID for playback and heart state, preventing likes from switching identity (#642).
 - Orphan cleanup now preserves TIDAL- and YouTube Music-backed albums and artists across scheduled, library, and legacy-discovery cleanup paths, including provider links created concurrently with cleanup (#645).

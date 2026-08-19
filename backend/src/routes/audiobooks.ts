@@ -12,7 +12,7 @@ import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
 import {
     apiLimiter,
-    imageLimiter,
+    coverArtLimiter,
     streamingLimiter,
 } from "../middleware/rateLimiter";
 import { safeResolvePath } from "../utils/safeResolvePath";
@@ -147,8 +147,8 @@ function sectionsArePlayable(cachedSections: AudiobookSections): boolean {
  */
 router.get(
     "/continue-listening",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             // Check if Audiobookshelf is enabled
@@ -218,7 +218,7 @@ router.get(
  * Manually trigger audiobook sync from Audiobookshelf
  * Fetches all audiobooks and caches metadata + cover images locally
  */
-router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.post("/sync", apiLimiter, requireAuthOrToken, async (req, res) => {
     try {
         const { getSystemSettings } = await import("../utils/systemSettings");
         const { notificationService } =
@@ -281,8 +281,8 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
  */
 router.get(
     "/debug-series",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         logger.debug("[Audiobooks] Debug series endpoint called");
         try {
@@ -370,7 +370,7 @@ router.get(
  * GET /audiobooks/search
  * Search audiobooks
  */
-router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get("/search", apiLimiter, requireAuthOrToken, async (req, res) => {
     try {
         const { getSystemSettings } = await import("../utils/systemSettings");
         const settings = await getSystemSettings();
@@ -446,7 +446,7 @@ router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
  * GET /audiobooks
  * Get all audiobooks from cached database (instant, no API calls)
  */
-router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get("/", apiLimiter, requireAuthOrToken, async (req, res) => {
     logger.debug("[Audiobooks] GET / - fetching audiobooks list");
     try {
         // Check if Audiobookshelf is enabled first
@@ -550,8 +550,8 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
  */
 router.get<{ seriesName: string }>(
     "/series/:seriesName",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             // Check if Audiobookshelf is enabled
@@ -672,7 +672,7 @@ router.get<{ seriesName: string }>(
 /**
  * GET /audiobooks/:id/cover
  * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
- * Uses the high-volume imageLimiter (matches library/browse image routes)
+ * Uses the high-volume coverArtLimiter shared with local library covers.
  */
 type AudiobookCoverRow = Awaited<ReturnType<typeof loadAudiobookCover>>;
 
@@ -861,8 +861,8 @@ export async function handleAudiobookCover(
 
 router.get<{ id: string }>(
     "/:id/cover",
+    coverArtLimiter,
     requireAuthOrToken,
-    imageLimiter,
     handleAudiobookCover,
 );
 
@@ -929,8 +929,8 @@ router.get<{ id: string }>(
  */
 router.get<{ id: string }>(
     "/:id",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             const { getSystemSettings } =
@@ -1152,8 +1152,8 @@ async function tryFederatedAudiobookStream(
 
 router.get<{ id: string }>(
     "/:id/stream",
-    requireAuthOrToken,
     streamingLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             logger.debug(
@@ -1296,8 +1296,8 @@ router.get<{ id: string }>(
  */
 router.post<{ id: string }>(
     "/:id/progress",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             const { getSystemSettings } =
@@ -1491,8 +1491,8 @@ router.post<{ id: string }>(
  */
 router.delete<{ id: string }>(
     "/:id/progress",
-    requireAuthOrToken,
     apiLimiter,
+    requireAuthOrToken,
     async (req, res) => {
         try {
             const { getSystemSettings } =

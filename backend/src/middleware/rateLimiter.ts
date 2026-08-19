@@ -1,5 +1,6 @@
 import rateLimit from "express-rate-limit";
 import { logger } from "../utils/logger";
+import { isLibraryMediaPath } from "./libraryRateLimitPaths";
 import { createRedisRateLimitOptions } from "./rateLimitStore";
 
 // soundspan is self-hosted behind a reverse proxy, and app.set("trust proxy", ...)
@@ -11,11 +12,17 @@ import { createRedisRateLimitOptions } from "./rateLimitStore";
 const trustProxyValidation = { validate: { trustProxy: false } };
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const API_RATE_LIMIT_MAX = 5_000;
+// Five thousand metadata operations fit large client syncs while bounding loops.
+const LIBRARY_METADATA_RATE_LIMIT_MAX = 5_000;
+// Five hundred limits outbound image-proxy amplification and bandwidth use.
+const IMAGE_PROXY_RATE_LIMIT_MAX = 500;
 // Five thousand covers fit a full large-library grid or offline-cache burst.
-const IMAGE_RATE_LIMIT_MAX = 5_000;
+const COVER_ART_RATE_LIMIT_MAX = 5_000;
 // Ten thousand stream starts allow gapless prefetch and seek storms while
 // still bounding runaway players to about 167 new requests per second per IP.
 const STREAMING_RATE_LIMIT_MAX = 10_000;
+const COVER_ART_RATE_LIMIT_NAMESPACE = "cover-art-surface";
+const STREAMING_RATE_LIMIT_NAMESPACE = "streaming-surface";
 
 // General API rate limiter (5000 req/minute per IP)
 // This remains in-memory to avoid Redis latency on hot API paths. It provides
@@ -39,9 +46,6 @@ export const apiLimiter = rateLimit({
         return (
             path === "/health" ||
             path === "/api/health" ||
-            // Track streaming: /api/library/tracks/:id/stream
-            (path.startsWith("/api/library/tracks/") &&
-                path.endsWith("/stream")) ||
             // Podcast streaming: /api/podcasts/:podcastId/episodes/:episodeId/stream
             (path.startsWith("/api/podcasts/") && path.endsWith("/stream")) ||
             // Soulseek search polling: /api/soulseek/search/:searchId (no /status suffix)
@@ -153,15 +157,40 @@ export const oidcFlowLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
-// Image and cover-art requests use a separate high-volume budget so large
-// grids and offline image caching cannot consume the metadata API budget.
+// Library metadata keeps the general API ceiling but skips media paths using
+// the path visible inside the mounted /api/library router.
+export const libraryMetadataLimiter = rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: LIBRARY_METADATA_RATE_LIMIT_MAX,
+    message: "Too many library metadata requests, please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => isLibraryMediaPath(req.path),
+    ...trustProxyValidation,
+});
+
+// External image proxies retain the original per-process budget because cache
+// misses amplify into bounded but expensive upstream fetches.
 export const imageLimiter = rateLimit({
     windowMs: RATE_LIMIT_WINDOW_MS,
-    max: IMAGE_RATE_LIMIT_MAX,
+    max: IMAGE_PROXY_RATE_LIMIT_MAX,
     message: "Too many image requests, please slow down.",
     standardHeaders: true,
     legacyHeaders: false,
-    ...createRedisRateLimitOptions("image-surface", { fallback: "memory" }),
+    ...trustProxyValidation,
+});
+
+// Local covers use a high-volume shared budget so grids and offline caching do
+// not consume metadata capacity across backend replicas.
+export const coverArtLimiter = rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: COVER_ART_RATE_LIMIT_MAX,
+    message: "Too many cover art requests, please slow down.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...createRedisRateLimitOptions(COVER_ART_RATE_LIMIT_NAMESPACE, {
+        fallback: "memory",
+    }),
     ...trustProxyValidation,
 });
 
@@ -173,7 +202,7 @@ export const streamingLimiter = rateLimit({
     message: "Too many streaming requests, please slow down.",
     standardHeaders: true,
     legacyHeaders: false,
-    ...createRedisRateLimitOptions("streaming-surface", {
+    ...createRedisRateLimitOptions(STREAMING_RATE_LIMIT_NAMESPACE, {
         fallback: "memory",
     }),
     ...trustProxyValidation,

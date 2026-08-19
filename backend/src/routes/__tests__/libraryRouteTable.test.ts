@@ -1,4 +1,55 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import rateLimit from "express-rate-limit";
+import { isLibraryMediaPath } from "../../middleware/libraryRateLimitPaths";
+
+const METADATA_TEST_MAX = 2;
+const COVER_TEST_MAX = 1;
+const STREAMING_TEST_MAX = 2;
+const EXPECTED_LIBRARY_ROUTE_COUNT = 39;
+const MAX_STATUS_REQUESTS = 3;
+const mockMiddlewareTrace = new Map<string, string[]>();
+
+function traceMiddleware(req: Request, name: string): void {
+    const key = String(req.headers["x-test-key"] ?? "missing");
+    const trace = mockMiddlewareTrace.get(key) ?? [];
+    trace.push(name);
+    mockMiddlewareTrace.set(key, trace);
+}
+
+function namedLimiter(
+    name: string,
+    max: number,
+    skip?: (req: Request) => boolean,
+): RequestHandler {
+    const limiter = rateLimit({
+        windowMs: 60_000,
+        max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        keyGenerator: (req) => String(req.headers["x-test-key"] ?? "missing"),
+        skip,
+        validate: { keyGeneratorIpFallback: false, trustProxy: false },
+    });
+    return Object.defineProperty(
+        (req: Request, res: Response, next: NextFunction) => {
+            if (!skip?.(req)) traceMiddleware(req, name);
+            limiter(req, res, next);
+        },
+        "name",
+        { value: name },
+    );
+}
+
+const mockLibraryMetadataLimiter = namedLimiter(
+    "libraryMetadataLimiter",
+    METADATA_TEST_MAX,
+    (req) => isLibraryMediaPath(req.path),
+);
+const mockCoverArtLimiter = namedLimiter("coverArtLimiter", COVER_TEST_MAX);
+const mockStreamingLimiter = namedLimiter(
+    "streamingLimiter",
+    STREAMING_TEST_MAX,
+);
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: function requireAuth(
@@ -16,36 +67,18 @@ jest.mock("../../middleware/auth", () => ({
         next();
     },
     requireAuthOrToken: function requireAuthOrToken(
-        _req: Request,
-        _res: Response,
-        next: NextFunction,
+        req: Request,
+        res: Response,
     ) {
-        next();
+        traceMiddleware(req, "requireAuthOrToken");
+        res.status(401).json({ error: "Not authenticated" });
     },
 }));
 
 jest.mock("../../middleware/rateLimiter", () => ({
-    apiLimiter: function apiLimiter(
-        _req: Request,
-        _res: Response,
-        next: NextFunction,
-    ) {
-        next();
-    },
-    imageLimiter: function imageLimiter(
-        _req: Request,
-        _res: Response,
-        next: NextFunction,
-    ) {
-        next();
-    },
-    streamingLimiter: function streamingLimiter(
-        _req: Request,
-        _res: Response,
-        next: NextFunction,
-    ) {
-        next();
-    },
+    coverArtLimiter: mockCoverArtLimiter,
+    libraryMetadataLimiter: mockLibraryMetadataLimiter,
+    streamingLimiter: mockStreamingLimiter,
 }));
 
 jest.mock("../../middleware/asyncHandler", () => ({
@@ -75,18 +108,11 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
-jest.mock("../../utils/redis", () => ({
-    redisClient: {},
-}));
-
-jest.mock("../../workers/queues", () => ({
-    scanQueue: {},
-}));
-
+jest.mock("../../utils/redis", () => ({ redisClient: {} }));
+jest.mock("../../workers/queues", () => ({ scanQueue: {} }));
 jest.mock("../../workers/organizeSingles", () => ({
     organizeSingles: jest.fn(),
 }));
-
 jest.mock("../../services/lastfm", () => ({ lastFmService: {} }));
 jest.mock("../../services/fanart", () => ({ fanartService: {} }));
 jest.mock("../../services/deezer", () => ({ deezerService: {} }));
@@ -139,10 +165,6 @@ interface RouteTableEntry {
     middleware: string[];
 }
 
-interface EffectiveRouteEntry extends RouteTableEntry {
-    inheritedMiddleware: string[];
-}
-
 interface RouterMiddlewareEntry {
     middleware: string;
     path: "(router-level)";
@@ -151,6 +173,17 @@ interface RouterMiddlewareEntry {
 type RegisteredRouteLayer = RouteLayer & {
     route: NonNullable<RouteLayer["route"]>;
 };
+
+const limiterNames = new Set([
+    "coverArtLimiter",
+    "libraryMetadataLimiter",
+    "streamingLimiter",
+]);
+const coverPaths = new Set([
+    "/cover-art{/:id}",
+    "/album-cover/:mbid",
+    "/cover-art-colors",
+]);
 
 const isNamedFunction = (name: string | undefined): name is string =>
     Boolean(name && name !== "<anonymous>");
@@ -162,8 +195,7 @@ const getRouteLayers = (): RegisteredRouteLayer[] =>
     flattenLibraryRouteLayers(router) as RegisteredRouteLayer[];
 
 const buildRouteTable = (): Array<RouteTableEntry | RouterMiddlewareEntry> => {
-    const stack = getRouterStack();
-    const routerMiddleware = stack
+    const routerMiddleware = getRouterStack()
         .filter((layer) => layer.handle && !layer.route)
         .filter((layer) => !layer.handle?.stack)
         .map((layer) => ({
@@ -186,47 +218,10 @@ const buildRouteTable = (): Array<RouteTableEntry | RouterMiddlewareEntry> => {
     return [...routerMiddleware, ...routes];
 };
 
-const getTerminalHandlerNames = (): string[] => {
-    return getRouteLayers().map(
+const getTerminalHandlerNames = (): string[] =>
+    getRouteLayers().map(
         (layer) => layer.route.stack.at(-1)?.handle?.name ?? "",
     );
-};
-
-const buildEffectiveRouteTable = (): EffectiveRouteEntry[] => {
-    const routes: EffectiveRouteEntry[] = [];
-    const visit = (stack: RouteLayer[], inherited: string[]): void => {
-        const active = [...inherited];
-        for (const layer of stack) {
-            if (layer.route) {
-                const middleware = layer.route.stack
-                    .slice(0, -1)
-                    .map((routeLayer) => routeLayer.handle?.name)
-                    .filter(isNamedFunction);
-                for (const method of Object.keys(layer.route.methods)) {
-                    if (layer.route.methods[method]) {
-                        routes.push({
-                            method: method.toUpperCase(),
-                            path: layer.route.path,
-                            middleware,
-                            inheritedMiddleware: [...active],
-                        });
-                    }
-                }
-                continue;
-            }
-            if (layer.handle?.stack) {
-                visit(layer.handle.stack, active);
-                continue;
-            }
-            if (isNamedFunction(layer.handle?.name)) {
-                active.push(layer.handle.name);
-            }
-        }
-    };
-
-    visit(getRouterStack(), []);
-    return routes;
-};
 
 const handlerModules = [
     maintenance,
@@ -242,12 +237,110 @@ const handlerModules = [
     radioPlaylists,
 ];
 
+function testPath(routePath: string): string {
+    return routePath.replace("{/:id}", "/item-1").replace(/:[^/]+/g, "item-1");
+}
+
+function expectedLimiter(routePath: string): string {
+    if (coverPaths.has(routePath)) return "coverArtLimiter";
+    if (routePath === "/tracks/:id/stream") return "streamingLimiter";
+    return "libraryMetadataLimiter";
+}
+
+function createRequest(method: string, path: string, key: string): Request {
+    const req = {
+        app: { get: () => false },
+        headers: { "x-test-key": key },
+        method,
+        originalUrl: path,
+        socket: { remoteAddress: "127.0.0.1" },
+        url: path,
+    } as unknown as Request;
+    Object.defineProperty(req, "path", {
+        configurable: true,
+        get: () => new URL(req.url, "http://localhost").pathname,
+    });
+    return req;
+}
+
+function createResponse(resolve: (status: number) => void): Response {
+    const headers = new Map<string, number | string | readonly string[]>();
+    const res = {
+        headersSent: false,
+        statusCode: 200,
+        appendHeader(name: string, value: string) {
+            headers.set(name.toLowerCase(), value);
+            return this;
+        },
+        end() {
+            this.headersSent = true;
+            resolve(this.statusCode);
+            return this;
+        },
+        getHeader(name: string) {
+            return headers.get(name.toLowerCase());
+        },
+        json() {
+            return this.end();
+        },
+        removeHeader(name: string) {
+            headers.delete(name.toLowerCase());
+        },
+        send() {
+            return this.end();
+        },
+        setHeader(name: string, value: number | string | readonly string[]) {
+            headers.set(name.toLowerCase(), value);
+            return this;
+        },
+        status(statusCode: number) {
+            this.statusCode = statusCode;
+            return this;
+        },
+    };
+    return res as unknown as Response;
+}
+
+async function send(
+    method: string,
+    path: string,
+    key: string,
+): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+        const req = createRequest(method, path, key);
+        const res = createResponse(resolve);
+        router(req, res, (error?: unknown) => {
+            if (error) reject(error);
+            else resolve(res.statusCode);
+        });
+    });
+}
+
+async function statuses(
+    method: string,
+    path: string,
+    key: string,
+    count: number,
+): Promise<number[]> {
+    if (count < 1 || count > MAX_STATUS_REQUESTS) {
+        throw new RangeError(
+            `count must be between 1 and ${MAX_STATUS_REQUESTS}`,
+        );
+    }
+    const results: number[] = [];
+    for (let index = 0; index < MAX_STATUS_REQUESTS; index += 1) {
+        if (index >= count) break;
+        results.push(await send(method, path, key));
+    }
+    return results;
+}
+
 describe("library route table", () => {
     it("matches the locked route surface", () => {
         const table = buildRouteTable();
         const routeCount = table.filter((entry) => "method" in entry).length;
 
-        expect(routeCount).toBe(39);
+        expect(routeCount).toBe(EXPECTED_LIBRARY_ROUTE_COUNT);
         expect(table).toMatchSnapshot();
     });
 
@@ -262,45 +355,73 @@ describe("library route table", () => {
             )
             .map((handler) => handler.name);
 
-        expect(handlerNames).toHaveLength(39);
+        expect(handlerNames).toHaveLength(EXPECTED_LIBRARY_ROUTE_COUNT);
         expect(handlerNames.every((name) => /^handle[A-Z]/.test(name))).toBe(
             true,
         );
         expect(new Set(exportedHandlerNames)).toEqual(new Set(handlerNames));
     });
 
-    it("assigns every handler to exactly one rate-limit class", () => {
-        const limiterNames = new Set([
-            "apiLimiter",
-            "imageLimiter",
-            "streamingLimiter",
-        ]);
-        const coverPaths = new Set([
-            "/cover-art{/:id}",
-            "/album-cover/:mbid",
-            "/cover-art-colors",
-        ]);
+    it("routes every registered handler through exactly one limiter class", async () => {
+        const registeredRoutes = buildRouteTable().filter(
+            (route): route is RouteTableEntry => "method" in route,
+        );
+        expect(registeredRoutes).toHaveLength(EXPECTED_LIBRARY_ROUTE_COUNT);
+        for (let index = 0; index < EXPECTED_LIBRARY_ROUTE_COUNT; index += 1) {
+            const route = registeredRoutes[index];
+            if (!route)
+                throw new Error(`missing library route at index ${index}`);
+            const key = `route-${route.method}-${route.path}`;
 
-        for (const route of buildEffectiveRouteTable()) {
-            const appliedLimiters = [
-                ...route.inheritedMiddleware,
-                ...route.middleware,
-            ].filter((name) => limiterNames.has(name));
-            const expectedLimiter = coverPaths.has(route.path)
-                ? "imageLimiter"
-                : route.path === "/tracks/:id/stream"
-                  ? "streamingLimiter"
-                  : "apiLimiter";
+            await send(route.method, testPath(route.path), key);
 
-            expect({
-                method: route.method,
-                path: route.path,
-                appliedLimiters,
-            }).toEqual({
-                method: route.method,
-                path: route.path,
-                appliedLimiters: [expectedLimiter],
-            });
+            expect(
+                mockMiddlewareTrace
+                    .get(key)
+                    ?.filter((name) => limiterNames.has(name)),
+            ).toEqual([expectedLimiter(route.path)]);
         }
+    });
+
+    it("keeps cover and stream requests available after metadata exhaustion", async () => {
+        const key = "metadata-isolation";
+
+        expect(
+            await statuses("GET", "/tracks/item-1/preference", key, 3),
+        ).toEqual([401, 401, 429]);
+        expect(await send("GET", "/tracks/item-1/stream", key)).toBe(401);
+        expect(await send("GET", "/cover-art/item-1", key)).toBe(401);
+    });
+
+    it("keeps metadata available after cover exhaustion", async () => {
+        const key = "cover-isolation";
+
+        expect(await statuses("GET", "/cover-art/item-1", key, 2)).toEqual([
+            401, 429,
+        ]);
+        expect(await send("GET", "/tracks/item-1", key)).toBe(401);
+    });
+
+    it("counts an after-media metadata request exactly once", async () => {
+        expect(
+            await statuses(
+                "GET",
+                "/tracks/item-1/preference",
+                "single-metadata-count",
+                3,
+            ),
+        ).toEqual([401, 401, 429]);
+    });
+
+    it("counts unauthenticated requests before authentication", async () => {
+        const key = "limiter-before-auth";
+
+        expect(await statuses("GET", "/tracks", key, 3)).toEqual([
+            401, 401, 429,
+        ]);
+        expect(mockMiddlewareTrace.get(key)?.slice(0, 2)).toEqual([
+            "libraryMetadataLimiter",
+            "requireAuthOrToken",
+        ]);
     });
 });

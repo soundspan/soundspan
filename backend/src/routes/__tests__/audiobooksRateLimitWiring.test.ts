@@ -26,7 +26,7 @@ function namedLimiter(name: string, max: number): RequestHandler {
 }
 
 const apiLimiter = namedLimiter("apiLimiter", API_TEST_MAX);
-const imageLimiter = namedLimiter("imageLimiter", 5);
+const coverArtLimiter = namedLimiter("coverArtLimiter", 5);
 const streamingLimiter = namedLimiter("streamingLimiter", STREAMING_TEST_MAX);
 
 jest.mock("../../middleware/auth", () => ({
@@ -42,7 +42,7 @@ jest.mock("../../middleware/auth", () => ({
 
 jest.mock("../../middleware/rateLimiter", () => ({
     apiLimiter,
-    imageLimiter,
+    coverArtLimiter,
     streamingLimiter,
 }));
 
@@ -94,13 +94,14 @@ type RouteLayer = {
 type LimitedRoute = {
     handlers: RequestHandler[];
     method: string;
+    middlewareOrder: string[];
     path: string;
     limiters: string[];
 };
 
 const limiterNames = new Set([
     "apiLimiter",
-    "imageLimiter",
+    "coverArtLimiter",
     "streamingLimiter",
 ]);
 
@@ -110,9 +111,12 @@ function collectLimitedRoutes(): LimitedRoute[] {
         const active = [...inherited];
         for (const layer of stack) {
             if (layer.route) {
-                const routeLimiters = layer.route.stack
-                    .map((entry) => entry.handle?.name ?? "")
-                    .filter((name) => limiterNames.has(name));
+                const middlewareOrder = layer.route.stack.map(
+                    (entry) => entry.handle?.name ?? "",
+                );
+                const routeLimiters = middlewareOrder.filter((name) =>
+                    limiterNames.has(name),
+                );
                 for (const method of Object.keys(layer.route.methods)) {
                     if (layer.route.methods[method]) {
                         routes.push({
@@ -123,6 +127,7 @@ function collectLimitedRoutes(): LimitedRoute[] {
                                     : [],
                             ),
                             method: method.toUpperCase(),
+                            middlewareOrder,
                             path: layer.route.path,
                             limiters: [...active, ...routeLimiters].filter(
                                 (name) => limiterNames.has(name),
@@ -205,11 +210,14 @@ describe("audiobook rate-limit wiring", () => {
         expect(routes).toHaveLength(11);
         for (const route of routes) {
             const expectedLimiter = route.path.endsWith("/cover")
-                ? "imageLimiter"
+                ? "coverArtLimiter"
                 : route.path.endsWith("/stream")
                   ? "streamingLimiter"
                   : "apiLimiter";
             expect(route.limiters).toEqual([expectedLimiter]);
+            expect(route.middlewareOrder.indexOf(expectedLimiter)).toBeLessThan(
+                route.middlewareOrder.indexOf("requireAuthOrToken"),
+            );
         }
     });
 
