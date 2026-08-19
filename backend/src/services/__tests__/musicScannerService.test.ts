@@ -84,7 +84,7 @@ const mockCreateMapping = jest.fn();
 const mockRecomputeAlbumLoudness = jest.fn();
 const mockConfig = {
     music: { transcodeCachePath: "/cache/transcodes" },
-    workers: { trackRemovalRetentionDays: 90 },
+    workers: { trackRemovalRetentionDays: 90, providerTrackRetentionDays: 30 },
     features: { federation: false },
 };
 
@@ -172,6 +172,8 @@ const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
 const { isLossyAudioCodec } =
     require("../libraryHealthDashboard/qualityOutliers") as typeof import("../libraryHealthDashboard/qualityOutliers");
+const { parentHasNoLiveProviderTracksWhere } =
+    require("../providerTrackRetention") as typeof import("../providerTrackRetention");
 
 interface TestIdentityTrack {
     id: string;
@@ -1989,12 +1991,18 @@ describe("MusicScannerService.scanLibrary", () => {
                 detail: null,
             },
         });
-        expect(mockPrisma.album.findMany).toHaveBeenCalledWith({
+        const orphanAlbumQuery = mockPrisma.album.findMany.mock.calls.find(
+            ([args]: [{ where?: { tracksTidal?: unknown } }]) =>
+                args?.where?.tracksTidal,
+        )?.[0];
+        const orphanCutoff = orphanAlbumQuery?.where?.tracksTidal?.none?.NOT
+            ?.createdAt?.lt as Date;
+        expect(orphanCutoff).toBeInstanceOf(Date);
+        expect(orphanAlbumQuery).toEqual({
             where: {
                 peerId: null,
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...parentHasNoLiveProviderTracksWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -2004,8 +2012,7 @@ describe("MusicScannerService.scanLibrary", () => {
             where: {
                 peerId: null,
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...parentHasNoLiveProviderTracksWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -2026,13 +2033,17 @@ describe("MusicScannerService.scanLibrary", () => {
 
         await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
+        const guardedAlbumDelete =
+            mockPrisma.album.deleteMany.mock.calls[0]?.[0];
+        const deleteCutoff = guardedAlbumDelete?.where?.tracksTidal?.none?.NOT
+            ?.createdAt?.lt as Date;
+        expect(deleteCutoff).toBeInstanceOf(Date);
+        expect(guardedAlbumDelete).toEqual({
             where: {
                 id: { in: ["album-1"] },
                 peerId: null,
                 tracks: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...parentHasNoLiveProviderTracksWhere(deleteCutoff),
             },
         });
         expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
@@ -2040,8 +2051,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 id: { in: ["artist-1"] },
                 peerId: null,
                 albums: { none: {} },
-                tracksTidal: { none: {} },
-                tracksYtMusic: { none: {} },
+                ...parentHasNoLiveProviderTracksWhere(deleteCutoff),
             },
         });
     });
