@@ -20,7 +20,10 @@ import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudio
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksList";
-import { deriveDiscoverySelection } from "@/features/search/discoverySelection";
+import {
+    deriveDiscoverySelection,
+    normalizeArtistName,
+} from "@/features/search/discoverySelection";
 import { AliasResolutionBanner } from "@/features/search/components/AliasResolutionBanner";
 import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsList";
 import { TVSearchInput } from "@/features/search/components/TVSearchInput";
@@ -121,6 +124,11 @@ export default function SearchPage() {
         filterTab === "all" || filterTab === "library" || filterTab === "peers";
     const showDiscover = filterTab === "all" || filterTab === "discover";
     const showSoulseek = filterTab === "all" || filterTab === "soulseek";
+    // Only offer the library artist as a top result when the active
+    // filter shows library sources at all.
+    const visibleLibraryTopArtist = showLibrary
+        ? libraryResults?.artists?.[0]
+        : undefined;
     // An exact-name external match beats a fuzzy library match, so
     // searching "Drake" surfaces Drake rather than an owned "Nick Drake".
     const {
@@ -132,9 +140,18 @@ export default function SearchPage() {
         discoverResults,
         query,
         aliasCanonical: aliasInfo?.canonical,
-        libraryTopName: libraryResults?.artists?.[0]?.name ?? null,
+        libraryTopName: visibleLibraryTopArtist?.name ?? null,
         showDiscover,
     });
+    // Related Artists should never repeat the artist shown as top result.
+    const visibleSimilarArtists = topArtist
+        ? similarArtists.filter(
+              (candidate) =>
+                  normalizeArtistName(candidate.name) !==
+                      normalizeArtistName(topArtist.name) &&
+                  (!candidate.mbid || candidate.mbid !== topArtist.mbid),
+          )
+        : similarArtists;
     const isLoading =
         isLibrarySearching ||
         isDiscoverSearching ||
@@ -151,7 +168,7 @@ export default function SearchPage() {
         libraryPodcasts.length > 0 || discoverPodcastResults.length > 0;
 
     // Determine if we should show the 2-column layout
-    const hasTopResult = libraryResults?.artists?.[0] || topArtist;
+    const hasTopResult = visibleLibraryTopArtist || topArtist;
     const hasTracks = libraryTracks.length > 0 || soulseekResults.length > 0;
     const show2ColumnLayout =
         hasSearched &&
@@ -309,7 +326,7 @@ export default function SearchPage() {
                         {/* Left Column: Top Result */}
                         <div>
                             <TopResult
-                                libraryArtist={libraryResults?.artists?.[0]}
+                                libraryArtist={visibleLibraryTopArtist}
                                 discoveryArtist={topArtist}
                                 preferDiscovery={preferDiscoveryTopResult}
                             />
@@ -390,9 +407,7 @@ export default function SearchPage() {
                             !isPodcastTab && (
                                 <div>
                                     <TopResult
-                                        libraryArtist={
-                                            libraryResults?.artists?.[0]
-                                        }
+                                        libraryArtist={visibleLibraryTopArtist}
                                         discoveryArtist={topArtist}
                                         preferDiscovery={
                                             preferDiscoveryTopResult
@@ -583,9 +598,9 @@ export default function SearchPage() {
                     showDiscover &&
                     !isPodcastTab &&
                     (sectionView === null || isArtistsView) &&
-                    similarArtists.length > 0 && (
+                    visibleSimilarArtists.length > 0 && (
                         <SimilarArtistsGrid
-                            similarArtists={similarArtists}
+                            similarArtists={visibleSimilarArtists}
                             titleHref={sectionViewLinks.artists}
                         />
                     )}
@@ -598,9 +613,11 @@ export default function SearchPage() {
                         : !topArtist &&
                           secondaryDiscoverArtists.length === 0 &&
                           discoverTracks.length === 0 &&
-                          discoverPodcastResults.length === 0 &&
-                          soulseekResults.length === 0 &&
-                          (!libraryResults ||
+                          (!showPodcastResults ||
+                              discoverPodcastResults.length === 0) &&
+                          (!showSoulseek || soulseekResults.length === 0) &&
+                          (!showLibrary ||
+                              !libraryResults ||
                               (!libraryResults.artists?.length &&
                                   !libraryResults.albums?.length &&
                                   !libraryResults.tracks?.length &&

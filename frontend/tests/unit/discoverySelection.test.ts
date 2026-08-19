@@ -61,10 +61,25 @@ test("an exact library match keeps the library artist on top", () => {
 });
 
 test("alias-corrected queries count as exact matches", () => {
+    // "beatles" only matches "The Beatles" through the alias canonical,
+    // not through normalization, so this pins the alias path itself.
     const selection = deriveDiscoverySelection({
-        discoverResults: [artist("Björk", "mbid-b")],
+        discoverResults: [artist("The Beatles", "mbid-b")],
+        query: "beatles",
+        aliasCanonical: "The Beatles",
+        libraryTopName: "Beatallica",
+        showDiscover: true,
+    });
+
+    assert.equal(selection.topArtist?.name, "The Beatles");
+    assert.equal(selection.preferDiscovery, true);
+});
+
+test("diacritic-only differences count as exact without an alias", () => {
+    const selection = deriveDiscoverySelection({
+        discoverResults: [artist("Björk", "mbid-bj")],
         query: "bjork",
-        aliasCanonical: "Björk",
+        aliasCanonical: null,
         libraryTopName: "Bjorn Again",
         showDiscover: true,
     });
