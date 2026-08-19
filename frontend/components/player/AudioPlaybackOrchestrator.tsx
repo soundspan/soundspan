@@ -143,10 +143,6 @@ export const AudioPlaybackOrchestrator = memo(
             trackEndWatchdogRef,
             howlerLoadStartMsRef,
             heartbeatRef,
-            transientTrackRecoveryLoadListenerRef,
-            transientTrackRecoveryTrackIdRef,
-            transientTrackRecoveryAttemptRef,
-            transientTrackRecoveryWindowStartedAtRef,
         } = orchestratorRefs;
         const applyCurrentOutputState = H.useApplyCurrentOutputState({
             refs: orchestratorRefs,
@@ -162,6 +158,7 @@ export const AudioPlaybackOrchestrator = memo(
             resolveBufferedAheadSec,
             clearStartupPlaybackRecovery,
             clearTransientTrackRecovery,
+            settleTransientRecoveryAfterLoad,
         } = playbackRecoveryHelpers;
         const {
             scheduleStartupPlaybackRecovery,
@@ -347,20 +344,7 @@ export const AudioPlaybackOrchestrator = memo(
                         isRemoteStream: isRemote,
                     }),
                 );
-                if (transientTrackRecoveryLoadListenerRef.current) {
-                    // A transient-recovery reload is completing. Its
-                    // correlated-resume listener is registered after this
-                    // stable handler on the same live listener set — a full
-                    // clear here would delete it before it runs (Set entries
-                    // removed mid-iteration are never visited). Reset only
-                    // the attempt budget and let the listener clean itself
-                    // up after applying the guarded resume position.
-                    transientTrackRecoveryTrackIdRef.current = null;
-                    transientTrackRecoveryAttemptRef.current = 0;
-                    transientTrackRecoveryWindowStartedAtRef.current = 0;
-                } else {
-                    clearTransientTrackRecovery(true);
-                }
+                settleTransientRecoveryAfterLoad();
 
                 const desiredLoadPlay = desiredLoadPlayRef.current;
                 const shouldPlayAfterLoad = Boolean(
@@ -1156,14 +1140,10 @@ export const AudioPlaybackOrchestrator = memo(
                 consecutiveErrorBreakerRef.current.reset();
             }
             loadTimeoutRetryCountRef.current = 0;
-            if (playbackType === "track" && currentTrack) {
-                markStartupStabilityWindow(
-                    currentTrack.id,
-                    "track_load_started",
-                );
-            } else {
-                markStartupStabilityWindow(null, "non_track_load_started");
-            }
+            markStartupStabilityWindow(
+                playbackType === "track" ? (currentTrack?.id ?? null) : null,
+                "track_load_started",
+            );
 
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);

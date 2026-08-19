@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `DISCOVERY_MODE=legacy` is deprecated, no longer receives fixes, and will be removed in a future release; unset `DISCOVERY_MODE` to migrate.
 
+### Fixed
+
+- Transient playback recovery now resumes correctly after its automatic reload: the recovery listener was previously cancelled before it could restart playback, and a stale pre-failure position can no longer be restored before the track has made real startup progress.
+
 ### Removed
 
 - The Tauri desktop integration: the `tauri-native` engine mode, the desktop auto-upgrade path, and the `@tauri-apps/*` dependencies. The discontinued desktop app never lived in this repository, and the integration was dead code in every shipping deployment; playback continues on the standard web engines.

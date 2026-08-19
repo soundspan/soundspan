@@ -142,6 +142,26 @@ export function usePlaybackRecoveryHelpers({
         [],
     );
 
+    /**
+     * Settles transient-recovery state when a load completes. While a
+     * correlated-resume listener is pending it must survive this call: it
+     * is registered after the stable load handler on the same live
+     * listener set, and a full clear would delete it before it runs (Set
+     * entries removed mid-iteration are never visited). Only the attempt
+     * budget resets; the listener applies the guarded resume position and
+     * cleans itself up.
+     */
+    const settleTransientRecoveryAfterLoad = useCallback(() => {
+        if (transientTrackRecoveryLoadListenerRef.current) {
+            transientTrackRecoveryTrackIdRef.current = null;
+            transientTrackRecoveryAttemptRef.current = 0;
+            transientTrackRecoveryWindowStartedAtRef.current = 0;
+            return;
+        }
+        clearTransientTrackRecovery(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
+    }, [clearTransientTrackRecovery]);
+
     return {
         clearPendingTrackErrorSkip,
         readTrustedTrackPositionSec,
@@ -149,5 +169,6 @@ export function usePlaybackRecoveryHelpers({
         resolveBufferedAheadSec,
         clearStartupPlaybackRecovery,
         clearTransientTrackRecovery,
+        settleTransientRecoveryAfterLoad,
     };
 }
