@@ -53,9 +53,20 @@ class DatabaseConnection:
         """Establish a database connection with explicit UTF-8 encoding."""
         if not self.url:
             raise ValueError("DATABASE_URL not set")
-        self.conn = psycopg2.connect(self.url, options="-c client_encoding=UTF8")
-        self.conn.set_client_encoding("UTF8")
-        self.conn.autocommit = False
+        connection = psycopg2.connect(self.url, options="-c client_encoding=UTF8")
+        try:
+            connection.set_client_encoding("UTF8")
+            connection.autocommit = False
+        except Exception:
+            try:
+                connection.close()
+            except Exception:
+                logger.debug(
+                    "Ignoring error while closing an uninitialized PostgreSQL connection",
+                    exc_info=True,
+                )
+            raise
+        self.conn = connection
         logger.info("Connected to PostgreSQL with UTF-8 encoding")
 
     def get_cursor(self) -> _DatabaseCursor:
@@ -72,13 +83,13 @@ class DatabaseConnection:
 
     def commit(self) -> None:
         """Commit once, resetting future work after a connection failure."""
-        if self.conn is None:
-            return
-        if self.conn.closed:
+        connection = self.conn
+        if connection is None:
+            raise psycopg2.InterfaceError("Cannot commit without a PostgreSQL connection")
+        if connection.closed:
             self.conn = None
-            return
+            raise psycopg2.InterfaceError("Cannot commit a closed PostgreSQL connection")
         try:
-            connection = self.conn
             connection.commit()
         except (psycopg2.InterfaceError, psycopg2.OperationalError):
             self._discard_connection()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
@@ -98,4 +99,34 @@ def test_save_results_rolls_back_and_closes_cursor_on_database_error(
     assert len(database.cursor.executions) == 1
     assert database.commit_calls == 0
     assert database.rollback_calls == 1
+    assert database.close_calls == 1
     assert database.cursor.closed is True
+
+
+def test_completed_future_commit_error_uses_retryable_failure_path(
+    loaded_analyzer: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count a failed commit as retryable work and record the track failure."""
+    database = FakeDatabaseConnection(
+        commit_error=loaded_analyzer.psycopg2.OperationalError("commit lost connection")
+    )
+    worker = _build_worker(loaded_analyzer, database)
+    failures: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr(
+        worker,
+        "_save_failed",
+        lambda track_id, error, permanent=False: failures.append(
+            (track_id, error, permanent)
+        ),
+    )
+    future: Future[tuple[str, str, dict[str, Any]]] = Future()
+    future.set_result(("track-a", "/music/a.flac", _analysis_features()))
+
+    outcome = worker._save_completed_future(future)
+
+    assert outcome == ("track-a", 0, 1, 0)
+    assert failures == [("track-a", "Failed to persist analysis results", False)]
+    assert database.commit_calls == 1
+    assert database.rollback_calls == 1
+    assert database.close_calls == 1

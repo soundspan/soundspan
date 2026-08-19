@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from hashlib import sha256
 from typing import Any, Literal, Protocol, TypedDict
@@ -22,10 +23,10 @@ logger = configure_service_logger("audio-analyzer").getChild("LoudnessBackfill")
 LOUDNESS_ATTEMPT_KEY_PREFIX = "audio:analysis:loudness:attempts:"
 LOUDNESS_OUTCOME_KEY_PREFIX = "audio:analysis:loudness:outcomes:"
 LOUDNESS_BACKFILL_MAX_FAILURES = 3
-MAX_LOUDNESS_ATTEMPT_KEY_BYTES = 160
 LOUDNESS_ATTEMPT_TTL_SECONDS = 30 * 24 * 60 * 60
 LOUDNESS_TRANSIENT_COOLDOWN_SECONDS = 24 * 60 * 60
 PERMANENT_FAILURE_MARKER = "permanent"
+_PRODUCER_ATTEMPT_KEY_SUFFIX = re.compile(r"[0-9a-f]{64}")
 
 _INCREMENT_FAILURES_SCRIPT = """
 local attempts = redis.call("INCR", KEYS[1])
@@ -301,12 +302,10 @@ def _legacy_attempt_key(track_id: str) -> str:
 def _attempt_key_for_job(job: AnalysisQueueJob) -> str:
     """Return a validated producer key or a bounded compatibility fallback."""
     attempt_key = job.get("loudnessAttemptKey")
-    if (
-        isinstance(attempt_key, str)
-        and attempt_key.startswith(LOUDNESS_ATTEMPT_KEY_PREFIX)
-        and len(attempt_key.encode("utf-8")) <= MAX_LOUDNESS_ATTEMPT_KEY_BYTES
-    ):
-        return attempt_key
+    if isinstance(attempt_key, str) and attempt_key.startswith(LOUDNESS_ATTEMPT_KEY_PREFIX):
+        suffix = attempt_key[len(LOUDNESS_ATTEMPT_KEY_PREFIX) :]
+        if _PRODUCER_ATTEMPT_KEY_SUFFIX.fullmatch(suffix) is not None:
+            return attempt_key
     track_id = job["trackId"]
     if "loudnessAttemptKey" in job:
         logger.warning(

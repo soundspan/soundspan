@@ -19,15 +19,25 @@ class FakeConnection:
         closed: bool = False,
         commit_error: Exception | None = None,
         rollback_error: Exception | None = None,
+        encoding_error: Exception | None = None,
     ) -> None:
         self.closed = closed
+        self.autocommit = True
         self.cursor_results = list(cursor_results or [])
         self.commit_error = commit_error
         self.rollback_error = rollback_error
+        self.encoding_error = encoding_error
+        self.client_encodings: list[str] = []
         self.cursor_calls = 0
         self.commit_calls = 0
         self.rollback_calls = 0
         self.close_calls = 0
+
+    def set_client_encoding(self, encoding: str) -> None:
+        """Record client setup and raise its programmed failure."""
+        self.client_encodings.append(encoding)
+        if self.encoding_error is not None:
+            raise self.encoding_error
 
     def cursor(self, *, cursor_factory: object) -> object:
         """Return or raise the next programmed cursor result."""
@@ -93,6 +103,27 @@ def test_get_cursor_reconnects_when_connection_is_closed(
 
     assert cursor is expected_cursor
     assert len(connect_calls) == 1
+
+
+def test_connect_does_not_publish_connection_when_client_setup_fails(
+    loaded_analyzer: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Close a partially configured connection without publishing it."""
+    connection = FakeConnection(encoding_error=RuntimeError("encoding setup failed"))
+    database = loaded_analyzer.DatabaseConnection("postgresql://test")
+    monkeypatch.setattr(
+        loaded_analyzer.psycopg2,
+        "connect",
+        lambda *_args, **_kwargs: connection,
+    )
+
+    with pytest.raises(RuntimeError, match="encoding setup failed"):
+        database.connect()
+
+    assert database.conn is None
+    assert connection.client_encodings == ["UTF8"]
+    assert connection.close_calls == 1
 
 
 def test_get_cursor_reconnects_once_after_interface_error(
@@ -192,6 +223,31 @@ def test_commit_connection_error_propagates_without_retry(
 
     assert connection.commit_calls == 1
     assert connection.close_calls == 1
+    assert database.conn is None
+
+
+def test_commit_without_connection_raises_interface_error(
+    loaded_analyzer: ModuleType,
+) -> None:
+    """Reject a commit when no transaction-owning connection exists."""
+    database = loaded_analyzer.DatabaseConnection("postgresql://test")
+
+    with pytest.raises(loaded_analyzer.psycopg2.InterfaceError, match="commit"):
+        database.commit()
+
+
+def test_commit_with_closed_connection_raises_interface_error(
+    loaded_analyzer: ModuleType,
+) -> None:
+    """Reject a commit after the transaction-owning connection has closed."""
+    connection = FakeConnection(closed=True)
+    database = loaded_analyzer.DatabaseConnection("postgresql://test")
+    database.conn = connection
+
+    with pytest.raises(loaded_analyzer.psycopg2.InterfaceError, match="commit"):
+        database.commit()
+
+    assert connection.commit_calls == 0
     assert database.conn is None
 
 

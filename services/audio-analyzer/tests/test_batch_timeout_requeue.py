@@ -201,7 +201,11 @@ def test_handle_batch_timeout_drains_requeues_and_fails_by_attempt_state(
     saved_failures: list[tuple[str, str, bool]] = []
     requeues: list[tuple[list[tuple[str, str]], str]] = []
 
-    monkeypatch.setattr(worker, "_save_results", lambda *args: saved_results.append(args))
+    monkeypatch.setattr(
+        worker,
+        "_save_results",
+        lambda *args: (saved_results.append(args) or True),
+    )
     monkeypatch.setattr(
         worker,
         "_save_failed",

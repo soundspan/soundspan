@@ -1962,7 +1962,11 @@ class AnalysisWorker:
             logger.error(f"✗ Failed: {file_path} - {features['_error']}")
             return track_id, 0, 1, 0
 
-        self._save_results(track_id, file_path, features)
+        if not self._save_results(track_id, file_path, features):
+            error = "Failed to persist analysis results"
+            self._save_failed(track_id, error, permanent=False)
+            logger.error(f"✗ Failed: {file_path} - {error}")
+            return track_id, 0, 1, 0
         logger.info(f"✓ Completed: {file_path}")
         return track_id, 1, 0, 0
 
@@ -2084,7 +2088,23 @@ class AnalysisWorker:
             f"Batch complete: {counts['completed']} succeeded, {counts['failed']} failed, {counts['permanent_failed']} permanently failed, {requeued} requeued in {elapsed:.1f}s ({rate:.1f} tracks/sec)"
         )
 
-    def _save_results(self, track_id: str, file_path: str, features: dict[str, Any]):
+    def _reset_database_after_save_failure(self) -> None:
+        """Roll back defensively and force the next database action to reconnect."""
+        try:
+            self.db.rollback()
+        except Exception as error:
+            logger.warning(f"Failed to roll back analysis save: {error}")
+        try:
+            self.db.close()
+        except Exception as error:
+            logger.warning(f"Failed to close database after analysis save failure: {error}")
+
+    def _save_results(
+        self,
+        track_id: str,
+        file_path: str,
+        features: dict[str, Any],
+    ) -> bool:
         """Save analysis results to database and resolve stale audio failures."""
         cursor = self.db.get_cursor()
         try:
@@ -2101,9 +2121,11 @@ class AnalysisWorker:
             self.db.commit()
         except Exception as e:
             logger.error(f"Failed to save results for {track_id}: {e}")
-            self.db.rollback()
+            self._reset_database_after_save_failure()
+            return False
         finally:
             cursor.close()
+        return True
 
     def _save_failed(self, track_id: str, error: str, permanent: bool = False):
         """Mark track as failed and record in EnrichmentFailure table."""

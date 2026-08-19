@@ -72,11 +72,14 @@ class FakeDatabaseConnection:
         self,
         results: list[list[dict[str, Any]]] | None = None,
         fail_on_execute: int | None = None,
+        commit_error: Exception | None = None,
     ) -> None:
         self.cursor = FakeCursor(results, fail_on_execute)
+        self.commit_error = commit_error
         self.get_cursor_calls = 0
         self.commit_calls = 0
         self.rollback_calls = 0
+        self.close_calls = 0
 
     def get_cursor(self) -> FakeCursor:
         """Return the recording cursor."""
@@ -86,10 +89,16 @@ class FakeDatabaseConnection:
     def commit(self) -> None:
         """Record a transaction commit."""
         self.commit_calls += 1
+        if self.commit_error is not None:
+            raise self.commit_error
 
     def rollback(self) -> None:
         """Record a transaction rollback."""
         self.rollback_calls += 1
+
+    def close(self) -> None:
+        """Record a connection-manager reset."""
+        self.close_calls += 1
 
 
 class FakePipeline:

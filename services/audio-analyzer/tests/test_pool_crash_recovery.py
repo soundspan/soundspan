@@ -65,7 +65,11 @@ def test_consume_batch_results_requeues_unfinalized_tracks_after_pool_crash(
     worker = _build_worker(loaded_analyzer)
     saved_results: list[tuple[str, str, dict[str, Any]]] = []
     requeues: list[tuple[list[tuple[str, str]], str]] = []
-    monkeypatch.setattr(worker, "_save_results", lambda *args: saved_results.append(args))
+    monkeypatch.setattr(
+        worker,
+        "_save_results",
+        lambda *args: (saved_results.append(args) or True),
+    )
     monkeypatch.setattr(
         worker,
         "_requeue_tracks_for_retry",

@@ -94,12 +94,15 @@ class _BookkeepingRedis:
 
 def _job(track_id: str, loudness_only: bool = True) -> dict[str, Any]:
     """Build one analyzer queue payload."""
+    revision_digest = sha256(track_id.encode()).hexdigest()
     return {
         "trackId": track_id,
         "filePath": f"Artist/{track_id}.flac",
         "duration": 180,
         "loudnessOnly": loudness_only,
-        "loudnessAttemptKey": f"audio:analysis:loudness:attempts:{track_id}",
+        "loudnessAttemptKey": (
+            f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{revision_digest}"
+        ),
     }
 
 
@@ -313,6 +316,10 @@ def test_keyless_legacy_jobs_share_a_bounded_track_failure_budget() -> None:
     "malformed_key",
     [
         "wrong-prefix:revision",
+        loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX,
+        f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}not-a-digest",
+        f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{'A' * 64}",
+        f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}legacy:{'a' * 64}",
         f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{'x' * 161}",
     ],
 )
