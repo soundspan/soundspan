@@ -59,6 +59,8 @@ type TrackSnapshot = {
 type ParsedVibeEmbedJob =
     | { kind: "valid"; job: VibeEmbedJob }
     | { kind: "invalid"; trackId: string | null };
+type VibeRetryCandidate = { id: string };
+type VibeRetryStateReader = (keys: string[]) => Promise<Array<string | null>>;
 
 interface VibeEmbedPrismaPort {
     track: {
@@ -339,15 +341,50 @@ async function resetTransientFailure(
 }
 
 function retryDelayForFailure(error: unknown, retryCount: number): number {
+    const baseline =
+        VIBE_RETRY_BACKOFF_MS[
+            Math.min(retryCount, VIBE_RETRY_BACKOFF_MS.length - 1)
+        ];
     if (
         error instanceof VibeProviderBackpressureError &&
         error.retryAfterMs !== undefined
     ) {
-        return Math.min(VIBE_RETRY_BACKOFF_MS[2], error.retryAfterMs);
+        return Math.min(
+            VIBE_RETRY_BACKOFF_MS[2],
+            Math.max(baseline, error.retryAfterMs),
+        );
     }
-    return VIBE_RETRY_BACKOFF_MS[
-        Math.min(retryCount, VIBE_RETRY_BACKOFF_MS.length - 1)
-    ];
+    return baseline;
+}
+
+function retryStateAllowsEnqueue(
+    stored: string | null,
+    nowMs: number,
+): boolean {
+    if (stored === null) return true;
+    const notBeforeMs = Number(stored);
+    return !Number.isFinite(notBeforeMs) || notBeforeMs <= nowMs;
+}
+
+/** Batch-read retry state and return only candidates whose not-before elapsed. */
+export async function filterVibeRetryEligibleCandidates<
+    Candidate extends VibeRetryCandidate,
+>(
+    candidates: Candidate[],
+    readRetryStates: VibeRetryStateReader,
+    nowMs: number = Date.now(),
+): Promise<Candidate[]> {
+    if (candidates.length === 0) return [];
+    const keys = candidates.map(
+        (candidate) => `${VIBE_RETRY_KEY_PREFIX}${candidate.id}`,
+    );
+    const states = await readRetryStates(keys);
+    if (states.length !== candidates.length) {
+        throw new Error("Vibe retry state batch read was incomplete");
+    }
+    return candidates.filter((_candidate, index) =>
+        retryStateAllowsEnqueue(states[index] ?? null, nowMs),
+    );
 }
 
 async function handleGenerationFailure(
@@ -564,9 +601,7 @@ export async function processVibeEmbedJob(
             const stored = await redisClient.get(
                 `${VIBE_RETRY_KEY_PREFIX}${trackId}`,
             );
-            if (stored === null) return true;
-            const notBeforeMs = Number(stored);
-            return !Number.isFinite(notBeforeMs) || notBeforeMs <= Date.now();
+            return retryStateAllowsEnqueue(stored, Date.now());
         },
         scheduleRetry: async (trackId, notBefore) => {
             const ttlMs = Math.max(1, notBefore.getTime() - Date.now());

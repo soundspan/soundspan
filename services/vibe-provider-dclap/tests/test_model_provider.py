@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections.abc import Iterator
 from types import SimpleNamespace
 
 import model_provider
@@ -127,8 +128,13 @@ def test_cancelled_audio_stops_between_segments_and_releases_lock(
 
     monkeypatch.setattr(
         model_provider,
-        "load_segmented_log_mels",
-        lambda _path, **_kwargs: iter([object(), object()]),
+        "load_audio",
+        lambda _path, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        model_provider,
+        "segmented_log_mels",
+        lambda _decoded, **_kwargs: iter([object(), object()]),
     )
     provider = DclapProvider(
         load_models=lambda: ModelBundle(
@@ -183,9 +189,14 @@ def test_blocking_audio_decode_does_not_hold_inference_lock(
         del check_cancelled
         decode_started.set()
         assert release_decode.wait(timeout=1)
-        return iter([object()])
+        return object()
 
-    monkeypatch.setattr(model_provider, "load_segmented_log_mels", blocking_decoder)
+    monkeypatch.setattr(model_provider, "load_audio", blocking_decoder)
+    monkeypatch.setattr(
+        model_provider,
+        "segmented_log_mels",
+        lambda _decoded, **_kwargs: iter([object()]),
+    )
     provider = DclapProvider(
         load_models=lambda: ModelBundle(AudioSession(), TextSession(), Tokenizer()),
         idle_timeout=0,
@@ -214,6 +225,54 @@ def test_blocking_audio_decode_does_not_hold_inference_lock(
     assert completed_before_decode
     assert not audio.is_alive()
     assert not text.is_alive()
+
+
+def test_mel_generator_is_consumed_lazily_during_inference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not materialize every mel tensor before the first ONNX call."""
+    events: list[str] = []
+
+    def decoded_audio(_path: str, **_kwargs: object) -> object:
+        return object()
+
+    def instrumented_mels(_source: object, **_kwargs: object) -> Iterator[object]:
+        def generate() -> Iterator[object]:
+            events.append("first")
+            yield object()
+            events.append("second")
+            yield object()
+            events.append("exhausted")
+
+        return generate()
+
+    class InspectingAudioSession(AudioSession):
+        def run(
+            self,
+            _outputs: list[str] | None,
+            _feed: dict[str, object],
+        ) -> list[object]:
+            assert "exhausted" not in events
+            return [np.ones((1, 512), dtype=np.float32)]
+
+    monkeypatch.setattr(model_provider, "load_audio", decoded_audio)
+    monkeypatch.setattr(
+        model_provider,
+        "segmented_log_mels",
+        instrumented_mels,
+    )
+    provider = DclapProvider(
+        load_models=lambda: ModelBundle(
+            InspectingAudioSession(),
+            TextSession(),
+            Tokenizer(),
+        ),
+        idle_timeout=0,
+    )
+
+    provider.get_audio_embedding("track.flac", InferenceCancellation(deadline=None))
+
+    assert events == ["first", "second", "exhausted"]
 
 
 def test_admission_reservation_rejects_before_executor_submission() -> None:

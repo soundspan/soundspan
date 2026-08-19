@@ -69,6 +69,7 @@ describe("unified enrichment runtime behavior", () => {
 
         const queueRedisPrimary = {
             llen: jest.fn(async () => 0),
+            mget: jest.fn(async (...keys: string[]) => keys.map(() => null)),
             rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
             eval: jest.fn(async () => 1),
             keys: jest.fn(async () => []),
@@ -77,6 +78,7 @@ describe("unified enrichment runtime behavior", () => {
         };
         const queueRedisRecovery = {
             llen: jest.fn(async () => 0),
+            mget: jest.fn(async (...keys: string[]) => keys.map(() => null)),
             rpush: jest.fn(async (_queue?: string, _payload?: string) => 1),
             eval: jest.fn(async () => 1),
             keys: jest.fn(async () => []),
@@ -2180,6 +2182,32 @@ describe("unified enrichment runtime behavior", () => {
             "   Failed to queue vibe embedding for track-vibe-rpush-fail:",
             expect.any(Error),
         );
+    });
+
+    it("skips automatic vibe candidates before their retry not-before", async () => {
+        const { prisma, getFeatures, queueRedisPrimary } =
+            setupUnifiedEnrichmentMocks();
+        getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
+        (prisma.track.findMany as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "track-vibe-delayed",
+                filePath: "/music/track-vibe-delayed.flac",
+                vibeAnalysisStatus: "pending",
+            },
+        ]);
+        (queueRedisPrimary.mget as jest.Mock).mockResolvedValueOnce([
+            String(Date.now() + 60_000),
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const queued = await enrichment.reRunVibeEmbeddingsOnly();
+
+        expect(queued).toBe(0);
+        expect(queueRedisPrimary.mget).toHaveBeenCalledWith(
+            "soundspan:vibe-retry-after:v1:track-vibe-delayed",
+        );
+        expect(queueRedisPrimary.rpush).not.toHaveBeenCalled();
     });
 
     it("retries CLAP queue push with recreated redis client when the connection closes", async () => {

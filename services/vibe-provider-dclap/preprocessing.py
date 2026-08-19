@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -50,6 +51,14 @@ class LibrosaBackend(Protocol):
 
     def power_to_db(self, mel: object, **kwargs: object) -> object:
         """Convert a power spectrogram to decibels."""
+
+
+@dataclass(frozen=True)
+class DecodedAudio:
+    """Bounded quantized waveform and the backend that decoded it."""
+
+    waveform: object
+    backend: LibrosaBackend
 
 
 def _load_librosa() -> LibrosaBackend:
@@ -104,12 +113,12 @@ def create_log_mel(segment: object, backend: LibrosaBackend) -> object:
     return np.asarray(log_mel, dtype=np.float32)[np.newaxis, np.newaxis, :, :]
 
 
-def load_segmented_log_mels(
+def load_audio(
     audio_path: str,
     backend: LibrosaBackend | None = None,
     check_cancelled: Callable[[], None] | None = None,
-) -> Iterator[object]:
-    """Load a bounded prefix and yield one quantized segment's log mel at a time."""
+) -> DecodedAudio:
+    """Decode and quantize one bounded waveform without creating mel tensors."""
     if check_cancelled is not None:
         check_cancelled()
     librosa_backend = backend or _load_librosa()
@@ -136,10 +145,28 @@ def load_segmented_log_mels(
             max_audio_seconds,
             Path(audio_path).name,
         )
-    for segment in segment_audio(quantized):
+    return DecodedAudio(quantized, librosa_backend)
+
+
+def segmented_log_mels(
+    decoded: DecodedAudio,
+    check_cancelled: Callable[[], None] | None = None,
+) -> Iterator[object]:
+    """Yield log-mel tensors lazily from one bounded decoded waveform."""
+    for segment in segment_audio(decoded.waveform):
         if check_cancelled is not None:
             check_cancelled()
-        log_mel = create_log_mel(segment, librosa_backend)
+        log_mel = create_log_mel(segment, decoded.backend)
         if check_cancelled is not None:
             check_cancelled()
         yield log_mel
+
+
+def load_segmented_log_mels(
+    audio_path: str,
+    backend: LibrosaBackend | None = None,
+    check_cancelled: Callable[[], None] | None = None,
+) -> Iterator[object]:
+    """Load a bounded prefix and yield one quantized segment's log mel at a time."""
+    decoded = load_audio(audio_path, backend, check_cancelled)
+    yield from segmented_log_mels(decoded, check_cancelled)

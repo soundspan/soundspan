@@ -39,6 +39,7 @@ import {
 } from "../utils/librarySorting";
 import { getActiveSpace } from "../services/embeddingSpaces";
 import { findLocalTracksNeedingActiveEmbedding } from "../services/trackEmbeddings";
+import { filterVibeRetryEligibleCandidates } from "../services/vibeEmbedJobs";
 
 const log = logger.child("Enrichment");
 
@@ -1301,9 +1302,17 @@ async function queueVibeEmbeddings(): Promise<number> {
         return 0;
     }
 
+    const eligibleTracks = await withEnrichmentQueueRedisRetry(
+        "queueVibeEmbeddings.retryState",
+        () =>
+            filterVibeRetryEligibleCandidates(tracks, (keys) =>
+                getRedis().mget(...keys),
+            ),
+    );
+
     let queued = 0;
 
-    for (const track of tracks) {
+    for (const track of eligibleTracks) {
         try {
             const admission = await withEnrichmentQueueRedisRetry(
                 `queueVibeEmbeddings.admit(${track.id})`,

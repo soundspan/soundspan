@@ -63,9 +63,10 @@ not need PostgreSQL or Redis credentials.
 | `DCLAP_ONNX_INTRA_OP_THREADS` | `1`                               | ONNX Runtime intra-operation CPU thread limit.            |
 | `DCLAP_MODEL_IDLE_TIMEOUT`    | `300`                             | Seconds before idle models unload; `0` keeps them loaded. |
 
-The provider streams mel segments through inference. It embeds at most the
-first 1,800 seconds of each track. This cap is immutable because it is part of
-the embedding-space preprocessing contract; changing it requires a new
+The provider decodes a bounded waveform under a two-request limit, then creates
+and consumes mel segments lazily during serialized inference. It embeds at most
+the first 1,800 seconds of each track. This cap is immutable because it is part
+of the embedding-space preprocessing contract; changing it requires a new
 declared space and a managed vector migration. A leftover
 `DCLAP_MAX_AUDIO_SECONDS` environment variable is ignored with a warning.
 

@@ -8,9 +8,12 @@ import {
 
 class InMemoryStatusRedis implements VibeWorkerStatusRedis {
     readonly registries = new Map<string, Map<string, number>>();
+    readonly sets = new Map<string, Set<string>>();
     readonly values = new Map<string, string>();
     readonly mGetBatchSizes: number[] = [];
     legacyCleanupRuns = 0;
+    afterRegistryScript: (() => void) | null = null;
+    failLegacyCleanup = false;
 
     get registry(): Map<string, number> {
         return this.registryFor(VIBE_WORKER_STATUS_REGISTRY_KEY);
@@ -38,20 +41,23 @@ class InMemoryStatusRedis implements VibeWorkerStatusRedis {
             if (excess > 0) {
                 await this.zRemRangeByRank(registryKey, 0, excess - 1);
             }
-            return 1;
+            const members = await this.zRange(registryKey, 0, -1);
+            this.afterRegistryScript?.();
+            return members;
         }
         const [legacyRegistryKey, markerKey] = options.keys;
         if (!legacyRegistryKey || !markerKey) return 0;
+        if (this.failLegacyCleanup) {
+            throw new Error("legacy cleanup failed");
+        }
         if (this.values.get(markerKey) === "done") return 0;
-        const [legacyPrefix] = options.arguments ?? [];
-        if (legacyPrefix) {
-            for (const key of this.registryFor(legacyRegistryKey).keys()) {
-                if (key.startsWith(legacyPrefix) && key !== legacyRegistryKey) {
-                    this.values.delete(key);
-                }
-            }
+        if (this.sets.has(legacyRegistryKey) && _script.includes("ZRANGE")) {
+            throw new Error(
+                "WRONGTYPE Operation against a key holding the wrong kind of value",
+            );
         }
         this.registries.delete(legacyRegistryKey);
+        this.sets.delete(legacyRegistryKey);
         this.values.set(markerKey, "done");
         this.legacyCleanupRuns += 1;
         return 1;
@@ -77,6 +83,14 @@ class InMemoryStatusRedis implements VibeWorkerStatusRedis {
     ): Promise<unknown> {
         this.registryFor(key).set(member.value, member.score);
         return 1;
+    }
+
+    async sAdd(key: string, member: string): Promise<number> {
+        const members = this.sets.get(key) ?? new Set<string>();
+        this.sets.set(key, members);
+        const previousSize = members.size;
+        members.add(member);
+        return members.size - previousSize;
     }
 
     async zRange(key: string, start: number, stop: number): Promise<string[]> {
@@ -266,12 +280,10 @@ describe("vibe worker status cache", () => {
     it("removes the v2 registry once without disturbing v3 status", async () => {
         const redis = new InMemoryStatusRedis();
         const v2RegistryKey = "soundspan:vibe-worker-status:v2:registry";
-        redis
-            .registryFor(v2RegistryKey)
-            .set(
-                "soundspan:vibe-worker-status:v2:old-worker",
-                Date.parse("2026-08-17T11:59:00.000Z"),
-            );
+        await redis.sAdd(
+            v2RegistryKey,
+            "soundspan:vibe-worker-status:v2:old-worker",
+        );
         redis.values.set(
             "soundspan:vibe-worker-status:v2:old-worker",
             JSON.stringify(status),
@@ -282,14 +294,42 @@ describe("vibe worker status cache", () => {
         await expect(readVibeWorkerStatus(redis, now)).resolves.toEqual(status);
         await expect(readVibeWorkerStatus(redis, now)).resolves.toEqual(status);
 
-        expect(redis.registries.has(v2RegistryKey)).toBe(false);
-        expect(
-            redis.values.has("soundspan:vibe-worker-status:v2:old-worker"),
-        ).toBe(false);
+        expect(redis.sets.has(v2RegistryKey)).toBe(false);
         expect(redis.legacyCleanupRuns).toBe(1);
         expect(
             redis.registry.has(`${VIBE_WORKER_STATUS_KEY_PREFIX}worker-v3`),
         ).toBe(true);
+    });
+
+    it("continues v3 reads when one-time v2 cleanup fails", async () => {
+        const redis = new InMemoryStatusRedis();
+        const now = new Date("2026-08-17T12:00:00.000Z");
+        redis.failLegacyCleanup = true;
+        addStatus(redis, "worker-v3", now.getTime());
+
+        await expect(readVibeWorkerStatus(redis, now)).resolves.toEqual(status);
+
+        expect(
+            redis.values.has(
+                "soundspan:vibe-worker-status:v2-registry-cleanup:v1",
+            ),
+        ).toBe(false);
+    });
+
+    it("keeps MGET bounded when a heartbeat lands after the registry script", async () => {
+        const redis = new InMemoryStatusRedis();
+        const now = new Date("2026-08-17T12:00:00.000Z");
+        for (let index = 0; index < 256; index += 1) {
+            addStatus(redis, `fresh-${index}`, now.getTime() + index);
+        }
+        redis.afterRegistryScript = () => {
+            addStatus(redis, "interleaved", now.getTime() + 1_000);
+            redis.afterRegistryScript = null;
+        };
+
+        await readVibeWorkerStatus(redis, now);
+
+        expect(Math.max(...redis.mGetBatchSizes)).toBeLessThanOrEqual(256);
     });
 
     it("keeps repeated restart identities bounded by timestamp expiry", async () => {

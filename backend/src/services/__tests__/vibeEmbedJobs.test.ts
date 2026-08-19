@@ -289,30 +289,42 @@ describe("vibe embed job processor", () => {
         expect(harness.embedAudio).not.toHaveBeenCalled();
     });
 
-    it("honors a bounded provider Retry-After before retrying", async () => {
-        const harness = createHarness();
-        harness.prisma.track.findFirst.mockResolvedValue({
-            id: "track-backpressure",
-            title: "Backpressure Track",
-            vibeAnalysisRetryCount: 0,
-        });
-        harness.embedAudio.mockRejectedValue(
-            new VibeProviderBackpressureError(429, "queue full", 300_000),
-        );
-        harness.isTransientFailure.mockReturnValue(true);
+    it.each([
+        { retryAfterMs: 1_000, expectedDelayMs: 30_000 },
+        { retryAfterMs: 900_000, expectedDelayMs: 300_000 },
+    ])(
+        "bounds provider Retry-After $retryAfterMs to $expectedDelayMs milliseconds",
+        async ({ retryAfterMs, expectedDelayMs }) => {
+            const harness = createHarness();
+            harness.prisma.track.findFirst.mockResolvedValue({
+                id: "track-backpressure",
+                title: "Backpressure Track",
+                vibeAnalysisRetryCount: 0,
+            });
+            harness.embedAudio.mockRejectedValue(
+                new VibeProviderBackpressureError(
+                    429,
+                    "queue full",
+                    retryAfterMs,
+                ),
+            );
+            harness.isTransientFailure.mockReturnValue(true);
 
-        await harness.processJob(
-            JSON.stringify({
-                trackId: "track-backpressure",
-                filePath: "artist/backpressure.flac",
-            }),
-        );
+            await harness.processJob(
+                JSON.stringify({
+                    trackId: "track-backpressure",
+                    filePath: "artist/backpressure.flac",
+                }),
+            );
 
-        expect(harness.scheduleRetry).toHaveBeenCalledWith(
-            "track-backpressure",
-            new Date("2026-08-16T12:05:00.000Z"),
-        );
-    });
+            expect(harness.scheduleRetry).toHaveBeenCalledWith(
+                "track-backpressure",
+                new Date(
+                    Date.parse("2026-08-16T12:00:00.000Z") + expectedDelayMs,
+                ),
+            );
+        },
+    );
 
     it("marks transient provider failures terminal at the retry bound", async () => {
         const harness = createHarness();

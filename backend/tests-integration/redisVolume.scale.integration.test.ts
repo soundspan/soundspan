@@ -168,7 +168,6 @@ function statusRedisAdapter(redis: Redis): VibeWorkerStatusRedis {
         mGet: (keys) => redis.mget(...keys),
         set: (key, value, options) => redis.set(key, value, "PX", options.PX),
         zAdd: (key, member) => redis.zadd(key, member.score, member.value),
-        zRange: (key, start, stop) => redis.zrange(key, start, stop),
         zRem: (key, members) => redis.zrem(key, ...members),
     };
 }

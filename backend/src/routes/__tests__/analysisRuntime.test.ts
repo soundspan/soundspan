@@ -68,6 +68,7 @@ jest.mock("../../utils/db", () => ({
 jest.mock("../../utils/redis", () => ({
     redisClient: {
         lLen: jest.fn(),
+        mGet: jest.fn(),
         multi: jest.fn(),
         rPush: jest.fn(),
         publish: jest.fn(),
@@ -118,6 +119,7 @@ const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockExecuteRaw = prisma.$executeRaw as jest.Mock;
 
 const mockRedisLLen = redisClient.lLen as jest.Mock;
+const mockRedisMGet = redisClient.mGet as jest.Mock;
 const mockRedisMulti = redisClient.multi as jest.Mock;
 const mockRedisRPush = redisClient.rPush as jest.Mock;
 const mockRedisPublish = redisClient.publish as jest.Mock;
@@ -229,6 +231,9 @@ describe("analysis routes runtime", () => {
         mockExecuteRaw.mockResolvedValue(0);
 
         mockRedisLLen.mockResolvedValue(0);
+        mockRedisMGet.mockImplementation(async (keys: string[]) =>
+            keys.map(() => null),
+        );
         mockRedisRPush.mockResolvedValue(1);
         mockRedisPublish.mockResolvedValue(1);
         mockRedisMulti.mockImplementation(() => createPipeline());
@@ -669,6 +674,39 @@ describe("analysis routes runtime", () => {
             redisClient,
             expect.objectContaining({ maxDepth: 1 }),
         );
+    });
+
+    it("skips manual vibe candidates before their retry not-before", async () => {
+        mockTrackFindMany.mockResolvedValue([
+            {
+                id: "delayed",
+                filePath: "/x.mp3",
+                duration: 111,
+                title: "Delayed",
+            },
+            { id: "ready", filePath: "/y.mp3", duration: 222, title: "Ready" },
+        ]);
+        mockRedisMGet.mockResolvedValue([String(Date.now() + 60_000), null]);
+
+        const res = createRes();
+        await postVibeStart({ body: { force: false } } as any, res);
+
+        expect(mockRedisMGet).toHaveBeenCalledWith([
+            "soundspan:vibe-retry-after:v1:delayed",
+            "soundspan:vibe-retry-after:v1:ready",
+        ]);
+        expect(mockEnqueueReservedWork).toHaveBeenCalledTimes(1);
+        expect(mockEnqueueReservedWork).toHaveBeenCalledWith(
+            redisClient,
+            expect.objectContaining({ trackId: "ready" }),
+        );
+        expect(mockTrackUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: { in: ["ready"] } } }),
+        );
+        expect(res.body).toEqual({
+            message: "Queued 1 tracks for vibe embedding",
+            queued: 1,
+        });
     });
 
     it("returns no-op vibe start when all tracks already have embeddings", async () => {

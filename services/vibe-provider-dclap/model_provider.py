@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TypeVar, cast
 
 from inference import InferenceSession, TextTokenizer, run_audio_chunks, run_text
-from preprocessing import AudioDecodeError, load_segmented_log_mels
+from preprocessing import AudioDecodeError, DecodedAudio, load_audio, segmented_log_mels
 from settings import (
     MODEL_DIRECTORY,
     MODEL_IDLE_TIMEOUT,
@@ -195,8 +195,8 @@ class DclapProvider:
         self,
         audio_path: str,
         cancellation: InferenceCancellation,
-    ) -> list[object]:
-        """Preprocess audio under its own small concurrency bound."""
+    ) -> DecodedAudio:
+        """Decode one bounded waveform under its own concurrency limit."""
         for _poll in range(MAX_INFERENCE_LOCK_POLLS):
             cancellation.raise_if_cancelled()
             if self._decode_slots.acquire(timeout=INFERENCE_LOCK_POLL_SECONDS):
@@ -204,11 +204,9 @@ class DclapProvider:
         else:
             raise InferenceDeadlineExceededError("Audio decode wait exceeded")
         try:
-            return list(
-                load_segmented_log_mels(
-                    audio_path,
-                    check_cancelled=cancellation.raise_if_cancelled,
-                )
+            return load_audio(
+                audio_path,
+                check_cancelled=cancellation.raise_if_cancelled,
             )
         finally:
             self._decode_slots.release()
@@ -234,11 +232,15 @@ class DclapProvider:
     ) -> object:
         """Return one normalized, chunk-aggregated student audio embedding."""
         control = cancellation or InferenceCancellation(deadline=None)
-        mel_tensors = self._decode_audio(audio_path, control)
+        decoded_audio = self._decode_audio(audio_path, control)
         control.raise_if_cancelled()
 
         def infer() -> object:
             models = self._models_locked()
+            mel_tensors = segmented_log_mels(
+                decoded_audio,
+                check_cancelled=control.raise_if_cancelled,
+            )
             return run_audio_chunks(
                 models.audio_session,
                 mel_tensors,

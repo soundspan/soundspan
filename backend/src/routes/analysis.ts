@@ -18,6 +18,7 @@ import {
 import { config } from "../config";
 import { enqueueReservedNodeRedisWork } from "../workers/enrichmentQueue";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
+import { filterVibeRetryEligibleCandidates } from "../services/vibeEmbedJobs";
 
 const router = Router();
 
@@ -777,9 +778,13 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
+        const eligibleTracks = await filterVibeRetryEligibleCandidates(
+            tracks,
+            (keys) => redisClient.mGet(keys),
+        );
         // Align producer state with queue handoff so drained work remains pending.
-        await markManualVibeTracksPending(tracks, force);
-        const queued = await enqueueManualVibeTracks(tracks);
+        await markManualVibeTracksPending(eligibleTracks, force);
+        const queued = await enqueueManualVibeTracks(eligibleTracks);
 
         logger.info(
             `Queued ${queued} tracks for vibe embedding${force ? " (force reset)" : ""}`,
