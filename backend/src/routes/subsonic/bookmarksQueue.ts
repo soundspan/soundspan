@@ -157,7 +157,9 @@ function resolveClassicCurrentIndex(
     }
     if (!/^\d+$/.test(value)) return 0;
     const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed < trackIds.length ? parsed : 0;
+    return Number.isSafeInteger(parsed) && parsed < trackIds.length
+        ? parsed
+        : 0;
 }
 
 const playQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
@@ -208,7 +210,9 @@ function parseQueueTrackIds(queue: unknown): string[] {
     });
 }
 
-async function loadPlayQueueTracks(trackIds: string[]): Promise<PlayQueueTrack[]> {
+async function loadPlayQueueTracks(
+    trackIds: string[],
+): Promise<PlayQueueTrack[]> {
     const uniqueTrackIds = Array.from(new Set(trackIds));
     if (uniqueTrackIds.length === 0) return [];
     return prisma.track.findMany({
@@ -330,20 +334,22 @@ function formatSavedQueue(
     return trackIds.flatMap((trackId) => {
         const track = trackById.get(trackId);
         if (!track) return [];
-        return [{
-            id: toSubsonicId("track", track.id),
-            title: track.title,
-            duration: track.duration,
-            artist: {
-                id: toSubsonicId("artist", track.album.artist.id),
-                name: track.album.artist.name,
+        return [
+            {
+                id: toSubsonicId("track", track.id),
+                title: track.title,
+                duration: track.duration,
+                artist: {
+                    id: toSubsonicId("artist", track.album.artist.id),
+                    name: track.album.artist.name,
+                },
+                album: {
+                    id: toSubsonicId("album", track.album.id),
+                    title: track.album.title,
+                    coverArt: track.album.coverUrl ?? null,
+                },
             },
-            album: {
-                id: toSubsonicId("album", track.album.id),
-                title: track.album.title,
-                coverArt: track.album.coverUrl ?? null,
-            },
-        }];
+        ];
     });
 }
 

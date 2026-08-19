@@ -262,24 +262,27 @@ export async function handleSearch3(
                         }),
                     ),
                     album: albums.map((album) =>
-                        formatAlbumForSubsonic({
-                            id: album.id,
-                            title: album.title,
-                            year: album.year,
-                            lastSynced: album.lastSynced,
-                            coverUrl: album.coverUrl,
-                            genres: album.genres,
-                            userGenres: album.userGenres,
-                            artist: album.artist,
-                            songCount: album._count.tracks,
-                            duration: album.tracks.reduce(
-                                (sum, track) => sum + (track.duration ?? 0),
-                                0,
+                        formatAlbumForSubsonic(
+                            {
+                                id: album.id,
+                                title: album.title,
+                                year: album.year,
+                                lastSynced: album.lastSynced,
+                                coverUrl: album.coverUrl,
+                                genres: album.genres,
+                                userGenres: album.userGenres,
+                                artist: album.artist,
+                                songCount: album._count.tracks,
+                                duration: album.tracks.reduce(
+                                    (sum, track) => sum + (track.duration ?? 0),
+                                    0,
+                                ),
+                            },
+                            combineSongEnrichmentForAlbum(
+                                album.tracks.map((track) => track.id),
+                                playedAtByTrackId,
                             ),
-                        }, combineSongEnrichmentForAlbum(
-                            album.tracks.map((track) => track.id),
-                            playedAtByTrackId,
-                        )),
+                        ),
                     ),
                     song: tracks.map((track) =>
                         formatSongForSubsonic(
@@ -528,30 +531,30 @@ async function handleSearchLike(
                 }),
             ),
             album: albums.map((album) =>
-                formatAlbumForSubsonic({
-                    id: album.id,
-                    title: album.title,
-                    year: album.year,
-                    lastSynced: album.lastSynced,
-                    coverUrl: album.coverUrl,
-                    genres: album.genres,
-                    userGenres: album.userGenres,
-                    artist: album.artist,
-                    songCount: album._count.tracks,
-                    duration: album.tracks.reduce(
-                        (sum, track) => sum + (track.duration ?? 0),
-                        0,
+                formatAlbumForSubsonic(
+                    {
+                        id: album.id,
+                        title: album.title,
+                        year: album.year,
+                        lastSynced: album.lastSynced,
+                        coverUrl: album.coverUrl,
+                        genres: album.genres,
+                        userGenres: album.userGenres,
+                        artist: album.artist,
+                        songCount: album._count.tracks,
+                        duration: album.tracks.reduce(
+                            (sum, track) => sum + (track.duration ?? 0),
+                            0,
+                        ),
+                    },
+                    combineSongEnrichmentForAlbum(
+                        album.tracks.map((track) => track.id),
+                        playedAtByTrackId,
                     ),
-                }, combineSongEnrichmentForAlbum(
-                    album.tracks.map((track) => track.id),
-                    playedAtByTrackId,
-                )),
+                ),
             ),
             song: tracks.map((track) =>
-                formatSongForSubsonic(
-                    track,
-                    playedAtByTrackId.get(track.id),
-                ),
+                formatSongForSubsonic(track, playedAtByTrackId.get(track.id)),
             ),
         };
 

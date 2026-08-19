@@ -565,7 +565,10 @@ export class AudioStreamingService {
         });
     }
 
-    private ffmpegUnavailableError(trackId: string, quality: Quality): AppError {
+    private ffmpegUnavailableError(
+        trackId: string,
+        quality: Quality,
+    ): AppError {
         return new AppError(
             ErrorCode.FFMPEG_NOT_FOUND,
             ErrorCategory.FATAL,
