@@ -10,14 +10,7 @@ import {
 } from "@/components/ui/HorizontalCarousel";
 import { memo } from "react";
 import { getArtistRouteParam } from "@/utils/artistRoute";
-
-interface PopularArtist {
-    id?: string;
-    name: string;
-    image?: string;
-    listeners?: number;
-    mbid?: string;
-}
+import type { PopularArtist } from "@/features/home/types";
 
 interface PopularArtistsGridProps {
     artists: PopularArtist[];

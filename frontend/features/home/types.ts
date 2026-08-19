@@ -69,4 +69,5 @@ export interface PopularArtist {
     name: string;
     image?: string;
     listeners?: number;
+    mbid?: string;
 }
