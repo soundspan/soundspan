@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DCLAP replicas now share one immutable 1,800-second decode cap without changing the established embedding-space identity; leftover `DCLAP_MAX_AUDIO_SECONDS` overrides are ignored with a warning.
+- DCLAP inference now decodes bounded waveforms outside the model lock under a separate two-request limit, creates mel segments lazily during serialized inference, reserves queue capacity before executor submission, returns promptly after its 100-second audio budget, and leaves 15 seconds before the backend client abort.
+- Retryable vibe-provider failures now persist a bounded retry not-before, keep provider `Retry-After` guidance between the attempt baseline and five minutes, suppress premature producer enqueue attempts, and remain subject to the existing three-attempt limit.
+- Vibe worker status discovery now atomically prunes and returns at most 256 registry members, and one-time upgrade cleanup deletes the retired v2 Set registry without disturbing v3 status.
 - Vibe-map builds now stay within their worker memory limit during database materialization, coordinate across backend replicas, and back off after failures instead of restarting on every browser poll.
 - Federation catalog parsing now bounds forward-compatible unknown-key warning samples, preventing oversized peer envelopes from crashing or creating unbounded warning state.
 - Volume leveling no longer steps audibly: mid-track gain changes (switching
