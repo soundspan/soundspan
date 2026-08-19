@@ -63,6 +63,7 @@ jest.mock("../../utils/db", () => ({
         user: {
             findUnique: jest.fn(),
         },
+        $queryRaw: jest.fn(),
         $transaction: jest.fn(),
     },
 }));
@@ -192,6 +193,7 @@ describe("subsonic Tier B handlers", () => {
         }
     ).trackRating;
     const mockTransaction = prisma.$transaction as jest.Mock;
+    const mockQueryRaw = prisma.$queryRaw as jest.Mock;
     const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
     const mockScanGetActive = scanQueue.getActive as jest.Mock;
     const mockScanGetWaiting = scanQueue.getWaiting as jest.Mock;
@@ -209,6 +211,7 @@ describe("subsonic Tier B handlers", () => {
         mockTrackRating.findMany.mockResolvedValue([]);
         mockTrackRating.upsert.mockResolvedValue({});
         mockTrackRating.deleteMany.mockResolvedValue({ count: 0 });
+        mockTrackFindMany.mockResolvedValue([]);
         mockTrackAggregate.mockResolvedValue({ _sum: { duration: null } });
         mockTrackGroupBy.mockResolvedValue([]);
         mockPlaylistItemFindMany.mockResolvedValue([]);
@@ -216,7 +219,15 @@ describe("subsonic Tier B handlers", () => {
         mockPlaylistFindFirst.mockResolvedValue(null);
         mockUserFindUnique.mockResolvedValue(null);
         mockPlaylistItemUpdate.mockResolvedValue({});
-        mockTransaction.mockResolvedValue([]);
+        mockQueryRaw.mockResolvedValue([
+            { id: "playlist-1", userId: "user-1", mixId: null },
+        ]);
+        mockTransaction.mockImplementation(async (operation: unknown) => {
+            if (typeof operation === "function") {
+                return operation(prisma);
+            }
+            return Promise.all(operation as Promise<unknown>[]);
+        });
         mockScanGetActive.mockResolvedValue([]);
         mockScanGetWaiting.mockResolvedValue([]);
         mockScanGetDelayed.mockResolvedValue([]);
@@ -298,6 +309,7 @@ describe("subsonic Tier B handlers", () => {
     it("returns not-authorized when createPlaylist update target is not owned", async () => {
         mockTrackFindMany.mockResolvedValue([{ id: "track-1" }]);
         mockPlaylistFindFirst.mockResolvedValue(null);
+        mockQueryRaw.mockResolvedValueOnce([]);
 
         await handleCreatePlaylist(
             buildReq({
@@ -374,6 +386,35 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
+    it("locks an existing createPlaylist target before reads and writes", async () => {
+        mockTrackFindMany.mockResolvedValue([{ id: "track-9" }]);
+
+        await handleCreatePlaylist(
+            buildReq({
+                playlistId: "pl-playlist-1",
+                name: "Locked Rename",
+                songId: ["tr-track-9"],
+            }),
+            buildRes(),
+        );
+
+        expect(typeof mockTransaction.mock.calls[0]?.[0]).toBe("function");
+        expect(mockQueryRaw).toHaveBeenCalledWith(
+            expect.anything(),
+            "playlist-1",
+            "user-1",
+        );
+        expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            mockTrackFindMany.mock.invocationCallOrder[0],
+        );
+        expect(mockTrackFindMany.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPlaylistUpdate.mock.invocationCallOrder[0],
+        );
+        expect(mockPlaylistUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPlaylistItemDeleteMany.mock.invocationCallOrder[0],
+        );
+    });
+
     it("updates a playlist by removing indices, adding tracks, and reindexing", async () => {
         mockPlaylistFindFirst.mockResolvedValue({ id: "playlist-1" });
         mockPlaylistItemFindMany
@@ -422,6 +463,43 @@ describe("subsonic Tier B handlers", () => {
         );
     });
 
+    it("locks updatePlaylist before ownership, item, and maximum-sort work", async () => {
+        mockPlaylistItemFindMany
+            .mockResolvedValueOnce([{ id: "item-1" }])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([{ id: "item-2" }]);
+        mockTrackFindMany.mockResolvedValue([{ id: "track-3" }]);
+        mockPlaylistItemAggregate.mockResolvedValue({ _max: { sort: 0 } });
+
+        await handleUpdatePlaylist(
+            buildReq({
+                playlistId: "pl-playlist-1",
+                songIndexToRemove: ["0"],
+                songIdToAdd: ["tr-track-3"],
+            }),
+            buildRes(),
+        );
+
+        expect(typeof mockTransaction.mock.calls[0]?.[0]).toBe("function");
+        expect(mockQueryRaw).toHaveBeenCalledWith(
+            expect.anything(),
+            "playlist-1",
+            "user-1",
+        );
+        expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            mockTrackFindMany.mock.invocationCallOrder[0],
+        );
+        expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPlaylistItemFindMany.mock.invocationCallOrder[0],
+        );
+        expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPlaylistItemAggregate.mock.invocationCallOrder[0],
+        );
+        expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPlaylistItemDeleteMany.mock.invocationCallOrder[0],
+        );
+    });
+
     it("returns playlist-not-found when updatePlaylist playlistId cannot be parsed", async () => {
         await handleUpdatePlaylist(
             buildReq({
@@ -447,6 +525,7 @@ describe("subsonic Tier B handlers", () => {
 
     it("returns not-authorized when updatePlaylist target is not owned", async () => {
         mockPlaylistFindFirst.mockResolvedValue(null);
+        mockQueryRaw.mockResolvedValueOnce([]);
 
         await handleUpdatePlaylist(
             buildReq({

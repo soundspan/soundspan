@@ -9,6 +9,14 @@ export type LockedPlaylist = {
     mixId: string | null;
 };
 
+/** Signals that an owned playlist row could not be locked for mutation. */
+export class PlaylistMutationLockNotFoundError extends Error {
+    constructor() {
+        super("Owned playlist disappeared before mutation");
+        this.name = "PlaylistMutationLockNotFoundError";
+    }
+}
+
 /** Locks an owned playlist row so every item mutation uses Playlist-first order. */
 export async function takePlaylistLock(
     tx: Prisma.TransactionClient,
@@ -33,7 +41,7 @@ export async function requirePlaylistMutationLock(
 ): Promise<void> {
     const playlist = await takePlaylistLock(tx, playlistId, userId);
     if (!playlist) {
-        throw new Error("Owned playlist disappeared before mutation");
+        throw new PlaylistMutationLockNotFoundError();
     }
 }
 

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import type { Request, Response } from "express";
 import { Client } from "pg";
 
 const mockSelectLibraryRadioStationTracks = jest.fn();
@@ -16,6 +17,7 @@ import {
     regenerateRadioPlaylist,
 } from "../src/services/radioPlaylistService";
 import playlistRouter from "../src/routes/playlists";
+import { handleUpdatePlaylist } from "../src/routes/subsonic/playlists";
 import { prisma } from "../src/utils/db";
 import {
     applyScaleMigrations,
@@ -42,6 +44,12 @@ type RouteResponse = {
     body: unknown;
     status(code: number): RouteResponse;
     json(body: unknown): RouteResponse;
+};
+
+type SubsonicRouteResponse = {
+    response: Response;
+    readonly statusCode: number;
+    readonly body: unknown;
 };
 
 function tracks(prefix: string, count: number, start = 1) {
@@ -161,6 +169,37 @@ function createRouteResponse(): RouteResponse {
     };
 }
 
+function createSubsonicRouteResponse(): SubsonicRouteResponse {
+    let statusCode = 200;
+    let body: unknown;
+    const response = {
+        locals: {},
+        status(code: number) {
+            statusCode = code;
+            return this;
+        },
+        set() {
+            return this;
+        },
+        type() {
+            return this;
+        },
+        send(value: unknown) {
+            body = typeof value === "string" ? JSON.parse(value) : value;
+            return this;
+        },
+    } as unknown as Response;
+    return {
+        response,
+        get statusCode() {
+            return statusCode;
+        },
+        get body() {
+            return body;
+        },
+    };
+}
+
 function getOrdinaryAddHandler() {
     type RouterLayer = {
         route?: {
@@ -228,6 +267,27 @@ async function removePlaylistItemThroughRoute(
         } as never,
         response as never,
         (() => undefined) as never,
+    );
+}
+
+async function updatePlaylistThroughSubsonic(
+    response: Response,
+): Promise<void> {
+    await handleUpdatePlaylist(
+        {
+            query: {
+                f: "json",
+                playlistId: `pl-${PLAYLIST_ID}`,
+                songIndexToRemove: "0",
+                songIdToAdd: "tr-track-11",
+            },
+            user: {
+                id: USER_ID,
+                username: "radio-concurrency-user",
+                role: "USER",
+            },
+        } as unknown as Request,
+        response,
     );
 }
 
@@ -505,6 +565,80 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
             expect(response.body).toEqual({
                 message: "Track removed from playlist",
             });
+        } finally {
+            if (blockerOpen) await blocker.query("ROLLBACK");
+            await Promise.allSettled(pendingOperations);
+        }
+    });
+
+    it("serializes Subsonic mutation with regeneration without deadlock or mixed state", async () => {
+        await seedPlaylist(10);
+        const target = await prisma.playlistItem.findFirstOrThrow({
+            where: { playlistId: PLAYLIST_ID },
+            select: { id: true },
+            orderBy: { sort: "asc" },
+        });
+        mockSelectLibraryRadioStationTracks.mockResolvedValue({
+            tracks: tracks("replacement-1", REPLACEMENT_TRACK_COUNT),
+        });
+        const response = createSubsonicRouteResponse();
+        let blockerOpen = false;
+        const pendingOperations: Promise<unknown>[] = [];
+
+        try {
+            await blocker.query("BEGIN");
+            blockerOpen = true;
+            await blocker.query(
+                'SELECT id FROM "PlaylistItem" WHERE id = $1 FOR UPDATE',
+                [target.id],
+            );
+
+            const subsonicMutation = updatePlaylistThroughSubsonic(
+                response.response,
+            );
+            pendingOperations.push(subsonicMutation);
+            await waitForWaitingConnections(
+                database,
+                1,
+                "Subsonic playlist mutation did not wait for the item lock",
+            );
+
+            const regenerate = regenerateRadioPlaylist(USER_ID, PLAYLIST_ID);
+            pendingOperations.push(regenerate);
+            await waitForWaitingConnections(
+                database,
+                2,
+                "Radio regeneration did not wait behind the Subsonic mutation",
+            );
+            expect(mockSelectLibraryRadioStationTracks).not.toHaveBeenCalled();
+
+            await blocker.query("COMMIT");
+            blockerOpen = false;
+            const results = await Promise.allSettled([
+                subsonicMutation,
+                regenerate,
+            ]);
+
+            expect(results.map((result) => result.status)).toEqual([
+                "fulfilled",
+                "fulfilled",
+            ]);
+            expect(response.statusCode).toBe(200);
+            expect(response.body).toMatchObject({
+                "subsonic-response": { status: "ok" },
+            });
+            const rows = await database.query<{
+                trackId: string;
+                sort: number;
+            }>(`
+                SELECT "trackId", sort FROM "PlaylistItem"
+                WHERE "playlistId" = '${PLAYLIST_ID}' ORDER BY sort
+            `);
+            expect(rows.rows).toEqual(
+                tracks("replacement-1", REPLACEMENT_TRACK_COUNT).map(
+                    (track, index) => ({ trackId: track.id, sort: index }),
+                ),
+            );
         } finally {
             if (blockerOpen) await blocker.query("ROLLBACK");
             await Promise.allSettled(pendingOperations);

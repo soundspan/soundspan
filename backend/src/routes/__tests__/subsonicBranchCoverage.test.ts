@@ -75,6 +75,7 @@ jest.mock("../../utils/db", () => ({
             deleteMany: jest.fn(),
         },
         user: { findUnique: jest.fn() },
+        $queryRaw: jest.fn(),
         $transaction: jest.fn(),
     },
 }));
@@ -222,6 +223,17 @@ describe("subsonic branch coverage focused handlers", () => {
         mockPlaylistUpdate.mockResolvedValue({ id: "playlist-1" });
         mockPlaylistItemFindMany.mockResolvedValue([]);
         mockPlaylistItemDeleteMany.mockResolvedValue({ count: 0 });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+            { id: "playlist-1", userId: "user-1", mixId: null },
+        ]);
+        (prisma.$transaction as jest.Mock).mockImplementation(
+            async (operation: unknown) => {
+                if (typeof operation === "function") {
+                    return operation(prisma);
+                }
+                return Promise.all(operation as Promise<unknown>[]);
+            },
+        );
         mockBookmarkFindMany.mockResolvedValue([]);
         mockBookmarkDeleteMany.mockResolvedValue({ count: 0 });
         mockBookmarkUpsert.mockResolvedValue({});

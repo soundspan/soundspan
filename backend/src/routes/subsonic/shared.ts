@@ -937,12 +937,16 @@ function parseEntityIdsFromQueryValues(
     return parsedIds;
 }
 
-async function ensureLibraryTracksExist(trackIds: string[]): Promise<boolean> {
+/** Checks visible Subsonic tracks through the supplied database scope. */
+async function ensureLibraryTracksExist(
+    trackIds: string[],
+    client: Pick<Prisma.TransactionClient, "track"> = prisma,
+): Promise<boolean> {
     if (trackIds.length === 0) {
         return true;
     }
 
-    const tracks = await prisma.track.findMany({
+    const tracks = await client.track.findMany({
         where: {
             ...LIBRARY_TRACK_WHERE,
             id: {
