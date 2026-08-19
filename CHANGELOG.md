@@ -17,8 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Federation catalog parsing now bounds forward-compatible unknown-key warning samples, preventing oversized peer envelopes from crashing or creating unbounded warning state.
 - Library Insights drill-downs no longer crash the Admin page: the metadata-gap Genres/Lyrics tabs and the analysis-coverage failure list read fields the API never returned, so expanding them with real data threw a client-side error. Gap tabs and the quality bitrate floor also fetch on selection now instead of requiring a separate Load press.
 - Transient playback recovery now resumes correctly after its automatic reload: the recovery listener was previously cancelled before it could restart playback, and a stale pre-failure position can no longer be restored before the track has made real startup progress.
+
+### Security
+
+- Federation requests now resolve and validate every peer address before each attempt, reject non-global IPv4 and IPv6 special-purpose ranges, and pin connections to validated addresses to prevent DNS-based SSRF and rebinding from receiving peer bearer tokens.
+- OpenSubsonic trace logs now strip control characters and Unicode line separators, bound client-supplied fields, and keep form-posted credentials out of structured trace metadata.
 
 ### Removed
 
