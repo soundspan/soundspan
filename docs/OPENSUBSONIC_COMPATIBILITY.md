@@ -90,6 +90,9 @@ Tier B mutation/readiness:
 - `scrobble`, `getNowPlaying`
 - `getStarred`, `getStarred2`, `star`, `unstar`, `setRating`
 
+`getPlaylists` omits generated radio-station playlists. Direct `getPlaylist`
+access by ID remains available for compatible clients.
+
 Soft-removed local tracks are omitted from browse, search, album, playlist,
 similar-song, and random-song responses. `stream` and `download` return
 not-found responses for soft-removed track IDs.

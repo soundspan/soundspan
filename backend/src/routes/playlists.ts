@@ -19,13 +19,17 @@ import {
 } from "../services/listenTogetherResolution";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { standardPlaylistListWhere } from "../services/radioPlaylistIdentity";
+import {
+    PLAYLIST_REORDER_MAX_ITEMS,
+    removeLockedPlaylistItem,
+    reorderLockedPlaylistItems,
+} from "../services/playlistMutationLock";
 
 const router = Router();
 
 const PLAYLISTS_MAX_LIMIT = 1000;
 const PLAYLISTS_DEFAULT_LIMIT = 500;
 const PLAYLIST_PREVIEW_ITEMS = 12;
-const PLAYLIST_REORDER_MAX_ITEMS = 1000;
 const PLAYLIST_DETAIL_MAX_ITEMS = 1000;
 const PLAYLIST_DETAIL_QUERY_ITEMS = PLAYLIST_DETAIL_MAX_ITEMS + 1;
 const pendingRetryPath = "/:id/pending/:trackId/retry";
@@ -1516,17 +1520,9 @@ router.delete("/:id/items/:trackId", async (req, res) => {
             return res.status(404).json({ error: "Playlist item not found" });
         }
 
-        await prisma.$transaction([
-            prisma.playlistItem.delete({
-                where: {
-                    id: targetItemId,
-                },
-            }),
-            prisma.playlist.update({
-                where: { id: req.params.id },
-                data: { updatedAt: new Date() },
-            }),
-        ]);
+        await prisma.$transaction((tx) =>
+            removeLockedPlaylistItem(tx, req.params.id, userId, targetItemId),
+        );
 
         res.json({ message: "Track removed from playlist" });
     } catch (error) {
@@ -1618,31 +1614,15 @@ router.put("/:id/items/reorder", async (req, res) => {
                 .json({ error: invalidReorder.message });
         }
 
-        // This bulk transaction is bounded by PLAYLIST_REORDER_MAX_ITEMS.
-        const updates = selection.ids.map((id, index) =>
-            selection.byItemId
-                ? prisma.playlistItem.update({
-                      where: { id },
-                      data: { sort: index },
-                  })
-                : prisma.playlistItem.update({
-                      where: {
-                          playlistId_trackId: {
-                              playlistId: req.params.id,
-                              trackId: id,
-                          },
-                      },
-                      data: { sort: index },
-                  }),
+        await prisma.$transaction((tx) =>
+            reorderLockedPlaylistItems(
+                tx,
+                req.params.id,
+                userId,
+                selection.ids,
+                selection.byItemId,
+            ),
         );
-
-        await prisma.$transaction([
-            ...updates,
-            prisma.playlist.update({
-                where: { id: req.params.id },
-                data: { updatedAt: new Date() },
-            }),
-        ]);
 
         res.json({ message: "Playlist reordered" });
     } catch (error) {

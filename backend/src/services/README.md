@@ -108,6 +108,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/outboundAddressPolicy.ts` | Shared outbound IP address classification policy |
 | `backend/src/services/outboundUrlSafety.ts` | Core |
 | `backend/src/services/playlistImportService.ts` | Core |
+| `backend/src/services/playlistMutationLock.ts` | Shared Playlist-first lock and ordinary item-mutation transactions |
 | `backend/src/services/playlistTrackResolution.ts` | Core |
 | `backend/src/services/playbackTrace.ts` | Playback telemetry |
 | `backend/src/services/podcastCache.ts` | Core |
@@ -125,9 +126,9 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/programmaticPlaylists/weeklyAndMoodMixes.ts` | Weekly curated and on-demand mood mixes |
 | `backend/src/services/providerFidelity.ts` | Pure provider-fidelity cosine, recall-overlap, and gate evaluation metrics |
 | `backend/src/services/providerFidelityValidation.ts` | Testable provider-fidelity sampling, orchestration, reporting, and CLI parsing |
-| `backend/src/services/radioVibeEngine.ts` | Core |
 | `backend/src/services/radioPlaylistIdentity.ts` | Generated-radio playlist discriminator and standard-list exclusion filter |
 | `backend/src/services/radioPlaylistService.ts` | User-scoped generated-radio playlist persistence and mutation |
+| `backend/src/services/radioVibeEngine.ts` | Core |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |

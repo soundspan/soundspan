@@ -15,6 +15,7 @@ import {
     appendRadioPlaylist,
     regenerateRadioPlaylist,
 } from "../src/services/radioPlaylistService";
+import playlistRouter from "../src/routes/playlists";
 import { prisma } from "../src/utils/db";
 import {
     applyScaleMigrations,
@@ -34,6 +35,13 @@ const ALBUM_ID = "album-1";
 const TRACK_COUNT = 100;
 const REPLACEMENT_TRACK_COUNT = 10;
 const FIXED_FILE_MODIFIED = new Date("2026-01-01T00:00:00.000Z");
+
+type RemoveResponse = {
+    statusCode: number;
+    body: unknown;
+    status(code: number): RemoveResponse;
+    json(body: unknown): RemoveResponse;
+};
 
 function tracks(prefix: string, count: number, start = 1) {
     return Array.from({ length: count }, (_unused, index) => ({
@@ -110,20 +118,81 @@ async function seedPlaylist(itemCount: number): Promise<void> {
     expect(created.count).toBe(itemCount);
 }
 
-async function waitForPlaylistLock(database: Client): Promise<void> {
+async function waitForWaitingConnections(
+    database: Client,
+    minimum: number,
+    failureMessage: string,
+): Promise<void> {
     for (let attempt = 0; attempt < MAX_LOCK_OBSERVATIONS; attempt += 1) {
-        const result = await database.query<{ waiting: boolean }>(`
-            SELECT EXISTS (
-                SELECT 1 FROM pg_catalog.pg_stat_activity
-                WHERE datname = current_database()
-                  AND pid <> pg_backend_pid()
-                  AND wait_event_type = 'Lock'
-            ) AS waiting
+        const result = await database.query<{ waiting: number }>(`
+            SELECT COUNT(*)::int AS waiting
+            FROM pg_catalog.pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
         `);
-        if (result.rows[0]?.waiting) return;
+        if ((result.rows[0]?.waiting ?? 0) >= minimum) return;
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    throw new Error("Concurrent regenerate did not wait for the playlist lock");
+    throw new Error(failureMessage);
+}
+
+async function waitForPlaylistLock(database: Client): Promise<void> {
+    return waitForWaitingConnections(
+        database,
+        1,
+        "Concurrent regenerate did not wait for the playlist lock",
+    );
+}
+
+function createRemoveResponse(): RemoveResponse {
+    return {
+        statusCode: 200,
+        body: undefined,
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        },
+    };
+}
+
+function getOrdinaryRemoveHandler() {
+    type RouterLayer = {
+        route?: {
+            path?: string;
+            methods?: Record<string, boolean>;
+            stack?: Array<{ handle: (...args: never[]) => unknown }>;
+        };
+    };
+    const layers = (playlistRouter as unknown as { stack: RouterLayer[] })
+        .stack;
+    const route = layers.find(
+        (layer) =>
+            layer.route?.path === "/:id/items/:trackId" &&
+            layer.route.methods?.delete,
+    )?.route;
+    const handler = route?.stack?.at(-1)?.handle;
+    if (!handler) throw new Error("Ordinary playlist remove handler not found");
+    return handler;
+}
+
+async function removePlaylistItemThroughRoute(
+    itemId: string,
+    response: RemoveResponse,
+): Promise<void> {
+    const handler = getOrdinaryRemoveHandler();
+    await handler(
+        {
+            user: { id: USER_ID },
+            params: { id: PLAYLIST_ID, trackId: itemId },
+        } as never,
+        response as never,
+        (() => undefined) as never,
+    );
 }
 
 async function waitForFirstSelection(): Promise<void> {
@@ -137,6 +206,7 @@ async function waitForFirstSelection(): Promise<void> {
 describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
     let admin: Client;
     let database: Client;
+    let blocker: Client;
 
     beforeAll(async () => {
         admin = await createScaleDatabase(
@@ -146,6 +216,8 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
         await applyScaleMigrations(process.env.DATABASE_URL!);
         database = new Client({ connectionString: process.env.DATABASE_URL });
         await database.connect();
+        blocker = new Client({ connectionString: process.env.DATABASE_URL });
+        await blocker.connect();
         await seedRequiredRows();
     });
 
@@ -153,6 +225,7 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
 
     afterAll(async () => {
         await prisma.$disconnect();
+        await blocker?.end();
         await database?.end();
         if (admin && databaseName) {
             await dropScaleDatabase(admin, databaseName);
@@ -236,5 +309,68 @@ describeWithPostgres("radio playlist PostgreSQL concurrency", () => {
             trackIds.every((id) => id.startsWith("replacement-1-")) ||
                 trackIds.every((id) => id.startsWith("replacement-2-")),
         ).toBe(true);
+    });
+
+    it("serializes radio regeneration behind an ordinary edit without deadlock or 500", async () => {
+        await seedPlaylist(10);
+        const target = await prisma.playlistItem.findFirstOrThrow({
+            where: { playlistId: PLAYLIST_ID },
+            select: { id: true },
+            orderBy: { sort: "asc" },
+        });
+        mockSelectLibraryRadioStationTracks.mockResolvedValue({
+            tracks: tracks("replacement-1", 10),
+        });
+        const response = createRemoveResponse();
+        let blockerOpen = false;
+        const pendingOperations: Promise<unknown>[] = [];
+
+        try {
+            await blocker.query("BEGIN");
+            blockerOpen = true;
+            await blocker.query(
+                'SELECT id FROM "PlaylistItem" WHERE id = $1 FOR UPDATE',
+                [target.id],
+            );
+
+            const ordinaryEdit = removePlaylistItemThroughRoute(
+                target.id,
+                response,
+            );
+            pendingOperations.push(ordinaryEdit);
+            await waitForWaitingConnections(
+                database,
+                1,
+                "Ordinary playlist edit did not wait for the item lock",
+            );
+
+            const regenerate = regenerateRadioPlaylist(USER_ID, PLAYLIST_ID);
+            pendingOperations.push(regenerate);
+            await waitForWaitingConnections(
+                database,
+                2,
+                "Radio regeneration did not wait behind the ordinary edit",
+            );
+            expect(mockSelectLibraryRadioStationTracks).not.toHaveBeenCalled();
+
+            await blocker.query("COMMIT");
+            blockerOpen = false;
+            const results = await Promise.allSettled([
+                ordinaryEdit,
+                regenerate,
+            ]);
+
+            expect(results.map((result) => result.status)).toEqual([
+                "fulfilled",
+                "fulfilled",
+            ]);
+            expect(response.statusCode).toBe(200);
+            expect(response.body).toEqual({
+                message: "Track removed from playlist",
+            });
+        } finally {
+            if (blockerOpen) await blocker.query("ROLLBACK");
+            await Promise.allSettled(pendingOperations);
+        }
     });
 });

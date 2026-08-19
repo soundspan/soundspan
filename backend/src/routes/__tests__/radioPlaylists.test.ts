@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 
+jest.mock("../../config", () => ({ config: { port: 3006 } }));
+
 jest.mock("../../utils/logger", () => {
     const logger = {
         debug: jest.fn(),
@@ -40,6 +42,7 @@ jest.mock("../../services/libraryRadioStationSelection", () => ({
 }));
 
 import { radioPlaylistRouter } from "../library/radioPlaylists";
+import { swaggerSpec } from "../../config/swagger";
 
 type HttpMethod = "post";
 const MAX_ROUTE_HANDLERS = 3;
@@ -370,6 +373,61 @@ describe("radio-generated playlist routes", () => {
         expect(res.body).toEqual({ playlistId: "playlist-1", entries: [] });
     });
 
+    it("binds playlist ownership into the row-lock query", async () => {
+        const res = createRes();
+
+        await invoke(
+            "/radio/playlists/:id/append",
+            {
+                user: { id: "user-1" },
+                params: { id: "playlist-1" },
+                body: { count: 2 },
+            },
+            res,
+        );
+
+        expect(
+            prisma.$queryRaw.mock.calls.some((call) => {
+                const boundValues = call.slice(1);
+                return (
+                    boundValues.includes("playlist-1") &&
+                    boundValues.includes("user-1")
+                );
+            }),
+        ).toBe(true);
+    });
+
+    it("returns a typed 503 after retryable transaction failures exhaust", async () => {
+        jest.useFakeTimers();
+        try {
+            prisma.$transaction.mockRejectedValue(
+                Object.assign(new Error("lock timeout"), { code: "55P03" }),
+            );
+            const res = createRes();
+
+            const request = invoke(
+                "/radio/playlists/:id/append",
+                {
+                    user: { id: "user-1" },
+                    params: { id: "playlist-1" },
+                    body: { count: 2 },
+                },
+                res,
+            );
+            await jest.runAllTimersAsync();
+            await request;
+
+            expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+            expect(res.statusCode).toBe(503);
+            expect(res.body).toEqual({
+                error: "Radio playlist is temporarily unavailable",
+                code: "RADIO_PLAYLIST_RETRY_EXHAUSTED",
+            });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     it("regenerates an owned playlist by replacing its entries", async () => {
         prisma.$queryRaw.mockResolvedValue([
             {
@@ -421,5 +479,66 @@ describe("radio-generated playlist routes", () => {
             playlistId: "playlist-1",
             entries: [{ id: "new-1" }, { id: "new-2" }],
         });
+    });
+
+    it("documents the create filter as the runtime discriminated union", () => {
+        type FilterContract = {
+            discriminator?: { propertyName: string };
+            oneOf: Array<{
+                additionalProperties?: boolean;
+                required?: string[];
+                properties: Record<string, { enum?: string[] }>;
+            }>;
+        };
+        const document = swaggerSpec as {
+            paths: Record<
+                string,
+                {
+                    post: {
+                        requestBody: {
+                            content: {
+                                "application/json": {
+                                    schema: {
+                                        properties: {
+                                            filter: FilterContract;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                }
+            >;
+        };
+        const filter =
+            document.paths["/api/library/radio/playlists"].post.requestBody
+                .content["application/json"].schema.properties.filter;
+
+        expect(filter.discriminator).toEqual({ propertyName: "type" });
+        expect(filter.oneOf).toHaveLength(5);
+        expect(
+            filter.oneOf.map((variant) => variant.properties.type.enum?.[0]),
+        ).toEqual(["genre", "decade", "discovery", "favorites", "workout"]);
+        expect(filter.oneOf[0]).toEqual(
+            expect.objectContaining({
+                additionalProperties: false,
+                required: ["type", "value"],
+            }),
+        );
+        expect(filter.oneOf[1]).toEqual(
+            expect.objectContaining({
+                additionalProperties: false,
+                required: ["type", "value"],
+            }),
+        );
+        for (const variant of filter.oneOf.slice(2)) {
+            expect(variant).toEqual(
+                expect.objectContaining({
+                    additionalProperties: false,
+                    required: ["type"],
+                }),
+            );
+            expect(variant.properties).not.toHaveProperty("value");
+        }
     });
 });

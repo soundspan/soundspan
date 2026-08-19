@@ -49,7 +49,12 @@ function sendValidationError(res: Response, issues: z.core.$ZodIssue[]) {
 
 function sendServiceError(res: Response, error: unknown): Response | null {
     if (!(error instanceof RadioPlaylistServiceError)) return null;
-    return sendRouteError(res, error.statusCode, error.message);
+    return sendRouteError(
+        res,
+        error.statusCode,
+        error.message,
+        error.code ? { code: error.code } : undefined,
+    );
 }
 
 /** Handles POST /api/library/radio/playlists. */
@@ -120,17 +125,40 @@ export async function handleRegenerateRadioPlaylist(
  *         application/json:
  *           schema:
  *             type: object
+ *             additionalProperties: false
  *             required: [filter]
  *             properties:
  *               filter:
- *                 type: object
- *                 required: [type]
- *                 properties:
- *                   type:
- *                     type: string
- *                     enum: [genre, decade, discovery, favorites, workout]
- *                   value:
- *                     type: string
+ *                 discriminator:
+ *                   propertyName: type
+ *                 oneOf:
+ *                   - type: object
+ *                     additionalProperties: false
+ *                     required: [type, value]
+ *                     properties:
+ *                       type: { type: string, enum: [genre] }
+ *                       value: { type: string, minLength: 1, maxLength: 200 }
+ *                   - type: object
+ *                     additionalProperties: false
+ *                     required: [type, value]
+ *                     properties:
+ *                       type: { type: string, enum: [decade] }
+ *                       value: { type: string, pattern: '^(?:1\d{2}|20\d)0$' }
+ *                   - type: object
+ *                     additionalProperties: false
+ *                     required: [type]
+ *                     properties:
+ *                       type: { type: string, enum: [discovery] }
+ *                   - type: object
+ *                     additionalProperties: false
+ *                     required: [type]
+ *                     properties:
+ *                       type: { type: string, enum: [favorites] }
+ *                   - type: object
+ *                     additionalProperties: false
+ *                     required: [type]
+ *                     properties:
+ *                       type: { type: string, enum: [workout] }
  *               size:
  *                 type: integer
  *                 minimum: 1
@@ -171,6 +199,16 @@ radioPlaylistRouter.post(
  *       400: { description: Invalid request }
  *       403: { description: Access denied }
  *       404: { description: Playlist not found }
+ *       503:
+ *         description: Playlist mutation retries exhausted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [error, code]
+ *               properties:
+ *                 error: { type: string }
+ *                 code: { type: string, enum: [RADIO_PLAYLIST_RETRY_EXHAUSTED] }
  *       401: { description: Not authenticated }
  */
 radioPlaylistRouter.post(
@@ -192,6 +230,16 @@ radioPlaylistRouter.post(
  *       400: { description: Invalid request }
  *       403: { description: Access denied }
  *       404: { description: Playlist not found }
+ *       503:
+ *         description: Playlist mutation retries exhausted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [error, code]
+ *               properties:
+ *                 error: { type: string }
+ *                 code: { type: string, enum: [RADIO_PLAYLIST_RETRY_EXHAUSTED] }
  *       401: { description: Not authenticated }
  */
 radioPlaylistRouter.post(

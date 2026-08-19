@@ -251,7 +251,23 @@ describe("subsonic collections/core compatibility handlers", () => {
 
         const playlistQuery = mockPlaylistFindMany.mock.calls[0][0];
         expect(playlistQuery).toEqual({
-            where: { userId: "user-1" },
+            where: {
+                AND: [
+                    { OR: [{ userId: "user-1" }, { isPublic: true }] },
+                    {
+                        OR: [
+                            { mixId: null },
+                            {
+                                NOT: {
+                                    mixId: {
+                                        startsWith: "radio-ephemeral:",
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
             orderBy: { createdAt: "desc" },
             include: {
                 _count: {

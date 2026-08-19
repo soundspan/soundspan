@@ -6,6 +6,7 @@ import {
     type LibraryRadioPlaylistType,
     type LibraryRadioStationTrack,
 } from "./libraryRadioStationSelection";
+import { takePlaylistLock } from "./playlistMutationLock";
 import { RADIO_PLAYLIST_MIX_ID_PREFIX } from "./radioPlaylistIdentity";
 
 export const RADIO_PLAYLIST_DEFAULT_SIZE = 25;
@@ -25,12 +26,19 @@ export interface RadioPlaylistResult {
     entries: LibraryRadioStationTrack[];
 }
 
+export const RADIO_PLAYLIST_RETRY_EXHAUSTED_CODE =
+    "RADIO_PLAYLIST_RETRY_EXHAUSTED";
+
+type RadioPlaylistServiceErrorCode = typeof RADIO_PLAYLIST_RETRY_EXHAUSTED_CODE;
+
 export class RadioPlaylistServiceError extends Error {
     constructor(
-        readonly statusCode: 400 | 403 | 404,
+        readonly statusCode: 400 | 403 | 404 | 503,
         message: string,
+        readonly code?: RadioPlaylistServiceErrorCode,
+        options?: ErrorOptions,
     ) {
-        super(message);
+        super(message, options);
         this.name = "RadioPlaylistServiceError";
     }
 }
@@ -121,25 +129,27 @@ async function lockOwnedRadioPlaylist(
     playlistId: string,
     userId: string,
 ) {
-    const playlists = await tx.$queryRaw<
-        { id: string; userId: string; mixId: string | null }[]
-    >`
-        WITH lock_config AS MATERIALIZED (
-            SELECT set_config(
-                'lock_timeout',
-                ${`${PLAYLIST_LOCK_TIMEOUT_MS}ms`},
-                true
-            )
-        )
-        SELECT p.id, p."userId", p."mixId"
-        FROM "Playlist" p
-        CROSS JOIN lock_config
-        WHERE p.id = ${playlistId}
-        FOR UPDATE OF p
+    const lockConfiguration = await tx.$queryRaw<{ lockTimeout: string }[]>`
+        SELECT set_config(
+            'lock_timeout',
+            ${`${PLAYLIST_LOCK_TIMEOUT_MS}ms`},
+            true
+        ) AS "lockTimeout"
     `;
-    const playlist = playlists[0];
-    if (!playlist)
+    if (lockConfiguration.length !== 1) {
+        throw new Error("Failed to configure playlist lock timeout");
+    }
+    const playlist = await takePlaylistLock(tx, playlistId, userId);
+    if (!playlist) {
+        const existing = await tx.playlist.findUnique({
+            where: { id: playlistId },
+            select: { userId: true },
+        });
+        if (existing) {
+            throw new RadioPlaylistServiceError(403, "Access denied");
+        }
         throw new RadioPlaylistServiceError(404, "Playlist not found");
+    }
     if (playlist.userId !== userId) {
         throw new RadioPlaylistServiceError(403, "Access denied");
     }
@@ -194,14 +204,23 @@ async function withLockedPlaylistTransaction<T>(
                 timeout: PLAYLIST_TRANSACTION_TIMEOUT_MS,
             });
         } catch (error) {
-            const canRetry =
-                attempt + 1 < PLAYLIST_TRANSACTION_ATTEMPTS &&
-                isRetryableTransactionError(error);
-            if (!canRetry) throw error;
+            if (!isRetryableTransactionError(error)) throw error;
+            if (attempt + 1 >= PLAYLIST_TRANSACTION_ATTEMPTS) {
+                throw new RadioPlaylistServiceError(
+                    503,
+                    "Radio playlist is temporarily unavailable",
+                    RADIO_PLAYLIST_RETRY_EXHAUSTED_CODE,
+                    { cause: error },
+                );
+            }
             await pauseBeforeRetry(attempt);
         }
     }
-    throw new Error("Playlist transaction retry bound exhausted");
+    throw new RadioPlaylistServiceError(
+        503,
+        "Radio playlist is temporarily unavailable",
+        RADIO_PLAYLIST_RETRY_EXHAUSTED_CODE,
+    );
 }
 
 async function selectTracks(

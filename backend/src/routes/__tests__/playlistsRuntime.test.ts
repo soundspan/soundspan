@@ -80,6 +80,7 @@ const prisma = {
         create: jest.fn(),
         update: jest.fn(),
     },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(),
 };
 
@@ -311,7 +312,19 @@ describe("playlists route runtime", () => {
             metadata: {},
         });
         prisma.downloadJob.update.mockResolvedValue({});
-        prisma.$transaction.mockResolvedValue([]);
+        prisma.$queryRaw.mockResolvedValue([
+            {
+                id: "pl-1",
+                userId: "u1",
+                mixId: null,
+            },
+        ]);
+        prisma.$transaction.mockImplementation(async (operation: unknown) => {
+            if (typeof operation === "function") {
+                return operation(prisma);
+            }
+            return Promise.all(operation as Promise<unknown>[]);
+        });
 
         deezerService.getTrackPreview.mockResolvedValue(null);
         spotifyImportService.reconcilePendingTracks.mockResolvedValue({
@@ -2122,6 +2135,64 @@ describe("playlists route runtime", () => {
         expect(reorderRes.statusCode).toBe(200);
         expect(prisma.playlistItem.update).toHaveBeenCalledTimes(2);
         expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
+    it("locks the owned playlist before ordinary remove and reorder writes", async () => {
+        prisma.playlistItem.findFirst.mockResolvedValueOnce({
+            id: "pli-1",
+        });
+        const removeRes = createRes();
+
+        await removeItem(
+            {
+                user: { id: "u1" },
+                params: { id: "pl-1", trackId: "pli-1" },
+            } as any,
+            removeRes,
+        );
+
+        expect(removeRes.statusCode).toBe(200);
+        expect(prisma.$queryRaw).toHaveBeenCalled();
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            prisma.playlistItem.delete.mock.invocationCallOrder[0],
+        );
+
+        jest.clearAllMocks();
+        prisma.playlist.findUnique.mockResolvedValue({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValue([
+            { id: "pli-2", trackId: "t-2" },
+            { id: "pli-1", trackId: "t-1" },
+        ]);
+        prisma.playlistItem.update.mockResolvedValue({});
+        prisma.playlist.update.mockResolvedValue({});
+        prisma.$queryRaw.mockResolvedValue([
+            { id: "pl-1", userId: "u1", mixId: null },
+        ]);
+        prisma.$transaction.mockImplementation(async (operation: unknown) => {
+            if (typeof operation !== "function") {
+                throw new Error("Expected an interactive transaction");
+            }
+            return operation(prisma);
+        });
+        const reorderRes = createRes();
+
+        await reorderItems(
+            {
+                user: { id: "u1" },
+                params: { id: "pl-1" },
+                body: { itemIds: ["pli-2", "pli-1"] },
+            } as any,
+            reorderRes,
+        );
+
+        expect(reorderRes.statusCode).toBe(200);
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+            prisma.playlistItem.update.mock.invocationCallOrder[0],
+        );
     });
 
     it("removes by playlist-item id first, then falls back to local track id, and returns 404 when missing", async () => {

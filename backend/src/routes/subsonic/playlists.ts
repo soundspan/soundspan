@@ -1,5 +1,6 @@
 import { type Request, type Response } from "express";
 import { prisma } from "../../utils/db";
+import { standardPlaylistListWhere } from "../../services/radioPlaylistIdentity";
 import { parseSubsonicId, toSubsonicId } from "../../utils/subsonicIds";
 import {
     sendSubsonicError,
@@ -85,9 +86,7 @@ export async function handleGetPlaylists(
 
     try {
         const playlists = await prisma.playlist.findMany({
-            where: {
-                userId: req.user!.id,
-            },
+            where: standardPlaylistListWhere(req.user!.id),
             orderBy: {
                 createdAt: "desc",
             },
