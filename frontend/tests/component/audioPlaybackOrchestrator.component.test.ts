@@ -2145,3 +2145,74 @@ test("heartbeat stall buffers and buffer timeout runs transient recovery", async
     assert.equal(engine.reloadCalls, 1);
     assert.equal(playbackMachine.state, "LOADING");
 });
+
+test("startup guard suppresses a second unexpected stop after progress begins", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("guarded-stop-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    // First stop with no progress arms the startup guard window.
+    engine.playing = false;
+    assert.equal(heartbeatInstances.length, 1);
+    heartbeatInstances[0].triggerUnexpectedStop();
+    await flushAsync();
+
+    // Playback then makes real progress inside the guard window.
+    engine.playing = true;
+    engine.currentTime = 0.6;
+    engine.actualCurrentTime = 0.6;
+    engine.emit("timeupdate", { timeSec: 0.6 });
+    await flushAsync();
+    engine.emit("timeupdate", { timeSec: 1.4 });
+    await flushAsync();
+
+    // A second stop inside the 20s guard is suppressed: play intent
+    // survives and the machine is not forced to READY.
+    const machineStateBefore = playbackMachine.state;
+    engine.playing = false;
+    heartbeatInstances[0].triggerUnexpectedStop();
+    await flushAsync();
+
+    assert.equal(playbackCalls.setIsPlaying.includes(false), false);
+    assert.equal(playbackMachine.state, machineStateBefore);
+});
+
+test("transient recovery anchors resume to zero before startup progress", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    playbackState.isPlaying = true;
+    audioState.currentTrack = makeTrack("stale-resume-track");
+    audioState.queue = [audioState.currentTrack];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    // The engine reports a stale position from a dying pipeline, but no
+    // startup progress was ever observed for this track (no timeupdates).
+    engine.currentTime = 12;
+    engine.actualCurrentTime = 12;
+
+    engine.emit("playerror", {
+        error: new Error("network connection reset"),
+    });
+    await flushAsync();
+    t.mock.timers.tick(450);
+    await flushAsync();
+    assert.equal(engine.reloadCalls, 1);
+
+    // The recovered load must NOT seek back to the stale 12s position:
+    // the startup guard forces the resume anchor to zero.
+    engine.playing = false;
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync();
+
+    assert.equal(engine.seekCalls.includes(12), false);
+    assert.ok(engine.playCalls >= 1);
+});
