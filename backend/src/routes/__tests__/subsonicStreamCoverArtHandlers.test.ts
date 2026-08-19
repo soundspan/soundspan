@@ -101,6 +101,7 @@ import {
     sendSubsonicSuccess,
     SubsonicErrorCode,
 } from "../../utils/subsonicResponse";
+import { AppError, ErrorCategory, ErrorCode } from "../../utils/errors";
 import { AudioStreamingService } from "../../services/audioStreaming";
 import { handleGetCoverArt, handleStream } from "../subsonic";
 
@@ -500,7 +501,13 @@ describe("handleStream", () => {
         });
         jest.spyOn(fs, "existsSync").mockReturnValue(true);
         mockGetStreamFilePath
-            .mockRejectedValueOnce({ code: "FFMPEG_NOT_FOUND" })
+            .mockRejectedValueOnce(
+                new AppError(
+                    ErrorCode.FFMPEG_NOT_FOUND,
+                    ErrorCategory.FATAL,
+                    "FFmpeg not available",
+                ),
+            )
             .mockResolvedValueOnce({
                 filePath: "/music/Artist/Track.flac",
                 mimeType: "audio/flac",

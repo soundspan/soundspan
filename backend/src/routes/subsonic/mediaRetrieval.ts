@@ -30,6 +30,7 @@ import {
     SubsonicErrorCode,
     type ResponseFormat,
 } from "../../utils/subsonicResponse";
+import { AppError, ErrorCode } from "../../utils/errors";
 import {
     DEFAULT_SUBSONIC_AVATAR_PNG,
     fetchCoverArtBuffer,
@@ -350,19 +351,25 @@ async function loadSubsonicStreamTrack(
     });
 }
 
-function resolveLocalStreamPath(track: SubsonicStreamTrack):
-    | { path: string }
-    | { error: "song" | "file" } {
-    if (!track.filePath || !track.fileModified) return { error: "song" };
+function resolveLocalStreamPath(
+    track: SubsonicStreamTrack,
+): { path: string } | { missing: "song" | "file" } {
+    if (!track.filePath || !track.fileModified) return { missing: "song" };
     const absolutePath = resolveTrackPathWithinRoot(
         config.music.musicPath,
         track.filePath,
     );
     return absolutePath && fs.existsSync(absolutePath)
         ? { path: absolutePath }
-        : { error: "file" };
+        : { missing: "file" };
 }
 
+function isFfmpegUnavailable(candidate: unknown): boolean {
+    return (
+        candidate instanceof AppError &&
+        candidate.code === ErrorCode.FFMPEG_NOT_FOUND
+    );
+}
 async function getLocalStreamFile(
     service: AudioStreamingService,
     track: SubsonicStreamTrack,
@@ -387,7 +394,7 @@ async function getLocalStreamFile(
                   absolutePath,
               );
     } catch (error) {
-        if ((error as { code?: string }).code !== "FFMPEG_NOT_FOUND") {
+        if (!isFfmpegUnavailable(error)) {
             throw error;
         }
         return service.getStreamFilePath(
@@ -407,7 +414,7 @@ async function serveLocalSubsonicStream(input: {
     timeOffsetSeconds: number;
 }): Promise<"served" | "song-missing" | "file-missing"> {
     const resolvedPath = resolveLocalStreamPath(input.track);
-    if ("error" in resolvedPath) return `${resolvedPath.error}-missing`;
+    if ("missing" in resolvedPath) return `${resolvedPath.missing}-missing`;
     const service = new AudioStreamingService(
         config.music.musicPath,
         config.music.transcodeCachePath,
