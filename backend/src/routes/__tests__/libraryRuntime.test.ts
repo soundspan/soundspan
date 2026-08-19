@@ -4444,6 +4444,7 @@ describe("library catalog list runtime coverage", () => {
             duration: false,
             skipCovers: true,
         });
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
         expect(okRes.statusCode).toBe(200);
         expect(okRes.body).toEqual({
             codec: "flac",
@@ -4454,6 +4455,113 @@ describe("library catalog list runtime coverage", () => {
             channels: 2,
         });
         presentFileSpy.mockRestore();
+    });
+
+    it("derives audio info from synchronized federated metadata", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce({
+            filePath: null,
+            fileModified: new Date("2026-08-19T00:00:00.000Z"),
+            fileSize: 30_000_000,
+            duration: 240,
+            mime: "audio/flac",
+            origin: "FEDERATED",
+            peerId: "peer-1",
+        });
+        const existsSpy = jest.spyOn(fs, "existsSync");
+        const res = createRes();
+
+        await audioInfoHandler(
+            {
+                params: { id: "federated-track" },
+                user: { id: "user-1" },
+                query: {},
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            codec: "FLAC",
+            bitrate: 1000,
+            sampleRate: null,
+            bitDepth: null,
+            lossless: true,
+            channels: null,
+        });
+        expect(existsSpy).not.toHaveBeenCalled();
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
+    it("returns null estimates when federated size and duration are missing", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce({
+            filePath: null,
+            fileModified: new Date("2026-08-19T00:00:00.000Z"),
+            fileSize: null,
+            duration: null,
+            mime: null,
+            origin: "LOCAL",
+            peerId: "peer-1",
+        });
+        const res = createRes();
+
+        await audioInfoHandler(
+            {
+                params: { id: "federated-track-missing-info" },
+                user: { id: "user-1" },
+                query: {},
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            codec: null,
+            bitrate: null,
+            sampleRate: null,
+            bitDepth: null,
+            lossless: false,
+            channels: null,
+        });
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+    });
+
+    it("does not probe a transcode for federated playback audio info", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce({
+            filePath: null,
+            fileModified: new Date("2026-08-19T00:00:00.000Z"),
+            fileSize: 30_000_000,
+            duration: 240,
+            mime: "audio/flac",
+            origin: "FEDERATED",
+            peerId: "peer-1",
+        });
+        const res = createRes();
+
+        await audioInfoHandler(
+            {
+                params: { id: "federated-playback-track" },
+                user: { id: "user-1" },
+                query: { playback: "true", quality: "low" },
+            } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            codec: "FLAC",
+            bitrate: 1000,
+            sampleRate: null,
+            bitDepth: null,
+            lossless: true,
+            channels: null,
+        });
+        expect(mockUserSettingsFindUnique).not.toHaveBeenCalled();
+        expect(mockStreamGetStreamFilePath).not.toHaveBeenCalled();
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
     });
 
     it("maps audio-info parsing errors to HTTP 500", async () => {

@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vibe embedding queueing now runs alongside ordinary audio analysis and pauses only when the audio queue exceeds its 500-job high-water mark, preventing DCLAP replicas from starving during long analyzer runs.
 - The vibe worker now reuses a dedicated blocking Redis connection per queue, applies bounded reconnect backoff, and closes the connection during worker shutdown instead of reconnecting for every job.
 - Audio-analyzer reconciliation replicas now lock disjoint pending batches with `FOR UPDATE SKIP LOCKED` and claim each batch in the same transaction, preventing replicas from selecting identical work.
+- Stream Info now renders for peer-library tracks and shows the peer's library name.
 - The audio analyzer now reconnects to PostgreSQL after a server-side connection close instead of waiting for multiple worker failures, so loudness backfill jobs no longer spend retry budget on a stale connection.
 - OpenSubsonic `stream` requests now honor `timeOffset` for transcoded audio with fast ffmpeg input seeking. Offset work bypasses the reusable track-and-quality cache, shares the global ffmpeg concurrency cap, uses interval-gated stale sweeping that excludes active temporary files, and cancels and cleans up when clients disconnect (#624).
 - OpenSubsonic song and album responses now report the authenticated user's latest `played` timestamp across the shared browse, search, playlist, queue, bookmark, starred, discovery, and now-playing surfaces (#625).

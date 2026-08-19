@@ -15,6 +15,30 @@ interface AudioInfoResponsePayload {
     channels: number | null;
 }
 
+interface FederatedAudioInfoTrack {
+    mime: string | null;
+    fileSize: number | null;
+    duration: number | null;
+}
+
+const AUDIO_CODEC_BY_MIME: Readonly<Record<string, string>> = {
+    "audio/aac": "AAC",
+    "audio/alac": "ALAC",
+    "audio/flac": "FLAC",
+    "audio/mp3": "MP3",
+    "audio/mp4": "MP4",
+    "audio/mpeg": "MP3",
+    "audio/ogg": "OGG",
+    "audio/opus": "OPUS",
+    "audio/wav": "WAV",
+    "audio/webm": "WEBM",
+    "audio/x-flac": "FLAC",
+    "audio/x-wav": "WAV",
+    "application/ogg": "OGG",
+};
+
+const LOSSLESS_CODECS = new Set(["FLAC", "ALAC", "WAV"]);
+
 interface AudioInfoCacheEntry {
     expiresAt: number;
     payload: AudioInfoResponsePayload;
@@ -74,6 +98,37 @@ export const normalizeStreamingQuality = (
         return normalized;
     }
     return null;
+};
+
+/** Builds best-effort audio metadata without exposing peer storage details. */
+export const buildFederatedAudioInfo = (
+    track: FederatedAudioInfoTrack,
+): AudioInfoResponsePayload => {
+    const normalizedMime =
+        typeof track.mime === "string"
+            ? track.mime.split(";", 1)[0].trim().toLowerCase()
+            : "";
+    const codec = AUDIO_CODEC_BY_MIME[normalizedMime] ?? null;
+    const fileSize = track.fileSize;
+    const duration = track.duration;
+    const bitrate =
+        typeof fileSize === "number" &&
+        Number.isFinite(fileSize) &&
+        fileSize > 0 &&
+        typeof duration === "number" &&
+        Number.isFinite(duration) &&
+        duration > 0
+            ? Math.round((fileSize * 8) / duration / 1000)
+            : null;
+
+    return {
+        codec,
+        bitrate,
+        sampleRate: null,
+        bitDepth: null,
+        lossless: codec !== null && LOSSLESS_CODECS.has(codec),
+        channels: null,
+    };
 };
 
 /** Resolves a persisted audio path beneath the configured music root. */

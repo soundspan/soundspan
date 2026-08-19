@@ -40,12 +40,8 @@ import {
 } from "../../services/unifiedTrackResponse";
 import { proxyFederatedTrackStream } from "../../services/federationStreamProxy";
 import {
-    AUDIO_INFO_CACHE_TTL_MS,
-    audioInfoCache,
-    buildAudioInfoCacheKey,
+    buildFederatedAudioInfo,
     normalizeStreamingQuality,
-    pruneAudioInfoCache,
-    readAudioInfoPayload,
     resolveAudioInfoAbsolutePath,
 } from "../../utils/libraryAudioInfo";
 import {
@@ -67,6 +63,12 @@ import {
     trackBrowseWhere,
 } from "../../utils/librarySorting";
 import { loadActiveFederationStreamPeer } from "./federationStreamPeer";
+import {
+    isFederatedAudioInfoTrack,
+    loadLocalAudioInfo,
+    resolvePlaybackAudioInfoPath,
+    TRACK_AUDIO_INFO_SELECT,
+} from "./trackAudioInfo";
 import {
     PersistedTrackDeletionPath,
     resolvePersistedTrackDeletionPath,
@@ -1516,7 +1518,7 @@ tracksDetailRouter.get("/tracks/:id", asyncHandler(handleGetTrack));
  *         schema:
  *           type: boolean
  *           default: false
- *         description: If true, return info for the transcoded playback file instead of the source
+ *         description: If true, return local transcode info; federated tracks retain their synchronized estimate
  *       - in: query
  *         name: quality
  *         schema:
@@ -1555,9 +1557,10 @@ tracksDetailRouter.get("/tracks/:id", asyncHandler(handleGetTrack));
  *         description: Not authenticated
  */
 // GET /library/tracks/:id/audio-info
-// Returns audio quality metadata (bitrate, sample rate, bit depth, codec)
-// by probing the file on disk with music-metadata. Uses a short-lived
-// in-process cache keyed by track/file identity to avoid repeated probes.
+// Returns audio quality metadata by probing local files or deriving a
+// best-effort estimate from synchronized peer metadata. Local probes use a
+// short-lived in-process cache keyed by track/file identity.
+
 /**
  * Handles GET /api/library/tracks/:id/audio-info.
  */
@@ -1567,18 +1570,18 @@ export async function handleGetTrackAudioInfo(
 ) {
     try {
         const trackId = req.params.id;
-        const playback = parseBooleanQueryParam(req.query.playback, false);
         const track = await prisma.track.findUnique({
             where: { id: trackId, ...TRACK_VISIBLE_WHERE },
-            select: {
-                filePath: true,
-                fileModified: true,
-            },
+            select: TRACK_AUDIO_INFO_SELECT,
         });
 
-        if (!track?.filePath) {
+        if (!track) {
             return sendRouteError(res, 404, "Track not found");
         }
+        if (isFederatedAudioInfoTrack(track)) {
+            return res.json(buildFederatedAudioInfo(track));
+        }
+        if (!track.filePath) return sendRouteError(res, 404, "Track not found");
 
         const absolutePath = resolveAudioInfoAbsolutePath(track.filePath);
         if (!absolutePath || !fs.existsSync(absolutePath)) {
@@ -1589,76 +1592,31 @@ export async function handleGetTrackAudioInfo(
         let cacheScope: "source" | "playback" = "source";
         let cacheQuality: StreamingQuality | null = null;
 
-        if (playback) {
+        if (parseBooleanQueryParam(req.query.playback, false)) {
             const userId = req.user?.id;
-            if (!userId) {
-                return sendRouteError(res, 401, "Unauthorized");
-            }
-
-            const queryQuality = normalizeStreamingQuality(req.query.quality);
-            let requestedQuality: StreamingQuality = queryQuality ?? "medium";
-
-            if (!queryQuality) {
-                const userSettings = await prisma.userSettings.findUnique({
-                    where: { userId },
-                    select: { playbackQuality: true },
-                });
-                requestedQuality =
-                    normalizeStreamingQuality(userSettings?.playbackQuality) ??
-                    "medium";
-            }
-
-            const streamingService = new AudioStreamingService(
-                config.music.musicPath,
-                config.music.transcodeCachePath,
-                config.music.transcodeCacheMaxGb,
+            if (!userId) return sendRouteError(res, 401, "Unauthorized");
+            const playbackInfo = await resolvePlaybackAudioInfoPath(
+                trackId,
+                track.fileModified,
+                absolutePath,
+                userId,
+                req.query.quality,
             );
-
-            try {
-                const playbackFile = await streamingService.getStreamFilePath(
-                    trackId,
-                    requestedQuality,
-                    track.fileModified,
-                    absolutePath,
-                );
-                metadataPath = playbackFile.filePath;
-                cacheScope = "playback";
-                cacheQuality = requestedQuality;
-            } finally {
-                streamingService.destroy();
-            }
+            metadataPath = playbackInfo.metadataPath;
+            cacheScope = "playback";
+            cacheQuality = playbackInfo.requestedQuality;
         }
-
-        const cacheKey = buildAudioInfoCacheKey(
+        const payload = await loadLocalAudioInfo(
             trackId,
             track.filePath,
             track.fileModified,
-            {
-                scope: cacheScope,
-                quality: cacheQuality,
-            },
+            metadataPath,
+            cacheScope,
+            cacheQuality,
         );
-        const now = Date.now();
-        const cachedEntry = audioInfoCache.get(cacheKey);
-        if (cachedEntry && cachedEntry.expiresAt > now) {
-            return res.json(cachedEntry.payload);
-        }
-        if (cachedEntry) {
-            audioInfoCache.delete(cacheKey);
-        }
-
-        if (!fs.existsSync(metadataPath)) {
+        if (!payload) {
             return sendRouteError(res, 404, "Playback file not found on disk");
         }
-
-        const payload = await readAudioInfoPayload(metadataPath);
-
-        audioInfoCache.set(cacheKey, {
-            payload,
-            expiresAt: now + AUDIO_INFO_CACHE_TTL_MS,
-        });
-        pruneAudioInfoCache(now);
-
         res.json(payload);
     } catch (error) {
         logger.error("Get audio info error:", error);

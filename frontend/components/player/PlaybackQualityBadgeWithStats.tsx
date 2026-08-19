@@ -34,6 +34,20 @@ const SERVICE_LABELS: Record<PlaybackQualityBadgeValue["variant"], string> = {
     local: "Local Library",
 };
 
+/**
+ * Resolves the Service row label, preferring the peer library name for
+ * federated tracks over the generic "Local Library" label.
+ */
+export function resolveServiceLabel(
+    variant: PlaybackQualityBadgeValue["variant"],
+    track: { source?: string; peer?: { name?: string } | null } | null,
+): string {
+    if (variant === "local" && track?.source === "federated") {
+        return track.peer?.name || "Peer Library";
+    }
+    return SERVICE_LABELS[variant];
+}
+
 function StatRow({
     label,
     value,
@@ -136,7 +150,10 @@ export function PlaybackQualityBadgeWithStats({
     }[] = [];
     const variant = badge.variant;
 
-    rows.push({ label: "Service", value: SERVICE_LABELS[variant] });
+    rows.push({
+        label: "Service",
+        value: resolveServiceLabel(variant, currentTrack),
+    });
 
     if (variant === "local" && currentTrack?.filePath) {
         const parts = currentTrack.filePath.split(/[/\\]/);
