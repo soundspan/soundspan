@@ -402,6 +402,18 @@ export async function processTrackRemovalPurge(
     job: Job<TrackRemovalPurgeJobData>,
 ): Promise<TrackRemovalPurgeResult> {
     const cursor = parsePurgeCursor(job.data);
+    // Persist a minted run id back into the job so Bull retries of this
+    // same job reuse one marker owner instead of stranding the previous
+    // attempt's marker under a fresh id.
+    if ((job.data as { sweepRunId?: string })?.sweepRunId === undefined) {
+        try {
+            await job.update({ ...job.data, sweepRunId: cursor.sweepRunId });
+        } catch (error) {
+            log.warn("Could not persist purge sweepRunId onto the job", {
+                error,
+            });
+        }
+    }
     const progress = await initializeSweepProgress(cursor);
     if (cursor.progress) {
         await refreshLibraryHealthPurgeMarker(

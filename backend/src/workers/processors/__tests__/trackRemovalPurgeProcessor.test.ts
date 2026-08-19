@@ -131,14 +131,27 @@ describe("trackRemovalPurgeProcessor", () => {
     }
 
     function buildJob(data: Record<string, unknown> = {}) {
-        return {
+        const job = {
             id: "track-removal-purge-1",
             data: { sweepRunId: "unique-run-a", ...data },
+            update: jest.fn(async (next: Record<string, unknown>) => {
+                job.data = next;
+            }),
         } as any;
+        return job;
     }
 
+    // Mirrors real Bull: update() persists data onto the job, so retries of
+    // the same job observe it, while each repeat occurrence is a NEW job.
     function buildLegacyJob(data: Record<string, unknown>) {
-        return { id: "legacy-track-removal-purge", data } as any;
+        const job = {
+            id: "legacy-track-removal-purge",
+            data,
+            update: jest.fn(async (next: Record<string, unknown>) => {
+                job.data = next;
+            }),
+        } as any;
+        return job;
     }
 
     it("processes a persisted legacy repeat root without a sweep run id", async () => {
@@ -151,10 +164,14 @@ describe("trackRemovalPurgeProcessor", () => {
 
     it("mints a different run id for each repeat occurrence", async () => {
         const { module, randomUUID, redisClient } = loadProcessor([]);
-        const repeatJob = buildLegacyJob({ mode: "repeat" });
 
-        await module.processTrackRemovalPurge(repeatJob);
-        await module.processTrackRemovalPurge(repeatJob);
+        // Bull creates a fresh job per repeat occurrence with the original data.
+        await module.processTrackRemovalPurge(
+            buildLegacyJob({ mode: "repeat" }),
+        );
+        await module.processTrackRemovalPurge(
+            buildLegacyJob({ mode: "repeat" }),
+        );
 
         expect(randomUUID).toHaveBeenCalledTimes(2);
         const markerCalls = redisClient.eval.mock.calls as unknown as Array<
@@ -164,6 +181,20 @@ describe("trackRemovalPurgeProcessor", () => {
             .filter((call) => call[1]?.arguments?.length === 4)
             .map((call) => call[1].arguments[0]);
         expect(startRunIds).toEqual(["generated-run-1", "generated-run-2"]);
+    });
+
+    it("reuses one run id across Bull retries of the same job", async () => {
+        const { module, randomUUID } = loadProcessor([]);
+        const job = buildLegacyJob({ mode: "repeat" });
+
+        await module.processTrackRemovalPurge(job);
+        // A Bull retry re-invokes the processor with the SAME job, whose
+        // data now carries the persisted run id.
+        await module.processTrackRemovalPurge(job);
+
+        expect(randomUUID).toHaveBeenCalledTimes(1);
+        expect(job.update).toHaveBeenCalledTimes(1);
+        expect(job.data.sweepRunId).toBe("generated-run-1");
     });
 
     it("mints a run id with a warning for a legacy continuation", async () => {
