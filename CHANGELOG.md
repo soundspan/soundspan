@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Federation catalog parsing now bounds forward-compatible unknown-key warning samples, preventing oversized peer envelopes from crashing or creating unbounded warning state.
+- Volume leveling no longer steps audibly: mid-track gain changes (switching
+  the mode, saving a new target, or a queue-context change) ramp over a short
+  interval instead of jumping, and the player's mode/target preferences load
+  as one snapshot with bounded retries, so a transient settings failure at
+  startup no longer silently disables leveling until the page reloads.
 - Library Insights drill-downs no longer crash the Admin page: the metadata-gap Genres/Lyrics tabs and the analysis-coverage failure list read fields the API never returned, so expanding them with real data threw a client-side error. Gap tabs and the quality bitrate floor also fetch on selection now instead of requiring a separate Load press.
 - Transient playback recovery now resumes correctly after its automatic reload: the recovery listener was previously cancelled before it could restart playback, and a stale pre-failure position can no longer be restored before the track has made real startup progress.
 
