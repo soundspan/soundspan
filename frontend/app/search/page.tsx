@@ -20,6 +20,7 @@ import { LibraryAudiobooksGrid } from "@/features/search/components/LibraryAudio
 import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 import { SimilarArtistsGrid } from "@/features/search/components/SimilarArtistsGrid";
 import { DiscoverTracksList } from "@/features/search/components/DiscoverTracksList";
+import { deriveDiscoverySelection } from "@/features/search/discoverySelection";
 import { AliasResolutionBanner } from "@/features/search/components/AliasResolutionBanner";
 import { SoulseekSongsList } from "@/features/search/components/SoulseekSongsList";
 import { TVSearchInput } from "@/features/search/components/TVSearchInput";
@@ -116,32 +117,29 @@ export default function SearchPage() {
     }, [urlQuery]);
 
     // Derived state
-    const discoverArtists = discoverResults.filter((r) => r.type === "music");
-    const discoverTracks = discoverResults.filter((r) => r.type === "track");
-    const normalizedQuery = query.trim().toLowerCase();
-    const exactDiscoverArtist = discoverArtists.find(
-        (artist) => artist.name.trim().toLowerCase() === normalizedQuery,
-    );
-    const libraryTopArtist = libraryResults?.artists?.[0];
-    const libraryTopIsExact =
-        libraryTopArtist?.name.trim().toLowerCase() === normalizedQuery;
+    const showLibrary =
+        filterTab === "all" || filterTab === "library" || filterTab === "peers";
+    const showDiscover = filterTab === "all" || filterTab === "discover";
+    const showSoulseek = filterTab === "all" || filterTab === "soulseek";
     // An exact-name external match beats a fuzzy library match, so
     // searching "Drake" surfaces Drake rather than an owned "Nick Drake".
-    const preferDiscoveryTopResult =
-        !!exactDiscoverArtist && !libraryTopIsExact;
-    const topArtist = exactDiscoverArtist ?? discoverArtists[0];
-    const secondaryDiscoverArtists = discoverArtists.filter(
-        (artist) => artist !== topArtist,
-    );
+    const {
+        topArtist,
+        preferDiscovery: preferDiscoveryTopResult,
+        secondaryArtists: secondaryDiscoverArtists,
+        tracks: discoverTracks,
+    } = deriveDiscoverySelection({
+        discoverResults,
+        query,
+        aliasCanonical: aliasInfo?.canonical,
+        libraryTopName: libraryResults?.artists?.[0]?.name ?? null,
+        showDiscover,
+    });
     const isLoading =
         isLibrarySearching ||
         isDiscoverSearching ||
         isSoulseekSearching ||
         isSoulseekPolling;
-    const showLibrary =
-        filterTab === "all" || filterTab === "library" || filterTab === "peers";
-    const showDiscover = filterTab === "all" || filterTab === "discover";
-    const showSoulseek = filterTab === "all" || filterTab === "soulseek";
     const showPodcastResults = filterTab === "all" || isPodcastTab;
     const discoverPodcastResults = discoverResults.filter(
         (result) => result.type === "podcast",
@@ -598,6 +596,8 @@ export default function SearchPage() {
                     (isPodcastTab
                         ? !hasPodcastResults
                         : !topArtist &&
+                          secondaryDiscoverArtists.length === 0 &&
+                          discoverTracks.length === 0 &&
                           discoverPodcastResults.length === 0 &&
                           soulseekResults.length === 0 &&
                           (!libraryResults ||

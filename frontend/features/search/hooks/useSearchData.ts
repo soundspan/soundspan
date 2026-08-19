@@ -4,6 +4,7 @@ import {
     useDiscoverSimilarArtistsQuery,
 } from "@/hooks/useQueries";
 import type { SearchResult, DiscoverResult, AliasInfo } from "../types";
+import { deriveDiscoverySelection } from "../discoverySelection";
 import { useMemo } from "react";
 
 interface UseSearchDataProps {
@@ -64,11 +65,19 @@ export function useSearchData({
         return discoverData?.aliasInfo || null;
     }, [discoverData]);
 
-    // Derive top artist for the similar artists query
+    // Derive top artist for the similar artists query, using the same
+    // exact-match-aware selection the search page shows as the top result.
     const topArtist = useMemo(() => {
-        const first = discoverResults.find((r) => r.type === "music");
-        return first ? { name: first.name, mbid: first.mbid || "" } : null;
-    }, [discoverResults]);
+        const selection = deriveDiscoverySelection({
+            discoverResults,
+            query,
+            aliasCanonical: aliasInfo?.canonical,
+            libraryTopName: null,
+            showDiscover: true,
+        });
+        const seed = selection.topArtist;
+        return seed ? { name: seed.name, mbid: seed.mbid || "" } : null;
+    }, [discoverResults, query, aliasInfo]);
 
     // Separate query for similar artists -- fires after discover results load
     const { data: similarData } = useDiscoverSimilarArtistsQuery(
