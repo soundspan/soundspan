@@ -204,7 +204,7 @@ def test_handle_batch_timeout_drains_requeues_and_fails_by_attempt_state(
     monkeypatch.setattr(
         worker,
         "_save_results",
-        lambda *args: (saved_results.append(args) or True),
+        lambda *args: saved_results.append(args) or True,
     )
     monkeypatch.setattr(
         worker,

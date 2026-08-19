@@ -100,9 +100,7 @@ def _job(track_id: str, loudness_only: bool = True) -> dict[str, Any]:
         "filePath": f"Artist/{track_id}.flac",
         "duration": 180,
         "loudnessOnly": loudness_only,
-        "loudnessAttemptKey": (
-            f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{revision_digest}"
-        ),
+        "loudnessAttemptKey": (f"{loudness_backfill.LOUDNESS_ATTEMPT_KEY_PREFIX}{revision_digest}"),
     }
 
 

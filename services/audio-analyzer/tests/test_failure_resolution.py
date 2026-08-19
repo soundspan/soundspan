@@ -116,9 +116,7 @@ def test_completed_future_commit_error_uses_retryable_failure_path(
     monkeypatch.setattr(
         worker,
         "_save_failed",
-        lambda track_id, error, permanent=False: failures.append(
-            (track_id, error, permanent)
-        ),
+        lambda track_id, error, permanent=False: failures.append((track_id, error, permanent)),
     )
     future: Future[tuple[str, str, dict[str, Any]]] = Future()
     future.set_result(("track-a", "/music/a.flac", _analysis_features()))

@@ -68,7 +68,7 @@ def test_consume_batch_results_requeues_unfinalized_tracks_after_pool_crash(
     monkeypatch.setattr(
         worker,
         "_save_results",
-        lambda *args: (saved_results.append(args) or True),
+        lambda *args: saved_results.append(args) or True,
     )
     monkeypatch.setattr(
         worker,
