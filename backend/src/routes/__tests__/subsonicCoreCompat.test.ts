@@ -549,7 +549,7 @@ describe("subsonic core compatibility handlers", () => {
                     id: "artist-1",
                     name: "Artist One",
                 },
-                tracks: [{ duration: 120 }],
+                tracks: [{ id: "track-1", duration: 120 }],
             },
         ]);
 
@@ -580,6 +580,7 @@ describe("subsonic core compatibility handlers", () => {
                 playedAt: true,
             },
         });
+        expect(mockPlayGroupBy).toHaveBeenCalledTimes(1);
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({

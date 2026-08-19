@@ -109,6 +109,8 @@ function buildReq(query: Record<string, unknown>): Request {
     return {
         query,
         headers: {},
+        once: jest.fn(),
+        off: jest.fn(),
         user: {
             id: "user-1",
             username: "alice",
@@ -125,6 +127,8 @@ function buildRes(): Response {
         end: jest.fn(),
         headersSent: false,
         writableEnded: false,
+        once: jest.fn(),
+        off: jest.fn(),
     };
     (res.status as jest.Mock).mockReturnValue(res);
     return res as Response;
@@ -211,6 +215,7 @@ describe("handleStream", () => {
             expect.any(Date),
             expect.stringContaining("/music"),
             42,
+            expect.any(AbortSignal),
         );
         expect(mockStreamFileWithRangeSupport).toHaveBeenCalledWith(
             req,
@@ -219,6 +224,60 @@ describe("handleStream", () => {
             "audio/mpeg",
         );
         expect(mockCleanupStreamFile).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["request abort", "request", "aborted"],
+        ["response close", "response", "close"],
+        ["response failure", "response", "error"],
+    ])("cancels an offset transcode on %s", async (_label, target, event) => {
+        mockTrackFindFirst.mockResolvedValue({
+            id: "track-1",
+            origin: "LOCAL",
+            remoteId: null,
+            mime: "audio/flac",
+            filePath: "Artist/Track.flac",
+            fileModified: new Date("2024-02-02T00:00:00Z"),
+            federationPeer: null,
+        });
+        jest.spyOn(fs, "existsSync").mockReturnValue(true);
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+            markStarted = resolve;
+        });
+        let transcodeSignal: AbortSignal | undefined;
+        mockGetStreamFilePath.mockImplementation(
+            (...args: unknown[]) =>
+                new Promise((_resolve, reject) => {
+                    transcodeSignal = args[5] as AbortSignal;
+                    transcodeSignal.addEventListener(
+                        "abort",
+                        () => reject(new Error("cancelled")),
+                        { once: true },
+                    );
+                    markStarted();
+                }),
+        );
+        const req = buildReq({
+            id: "tr-track-1",
+            maxBitRate: "128",
+            timeOffset: "42",
+        });
+        const res = buildRes();
+
+        const handling = handleStream(req, res);
+        await started;
+        const emitter = target === "request" ? req : res;
+        const listener = (emitter.once as jest.Mock).mock.calls.find(
+            ([registeredEvent]) => registeredEvent === event,
+        )?.[1] as (() => void) | undefined;
+        expect(listener).toBeDefined();
+
+        listener?.();
+        await handling;
+
+        expect(transcodeSignal?.aborted).toBe(true);
+        expect(mockDestroyStreamingService).toHaveBeenCalledTimes(1);
     });
 
     it("ignores timeOffset when original quality is selected", async () => {

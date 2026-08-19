@@ -75,6 +75,9 @@ async function handleGetAlbumListLike(
     try {
         let albums: AlbumListRecord[] = [];
         let enrichmentByAlbumId = new Map<string, SongEnrichment>();
+        let playEnrichmentByTrackId:
+            | ReadonlyMap<string, SongEnrichment>
+            | undefined;
 
         if (type === "starred") {
             albums = [];
@@ -94,7 +97,9 @@ async function handleGetAlbumListLike(
             type === "highest" ||
             type === "recent"
         ) {
-            const albumStats = await buildAlbumPlayStats(req.user!.id);
+            const playStats = await buildAlbumPlayStats(req.user!.id);
+            const albumStats = playStats.byAlbumId;
+            playEnrichmentByTrackId = playStats.byTrackId;
             enrichmentByAlbumId = new Map(
                 Array.from(albumStats, ([albumId, stats]) => [
                     albumId,
@@ -244,6 +249,8 @@ async function handleGetAlbumListLike(
         const playedAtByTrackId = await loadSongEnrichmentByTrackId(
             req.user!.id,
             albums.flatMap((album) => album.tracks.map((track) => track.id)),
+            undefined,
+            playEnrichmentByTrackId,
         );
         for (const album of albums) {
             const aggregate = combineSongEnrichmentForAlbum(

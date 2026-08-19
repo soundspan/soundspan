@@ -194,21 +194,41 @@ describe("subsonic profile compatibility handlers", () => {
         );
     });
 
-    it("rejects invalid setRating values", async () => {
-        await handleSetRating(
-            buildReq({
-                id: "tr-track-1",
-                rating: "10",
-            }),
-            buildRes(),
-        );
+    it.each(["3.9", "3junk", "3e2", "6", "-1"])(
+        "rejects malformed setRating value %s",
+        async (rating) => {
+            await handleSetRating(
+                buildReq({ id: "tr-track-1", rating }),
+                buildRes(),
+            );
 
-        expect(mockSendError).toHaveBeenCalledWith(
-            expect.anything(),
-            10,
-            "Required parameter 'rating' is invalid",
-            "json",
-            undefined,
-        );
-    });
+            expect(mockTrackRatingUpsert).not.toHaveBeenCalled();
+            expect(mockTrackRatingDeleteMany).not.toHaveBeenCalled();
+            expect(mockSendError).toHaveBeenCalledWith(
+                expect.anything(),
+                10,
+                "Required parameter 'rating' is invalid",
+                "json",
+                undefined,
+            );
+        },
+    );
+
+    it.each(["0", "1", "2", "3", "4", "5"])(
+        "accepts exact setRating value %s",
+        async (rating) => {
+            await handleSetRating(
+                buildReq({ id: "tr-track-1", rating }),
+                buildRes(),
+            );
+
+            expect(mockSendError).not.toHaveBeenCalled();
+            expect(mockSendSuccess).toHaveBeenCalledWith(
+                expect.anything(),
+                {},
+                "json",
+                undefined,
+            );
+        },
+    );
 });

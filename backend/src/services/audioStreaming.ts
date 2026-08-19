@@ -6,7 +6,6 @@ import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import * as crypto from "crypto";
-import * as os from "os";
 import { prisma } from "../utils/db";
 import ffmpeg from "fluent-ffmpeg";
 import PQueue from "p-queue";
@@ -34,6 +33,9 @@ const inflightFederatedStreams = new Map<
     Promise<StreamFileInfo | FederatedStreamSource>
 >();
 const BYTES_PER_GIBIBYTE = 1024 * 1024 * 1024;
+const OFFSET_TEMP_DIRECTORY = "offset-tmp";
+const OFFSET_TEMP_MAX_AGE_MS = 60 * 60 * 1000;
+const OFFSET_SWEEP_FILE_LIMIT = 1000;
 
 // Quality settings
 export const QUALITY_SETTINGS = {
@@ -50,6 +52,15 @@ interface StreamFileInfo {
     mimeType: string;
     cleanup?: () => Promise<void>;
 }
+
+type FfmpegExecution = {
+    command: ReturnType<typeof ffmpeg>;
+    cachePath: string;
+    trackId: string;
+    quality: Quality;
+    sourcePath: string;
+    signal?: AbortSignal;
+};
 
 /** Complete peer response metadata needed to decide cache fill or passthrough. */
 export interface FederatedStreamSource {
@@ -88,6 +99,7 @@ function createByteLimitGuard(maxBytes: number): Transform {
 export class AudioStreamingService {
     private musicPath: string;
     private transcodeCachePath: string;
+    private offsetTempPath: string;
     private transcodeCacheMaxGb: number;
     private evictionInterval: NodeJS.Timeout | null = null;
 
@@ -98,12 +110,20 @@ export class AudioStreamingService {
     ) {
         this.musicPath = musicPath;
         this.transcodeCachePath = transcodeCachePath;
+        this.offsetTempPath = path.join(
+            this.transcodeCachePath,
+            OFFSET_TEMP_DIRECTORY,
+        );
         this.transcodeCacheMaxGb = transcodeCacheMaxGb;
 
         // Ensure cache directory exists
         if (!fs.existsSync(this.transcodeCachePath)) {
             fs.mkdirSync(this.transcodeCachePath, { recursive: true });
         }
+        fs.mkdirSync(this.offsetTempPath, { recursive: true });
+        void this.sweepStaleOffsetFiles().catch((issue) => {
+            logger.warn("Offset transcode cleanup failed:", issue);
+        });
 
         // Start cache eviction timer (every 6 hours)
         this.evictionInterval = setInterval(
@@ -125,6 +145,7 @@ export class AudioStreamingService {
         sourceModified: Date,
         sourceAbsolutePath: string,
         timeOffsetSeconds = 0,
+        signal?: AbortSignal,
     ): Promise<StreamFileInfo> {
         logger.debug(
             `[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`,
@@ -139,6 +160,7 @@ export class AudioStreamingService {
                 quality,
                 sourceAbsolutePath,
                 timeOffsetSeconds,
+                signal,
             );
         }
 
@@ -224,24 +246,30 @@ export class AudioStreamingService {
         quality: Quality,
         sourcePath: string,
         timeOffsetSeconds: number,
+        signal?: AbortSignal,
     ): Promise<StreamFileInfo> {
         const settings = QUALITY_SETTINGS[quality];
         if (!settings.bitrate || !settings.format) {
             throw this.invalidQualityError(quality);
         }
         const temporaryPath = path.join(
-            os.tmpdir(),
+            this.offsetTempPath,
             `soundspan-offset-${crypto.randomUUID()}.${settings.format}`,
         );
         try {
-            await this.runFfmpeg(
-                sourcePath,
-                temporaryPath,
-                settings.bitrate,
-                settings.format,
-                trackId,
-                quality,
-                timeOffsetSeconds,
+            await transcodeQueue.add(
+                () =>
+                    this.runFfmpeg(
+                        sourcePath,
+                        temporaryPath,
+                        settings.bitrate,
+                        settings.format,
+                        trackId,
+                        quality,
+                        timeOffsetSeconds,
+                        signal,
+                    ),
+                signal ? { signal } : undefined,
             );
         } catch (error) {
             await fs.promises.unlink(temporaryPath).catch(() => undefined);
@@ -253,6 +281,24 @@ export class AudioStreamingService {
             cleanup: () =>
                 fs.promises.unlink(temporaryPath).catch(() => undefined),
         };
+    }
+
+    private async sweepStaleOffsetFiles(): Promise<void> {
+        const entries = await fsPromises.readdir(this.offsetTempPath, {
+            withFileTypes: true,
+        });
+        const cutoff = Date.now() - OFFSET_TEMP_MAX_AGE_MS;
+        const boundedEntries = entries.slice(0, OFFSET_SWEEP_FILE_LIMIT);
+        for (const entry of boundedEntries) {
+            if (!entry.isFile()) continue;
+            const filePath = path.join(this.offsetTempPath, entry.name);
+            try {
+                const stats = await fsPromises.stat(filePath);
+                if (stats.mtimeMs < cutoff) await fsPromises.unlink(filePath);
+            } catch {
+                // Best-effort startup cleanup tolerates races and permissions.
+            }
+        }
     }
 
     /** Returns a complete peer stream cache hit without source staleness checks. */
@@ -512,57 +558,156 @@ export class AudioStreamingService {
         trackId: string,
         quality: Quality,
         timeOffsetSeconds = 0,
+        signal?: AbortSignal,
     ): Promise<void> {
-        return new Promise((resolve, reject) => {
-            let settled = false;
-            let deadline: NodeJS.Timeout | undefined;
-            const clearDeadline = (): void => {
-                if (deadline === undefined) return;
-                clearTimeout(deadline);
-                deadline = undefined;
-            };
-            const rejectOnce = (error: AppError): void => {
-                if (settled) return;
-                settled = true;
-                clearDeadline();
-                reject(error);
-            };
-
-            try {
-                const command = this.createFfmpegCommand(
-                    sourcePath,
-                    bitrate,
-                    format,
-                    timeOffsetSeconds,
-                );
-                command.on("error", (error) => {
-                    rejectOnce(
-                        this.toFfmpegError(error, trackId, quality, sourcePath),
-                    );
-                });
-                command.on("end", () => {
-                    if (settled) return;
-                    settled = true;
-                    clearDeadline();
-                    resolve();
-                });
-                deadline = setTimeout(() => {
-                    if (settled) return;
-                    settled = true;
-                    this.cleanupTimedOutTranscode(
+        if (signal?.aborted) {
+            return Promise.reject(
+                this.cancelledTranscodeIssue(trackId, quality, sourcePath),
+            );
+        }
+        try {
+            const command = this.createFfmpegCommand(
+                sourcePath,
+                bitrate,
+                format,
+                timeOffsetSeconds,
+            );
+            return new Promise((resolve, reject) => {
+                this.observeFfmpeg(
+                    {
                         command,
                         cachePath,
                         trackId,
                         quality,
                         sourcePath,
-                        reject,
-                    );
-                }, config.transcodeTimeoutMs);
-                command.save(cachePath);
-            } catch {
-                rejectOnce(this.ffmpegUnavailableError(trackId, quality));
-            }
+                        signal,
+                    },
+                    resolve,
+                    reject,
+                );
+            });
+        } catch {
+            return Promise.reject(
+                this.ffmpegUnavailableError(trackId, quality),
+            );
+        }
+    }
+
+    private observeFfmpeg(
+        input: FfmpegExecution,
+        resolve: () => void,
+        reject: (reason?: unknown) => void,
+    ): void {
+        let settled = false;
+        let deadline: NodeJS.Timeout | undefined;
+        const finish = (): void => {
+            if (deadline !== undefined) clearTimeout(deadline);
+            input.signal?.removeEventListener("abort", abort);
+        };
+        const fail = (issue: AppError): void => {
+            if (settled) return;
+            settled = true;
+            finish();
+            reject(issue);
+        };
+        const terminate = (issue: AppError): void => {
+            if (settled) return;
+            settled = true;
+            finish();
+            this.terminateTranscode(
+                input.command,
+                input.cachePath,
+                issue,
+                reject,
+            );
+        };
+        const abort = (): void =>
+            terminate(
+                this.cancelledTranscodeIssue(
+                    input.trackId,
+                    input.quality,
+                    input.sourcePath,
+                ),
+            );
+        const complete = (): void => {
+            if (settled) return;
+            settled = true;
+            finish();
+            resolve();
+        };
+        this.attachFfmpegHandlers(input, fail, complete);
+        input.signal?.addEventListener("abort", abort, { once: true });
+        if (input.signal?.aborted) {
+            abort();
+            return;
+        }
+        deadline = this.startFfmpegDeadline(input, terminate);
+        try {
+            input.command.save(input.cachePath);
+        } catch {
+            fail(this.ffmpegUnavailableError(input.trackId, input.quality));
+        }
+    }
+
+    private startFfmpegDeadline(
+        input: FfmpegExecution,
+        terminate: (issue: AppError) => void,
+    ): NodeJS.Timeout {
+        return setTimeout(
+            () =>
+                terminate(
+                    this.timedOutTranscodeIssue(
+                        input.trackId,
+                        input.quality,
+                        input.sourcePath,
+                    ),
+                ),
+            config.transcodeTimeoutMs,
+        );
+    }
+
+    private attachFfmpegHandlers(
+        input: FfmpegExecution,
+        fail: (issue: AppError) => void,
+        complete: () => void,
+    ): void {
+        input.command.on("error", (issue) => {
+            fail(
+                this.toFfmpegError(
+                    issue,
+                    input.trackId,
+                    input.quality,
+                    input.sourcePath,
+                ),
+            );
         });
+        input.command.on("end", complete);
+    }
+
+    private cancelledTranscodeIssue(
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+    ): AppError {
+        return new AppError(
+            ErrorCode.TRANSCODE_FAILED,
+            ErrorCategory.RECOVERABLE,
+            "Transcoding cancelled because the client disconnected",
+            { trackId, quality, source: sourcePath },
+        );
+    }
+
+    private timedOutTranscodeIssue(
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+    ): AppError {
+        return new AppError(
+            ErrorCode.TRANSCODE_FAILED,
+            ErrorCategory.RECOVERABLE,
+            `Transcoding timed out after ${config.transcodeTimeoutMs}ms`,
+            { trackId, quality, source: sourcePath },
+        );
     }
 
     private ffmpegUnavailableError(
@@ -601,12 +746,10 @@ export class AudioStreamingService {
         );
     }
 
-    private cleanupTimedOutTranscode(
+    private terminateTranscode(
         command: { kill(signal: string): unknown },
         cachePath: string,
-        trackId: string,
-        quality: Quality,
-        sourcePath: string,
+        issue: AppError,
         reject: (reason?: unknown) => void,
     ): void {
         try {
@@ -615,14 +758,7 @@ export class AudioStreamingService {
             // Continue cleanup when the process already exited.
         }
         fs.unlink(cachePath, () => {
-            reject(
-                new AppError(
-                    ErrorCode.TRANSCODE_FAILED,
-                    ErrorCategory.RECOVERABLE,
-                    `Transcoding timed out after ${config.transcodeTimeoutMs}ms`,
-                    { trackId, quality, source: sourcePath },
-                ),
-            );
+            reject(issue);
         });
     }
 

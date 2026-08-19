@@ -13,6 +13,7 @@ const mockFsMkdirSync = jest.fn();
 const mockFsCreateReadStream = jest.fn();
 const mockFsCreateWriteStream = jest.fn();
 const mockFsStat = jest.fn();
+const mockFsReaddir = jest.fn();
 const mockPipeline = jest.fn();
 const mockFsUnlink = jest.fn();
 const mockFsRename = jest.fn();
@@ -141,6 +142,7 @@ jest.mock("fs", () => ({
     unlink: mockFsUnlinkCallback,
     promises: {
         stat: mockFsStat,
+        readdir: mockFsReaddir,
         unlink: mockFsUnlink,
         rename: mockFsRename,
     },
@@ -331,6 +333,7 @@ describe("AudioStreamingService", () => {
         mockFsCreateReadStream.mockReturnValue(createMockReadStream());
         mockFsCreateWriteStream.mockReturnValue({});
         mockFsStat.mockResolvedValue({ size: 1024 });
+        mockFsReaddir.mockResolvedValue([]);
         mockFsUnlink.mockResolvedValue(undefined);
         mockFsRename.mockResolvedValue(undefined);
         mockFsUnlinkCallback.mockImplementation(
@@ -365,6 +368,32 @@ describe("AudioStreamingService", () => {
     });
 
     describe("getStreamFilePath", () => {
+        it("sweeps stale offset files from the transcode volume", async () => {
+            let resolveSweep!: (filePath: string) => void;
+            const sweptPath = new Promise<string>((resolve) => {
+                resolveSweep = resolve;
+            });
+            mockFsReaddir.mockResolvedValueOnce([
+                { name: "stale.mp3", isFile: () => true },
+            ]);
+            mockFsStat.mockResolvedValueOnce({
+                size: 1024,
+                mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
+            });
+            mockFsUnlink.mockImplementationOnce(async (filePath: string) => {
+                resolveSweep(filePath);
+            });
+
+            createService();
+
+            await expect(sweptPath).resolves.toBe(
+                "/cache/offset-tmp/stale.mp3",
+            );
+            expect(mockFsMkdirSync).toHaveBeenCalledWith("/cache/offset-tmp", {
+                recursive: true,
+            });
+        });
+
         it("transcodes a time offset to an uncached temporary file", async () => {
             const service = createService();
 
@@ -385,13 +414,77 @@ describe("AudioStreamingService", () => {
                 "42",
             );
             expect(ffmpegControl.lastCommand.save).toHaveBeenCalledWith(
-                expect.stringMatching(/soundspan-offset-.*\.mp3$/),
+                expect.stringMatching(
+                    /^\/cache\/offset-tmp\/soundspan-offset-.*\.mp3$/,
+                ),
             );
             expect(result).toEqual({
-                filePath: expect.stringMatching(/soundspan-offset-.*\.mp3$/),
+                filePath: expect.stringMatching(
+                    /^\/cache\/offset-tmp\/soundspan-offset-.*\.mp3$/,
+                ),
                 mimeType: "audio/mpeg",
                 cleanup: expect.any(Function),
             });
+        });
+
+        it("shares the bounded transcode queue with offset transcodes", async () => {
+            const service = createService();
+            ffmpegControl.mode = "pending";
+
+            const transcodes = [1, 2, 3, 4].map((index) =>
+                service.getStreamFilePath(
+                    `track-offset-${index}`,
+                    "low",
+                    new Date("2025-01-01T00:00:00.000Z"),
+                    `/music/source-${index}.flac`,
+                    index,
+                ),
+            );
+
+            await waitForFfmpegCommandCount(3);
+            expect(mockFfmpeg).toHaveBeenCalledTimes(3);
+
+            ffmpegControl.commands[0].__handlers.end();
+            await waitForFfmpegCommandCount(4);
+            expect(mockFfmpeg).toHaveBeenCalledTimes(4);
+
+            ffmpegControl.commands.slice(1).forEach((command) => {
+                command.__handlers.end();
+            });
+            const results = await Promise.all(transcodes);
+            await Promise.all(results.map((result) => result.cleanup?.()));
+        });
+
+        it("kills and removes an offset transcode when its request aborts", async () => {
+            const service = createService();
+            const controller = new AbortController();
+            ffmpegControl.mode = "pending";
+
+            const transcode = service.getStreamFilePath(
+                "track-offset-abort",
+                "low",
+                new Date("2025-01-01T00:00:00.000Z"),
+                "/music/source.flac",
+                42,
+                controller.signal,
+            );
+            await waitForFfmpegCommandCount(1);
+
+            controller.abort();
+
+            await expect(transcode).rejects.toMatchObject({
+                code: ErrorCode.TRANSCODE_FAILED,
+                message: expect.stringContaining("cancelled"),
+            });
+            expect(ffmpegControl.commands[0].kill).toHaveBeenCalledWith(
+                "SIGKILL",
+            );
+            expect(mockFsUnlinkCallback).toHaveBeenCalledWith(
+                expect.stringMatching(
+                    /^\/cache\/offset-tmp\/soundspan-offset-.*\.mp3$/,
+                ),
+                expect.any(Function),
+            );
         });
 
         it("returns source path and mime type when original quality is requested", async () => {

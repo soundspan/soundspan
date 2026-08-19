@@ -13,6 +13,7 @@ jest.mock("../../utils/subsonicResponse", () => ({
     sendSubsonicSuccess: jest.fn(),
     SubsonicErrorCode: {
         GENERIC: 0,
+        MISSING_PARAMETER: 10,
         NOT_FOUND: 70,
     },
 }));
@@ -231,7 +232,7 @@ describe("subsonic state/admin compatibility handlers", () => {
         );
     });
 
-    it("keeps numeric current semantics for getPlayQueueByIndex", async () => {
+    it("returns the index-based queue envelope and currentIndex", async () => {
         mockPlaybackFindUnique.mockResolvedValue({
             queue: [{ id: "tr-track-1" }, { id: "tr-track-2" }],
             currentIndex: 1,
@@ -245,14 +246,18 @@ describe("subsonic state/admin compatibility handlers", () => {
 
         await handleGetPlayQueueByIndex(buildReq({ index: "2" }), buildRes());
 
-        expect(mockSendSuccess).toHaveBeenCalledWith(
-            expect.anything(),
-            expect.objectContaining({
-                playQueue: expect.objectContaining({ current: 1 }),
+        const payload = mockSendSuccess.mock.calls[0][1] as Record<
+            string,
+            unknown
+        >;
+        expect(payload).toEqual({
+            playQueueByIndex: expect.objectContaining({
+                currentIndex: 1,
+                position: 12000,
+                entry: expect.any(Array),
             }),
-            "json",
-            undefined,
-        );
+        });
+        expect(payload).not.toHaveProperty("playQueue");
     });
 
     it("resolves indexed play queue from indexed legacy device id", async () => {
@@ -391,7 +396,7 @@ describe("subsonic state/admin compatibility handlers", () => {
             buildReq({
                 index: "3",
                 id: ["tr-track-1"],
-                current: "0",
+                currentIndex: "0",
                 position: "12000",
             }),
             buildRes(),
@@ -406,6 +411,189 @@ describe("subsonic state/admin compatibility handlers", () => {
                     },
                 },
             }),
+        );
+    });
+
+    it.each([
+        ["missing", undefined],
+        ["negative", "-1"],
+        ["equal to queue length", "1"],
+        ["non-integer", "0.5"],
+    ])(
+        "rejects %s savePlayQueueByIndex currentIndex with error 10",
+        async (_label, currentIndex) => {
+            mockTrackFindMany.mockResolvedValue([
+                buildQueueTrack("track-1", "Song One"),
+            ]);
+
+            await handleSavePlayQueueByIndex(
+                buildReq({
+                    id: ["tr-track-1"],
+                    ...(currentIndex === undefined ? {} : { currentIndex }),
+                }),
+                buildRes(),
+            );
+
+            expect(mockPlaybackUpsert).not.toHaveBeenCalled();
+            expect(mockSendError).toHaveBeenCalledWith(
+                expect.anything(),
+                10,
+                "Required parameter 'currentIndex' is missing or invalid",
+                "json",
+                undefined,
+            );
+        },
+    );
+
+    it("does not treat classic current as savePlayQueueByIndex currentIndex", async () => {
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+        ]);
+
+        await handleSavePlayQueueByIndex(
+            buildReq({ id: ["tr-track-1"], current: "0" }),
+            buildRes(),
+        );
+
+        expect(mockPlaybackUpsert).not.toHaveBeenCalled();
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            10,
+            "Required parameter 'currentIndex' is missing or invalid",
+            "json",
+            undefined,
+        );
+    });
+
+    it("clears savePlayQueueByIndex without requiring currentIndex", async () => {
+        await handleSavePlayQueueByIndex(buildReq({}), buildRes());
+
+        expect(mockPlaybackUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    currentIndex: 0,
+                    trackId: null,
+                }),
+            }),
+        );
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            {},
+            "json",
+            undefined,
+        );
+    });
+
+    it("remaps classic current after an earlier queue entry is filtered", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [
+                { id: "tr-track-removed" },
+                { id: "tr-track-2" },
+                { id: "tr-track-3" },
+            ],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-2", "Song Two"),
+            buildQueueTrack("track-3", "Song Three"),
+        ]);
+
+        await handleGetPlayQueue(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playQueue: expect.objectContaining({
+                    current: "tr-track-2",
+                    position: 12000,
+                }),
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("omits classic current and resets position when it is filtered", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [
+                { id: "tr-track-1" },
+                { id: "tr-track-removed" },
+                { id: "tr-track-3" },
+            ],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+            buildQueueTrack("track-3", "Song Three"),
+        ]);
+
+        await handleGetPlayQueue(buildReq({}), buildRes());
+
+        const payload = mockSendSuccess.mock.calls[0][1] as {
+            playQueue: Record<string, unknown>;
+        };
+        expect(payload.playQueue).not.toHaveProperty("current");
+        expect(payload.playQueue.position).toBe(0);
+    });
+
+    it("moves index-based current to the next survivor when current is filtered", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [
+                { id: "tr-track-1" },
+                { id: "tr-track-removed" },
+                { id: "tr-track-3" },
+            ],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+            buildQueueTrack("track-3", "Song Three"),
+        ]);
+
+        await handleGetPlayQueueByIndex(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playQueueByIndex: expect.objectContaining({
+                    currentIndex: 1,
+                    position: 0,
+                }),
+            }),
+            "json",
+            undefined,
+        );
+    });
+
+    it("falls back to index zero when no entry survives after current", async () => {
+        mockPlaybackFindUnique.mockResolvedValue({
+            queue: [{ id: "tr-track-1" }, { id: "tr-track-removed" }],
+            currentIndex: 1,
+            currentTime: 12,
+            updatedAt: new Date("2026-08-18T12:00:00.000Z"),
+        });
+        mockTrackFindMany.mockResolvedValue([
+            buildQueueTrack("track-1", "Song One"),
+        ]);
+
+        await handleGetPlayQueueByIndex(buildReq({}), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                playQueueByIndex: expect.objectContaining({
+                    currentIndex: 0,
+                    position: 0,
+                }),
+            }),
+            "json",
+            undefined,
         );
     });
 
@@ -713,7 +901,7 @@ describe("subsonic state/admin compatibility handlers", () => {
             buildReq({
                 index: "420",
                 id: ["tr-track-1"],
-                current: "0",
+                currentIndex: "0",
                 position: "12000",
             }),
             buildRes(),

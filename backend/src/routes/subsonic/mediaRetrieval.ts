@@ -376,6 +376,7 @@ async function getLocalStreamFile(
     quality: Quality,
     absolutePath: string,
     timeOffsetSeconds: number,
+    signal: AbortSignal,
 ) {
     const offset = quality === "original" ? 0 : timeOffsetSeconds;
     try {
@@ -386,6 +387,7 @@ async function getLocalStreamFile(
                   track.fileModified,
                   absolutePath,
                   offset,
+                  signal,
               )
             : await service.getStreamFilePath(
                   track.id,
@@ -406,6 +408,32 @@ async function getLocalStreamFile(
     }
 }
 
+function bindStreamAbort(
+    req: Request,
+    res: Response,
+): {
+    signal: AbortSignal;
+    dispose: () => void;
+} {
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    if (typeof req.once === "function") req.once("aborted", abort);
+    if (typeof res.once === "function") {
+        res.once("close", abort);
+        res.once("error", abort);
+    }
+    return {
+        signal: controller.signal,
+        dispose: () => {
+            if (typeof req.off === "function") req.off("aborted", abort);
+            if (typeof res.off === "function") {
+                res.off("close", abort);
+                res.off("error", abort);
+            }
+        },
+    };
+}
+
 async function serveLocalSubsonicStream(input: {
     req: Request;
     res: Response;
@@ -420,6 +448,7 @@ async function serveLocalSubsonicStream(input: {
         config.music.transcodeCachePath,
         config.music.transcodeCacheMaxGb,
     );
+    const abortBinding = bindStreamAbort(input.req, input.res);
     let cleanup: (() => Promise<void>) | undefined;
     try {
         const streamFile = await getLocalStreamFile(
@@ -428,6 +457,7 @@ async function serveLocalSubsonicStream(input: {
             input.quality,
             resolvedPath.path,
             input.timeOffsetSeconds,
+            abortBinding.signal,
         );
         cleanup = streamFile.cleanup;
         await service.streamFileWithRangeSupport(
@@ -438,6 +468,7 @@ async function serveLocalSubsonicStream(input: {
         );
         return "served";
     } finally {
+        abortBinding.dispose();
         await cleanup?.();
         service.destroy();
     }

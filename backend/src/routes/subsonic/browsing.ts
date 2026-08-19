@@ -649,10 +649,63 @@ async function loadArtistInfo(artistId: string, count: number) {
     };
 }
 
+async function resolveAlbumArtistId(albumId: string): Promise<string | null> {
+    const album = await prisma.album.findFirst({
+        where: { id: albumId, ...LIBRARY_ALBUM_WHERE },
+        select: { artistId: true },
+    });
+    return album?.artistId ?? null;
+}
+
+async function resolveTrackArtistId(trackId: string): Promise<string | null> {
+    const track = await prisma.track.findFirst({
+        where: { id: trackId, ...LIBRARY_TRACK_WHERE },
+        select: { album: { select: { artistId: true } } },
+    });
+    return track?.album.artistId ?? null;
+}
+
+function parseOptionalInfoId(rawId: string) {
+    try {
+        return parseSubsonicId(rawId);
+    } catch {
+        return null;
+    }
+}
+
+async function loadClassicArtistInfo(rawId: string, count: number) {
+    const parsed = parseOptionalInfoId(rawId);
+    if (parsed) {
+        if (parsed.type === "artist") return loadArtistInfo(parsed.id, count);
+        const artistId =
+            parsed.type === "album"
+                ? await resolveAlbumArtistId(parsed.id)
+                : parsed.type === "track"
+                  ? await resolveTrackArtistId(parsed.id)
+                  : null;
+        return artistId ? loadArtistInfo(artistId, count) : null;
+    }
+    const direct = await loadArtistInfo(rawId, count);
+    if (direct) return direct;
+    const artistId =
+        (await resolveAlbumArtistId(rawId)) ??
+        (await resolveTrackArtistId(rawId));
+    return artistId ? loadArtistInfo(artistId, count) : null;
+}
+
+async function loadStrictArtistInfo(rawId: string, count: number) {
+    try {
+        return loadArtistInfo(parseSubsonicId(rawId, "artist").id, count);
+    } catch {
+        return null;
+    }
+}
+
 async function handleGetArtistInfoLike(
     req: Request,
     res: Response,
     responseKey: "artistInfo" | "artistInfo2",
+    loader: (rawId: string, count: number) => Promise<unknown>,
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const rawId = getRequiredQueryString(req, res, "id", format, callback);
@@ -660,22 +713,9 @@ async function handleGetArtistInfoLike(
         return;
     }
 
-    const artistId = parseEntityIdOrNotFound(
-        req,
-        res,
-        rawId,
-        "artist",
-        "Artist not found",
-        format,
-        callback,
-    );
-    if (!artistId) {
-        return;
-    }
-
     try {
-        const artistInfo = await loadArtistInfo(
-            artistId,
+        const artistInfo = await loader(
+            rawId,
             parseCountParam(req.query.count, 20, 500),
         );
         if (!artistInfo) {
@@ -711,7 +751,12 @@ export async function handleGetArtistInfo(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetArtistInfoLike(req, res, "artistInfo");
+    await handleGetArtistInfoLike(
+        req,
+        res,
+        "artistInfo",
+        loadClassicArtistInfo,
+    );
 }
 
 /** Return ID3-mode artist metadata. */
@@ -719,13 +764,19 @@ export async function handleGetArtistInfo2(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetArtistInfoLike(req, res, "artistInfo2");
+    await handleGetArtistInfoLike(
+        req,
+        res,
+        "artistInfo2",
+        loadStrictArtistInfo,
+    );
 }
 
 async function handleGetAlbumInfoLike(
     req: Request,
     res: Response,
     responseKey: "albumInfo" | "albumInfo2",
+    loader: (rawId: string) => Promise<unknown>,
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const rawId = getRequiredQueryString(req, res, "id", format, callback);
@@ -733,21 +784,8 @@ async function handleGetAlbumInfoLike(
         return;
     }
 
-    const albumId = parseEntityIdOrNotFound(
-        req,
-        res,
-        rawId,
-        "album",
-        "Album not found",
-        format,
-        callback,
-    );
-    if (!albumId) {
-        return;
-    }
-
     try {
-        const album = await loadAlbumInfo(albumId);
+        const album = await loader(rawId);
         if (!album) {
             sendSubsonicError(
                 res,
@@ -786,12 +824,42 @@ async function loadAlbumInfo(albumId: string) {
     };
 }
 
+async function resolveTrackAlbumId(trackId: string): Promise<string | null> {
+    const track = await prisma.track.findFirst({
+        where: { id: trackId, ...LIBRARY_TRACK_WHERE },
+        select: { albumId: true },
+    });
+    return track?.albumId ?? null;
+}
+
+async function loadClassicAlbumInfo(rawId: string) {
+    const parsed = parseOptionalInfoId(rawId);
+    if (parsed) {
+        if (parsed.type === "album") return loadAlbumInfo(parsed.id);
+        if (parsed.type !== "track") return null;
+        const albumId = await resolveTrackAlbumId(parsed.id);
+        return albumId ? loadAlbumInfo(albumId) : null;
+    }
+    const direct = await loadAlbumInfo(rawId);
+    if (direct) return direct;
+    const albumId = await resolveTrackAlbumId(rawId);
+    return albumId ? loadAlbumInfo(albumId) : null;
+}
+
+async function loadStrictAlbumInfo(rawId: string) {
+    try {
+        return loadAlbumInfo(parseSubsonicId(rawId, "album").id);
+    } catch {
+        return null;
+    }
+}
+
 /** Return classic folder-mode album metadata. */
 export async function handleGetAlbumInfo(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetAlbumInfoLike(req, res, "albumInfo");
+    await handleGetAlbumInfoLike(req, res, "albumInfo", loadClassicAlbumInfo);
 }
 
 /** Return ID3-mode album metadata. */
@@ -799,7 +867,7 @@ export async function handleGetAlbumInfo2(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetAlbumInfoLike(req, res, "albumInfo2");
+    await handleGetAlbumInfoLike(req, res, "albumInfo2", loadStrictAlbumInfo);
 }
 async function getRootMusicDirectoryChildren(): Promise<
     Record<string, unknown>[]

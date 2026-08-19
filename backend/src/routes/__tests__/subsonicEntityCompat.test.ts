@@ -81,7 +81,9 @@ import {
     handleGetAlbum,
     handleGetArtist,
     handleGetArtists,
+    handleGetArtistInfo,
     handleGetArtistInfo2,
+    handleGetAlbumInfo,
     handleGetAlbumInfo2,
     handleSearch3,
     handleGetSong,
@@ -613,6 +615,66 @@ describe("subsonic entity compatibility handlers", () => {
         );
     });
 
+    it.each([
+        ["album", "al-album-1"],
+        ["song", "tr-track-1"],
+    ])("resolves classic artistInfo from an %s ID", async (kind, id) => {
+        if (kind === "album") {
+            mockAlbumFindFirst.mockResolvedValueOnce({
+                artistId: "artist-1",
+            });
+        } else {
+            mockTrackFindFirst.mockResolvedValueOnce({
+                album: { artistId: "artist-1" },
+            });
+        }
+        mockArtistFindFirst.mockResolvedValueOnce({
+            mbid: "mbid-artist-1",
+            summary: "Artist biography",
+            heroUrl: null,
+            similarFrom: [],
+        });
+
+        await handleGetArtistInfo(buildReq({ id }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                artistInfo: expect.objectContaining({
+                    biography: "Artist biography",
+                    musicBrainzId: "mbid-artist-1",
+                }),
+            },
+            "json",
+            undefined,
+        );
+    });
+
+    it("resolves classic artistInfo from a raw song ID fallback", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
+            mbid: null,
+            summary: "Raw fallback biography",
+            heroUrl: null,
+            similarFrom: [],
+        });
+        mockTrackFindFirst.mockResolvedValueOnce({
+            album: { artistId: "artist-1" },
+        });
+
+        await handleGetArtistInfo(buildReq({ id: "track-1" }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                artistInfo: expect.objectContaining({
+                    biography: "Raw fallback biography",
+                }),
+            },
+            "json",
+            undefined,
+        );
+    });
+
     it("returns missing-parameter for albumInfo2 without id", async () => {
         await handleGetAlbumInfo2(buildReq({}), buildRes());
 
@@ -675,6 +737,54 @@ describe("subsonic entity compatibility handlers", () => {
             expect.anything(),
             0,
             "Failed to fetch album info",
+            "json",
+            undefined,
+        );
+    });
+
+    it.each([
+        ["album", "al-album-1"],
+        ["song", "tr-track-1"],
+    ])("resolves classic albumInfo from an %s ID", async (kind, id) => {
+        if (kind === "song") {
+            mockTrackFindFirst.mockResolvedValueOnce({ albumId: "album-1" });
+        }
+        mockAlbumFindFirst.mockResolvedValueOnce({
+            rgMbid: "mbid-album-1",
+            title: "Album One",
+            coverUrl: null,
+        });
+
+        await handleGetAlbumInfo(buildReq({ id }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                albumInfo: expect.objectContaining({
+                    notes: "Album One",
+                    musicBrainzId: "mbid-album-1",
+                }),
+            },
+            "json",
+            undefined,
+        );
+    });
+
+    it("resolves classic albumInfo from a raw song ID fallback", async () => {
+        mockAlbumFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
+            rgMbid: null,
+            title: "Raw Album",
+            coverUrl: null,
+        });
+        mockTrackFindFirst.mockResolvedValueOnce({ albumId: "album-1" });
+
+        await handleGetAlbumInfo(buildReq({ id: "track-1" }), buildRes());
+
+        expect(mockSendSuccess).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                albumInfo: expect.objectContaining({ notes: "Raw Album" }),
+            },
             "json",
             undefined,
         );

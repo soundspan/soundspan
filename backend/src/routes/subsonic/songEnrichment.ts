@@ -1,23 +1,5 @@
 import { prisma } from "../../utils/db";
 
-type TrackRatingDelegate = {
-    findMany(input: {
-        where: { userId: string; trackId: { in: string[] } };
-        select: { trackId: true; rating: true };
-    }): Promise<Array<{ trackId: string; rating: number }>>;
-    upsert(input: {
-        where: { userId_trackId: { userId: string; trackId: string } };
-        create: { userId: string; trackId: string; rating: number };
-        update: { rating: number };
-    }): Promise<unknown>;
-    deleteMany(input: {
-        where: { userId: string; trackId: string };
-    }): Promise<unknown>;
-};
-
-const trackRating = (prisma as unknown as { trackRating: TrackRatingDelegate })
-    .trackRating;
-
 /** Authenticated-user fields added to a Subsonic song response. */
 export type SongEnrichment = {
     playedAt?: Date;
@@ -50,16 +32,19 @@ export async function loadSongEnrichmentByTrackId(
     userId: string,
     trackIds: Array<string | null | undefined>,
     preloadedStarredAtByTrackId?: ReadonlyMap<string, Date>,
+    preloadedPlayByTrackId?: ReadonlyMap<string, SongEnrichment>,
 ): Promise<Map<string, SongEnrichment>> {
     const ids = uniqueTrackIds(trackIds);
     if (ids.length === 0) return new Map();
     const [plays, likedTracks, ratings] = await Promise.all([
-        prisma.play.groupBy({
-            by: ["trackId"],
-            where: { userId, trackId: { in: ids } },
-            _count: { _all: true },
-            _max: { playedAt: true },
-        }),
+        preloadedPlayByTrackId
+            ? Promise.resolve([])
+            : prisma.play.groupBy({
+                  by: ["trackId"],
+                  where: { userId, trackId: { in: ids } },
+                  _count: { _all: true },
+                  _max: { playedAt: true },
+              }),
         preloadedStarredAtByTrackId
             ? Promise.resolve(
                   Array.from(
@@ -71,12 +56,15 @@ export async function loadSongEnrichmentByTrackId(
                   where: { userId, trackId: { in: ids } },
                   select: { trackId: true, likedAt: true },
               }),
-        trackRating.findMany({
+        prisma.trackRating.findMany({
             where: { userId, trackId: { in: ids } },
             select: { trackId: true, rating: true },
         }),
     ]);
     const result = new Map<string, SongEnrichment>();
+    for (const [trackId, value] of preloadedPlayByTrackId ?? []) {
+        mergeEnrichment(result, trackId, value);
+    }
     for (const play of plays) {
         if (!play.trackId) continue;
         mergeEnrichment(result, play.trackId, {
@@ -102,10 +90,10 @@ export async function setSongUserRating(
     rating: number,
 ): Promise<void> {
     if (rating === 0) {
-        await trackRating.deleteMany({ where: { userId, trackId } });
+        await prisma.trackRating.deleteMany({ where: { userId, trackId } });
         return;
     }
-    await trackRating.upsert({
+    await prisma.trackRating.upsert({
         where: { userId_trackId: { userId, trackId } },
         create: { userId, trackId, rating },
         update: { rating },

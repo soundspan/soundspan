@@ -26,19 +26,6 @@ import {
     SUBSONIC_ALBUM_LOCATION_WHERE,
 } from "./shared";
 
-function parseQueueIndex(value: unknown): number {
-    if (typeof value !== "string") {
-        return 0;
-    }
-
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isNaN(parsed)) {
-        return 0;
-    }
-
-    return Math.max(0, parsed);
-}
-
 function parseQueuePositionMs(value: unknown): number {
     if (typeof value !== "string") {
         return 0;
@@ -83,42 +70,92 @@ function sendQueueError(
     sendSubsonicError(res, code, message, format, callback);
 }
 
-function resolveReturnedQueueCurrent(
-    indexBasedCurrent: boolean,
-    currentIndex: number,
-    entry: Record<string, unknown>[],
-): number | string | undefined {
-    return indexBasedCurrent
-        ? currentIndex
-        : (entry[currentIndex]?.id as string | undefined);
+type PlayQueueState = {
+    currentIndex: number;
+    currentTime: number;
+    updatedAt: Date;
+};
+
+type FormattedPlayQueue = {
+    entry: Record<string, unknown>[];
+    sourceIndexes: number[];
+};
+
+function findSurvivingCurrentIndex(
+    state: PlayQueueState | null,
+    queueTrackIds: string[],
+    formatted: FormattedPlayQueue,
+): number {
+    if (!state || !queueTrackIds[state.currentIndex]) return -1;
+    return formatted.sourceIndexes.indexOf(state.currentIndex);
 }
 
-function buildPlayQueueResponse(
-    state: {
-        currentIndex: number;
-        currentTime: number;
-        updatedAt: Date;
-    } | null,
-    entry: Record<string, unknown>[],
+function buildSharedQueueFields(
+    state: PlayQueueState | null,
+    formatted: FormattedPlayQueue,
     username: string,
-    indexBasedCurrent: boolean,
+    currentSurvived: boolean,
 ): Record<string, unknown> {
-    const currentIndex = Math.min(
-        Math.max(0, state?.currentIndex ?? 0),
-        entry.length > 0 ? entry.length - 1 : 0,
+    return {
+        position: currentSurvived
+            ? Math.max(0, Math.round((state?.currentTime ?? 0) * 1000))
+            : 0,
+        username,
+        changed: state?.updatedAt.toISOString(),
+        entry: formatted.entry,
+    };
+}
+
+function buildClassicPlayQueueResponse(
+    state: PlayQueueState | null,
+    queueTrackIds: string[],
+    formatted: FormattedPlayQueue,
+    username: string,
+): Record<string, unknown> {
+    const currentIndex = findSurvivingCurrentIndex(
+        state,
+        queueTrackIds,
+        formatted,
     );
-    const current = resolveReturnedQueueCurrent(
-        indexBasedCurrent,
-        currentIndex,
-        entry,
-    );
+    const current = formatted.entry[currentIndex]?.id;
     return {
         playQueue: {
-            ...(current === undefined ? {} : { current }),
-            position: Math.max(0, Math.round((state?.currentTime ?? 0) * 1000)),
-            username,
-            changed: state?.updatedAt.toISOString(),
-            entry,
+            ...(typeof current === "string" ? { current } : {}),
+            ...buildSharedQueueFields(
+                state,
+                formatted,
+                username,
+                currentIndex >= 0,
+            ),
+        },
+    };
+}
+
+function buildIndexPlayQueueResponse(
+    state: PlayQueueState | null,
+    queueTrackIds: string[],
+    formatted: FormattedPlayQueue,
+    username: string,
+): Record<string, unknown> {
+    const survivingCurrent = findSurvivingCurrentIndex(
+        state,
+        queueTrackIds,
+        formatted,
+    );
+    const nextIndex = formatted.sourceIndexes.findIndex(
+        (sourceIndex) => sourceIndex > (state?.currentIndex ?? 0),
+    );
+    const currentIndex =
+        survivingCurrent >= 0 ? survivingCurrent : Math.max(0, nextIndex);
+    return {
+        playQueueByIndex: {
+            ...(formatted.entry.length > 0 ? { currentIndex } : {}),
+            ...buildSharedQueueFields(
+                state,
+                formatted,
+                username,
+                survivingCurrent >= 0,
+            ),
         },
     };
 }
@@ -229,55 +266,74 @@ async function formatPlayQueueEntries(
     userId: string,
     queueTrackIds: string[],
     tracks: PlayQueueTrack[],
-): Promise<Record<string, unknown>[]> {
+): Promise<FormattedPlayQueue> {
     const trackById = new Map(tracks.map((track) => [track.id, track]));
     const playedAtByTrackId = await loadSongEnrichmentByTrackId(
         userId,
         tracks.map((track) => track.id),
     );
-    return queueTrackIds.flatMap((trackId) => {
+    const formatted = queueTrackIds.flatMap((trackId, sourceIndex) => {
         const track = trackById.get(trackId);
         return track
-            ? [formatSongForSubsonic(track, playedAtByTrackId.get(track.id))]
+            ? [
+                  {
+                      value: formatSongForSubsonic(
+                          track,
+                          playedAtByTrackId.get(track.id),
+                      ),
+                      sourceIndex,
+                  },
+              ]
             : [];
     });
+    return {
+        entry: formatted.map(({ value }) => value),
+        sourceIndexes: formatted.map(({ sourceIndex }) => sourceIndex),
+    };
 }
 
-async function handleGetPlayQueueWithMode(
-    req: Request,
-    res: Response,
-    indexBasedCurrent: boolean,
-): Promise<void> {
-    const { format, callback } = getRequestContext(req);
+async function loadPlayQueue(req: Request): Promise<{
+    state: PlayQueueState | null;
+    queueTrackIds: string[];
+    formatted: FormattedPlayQueue;
+}> {
     const deviceId = getLegacyPlaybackDeviceId(
         parsePlaybackDeviceIndex(req.query.index),
     );
-
-    try {
-        const state = await prisma.playbackState.findUnique({
-            where: {
-                userId_deviceId: {
-                    userId: req.user!.id,
-                    deviceId,
-                },
+    const state = await prisma.playbackState.findUnique({
+        where: {
+            userId_deviceId: {
+                userId: req.user!.id,
+                deviceId,
             },
-        });
+        },
+    });
+    const queueTrackIds = parseQueueTrackIds(state?.queue);
+    const tracks = await loadPlayQueueTracks(queueTrackIds);
+    const formatted = await formatPlayQueueEntries(
+        req.user!.id,
+        queueTrackIds,
+        tracks,
+    );
+    return { state, queueTrackIds, formatted };
+}
 
-        const queueTrackIds = parseQueueTrackIds(state?.queue);
-        const tracks = await loadPlayQueueTracks(queueTrackIds);
-        const entry = await formatPlayQueueEntries(
-            req.user!.id,
-            queueTrackIds,
-            tracks,
-        );
+async function sendLoadedPlayQueue(
+    req: Request,
+    res: Response,
+    buildResponse: (
+        state: PlayQueueState | null,
+        queueTrackIds: string[],
+        formatted: FormattedPlayQueue,
+        username: string,
+    ) => Record<string, unknown>,
+): Promise<void> {
+    const { format, callback } = getRequestContext(req);
+    try {
+        const { state, queueTrackIds, formatted } = await loadPlayQueue(req);
         sendSubsonicSuccess(
             res,
-            buildPlayQueueResponse(
-                state,
-                entry,
-                req.user!.username,
-                indexBasedCurrent,
-            ),
+            buildResponse(state, queueTrackIds, formatted, req.user!.username),
             format,
             callback,
         );
@@ -297,7 +353,7 @@ export async function handleGetPlayQueue(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetPlayQueueWithMode(req, res, false);
+    await sendLoadedPlayQueue(req, res, buildClassicPlayQueueResponse);
 }
 
 const savedQueueTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
@@ -401,20 +457,26 @@ async function persistSavedQueue(input: {
     });
 }
 
-async function handleSavePlayQueueWithMode(
+function parseIndexBasedCurrent(
+    value: unknown,
+    trackCount: number,
+): number | null {
+    if (trackCount === 0) return value === undefined ? 0 : null;
+    if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed < trackCount ? parsed : null;
+}
+
+async function saveSubmittedPlayQueue(
     req: Request,
     res: Response,
-    indexBasedCurrent: boolean,
+    trackIds: string[],
+    currentIndex: number,
 ): Promise<void> {
     const { format, callback } = getRequestContext(req);
     const deviceId = getLegacyPlaybackDeviceId(
         parsePlaybackDeviceIndex(req.query.index),
     );
-    const rawCurrent = req.query.current;
-    const rawPosition = req.query.position;
-    const trackIds = parseSubmittedQueueTrackIds(req, res, format, callback);
-    if (!trackIds) return;
-
     try {
         const savedQueue = await buildSavedQueue(trackIds);
         if (!savedQueue.valid) {
@@ -427,20 +489,12 @@ async function handleSavePlayQueueWithMode(
             );
             return;
         }
-        const requestedCurrent = indexBasedCurrent
-            ? parseQueueIndex(rawCurrent)
-            : resolveClassicCurrentIndex(rawCurrent, trackIds);
-        const requestedPositionMs = parseQueuePositionMs(rawPosition);
-        const currentIndex = Math.min(
-            requestedCurrent,
-            savedQueue.queue.length > 0 ? savedQueue.queue.length - 1 : 0,
-        );
         await persistSavedQueue({
             userId: req.user!.id,
             deviceId,
             queue: savedQueue.queue,
             currentIndex,
-            positionMs: requestedPositionMs,
+            positionMs: parseQueuePositionMs(req.query.position),
         });
 
         sendSubsonicSuccess(res, {}, format, callback);
@@ -460,7 +514,14 @@ export async function handleSavePlayQueue(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleSavePlayQueueWithMode(req, res, false);
+    const { format, callback } = getRequestContext(req);
+    const trackIds = parseSubmittedQueueTrackIds(req, res, format, callback);
+    if (!trackIds) return;
+    const currentIndex = resolveClassicCurrentIndex(
+        req.query.current,
+        trackIds,
+    );
+    await saveSubmittedPlayQueue(req, res, trackIds, currentIndex);
 }
 
 /**
@@ -470,7 +531,7 @@ export async function handleGetPlayQueueByIndex(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleGetPlayQueueWithMode(req, res, true);
+    await sendLoadedPlayQueue(req, res, buildIndexPlayQueueResponse);
 }
 
 /**
@@ -480,7 +541,24 @@ export async function handleSavePlayQueueByIndex(
     req: Request,
     res: Response,
 ): Promise<void> {
-    await handleSavePlayQueueWithMode(req, res, true);
+    const { format, callback } = getRequestContext(req);
+    const trackIds = parseSubmittedQueueTrackIds(req, res, format, callback);
+    if (!trackIds) return;
+    const currentIndex = parseIndexBasedCurrent(
+        req.query.currentIndex,
+        trackIds.length,
+    );
+    if (currentIndex === null) {
+        sendQueueError(
+            res,
+            SubsonicErrorCode.MISSING_PARAMETER,
+            "Required parameter 'currentIndex' is missing or invalid",
+            format,
+            callback,
+        );
+        return;
+    }
+    await saveSubmittedPlayQueue(req, res, trackIds, currentIndex);
 }
 
 /**

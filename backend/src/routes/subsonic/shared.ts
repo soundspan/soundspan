@@ -291,91 +291,81 @@ type AlbumPlayStat = {
     lastPlayed: Date | null;
 };
 
-async function buildAlbumPlayStats(
-    userId: string,
-): Promise<Map<string, AlbumPlayStat>> {
-    const groupedPlays = await prisma.play.groupBy({
+type AlbumPlayStats = {
+    byAlbumId: Map<string, AlbumPlayStat>;
+    byTrackId: Map<string, SongEnrichment>;
+};
+
+async function loadGroupedTrackPlays(userId: string) {
+    return prisma.play.groupBy({
         by: ["trackId"],
         where: {
             userId,
             track: {
                 ...LIBRARY_TRACK_WHERE,
-                album: {
-                    location: SUBSONIC_ALBUM_LOCATION_WHERE,
-                },
+                album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
             },
         },
-        _count: {
-            _all: true,
-        },
-        _max: {
-            playedAt: true,
-        },
+        _count: { _all: true },
+        _max: { playedAt: true },
     });
+}
 
-    if (groupedPlays.length === 0) {
-        return new Map();
-    }
+type GroupedTrackPlay = Awaited<
+    ReturnType<typeof loadGroupedTrackPlays>
+>[number];
 
-    const trackIds = groupedPlays
-        .map((entry) => entry.trackId)
-        .filter((trackId): trackId is string => typeof trackId === "string");
-    if (trackIds.length === 0) {
-        return new Map();
-    }
+async function loadAlbumIdsForGroupedPlays(
+    groupedPlays: GroupedTrackPlay[],
+): Promise<Map<string, string>> {
+    const trackIds = groupedPlays.flatMap((entry) =>
+        entry.trackId ? [entry.trackId] : [],
+    );
+    if (trackIds.length === 0) return new Map();
     const tracks = await prisma.track.findMany({
         where: {
             ...LIBRARY_TRACK_WHERE,
-            id: {
-                in: trackIds,
-            },
-            album: {
-                location: SUBSONIC_ALBUM_LOCATION_WHERE,
-            },
+            id: { in: trackIds },
+            album: { location: SUBSONIC_ALBUM_LOCATION_WHERE },
         },
-        select: {
-            id: true,
-            albumId: true,
-        },
+        select: { id: true, albumId: true },
     });
+    return new Map(tracks.map((track) => [track.id, track.albumId]));
+}
 
-    const albumIdByTrackId = new Map(
-        tracks.map((track) => [track.id, track.albumId]),
-    );
-
-    const albumStats = new Map<string, AlbumPlayStat>();
-
+function aggregateAlbumPlayStats(
+    groupedPlays: GroupedTrackPlay[],
+    albumIdByTrackId: ReadonlyMap<string, string>,
+): AlbumPlayStats {
+    const byAlbumId = new Map<string, AlbumPlayStat>();
+    const byTrackId = new Map<string, SongEnrichment>();
     for (const entry of groupedPlays) {
-        if (!entry.trackId) {
-            continue;
-        }
+        if (!entry.trackId) continue;
         const albumId = albumIdByTrackId.get(entry.trackId);
-        if (!albumId) {
-            continue;
-        }
-
-        const currentStat = albumStats.get(albumId);
+        if (!albumId) continue;
         const playCount = entry._count._all;
         const lastPlayed = entry._max.playedAt ?? null;
-
-        if (!currentStat) {
-            albumStats.set(albumId, {
-                playCount,
-                lastPlayed,
-            });
-            continue;
-        }
-
-        currentStat.playCount += playCount;
-        if (
-            lastPlayed &&
-            (!currentStat.lastPlayed || lastPlayed > currentStat.lastPlayed)
-        ) {
-            currentStat.lastPlayed = lastPlayed;
-        }
+        byTrackId.set(entry.trackId, {
+            playedAt: lastPlayed ?? undefined,
+            playCount: playCount || undefined,
+        });
+        const current = byAlbumId.get(albumId);
+        byAlbumId.set(albumId, {
+            playCount: (current?.playCount ?? 0) + playCount,
+            lastPlayed:
+                lastPlayed &&
+                (!current?.lastPlayed || lastPlayed > current.lastPlayed)
+                    ? lastPlayed
+                    : (current?.lastPlayed ?? null),
+        });
     }
+    return { byAlbumId, byTrackId };
+}
 
-    return albumStats;
+async function buildAlbumPlayStats(userId: string): Promise<AlbumPlayStats> {
+    const groupedPlays = await loadGroupedTrackPlays(userId);
+    const albumIdByTrackId = await loadAlbumIdsForGroupedPlays(groupedPlays);
+    return aggregateAlbumPlayStats(groupedPlays, albumIdByTrackId);
 }
 
 function getQueryValues(value: unknown): string[] {
