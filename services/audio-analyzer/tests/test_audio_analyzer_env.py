@@ -30,11 +30,18 @@ ANALYZER_PATH = Path(__file__).resolve().parents[1] / "analyzer.py"
 class FakeRedisClient:
     """Minimal Redis client used while constructing the worker."""
 
+    def __init__(self) -> None:
+        self.registered_scripts: list[str] = []
+
     def pubsub(self) -> "FakeRedisClient":
         return self
 
     def subscribe(self, _channel: str) -> None:
         pass
+
+    def register_script(self, script: str) -> Any:
+        self.registered_scripts.append(script)
+        return lambda **_kwargs: 1
 
 
 def _load_analyzer_with_recording_redis(
@@ -119,6 +126,8 @@ def test_audio_worker_applies_bounded_socket_timeout_to_queue_client(
     assert timeout_calls == [("AUDIO_REDIS_SOCKET_TIMEOUT", 17, 12)]
     assert redis_calls == [((module.REDIS_URL,), {"socket_timeout": 37})]
     assert isinstance(worker.redis, FakeRedisClient)
+    assert len(worker.redis.registered_scripts) == 1
+    assert 'redis.call("INCR", KEYS[1])' in worker.redis.registered_scripts[0]
 
 
 def test_audio_analyzer_builds_database_url_from_encoded_components(

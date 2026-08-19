@@ -470,6 +470,7 @@ export class MusicScannerService {
                         needsHash,
                         existingTrack?.audioHash ?? null,
                         existingTrack?.albumId ?? null,
+                        existingTrack?.duration ?? null,
                         contentChangeDetected,
                         Boolean(removedTrack),
                     );
@@ -999,6 +1000,7 @@ export class MusicScannerService {
         computeHash = true,
         existingAudioHash: string | null = null,
         previousAlbumId: string | null = null,
+        previousDuration: number | null = null,
         contentChangeDetected = false,
         revival = false,
     ): Promise<void> {
@@ -1501,11 +1503,13 @@ export class MusicScannerService {
         await persistScannedTrack(
             trackUpsert,
             album.id,
+            duration,
             {
                 contentChangeDetected,
                 storedAudioHash: existingAudioHash,
                 computedAudioHash,
                 previousAlbumId,
+                previousDuration,
                 revival,
             },
             (trackId) => this.clearTrackHealthIssue(trackId),

@@ -1878,7 +1878,10 @@ describe("library catalog list runtime coverage", () => {
         mockTrackFindMany.mockResolvedValue([]);
         mockTrackFindUnique.mockResolvedValue(null);
         mockTrackCount.mockResolvedValue(0);
-        mockTrackDelete.mockResolvedValue(undefined);
+        mockTrackDelete.mockImplementation(async ({ where }) => ({
+            id: where.id,
+            albumId: "album-1",
+        }));
         mockTrackDeleteMany.mockResolvedValue({ count: 0 });
         mockLikedTrackFindUnique.mockResolvedValue(null);
         mockLikedTrackFindMany.mockResolvedValue([]);
@@ -4573,7 +4576,7 @@ describe("library catalog list runtime coverage", () => {
         );
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-2" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
         expect(deleteTrackResOk.statusCode).toBe(200);
         expect(deleteTrackResOk.body).toEqual({
@@ -4664,6 +4667,11 @@ describe("library catalog list runtime coverage", () => {
             id: "track-delete-1",
             title: "Delete Me",
             filePath: "Artist-One/Track.flac",
+            albumId: "album-observed",
+        });
+        mockTrackDelete.mockResolvedValueOnce({
+            id: "track-delete-1",
+            albumId: "album-authoritative",
         });
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
         const unlinkSpy = jest
@@ -4679,8 +4687,12 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).toHaveBeenCalledWith("/music/Artist-One/Track.flac");
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-delete-1" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
+        expect(mockPrismaQueryRaw).toHaveBeenCalledWith(
+            expect.any(Array),
+            "album-authoritative",
+        );
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ message: "Track deleted successfully" });
 
@@ -4730,15 +4742,15 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).not.toHaveBeenCalled();
         expect(mockTrackDelete).toHaveBeenNthCalledWith(1, {
             where: { id: "track-absolute" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
         expect(mockTrackDelete).toHaveBeenNthCalledWith(2, {
             where: { id: "track-windows-absolute" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
         expect(mockTrackDelete).toHaveBeenNthCalledWith(3, {
             where: { id: "track-dot-segment" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
 
         existsSpy.mockRestore();
@@ -4770,7 +4782,7 @@ describe("library catalog list runtime coverage", () => {
         expect(unlinkSpy).toHaveBeenCalledWith("/music/Locked/Track.flac");
         expect(mockTrackDelete).toHaveBeenCalledWith({
             where: { id: "track-delete-2" },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ message: "Track deleted successfully" });

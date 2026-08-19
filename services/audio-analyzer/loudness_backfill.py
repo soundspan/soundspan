@@ -26,6 +26,16 @@ LOUDNESS_ATTEMPT_TTL_SECONDS = 30 * 24 * 60 * 60
 LOUDNESS_TRANSIENT_COOLDOWN_SECONDS = 24 * 60 * 60
 PERMANENT_FAILURE_MARKER = "permanent"
 
+_INCREMENT_FAILURES_SCRIPT = """
+local attempts = redis.call("INCR", KEYS[1])
+local ttl = tonumber(ARGV[2])
+if attempts >= tonumber(ARGV[1]) then
+    ttl = tonumber(ARGV[3])
+end
+redis.call("EXPIRE", KEYS[1], ttl)
+return attempts
+"""
+
 LoudnessBackfillOutcome = Literal[
     "measured_success",
     "transient_failure",
@@ -76,9 +86,6 @@ class LoudnessBackfillBookkeeping(Protocol):
     def park_permanently(self, attempt_key: str) -> None:
         """Park one permanent content failure until its revision key changes."""
 
-    def start_transient_cooldown(self, attempt_key: str) -> None:
-        """Expire an exhausted transient budget after the recovery cooldown."""
-
     def increment_outcome(self, outcome: LoudnessBackfillOutcome) -> None:
         """Increment one durable bounded outcome counter."""
 
@@ -92,11 +99,11 @@ class RedisBookkeepingClient(Protocol):
     def incr(self, key: str) -> object:
         """Increment and return one counter."""
 
-    def expire(self, key: str, seconds: int) -> object:
-        """Set a bounded key lifetime."""
-
     def set(self, key: str, value: str, *, ex: int) -> object:
         """Set a bounded marker with an expiry."""
+
+    def register_script(self, script: str) -> Callable[..., object]:
+        """Register one Lua script with transparent EVAL fallback."""
 
 
 class RedisLoudnessBackfillBookkeeping:
@@ -104,6 +111,7 @@ class RedisLoudnessBackfillBookkeeping:
 
     def __init__(self, redis_client: RedisBookkeepingClient) -> None:
         self.redis = redis_client
+        self.increment_failures_script = redis_client.register_script(_INCREMENT_FAILURES_SCRIPT)
 
     def clear_failures(self, attempt_key: str) -> None:
         """Clear the loudness failure budget for one measured content revision."""
@@ -111,8 +119,14 @@ class RedisLoudnessBackfillBookkeeping:
 
     def increment_failures(self, attempt_key: str) -> int:
         """Increment one content revision's durable loudness failure count."""
-        attempts = self.redis.incr(attempt_key)
-        self.redis.expire(attempt_key, LOUDNESS_ATTEMPT_TTL_SECONDS)
+        attempts = self.increment_failures_script(
+            keys=[attempt_key],
+            args=[
+                LOUDNESS_BACKFILL_MAX_FAILURES,
+                LOUDNESS_ATTEMPT_TTL_SECONDS,
+                LOUDNESS_TRANSIENT_COOLDOWN_SECONDS,
+            ],
+        )
         if isinstance(attempts, bool) or not isinstance(attempts, int):
             raise RuntimeError("Redis returned an invalid loudness failure count")
         if attempts < 1:
@@ -126,10 +140,6 @@ class RedisLoudnessBackfillBookkeeping:
             PERMANENT_FAILURE_MARKER,
             ex=LOUDNESS_ATTEMPT_TTL_SECONDS,
         )
-
-    def start_transient_cooldown(self, attempt_key: str) -> None:
-        """Reset an exhausted transient budget after a bounded cooldown."""
-        self.redis.expire(attempt_key, LOUDNESS_TRANSIENT_COOLDOWN_SECONDS)
 
     def increment_outcome(self, outcome: LoudnessBackfillOutcome) -> None:
         """Increment one durable loudness backfill outcome counter."""
@@ -320,9 +330,7 @@ def _record_job_result(
         bookkeeping.increment_outcome("permanently_skipped")
         return
 
-    attempts = bookkeeping.increment_failures(attempt_key)
-    if attempts >= LOUDNESS_BACKFILL_MAX_FAILURES:
-        bookkeeping.start_transient_cooldown(attempt_key)
+    bookkeeping.increment_failures(attempt_key)
     bookkeeping.increment_outcome("transient_failure")
 
 

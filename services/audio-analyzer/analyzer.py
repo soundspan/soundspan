@@ -1251,10 +1251,8 @@ class AnalysisWorker:
 
     def __init__(self):
         """Initialize Redis/DB clients and runtime state for batch processing."""
-        self.redis = redis.from_url(
-            REDIS_URL,
-            socket_timeout=REDIS_SOCKET_TIMEOUT,
-        )
+        self.redis = redis.from_url(REDIS_URL, socket_timeout=REDIS_SOCKET_TIMEOUT)
+        self.loudness_backfill_bookkeeping = RedisLoudnessBackfillBookkeeping(self.redis)
         self.db = DatabaseConnection(DATABASE_URL)
         self.running = False
         self.executor = None
@@ -1923,7 +1921,7 @@ class AnalysisWorker:
             resolve_path=_resolve_music_path,
             max_file_size_mb=MAX_FILE_SIZE_MB,
             timeout_seconds=LOUDNESS_MEASURE_TIMEOUT_SECONDS,
-            bookkeeping=RedisLoudnessBackfillBookkeeping(self.redis),
+            bookkeeping=self.loudness_backfill_bookkeeping,
         )
         return True
 

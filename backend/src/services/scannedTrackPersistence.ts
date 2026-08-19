@@ -13,15 +13,19 @@ export interface ScanPersistenceContext {
     storedAudioHash: string | null;
     computedAudioHash: string | null | undefined;
     previousAlbumId: string | null;
+    previousDuration: number | null;
     revival: boolean;
 }
 
 function needsLoudnessRefresh(
     context: ScanPersistenceContext,
     nextAlbumId: string,
+    nextDuration: number,
 ): boolean {
     return (
         context.revival ||
+        (context.previousDuration !== null &&
+            context.previousDuration !== nextDuration) ||
         (context.previousAlbumId !== null &&
             context.previousAlbumId !== nextAlbumId) ||
         (context.contentChangeDetected &&
@@ -36,6 +40,7 @@ function needsLoudnessRefresh(
 export async function persistScannedTrack(
     trackUpsert: Prisma.TrackUpsertArgs,
     nextAlbumId: string,
+    nextDuration: number,
     context: ScanPersistenceContext,
     clearHealthIssue: (trackId: string) => Promise<void>,
 ): Promise<void> {
@@ -51,7 +56,10 @@ export async function persistScannedTrack(
             context.storedAudioHash,
             context.computedAudioHash ?? null,
         );
-    if (!replacement && !needsLoudnessRefresh(context, nextAlbumId)) {
+    if (
+        !replacement &&
+        !needsLoudnessRefresh(context, nextAlbumId, nextDuration)
+    ) {
         const track = await prisma.track.upsert(trackUpsert);
         await clearHealthIssue(track.id);
         return;

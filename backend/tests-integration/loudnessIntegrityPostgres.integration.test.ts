@@ -137,7 +137,7 @@ describeWithPostgres("loudness integrity PostgreSQL behavior", () => {
             albumTruePeakDb: -1,
         });
 
-        await deleteTrackAndRecomputeAlbum("track-a", "album-a");
+        await deleteTrackAndRecomputeAlbum("track-a");
         await expect(loadAlbum(database, "album-a")).resolves.toEqual({
             albumLoudnessLufs: null,
             albumTruePeakDb: null,

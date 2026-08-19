@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any
@@ -29,6 +30,8 @@ class _Bookkeeping:
         """Increment and return the current content revision's failures."""
         attempts = self.attempts.get(attempt_key, 0) + 1
         self.attempts[attempt_key] = attempts
+        if attempts >= loudness_backfill.LOUDNESS_BACKFILL_MAX_FAILURES:
+            self.cooldowns.append(attempt_key)
         return attempts
 
     def increment_outcome(self, outcome: str) -> None:
@@ -39,10 +42,6 @@ class _Bookkeeping:
         """Record one permanently parked revision."""
         self.permanent.add(attempt_key)
 
-    def start_transient_cooldown(self, attempt_key: str) -> None:
-        """Record one exhausted transient revision."""
-        self.cooldowns.append(attempt_key)
-
 
 class _BookkeepingRedis:
     """Apply Redis bookkeeping commands to an in-memory keyspace."""
@@ -50,6 +49,23 @@ class _BookkeepingRedis:
     def __init__(self) -> None:
         self.values: dict[str, int | str] = {}
         self.expirations: dict[str, int] = {}
+        self.registered_scripts: list[str] = []
+
+    def register_script(self, script: str) -> Callable[..., int]:
+        """Register an atomic failure transition script."""
+        self.registered_scripts.append(script)
+
+        def execute(*, keys: list[str], args: list[int]) -> int:
+            key = keys[0]
+            current = self.values.get(key, 0)
+            assert isinstance(current, int)
+            value = current + 1
+            ttl = args[2] if value >= args[0] else args[1]
+            self.values[key] = value
+            self.expirations[key] = ttl
+            return value
+
+        return execute
 
     def delete(self, key: str) -> int:
         """Delete one counter and return whether it existed."""
@@ -108,13 +124,50 @@ def test_redis_bookkeeping_persists_failures_and_outcomes() -> None:
     assert bookkeeping.increment_failures(attempt_key) == 1
     assert bookkeeping.increment_failures(attempt_key) == 2
     assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_ATTEMPT_TTL_SECONDS
-    bookkeeping.start_transient_cooldown(attempt_key)
+    assert bookkeeping.increment_failures(attempt_key) == 3
     assert redis.expirations[attempt_key] == loudness_backfill.LOUDNESS_TRANSIENT_COOLDOWN_SECONDS
+    assert redis.registered_scripts == [loudness_backfill._INCREMENT_FAILURES_SCRIPT]
     bookkeeping.increment_outcome("transient_failure")
     bookkeeping.clear_failures(attempt_key)
 
     assert attempt_key not in redis.values
     assert redis.values["audio:analysis:loudness:outcomes:transient_failure"] == 1
+
+
+def test_bookkeeping_script_error_skips_outcome_and_warns(caplog: pytest.LogCaptureFixture) -> None:
+    """Treat an atomic transition failure as transient bookkeeping failure."""
+
+    class ScriptErrorRedis(_BookkeepingRedis):
+        def register_script(self, script: str) -> Callable[..., int]:
+            self.registered_scripts.append(script)
+
+            def fail(*, keys: list[str], args: list[int]) -> int:
+                raise RuntimeError("script unavailable")
+
+            return fail
+
+    redis = ScriptErrorRedis()
+    bookkeeping = loudness_backfill.RedisLoudnessBackfillBookkeeping(redis)
+    database = FakeDatabaseConnection([[{"loudnessLufs": None}]])
+    releases, release = _release_recorder()
+
+    with caplog.at_level(logging.WARNING):
+        loudness_backfill.process_loudness_backfill_jobs(
+            [_job("track-script-error")],
+            database=database,
+            release_reservations=release,
+            resolve_path=lambda _path: "/music/Artist/track-script-error.flac",
+            max_file_size_mb=500,
+            timeout_seconds=120,
+            bookkeeping=bookkeeping,
+            measure=lambda _path, _timeout: {"measurement": None, "failure": "transient"},
+            path_exists=lambda _path: True,
+            path_size=lambda _path: 1024,
+        )
+
+    assert redis.values == {}
+    assert "Failed to persist loudness backfill bookkeeping" in caplog.text
+    assert releases == [[("track-script-error", "Artist/track-script-error.flac")]]
 
 
 def test_redis_bookkeeping_parks_permanent_revisions_with_a_ttl() -> None:
@@ -134,8 +187,9 @@ def test_redis_bookkeeping_rejects_invalid_failure_counts(invalid_count: object)
     """Reject malformed Redis counter responses before using retry state."""
 
     class InvalidRedis(_BookkeepingRedis):
-        def incr(self, _key: str) -> object:
-            return invalid_count
+        def register_script(self, script: str) -> Callable[..., object]:
+            self.registered_scripts.append(script)
+            return lambda **_kwargs: invalid_count
 
     bookkeeping = loudness_backfill.RedisLoudnessBackfillBookkeeping(InvalidRedis())
 
@@ -345,17 +399,19 @@ def test_loudness_only_batch_works_without_loading_models(
     worker.db = FakeDatabaseConnection()
     worker.executor = None
     worker.pool_active = False
-    handled: list[list[dict[str, Any]]] = []
+    bookkeeping = object()
+    worker.loudness_backfill_bookkeeping = bookkeeping
+    handled: list[tuple[list[dict[str, Any]], object]] = []
     monkeypatch.setattr(
         loaded_analyzer,
         "process_loudness_backfill_jobs",
-        lambda jobs, **_kwargs: handled.append(jobs),
+        lambda jobs, **kwargs: handled.append((jobs, kwargs["bookkeeping"])),
     )
     worker._process_tracks_parallel = lambda _tracks: (_ for _ in ()).throw(
         AssertionError("ML processing must stay idle")
     )
 
     assert worker.process_batch_parallel() is True
-    assert handled == [[_job("track-idle")]]
+    assert handled == [([_job("track-idle")], bookkeeping)]
     assert worker.executor is None
     assert worker.pool_active is False

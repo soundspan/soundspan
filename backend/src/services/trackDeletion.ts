@@ -4,13 +4,12 @@ import { recomputeAlbumLoudness } from "./albumLoudness";
 /** Deletes one track and refreshes its former album in the same transaction. */
 export async function deleteTrackAndRecomputeAlbum(
     trackId: string,
-    albumId: string,
 ): Promise<void> {
     await prisma.$transaction(async (transaction) => {
-        await transaction.track.delete({
+        const deletedTrack = await transaction.track.delete({
             where: { id: trackId },
-            select: { id: true },
+            select: { id: true, albumId: true },
         });
-        await recomputeAlbumLoudness(transaction, [albumId]);
+        await recomputeAlbumLoudness(transaction, [deletedTrack.albumId]);
     });
 }

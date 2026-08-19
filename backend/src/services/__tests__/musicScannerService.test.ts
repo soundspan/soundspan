@@ -1165,6 +1165,70 @@ describe("MusicScannerService.scanLibrary", () => {
         ]);
     });
 
+    it("recomputes the album when same-hash duration changes", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+        const audioHash = "sha256:" + "f0".repeat(32);
+        const existing = identityTrack("track-1", "Artist/Track.mp3", {
+            audioHash,
+            duration: 218,
+        });
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([existing]);
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Test Track",
+                track: { no: 3 },
+                disk: { no: 1 },
+                albumartist: "Test Artist",
+                album: "Test Album",
+            },
+            format: { duration: 200, codec: "audio/flac" },
+        } as any);
+        mockComputeAudioStreamHash.mockResolvedValue(audioHash);
+        mockPrisma.track.upsert.mockResolvedValue({ id: "track-1" });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockRecomputeAlbumLoudness).toHaveBeenCalledWith(mockPrisma, [
+            "album-1",
+            "album-1",
+        ]);
+        expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-1" },
+        });
+    });
+
+    it("keeps same-hash unchanged-duration updates on the fast path", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+        const audioHash = "sha256:" + "f1".repeat(32);
+        const existing = identityTrack("track-1", "Artist/Track.mp3", {
+            audioHash,
+            duration: 218,
+        });
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles",
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([existing]);
+        mockComputeAudioStreamHash.mockResolvedValue(audioHash);
+        mockPrisma.track.upsert.mockResolvedValue({ id: "track-1" });
+
+        await scanner.scanLibrary("/music");
+
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockRecomputeAlbumLoudness).not.toHaveBeenCalled();
+        expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-1" },
+        });
+    });
+
     it("re-parses with duration:true only when the cheap parse lacks a duration (opus/ogg)", async () => {
         const scanner = new MusicScannerService();
         const audioFile = "/music/Artist/YouTube Rip.opus";
