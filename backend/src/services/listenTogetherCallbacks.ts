@@ -10,9 +10,15 @@ import { listenTogetherStateStore } from "./listenTogetherStateStore";
 
 const log = logger.child("ListenTogetherPublication");
 const PUBLICATION_MAX_ATTEMPTS = 2;
+const PUBLICATION_MAX_STAGES = 6;
 const pendingGroupPublications = new Map<string, Promise<void>>();
 
-/** Socket-facing fanout invoked only after authoritative publication succeeds. */
+interface PublicationStage {
+    name: string;
+    publish: () => Promise<void>;
+}
+
+/** Socket-facing fanout used by ordered publication stages. */
 export interface GroupPublicationBroadcaster {
     emitSnapshot(
         groupId: string,
@@ -67,17 +73,33 @@ export function configureGroupPublicationBroadcaster(
 async function runPublicationWithRetry(
     groupId: string,
     publicationName: string,
-    publish: () => Promise<void>,
+    stages: PublicationStage[],
 ): Promise<void> {
+    if (stages.length > PUBLICATION_MAX_STAGES) {
+        throw new Error(`Publication stage limit exceeded for ${groupId}`);
+    }
+    const completedStages = new Set<number>();
     for (let attempt = 1; attempt <= PUBLICATION_MAX_ATTEMPTS; attempt += 1) {
         try {
-            await publish();
+            for (
+                let stageIndex = 0;
+                stageIndex < stages.length &&
+                stageIndex < PUBLICATION_MAX_STAGES;
+                stageIndex += 1
+            ) {
+                if (completedStages.has(stageIndex)) continue;
+                await stages[stageIndex].publish();
+                completedStages.add(stageIndex);
+            }
             return;
         } catch (error) {
+            const failedStageIndex = completedStages.size;
+            const stageName = stages[failedStageIndex]?.name ?? "unknown";
             if (attempt < PUBLICATION_MAX_ATTEMPTS) {
                 log.warn("Publication failed; retrying through group queue", {
                     groupId,
                     publicationName,
+                    stageName,
                     attempt,
                     error,
                 });
@@ -86,6 +108,7 @@ async function runPublicationWithRetry(
             log.error("Publication failed after bounded retry", {
                 groupId,
                 publicationName,
+                stageName,
                 attempt,
                 error,
             });
@@ -96,7 +119,7 @@ async function runPublicationWithRetry(
 function enqueueGroupPublication(
     groupId: string,
     publicationName: string,
-    publish: () => Promise<void>,
+    stages: PublicationStage[],
 ): Promise<void> {
     const previous = pendingGroupPublications.get(groupId) ?? Promise.resolve();
     let queued: Promise<void>;
@@ -105,7 +128,7 @@ function enqueueGroupPublication(
             () => undefined,
             () => undefined,
         )
-        .then(() => runPublicationWithRetry(groupId, publicationName, publish))
+        .then(() => runPublicationWithRetry(groupId, publicationName, stages))
         .finally(() => {
             if (pendingGroupPublications.get(groupId) === queued) {
                 pendingGroupPublications.delete(groupId);
@@ -129,21 +152,41 @@ async function emitMembershipPublication(
     await publicationBroadcaster?.emitMemberLeft(groupId, publication.member);
 }
 
-async function publishMembershipChange(
+function membershipPublicationStages(
     groupId: string,
     publication: GroupMembershipPublication | undefined,
     membership: ClusterGroupMembership | undefined,
     revokedSocketIds: string[],
-): Promise<void> {
+): PublicationStage[] {
+    const stages: PublicationStage[] = [];
     if (publication) {
-        await emitMembershipPublication(groupId, publication);
-    }
-    if (membership) {
-        await listenTogetherClusterSync.publishMembership(groupId, membership);
+        stages.push({
+            name: "membership-fanout",
+            publish: () => emitMembershipPublication(groupId, publication),
+        });
     }
     if (revokedSocketIds.length > 0) {
-        await publicationBroadcaster?.revokeSockets(groupId, revokedSocketIds);
+        stages.push({
+            name: "socket-revocation",
+            publish: async () => {
+                await publicationBroadcaster?.revokeSockets(
+                    groupId,
+                    revokedSocketIds,
+                );
+            },
+        });
     }
+    if (membership) {
+        stages.push({
+            name: "cluster-membership-publication",
+            publish: () =>
+                listenTogetherClusterSync.publishMembership(
+                    groupId,
+                    membership,
+                ),
+        });
+    }
+    return stages;
 }
 
 /** Queue one authoritative snapshot publication for a group. */
@@ -154,17 +197,31 @@ export function enqueueGroupSnapshotPublication(
     committedMembership?: ClusterGroupMembership,
     revokedSocketIds: string[] = [],
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "snapshot", async () => {
-        await listenTogetherStateStore.setSnapshot(groupId, snapshot);
-        await publishMembershipChange(
-            groupId,
-            membership,
-            committedMembership,
-            revokedSocketIds,
-        );
-        await listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-        await publicationBroadcaster?.emitSnapshot(groupId, snapshot);
-    });
+    const stages = membershipPublicationStages(
+        groupId,
+        membership,
+        committedMembership,
+        revokedSocketIds,
+    );
+    stages.push(
+        {
+            name: "snapshot-persistence",
+            publish: () =>
+                listenTogetherStateStore.setSnapshot(groupId, snapshot),
+        },
+        {
+            name: "cluster-snapshot-publication",
+            publish: () =>
+                listenTogetherClusterSync.publishSnapshot(groupId, snapshot),
+        },
+        {
+            name: "snapshot-fanout",
+            publish: async () => {
+                await publicationBroadcaster?.emitSnapshot(groupId, snapshot);
+            },
+        },
+    );
+    return enqueueGroupPublication(groupId, "snapshot", stages);
 }
 
 /** Queue socket fanout for a snapshot synchronized by another boundary. */
@@ -172,9 +229,14 @@ export function enqueueGroupSnapshotBroadcast(
     groupId: string,
     snapshot: GroupSnapshot,
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "snapshot-broadcast", async () => {
-        await publicationBroadcaster?.emitSnapshot(groupId, snapshot);
-    });
+    return enqueueGroupPublication(groupId, "snapshot-broadcast", [
+        {
+            name: "snapshot-fanout",
+            publish: async () => {
+                await publicationBroadcaster?.emitSnapshot(groupId, snapshot);
+            },
+        },
+    ]);
 }
 
 /** Queue an ended publication and authoritative snapshot deletion. */
@@ -182,11 +244,22 @@ export function enqueueGroupEndedPublication(
     groupId: string,
     reason: string,
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "ended", async () => {
-        await listenTogetherStateStore.deleteSnapshot(groupId);
-        await listenTogetherClusterSync.publishEnded(groupId);
-        await publicationBroadcaster?.emitEnded(groupId, reason);
-    });
+    return enqueueGroupPublication(groupId, "ended", [
+        {
+            name: "snapshot-deletion",
+            publish: () => listenTogetherStateStore.deleteSnapshot(groupId),
+        },
+        {
+            name: "cluster-ended-publication",
+            publish: () => listenTogetherClusterSync.publishEnded(groupId),
+        },
+        {
+            name: "ended-fanout",
+            publish: async () => {
+                await publicationBroadcaster?.emitEnded(groupId, reason);
+            },
+        },
+    ]);
 }
 
 /** Queue socket fanout for an end synchronized by another boundary. */
@@ -194,9 +267,14 @@ export function enqueueGroupEndedBroadcast(
     groupId: string,
     reason: string,
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "ended-broadcast", async () => {
-        await publicationBroadcaster?.emitEnded(groupId, reason);
-    });
+    return enqueueGroupPublication(groupId, "ended-broadcast", [
+        {
+            name: "ended-fanout",
+            publish: async () => {
+                await publicationBroadcaster?.emitEnded(groupId, reason);
+            },
+        },
+    ]);
 }
 
 /** Queue membership-only fanout when no playback snapshot is authoritative. */
@@ -206,8 +284,10 @@ export function enqueueGroupMembershipPublication(
     committedMembership?: ClusterGroupMembership,
     revokedSocketIds: string[] = [],
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "membership", () =>
-        publishMembershipChange(
+    return enqueueGroupPublication(
+        groupId,
+        "membership",
+        membershipPublicationStages(
             groupId,
             membership,
             committedMembership,
@@ -221,9 +301,17 @@ export function enqueueGroupPresenceBroadcast(
     groupId: string,
     member: { userId: string; isConnected: boolean },
 ): Promise<void> {
-    return enqueueGroupPublication(groupId, "presence", async () => {
-        await publicationBroadcaster?.emitMemberPresence(groupId, member);
-    });
+    return enqueueGroupPublication(groupId, "presence", [
+        {
+            name: "presence-fanout",
+            publish: async () => {
+                await publicationBroadcaster?.emitMemberPresence(
+                    groupId,
+                    member,
+                );
+            },
+        },
+    ]);
 }
 
 /** Wait for all publications currently queued for one group. */

@@ -159,6 +159,11 @@ export interface MemberLeftEvent extends MemberEvent {
     newHostUsername?: string;
 }
 
+/** Direct signal that this socket's authoritative membership was revoked. */
+export interface MembershipRevokedEvent {
+    groupId: string;
+}
+
 export interface GroupEndedEvent {
     reason: string;
 }
@@ -168,6 +173,26 @@ export interface SocketRouteProbeResult {
     reason?: string;
     status?: number;
     sample?: string;
+}
+
+/** Format a socket-route probe failure for the Listen Together UI. */
+export function formatListenTogetherSocketRouteError(
+    result: SocketRouteProbeResult,
+): string {
+    switch (result.reason) {
+        case "frontend-route":
+            return "Listen Together is blocked: /socket.io/listen-together is not reaching the backend Socket.IO service. Verify frontend socket proxy routing or direct backend path routing.";
+        case "http-error":
+            return `Listen Together socket probe failed with HTTP ${result.status ?? "error"}. Ensure /socket.io/listen-together reaches backend Socket.IO and websocket upgrades are enabled.`;
+        case "timeout":
+            return "Listen Together socket probe timed out. Verify your proxy/tunnel forwards /socket.io/listen-together correctly.";
+        case "network-error":
+            return "Listen Together socket probe could not reach the server. Check public URL, proxy/tunnel routing, and backend reachability.";
+        case "unexpected-response":
+            return "Listen Together socket probe received an unexpected response. /socket.io/listen-together must terminate on the backend Socket.IO service.";
+        default:
+            return "Listen Together websocket routing is not configured correctly. Ensure /socket.io/listen-together reaches backend Socket.IO.";
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +209,7 @@ export interface ListenTogetherSocketCallbacks {
     onMemberJoined: (data: MemberEvent) => void;
     onMemberPresence?: (data: MemberPresenceEvent) => void;
     onMemberLeft: (data: MemberLeftEvent) => void;
+    onMembershipRevoked?: (data: MembershipRevokedEvent) => void;
     onGroupEnded: (data: GroupEndedEvent) => void;
     onConnect: () => void;
     onReconnect?: (attempt: number) => void;
@@ -472,6 +498,15 @@ export class ListenTogetherSocket {
         this.socket.on("group:member-left", (data: MemberLeftEvent) => {
             this.callbacks?.onMemberLeft(data);
         });
+
+        this.socket.on(
+            "group:membership-revoked",
+            (data: MembershipRevokedEvent) => {
+                if (data.groupId !== this.currentGroupId) return;
+                this.currentGroupId = null;
+                this.callbacks?.onMembershipRevoked?.(data);
+            },
+        );
 
         this.socket.on("group:ended", (data: GroupEndedEvent) => {
             this.currentGroupId = null;

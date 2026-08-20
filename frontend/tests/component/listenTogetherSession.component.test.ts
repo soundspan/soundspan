@@ -640,6 +640,7 @@ const providerSocketState = {
     seekCalls: [] as number[],
     seekStateVersions: [] as Array<number | undefined>,
     reportReadyCalls: 0,
+    disconnectCalls: 0,
 };
 const providerEngineState = {
     currentTime: 0,
@@ -743,6 +744,7 @@ const providerSocket: ProviderSocketStub = {
     },
     disconnect: () => {
         providerSocket.isConnected = false;
+        providerSocketState.disconnectCalls += 1;
     },
     joinGroup: async (groupId: string) => {
         providerSocketState.joinGroupCalls.push(groupId);
@@ -964,6 +966,7 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerSocketState.seekCalls = [];
     providerSocketState.seekStateVersions = [];
     providerSocketState.reportReadyCalls = 0;
+    providerSocketState.disconnectCalls = 0;
     providerEngineState.currentTime = 0;
     providerEngineState.duration = 180;
     providerEngineState.playing = false;
@@ -1084,6 +1087,55 @@ async function mountListenTogetherProvider(
         },
     };
 }
+
+test("membership revocation fully clears the active client session", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    await guest.act(async () => {
+        await waitFor(
+            () =>
+                getListenTogetherSessionSnapshot()?.groupId ===
+                "group-provider",
+            "provider session snapshot was not persisted",
+        );
+    });
+    const onMembershipRevoked = guest.callbacks().onMembershipRevoked;
+    assert.ok(onMembershipRevoked);
+
+    await guest.act(() => onMembershipRevoked({ groupId: "group-provider" }));
+
+    assert.equal(guest.latest().activeGroup, null);
+    assert.equal(guest.latest().isInGroup, false);
+    assert.equal(guest.latest().isConnected, false);
+    assert.equal(guest.latest().hasConnectedOnce, false);
+    assert.equal(getListenTogetherSessionSnapshot(), null);
+    assert.equal(providerSocketState.disconnectCalls, 1);
+});
+
+test("self member-left falls back to cleanup while another departure does not", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+
+    await guest.act(() =>
+        guest.callbacks().onMemberLeft({
+            userId: "host-id",
+            username: "Host",
+        }),
+    );
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.equal(providerSocketState.disconnectCalls, 0);
+
+    await guest.act(() =>
+        guest.callbacks().onMemberLeft({
+            userId: "guest-id",
+            username: "Guest",
+        }),
+    );
+
+    assert.equal(guest.latest().activeGroup, null);
+    assert.equal(getListenTogetherSessionSnapshot(), null);
+    assert.equal(providerSocketState.disconnectCalls, 1);
+});
 
 test("ready-gated play-at resumes hosts without seeking and followers with a compensated seek", async (t) => {
     t.mock.method(Date, "now", () => 100_000);

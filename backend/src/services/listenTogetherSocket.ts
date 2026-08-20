@@ -395,6 +395,7 @@ async function revokeGroupSockets(
             recentDisconnectAtMs.delete(
                 disconnectCleanupKey(groupId, socket.data.userId),
             );
+            socket.emit("group:membership-revoked", { groupId });
             socket.data.groupId = null;
             await socket.leave(groupId);
         }),

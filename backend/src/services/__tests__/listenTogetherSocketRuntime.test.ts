@@ -673,6 +673,7 @@ describe("listen together socket runtime behavior", () => {
                 username: "User One",
                 groupId: "group-1",
             },
+            emit: jest.fn(),
             leave: jest.fn(async () => undefined),
         };
         mocks.namespace.sockets.set(secondTab.id, secondTab);
@@ -707,9 +708,16 @@ describe("listen together socket runtime behavior", () => {
             userId: "user-1",
             username: "User One",
         });
+        expect(secondTab.emit).toHaveBeenCalledWith(
+            "group:membership-revoked",
+            { groupId: "group-1" },
+        );
         expect(secondTab.leave).toHaveBeenCalledWith("group-1");
         expect(secondTab.data.groupId).toBeNull();
         expect(mocks.roomEmit.mock.invocationCallOrder[0]).toBeLessThan(
+            secondTab.emit.mock.invocationCallOrder[0],
+        );
+        expect(secondTab.emit.mock.invocationCallOrder[0]).toBeLessThan(
             secondTab.leave.mock.invocationCallOrder[0],
         );
         expect(ack).toHaveBeenCalledWith({ ok: true });
@@ -1743,6 +1751,7 @@ describe("listen together socket runtime behavior", () => {
         clusterHandler(snapshot);
         const peerSocket = {
             data: { userId: "old-host", groupId: "group-1" },
+            emit: jest.fn(),
             leave: jest.fn(async () => undefined),
         };
         mocks.namespace.sockets.set("peer-socket", peerSocket);
@@ -1761,7 +1770,14 @@ describe("listen together socket runtime behavior", () => {
         expect(
             mocks.groupManager.applyCommittedMembership,
         ).toHaveBeenCalledWith("group-1", [], "new-host");
+        expect(peerSocket.emit).toHaveBeenCalledWith(
+            "group:membership-revoked",
+            { groupId: "group-1" },
+        );
         expect(peerSocket.leave).toHaveBeenCalledWith("group-1");
+        expect(peerSocket.emit.mock.invocationCallOrder[0]).toBeLessThan(
+            peerSocket.leave.mock.invocationCallOrder[0],
+        );
         expect(peerSocket.data.groupId).toBeNull();
         expect(mocks.groupManager.remove).toHaveBeenCalledWith("group-1");
     });

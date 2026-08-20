@@ -172,6 +172,56 @@ test("joinGroup stops after the transient conflict retry budget", async () => {
     assert.deepEqual(scheduledDelaysMs, [75, 120, 240]);
 });
 
+test("membership revocation clears the socket group before notifying the client", () => {
+    const handlers = new Map<string, (payload?: unknown) => void>();
+    const fakeSocket = {
+        connected: true,
+        auth: {},
+        connect: () => undefined,
+        disconnect: () => undefined,
+        removeAllListeners: () => undefined,
+        on: (event: string, handler: (payload?: unknown) => void) => {
+            handlers.set(event, handler);
+        },
+        io: { on: () => undefined },
+        emit: () => undefined,
+    };
+    const socketClient = new ListenTogetherSocket({
+        createSocket: (() => fakeSocket) as never,
+        getToken: () => "token",
+        setInterval: (() => 0) as never,
+        clearInterval: () => undefined,
+    });
+    (
+        socketClient as unknown as { currentGroupId: string | null }
+    ).currentGroupId = "group-revoked";
+    let callbackGroupId: string | null = null;
+
+    socketClient.connect({
+        onGroupState: () => undefined,
+        onPlaybackDelta: () => undefined,
+        onQueueDelta: () => undefined,
+        onWaiting: () => undefined,
+        onPlayAt: () => undefined,
+        onMemberJoined: () => undefined,
+        onMemberLeft: () => undefined,
+        onMembershipRevoked: (event) => {
+            assert.equal(socketClient.activeGroupId, null);
+            callbackGroupId = event.groupId;
+        },
+        onGroupEnded: () => undefined,
+        onConnect: () => undefined,
+        onDisconnect: () => undefined,
+        onError: () => undefined,
+    });
+    handlers.get("group:membership-revoked")?.({
+        groupId: "group-revoked",
+    });
+
+    assert.equal(callbackGroupId, "group-revoked");
+    assert.equal(socketClient.activeGroupId, null);
+});
+
 test("reconnect reports a final rejoin rejection without a floating promise", async () => {
     const handlers = new Map<string, () => void>();
     const joinEmits: EmitRecord[] = [];

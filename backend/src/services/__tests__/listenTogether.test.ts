@@ -1338,12 +1338,13 @@ describe("listenTogether service", () => {
             listenTogetherClusterSync,
         } = loadService();
         const emitSnapshot = jest.fn();
+        const emitMemberLeft = jest.fn();
         listenTogetherCallbacks.configureGroupPublicationBroadcaster({
             emitSnapshot,
             emitEnded: jest.fn(),
             emitMemberJoined: jest.fn(),
             emitMemberPresence: jest.fn(),
-            emitMemberLeft: jest.fn(),
+            emitMemberLeft,
             revokeSockets: jest.fn(),
         });
         const joinedAt = new Date("2026-08-20T12:00:00.000Z");
@@ -1392,6 +1393,10 @@ describe("listenTogether service", () => {
         expect(listenTogetherClusterSync.publishSnapshot).toHaveBeenCalledTimes(
             2,
         );
+        expect(
+            listenTogetherClusterSync.publishMembership,
+        ).toHaveBeenCalledTimes(1);
+        expect(emitMemberLeft).toHaveBeenCalledTimes(1);
         expect(emitSnapshot).toHaveBeenCalledTimes(1);
     });
 
