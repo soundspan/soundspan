@@ -220,6 +220,7 @@ test("reconnect reports a final rejoin rejection without a floating promise", as
         socketClient as unknown as { currentGroupId: string | null }
     ).currentGroupId = "group-reconnect";
     const reportedErrors: Error[] = [];
+    let resyncRequests = 0;
 
     socketClient.connect({
         onGroupState: () => undefined,
@@ -232,6 +233,9 @@ test("reconnect reports a final rejoin rejection without a floating promise", as
         onGroupEnded: () => undefined,
         onConnect: () => undefined,
         onDisconnect: () => undefined,
+        onRejoinFailed: () => {
+            resyncRequests += 1;
+        },
         onError: (error) => {
             reportedErrors.push(error);
         },
@@ -242,6 +246,7 @@ test("reconnect reports a final rejoin rejection without a floating promise", as
     }
 
     assert.equal(joinEmits.length, 4);
+    assert.equal(resyncRequests, 1);
     assert.equal(reportedErrors[0]?.message, "lock conflict");
 });
 

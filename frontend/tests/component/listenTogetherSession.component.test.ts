@@ -636,6 +636,7 @@ const providerApiState: { group: MockGroupSnapshot | null } = {
 };
 const providerSocketState = {
     callbacks: null as ListenTogetherSocketCallbacks | null,
+    joinGroupCalls: [] as string[],
     seekCalls: [] as number[],
     seekStateVersions: [] as Array<number | undefined>,
     reportReadyCalls: 0,
@@ -743,7 +744,9 @@ const providerSocket: ProviderSocketStub = {
     disconnect: () => {
         providerSocket.isConnected = false;
     },
-    joinGroup: async () => undefined,
+    joinGroup: async (groupId: string) => {
+        providerSocketState.joinGroupCalls.push(groupId);
+    },
     reportReady: async () => {
         providerSocketState.reportReadyCalls += 1;
     },
@@ -957,6 +960,7 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerSocket.isConnected = false;
     providerSocket.probeRoute = async () => ({ ok: true });
     providerSocketState.callbacks = null;
+    providerSocketState.joinGroupCalls = [];
     providerSocketState.seekCalls = [];
     providerSocketState.seekStateVersions = [];
     providerSocketState.reportReadyCalls = 0;
@@ -1353,6 +1357,19 @@ test("reconnect recovery restores host position and compensates follower positio
     assert.equal(providerControlCalls.seek.length, seeksBeforeReload + 1);
     assert.equal(providerControlCalls.seek.at(-1), 25);
     assert.equal(providerEngineState.currentTime, 25);
+});
+
+test("rejoin exhaustion requests one bounded group resync", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    providerSocketState.joinGroupCalls = [];
+
+    await guest.act(async () => {
+        guest.callbacks().onRejoinFailed?.(new Error("rejoin exhausted"));
+        await flushMicrotasks();
+    });
+
+    assert.deepEqual(providerSocketState.joinGroupCalls, ["group-provider"]);
 });
 
 test("host playback-delta echoes preserve local position while followers seek", async (t) => {

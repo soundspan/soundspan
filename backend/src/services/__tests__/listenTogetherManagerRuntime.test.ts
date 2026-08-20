@@ -198,13 +198,27 @@ describe("listenTogetherManager runtime behavior", () => {
         groupManager.addSocket("g-socket", "host", "host-socket");
         groupManager.addSocket("g-socket", "guest", "guest-socket");
 
+        expect(callbacks.onGroupState).toHaveBeenLastCalledWith(
+            "g-socket",
+            expect.objectContaining({ id: "g-socket" }),
+            { synchronize: false },
+        );
+
         expect(groupManager.socketCount("g-socket", "guest")).toBe(1);
         expect(groupManager.connectedMemberCount("g-socket")).toBe(2);
 
         // Enter waiting gate and mark host ready so guest disconnect triggers forcePlay.
         groupManager.setTrack("g-socket", "host", 1, true);
         groupManager.reportReady("g-socket", "host");
+        callbacks.onGroupState.mockClear();
         groupManager.removeSocket("g-socket", "guest", "guest-socket");
+
+        expect(callbacks.onGroupState).toHaveBeenNthCalledWith(
+            1,
+            "g-socket",
+            expect.objectContaining({ id: "g-socket" }),
+            { synchronize: false },
+        );
 
         expect(groupManager.connectedMemberCount("g-socket")).toBe(1);
         expect(callbacks.onPlayAt).toHaveBeenCalled();

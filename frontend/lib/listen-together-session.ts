@@ -1,6 +1,7 @@
 "use client";
 
 import { listenTogetherSocket } from "./listen-together-socket";
+import { frontendLogger } from "./logger";
 import {
     createLatestAsyncOperationState,
     enqueueLatestAsyncOperation,
@@ -46,6 +47,7 @@ interface ListenTogetherAckLikeError extends Error {
 }
 
 const HOST_TRACK_OPERATION_CONFLICT_RECOVERY_MAX_RETRIES = 12;
+const log = frontendLogger.child("ListenTogetherSession");
 const LISTEN_TOGETHER_OPTIMISTIC_TRACK_SELECTION_POLICY: ListenTogetherOptimisticTrackSelectionPolicy =
     Object.freeze({
         resetPersistedTrackStartPosition: false,
@@ -226,6 +228,15 @@ export async function requestListenTogetherGroupResync(
     }
 
     await listenTogetherSocket.joinGroup(targetGroupId);
+}
+
+/** Starts a bounded group resync and reports any terminal failure. */
+export function scheduleListenTogetherGroupResync(
+    groupId?: string | null,
+): void {
+    void requestListenTogetherGroupResync(groupId).catch((error) => {
+        log.warn("Group resync failed", { error });
+    });
 }
 
 function isRetryableConflictError(

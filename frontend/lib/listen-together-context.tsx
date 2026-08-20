@@ -60,6 +60,7 @@ import {
     getListenTogetherOptimisticTrackSelectionPolicy,
     getListenTogetherSessionSnapshot,
     requestListenTogetherGroupResync,
+    scheduleListenTogetherGroupResync,
     setListenTogetherMembershipPending,
     setListenTogetherSessionSnapshot,
 } from "@/lib/listen-together-session";
@@ -1057,19 +1058,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         if (recoveryTriggered) return;
                         recoveryTriggered = true;
                         sharedFrontendLogger.warn(reason, details);
-                        void requestListenTogetherGroupResync(
+                        scheduleListenTogetherGroupResync(
                             activeGroupRef.current?.id,
-                        ).catch((recoveryError) => {
-                            sharedFrontendLogger.warn(
-                                "[ListenTogether] ready report recovery resync failed",
-                                {
-                                    error:
-                                        recoveryError instanceof Error
-                                            ? recoveryError.message
-                                            : String(recoveryError),
-                                },
-                            );
-                        });
+                        );
                     };
 
                     const tryReportReady = () => {
@@ -1443,6 +1434,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         "Listen Together reconnect failed. Check route/proxy health and try rejoining.",
                     );
                     void validateSocketRoute(true);
+                },
+                onRejoinFailed: () => {
+                    scheduleListenTogetherGroupResync(
+                        activeGroupRef.current?.id,
+                    );
                 },
                 onDisconnect: (_reason) => {
                     // Defer the visual disconnect; if Socket.IO reconnects within

@@ -10,7 +10,10 @@
 
 import type {} from "@soundspan/media-metadata-contract";
 import type { SyncQueueItem } from "./listenTogetherQueueItem";
-import type { ManagerCallbacks } from "./listenTogetherCallbacks";
+import type {
+    ManagerCallbacks,
+    StatePublicationOptions,
+} from "./listenTogetherCallbacks";
 import { logger } from "../utils/logger";
 import {
     compensateSnapshotPosition,
@@ -450,7 +453,7 @@ class GroupManager {
 
         // Broadcast presence transition so member connection dots update in real time.
         if (!wasConnected && member.socketIds.size > 0) {
-            this.broadcastState(group);
+            this.broadcastState(group, { synchronize: false });
         }
     }
 
@@ -465,7 +468,7 @@ class GroupManager {
 
         // Broadcast presence transition so member connection dots update in real time.
         if (wasConnected && member.socketIds.size === 0) {
-            this.broadcastState(group);
+            this.broadcastState(group, { synchronize: false });
 
             // In waiting state, disconnected members should not block the gate.
             if (group.syncState === "waiting") {
@@ -1248,8 +1251,16 @@ class GroupManager {
         };
     }
 
-    private broadcastState(group: GroupState): void {
-        this.callbacks?.onGroupState(group.id, this.snapshot(group));
+    private broadcastState(
+        group: GroupState,
+        options?: StatePublicationOptions,
+    ): void {
+        const snapshot = this.snapshot(group);
+        if (options) {
+            this.callbacks?.onGroupState(group.id, snapshot, options);
+            return;
+        }
+        this.callbacks?.onGroupState(group.id, snapshot);
     }
 
     private checkReadyGate(group: GroupState): boolean {

@@ -89,6 +89,7 @@ class ListenTogetherClusterSync {
                 `[ListenTogether/StateSync] Failed to publish snapshot for group ${groupId}`,
                 err,
             );
+            throw err;
         }
     }
 
@@ -114,6 +115,7 @@ class ListenTogetherClusterSync {
                 `[ListenTogether/StateSync] Failed to publish end for group ${groupId}`,
                 err,
             );
+            throw err;
         }
     }
 

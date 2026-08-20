@@ -946,10 +946,10 @@ describe("listen together socket runtime behavior", () => {
 
         expect(
             mocks.listenTogetherStateStore.setSnapshot,
-        ).toHaveBeenCalledTimes(2);
+        ).toHaveBeenCalledTimes(3);
         expect(
             mocks.listenTogetherClusterSync.publishSnapshot,
-        ).toHaveBeenCalledTimes(1);
+        ).toHaveBeenCalledTimes(2);
 
         socketService.shutdownListenTogetherSocket();
     });
@@ -1670,10 +1670,10 @@ describe("listen together socket runtime behavior", () => {
 
         expect(
             mocks.listenTogetherStateStore.setSnapshot,
-        ).toHaveBeenCalledTimes(2);
+        ).toHaveBeenCalledTimes(3);
         expect(
             mocks.listenTogetherClusterSync.publishSnapshot,
-        ).toHaveBeenCalledTimes(1);
+        ).toHaveBeenCalledTimes(2);
 
         mocks.groupManager.snapshotById.mockReturnValue(undefined);
         callbacks.onGroupEnded("group-1", "ended");
@@ -1684,7 +1684,7 @@ describe("listen together socket runtime behavior", () => {
         ).toHaveBeenCalledWith("group-1");
         expect(
             mocks.listenTogetherClusterSync.publishSnapshot,
-        ).toHaveBeenCalledTimes(1);
+        ).toHaveBeenCalledTimes(2);
 
         socketService.shutdownListenTogetherSocket();
     });

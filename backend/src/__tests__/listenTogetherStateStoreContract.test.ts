@@ -16,6 +16,13 @@ describe("listen together state store contract", () => {
     );
     const socketSource = fs.readFileSync(socketServicePath, "utf8");
     const serviceSource = fs.readFileSync(listenTogetherServicePath, "utf8");
+    const callbacksPath = path.join(
+        __dirname,
+        "..",
+        "services",
+        "listenTogetherCallbacks.ts",
+    );
+    const callbacksSource = fs.readFileSync(callbacksPath, "utf8");
 
     it("loads authoritative snapshot from redis store before locked mutations", () => {
         expect(socketSource).toContain(
@@ -27,10 +34,10 @@ describe("listen together state store contract", () => {
     });
 
     it("persists and deletes snapshots through callbacks and shutdown", () => {
-        expect(socketSource).toContain(
-            "await listenTogetherStateStore.setSnapshot(groupId, resolvedSnapshot)",
+        expect(callbacksSource).toContain(
+            "await listenTogetherStateStore.setSnapshot(groupId, snapshot)",
         );
-        expect(socketSource).toContain(
+        expect(callbacksSource).toContain(
             "await listenTogetherStateStore.deleteSnapshot(groupId)",
         );
         expect(socketSource).toContain("listenTogetherStateStore.stop();");

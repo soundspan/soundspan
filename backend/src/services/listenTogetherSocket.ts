@@ -43,6 +43,16 @@ import {
     shutdownGroupMutationLock,
     withGroupMutationLock as withSharedGroupMutationLock,
 } from "./listenTogetherMutationLock";
+import {
+    configureGroupPublicationBroadcaster,
+    enqueueGroupEndedBroadcast,
+    enqueueGroupEndedPublication,
+    enqueueGroupMembershipPublication,
+    enqueueGroupSnapshotBroadcast,
+    enqueueGroupSnapshotPublication,
+    flushGroupPublications,
+    resetGroupPublications,
+} from "./listenTogetherCallbacks";
 
 const log = logger.child("ListenTogetherSocket");
 
@@ -115,7 +125,6 @@ const pendingDisconnectCleanupTimers = new Map<
     ReturnType<typeof setTimeout>
 >();
 const recentDisconnectAtMs = new Map<string, number>();
-const pendingGroupSnapshotWrites = new Map<string, Promise<void>>();
 const listenTogetherObservabilityCounters = {
     reconnectSamples: 0,
     reconnectBreaches: 0,
@@ -173,35 +182,6 @@ function buildTransientConflictAck(
     };
 }
 
-function enqueueGroupSnapshotWrite(
-    groupId: string,
-    write: () => Promise<void>,
-): Promise<void> {
-    const previous =
-        pendingGroupSnapshotWrites.get(groupId) ?? Promise.resolve();
-    let queued: Promise<void>;
-    queued = previous
-        .then(
-            () => undefined,
-            () => undefined,
-        )
-        .then(write)
-        .catch(() => undefined)
-        .finally(() => {
-            if (pendingGroupSnapshotWrites.get(groupId) === queued) {
-                pendingGroupSnapshotWrites.delete(groupId);
-            }
-        });
-    pendingGroupSnapshotWrites.set(groupId, queued);
-    return queued;
-}
-
-async function flushGroupSnapshotWrites(groupId: string): Promise<void> {
-    const pending = pendingGroupSnapshotWrites.get(groupId);
-    if (!pending) return;
-    await pending;
-}
-
 function queuePersistAndPublishSnapshot(
     groupId: string,
     snapshot?: GroupSnapshot,
@@ -211,20 +191,7 @@ function queuePersistAndPublishSnapshot(
         return Promise.resolve();
     }
 
-    return enqueueGroupSnapshotWrite(groupId, async () => {
-        await listenTogetherStateStore.setSnapshot(groupId, resolvedSnapshot);
-        await listenTogetherClusterSync.publishSnapshot(
-            groupId,
-            resolvedSnapshot,
-        );
-    });
-}
-
-function queueEndedSnapshotSync(groupId: string): Promise<void> {
-    return enqueueGroupSnapshotWrite(groupId, async () => {
-        await listenTogetherStateStore.deleteSnapshot(groupId);
-        await listenTogetherClusterSync.publishEnded(groupId);
-    });
+    return enqueueGroupSnapshotPublication(groupId, resolvedSnapshot);
 }
 
 async function emitAvailabilityForGroup(
@@ -316,7 +283,7 @@ async function withGroupMutationLock<T>(
                 groupManager.applyExternalSnapshot(authoritativeSnapshot);
             }
         },
-        afterOperation: () => flushGroupSnapshotWrites(groupId),
+        afterOperation: () => flushGroupPublications(groupId),
         onAcquireFailure: () => {
             listenTogetherObservabilityCounters.mutationLockAcquireFailures += 1;
             maybeLogListenTogetherObservability(
@@ -616,6 +583,22 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         }
     });
 
+    configureGroupPublicationBroadcaster({
+        emitSnapshot(groupId, snapshot) {
+            ns.to(groupId).emit("group:state", snapshot);
+            void emitAvailabilityForGroup(ns, groupId, snapshot);
+        },
+        emitEnded(groupId, reason) {
+            ns.to(groupId).emit("group:ended", { reason });
+        },
+        emitMemberJoined(groupId, member) {
+            ns.to(groupId).emit("group:member-joined", member);
+        },
+        emitMemberLeft(groupId, member) {
+            ns.to(groupId).emit("group:member-left", member);
+        },
+    });
+
     // Wire up manager callbacks → Socket.IO broadcasts
     const callbacks: ManagerCallbacks = {
         onGroupState(
@@ -623,11 +606,11 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
             snapshot: GroupSnapshot,
             options?: StatePublicationOptions,
         ) {
-            ns.to(groupId).emit("group:state", snapshot);
             if (options?.synchronize !== false) {
-                void queuePersistAndPublishSnapshot(groupId, snapshot);
+                void enqueueGroupSnapshotPublication(groupId, snapshot);
+            } else {
+                void enqueueGroupSnapshotBroadcast(groupId, snapshot);
             }
-            void emitAvailabilityForGroup(ns, groupId, snapshot);
         },
         onPlaybackDelta(groupId: string, delta: PlaybackDelta) {
             ns.to(groupId).emit("group:playback-delta", delta);
@@ -647,21 +630,26 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
             void queuePersistAndPublishSnapshot(groupId);
         },
         onMemberJoined(groupId: string, member) {
-            ns.to(groupId).emit("group:member-joined", member);
-            void queuePersistAndPublishSnapshot(groupId);
+            void enqueueGroupMembershipPublication(groupId, {
+                type: "joined",
+                member,
+            });
         },
         onMemberLeft(groupId: string, data) {
-            ns.to(groupId).emit("group:member-left", data);
-            void queuePersistAndPublishSnapshot(groupId);
+            void enqueueGroupMembershipPublication(groupId, {
+                type: "left",
+                member: data,
+            });
         },
         onGroupEnded(
             groupId: string,
             reason: string,
             options?: StatePublicationOptions,
         ) {
-            ns.to(groupId).emit("group:ended", { reason });
             if (options?.synchronize !== false) {
-                void queueEndedSnapshotSync(groupId);
+                void enqueueGroupEndedPublication(groupId, reason);
+            } else {
+                void enqueueGroupEndedBroadcast(groupId, reason);
             }
         },
         onBoundaryWatchdog(groupId: string, data) {
@@ -1310,7 +1298,7 @@ export function shutdownListenTogetherSocket(): void {
     }
     pendingDisconnectCleanupTimers.clear();
     recentDisconnectAtMs.clear();
-    pendingGroupSnapshotWrites.clear();
+    resetGroupPublications();
 
     if (io) {
         io.close();

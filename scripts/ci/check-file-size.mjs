@@ -76,7 +76,7 @@ const BASELINE = Object.freeze({
     "frontend/components/player/OverlayPlayer.tsx": 2868,
     "frontend/hooks/useQueries.ts": 1551,
     "frontend/lib/audio-controls-context.tsx": 2311,
-    "frontend/lib/listen-together-context.tsx": 2073,
+    "frontend/lib/listen-together-context.tsx": 2069,
     "services/audio-analyzer/analyzer.py": 2266,
     "services/tidal-downloader/app.py": 2209,
 });

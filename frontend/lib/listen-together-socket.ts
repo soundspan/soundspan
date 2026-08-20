@@ -167,6 +167,7 @@ export interface ListenTogetherSocketCallbacks {
     onReconnectAttempt?: (attempt: number) => void;
     onReconnectError?: (error: Error) => void;
     onReconnectFailed?: () => void;
+    onRejoinFailed?: (error: Error) => void;
     onDisconnect: (reason: string) => void;
     onError: (error: Error) => void;
 }
@@ -372,6 +373,7 @@ export class ListenTogetherSocket {
                         groupId,
                         error: normalizedError,
                     });
+                    this.callbacks?.onRejoinFailed?.(normalizedError);
                     this.callbacks?.onError(normalizedError);
                 });
             }

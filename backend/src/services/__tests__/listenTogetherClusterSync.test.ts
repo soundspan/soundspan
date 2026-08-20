@@ -285,18 +285,20 @@ describe("listenTogetherClusterSync", () => {
         expect(pubClient.disconnect).toHaveBeenCalledTimes(1);
     });
 
-    it("logs a warning when publishSnapshot fails", async () => {
+    it("logs and propagates publishSnapshot failures for queued retry", async () => {
         const { listenTogetherClusterSync, pubClient, logger } =
             loadClusterSync();
         const handler = jest.fn();
         await listenTogetherClusterSync.start(handler);
 
         pubClient.publish.mockRejectedValueOnce(new Error("publish failed"));
-        await listenTogetherClusterSync.publishSnapshot("g1", {
-            id: "g1",
-            playback: {},
-            members: [],
-        });
+        await expect(
+            listenTogetherClusterSync.publishSnapshot("g1", {
+                id: "g1",
+                playback: {},
+                members: [],
+            }),
+        ).rejects.toThrow("publish failed");
 
         expect(logger.warn).toHaveBeenCalledWith(
             "[ListenTogether/StateSync] Failed to publish snapshot for group g1",
