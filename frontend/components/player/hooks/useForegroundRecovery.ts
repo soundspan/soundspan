@@ -13,11 +13,12 @@ import {
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import type { createConsecutiveErrorBreaker } from "@/lib/audio-engine/consecutiveErrorBreaker";
 import type { TrackEndWatchdog } from "../trackEndWatchdog";
+import type { PlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UseForegroundRecoveryOptions {
     currentAudiobook: Audiobook | null;
     currentPodcast: Podcast | null;
-    next: () => void;
+    next: (origin: PlaybackAdvanceOrigin) => void;
     setIsBuffering: (isBuffering: boolean) => void;
     wasPlayingWhenHiddenRef: MutableRefObject<boolean>;
     consecutiveErrorBreakerRef: MutableRefObject<
@@ -137,7 +138,7 @@ export function useForegroundRecovery({
                             trackId: currentMediaId,
                             viaWatchdog: false,
                         });
-                        next();
+                        next(null);
                         return;
                     }
                 }

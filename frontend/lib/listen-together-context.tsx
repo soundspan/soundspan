@@ -63,7 +63,7 @@ import {
     toLegacyStreamFields,
 } from "@soundspan/media-metadata-contract";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
-
+import { writePlaybackAdvanceOrigin as writeOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 const playbackEngine = createRuntimeAudioEngine();
 const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
 const LT_READY_REPORT_DELAY_MS = 150;
@@ -1879,13 +1879,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
         return ok;
     }, [connectSocket, validateSocketRoute]);
-
     // -----------------------------------------------------------------------
     // Actions — hot path (Socket.IO wrappers)
     // -----------------------------------------------------------------------
-
     const syncPlay = useCallback(() => {
         // Drive local player immediately for responsive feedback
+        writeOrigin("manual", audioStateRef.current.currentTrack?.id ?? null);
         controlsRef.current.resume({ suppressListenTogetherBroadcast: true });
         listenTogetherSocket.play().catch(() => {});
     }, []);
@@ -1917,10 +1916,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (!canCurrentUserControlHostPlayback(group)) {
             return;
         }
-
         const nextIndex = resolveAdjacentHostTrackIndex("next");
         if (nextIndex === null) return;
-
+        writeOrigin("manual", group?.playback.trackId ?? null);
         enqueueLatestListenTogetherHostTrackOperation({
             action: "next",
         });
@@ -1935,10 +1933,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (!canCurrentUserControlHostPlayback(group)) {
             return;
         }
-
         const prevIndex = resolveAdjacentHostTrackIndex("previous");
         if (prevIndex === null) return;
-
+        writeOrigin("manual", group?.playback.trackId ?? null);
         enqueueLatestListenTogetherHostTrackOperation({
             action: "previous",
         });
@@ -1961,7 +1958,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             const safeIndex = Math.min(Math.max(index, 0), queueLength - 1);
             if (safeIndex === state.currentIndex) return;
-
+            writeOrigin("manual", group?.playback.trackId ?? null);
             enqueueLatestListenTogetherHostTrackOperation({
                 action: "set-track",
                 index: safeIndex,

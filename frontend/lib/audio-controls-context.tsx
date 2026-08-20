@@ -16,6 +16,7 @@ import {
     Podcast,
     PlayerMode,
 } from "./audio-state-context";
+import type { AudioControlsContextType } from "./audio-controls-types";
 import { useAudioPlayback } from "./audio-playback-context";
 import { api } from "@/lib/api";
 import { audioSeekEmitter } from "./audio-seek-emitter";
@@ -60,6 +61,8 @@ import {
 } from "@/lib/audio-playback-normalization";
 import { resetPersistedTrackStartPosition } from "@/lib/persisted-playback-position";
 import { resolveListenTogetherNavigationIndex } from "@/lib/listen-together-navigation";
+import { writePlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
+import type { PlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import {
     createMigratingStorageKey,
@@ -273,91 +276,6 @@ export function generateSeparatedShuffleIndices(
     return [currentIdx, ...separated];
 }
 
-interface AudioControlsContextType {
-    // Track methods
-    playTrack: (track: Track) => void;
-    playTracks: (
-        tracks: Track[],
-        startIndex?: number,
-        isVibeQueue?: boolean,
-    ) => void;
-
-    // Audiobook methods
-    playAudiobook: (audiobook: Audiobook) => void;
-
-    // Podcast methods
-    playPodcast: (
-        podcast: Podcast,
-        options?: { episodeQueue?: EpisodeQueueItem[] },
-    ) => void;
-    addEpisodeToQueue: (
-        episode: Episode,
-        podcast: { id: string; title: string; coverUrl: string | null },
-    ) => void;
-    playEpisodeNext: (
-        episode: Episode,
-        podcast: { id: string; title: string; coverUrl: string | null },
-    ) => void;
-
-    // Playback controls
-    pause: (options?: { suppressListenTogetherBroadcast?: boolean }) => void;
-    resume: (options?: {
-        suppressListenTogetherBroadcast?: boolean;
-        listenTogetherForceIsPlaying?: boolean;
-        listenTogetherPositionMs?: number;
-        listenTogetherServerTimeMs?: number;
-    }) => void;
-    play: () => void;
-    next: () => void;
-    previous: () => void;
-
-    // Queue controls
-    playNow: (track: Track) => void;
-    playNext: (track: Track) => void;
-    addToQueue: (track: Track, options?: { silent?: boolean }) => void;
-    addTracksToQueue: (tracks: Track[], options?: { silent?: boolean }) => void;
-    playQueueIndex: (index: number) => void; // Jump to a queue item (track or episode)
-    removeFromQueue: (index: number) => void;
-    /**
-     * Move an UPCOMING queue item (index > currentIndex) to another
-     * upcoming position with splice semantics. No-op in Listen Together
-     * sessions, for out-of-range indexes, and for history/current rows;
-     * shuffle indices are remapped so the shuffle order keeps pointing
-     * at the same items.
-     */
-    moveQueueItem: (fromIndex: number, toIndex: number) => void;
-    clearQueue: () => void;
-    setUpcoming: (tracks: Track[], preserveOrder?: boolean) => void; // Replace queue after current track
-
-    // Playback modes
-    toggleShuffle: () => void;
-    toggleRepeat: () => void;
-
-    // Time controls
-    updateCurrentTime: (time: number) => void;
-    seek: (
-        time: number,
-        options?: {
-            allowListenTogetherFollower?: boolean;
-            suppressListenTogetherBroadcast?: boolean;
-        },
-    ) => void;
-    skipForward: (seconds?: number) => void;
-    skipBackward: (seconds?: number) => void;
-
-    // Player mode controls
-    setPlayerMode: (mode: PlayerMode) => void;
-    returnToPreviousMode: () => void;
-
-    // Volume controls
-    setVolume: (volume: number) => void;
-    toggleMute: () => void;
-
-    // Vibe mode controls
-    startVibeMode: () => Promise<{ success: boolean; trackCount: number }>;
-    stopVibeMode: () => void;
-}
-
 const AudioControlsContext = createContext<
     AudioControlsContextType | undefined
 >(undefined);
@@ -530,6 +448,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playTrack = useCallback(
         (track: Track) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const playbackState = playbackRef.current;
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
@@ -583,6 +505,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playTracks = useCallback(
         (tracks: Track[], startIndex = 0, isVibeQueue = false) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const playbackState = playbackRef.current;
             if (tracks.length === 0) {
                 return;
@@ -687,6 +613,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playAudiobook = useCallback(
         (audiobook: Audiobook) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 toast.error("Audiobooks are not supported in Listen Together");
@@ -752,6 +682,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playPodcast = useCallback(
         (podcast: Podcast, options?: { episodeQueue?: EpisodeQueueItem[] }) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 toast.error("Podcasts are not supported in Listen Together");
@@ -947,6 +881,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             listenTogetherServerTimeMs?: number;
         }) => {
             const playbackState = playbackRef.current;
+            if (!options?.suppressListenTogetherBroadcast) {
+                writePlaybackAdvanceOrigin(
+                    "manual",
+                    state.currentTrack?.id ?? null,
+                );
+            }
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 if (ltSession.isHost) {
@@ -1003,91 +943,98 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         resume();
     }, [resume]);
 
-    const next = useCallback(() => {
-        const playbackState = playbackRef.current;
-        const ltSession = getActiveListenTogetherSession();
-        if (ltSession) {
-            if (!ltSession.isHost) return;
-            const nextIndex = resolveListenTogetherNavigationIndex({
-                action: "next",
-                queueLength: state.queue.length > 0 ? state.queue.length : 0,
-                currentIndex: state.currentIndex,
-                currentPositionMs: Math.max(
-                    0,
-                    playbackState.currentTime * 1000,
-                ),
-            });
-            if (nextIndex === null) return;
+    const advanceQueue = useCallback(
+        (origin: PlaybackAdvanceOrigin) => {
+            writePlaybackAdvanceOrigin(origin, state.currentTrack?.id ?? null);
+            const playbackState = playbackRef.current;
+            const ltSession = getActiveListenTogetherSession();
+            if (ltSession) {
+                if (!ltSession.isHost) return;
+                const nextIndex = resolveListenTogetherNavigationIndex({
+                    action: "next",
+                    queueLength:
+                        state.queue.length > 0 ? state.queue.length : 0,
+                    currentIndex: state.currentIndex,
+                    currentPositionMs: Math.max(
+                        0,
+                        playbackState.currentTime * 1000,
+                    ),
+                });
+                if (nextIndex === null) return;
 
-            emitListenTogetherHostTrackOperation("next");
-            applyOptimisticListenTogetherTrackSelection(nextIndex);
-            return;
-        }
-
-        if (state.queue.length === 0) return;
-
-        // Handle repeat one
-        if (state.repeatMode === "one" && state.repeatOneCount === 0) {
-            state.setRepeatOneCount(1);
-            playbackState.setCurrentTime(0);
-            playbackState.setIsPlaying(false);
-            // Clear any existing timeout before setting a new one
-            if (repeatTimeoutRef.current) {
-                clearTimeout(repeatTimeoutRef.current);
+                emitListenTogetherHostTrackOperation("next");
+                applyOptimisticListenTogetherTrackSelection(nextIndex);
+                return;
             }
-            // Short delay for audio element state synchronization
-            repeatTimeoutRef.current = setTimeout(
-                () => playbackRef.current.setIsPlaying(true),
-                10,
-            );
-            return;
-        }
 
-        state.setRepeatOneCount(0);
+            if (state.queue.length === 0) return;
 
-        if (state.isShuffle) {
-            const currentShufflePos = state.shuffleIndices.indexOf(
-                state.currentIndex,
-            );
-            queueDebugLog("next() shuffle", {
+            // Handle repeat one
+            if (state.repeatMode === "one" && state.repeatOneCount === 0) {
+                state.setRepeatOneCount(1);
+                playbackState.setCurrentTime(0);
+                playbackState.setIsPlaying(false);
+                // Clear any existing timeout before setting a new one
+                if (repeatTimeoutRef.current) {
+                    clearTimeout(repeatTimeoutRef.current);
+                }
+                // Short delay for audio element state synchronization
+                repeatTimeoutRef.current = setTimeout(
+                    () => playbackRef.current.setIsPlaying(true),
+                    10,
+                );
+                return;
+            }
+
+            state.setRepeatOneCount(0);
+
+            if (state.isShuffle) {
+                const currentShufflePos = state.shuffleIndices.indexOf(
+                    state.currentIndex,
+                );
+                queueDebugLog("next() shuffle", {
+                    currentIndex: state.currentIndex,
+                    currentShufflePos,
+                    shuffleIndicesLen: state.shuffleIndices.length,
+                });
+            }
+            const advance = resolveQueueAdvance({
+                action: "next",
+                queue: state.queue,
                 currentIndex: state.currentIndex,
-                currentShufflePos,
-                shuffleIndicesLen: state.shuffleIndices.length,
+                isShuffle: state.isShuffle,
+                shuffleIndices: state.shuffleIndices,
+                repeatMode: state.repeatMode,
             });
-        }
-        const advance = resolveQueueAdvance({
-            action: "next",
-            queue: state.queue,
-            currentIndex: state.currentIndex,
-            isShuffle: state.isShuffle,
-            shuffleIndices: state.shuffleIndices,
-            repeatMode: state.repeatMode,
-        });
-        if (advance.kind === "stop") {
-            return;
-        }
+            if (advance.kind === "stop") {
+                return;
+            }
 
-        queueDebugLog("next() chosen", {
-            isShuffle: state.isShuffle,
-            nextIndex: advance.index,
-            nextItemKind: advance.kind,
-            nextItemId: state.queue[advance.index]?.id,
-            queueLen: state.queue.length,
-        });
-        const nextItem = state.queue[advance.index];
-        if (!nextItem) {
-            return;
-        }
-        startQueueItemAtIndex(advance.index, nextItem);
-    }, [
-        state,
-        startQueueItemAtIndex,
-        getActiveListenTogetherSession,
-        emitListenTogetherHostTrackOperation,
-        applyOptimisticListenTogetherTrackSelection,
-    ]);
+            queueDebugLog("next() chosen", {
+                isShuffle: state.isShuffle,
+                nextIndex: advance.index,
+                nextItemKind: advance.kind,
+                nextItemId: state.queue[advance.index]?.id,
+                queueLen: state.queue.length,
+            });
+            const nextItem = state.queue[advance.index];
+            if (!nextItem) {
+                return;
+            }
+            startQueueItemAtIndex(advance.index, nextItem);
+        },
+        [
+            state,
+            startQueueItemAtIndex,
+            getActiveListenTogetherSession,
+            emitListenTogetherHostTrackOperation,
+            applyOptimisticListenTogetherTrackSelection,
+        ],
+    );
+    const next = useCallback(() => advanceQueue("manual"), [advanceQueue]);
 
     const previous = useCallback(() => {
+        writePlaybackAdvanceOrigin("manual", state.currentTrack?.id ?? null);
         const playbackState = playbackRef.current;
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
@@ -1139,6 +1086,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const addTracksToQueue = useCallback(
         (tracks: Track[], options?: { silent?: boolean }) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const playbackState = playbackRef.current;
             const shouldToastSuccess = !options?.silent;
             const validTracks = tracks.filter((track) => Boolean(track?.id));
@@ -1343,6 +1294,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playNext = useCallback(
         (track: Track) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             if (!track?.id) return;
             const playbackState = playbackRef.current;
 
@@ -1450,6 +1405,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playNow = useCallback(
         (track: Track) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             if (!track?.id) return;
 
             const playbackState = playbackRef.current;
@@ -1577,6 +1536,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             episode: Episode,
             podcast: { id: string; title: string; coverUrl: string | null },
         ) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 toast.error("Podcasts are not supported in Listen Together");
@@ -1644,6 +1607,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             episode: Episode,
             podcast: { id: string; title: string; coverUrl: string | null },
         ) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 toast.error("Podcasts are not supported in Listen Together");
@@ -1721,6 +1688,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // Jump to an arbitrary queue position without rebuilding the queue.
     const playQueueIndex = useCallback(
         (index: number) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const item = state.queue[index];
             if (!item) return;
             startQueueItemAtIndex(index, item);
@@ -1730,6 +1701,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const removeFromQueue = useCallback(
         (index: number) => {
+            writePlaybackAdvanceOrigin(
+                "manual",
+                state.currentTrack?.id ?? null,
+            );
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 listenTogetherSocket.removeFromQueue(index).catch(() => {});
@@ -1811,6 +1786,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const clearQueue = useCallback(() => {
+        writePlaybackAdvanceOrigin("manual", state.currentTrack?.id ?? null);
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
             listenTogetherSocket.clearQueue().catch(() => {});
@@ -2231,6 +2207,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             resume,
             play,
             next,
+            advanceQueue,
             previous,
             playNow,
             playNext,
@@ -2265,6 +2242,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             resume,
             play,
             next,
+            advanceQueue,
             previous,
             playNow,
             playNext,

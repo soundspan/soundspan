@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import * as realPlaybackRecoveryPolicy from "../../lib/audio-engine/playbackRecoveryPolicy";
+import {
+    playbackAdvanceOriginRef,
+    writePlaybackAdvanceOrigin,
+} from "../../lib/audio-engine/playbackAdvanceOrigin";
 import { afterEach, before, beforeEach, mock, test } from "node:test";
 
 type PlaybackType = "track" | "audiobook" | "podcast" | null;
@@ -445,7 +449,6 @@ let listenTogetherSnapshot: {
     groupId?: string;
     isHost?: boolean;
 } | null = null;
-let listenTogetherFollowerTransientRecoveryEnabled = true;
 let podcastCacheStatus = {
     cached: true,
     downloading: false,
@@ -545,7 +548,7 @@ const resetHarnessState = (): void => {
 
     runtimeEngineMode = "howler";
     listenTogetherSnapshot = null;
-    listenTogetherFollowerTransientRecoveryEnabled = true;
+    playbackAdvanceOriginRef.current = null;
     podcastCacheStatus = {
         cached: true,
         downloading: false,
@@ -622,6 +625,12 @@ mock.module("react/jsx-runtime", {
         Fragment: "mock-fragment",
         jsx: (..._args: unknown[]) => ({ __mocked: true }),
         jsxs: (..._args: unknown[]) => ({ __mocked: true }),
+    },
+});
+
+mock.module("@/components/player/PlaybackProgressSnapshot", {
+    exports: {
+        PlaybackProgressSnapshot: () => null,
     },
 });
 
@@ -757,6 +766,9 @@ mock.module("@/lib/audio-controls-context", {
                 controlCalls.pause += 1;
             },
             next: () => {
+                controlCalls.next += 1;
+            },
+            advanceQueue: () => {
                 controlCalls.next += 1;
             },
             nextPodcastEpisode: () => {
@@ -927,9 +939,7 @@ mock.module("@/lib/listen-together-session", {
         resolveListenTogetherFollowerGroupId: (
             snapshot: { groupId?: string; isHost?: boolean } | null,
         ) =>
-            listenTogetherFollowerTransientRecoveryEnabled &&
-            snapshot?.groupId &&
-            snapshot.isHost !== true
+            snapshot?.groupId && snapshot.isHost !== true
                 ? snapshot.groupId
                 : null,
         requestListenTogetherGroupResync: async (groupId?: string) => {
@@ -1217,6 +1227,14 @@ const applyListenTogetherResume = async (
     await flushAsync();
 };
 
+const applyManualListenTogetherSelection = async (
+    tracks: Track[],
+    index: number,
+): Promise<void> => {
+    writePlaybackAdvanceOrigin("manual", audioState.currentTrack?.id ?? null);
+    await applyListenTogetherResume(tracks, index);
+};
+
 const extractedHookNames = [
     "usePlaybackOrchestratorRefs",
     "useApplyCurrentOutputState",
@@ -1377,6 +1395,7 @@ test("listen-together host error advances preserve consecutive failures until th
     for (let index = 0; index < 3; index += 1) {
         await failPlayingTrack();
         if (index < 2) {
+            if (index === 0) mock.timers.tick(31_000);
             await applyListenTogetherResume(tracks, index + 1);
         }
     }
@@ -1401,7 +1420,6 @@ test("listen-together follower resync preserves consecutive failures until the b
         groupId: "lt-follower-breaker",
         isHost: false,
     };
-    listenTogetherFollowerTransientRecoveryEnabled = false;
     audioState.currentTrack = tracks[0];
     audioState.queue = tracks;
 
@@ -1426,6 +1444,41 @@ test("listen-together follower resync preserves consecutive failures until the b
     );
 });
 
+test("manual host selection overrides an outstanding error advance", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("lt-overlap-error-source"),
+        makeTrack("lt-overlap-auto-target"),
+        makeTrack("lt-overlap-manual-target"),
+        makeTrack("lt-overlap-after-manual"),
+        makeTrack("lt-overlap-unreached"),
+    ];
+    listenTogetherSnapshot = { groupId: "lt-overlap", isHost: true };
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    await failPlayingTrack();
+    await applyManualListenTogetherSelection(tracks, 2);
+    await failPlayingTrack();
+    await applyListenTogetherResume(tracks, 3);
+    await failPlayingTrack();
+
+    assert.deepEqual(listenTogetherHostTrackOperations, [
+        "next",
+        "next",
+        "next",
+    ]);
+    assert.equal(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+        false,
+    );
+});
+
 test("manual listen-together track changes still reset prior failures", async () => {
     mock.timers.enable();
     const tracks = [
@@ -1447,7 +1500,7 @@ test("manual listen-together track changes still reset prior failures", async ()
         await applyListenTogetherResume(tracks, index + 1);
     }
 
-    await applyListenTogetherResume(tracks, 3);
+    await applyManualListenTogetherSelection(tracks, 3);
     await failPlayingTrack();
 
     assert.deepEqual(listenTogetherHostTrackOperations, [

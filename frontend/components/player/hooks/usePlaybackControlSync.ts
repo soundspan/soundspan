@@ -9,6 +9,7 @@ import {
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import { useLoudnessNormalization } from "./useLoudnessNormalization";
+import { consumePlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UsePlaybackControlSyncOptions {
     refs: PlaybackOrchestratorRefs;
@@ -53,7 +54,6 @@ export function usePlaybackControlSync({
         loadIdRef,
         cancelledLoadPlayIdRef,
         isUserInitiatedRef,
-        trackErrorAdvanceFromTrackIdRef,
         consecutiveErrorBreakerRef,
         trackEndWatchdogRef,
         outputStateRef,
@@ -171,15 +171,8 @@ export function usePlaybackControlSync({
         isUserInitiatedRef.current = true;
 
         if (isPlaying) {
-            const errorAdvanceFromTrackId =
-                trackErrorAdvanceFromTrackIdRef.current;
-            const isTrackErrorAdvance =
-                playbackType === "track" &&
-                errorAdvanceFromTrackId !== null &&
-                (currentTrack?.id !== errorAdvanceFromTrackId ||
-                    repeatMode === "one");
-            trackErrorAdvanceFromTrackIdRef.current = null;
-            if (!isTrackErrorAdvance) {
+            const advanceOrigin = consumePlaybackAdvanceOrigin();
+            if (advanceOrigin?.origin === "manual") {
                 consecutiveErrorBreakerRef.current.reset();
             }
             applyCurrentOutputState();

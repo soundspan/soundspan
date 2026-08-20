@@ -11,6 +11,30 @@ interface UseAudioEngineBindingsOptions {
     refs: PlaybackOrchestratorRefs;
 }
 
+const createPlaybackConfirmationTimeUpdateHandler = (
+    refs: PlaybackOrchestratorRefs,
+): AudioEngineEventHandler<"timeupdate"> => {
+    return (payload) => {
+        const mediaId =
+            refs.playbackTypeRef.current === "track"
+                ? (refs.currentTrackRef.current?.id ?? null)
+                : null;
+        const result = transitionPlaybackProgressConfirmation(
+            refs.playbackProgressConfirmationRef.current,
+            {
+                type: "position",
+                mediaId,
+                currentTimeSeconds: payload.timeSec,
+                isPlaying: audioEngine.isPlaying(),
+            },
+        );
+        refs.playbackProgressConfirmationRef.current = result.nextState;
+        if (result.confirmed) {
+            refs.consecutiveErrorBreakerRef.current.recordSuccess();
+        }
+    };
+};
+
 const createPlaybackConfirmationSeekHandler = (
     refs: PlaybackOrchestratorRefs,
 ): AudioEngineEventHandler<"seek"> => {
@@ -41,9 +65,14 @@ export function useAudioEngineBindings({
     // The shared hybrid facade keeps its identity while inner engines swap.
     // Bind once per facade identity and dispatch into the latest closures.
     useEffect(() => {
+        const confirmPlaybackProgress =
+            createPlaybackConfirmationTimeUpdateHandler(refs);
         const stableHandleTimeUpdate: AudioEngineEventHandler<"timeupdate"> = (
             payload,
-        ) => engineEventHandlersRef.current?.handleTimeUpdate(payload);
+        ) => {
+            confirmPlaybackProgress(payload);
+            engineEventHandlersRef.current?.handleTimeUpdate(payload);
+        };
         const stableHandleLoad: AudioEngineEventHandler<"load"> = (payload) =>
             engineEventHandlersRef.current?.handleLoad(payload);
         const stableHandleEnd: AudioEngineEventHandler<"end"> = () =>

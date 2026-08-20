@@ -1,5 +1,8 @@
 const CONFIRMED_PLAYBACK_PROGRESS_THRESHOLD_SECONDS = 0.5;
 
+/** Maximum backward engine wobble ignored without re-baselining progress. */
+export const JITTER_TOLERANCE_SECONDS = 0.25;
+
 /** Movement tracked for one media item until playback is confirmed. */
 export interface PlaybackProgressConfirmationState {
     mediaId: string | null;
@@ -50,7 +53,8 @@ const createBaselineState = (
  *
  * The first valid position establishes a baseline. Only later, strictly
  * increasing positions observed while playing contribute toward confirmation.
- * Seek discontinuities and backward movement establish a new baseline.
+ * Seek discontinuities and backward movement beyond the jitter tolerance
+ * establish a new baseline.
  */
 export function transitionPlaybackProgressConfirmation(
     previousState: PlaybackProgressConfirmationState,
@@ -81,9 +85,22 @@ export function transitionPlaybackProgressConfirmation(
     if (
         event.type === "seek" ||
         previousState.lastTimeSeconds === null ||
-        !event.isPlaying ||
-        event.currentTimeSeconds < previousState.lastTimeSeconds
+        !event.isPlaying
     ) {
+        return {
+            nextState: createBaselineState(
+                event.mediaId,
+                event.currentTimeSeconds,
+            ),
+            confirmed: false,
+        };
+    }
+    if (event.currentTimeSeconds < previousState.lastTimeSeconds) {
+        const backwardMovementSeconds =
+            previousState.lastTimeSeconds - event.currentTimeSeconds;
+        if (backwardMovementSeconds <= JITTER_TOLERANCE_SECONDS) {
+            return { nextState: previousState, confirmed: false };
+        }
         return {
             nextState: createBaselineState(
                 event.mediaId,

@@ -50,6 +50,52 @@ test("strictly increasing positions confirm once cumulative movement reaches the
     }
 });
 
+test("small backward jitter preserves accumulated forward progress", () => {
+    let state = createPlaybackProgressConfirmationState();
+    const cases = [
+        { currentTimeSeconds: 10, expected: false },
+        { currentTimeSeconds: 10.3, expected: false },
+        { currentTimeSeconds: 10.299, expected: false },
+        { currentTimeSeconds: 10.5, expected: true },
+    ] as const;
+
+    for (const testCase of cases) {
+        const result = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(testCase.currentTimeSeconds),
+        );
+        state = result.nextState;
+        assert.equal(result.confirmed, testCase.expected);
+    }
+});
+
+test("a substantial backward observation re-baselines progress", () => {
+    let state = createPlaybackProgressConfirmationState();
+    const cases = [10, 10.3, 5, 5.2, 5.49];
+
+    for (const currentTimeSeconds of cases) {
+        const result = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(currentTimeSeconds),
+        );
+        state = result.nextState;
+        assert.equal(result.confirmed, false);
+    }
+});
+
+test("small oscillations around a frozen position never confirm playback", () => {
+    let state = createPlaybackProgressConfirmationState();
+
+    for (const currentTimeSeconds of [10, 10.2, 10, 10.2, 10, 10.2]) {
+        const result = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(currentTimeSeconds),
+        );
+        state = result.nextState;
+        assert.equal(result.confirmed, false);
+    }
+});
+
 test("a seek jump re-baselines and frozen positions after it never confirm", () => {
     let state = createPlaybackProgressConfirmationState();
 

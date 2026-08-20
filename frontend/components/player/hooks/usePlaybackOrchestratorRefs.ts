@@ -77,7 +77,6 @@ export function usePlaybackOrchestratorRefs({
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
-    const trackErrorAdvanceFromTrackIdRef = useRef<string | null>(null);
     const consecutiveErrorBreakerRef = useRef(createConsecutiveErrorBreaker());
     const playbackProgressConfirmationRef = useRef(
         createPlaybackProgressConfirmationState(),
@@ -226,7 +225,6 @@ export function usePlaybackOrchestratorRefs({
         lastPreloadedTrackIdRef,
         pendingTrackErrorSkipRef,
         pendingTrackErrorTrackIdRef,
-        trackErrorAdvanceFromTrackIdRef,
         consecutiveErrorBreakerRef,
         playbackProgressConfirmationRef,
         wasPlayingWhenHiddenRef,

@@ -26,11 +26,15 @@ import {
 } from "@/lib/audio-engine/playbackRecoveryPolicy";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import type { usePlaybackRecoveryHelpers } from "./usePlaybackRecoveryHelpers";
+import {
+    type PlaybackAdvanceOrigin,
+    writePlaybackAdvanceOrigin,
+} from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UseTrackRecoveryOptions {
     refs: PlaybackOrchestratorRefs;
     playbackRecoveryHelpers: ReturnType<typeof usePlaybackRecoveryHelpers>;
-    next: () => void;
+    next: (origin: PlaybackAdvanceOrigin) => void;
     setCurrentTime: (time: number) => void;
     setIsBuffering: (isBuffering: boolean) => void;
 }
@@ -66,7 +70,6 @@ export function useTrackRecovery({
         consecutiveErrorBreakerRef,
         queueLengthRef,
         lastTrackIdRef,
-        trackErrorAdvanceFromTrackIdRef,
         advancePlayIntentAtMsRef,
         transientTrackRecoveryTrackIdRef,
         transientTrackRecoveryWindowStartedAtRef,
@@ -300,7 +303,7 @@ export function useTrackRecovery({
 
                 const ltSession = getListenTogetherSessionSnapshot();
                 if (ltSession?.groupId) {
-                    trackErrorAdvanceFromTrackIdRef.current = failedTrackId;
+                    writePlaybackAdvanceOrigin("error", failedTrackId);
                     advancePlayIntentAtMsRef.current = Date.now();
                     if (ltSession.isHost && queueLengthRef.current > 1) {
                         enqueueLatestListenTogetherHostTrackOperation({
@@ -319,9 +322,8 @@ export function useTrackRecovery({
 
                 lastTrackIdRef.current = null;
                 isLoadingRef.current = false;
-                trackErrorAdvanceFromTrackIdRef.current = failedTrackId;
                 advancePlayIntentAtMsRef.current = Date.now();
-                next();
+                next("error");
             }, TRACK_ERROR_SKIP_DELAY_MS);
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
@@ -332,13 +334,13 @@ export function useTrackRecovery({
         (failedTrackId: string | null, error: unknown): boolean => {
             if (playbackTypeRef.current !== "track") return false;
             if (!failedTrackId) return false;
+            if (!lastPlayingStateRef.current) return false;
+            if (!isLikelyTransientStreamError(error)) return false;
             if (
                 requestListenTogetherFollowerRecovery("transient_track_error")
             ) {
                 return true;
             }
-            if (!lastPlayingStateRef.current) return false;
-            if (!isLikelyTransientStreamError(error)) return false;
 
             const now = Date.now();
             const isNewTrack =

@@ -11,10 +11,8 @@ import {
 import { api } from "@/lib/api";
 import type { AudioEngineErrorPayload } from "@/lib/audio-engine/types";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
-import {
-    createPlaybackProgressConfirmationState,
-    transitionPlaybackProgressConfirmation,
-} from "@/lib/audio-engine/playbackProgressConfirmation";
+import { createPlaybackProgressConfirmationState } from "@/lib/audio-engine/playbackProgressConfirmation";
+import { consumePlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
 import {
     getListenTogetherSessionSnapshot,
@@ -99,7 +97,7 @@ export const AudioPlaybackOrchestrator = memo(
             setStreamProfile,
         } = usePlaybackStatus();
         // Controls context
-        const { pause, next, startVibeMode } = useAudioControls();
+        const { pause, advanceQueue: next, startVibeMode } = useAudioControls();
         const queryClient = useQueryClient();
         const orchestratorRefs = H.usePlaybackOrchestratorRefs({
             currentTrack,
@@ -258,22 +256,6 @@ export const AudioPlaybackOrchestrator = memo(
                 }
                 if (playbackTypeRef.current === "track") {
                     const liveTrackId = currentTrackRef.current?.id ?? null;
-                    const progressConfirmation =
-                        transitionPlaybackProgressConfirmation(
-                            playbackProgressConfirmationRef.current,
-                            {
-                                type: "position",
-                                mediaId: liveTrackId,
-                                currentTimeSeconds: currentTimeValue,
-                                isPlaying: audioEngine.isPlaying(),
-                            },
-                        );
-                    playbackProgressConfirmationRef.current =
-                        progressConfirmation.nextState;
-                    if (progressConfirmation.confirmed) {
-                        consecutiveErrorBreakerRef.current.recordSuccess();
-                    }
-
                     // Real progress can precede the synthetic load callback. Treat it
                     // as loaded so startup retries do not restart healthy playback.
                     if (
@@ -434,7 +416,7 @@ export const AudioPlaybackOrchestrator = memo(
                         trackId: currentTrackId,
                         viaWatchdog,
                     });
-                    next();
+                    next(null);
                 };
                 if (playbackType === "track") {
                     if (isLoadingRef.current) {
@@ -509,7 +491,7 @@ export const AudioPlaybackOrchestrator = memo(
                         pause();
                     } else {
                         advancePlayIntentAtMsRef.current = Date.now();
-                        next();
+                        next(null);
                     }
                 } else if (playbackType === "audiobook") {
                     pause();
@@ -1064,8 +1046,6 @@ export const AudioPlaybackOrchestrator = memo(
             const previousMediaId = lastTrackIdRef.current;
             if (currentMediaId !== previousMediaId) {
                 trackEndWatchdogRef.current?.clear();
-                playbackProgressConfirmationRef.current =
-                    createPlaybackProgressConfirmationState();
             }
 
             if (currentMediaId === previousMediaId) {
@@ -1144,11 +1124,8 @@ export const AudioPlaybackOrchestrator = memo(
                 Date.now(),
             );
             advancePlayIntentAtMsRef.current = null;
-            if (
-                playbackType === "track" &&
-                previousMediaId !== null &&
-                !hasAdvancePlayIntent
-            ) {
+            const advanceOrigin = consumePlaybackAdvanceOrigin();
+            if (advanceOrigin?.origin === "manual") {
                 consecutiveErrorBreakerRef.current.reset();
             }
             loadTimeoutRetryCountRef.current = 0;
