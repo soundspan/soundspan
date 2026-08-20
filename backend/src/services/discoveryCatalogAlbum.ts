@@ -66,16 +66,23 @@ interface DiscoveryCatalogLinkSnapshot {
     catalogAlbumId: string | null;
 }
 
+type DiscoveryFallbackMatch = "rgMbid" | "titleArtist";
+
+interface DiscoveryFallbackCandidate {
+    catalogAlbum: DiscoveryCatalogAlbum;
+    match: DiscoveryFallbackMatch;
+}
+
 async function findFallbackCatalogAlbum(
     transaction: Prisma.TransactionClient,
     discoveryAlbum: DiscoveryCatalogIdentity,
-): Promise<DiscoveryCatalogAlbum | null> {
+): Promise<DiscoveryFallbackCandidate | null> {
     const exactMbid = await transaction.album.findFirst({
         where: { rgMbid: discoveryAlbum.rgMbid },
         include: { artist: true },
     });
-    if (exactMbid) return exactMbid;
-    return transaction.album.findFirst({
+    if (exactMbid) return { catalogAlbum: exactMbid, match: "rgMbid" };
+    const titleArtist = await transaction.album.findFirst({
         where: {
             title: {
                 equals: discoveryAlbum.albumTitle,
@@ -90,6 +97,9 @@ async function findFallbackCatalogAlbum(
         },
         include: { artist: true },
     });
+    return titleArtist
+        ? { catalogAlbum: titleArtist, match: "titleArtist" }
+        : null;
 }
 
 async function findCatalogAlbumById(
@@ -109,6 +119,7 @@ async function readCatalogCandidate(
 ): Promise<{
     snapshot: DiscoveryCatalogLinkSnapshot;
     catalogAlbum: DiscoveryCatalogAlbum | null;
+    fallbackMatch: DiscoveryFallbackMatch | null;
 } | null> {
     const snapshot = await transaction.discoveryAlbum.findUnique({
         where: { id: discoveryAlbum.id },
@@ -118,13 +129,26 @@ async function readCatalogCandidate(
     const normalizedSnapshot = {
         catalogAlbumId: snapshot.catalogAlbumId ?? null,
     };
-    const catalogAlbum = normalizedSnapshot.catalogAlbumId
-        ? await findCatalogAlbumById(
-              transaction,
-              normalizedSnapshot.catalogAlbumId,
-          )
-        : await findFallbackCatalogAlbum(transaction, discoveryAlbum);
-    return { snapshot: normalizedSnapshot, catalogAlbum };
+    if (normalizedSnapshot.catalogAlbumId) {
+        const catalogAlbum = await findCatalogAlbumById(
+            transaction,
+            normalizedSnapshot.catalogAlbumId,
+        );
+        return {
+            snapshot: normalizedSnapshot,
+            catalogAlbum,
+            fallbackMatch: null,
+        };
+    }
+    const fallback = await findFallbackCatalogAlbum(
+        transaction,
+        discoveryAlbum,
+    );
+    return {
+        snapshot: normalizedSnapshot,
+        catalogAlbum: fallback?.catalogAlbum ?? null,
+        fallbackMatch: fallback?.match ?? null,
+    };
 }
 
 async function lockCatalogAlbum(
@@ -138,6 +162,50 @@ async function lockCatalogAlbum(
         FOR UPDATE
     `);
     return rows.length === 1;
+}
+
+function fallbackStillMatches(
+    catalogAlbum: DiscoveryCatalogAlbum,
+    discoveryAlbum: DiscoveryCatalogIdentity,
+    match: DiscoveryFallbackMatch,
+): boolean {
+    if (match === "rgMbid") {
+        return catalogAlbum.rgMbid === discoveryAlbum.rgMbid;
+    }
+    return (
+        catalogAlbum.title.toLowerCase() ===
+            discoveryAlbum.albumTitle.toLowerCase() &&
+        catalogAlbum.artist.name.toLowerCase() ===
+            discoveryAlbum.artistName.toLowerCase()
+    );
+}
+
+async function readLockedCatalogAlbum(
+    transaction: Prisma.TransactionClient,
+    discoveryAlbum: DiscoveryCatalogIdentity,
+    catalogAlbumId: string,
+    fallbackMatch: DiscoveryFallbackMatch | null,
+): Promise<DiscoveryCatalogAlbum | null> {
+    const locked = await lockCatalogAlbum(transaction, catalogAlbumId);
+    if (!locked) return null;
+    const catalogAlbum = await findCatalogAlbumById(
+        transaction,
+        catalogAlbumId,
+    );
+    if (!catalogAlbum) {
+        throw new DiscoveryLinkDriftError(
+            "Catalog album changed during resolution",
+        );
+    }
+    if (
+        fallbackMatch &&
+        !fallbackStillMatches(catalogAlbum, discoveryAlbum, fallbackMatch)
+    ) {
+        throw new DiscoveryLinkDriftError(
+            "Fallback catalog match changed during resolution",
+        );
+    }
+    return catalogAlbum;
 }
 
 async function lockDiscoveryRows(
@@ -215,11 +283,14 @@ export async function resolveDiscoveryCatalogAlbum(
     const candidate = await readCatalogCandidate(transaction, discoveryAlbum);
     if (!candidate) return null;
 
-    let catalogAlbum = candidate.catalogAlbum;
-    if (catalogAlbum) {
-        const locked = await lockCatalogAlbum(transaction, catalogAlbum.id);
-        if (!locked) catalogAlbum = null;
-    }
+    const catalogAlbum = candidate.catalogAlbum
+        ? await readLockedCatalogAlbum(
+              transaction,
+              discoveryAlbum,
+              candidate.catalogAlbum.id,
+              candidate.fallbackMatch,
+          )
+        : null;
     const rows = await lockDiscoveryRows(
         transaction,
         discoveryAlbum.id,

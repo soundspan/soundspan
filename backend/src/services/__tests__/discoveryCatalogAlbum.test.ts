@@ -44,11 +44,14 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         const transaction = createTransaction([
             { id: "discovery", catalogAlbumId: "linked", status: "ACTIVE" },
         ]);
-        const linkedAlbum = { id: "linked", artist: {} };
+        const preLockAlbum = { id: "linked", rgMbid: "stale", artist: {} };
+        const linkedAlbum = { id: "linked", rgMbid: "current", artist: {} };
         transaction.discoveryAlbum.findUnique.mockResolvedValue({
             catalogAlbumId: "linked",
         });
-        transaction.album.findUnique.mockResolvedValue(linkedAlbum);
+        transaction.album.findUnique
+            .mockResolvedValueOnce(preLockAlbum)
+            .mockResolvedValueOnce(linkedAlbum);
 
         await expect(
             resolveDiscoveryCatalogAlbum(transaction as never, {
@@ -81,7 +84,7 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         const transaction = createTransaction([
             { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
         ]);
-        const exactAlbum = { id: "exact", artist: {} };
+        const exactAlbum = { id: "exact", rgMbid: "legacy-rg", artist: {} };
         transaction.discoveryAlbum.findUnique.mockResolvedValue({
             catalogAlbumId: null,
         });
@@ -116,7 +119,12 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         const transaction = createTransaction([
             { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
         ]);
-        const titleAlbum = { id: "title-match", artist: {} };
+        const titleAlbum = {
+            id: "title-match",
+            rgMbid: "other-rg",
+            title: "legacy title",
+            artist: { name: "LEGACY ARTIST" },
+        };
         transaction.discoveryAlbum.findUnique.mockResolvedValue({
             catalogAlbumId: null,
         });
@@ -147,6 +155,68 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         });
     });
 
+    it("retries when an exact MBID fallback no longer matches after its album lock", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
+        ]);
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: null,
+        });
+        transaction.album.findFirst.mockResolvedValueOnce({
+            id: "exact",
+            rgMbid: "legacy-rg",
+            artist: {},
+        });
+        transaction.album.findUnique.mockResolvedValueOnce({
+            id: "exact",
+            rgMbid: "changed-rg",
+            artist: {},
+        });
+
+        await expect(
+            resolveDiscoveryCatalogAlbum(transaction as never, {
+                id: "discovery",
+                rgMbid: "legacy-rg",
+                albumTitle: "Legacy Title",
+                artistName: "Legacy Artist",
+            }),
+        ).rejects.toBeInstanceOf(DiscoveryLinkDriftError);
+        expect(transaction.discoveryAlbum.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("retries when a title and artist fallback no longer matches after its album lock", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
+        ]);
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: null,
+        });
+        transaction.album.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "title-match",
+                rgMbid: "other-rg",
+                title: "Legacy Title",
+                artist: { name: "Legacy Artist" },
+            });
+        transaction.album.findUnique.mockResolvedValueOnce({
+            id: "title-match",
+            rgMbid: "other-rg",
+            title: "Changed Title",
+            artist: { name: "Legacy Artist" },
+        });
+
+        await expect(
+            resolveDiscoveryCatalogAlbum(transaction as never, {
+                id: "discovery",
+                rgMbid: "missing-rg",
+                albumTitle: "Legacy Title",
+                artistName: "Legacy Artist",
+            }),
+        ).rejects.toBeInstanceOf(DiscoveryLinkDriftError);
+        expect(transaction.discoveryAlbum.updateMany).not.toHaveBeenCalled();
+    });
+
     it("aborts the attempt with a retryable error when the catalog link changes before the discovery row lock", async () => {
         const transaction = createTransaction([
             {
@@ -155,7 +225,11 @@ describe("resolveDiscoveryCatalogAlbum", () => {
                 status: "ACTIVE",
             },
         ]);
-        const fallbackAlbum = { id: "fallback", artist: {} };
+        const fallbackAlbum = {
+            id: "fallback",
+            rgMbid: "legacy-rg",
+            artist: {},
+        };
         transaction.discoveryAlbum.findUnique.mockResolvedValue({
             catalogAlbumId: null,
         });

@@ -5,10 +5,7 @@ import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
 import { deleteDiscoveryAlbumCatalogEntry } from "../src/services/discoveryAlbumCatalogCleanup";
-import {
-    resolveDiscoveryCatalogAlbum,
-    retryDiscoveryLinkDrift,
-} from "../src/services/discoveryCatalogAlbum";
+import { resolveDiscoveryCatalogAlbum } from "../src/services/discoveryCatalogAlbum";
 import {
     albumTracksOrphanRetentionGuardWhere,
     discoveryAlbumTracksOrphanRetentionGuardWhere,
@@ -215,6 +212,41 @@ async function waitForBlockedFlowCount(
         await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     throw new Error(`Timed out waiting for ${expectedCount} blocked flows`);
+}
+
+async function blockedFlowDiscoveryRowLocks(
+    observer: Client,
+    blockerPid: number,
+): Promise<Array<{ pid: number; mode: string }>> {
+    const result = await observer.query<{ pid: number; mode: string }>(
+        `
+            WITH RECURSIVE blocked(pid) AS (
+                SELECT activity.pid
+                FROM pg_catalog.pg_stat_activity AS activity
+                WHERE $1 = ANY(pg_catalog.pg_blocking_pids(activity.pid))
+                UNION
+                SELECT activity.pid
+                FROM pg_catalog.pg_stat_activity AS activity
+                JOIN blocked AS blocker
+                  ON blocker.pid = ANY(
+                      pg_catalog.pg_blocking_pids(activity.pid)
+                  )
+            )
+            SELECT row_lock.pid, row_lock.mode
+            FROM blocked
+            JOIN pg_catalog.pg_locks AS row_lock
+              ON row_lock.pid = blocked.pid
+            WHERE row_lock.granted
+              AND row_lock.relation = '"DiscoveryAlbum"'::regclass
+              AND (
+                  row_lock.locktype = 'tuple'
+                  OR row_lock.mode IN ('RowShareLock', 'RowExclusiveLock')
+              )
+            ORDER BY row_lock.pid, row_lock.mode
+        `,
+        [blockerPid],
+    );
+    return result.rows;
 }
 
 async function beginCleanupClaim(
@@ -773,6 +805,9 @@ describeWithPostgres(
                     await waitForBlockedFlowCount(database, blockerPid, 1);
                     cleanupPromise = deleteDiscoveryAlbumCatalogEntry(cleanup);
                     await waitForBlockedFlowCount(database, blockerPid, 2);
+                    await expect(
+                        blockedFlowDiscoveryRowLocks(database, blockerPid),
+                    ).resolves.toEqual([]);
                     await lockHolder.query("COMMIT");
                     transactionOpen = false;
 
@@ -1046,7 +1081,7 @@ describeWithPostgres(
                 });
                 await linkWriter.connect();
                 let transactionOpen = false;
-                let resolution: Promise<unknown> | undefined;
+                let like: ReturnType<typeof startObservedLike> | undefined;
                 try {
                     transactionOpen = true;
                     await linkWriter.query("BEGIN");
@@ -1057,29 +1092,49 @@ describeWithPostgres(
                         'UPDATE "DiscoveryAlbum" SET "catalogAlbumId" = $1 WHERE id = $2',
                         [`${prefix}-album`, discovery.id],
                     );
-                    resolution = retryDiscoveryLinkDrift(() =>
-                        prisma.$transaction((transaction) =>
-                            resolveDiscoveryCatalogAlbum(
-                                transaction,
-                                discovery,
-                            ),
-                        ),
-                    );
+                    jest.spyOn(
+                        lidarrService,
+                        "removeDiscoveryTagByMbid",
+                    ).mockResolvedValueOnce(true);
+                    like = startObservedLike(discovery.rgMbid);
                     await waitForLockBlockedBy(database, backend.rows[0]!.pid);
                     await linkWriter.query("COMMIT");
                     transactionOpen = false;
-                    await expect(resolution).resolves.toEqual(
-                        expect.objectContaining({
-                            catalogAlbum: expect.objectContaining({
-                                id: `${prefix}-album`,
-                            }),
-                        }),
-                    );
+                    await expect(like.promise).resolves.toBeUndefined();
                 } finally {
                     if (transactionOpen) await linkWriter.query("ROLLBACK");
                     await linkWriter.end();
-                    if (resolution) await Promise.allSettled([resolution]);
+                    if (like) await Promise.allSettled([like.promise]);
                 }
+
+                expect(like?.response.statusCode).toBe(200);
+                expect(like?.response.body).toEqual({ success: true });
+                await expect(
+                    prisma.discoveryAlbum.findUnique({
+                        where: { id: discovery.id },
+                        select: { catalogAlbumId: true, status: true },
+                    }),
+                ).resolves.toEqual({
+                    catalogAlbumId: `${prefix}-album`,
+                    status: "LIKED",
+                });
+                await expect(
+                    prisma.album.findUnique({
+                        where: { id: `${prefix}-album` },
+                        select: { location: true },
+                    }),
+                ).resolves.toEqual({ location: "LIBRARY" });
+                await expect(
+                    prisma.ownedAlbum.findUnique({
+                        where: {
+                            artistId_rgMbid: {
+                                artistId: `${prefix}-artist`,
+                                rgMbid: `${prefix}-album-mbid`,
+                            },
+                        },
+                        select: { source: true },
+                    }),
+                ).resolves.toEqual({ source: "discovery_liked" });
             },
             CLAIM_RACE_TEST_TIMEOUT_MS,
         );
