@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException
@@ -91,6 +91,90 @@ class CapturingExecutor:
         self._executor.shutdown(wait=True, cancel_futures=True)
 
 
+class GatedSpoolDownload:
+    """Controllable async spool download used to exercise task callbacks."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.failing_keys: set[str] = set()
+
+    async def __call__(self, video_id: str, quality: str) -> tuple[str, str]:
+        self.started.set()
+        await self.release.wait()
+        if f"{video_id}:{quality}" in self.failing_keys:
+            raise HTTPException(status_code=502, detail="download failed")
+        return (f"{video_id}-{quality}.m4a", "audio/mp4")
+
+    def reset(self, *failing_keys: str) -> None:
+        """Close the prior phase and prepare a new gated phase."""
+        self.started.clear()
+        self.release.clear()
+        self.failing_keys = set(failing_keys)
+
+
+async def _assert_spool_task_completion_lifecycle(
+    stream_module: Any, download: GatedSpoolDownload
+) -> None:
+    """Prove success and failure callbacks both decrement pending jobs."""
+    success = stream_module._create_spool_task("success:HIGH", "success", "HIGH")
+    await asyncio.wait_for(download.started.wait(), timeout=1)
+    assert stream_module._spool_pending_jobs == 1
+    download.release.set()
+    assert await success == ("success-HIGH.m4a", "audio/mp4")
+    assert stream_module._spool_pending_jobs == 0
+
+    download.reset("failure:HIGH")
+    failure = stream_module._create_spool_task("failure:HIGH", "failure", "HIGH")
+    await asyncio.wait_for(download.started.wait(), timeout=1)
+    assert stream_module._spool_pending_jobs == 1
+    download.release.set()
+    with pytest.raises(HTTPException, match="download failed"):
+        await failure
+    assert stream_module._spool_pending_jobs == 0
+    assert stream_module._spool_tasks == {}
+
+
+async def _start_same_key_waiter(
+    stream_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capacity_tasks: list[asyncio.Task[tuple[str, str]]],
+) -> asyncio.Task[tuple[str, str]]:
+    """Start and observe a same-key waiter while the queue is full."""
+    real_await_spool_task = stream_module._await_spool_task
+    existing_joined = asyncio.Event()
+
+    async def record_existing_join(task: asyncio.Task[tuple[str, str]]) -> tuple[str, str]:
+        if task is capacity_tasks[0]:
+            existing_joined.set()
+        return cast(tuple[str, str], await real_await_spool_task(task))
+
+    monkeypatch.setattr(stream_module, "_await_spool_task", record_existing_join)
+    waiter = asyncio.create_task(stream_module._get_ytmusic_spooled_stream("video-0", "HIGH"))
+    await asyncio.wait_for(existing_joined.wait(), timeout=1)
+    assert not waiter.done()
+    return waiter
+
+
+def _install_preflight_miss(
+    stream_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[Path, dict[str, int]]:
+    """Install a lookup whose first miss races with a completed file landing."""
+    cached_path = tmp_path / f"{VIDEO_ID}-LOW.m4a"
+    lookup_counts: dict[str, int] = {}
+
+    def find_after_preflight_miss(video_id: str, quality: str) -> Path | None:
+        key = f"{video_id}:{quality}"
+        lookup_counts[key] = lookup_counts.get(key, 0) + 1
+        if key == f"{VIDEO_ID}:LOW" and lookup_counts[key] == 1:
+            cached_path.write_bytes(b"cached")
+            return None
+        return cached_path if key == f"{VIDEO_ID}:LOW" else None
+
+    monkeypatch.setattr(stream_module, "_find_spooled_file", find_after_preflight_miss)
+    return cached_path, lookup_counts
+
+
 @pytest.fixture()
 def stream_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
     """Provide isolated spool state for one test."""
@@ -156,6 +240,38 @@ def test_spool_candidates_return_newest_valid_file(stream_module: Any, tmp_path:
 
     assert stream_module._spool_candidates(VIDEO_ID, QUALITY) == [newest, oldest]
     assert stream_module._find_spooled_file(VIDEO_ID, QUALITY) == newest
+
+
+def test_spool_lookup_holds_prune_lock_while_scanning_and_touching(
+    stream_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / f"{VIDEO_ID}-{QUALITY}.m4a"
+    path.write_bytes(b"audio")
+    lock_state = {"held": False}
+
+    class TrackingLock:
+        def __enter__(self) -> None:
+            assert not lock_state["held"]
+            lock_state["held"] = True
+
+        def __exit__(self, *args: object) -> None:
+            lock_state["held"] = False
+
+    def guarded_candidates(video_id: str, quality: str) -> list[Path]:
+        assert lock_state["held"]
+        return [path]
+
+    def guarded_touch(candidate: Path, times: object) -> None:
+        assert candidate == path
+        assert times is None
+        assert lock_state["held"]
+
+    monkeypatch.setattr(stream_module, "_spool_prune_lock", TrackingLock())
+    monkeypatch.setattr(stream_module, "_spool_candidates", guarded_candidates)
+    monkeypatch.setattr(stream_module.os, "utime", guarded_touch)
+
+    assert stream_module._find_spooled_file(VIDEO_ID, QUALITY) == path
+    assert not lock_state["held"]
 
 
 def test_prune_spool_evicts_oldest_completed_files(
@@ -293,22 +409,38 @@ def test_spool_progress_hook_allows_progress_under_limits(
     hook({"downloaded_bytes": 10})
 
 
-def test_spool_options_include_live_filter_and_progress_hook(stream_module: Any) -> None:
-    def match_filter(info: dict[str, Any]) -> None:
-        return None
+def test_sync_spool_options_reject_live_streams(
+    stream_module: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yt_dlp
 
-    def progress_hook(status: dict[str, Any]) -> None:
-        return None
+    captured_options: dict[str, Any] = {}
 
-    options = stream_module._build_ytmusic_spool_options(
-        VIDEO_ID,
-        QUALITY,
-        match_filter=match_filter,
-        progress_hook=progress_hook,
-    )
+    class CapturingYoutubeDL:
+        def __init__(self, options: dict[str, Any]) -> None:
+            captured_options.update(options)
 
-    assert options["match_filter"] is match_filter
-    assert options["progress_hooks"] == [progress_hook]
+        def __enter__(self) -> CapturingYoutubeDL:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def extract_info(self, url: str, *, download: bool) -> dict[str, str]:
+            raise RuntimeError("stop after capturing options")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", CapturingYoutubeDL)
+
+    with pytest.raises(HTTPException):
+        stream_module._download_ytmusic_spool_sync(VIDEO_ID, QUALITY)
+
+    match_filter = captured_options["match_filter"]
+    assert callable(match_filter)
+    live_rejection = match_filter({"is_live": True, "title": "Live stream"})
+    assert isinstance(live_rejection, str)
+    assert live_rejection
+    assert match_filter({"is_live": False, "title": "Recorded track"}) is None
+    assert len(captured_options["progress_hooks"]) == 1
 
 
 def test_sync_spool_deletes_completed_file_over_total_budget(
@@ -401,49 +533,42 @@ async def test_concurrent_spool_requests_share_one_download(
 async def test_spool_queue_rejects_new_key_but_joins_existing_task(
     stream_module: Any,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    expected = ("existing.m4a", "audio/mp4")
+    download = GatedSpoolDownload()
+    monkeypatch.setattr(
+        stream_module,
+        "_download_ytmusic_spool_bounded",
+        download,
+    )
     monkeypatch.setattr(stream_module.asyncio, "to_thread", _run_inline)
-    tasks: list[asyncio.Future[tuple[str, str]]] = [
-        asyncio.get_running_loop().create_future()
-        for _ in range(stream_module._SPOOL_MAX_PENDING_JOBS)
+    await _assert_spool_task_completion_lifecycle(stream_module, download)
+    download.reset()
+    capacity_tasks = [
+        stream_module._create_spool_task(f"video-{index}:HIGH", f"video-{index}", "HIGH")
+        for index in range(stream_module._SPOOL_MAX_PENDING_JOBS)
     ]
-    keys = [f"video-{index}:HIGH" for index in range(len(tasks))]
-    stream_module._spool_tasks.update(zip(keys, tasks, strict=True))
-    stream_module._spool_pending_jobs = len(tasks)
+    assert stream_module._spool_pending_jobs == stream_module._SPOOL_MAX_PENDING_JOBS
+    existing_waiter = await _start_same_key_waiter(stream_module, monkeypatch, capacity_tasks)
+    assert stream_module._spool_pending_jobs == stream_module._SPOOL_MAX_PENDING_JOBS
+    cached_path, lookup_counts = _install_preflight_miss(stream_module, monkeypatch, tmp_path)
+    assert await stream_module._get_ytmusic_spooled_stream(VIDEO_ID, "LOW") == (
+        str(cached_path),
+        "audio/mp4",
+    )
+    assert lookup_counts[f"{VIDEO_ID}:LOW"] == 2
 
-    try:
-        queue_request = asyncio.create_task(
-            stream_module._get_ytmusic_spooled_stream(VIDEO_ID, "LOW")
-        )
-        for _ in range(200):
-            if queue_request.done():
-                break
-            await asyncio.sleep(0.01)
-        assert queue_request.done()
-        with pytest.raises(HTTPException) as raised:
-            await queue_request
-        assert raised.value.status_code == 503
-        assert raised.value.detail == "YouTube Music spool queue is full"
+    with pytest.raises(HTTPException) as raised:
+        await stream_module._get_ytmusic_spooled_stream(VIDEO_ID, "MEDIUM")
+    assert raised.value.status_code == 503
+    assert raised.value.detail == "YouTube Music spool queue is full"
+    assert lookup_counts[f"{VIDEO_ID}:MEDIUM"] == 2
 
-        existing_waiter = asyncio.create_task(
-            stream_module._get_ytmusic_spooled_stream("video-0", "HIGH")
-        )
-        await asyncio.sleep(0)
-        assert not existing_waiter.done()
-        for task in tasks:
-            task.set_result(expected)
-        assert await asyncio.wait_for(existing_waiter, timeout=1) == expected
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.wait_for(
-            asyncio.gather(*tasks, return_exceptions=True),
-            timeout=1,
-        )
-        stream_module._spool_tasks.clear()
-        stream_module._spool_pending_jobs = 0
+    download.release.set()
+    completed = await asyncio.gather(*capacity_tasks)
+    assert await existing_waiter == completed[0]
+    assert stream_module._spool_pending_jobs == 0
+    assert stream_module._spool_tasks == {}
 
 
 @pytest.mark.anyio
@@ -461,6 +586,7 @@ async def test_failed_spool_request_is_not_reused(
         raise HTTPException(status_code=502, detail="download failed")
 
     monkeypatch.setattr(stream_module, "_download_ytmusic_spool_sync", failed_download)
+    monkeypatch.setattr(stream_module, "_find_spooled_file", lambda *_args: None)
     monkeypatch.setattr(stream_module.asyncio, "to_thread", _run_inline)
 
     first = asyncio.create_task(stream_module._get_ytmusic_spooled_stream(VIDEO_ID, QUALITY))
@@ -496,6 +622,7 @@ async def test_waiter_timeout_keeps_single_flight_until_download_finishes(
         return expected
 
     monkeypatch.setattr(stream_module, "_download_ytmusic_spool_sync", slow_download)
+    monkeypatch.setattr(stream_module, "_find_spooled_file", lambda *_args: None)
     monkeypatch.setattr(stream_module, "YTMUSIC_SPOOL_TIMEOUT", 0.05)
     monkeypatch.setattr(stream_module.asyncio, "to_thread", _run_inline)
 
@@ -536,6 +663,7 @@ async def test_proxy_endpoint_serves_full_and_range_responses(
         return str(path), "audio/mp4"
 
     monkeypatch.setattr(stream_module, "_download_ytmusic_spool_sync", write_spool)
+    monkeypatch.setattr(stream_module, "_find_spooled_file", lambda *_args: None)
     monkeypatch.setattr(stream_module.asyncio, "to_thread", _run_inline)
 
     full_request = asyncio.create_task(client.get(f"/proxy/{VIDEO_ID}?user_id=__public__"))

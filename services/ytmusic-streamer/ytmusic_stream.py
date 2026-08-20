@@ -352,15 +352,30 @@ def _spool_candidates(video_id: str, quality: str) -> list[Path]:
     return [path for _, path in sorted(candidates, reverse=True)]
 
 
+def _require_spool_worker_thread() -> None:
+    """Reject spool filesystem lookup from an event-loop thread."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError("Spool filesystem lookup must run off the event loop")
+
+
 def _find_spooled_file(video_id: str, quality: str) -> Path | None:
-    """Return and touch a valid completed spool entry."""
-    for path in _spool_candidates(video_id, quality):
-        try:
-            if path.stat().st_size > 0:
-                os.utime(path, None)
-                return path
-        except FileNotFoundError:
-            continue
+    """Return and touch a valid spool entry from a worker thread.
+
+    The prune lock makes the candidate snapshot and touch atomic with eviction.
+    Neither this lookup nor ``_prune_spool`` calls the other while holding it.
+    """
+    _require_spool_worker_thread()
+    with _spool_prune_lock:
+        for path in _spool_candidates(video_id, quality):
+            try:
+                if path.stat().st_size > 0:
+                    os.utime(path, None)
+                    return path
+            except FileNotFoundError:
+                continue
     return None
 
 
@@ -424,7 +439,12 @@ def _prune_spool(exclude: Path | None = None) -> None:
 
 
 def _build_spool_progress_hook(started_at: float) -> Callable[[JsonObject], None]:
-    """Build a yt-dlp hook that enforces per-job time and byte limits."""
+    """Build a yt-dlp hook that enforces download-progress limits.
+
+    The elapsed deadline covers the download phase and is checked only at
+    progress events. ``socket_timeout`` bounds individual stalled reads during
+    extraction and download.
+    """
 
     def enforce_spool_limits(status: JsonObject) -> None:
         downloaded_bytes = status.get("downloaded_bytes", 0)
@@ -582,6 +602,33 @@ def _create_spool_task(key: str, video_id: str, quality: str) -> asyncio.Task[tu
     return task
 
 
+def _try_get_or_create_spool_task(
+    key: str, video_id: str, quality: str
+) -> asyncio.Task[tuple[str, str]] | None:
+    """Join or create a task, or return None when the queue is full.
+
+    The event loop owns this helper. It contains no await between the final map
+    lookup, capacity check, and insertion performed by ``_create_spool_task``.
+    """
+    task = _spool_tasks.get(key)
+    if task is not None:
+        return task
+    if _spool_pending_jobs >= _SPOOL_MAX_PENDING_JOBS:
+        return None
+    return _create_spool_task(key, video_id, quality)
+
+
+def _spooled_file_result(path: Path) -> tuple[str, str]:
+    """Return the transport result for one completed spool file."""
+    return str(path), _spool_content_type(path)
+
+
+async def _find_spooled_result(video_id: str, quality: str) -> tuple[str, str] | None:
+    """Find a spool file off the event loop and map it to a stream result."""
+    existing = await asyncio.to_thread(_find_spooled_file, video_id, quality)
+    return _spooled_file_result(existing) if existing is not None else None
+
+
 async def _await_spool_task(task: asyncio.Task[tuple[str, str]]) -> tuple[str, str]:
     """Await one shared spool task without allowing a waiter to cancel it."""
     try:
@@ -597,16 +644,26 @@ async def _get_ytmusic_spooled_stream(video_id: str, quality: str) -> tuple[str,
     if task is not None:
         return await _await_spool_task(task)
 
-    existing = await asyncio.to_thread(_find_spooled_file, video_id, quality)
+    existing = await _find_spooled_result(video_id, quality)
     if existing is not None:
-        return str(existing), _spool_content_type(existing)
+        return existing
 
     # Re-check after the filesystem await. Map lookup, limit check, and insert
     # remain one event-loop-only critical section with no intervening await.
+    task = _try_get_or_create_spool_task(key, video_id, quality)
+    if task is not None:
+        return await _await_spool_task(task)
+
+    # A prior task may have completed and removed itself after our preflight
+    # miss. Retry disk once before reporting saturation.
+    existing = await _find_spooled_result(video_id, quality)
+    if existing is not None:
+        return existing
+
     task = _spool_tasks.get(key)
-    if task is None:
-        task = _create_spool_task(key, video_id, quality)
-    return await _await_spool_task(task)
+    if task is not None:
+        return await _await_spool_task(task)
+    raise HTTPException(status_code=503, detail="YouTube Music spool queue is full")
 
 
 def _clean_stream_cache_locked() -> int:
