@@ -44,6 +44,10 @@ export interface FollowerSeekInput {
     clockOffsetMs: number;
 }
 
+interface ReconnectSeekInput extends FollowerSeekInput {
+    isHost: boolean;
+}
+
 /**
  * Resolve where a follower's player should sit on the group timeline.
  * Returns the target seconds plus whether local playback has drifted far
@@ -71,6 +75,16 @@ export function resolveFollowerSeekTarget(input: FollowerSeekInput): {
         Math.abs(input.currentTimeSec - targetSec) >
         FOLLOWER_DRIFT_SEEK_THRESHOLD_SEC;
     return { targetSec, drifted };
+}
+
+/** Resolve the post-reload position without replacing a host's local timeline. */
+export function resolveReconnectSeekTarget(input: ReconnectSeekInput): number {
+    if (input.isHost) {
+        return Number.isFinite(input.currentTimeSec)
+            ? Math.max(0, input.currentTimeSec)
+            : 0;
+    }
+    return resolveFollowerSeekTarget(input).targetSec;
 }
 
 /**
