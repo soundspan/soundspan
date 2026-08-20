@@ -6,8 +6,12 @@
 # regeneration on every YouTube break. They are therefore installed as loose
 # floors, in a plain `pip install` AFTER the hash-locked requirements.lock.
 #
-# Their transitive dependency (requests) is already pinned+hashed in
-# requirements.lock, so only these two dists float at build time.
+# The `default` extra's stable dependencies (brotli, certifi, mutagen,
+# pycryptodomex, requests, urllib3, websockets) are all pinned+hashed in
+# requirements.lock, so the only dists that float at build time are yt-dlp,
+# ytmusicapi, and yt-dlp-ejs. yt-dlp-ejs must float because each yt-dlp
+# release pins it exactly (==) and a same-day yt-dlp floor bump has to be able
+# to pull the matching yt-dlp-ejs without a lock regeneration.
 #
 # Floors here must match services/ytmusic-streamer/requirements.txt.
 yt-dlp[default]>=2026.8.19

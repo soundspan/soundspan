@@ -6,9 +6,14 @@
 # two are installed loose, AFTER this lock, so a YouTube breakage can be fixed
 # with a same-day floor bump without regenerating the lock.
 #
-# `requests` is ytmusicapi's only runtime dependency; it is pinned+hashed here
-# so that when the exempt install runs, ONLY yt-dlp + ytmusicapi themselves are
-# unpinned — their transitive tree is already fixed by this lock.
+# `requests` is ytmusicapi's only runtime dependency, and brotli,
+# pycryptodomex, and websockets are the stable dependencies of yt-dlp's
+# `default` extra (certifi/mutagen/requests/urllib3 are already here via other
+# routes). They are pinned+hashed so that when the exempt install runs, ONLY
+# yt-dlp, ytmusicapi, and yt-dlp-ejs themselves are unpinned — the rest of
+# their transitive tree is already fixed by this lock. yt-dlp-ejs cannot be
+# locked because each yt-dlp release pins it exactly (==), so it must float
+# with yt-dlp.
 #
 # Regenerate the lock: see the header of requirements.lock.
 fastapi>=0.141.1
@@ -17,3 +22,7 @@ mutagen>=1.48.1
 pydantic>=2.13.4
 httpx>=0.28.1
 requests>=2.34.2
+# yt-dlp[default] stable extras (see requirements-exempt.txt)
+brotli>=1.2.0
+pycryptodomex>=3.23.0
+websockets>=13.0

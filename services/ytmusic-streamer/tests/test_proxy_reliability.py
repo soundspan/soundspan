@@ -126,7 +126,7 @@ async def test_range_send_failure_closes_client_no_leak(
     transport.raise_app_exceptions = False
 
     response = await client.get(
-        f"/proxy/{VIDEO_ID}?user_id=__public__",
+        f"/yt/proxy/{VIDEO_ID}",
         headers={"Range": "bytes=0-"},
     )
 

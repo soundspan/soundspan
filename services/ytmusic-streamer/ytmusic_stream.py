@@ -3,11 +3,13 @@
 import asyncio
 import os
 import re
+import tempfile
 import threading
 import time
-from pathlib import Path
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from common.sidecar_runtime_utils import (
@@ -60,22 +62,22 @@ YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
 # YouTube Music HLS spool. yt-dlp owns YouTube delivery; clients range-read
 # the completed local file instead of continuation-reading signed URLs.
 YTMUSIC_SPOOL_DIR = Path(
-    os.getenv("YTMUSIC_SPOOL_DIR", "/tmp/soundspan-ytmusic-spool")
+    os.getenv("YTMUSIC_SPOOL_DIR") or Path(tempfile.gettempdir()) / "soundspan-ytmusic-spool"
 )
 YTMUSIC_SPOOL_MAX_BYTES = max(
     16 * 1024 * 1024,
     env_int("YTMUSIC_SPOOL_MAX_BYTES", str(256 * 1024 * 1024)),
 )
-YTMUSIC_SPOOL_TIMEOUT = env_float("YTMUSIC_SPOOL_TIMEOUT", "120")
-YTMUSIC_SPOOL_CONCURRENCY = max(
-    1, min(4, env_int("YTMUSIC_SPOOL_CONCURRENCY", "2"))
-)
+# Stay below the backend's 120-second timeout so callers receive this sidecar's 504.
+YTMUSIC_SPOOL_TIMEOUT = env_float("YTMUSIC_SPOOL_TIMEOUT", "110")
+YTMUSIC_SPOOL_CONCURRENCY = max(1, min(4, env_int("YTMUSIC_SPOOL_CONCURRENCY", "2")))
+_SPOOL_PARTIAL_STALE_SECONDS = 900
 _yt_dlp_spool_executor = ThreadPoolExecutor(
     max_workers=YTMUSIC_SPOOL_CONCURRENCY,
     thread_name_prefix="yt-dlp-spool",
 )
+# The event loop owns all access, with no await between lookup and insertion.
 _spool_tasks: dict[str, asyncio.Task[tuple[str, str]]] = {}
-_spool_tasks_lock = asyncio.Lock()
 
 
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -293,24 +295,24 @@ async def _browse_public_bounded(func: Callable[..., T], *args: Any) -> T:
         raise HTTPException(status_code=504, detail="YouTube Music request timed out") from error
 
 
-
+# HLS preferred because signed progressive URLs reject continuation ranges (SABR); ba/b is last.
 _YTMUSIC_HLS_FORMATS = {
     "LOW": (
         "ba[protocol=m3u8_native][abr<=64]/"
         "ba[protocol=m3u8][abr<=64]/"
-        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]/ba/b"
     ),
     "MEDIUM": (
         "ba[protocol=m3u8_native][abr<=128]/"
         "ba[protocol=m3u8][abr<=128]/"
-        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]/ba/b"
     ),
     "HIGH": (
         "ba[protocol=m3u8_native][abr<=256]/"
         "ba[protocol=m3u8][abr<=256]/"
-        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]/ba/b"
     ),
-    "LOSSLESS": "ba[protocol=m3u8_native]/ba[protocol=m3u8]",
+    "LOSSLESS": "ba[protocol=m3u8_native]/ba[protocol=m3u8]/ba/b",
 }
 
 
@@ -319,15 +321,22 @@ def _spool_candidates(video_id: str, quality: str) -> list[Path]:
     if not YTMUSIC_SPOOL_DIR.exists():
         return []
     prefix = f"{video_id}-{quality}."
-    paths = [
-        path
-        for path in YTMUSIC_SPOOL_DIR.iterdir()
-        if path.is_file()
-        and path.name.startswith(prefix)
-        and ".part" not in path.name
-        and not path.name.endswith(".ytdl")
-    ]
-    return sorted(paths, key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates: list[tuple[float, Path]] = []
+    for path in YTMUSIC_SPOOL_DIR.iterdir():
+        if (
+            not path.is_file()
+            or not path.name.startswith(prefix)
+            or ".part" in path.name
+            or path.name.endswith(".ytdl")
+        ):
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        if stat.st_size > 0:
+            candidates.append((stat.st_mtime, path))
+    return [path for _, path in sorted(candidates, reverse=True)]
 
 
 def _find_spooled_file(video_id: str, quality: str) -> Path | None:
@@ -351,27 +360,37 @@ def _spool_content_type(path: Path) -> str:
     return "application/octet-stream"
 
 
-def _prune_spool(exclude: Path | None = None) -> None:
-    """Evict least-recently-used completed files until under the disk budget."""
-    if not YTMUSIC_SPOOL_DIR.exists():
-        return
-
+def _collect_spool_entries() -> tuple[int, list[tuple[float, int, Path]]]:
+    """Sweep stale partials and collect completed files for budget accounting."""
     entries: list[tuple[float, int, Path]] = []
     total = 0
+    now = time.time()
     for path in YTMUSIC_SPOOL_DIR.iterdir():
-        if (
-            not path.is_file()
-            or ".part" in path.name
-            or path.name.endswith(".ytdl")
-        ):
+        if not path.is_file():
             continue
         try:
             stat = path.stat()
         except FileNotFoundError:
             continue
+        if ".part" in path.name or path.name.endswith(".ytdl"):
+            if now - stat.st_mtime > _SPOOL_PARTIAL_STALE_SECONDS:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    continue
+                log.debug("Removed stale YouTube Music spool partial %s", path.name)
+            continue
         total += stat.st_size
         entries.append((stat.st_mtime, stat.st_size, path))
+    return total, entries
 
+
+def _prune_spool(exclude: Path | None = None) -> None:
+    """Sweep stale partials and evict completed files to the disk budget."""
+    if not YTMUSIC_SPOOL_DIR.exists():
+        return
+
+    total, entries = _collect_spool_entries()
     for _, size, path in sorted(entries):
         if total <= YTMUSIC_SPOOL_MAX_BYTES:
             break
@@ -382,25 +401,14 @@ def _prune_spool(exclude: Path | None = None) -> None:
             total -= size
             log.debug("Evicted YouTube Music spool file %s", path.name)
         except FileNotFoundError:
-            pass
+            continue
 
 
-def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]:
-    """Download a complete YouTube Music HLS stream into the bounded spool."""
-    import yt_dlp
-
-    YTMUSIC_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
-
-    existing = _find_spooled_file(video_id, quality)
-    if existing is not None:
-        return str(existing), _spool_content_type(existing)
-
-    fmt = _YTMUSIC_HLS_FORMATS.get(
-        quality, _YTMUSIC_HLS_FORMATS["HIGH"]
-    )
+def _build_ytmusic_spool_options(video_id: str, quality: str) -> JsonObject:
+    """Build yt-dlp options for one validated spool request."""
+    fmt = _YTMUSIC_HLS_FORMATS.get(quality, _YTMUSIC_HLS_FORMATS["HIGH"])
     outtmpl = str(YTMUSIC_SPOOL_DIR / f"{video_id}-{quality}.%(ext)s")
-
-    ydl_opts = {
+    return {
         "format": fmt,
         "outtmpl": outtmpl,
         "quiet": True,
@@ -419,6 +427,32 @@ def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]
         },
         "js_runtimes": {"deno": {}},
     }
+
+
+def _remove_failed_spool_partials(video_id: str, quality: str) -> None:
+    """Remove yt-dlp partials for one failed single-flight download."""
+    if not YTMUSIC_SPOOL_DIR.exists():
+        return
+    prefix = f"{video_id}-{quality}."
+    for path in YTMUSIC_SPOOL_DIR.iterdir():
+        is_partial = ".part" in path.name or path.name.endswith(".ytdl")
+        if path.name.startswith(prefix) and is_partial:
+            with suppress(FileNotFoundError):
+                path.unlink()
+
+
+def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]:
+    """Download a complete YouTube Music HLS stream into the bounded spool."""
+    import yt_dlp
+
+    YTMUSIC_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
+    _prune_spool()
+
+    existing = _find_spooled_file(video_id, quality)
+    if existing is not None:
+        return str(existing), _spool_content_type(existing)
+
+    ydl_opts = _build_ytmusic_spool_options(video_id, quality)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -443,16 +477,7 @@ def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]
         return str(completed), _spool_content_type(completed)
     except Exception as error:
         # yt-dlp normally cleans these itself; remove leftovers after failures.
-        prefix = f"{video_id}-{quality}."
-        if YTMUSIC_SPOOL_DIR.exists():
-            for path in YTMUSIC_SPOOL_DIR.iterdir():
-                if path.name.startswith(prefix) and (
-                    ".part" in path.name or path.name.endswith(".ytdl")
-                ):
-                    try:
-                        path.unlink()
-                    except FileNotFoundError:
-                        pass
+        _remove_failed_spool_partials(video_id, quality)
         raise _stream_extraction_http_error(
             video_id,
             f"yt-dlp HLS spool for {video_id}",
@@ -460,50 +485,45 @@ def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]
         ) from error
 
 
-async def _download_ytmusic_spool_bounded(
-    video_id: str, quality: str
-) -> tuple[str, str]:
-    """Run one spool download in its bounded executor."""
-    try:
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(
-            _yt_dlp_spool_executor,
-            _download_ytmusic_spool_sync,
-            video_id,
-            quality,
-        )
-        return await asyncio.wait_for(future, timeout=YTMUSIC_SPOOL_TIMEOUT)
-    except TimeoutError as error:
-        raise HTTPException(
-            status_code=504, detail="YouTube Music spool timed out"
-        ) from error
+async def _download_ytmusic_spool_bounded(video_id: str, quality: str) -> tuple[str, str]:
+    """Run one spool download for the executor thread's full lifetime."""
+    loop = asyncio.get_running_loop()
+    # yt-dlp's socket timeout bounds the executor thread between network reads.
+    return await loop.run_in_executor(
+        _yt_dlp_spool_executor,
+        _download_ytmusic_spool_sync,
+        video_id,
+        quality,
+    )
 
 
-async def _get_ytmusic_spooled_stream(
-    video_id: str, quality: str
-) -> tuple[str, str]:
+def _remove_completed_spool_task(key: str, task: asyncio.Task[tuple[str, str]]) -> None:
+    """Remove one completed single-flight task without disturbing a replacement."""
+    if _spool_tasks.get(key) is task:
+        _spool_tasks.pop(key, None)
+    if not task.cancelled():
+        # Observe failures when every waiter disconnected before completion.
+        _ = task.exception()
+
+
+async def _get_ytmusic_spooled_stream(video_id: str, quality: str) -> tuple[str, str]:
     """Return a cached spool entry, coalescing concurrent requests per track."""
     existing = _find_spooled_file(video_id, quality)
     if existing is not None:
         return str(existing), _spool_content_type(existing)
 
     key = f"{video_id}:{quality}"
-    async with _spool_tasks_lock:
-        task = _spool_tasks.get(key)
-        if task is None:
-            task = asyncio.create_task(
-                _download_ytmusic_spool_bounded(video_id, quality)
-            )
-            _spool_tasks[key] = task
+    task = _spool_tasks.get(key)
+    if task is None:
+        task = asyncio.create_task(_download_ytmusic_spool_bounded(video_id, quality))
+        _spool_tasks[key] = task
+        task.add_done_callback(lambda completed: _remove_completed_spool_task(key, completed))
 
     try:
-        # One disconnected client must not cancel the shared download.
-        return await asyncio.shield(task)
-    finally:
-        if task.done():
-            async with _spool_tasks_lock:
-                if _spool_tasks.get(key) is task:
-                    _spool_tasks.pop(key, None)
+        # A waiter has a deadline, but disconnects and timeouts cannot cancel the shared download.
+        return await asyncio.wait_for(asyncio.shield(task), timeout=YTMUSIC_SPOOL_TIMEOUT)
+    except TimeoutError as error:
+        raise HTTPException(status_code=504, detail="YouTube Music spool timed out") from error
 
 
 def _clean_stream_cache_locked() -> int:
@@ -762,6 +782,8 @@ async def yt_proxy_stream(
     No OAuth required — uses anonymous yt-dlp extraction.
     Same Range-request handling as the YouTube Music proxy.
     """
+    # This path still range-proxies progressive URLs. SABR is breaking that flow,
+    # so regular YouTube should eventually move to the same spool mechanism.
     video_id = _validate_video_id(video_id)
     quality = _validate_stream_quality(quality)
     stream_info = await _extract_stream_info_bounded(_get_yt_stream_url_sync, video_id, quality)

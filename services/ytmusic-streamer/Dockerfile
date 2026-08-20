@@ -30,9 +30,10 @@ WORKDIR /app
 COPY services/ytmusic-streamer/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 # Step 2: yt-dlp + ytmusicapi are DELIBERATELY EXEMPT from hash-locking (roadmap
-# F38/F50) so a YouTube breakage can be fixed with a same-day floor bump. Their
-# only transitive (requests) is already pinned by the lock above, so just these
-# two dists float. Installed loose, without --require-hashes.
+# F38/F50) so a YouTube breakage can be fixed with a same-day floor bump. The
+# stable dependencies of yt-dlp's `default` extra are pinned by the lock above,
+# so only yt-dlp, ytmusicapi, and yt-dlp-ejs (exact-pinned per yt-dlp release)
+# float. Installed loose, without --require-hashes.
 COPY services/ytmusic-streamer/requirements-exempt.txt ./requirements-exempt.txt
 RUN pip install --no-cache-dir -r requirements-exempt.txt
 
