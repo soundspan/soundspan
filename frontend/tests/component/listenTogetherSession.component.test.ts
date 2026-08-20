@@ -822,7 +822,10 @@ function installProviderBoundaryStubs(): void {
     if (providerBoundaryStubsInstalled) return;
     providerBoundaryStubsInstalled = true;
     const socket = listenTogetherSocket as unknown as typeof providerSocket;
-    socket.probeRoute = providerSocket.probeRoute;
+    // Delegate dynamically so tests can swap the probe stub mid-test.
+    socket.probeRoute = (
+        ...args: Parameters<typeof providerSocket.probeRoute>
+    ) => providerSocket.probeRoute(...args);
     socket.connect = providerSocket.connect;
     socket.disconnect = providerSocket.disconnect;
     socket.joinGroup = providerSocket.joinGroup;
@@ -952,6 +955,7 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerAuthState.userId = isHost ? "host-id" : "guest-id";
     providerApiState.group = group;
     providerSocket.isConnected = false;
+    providerSocket.probeRoute = async () => ({ ok: true });
     providerSocketState.callbacks = null;
     providerSocketState.seekCalls = [];
     providerSocketState.seekStateVersions = [];
@@ -1000,10 +1004,21 @@ type ListenTogetherApi = ReturnType<
 async function mountListenTogetherProvider(
     isHost: boolean,
     currentIndex: number,
+    options?: { connect?: boolean },
 ) {
+    const connect = options?.connect ?? true;
     installProviderBoundaryStubs();
     resetProviderHarness(isHost, currentIndex);
     restoreBrowserGlobals();
+    if (!connect) {
+        // Mount with a failing route probe: the group is retained but no
+        // socket connection is made (recheckSocketRoute makes the first one).
+        providerSocket.probeRoute = async () => ({
+            ok: false,
+            reason: "probe-failed",
+            status: 502,
+        });
+    }
     const { ListenTogetherProvider, useListenTogether } =
         await import("../../lib/listen-together-context");
     const { createRoot } = await import("react-dom/client");
@@ -1026,16 +1041,18 @@ async function mountListenTogetherProvider(
             ),
         );
     });
-    await React.act(async () => {
-        await waitFor(
-            () => providerSocketState.callbacks !== null,
-            "provider socket callbacks were not registered",
-        );
-    });
-    providerSocket.isConnected = true;
-    await React.act(async () => {
-        providerSocketState.callbacks?.onConnect();
-    });
+    if (connect) {
+        await React.act(async () => {
+            await waitFor(
+                () => providerSocketState.callbacks !== null,
+                "provider socket callbacks were not registered",
+            );
+        });
+        providerSocket.isConnected = true;
+        await React.act(async () => {
+            providerSocketState.callbacks?.onConnect();
+        });
+    }
 
     return {
         latest: () => {
@@ -1204,6 +1221,33 @@ test("host hydration seeks even when the target sits inside the drift threshold"
     // threshold; an adopting host must still take the group position or its
     // zeroed local timeline becomes authoritative on the next heartbeat.
     assert.deepEqual(providerControlCalls.seek, [1.2]);
+});
+
+test("re-check after a failed mount probe still hydrates the host position", async (t) => {
+    t.mock.method(Date, "now", () => 100_000);
+    const host = await mountListenTogetherProvider(true, 0, { connect: false });
+    t.after(host.unmount);
+    assert.equal(providerSocketState.callbacks, null);
+
+    providerSocket.probeRoute = async () => ({ ok: true });
+    await host.act(async () => {
+        assert.equal(await host.latest().recheckSocketRoute(), true);
+    });
+    providerSocket.isConnected = true;
+    await host.act(() => host.callbacks().onConnect());
+    const hydrated = {
+        ...makeGroup(true, 0),
+        playback: {
+            ...makeGroup(true, 0).playback,
+            positionMs: 20_000,
+            serverTime: 95_000,
+        },
+    };
+    await host.act(() => host.callbacks().onGroupState(hydrated));
+
+    // This re-check made the session's FIRST connection: the restored host
+    // must adopt the compensated group position, not stay at 0.
+    assert.deepEqual(providerControlCalls.seek, [25]);
 });
 
 test("live-session re-check reconnect never adopts the server position onto the host", async (t) => {

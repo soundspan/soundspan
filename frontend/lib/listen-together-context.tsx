@@ -1884,12 +1884,15 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (ok) {
             const group = activeGroupRef.current;
             if (group?.id && !listenTogetherSocket.isConnected) {
-                // Live-session reconnect: the host timeline stays authoritative.
-                connectSocket(group.id, { adoptGroupPosition: false });
+                // A first-ever connection (mount probe failed earlier) still
+                // hydrates; live-session reconnects keep the host authoritative.
+                connectSocket(group.id, {
+                    adoptGroupPosition: !hasConnectedOnce,
+                });
             }
         }
         return ok;
-    }, [connectSocket, validateSocketRoute]);
+    }, [connectSocket, hasConnectedOnce, validateSocketRoute]);
     // -----------------------------------------------------------------------
     // Actions — hot path (Socket.IO wrappers)
     // -----------------------------------------------------------------------
