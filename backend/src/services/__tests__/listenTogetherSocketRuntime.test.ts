@@ -1574,7 +1574,7 @@ describe("listen together socket runtime behavior", () => {
 
         const seekAck = jest.fn();
         await eventHandlers["playback"](
-            { action: "seek", positionMs: 1200 },
+            { action: "seek", positionMs: 1200, stateVersion: 9 },
             seekAck,
         );
         expect(seekAck).toHaveBeenCalledWith({ ok: true });
@@ -1582,6 +1582,7 @@ describe("listen together socket runtime behavior", () => {
             "group-1",
             "user-1",
             1200,
+            9,
         );
 
         expect(mocks.mutationLockClient.set).not.toHaveBeenCalled();

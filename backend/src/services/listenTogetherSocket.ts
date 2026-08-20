@@ -796,7 +796,12 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         socket.on(
             "playback",
             async (
-                data: { action: string; positionMs?: number; index?: number },
+                data: {
+                    action: string;
+                    positionMs?: number;
+                    index?: number;
+                    stateVersion?: number;
+                },
                 ack?: (res: unknown) => void,
             ) => {
                 try {
@@ -824,10 +829,21 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                                             "positionMs required for seek",
                                         );
                                     }
+                                    if (
+                                        data.stateVersion !== undefined &&
+                                        (!Number.isInteger(data.stateVersion) ||
+                                            data.stateVersion < 0)
+                                    ) {
+                                        throw new GroupError(
+                                            "INVALID",
+                                            "stateVersion must be a non-negative integer",
+                                        );
+                                    }
                                     groupManager.seek(
                                         groupId,
                                         userId,
                                         data.positionMs,
+                                        data.stateVersion,
                                     );
                                     return;
                                 case "next":

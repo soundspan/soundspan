@@ -131,6 +131,19 @@ test("seek does not retry non-conflict errors", async () => {
     assert.deepEqual(scheduledDelaysMs, []);
 });
 
+test("seek includes an applied state version when supplied", async () => {
+    const { socketClient, emits } = createSocketWithAckSequence([{ ok: true }]);
+
+    await socketClient.seek(5000, 17);
+
+    assert.deepEqual(emits, [
+        {
+            event: "playback",
+            payload: { action: "seek", positionMs: 5000, stateVersion: 17 },
+        },
+    ]);
+});
+
 test("next/previous/setTrack emit playback actions and accept empty ack payloads", async () => {
     const emits: EmitRecord[] = [];
     const socketClient = new ListenTogetherSocket();

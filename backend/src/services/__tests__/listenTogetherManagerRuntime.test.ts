@@ -238,6 +238,51 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(callbacks.onPlaybackDelta).toHaveBeenCalled();
     });
 
+    it("applies current and versionless seeks while ignoring stale versions", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        const created = groupManager.create("g-versioned-seek", {
+            name: "Versioned seek",
+            joinCode: "VSK",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1", 120)],
+            createdAt: new Date(),
+        });
+        const initialVersion = created.playback.stateVersion;
+
+        const currentVersionDelta = groupManager.seek(
+            "g-versioned-seek",
+            "host",
+            1_000,
+            initialVersion,
+        );
+        expect(currentVersionDelta.positionMs).toBe(1_000);
+        expect(currentVersionDelta.stateVersion).toBe(initialVersion + 1);
+        expect(callbacks.onPlaybackDelta).toHaveBeenCalledTimes(1);
+
+        const staleVersionDelta = groupManager.seek(
+            "g-versioned-seek",
+            "host",
+            90_000,
+            initialVersion,
+        );
+        expect(staleVersionDelta.positionMs).toBe(1_000);
+        expect(staleVersionDelta.stateVersion).toBe(initialVersion + 1);
+        expect(callbacks.onPlaybackDelta).toHaveBeenCalledTimes(1);
+
+        const compatibleDelta = groupManager.seek(
+            "g-versioned-seek",
+            "host",
+            2_000,
+        );
+        expect(compatibleDelta.positionMs).toBe(2_000);
+        expect(compatibleDelta.stateVersion).toBe(initialVersion + 2);
+        expect(callbacks.onPlaybackDelta).toHaveBeenCalledTimes(2);
+    });
+
     it("supports next/previous behavior including restart-current shortcut", () => {
         groupManager.setCallbacks(createCallbacks());
         groupManager.create("g-nav", {

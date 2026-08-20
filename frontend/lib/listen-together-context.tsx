@@ -36,6 +36,7 @@ import { isEpisodeQueueItem, type QueueItem } from "@/lib/queue-item";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
+    getServerClockOffsetMs,
     listenTogetherSocket,
     type GroupSnapshot,
     type PlaybackDelta,
@@ -48,6 +49,7 @@ import {
     type SyncQueueItem,
     type SocketRouteProbeResult,
 } from "@/lib/listen-together-socket";
+import { computeCompensatedTargetMs } from "@/lib/listenTogetherPlaybackSync";
 import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherOptimisticTrackSelectionPolicy,
@@ -489,6 +491,19 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         [validateSocketRoute],
     );
 
+    const canCurrentUserControlHostPlayback = useCallback(
+        (group: GroupSnapshot | null): boolean => {
+            if (!group) return false;
+            return canIssueListenTogetherHostPlaybackCommand({
+                activeGroupId: group.id,
+                hostUserId: group.hostUserId,
+                userId: user?.id,
+                snapshot: getListenTogetherSessionSnapshot(),
+            });
+        },
+        [user?.id],
+    );
+
     // -----------------------------------------------------------------------
     // Player manipulation helpers (defined before the callbacks that use them)
     // -----------------------------------------------------------------------
@@ -515,6 +530,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             const state = audioStateRef.current;
             const ctrl = controlsRef.current;
+            const isCurrentClientHost =
+                canCurrentUserControlHostPlayback(snapshot);
             const outgoingTrackId = state.currentTrack?.id ?? null;
             markTrackChange(outgoingTrackId, targetTrack?.id ?? null);
 
@@ -549,26 +566,31 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             state.setIsShuffle(false); // Sync groups don't use shuffle
             state.setVibeMode(false);
 
-            // Compute target position (compensate for network latency)
-            let targetMs = Math.max(0, pb.positionMs);
-            if (pb.isPlaying && pb.serverTime) {
-                const age = Date.now() - pb.serverTime;
-                targetMs += Math.min(Math.max(age, 0), 5000); // Cap compensation at 5s
-            }
-            if (targetTrack?.duration) {
-                targetMs = Math.min(targetMs, targetTrack.duration * 1000);
-            }
+            if (!isCurrentClientHost) {
+                let targetMs = Math.max(0, pb.positionMs);
+                if (pb.isPlaying && pb.serverTime) {
+                    targetMs = computeCompensatedTargetMs(
+                        pb.positionMs,
+                        pb.serverTime,
+                        Date.now(),
+                        getServerClockOffsetMs(),
+                        5_000,
+                    );
+                }
+                if (targetTrack?.duration) {
+                    targetMs = Math.min(targetMs, targetTrack.duration * 1000);
+                }
 
-            // Convert to seconds for the player
-            const targetSec = targetMs / 1000;
-
-            // Seek if needed
-            const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
-            if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
-                ctrl.seek(targetSec, {
-                    allowListenTogetherFollower: true,
-                    suppressListenTogetherBroadcast: true,
-                });
+                const targetSec = targetMs / 1000;
+                const drift = Math.abs(
+                    playbackEngine.getCurrentTime() - targetSec,
+                );
+                if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
+                    ctrl.seek(targetSec, {
+                        allowListenTogetherFollower: true,
+                        suppressListenTogetherBroadcast: true,
+                    });
+                }
             }
 
             // Play/pause — skip resume when a reconnect audio recovery is pending,
@@ -580,7 +602,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
                 // Let recoverAudioAfterReconnect handle resume after reload
             } else if (pb.isPlaying) {
-                resumeListenTogetherPlayback(ctrl.resume, pb);
+                if (isCurrentClientHost) {
+                    ctrl.resume({ suppressListenTogetherBroadcast: true });
+                } else {
+                    resumeListenTogetherPlayback(ctrl.resume, pb);
+                }
             } else {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -589,7 +615,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 isApplyingRemoteRef.current = false;
             });
         },
-        [clearObsoleteReadyReportLoadListener],
+        [
+            canCurrentUserControlHostPlayback,
+            clearObsoleteReadyReportLoadListener,
+        ],
     );
 
     const applyDeltaToPlayer = useCallback(
@@ -601,6 +630,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             const state = audioStateRef.current;
             const ctrl = controlsRef.current;
+            const isCurrentClientHost = canCurrentUserControlHostPlayback(
+                activeGroupRef.current,
+            );
 
             isApplyingRemoteRef.current = true;
 
@@ -643,34 +675,40 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
             }
 
-            // Compute target position
-            let targetMs = Math.max(0, delta.positionMs);
-            if (delta.isPlaying && delta.serverTime) {
-                const age = Date.now() - delta.serverTime;
-                targetMs += Math.min(Math.max(age, 0), 5000);
-            }
-            const safeTrackIdx =
-                currentQueue.length > 0
-                    ? Math.min(
-                          Math.max(delta.currentIndex, 0),
-                          currentQueue.length - 1,
-                      )
-                    : -1;
-            const track =
-                safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
-            if (track?.duration) {
-                targetMs = Math.min(targetMs, track.duration * 1000);
-            }
+            if (!isCurrentClientHost) {
+                let targetMs = Math.max(0, delta.positionMs);
+                if (delta.isPlaying && delta.serverTime) {
+                    targetMs = computeCompensatedTargetMs(
+                        delta.positionMs,
+                        delta.serverTime,
+                        Date.now(),
+                        getServerClockOffsetMs(),
+                        5_000,
+                    );
+                }
+                const safeTrackIdx =
+                    currentQueue.length > 0
+                        ? Math.min(
+                              Math.max(delta.currentIndex, 0),
+                              currentQueue.length - 1,
+                          )
+                        : -1;
+                const track =
+                    safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
+                if (track?.duration) {
+                    targetMs = Math.min(targetMs, track.duration * 1000);
+                }
 
-            const targetSec = targetMs / 1000;
-            const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
-
-            // Seek if drift is significant
-            if (drift > 1.5) {
-                ctrl.seek(targetSec, {
-                    allowListenTogetherFollower: true,
-                    suppressListenTogetherBroadcast: true,
-                });
+                const targetSec = targetMs / 1000;
+                const drift = Math.abs(
+                    playbackEngine.getCurrentTime() - targetSec,
+                );
+                if (drift > 1.5) {
+                    ctrl.seek(targetSec, {
+                        allowListenTogetherFollower: true,
+                        suppressListenTogetherBroadcast: true,
+                    });
+                }
             }
 
             // Play/pause — after a track change, always call resume if delta says
@@ -679,7 +717,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 delta.isPlaying &&
                 (trackChanged || !playbackEngine.isPlaying())
             ) {
-                resumeListenTogetherPlayback(ctrl.resume, delta);
+                if (isCurrentClientHost) {
+                    ctrl.resume({ suppressListenTogetherBroadcast: true });
+                } else {
+                    resumeListenTogetherPlayback(ctrl.resume, delta);
+                }
             } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -688,7 +730,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 isApplyingRemoteRef.current = false;
             });
         },
-        [clearObsoleteReadyReportLoadListener],
+        [
+            canCurrentUserControlHostPlayback,
+            clearObsoleteReadyReportLoadListener,
+        ],
     );
 
     const recoverAudioAfterReconnect = useCallback(
@@ -719,8 +764,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             let targetMs = Math.max(0, pb.positionMs);
             if (pb.serverTime) {
-                const age = Date.now() - pb.serverTime;
-                targetMs += Math.min(Math.max(age, 0), 5000);
+                targetMs = computeCompensatedTargetMs(
+                    pb.positionMs,
+                    pb.serverTime,
+                    Date.now(),
+                    getServerClockOffsetMs(),
+                    5_000,
+                );
             }
             if (targetTrack.duration) {
                 targetMs = Math.min(targetMs, targetTrack.duration * 1000);
@@ -1265,38 +1315,30 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         return next;
                     });
 
-                    const elapsed = Date.now() - data.serverTime;
-                    const targetSec =
-                        (data.positionMs + Math.max(elapsed, 0)) / 1000;
-                    const track = state.queue[state.currentIndex];
-                    const clampedSec = track?.duration
-                        ? Math.min(targetSec, track.duration)
-                        : targetSec;
-
-                    const pendingHostTrackIndex =
-                        pendingHostTrackIndexRef.current;
                     const group = activeGroupRef.current;
                     const isCurrentClientHost =
-                        canIssueListenTogetherHostPlaybackCommand({
-                            activeGroupId: group?.id,
-                            hostUserId: group?.hostUserId,
-                            userId: user?.id,
-                            snapshot: getListenTogetherSessionSnapshot(),
-                        });
-                    const suppressHostPlayAtEcho = Boolean(
-                        isCurrentClientHost &&
-                        pendingHostTrackIndex !== null &&
-                        state.currentIndex === pendingHostTrackIndex &&
-                        playbackEngine.isPlaying(),
-                    );
+                        canCurrentUserControlHostPlayback(group);
                     pendingHostTrackIndexRef.current = null;
 
-                    if (suppressHostPlayAtEcho) {
+                    if (isCurrentClientHost) {
                         queueMicrotask(() => {
                             isApplyingRemoteRef.current = false;
                         });
                         return;
                     }
+
+                    const targetMs = computeCompensatedTargetMs(
+                        data.positionMs,
+                        data.serverTime,
+                        Date.now(),
+                        getServerClockOffsetMs(),
+                        5_000,
+                    );
+                    const targetSec = targetMs / 1000;
+                    const track = state.queue[state.currentIndex];
+                    const clampedSec = track?.duration
+                        ? Math.min(targetSec, track.duration)
+                        : targetSec;
 
                     ctrl.seek(Math.max(0, clampedSec), {
                         allowListenTogetherFollower: true,
@@ -1470,6 +1512,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             applyGroupState,
             applyPlaybackDelta,
             applyQueueDelta,
+            canCurrentUserControlHostPlayback,
             clearAvailabilitySwapLoadListener,
             clearReadyReportLoadListener,
             recoverAudioAfterReconnect,
@@ -1586,7 +1629,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 isPlaying: Boolean(activeGroup.playback?.isPlaying),
                 positionMs: Number(activeGroup.playback?.positionMs ?? 0),
                 serverTime: Number(
-                    activeGroup.playback?.serverTime ?? Date.now(),
+                    activeGroup.playback?.serverTime ??
+                        Date.now() - getServerClockOffsetMs(),
                 ),
                 currentIndex: Number(activeGroup.playback?.currentIndex ?? 0),
             },
@@ -1596,9 +1640,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     // -----------------------------------------------------------------------
     // Host heartbeat: push local playback state to server periodically.
     // Only runs when user canControl and is NOT in a waiting state.
-    // This ensures the server's position stays in sync with what the host
-    // is actually hearing, without any echo loops (the host never applies
-    // its own broadcasts back).
+    // This keeps the server aligned with what the host is actually hearing.
+    // Broadcast handlers still apply shared state and metadata to the host,
+    // but their host guards never position-correct its authoritative player.
     // -----------------------------------------------------------------------
 
     const syncState = activeGroup?.syncState;
@@ -1616,7 +1660,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             // Use seek to sync position (lightweight, no ready gate)
             const positionMs = playbackEngine.getCurrentTime() * 1000;
-            listenTogetherSocket.seek(positionMs).catch(() => {});
+            listenTogetherSocket
+                .seek(positionMs, lastAppliedVersionRef.current)
+                .catch(() => {});
         }, 5000); // Every 5 seconds
 
         return () => clearInterval(interval);
@@ -1901,18 +1947,6 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         });
         listenTogetherSocket.seek(positionMs).catch(() => {});
     }, []);
-    const canCurrentUserControlHostPlayback = useCallback(
-        (group: GroupSnapshot | null): boolean => {
-            if (!group) return false;
-            return canIssueListenTogetherHostPlaybackCommand({
-                activeGroupId: group.id,
-                hostUserId: group.hostUserId,
-                userId: user?.id,
-                snapshot: getListenTogetherSessionSnapshot(),
-            });
-        },
-        [user?.id],
-    );
     const syncNext = useCallback(() => {
         const group = activeGroupRef.current;
         if (!canCurrentUserControlHostPlayback(group)) {

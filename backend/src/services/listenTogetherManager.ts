@@ -692,9 +692,25 @@ class GroupManager {
         return delta;
     }
 
-    seek(groupId: string, userId: string, positionMs: number): PlaybackDelta {
+    seek(
+        groupId: string,
+        userId: string,
+        positionMs: number,
+        expectedStateVersion?: number,
+    ): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
+        if (
+            expectedStateVersion !== undefined &&
+            expectedStateVersion !== group.playback.stateVersion
+        ) {
+            log.debug("Ignored seek with stale state version", {
+                groupId,
+                expectedStateVersion,
+                currentStateVersion: group.playback.stateVersion,
+            });
+            return this.playbackDelta(group);
+        }
         const waitingDelta = this.playbackDeltaIfWaiting(group);
         if (waitingDelta) return waitingDelta;
 

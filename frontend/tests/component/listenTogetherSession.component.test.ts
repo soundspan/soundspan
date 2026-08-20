@@ -637,6 +637,7 @@ const providerApiState: { group: MockGroupSnapshot | null } = {
 const providerSocketState = {
     callbacks: null as ListenTogetherSocketCallbacks | null,
     seekCalls: [] as number[],
+    seekStateVersions: [] as Array<number | undefined>,
     reportReadyCalls: 0,
 };
 const providerEngineState = {
@@ -743,8 +744,9 @@ const providerSocket: ProviderSocketStub = {
     },
     play: async () => undefined,
     pause: async () => undefined,
-    seek: async (positionMs: number) => {
+    seek: async (positionMs: number, stateVersion?: number) => {
         providerSocketState.seekCalls.push(positionMs);
+        providerSocketState.seekStateVersions.push(stateVersion);
     },
     next: async () => undefined,
     previous: async () => undefined,
@@ -947,6 +949,7 @@ function resetProviderHarness(isHost: boolean, currentIndex: number): void {
     providerSocket.isConnected = false;
     providerSocketState.callbacks = null;
     providerSocketState.seekCalls = [];
+    providerSocketState.seekStateVersions = [];
     providerSocketState.reportReadyCalls = 0;
     providerEngineState.currentTime = 0;
     providerEngineState.duration = 180;
@@ -1088,6 +1091,48 @@ test("host play-at echoes do not restart an optimistic track, while guests still
     await guest.unmount();
 });
 
+test("host playback-delta echoes preserve local position while followers seek", async (t) => {
+    const host = await mountListenTogetherProvider(true, 0);
+    providerEngineState.playing = true;
+    providerEngineState.currentTime = 10;
+    providerControlCalls.seek = [];
+
+    await host.act(() =>
+        host.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 15_000,
+            serverTime: Date.now() + 1_000,
+            stateVersion: 2,
+            currentIndex: 0,
+            trackId: "remote-0",
+        }),
+    );
+
+    assert.deepEqual(providerControlCalls.seek, []);
+    assert.equal(providerEngineState.currentTime, 10);
+    await host.unmount();
+
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    providerEngineState.playing = true;
+    providerEngineState.currentTime = 10;
+    providerControlCalls.seek = [];
+
+    await guest.act(() =>
+        guest.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 15_000,
+            serverTime: Date.now() + 1_000,
+            stateVersion: 2,
+            currentIndex: 0,
+            trackId: "remote-0",
+        }),
+    );
+
+    assert.deepEqual(providerControlCalls.seek, [15]);
+    assert.equal(providerEngineState.currentTime, 15);
+});
+
 test("tripped followers suppress heartbeat restarts until a track-changing delta arrives", async (t) => {
     const guest = await mountListenTogetherProvider(false, 0);
     t.after(guest.unmount);
@@ -1187,6 +1232,7 @@ test("remote-apply guards clear without animation frames so host heartbeats cont
     t.mock.timers.tick(5_000);
 
     assert.deepEqual(providerSocketState.seekCalls, [12_500]);
+    assert.deepEqual(providerSocketState.seekStateVersions, [2]);
 });
 
 test("availability remaps update queue identity idempotently and preserve swap position", async (t) => {

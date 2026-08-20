@@ -624,12 +624,12 @@ export class ListenTogetherSocket {
         return this.emit("playback", { action: "pause" });
     }
 
-    seek(positionMs: number): Promise<void> {
-        return this.emit(
-            "playback",
-            { action: "seek", positionMs },
-            TRANSIENT_CONFLICT_RETRY_POLICY,
-        );
+    seek(positionMs: number, stateVersion?: number): Promise<void> {
+        const payload =
+            stateVersion === undefined
+                ? { action: "seek", positionMs }
+                : { action: "seek", positionMs, stateVersion };
+        return this.emit("playback", payload, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     next(): Promise<void> {
