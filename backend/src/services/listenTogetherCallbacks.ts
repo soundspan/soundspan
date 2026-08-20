@@ -5,6 +5,7 @@ import type {
 } from "./listenTogetherManager";
 import { logger } from "../utils/logger";
 import { listenTogetherClusterSync } from "./listenTogetherClusterSync";
+import type { ClusterGroupMembership } from "./listenTogetherClusterSync";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 
 const log = logger.child("ListenTogetherPublication");
@@ -22,6 +23,10 @@ export interface GroupPublicationBroadcaster {
         groupId: string,
         member: { userId: string; username: string },
     ): void | Promise<void>;
+    emitMemberPresence(
+        groupId: string,
+        member: { userId: string; isConnected: boolean },
+    ): void | Promise<void>;
     emitMemberLeft(
         groupId: string,
         member: {
@@ -31,6 +36,7 @@ export interface GroupPublicationBroadcaster {
             newHostUsername?: string;
         },
     ): void | Promise<void>;
+    revokeSockets(groupId: string, socketIds: string[]): void | Promise<void>;
 }
 
 /** Membership-only detail that may accompany or replace a snapshot publication. */
@@ -123,18 +129,40 @@ async function emitMembershipPublication(
     await publicationBroadcaster?.emitMemberLeft(groupId, publication.member);
 }
 
+async function publishMembershipChange(
+    groupId: string,
+    publication: GroupMembershipPublication | undefined,
+    membership: ClusterGroupMembership | undefined,
+    revokedSocketIds: string[],
+): Promise<void> {
+    if (publication) {
+        await emitMembershipPublication(groupId, publication);
+    }
+    if (membership) {
+        await listenTogetherClusterSync.publishMembership(groupId, membership);
+    }
+    if (revokedSocketIds.length > 0) {
+        await publicationBroadcaster?.revokeSockets(groupId, revokedSocketIds);
+    }
+}
+
 /** Queue one authoritative snapshot publication for a group. */
 export function enqueueGroupSnapshotPublication(
     groupId: string,
     snapshot: GroupSnapshot,
     membership?: GroupMembershipPublication,
+    committedMembership?: ClusterGroupMembership,
+    revokedSocketIds: string[] = [],
 ): Promise<void> {
     return enqueueGroupPublication(groupId, "snapshot", async () => {
         await listenTogetherStateStore.setSnapshot(groupId, snapshot);
+        await publishMembershipChange(
+            groupId,
+            membership,
+            committedMembership,
+            revokedSocketIds,
+        );
         await listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-        if (membership) {
-            await emitMembershipPublication(groupId, membership);
-        }
         await publicationBroadcaster?.emitSnapshot(groupId, snapshot);
     });
 }
@@ -174,11 +202,28 @@ export function enqueueGroupEndedBroadcast(
 /** Queue membership-only fanout when no playback snapshot is authoritative. */
 export function enqueueGroupMembershipPublication(
     groupId: string,
-    membership: GroupMembershipPublication,
+    membership: GroupMembershipPublication | undefined,
+    committedMembership?: ClusterGroupMembership,
+    revokedSocketIds: string[] = [],
 ): Promise<void> {
     return enqueueGroupPublication(groupId, "membership", () =>
-        emitMembershipPublication(groupId, membership),
+        publishMembershipChange(
+            groupId,
+            membership,
+            committedMembership,
+            revokedSocketIds,
+        ),
     );
+}
+
+/** Queue a presence-only socket event without publishing playback state. */
+export function enqueueGroupPresenceBroadcast(
+    groupId: string,
+    member: { userId: string; isConnected: boolean },
+): Promise<void> {
+    return enqueueGroupPublication(groupId, "presence", async () => {
+        await publicationBroadcaster?.emitMemberPresence(groupId, member);
+    });
 }
 
 /** Wait for all publications currently queued for one group. */
@@ -220,6 +265,10 @@ export interface ManagerCallbacks {
     onMemberJoined(
         groupId: string,
         member: { userId: string; username: string },
+    ): void;
+    onMemberPresence(
+        groupId: string,
+        member: { userId: string; isConnected: boolean },
     ): void;
     onMemberLeft(
         groupId: string,

@@ -132,6 +132,28 @@ export interface MemberEvent {
     username: string;
 }
 
+/** Presence-only update that does not carry playback state. */
+export interface MemberPresenceEvent {
+    userId: string;
+    isConnected: boolean;
+}
+
+/** Apply a presence-only event to an existing client snapshot. */
+export function applyGroupMemberPresence(
+    snapshot: GroupSnapshot | null,
+    event: MemberPresenceEvent,
+): GroupSnapshot | null {
+    if (!snapshot) return null;
+    return {
+        ...snapshot,
+        members: snapshot.members.map((member) =>
+            member.userId === event.userId
+                ? { ...member, isConnected: event.isConnected }
+                : member,
+        ),
+    };
+}
+
 export interface MemberLeftEvent extends MemberEvent {
     newHostUserId?: string;
     newHostUsername?: string;
@@ -160,6 +182,7 @@ export interface ListenTogetherSocketCallbacks {
     onWaiting: (data: WaitingEvent) => void;
     onPlayAt: (data: PlayAtEvent) => void;
     onMemberJoined: (data: MemberEvent) => void;
+    onMemberPresence?: (data: MemberPresenceEvent) => void;
     onMemberLeft: (data: MemberLeftEvent) => void;
     onGroupEnded: (data: GroupEndedEvent) => void;
     onConnect: () => void;
@@ -198,6 +221,7 @@ const TRANSIENT_CONFLICT_MAX_RETRIES = 3;
 const TRANSIENT_CONFLICT_BASE_DELAY_MS = 60;
 const TRANSIENT_CONFLICT_MAX_DELAY_MS = 300;
 const TRANSIENT_CONFLICT_JITTER_FACTOR = 0.35;
+const LISTEN_TOGETHER_ACK_TIMEOUT_MS = 5_000;
 
 interface ListenTogetherAckResponse {
     ok?: boolean;
@@ -234,6 +258,11 @@ interface ListenTogetherSocketDependencies {
         intervalMs: number,
     ) => ReturnType<typeof setInterval>;
     clearInterval: (handle: ReturnType<typeof setInterval>) => void;
+    setTimeout: (
+        callback: () => void,
+        timeoutMs: number,
+    ) => ReturnType<typeof setTimeout>;
+    clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
 }
 
 const DEFAULT_SOCKET_DEPENDENCIES: ListenTogetherSocketDependencies = {
@@ -243,6 +272,9 @@ const DEFAULT_SOCKET_DEPENDENCIES: ListenTogetherSocketDependencies = {
     setInterval: (callback, intervalMs) =>
         globalThis.setInterval(callback, intervalMs),
     clearInterval: (handle) => globalThis.clearInterval(handle),
+    setTimeout: (callback, timeoutMs) =>
+        globalThis.setTimeout(callback, timeoutMs),
+    clearTimeout: (handle) => globalThis.clearTimeout(handle),
 };
 
 let serverClockOffsetSamplesMs: number[] = [];
@@ -431,6 +463,10 @@ export class ListenTogetherSocket {
 
         this.socket.on("group:member-joined", (data: MemberEvent) => {
             this.callbacks?.onMemberJoined(data);
+        });
+
+        this.socket.on("group:member-presence", (data: MemberPresenceEvent) => {
+            this.callbacks?.onMemberPresence?.(data);
         });
 
         this.socket.on("group:member-left", (data: MemberLeftEvent) => {
@@ -846,7 +882,17 @@ export class ListenTogetherSocket {
                 return;
             }
 
+            let settled = false;
+            let timeout: ReturnType<typeof setTimeout> | null = null;
+            const clearAckTimeout = () => {
+                if (timeout === null) return;
+                this.dependencies.clearTimeout(timeout);
+                timeout = null;
+            };
             const onAck = (res: ListenTogetherAckResponse) => {
+                if (settled) return;
+                settled = true;
+                clearAckTimeout();
                 resolve(res ?? {});
             };
 
@@ -855,6 +901,17 @@ export class ListenTogetherSocket {
             } else {
                 this.socket.emit(event, data, onAck);
             }
+            if (settled) return;
+            timeout = this.dependencies.setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                clearAckTimeout();
+                reject(
+                    new Error(
+                        `Listen Together acknowledgement timed out for ${event}`,
+                    ),
+                );
+            }, LISTEN_TOGETHER_ACK_TIMEOUT_MS);
         });
     }
 

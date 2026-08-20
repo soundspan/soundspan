@@ -250,6 +250,93 @@ test("reconnect reports a final rejoin rejection without a floating promise", as
     assert.equal(reportedErrors[0]?.message, "lock conflict");
 });
 
+test("reconnect rejoin reports a withheld acknowledgement within the timeout bound", async () => {
+    const handlers = new Map<string, () => void>();
+    const timers = new Map<number, { callback: () => void; delayMs: number }>();
+    let nextTimerId = 1;
+    const fakeSocket = {
+        connected: true,
+        auth: {},
+        connect: () => undefined,
+        disconnect: () => undefined,
+        removeAllListeners: () => undefined,
+        on: (event: string, handler: () => void) => {
+            handlers.set(event, handler);
+        },
+        io: { on: () => undefined },
+        emit: (
+            event: string,
+            payloadOrAck: unknown,
+            maybeAck?: (response: AckResponse) => void,
+        ) => {
+            const ack =
+                typeof payloadOrAck === "function"
+                    ? (payloadOrAck as (response: AckResponse) => void)
+                    : maybeAck;
+            if (event === "lt-ping") {
+                ack?.({ serverTime: 0 } as AckResponse);
+            }
+            // Deliberately withhold the join-group acknowledgement.
+        },
+    };
+    const socketClient = new ListenTogetherSocket({
+        createSocket: (() => fakeSocket) as never,
+        getToken: () => "token",
+        now: () => 0,
+        setInterval: (() => 0) as never,
+        clearInterval: () => undefined,
+        setTimeout: (callback, delayMs) => {
+            const timerId = nextTimerId;
+            nextTimerId += 1;
+            timers.set(timerId, { callback, delayMs });
+            return timerId as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimeout: (handle) => {
+            timers.delete(Number(handle));
+        },
+    });
+    (
+        socketClient as unknown as { currentGroupId: string | null }
+    ).currentGroupId = "group-timeout";
+    const reportedErrors: Error[] = [];
+    let rejoinFailures = 0;
+
+    socketClient.connect({
+        onGroupState: () => undefined,
+        onPlaybackDelta: () => undefined,
+        onQueueDelta: () => undefined,
+        onWaiting: () => undefined,
+        onPlayAt: () => undefined,
+        onMemberJoined: () => undefined,
+        onMemberLeft: () => undefined,
+        onGroupEnded: () => undefined,
+        onConnect: () => undefined,
+        onDisconnect: () => undefined,
+        onRejoinFailed: () => {
+            rejoinFailures += 1;
+        },
+        onError: (error) => {
+            reportedErrors.push(error);
+        },
+    });
+    handlers.get("connect")?.();
+
+    const ackTimer = [...timers.values()].find(({ delayMs }) => delayMs > 0);
+    assert.ok(ackTimer);
+    assert.ok(ackTimer.delayMs <= 5_000);
+    ackTimer.callback();
+    for (let turn = 0; turn < 10 && reportedErrors.length === 0; turn += 1) {
+        await Promise.resolve();
+    }
+
+    assert.equal(rejoinFailures, 1);
+    assert.match(
+        reportedErrors[0]?.message ?? "",
+        /acknowledgement timed out/i,
+    );
+    assert.equal(timers.size, 0);
+});
+
 test("seek does not retry non-conflict errors", async () => {
     const { socketClient, emits } = createSocketWithAckSequence([
         {

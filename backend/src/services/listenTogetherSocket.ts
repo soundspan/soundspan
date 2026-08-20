@@ -48,6 +48,7 @@ import {
     enqueueGroupEndedBroadcast,
     enqueueGroupEndedPublication,
     enqueueGroupMembershipPublication,
+    enqueueGroupPresenceBroadcast,
     enqueueGroupSnapshotBroadcast,
     enqueueGroupSnapshotPublication,
     flushGroupPublications,
@@ -379,6 +380,27 @@ function scheduleDisconnectCleanup(
     pendingDisconnectCleanupTimers.set(key, timer);
 }
 
+async function revokeGroupSockets(
+    ns: Namespace,
+    groupId: string,
+    socketIds: string[],
+): Promise<void> {
+    await Promise.all(
+        socketIds.map(async (socketId) => {
+            const socket = ns.sockets.get(socketId) as
+                | AuthenticatedSocket
+                | undefined;
+            if (!socket || socket.data.groupId !== groupId) return;
+            clearDisconnectCleanup(groupId, socket.data.userId);
+            recentDisconnectAtMs.delete(
+                disconnectCleanupKey(groupId, socket.data.userId),
+            );
+            socket.data.groupId = null;
+            await socket.leave(groupId);
+        }),
+    );
+}
+
 /**
  * Executes setupListenTogetherSocket.
  */
@@ -495,6 +517,25 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                 (groupId) => {
                     groupManager.remove(groupId);
                 },
+                (groupId, membership) => {
+                    if (!groupManager.has(groupId)) return;
+                    const revokedSocketIds =
+                        groupManager.applyCommittedMembership(
+                            groupId,
+                            membership.members,
+                            membership.hostUserId,
+                        );
+                    void revokeGroupSockets(
+                        ns,
+                        groupId,
+                        revokedSocketIds,
+                    ).catch((error) => {
+                        log.error(
+                            `Failed to revoke committed departure sockets for ${groupId}`,
+                            error,
+                        );
+                    });
+                },
             )
             .catch((err) => {
                 logger.error(
@@ -594,8 +635,14 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         emitMemberJoined(groupId, member) {
             ns.to(groupId).emit("group:member-joined", member);
         },
+        emitMemberPresence(groupId, member) {
+            ns.to(groupId).emit("group:member-presence", member);
+        },
         emitMemberLeft(groupId, member) {
             ns.to(groupId).emit("group:member-left", member);
+        },
+        revokeSockets(groupId, socketIds) {
+            return revokeGroupSockets(ns, groupId, socketIds);
         },
     });
 
@@ -634,6 +681,9 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                 type: "joined",
                 member,
             });
+        },
+        onMemberPresence(groupId: string, member) {
+            void enqueueGroupPresenceBroadcast(groupId, member);
         },
         onMemberLeft(groupId: string, data) {
             void enqueueGroupMembershipPublication(groupId, {

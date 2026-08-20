@@ -10,12 +10,14 @@ describe("listen together socket runtime behavior", () => {
     function setupListenTogetherSocketMocks() {
         let ioInstance: any = null;
         let serverOptions: any = null;
+        const roomEmit = jest.fn();
         const namespace = {
             use: jest.fn(),
             on: jest.fn(),
             emit: jest.fn(),
-            to: jest.fn(() => ({ emit: jest.fn() })),
+            to: jest.fn(() => ({ emit: roomEmit })),
             in: jest.fn(() => ({ fetchSockets: jest.fn(async () => []) })),
+            sockets: new Map(),
         };
         const logger: any = {
             debug: jest.fn(),
@@ -82,6 +84,7 @@ describe("listen together socket runtime behavior", () => {
             isEnabled: jest.fn(() => false),
             start: jest.fn(async () => undefined),
             publishSnapshot: jest.fn(async () => undefined),
+            publishMembership: jest.fn(async () => undefined),
             publishEnded: jest.fn(async () => undefined),
             stop: jest.fn(async () => undefined),
         };
@@ -94,7 +97,9 @@ describe("listen together socket runtime behavior", () => {
         };
         const groupManager: any = {
             setCallbacks: jest.fn(),
+            has: jest.fn(() => true),
             applyExternalSnapshot: jest.fn(),
+            applyCommittedMembership: jest.fn(() => []),
             remove: jest.fn(),
             snapshotById: jest.fn(() => null),
             setUnavailableIndices: jest.fn(),
@@ -230,6 +235,7 @@ describe("listen together socket runtime behavior", () => {
             getServerOptions: () => serverOptions,
             configMock,
             namespace,
+            roomEmit,
             createIORedisClient,
             adapterPubClient,
             adapterSubClient,
@@ -613,6 +619,101 @@ describe("listen together socket runtime behavior", () => {
 
         socketService.shutdownListenTogetherSocket();
         jest.useRealTimers();
+    });
+
+    it("broadcasts only presence when fallback hydration connects a member", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        const { socketService, eventHandlers } =
+            bootstrapConnectedSocket(mocks);
+        const callbacks = mocks.groupManager.setCallbacks.mock.calls[0][0];
+        mocks.groupManager.addSocket.mockImplementationOnce(
+            (groupId: string, userId: string) => {
+                callbacks.onMemberPresence(groupId, {
+                    userId,
+                    isConnected: true,
+                });
+            },
+        );
+
+        const ack = jest.fn();
+        await eventHandlers["join-group"]({ groupId: "group-1" }, ack);
+
+        expect(ack).toHaveBeenCalledWith({ ok: true });
+        expect(mocks.roomEmit).toHaveBeenCalledWith("group:member-presence", {
+            userId: "user-1",
+            isConnected: true,
+        });
+        expect(mocks.roomEmit).not.toHaveBeenCalledWith(
+            "group:state",
+            expect.anything(),
+        );
+        socketService.shutdownListenTogetherSocket();
+    });
+
+    it("delivers departure to a second tab before revoking its room membership", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const callbacks = require("../listenTogetherCallbacks");
+        const secondTab = {
+            id: "sock-tab-b",
+            data: {
+                userId: "user-1",
+                username: "User One",
+                groupId: "group-1",
+            },
+            leave: jest.fn(async () => undefined),
+        };
+        mocks.namespace.sockets.set(secondTab.id, secondTab);
+        mocks.leaveGroup.mockImplementationOnce(async () => {
+            await callbacks.enqueueGroupMembershipPublication(
+                "group-1",
+                {
+                    type: "left",
+                    member: { userId: "user-1", username: "User One" },
+                },
+                {
+                    hostUserId: "host-1",
+                    members: [
+                        {
+                            userId: "host-1",
+                            username: "Host",
+                            isHost: true,
+                            joinedAt: "2026-08-20T12:00:00.000Z",
+                            isConnected: true,
+                        },
+                    ],
+                },
+                [secondTab.id],
+            );
+        });
+        socket.data.groupId = "group-1";
+
+        const ack = jest.fn();
+        await eventHandlers["leave-group"](ack);
+
+        expect(mocks.roomEmit).toHaveBeenCalledWith("group:member-left", {
+            userId: "user-1",
+            username: "User One",
+        });
+        expect(secondTab.leave).toHaveBeenCalledWith("group-1");
+        expect(secondTab.data.groupId).toBeNull();
+        expect(mocks.roomEmit.mock.invocationCallOrder[0]).toBeLessThan(
+            secondTab.leave.mock.invocationCallOrder[0],
+        );
+        expect(ack).toHaveBeenCalledWith({ ok: true });
+        socketService.shutdownListenTogetherSocket();
     });
 
     it("fails module initialization when JWT_SECRET and SESSION_SECRET are missing", () => {
@@ -1613,7 +1714,7 @@ describe("listen together socket runtime behavior", () => {
         socketService.shutdownListenTogetherSocket();
     });
 
-    it("logs adapter state-store warning and applies snapshots from cluster-sync callbacks", () => {
+    it("logs adapter warning and applies cluster snapshots, membership, and endings", async () => {
         process.env = {
             ...originalEnv,
             JWT_SECRET: "test-secret",
@@ -1636,12 +1737,32 @@ describe("listen together socket runtime behavior", () => {
             mocks.listenTogetherClusterSync.start.mock.calls[0][0];
         const endedHandler =
             mocks.listenTogetherClusterSync.start.mock.calls[0][1];
+        const membershipHandler =
+            mocks.listenTogetherClusterSync.start.mock.calls[0][2];
         const snapshot = { id: "group-1", playback: {}, members: [] };
         clusterHandler(snapshot);
+        const peerSocket = {
+            data: { userId: "old-host", groupId: "group-1" },
+            leave: jest.fn(async () => undefined),
+        };
+        mocks.namespace.sockets.set("peer-socket", peerSocket);
+        mocks.groupManager.applyCommittedMembership.mockReturnValueOnce([
+            "peer-socket",
+        ]);
+        membershipHandler("group-1", {
+            hostUserId: "new-host",
+            members: [],
+        });
+        await new Promise((resolve) => setImmediate(resolve));
         endedHandler("group-1");
         expect(mocks.groupManager.applyExternalSnapshot).toHaveBeenCalledWith(
             snapshot,
         );
+        expect(
+            mocks.groupManager.applyCommittedMembership,
+        ).toHaveBeenCalledWith("group-1", [], "new-host");
+        expect(peerSocket.leave).toHaveBeenCalledWith("group-1");
+        expect(peerSocket.data.groupId).toBeNull();
         expect(mocks.groupManager.remove).toHaveBeenCalledWith("group-1");
     });
 

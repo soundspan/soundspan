@@ -19,6 +19,7 @@ const callbacks: ManagerCallbacks = {
     onWaiting: jest.fn(),
     onPlayAt: jest.fn(),
     onMemberJoined: jest.fn(),
+    onMemberPresence: jest.fn(),
     onMemberLeft: jest.fn(),
     onGroupEnded: jest.fn(),
 };

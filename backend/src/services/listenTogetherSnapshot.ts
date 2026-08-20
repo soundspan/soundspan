@@ -71,6 +71,32 @@ export function reconcileCommittedMembers(
     group.lastActivity = now;
 }
 
+/** Apply exact snapshot membership and return sockets owned by omitted members. */
+export function applyExactCommittedMembership(
+    group: GroupState,
+    members: GroupSnapshot["members"],
+    hostUserId: string,
+    now: number,
+): string[] {
+    const committedUserIds = new Set(members.map((member) => member.userId));
+    const revokedSocketIds = Array.from(group.members.values())
+        .filter((member) => !committedUserIds.has(member.userId))
+        .flatMap((member) => Array.from(member.socketIds));
+    const persistedMembers = members.map((member) => {
+        const joinedAt = new Date(member.joinedAt);
+        return {
+            userId: member.userId,
+            username: member.username,
+            isHost: member.userId === hostUserId,
+            joinedAt: Number.isFinite(joinedAt.getTime())
+                ? joinedAt
+                : new Date(0),
+        };
+    });
+    reconcileCommittedMembers(group, persistedMembers, hostUserId, now);
+    return revokedSocketIds;
+}
+
 /** Serialize members in stable host-then-join order. */
 export function snapshotMembers(
     members: Map<string, GroupMember>,

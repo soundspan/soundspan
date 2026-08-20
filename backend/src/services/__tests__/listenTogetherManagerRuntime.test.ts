@@ -25,6 +25,7 @@ describe("listenTogetherManager runtime behavior", () => {
         onWaiting: jest.fn(),
         onPlayAt: jest.fn(),
         onMemberJoined: jest.fn(),
+        onMemberPresence: jest.fn(),
         onMemberLeft: jest.fn(),
         onGroupEnded: jest.fn(),
     });
@@ -222,6 +223,43 @@ describe("listenTogetherManager runtime behavior", () => {
 
         expect(groupManager.connectedMemberCount("g-socket")).toBe(1);
         expect(callbacks.onPlayAt).toHaveBeenCalled();
+    });
+
+    it("emits presence only when a DB-fallback hydrated member connects", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.hydrate("g-fallback-presence", {
+            name: "Fallback Presence",
+            joinCode: "FBACK1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            queue: [track("db-copy")],
+            currentIndex: 0,
+            isPlaying: true,
+            currentTimeMs: 42_000,
+            stateVersion: 7,
+            createdAt: new Date("2026-08-20T12:00:00.000Z"),
+            members: [
+                {
+                    userId: "host",
+                    username: "Host",
+                    isHost: true,
+                    joinedAt: new Date("2026-08-20T12:00:00.000Z"),
+                },
+            ],
+        });
+
+        groupManager.addSocket("g-fallback-presence", "host", "host-tab");
+
+        expect(
+            groupManager.snapshotForPublication("g-fallback-presence"),
+        ).toBeUndefined();
+        expect(callbacks.onMemberPresence).toHaveBeenCalledWith(
+            "g-fallback-presence",
+            { userId: "host", isConnected: true },
+        );
+        expect(callbacks.onGroupState).not.toHaveBeenCalled();
     });
 
     it("enforces host-only playback control and supports play/pause/seek deltas", () => {
@@ -1060,79 +1098,6 @@ describe("listenTogetherManager runtime behavior", () => {
             "host-a",
         );
         expect(groupManager.socketCount("g-host-merge", "host-a")).toBe(1);
-    });
-
-    it("re-adds the persisted host without retaining a transferred host flag", () => {
-        groupManager.setCallbacks(createCallbacks());
-        groupManager.create("g-host-rejoin", {
-            name: "Host Rejoin",
-            joinCode: "HOSTR1",
-            groupType: "host-follower",
-            visibility: "private",
-            hostUserId: "transient-host",
-            hostUsername: "Transient Host",
-            queue: [track("1")],
-            createdAt: new Date("2026-02-16T00:00:00.000Z"),
-        });
-
-        groupManager.reconcileHost("g-host-rejoin", "persisted-host");
-        groupManager.addMember(
-            "g-host-rejoin",
-            "persisted-host",
-            "Persisted Host",
-            true,
-        );
-
-        const group = groupManager.get("g-host-rejoin")!;
-        const hosts = Array.from(group.members.values()).filter(
-            (member) => member.isHost,
-        );
-        expect(group.hostUserId).toBe("persisted-host");
-        expect(hosts.map((member) => member.userId)).toEqual([
-            "persisted-host",
-        ]);
-    });
-
-    it("reconciles committed membership before granting control to a transferred host", () => {
-        groupManager.setCallbacks(createCallbacks());
-        const joinedAt = new Date("2026-08-20T12:00:00.000Z");
-        groupManager.create("g-committed-members", {
-            name: "Committed Members",
-            joinCode: "CMMT01",
-            groupType: "host-follower",
-            visibility: "private",
-            hostUserId: "departed-host",
-            hostUsername: "Departed Host",
-            queue: [track("1")],
-            createdAt: joinedAt,
-        });
-        groupManager.addMember(
-            "g-committed-members",
-            "committed-host",
-            "Committed Host",
-        );
-
-        groupManager.reconcileMembers(
-            "g-committed-members",
-            [
-                {
-                    userId: "committed-host",
-                    username: "Committed Host",
-                    isHost: true,
-                    joinedAt,
-                },
-            ],
-            "committed-host",
-        );
-
-        expect(() =>
-            groupManager.play("g-committed-members", "committed-host"),
-        ).not.toThrow();
-        expect(
-            groupManager
-                .get("g-committed-members")
-                ?.members.has("departed-host"),
-        ).toBe(false);
     });
 
     it("anchors external playback to the local clock with bounded age compensation", () => {

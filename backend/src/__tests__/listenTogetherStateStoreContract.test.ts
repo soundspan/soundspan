@@ -1,54 +1,111 @@
-import fs from "fs";
-import path from "path";
-
-describe("listen together state store contract", () => {
-    const socketServicePath = path.join(
-        __dirname,
-        "..",
-        "services",
-        "listenTogetherSocket.ts",
-    );
-    const listenTogetherServicePath = path.join(
-        __dirname,
-        "..",
-        "services",
-        "listenTogether.ts",
-    );
-    const socketSource = fs.readFileSync(socketServicePath, "utf8");
-    const serviceSource = fs.readFileSync(listenTogetherServicePath, "utf8");
-    const callbacksPath = path.join(
-        __dirname,
-        "..",
-        "services",
-        "listenTogetherCallbacks.ts",
-    );
-    const callbacksSource = fs.readFileSync(callbacksPath, "utf8");
-
-    it("loads authoritative snapshot from redis store before locked mutations", () => {
-        expect(socketSource).toContain(
-            "await listenTogetherStateStore.getSnapshot(groupId)",
-        );
-        expect(socketSource).toContain(
-            "groupManager.applyExternalSnapshot(authoritativeSnapshot)",
-        );
+describe("listen together publication state-store behavior", () => {
+    afterEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
     });
 
-    it("persists and deletes snapshots through callbacks and shutdown", () => {
-        expect(callbacksSource).toContain(
-            "await listenTogetherStateStore.setSnapshot(groupId, snapshot)",
+    function loadCallbacks() {
+        const listenTogetherStateStore = {
+            setSnapshot: jest.fn(async () => undefined),
+            deleteSnapshot: jest.fn(async () => undefined),
+        };
+        const listenTogetherClusterSync = {
+            publishSnapshot: jest.fn(async () => undefined),
+            publishMembership: jest.fn(async () => undefined),
+            publishEnded: jest.fn(async () => undefined),
+        };
+        const logger = {
+            child: jest.fn(() => ({
+                warn: jest.fn(),
+                error: jest.fn(),
+            })),
+        };
+
+        jest.doMock("../services/listenTogetherStateStore", () => ({
+            listenTogetherStateStore,
+        }));
+        jest.doMock("../services/listenTogetherClusterSync", () => ({
+            listenTogetherClusterSync,
+        }));
+        jest.doMock("../utils/logger", () => ({ logger }));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const callbacks = require("../services/listenTogetherCallbacks");
+        return {
+            callbacks,
+            listenTogetherStateStore,
+            listenTogetherClusterSync,
+        };
+    }
+
+    it("sets the snapshot before publishing and broadcasting it", async () => {
+        const {
+            callbacks,
+            listenTogetherStateStore,
+            listenTogetherClusterSync,
+        } = loadCallbacks();
+        const emitSnapshot = jest.fn();
+        callbacks.configureGroupPublicationBroadcaster({
+            emitSnapshot,
+            emitEnded: jest.fn(),
+            emitMemberJoined: jest.fn(),
+            emitMemberLeft: jest.fn(),
+            emitMemberPresence: jest.fn(),
+            revokeSockets: jest.fn(),
+        });
+        const snapshot = {
+            id: "group-1",
+            playback: { stateVersion: 4 },
+            members: [],
+        };
+
+        await callbacks.enqueueGroupSnapshotPublication("group-1", snapshot);
+
+        expect(listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
+            "group-1",
+            snapshot,
         );
-        expect(callbacksSource).toContain(
-            "await listenTogetherStateStore.deleteSnapshot(groupId)",
+        expect(
+            listenTogetherStateStore.setSnapshot.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+            listenTogetherClusterSync.publishSnapshot.mock
+                .invocationCallOrder[0],
         );
-        expect(socketSource).toContain("listenTogetherStateStore.stop();");
+        expect(emitSnapshot).toHaveBeenCalledWith("group-1", snapshot);
     });
 
-    it("hydrates cold-path memory from state store before database fallback", () => {
-        expect(serviceSource).toContain(
-            "const storedSnapshot = await listenTogetherStateStore.getSnapshot(groupId);",
+    it("deletes the snapshot before publishing and broadcasting an end", async () => {
+        const {
+            callbacks,
+            listenTogetherStateStore,
+            listenTogetherClusterSync,
+        } = loadCallbacks();
+        const emitEnded = jest.fn();
+        callbacks.configureGroupPublicationBroadcaster({
+            emitSnapshot: jest.fn(),
+            emitEnded,
+            emitMemberJoined: jest.fn(),
+            emitMemberLeft: jest.fn(),
+            emitMemberPresence: jest.fn(),
+            revokeSockets: jest.fn(),
+        });
+
+        await callbacks.enqueueGroupEndedPublication(
+            "group-1",
+            "Host ended the group",
         );
-        expect(serviceSource).toContain(
-            "groupManager.applyExternalSnapshot(storedSnapshot);",
+
+        expect(listenTogetherStateStore.deleteSnapshot).toHaveBeenCalledWith(
+            "group-1",
+        );
+        expect(
+            listenTogetherStateStore.deleteSnapshot.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+            listenTogetherClusterSync.publishEnded.mock.invocationCallOrder[0],
+        );
+        expect(emitEnded).toHaveBeenCalledWith(
+            "group-1",
+            "Host ended the group",
         );
     });
 });

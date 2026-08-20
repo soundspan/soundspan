@@ -17,9 +17,9 @@ import type {
 import { logger } from "../utils/logger";
 import {
     compensateSnapshotPosition,
+    applyExactCommittedMembership,
     advanceSnapshotWatermark,
     mergeSnapshotMembers,
-    reconcileCommittedMembers,
     reconcileHostFlags,
     selectHostSuccessor,
     shouldApplyIncomingPlayback,
@@ -89,6 +89,8 @@ export interface GroupState {
     createdAt: Date;
     /** True when in-memory state has diverged from DB and needs persisting. */
     dirty: boolean;
+    /** True when playback came from a live or shared authoritative snapshot. */
+    playbackAuthoritative: boolean;
 }
 
 /** Serialisable snapshot broadcast to clients. */
@@ -315,6 +317,7 @@ class GroupManager {
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
+            playbackAuthoritative: false,
         };
 
         this.groups.set(id, group);
@@ -392,6 +395,7 @@ class GroupManager {
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
+            playbackAuthoritative: true,
         };
 
         this.groups.set(id, group);
@@ -453,7 +457,7 @@ class GroupManager {
 
         // Broadcast presence transition so member connection dots update in real time.
         if (!wasConnected && member.socketIds.size > 0) {
-            this.broadcastState(group, { synchronize: false });
+            this.publishPresence(group, userId, true);
         }
     }
 
@@ -468,7 +472,7 @@ class GroupManager {
 
         // Broadcast presence transition so member connection dots update in real time.
         if (wasConnected && member.socketIds.size === 0) {
-            this.broadcastState(group, { synchronize: false });
+            this.publishPresence(group, userId, false);
 
             // In waiting state, disconnected members should not block the gate.
             if (group.syncState === "waiting") {
@@ -539,43 +543,19 @@ class GroupManager {
         return this.snapshot(group);
     }
 
-    /** Reconcile member host flags to an authoritative persisted identity. */
-    reconcileHost(groupId: string, hostUserId: string): void {
-        const group = this.requireGroup(groupId);
-        group.hostUserId = hostUserId;
-        reconcileHostFlags(group.members, hostUserId);
-    }
-
-    /** Replace local membership with the committed database membership set. */
-    reconcileMembers(
+    /** Apply exact committed membership and return sockets that lost membership. */
+    applyCommittedMembership(
         groupId: string,
-        persistedMembers: PersistedGroupMember[],
+        members: GroupSnapshot["members"],
         hostUserId: string,
-    ): void {
+    ): string[] {
         const group = this.requireGroup(groupId);
-        reconcileCommittedMembers(
+        return applyExactCommittedMembership(
             group,
-            persistedMembers,
+            members,
             hostUserId,
             Date.now(),
         );
-    }
-
-    /** Emit a snapshot already synchronized by the service layer. */
-    async publishAuthoritativeSnapshot(snapshot: GroupSnapshot): Promise<void> {
-        await this.callbacks?.onGroupState(snapshot.id, snapshot, {
-            synchronize: false,
-        });
-    }
-
-    /** Emit an end notification already synchronized by the service layer. */
-    async publishAuthoritativeEnd(
-        groupId: string,
-        reason: string,
-    ): Promise<void> {
-        await this.callbacks?.onGroupEnded(groupId, reason, {
-            synchronize: false,
-        });
     }
 
     removeMember(
@@ -1020,6 +1000,13 @@ class GroupManager {
         return this.snapshot(group);
     }
 
+    /** Return a snapshot only when playback is safe to publish to peers. */
+    snapshotForPublication(groupId: string): GroupSnapshot | undefined {
+        const group = this.groups.get(groupId);
+        if (!group?.playbackAuthoritative) return undefined;
+        return this.snapshot(group);
+    }
+
     /**
      * Apply a remotely-produced snapshot (from another backend replica) to keep
      * this pod's in-memory state aligned without re-emitting socket callbacks.
@@ -1151,6 +1138,7 @@ class GroupManager {
             lastActivity: now,
             createdAt: existing?.createdAt ?? new Date(),
             dirty: false,
+            playbackAuthoritative: true,
         };
 
         this.groups.set(snapshot.id, group);
@@ -1261,6 +1249,18 @@ class GroupManager {
             return;
         }
         this.callbacks?.onGroupState(group.id, snapshot);
+    }
+
+    private publishPresence(
+        group: GroupState,
+        userId: string,
+        isConnected: boolean,
+    ): void {
+        if (group.playbackAuthoritative) {
+            this.broadcastState(group, { synchronize: false });
+            return;
+        }
+        this.callbacks?.onMemberPresence(group.id, { userId, isConnected });
     }
 
     private checkReadyGate(group: GroupState): boolean {

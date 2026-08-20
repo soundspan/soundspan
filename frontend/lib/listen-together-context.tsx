@@ -36,6 +36,7 @@ import { isEpisodeQueueItem, type QueueItem } from "@/lib/queue-item";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
+    applyGroupMemberPresence,
     getServerClockOffsetMs,
     listenTogetherSocket,
     type GroupSnapshot,
@@ -1306,10 +1307,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     });
                 },
                 onMemberJoined: (data) => {
-                    if (data.userId !== user?.id) {
+                    if (data.userId !== user?.id)
                         toast.info(`${data.username} joined`);
-                    }
-                    // Refresh group state
                     setActiveGroup((prev) => {
                         if (!prev) return prev;
                         const exists = prev.members.some(
@@ -1333,10 +1332,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         return next;
                     });
                 },
+                onMemberPresence: (data) =>
+                    setActiveGroup((prev) =>
+                        applyGroupMemberPresence(prev, data),
+                    ),
                 onMemberLeft: (data) => {
-                    if (data.userId !== user?.id) {
+                    if (data.userId !== user?.id)
                         toast.info(`${data.username} left`);
-                    }
                     setActiveGroup((prev) => {
                         if (!prev) return prev;
                         const updated = {
@@ -1346,7 +1348,6 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                             ),
                             hostUserId: data.newHostUserId ?? prev.hostUserId,
                         };
-                        // Update host flag
                         if (data.newHostUserId) {
                             updated.members = updated.members.map((m) => ({
                                 ...m,

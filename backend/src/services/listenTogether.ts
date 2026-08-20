@@ -29,6 +29,7 @@ import { selectHostSuccessor } from "./listenTogetherSnapshot";
 import { flushGroupPublications } from "./listenTogetherCallbacks";
 import {
     captureGroupPublicationBase,
+    applyCommittedReconnect,
     publishCommittedDeparture,
     publishCommittedEnd,
     publishCommittedJoin,
@@ -94,6 +95,8 @@ export interface QueueTrackInput {
 
 interface CommittedJoin {
     hostUserId: string;
+    memberships: PersistedGroupMember[];
+    membershipTransitioned: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +525,7 @@ export async function joinGroup(
         const committed = await commitGroupJoin(
             dbGroup.id,
             userId,
+            memberPresentationName,
             now,
             captured?.hostUserId ?? groupManager.get(dbGroup.id)?.hostUserId,
         );
@@ -536,6 +540,8 @@ export async function joinGroup(
             captured,
             member,
             committed.hostUserId,
+            committed.memberships,
+            committed.membershipTransitioned,
         );
         if (snapshot) {
             return snapshot;
@@ -555,6 +561,7 @@ export async function joinGroup(
 async function commitGroupJoin(
     groupId: string,
     userId: string,
+    username: string,
     joinedAt: Date,
     capturedHostUserId?: string,
 ): Promise<CommittedJoin> {
@@ -566,16 +573,38 @@ async function commitGroupJoin(
         if (!group?.isActive) {
             throw new GroupError("NOT_FOUND", "Group not found");
         }
-        await tx.syncGroupMember.upsert({
+        const existingMembership = await tx.syncGroupMember.findUnique({
             where: { syncGroupId_userId: { syncGroupId: groupId, userId } },
-            update: { leftAt: null, joinedAt, isHost: false },
-            create: { syncGroupId: groupId, userId, isHost: false },
+            select: { leftAt: true },
         });
+        const membershipTransitioned = existingMembership?.leftAt !== null;
+        if (membershipTransitioned) {
+            await tx.syncGroupMember.upsert({
+                where: {
+                    syncGroupId_userId: { syncGroupId: groupId, userId },
+                },
+                update: { leftAt: null, joinedAt, isHost: false },
+                create: { syncGroupId: groupId, userId, isHost: false },
+            });
+        }
         const hostUserId = group.hostUserId ?? capturedHostUserId;
         if (!hostUserId) {
             throw new Error(`Active group ${groupId} has no host`);
         }
-        return { hostUserId };
+        const loadedMemberships = await loadPersistedMemberships(tx, groupId);
+        if (!loadedMemberships.some((member) => member.userId === userId)) {
+            loadedMemberships.push({
+                userId,
+                username,
+                isHost: false,
+                joinedAt,
+            });
+        }
+        const memberships = loadedMemberships.map((member) => ({
+            ...member,
+            isHost: member.userId === hostUserId,
+        }));
+        return { hostUserId, memberships, membershipTransitioned };
     });
 }
 
@@ -615,26 +644,24 @@ async function joinGroupByIdLocked(
     );
 
     const authoritativeHostUserId = membership.syncGroup.hostUserId;
-    const snapshot = await publishCommittedJoin(
-        groupId,
-        captured,
-        {
-            userId,
-            username: memberPresentationName,
-            isHost: userId === authoritativeHostUserId,
-            joinedAt:
-                membership.joinedAt instanceof Date
-                    ? membership.joinedAt
-                    : new Date(),
-        },
-        authoritativeHostUserId,
-    );
-    if (snapshot) {
-        return snapshot;
+    const member = {
+        userId,
+        username: memberPresentationName,
+        isHost: userId === authoritativeHostUserId,
+        joinedAt:
+            membership.joinedAt instanceof Date
+                ? membership.joinedAt
+                : new Date(),
+    };
+    if (captured) {
+        return applyCommittedReconnect(
+            captured,
+            member,
+            authoritativeHostUserId,
+        );
     }
 
-    // No playback base was publishable. Hydrate only for this caller's
-    // response; publishCommittedJoin already emitted membership-only.
+    // No playback base was publishable. Hydrate only for this caller's response.
     await ensureGroupInMemory(groupId);
     const responseSnapshot = groupManager.snapshotById(groupId);
     if (!responseSnapshot) {
@@ -655,7 +682,7 @@ type CommittedDeparture =
       }
     | { status: "ended" | "already-ended" };
 
-async function loadPersistedHostCandidates(
+async function loadPersistedMemberships(
     tx: Prisma.TransactionClient,
     groupId: string,
 ): Promise<PersistedHostCandidate[]> {
@@ -667,7 +694,7 @@ async function loadPersistedHostCandidates(
             user: { select: { username: true, displayName: true } },
         },
     });
-    return memberships.map((membership) => ({
+    return (memberships ?? []).map((membership) => ({
         userId: membership.userId,
         username:
             membership.user.displayName?.trim() || membership.user.username,
@@ -729,7 +756,7 @@ async function commitGroupDeparture(
         });
         if (!group?.isActive) return { status: "already-ended" };
 
-        const candidates = await loadPersistedHostCandidates(tx, groupId);
+        const candidates = await loadPersistedMemberships(tx, groupId);
         if (candidates.length === 0) {
             await tx.syncGroup.update({
                 where: { id: groupId },

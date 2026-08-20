@@ -9,6 +9,7 @@ import {
     enqueueGroupMembershipPublication,
     enqueueGroupSnapshotPublication,
 } from "./listenTogetherCallbacks";
+import type { ClusterGroupMembership } from "./listenTogetherClusterSync";
 
 /** Capture the authoritative playback base while the caller holds the group lock. */
 export async function captureGroupPublicationBase(
@@ -18,7 +19,7 @@ export async function captureGroupPublicationBase(
     if (storedSnapshot) {
         return storedSnapshot;
     }
-    return groupManager.snapshotById(groupId) ?? null;
+    return groupManager.snapshotForPublication(groupId) ?? null;
 }
 
 function clonePlayback(
@@ -63,6 +64,27 @@ export function overlayCommittedMembership(
     };
 }
 
+function committedMembershipState(
+    memberships: PersistedGroupMember[],
+    hostUserId: string,
+    captured?: GroupSnapshot,
+): ClusterGroupMembership {
+    const connectedMembers = new Map(
+        captured?.members.map((member) => [member.userId, member]) ?? [],
+    );
+    return {
+        hostUserId,
+        members: memberships.map((membership) => ({
+            userId: membership.userId,
+            username: membership.username,
+            isHost: membership.userId === hostUserId,
+            joinedAt: membership.joinedAt.toISOString(),
+            isConnected:
+                connectedMembers.get(membership.userId)?.isConnected ?? false,
+        })),
+    };
+}
+
 /** Overlay one committed join onto the captured membership set. */
 export function overlayCommittedJoin(
     captured: GroupSnapshot,
@@ -92,19 +114,52 @@ export async function publishCommittedJoin(
     captured: GroupSnapshot | null,
     member: PersistedGroupMember,
     hostUserId: string,
+    memberships: PersistedGroupMember[],
+    membershipTransitioned: boolean,
 ): Promise<GroupSnapshot | null> {
-    const membership = {
-        type: "joined" as const,
-        member: { userId: member.userId, username: member.username },
-    };
+    const membership = membershipTransitioned
+        ? {
+              type: "joined" as const,
+              member: { userId: member.userId, username: member.username },
+          }
+        : undefined;
+    const committedMembership = committedMembershipState(
+        memberships,
+        hostUserId,
+        captured ?? undefined,
+    );
     if (!captured) {
-        await enqueueGroupMembershipPublication(groupId, membership);
+        await enqueueGroupMembershipPublication(
+            groupId,
+            membership,
+            committedMembership,
+        );
         return null;
     }
 
+    const snapshot = overlayCommittedMembership(
+        captured,
+        memberships,
+        hostUserId,
+    );
+    hydrateFromCapturedSnapshot(snapshot);
+    await enqueueGroupSnapshotPublication(
+        groupId,
+        snapshot,
+        membership,
+        committedMembership,
+    );
+    return snapshot;
+}
+
+/** Rehydrate one persisted reconnect without publishing a membership transition. */
+export function applyCommittedReconnect(
+    captured: GroupSnapshot,
+    member: PersistedGroupMember,
+    hostUserId: string,
+): GroupSnapshot {
     const snapshot = overlayCommittedJoin(captured, member, hostUserId);
     hydrateFromCapturedSnapshot(snapshot);
-    await enqueueGroupSnapshotPublication(groupId, snapshot, membership);
     return snapshot;
 }
 
@@ -134,8 +189,25 @@ export async function publishCommittedDeparture(
             newHostUsername: committed.newHostUsername,
         },
     };
+    const committedMembership = committedMembershipState(
+        committed.memberships,
+        committed.hostUserId,
+        captured ?? undefined,
+    );
     if (!captured) {
-        await enqueueGroupMembershipPublication(groupId, membership);
+        const revokedSocketIds = groupManager.has(groupId)
+            ? groupManager.applyCommittedMembership(
+                  groupId,
+                  committedMembership.members,
+                  committed.hostUserId,
+              )
+            : [];
+        await enqueueGroupMembershipPublication(
+            groupId,
+            membership,
+            committedMembership,
+            revokedSocketIds,
+        );
         return;
     }
 
@@ -145,7 +217,18 @@ export async function publishCommittedDeparture(
         committed.hostUserId,
     );
     hydrateFromCapturedSnapshot(snapshot);
-    await enqueueGroupSnapshotPublication(groupId, snapshot, membership);
+    const revokedSocketIds = groupManager.applyCommittedMembership(
+        groupId,
+        snapshot.members,
+        committed.hostUserId,
+    );
+    await enqueueGroupSnapshotPublication(
+        groupId,
+        snapshot,
+        membership,
+        committedMembership,
+        revokedSocketIds,
+    );
 }
 
 /** Hydrate from the capture, remove local state, and queue one ended publication. */
