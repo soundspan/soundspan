@@ -99,10 +99,31 @@ describe("provider track retention policy", () => {
         ).toEqual({
             albumId: "album-1",
             album: expect.objectContaining({
-                NOT: { location: "LIBRARY" },
+                NOT: {
+                    OR: [{ location: "LIBRARY" }, { rgMbid: { in: [] } }],
+                },
                 discoveryRecords: { none: { status: "LIKED" } },
             }),
         });
+    });
+
+    it("adds unlinked LIKED release groups to the discovery exclusion", () => {
+        expect(
+            discoveryAlbumTracksOrphanRetentionGuardWhere("album-1", cutoff, [
+                "rolling-like",
+            ]),
+        ).toEqual(
+            expect.objectContaining({
+                album: expect.objectContaining({
+                    NOT: {
+                        OR: [
+                            { location: "LIBRARY" },
+                            { rgMbid: { in: ["rolling-like"] } },
+                        ],
+                    },
+                }),
+            }),
+        );
     });
 
     it("protects owned and overridden artists from parent collection", () => {

@@ -116,6 +116,18 @@ export function albumOrphanRetentionGuardWhere(
     } as Prisma.AlbumWhereInput;
 }
 
+/** Loads legacy LIKED release groups that an old replica did not link. */
+export async function findUnlinkedLikedDiscoveryRgMbids(
+    transaction: Prisma.TransactionClient,
+): Promise<string[]> {
+    const rows = await transaction.discoveryAlbum.findMany({
+        where: { status: "LIKED", catalogAlbumId: null },
+        distinct: ["rgMbid"],
+        select: { rgMbid: true },
+    });
+    return rows.map((row) => row.rgMbid);
+}
+
 /**
  * Discovery cleanup must never collect an album promoted into the library.
  * Like-promotion writes location and ownership atomically, so this scope is
@@ -123,12 +135,18 @@ export function albumOrphanRetentionGuardWhere(
  */
 export function discoveryAlbumOrphanRetentionGuardWhere(
     cutoff: Date,
+    unlinkedLikedRgMbids: readonly string[] = [],
 ): Prisma.AlbumWhereInput {
     // Uses the NOT key (not `location`) so spreading this guard next to a
     // caller's explicit `location` filter cannot clobber it.
     return {
         ...albumOrphanRetentionGuardWhere(cutoff),
-        NOT: { location: "LIBRARY" },
+        NOT: {
+            OR: [
+                { location: "LIBRARY" },
+                { rgMbid: { in: [...unlinkedLikedRgMbids] } },
+            ],
+        },
         discoveryRecords: { none: { status: "LIKED" } },
     } as Prisma.AlbumWhereInput;
 }
@@ -148,10 +166,14 @@ export function albumTracksOrphanRetentionGuardWhere(
 export function discoveryAlbumTracksOrphanRetentionGuardWhere(
     albumId: string,
     cutoff: Date,
+    unlinkedLikedRgMbids: readonly string[] = [],
 ): Prisma.TrackWhereInput {
     return {
         albumId,
-        album: discoveryAlbumOrphanRetentionGuardWhere(cutoff),
+        album: discoveryAlbumOrphanRetentionGuardWhere(
+            cutoff,
+            unlinkedLikedRgMbids,
+        ),
     };
 }
 

@@ -173,6 +173,39 @@ export class MusicScannerService {
         }
     }
 
+    private async promoteNativeAlbumOnce(
+        album: {
+            id: string;
+            artistId: string;
+            rgMbid: string;
+            location: string;
+        },
+        promotedAlbumIds: Set<string>,
+    ): Promise<void> {
+        if (promotedAlbumIds.has(album.id)) return;
+        promotedAlbumIds.add(album.id);
+        try {
+            if (album.location === "LIBRARY") {
+                const ownership = await prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: album.artistId,
+                            rgMbid: album.rgMbid,
+                        },
+                    },
+                    select: { source: true },
+                });
+                if (ownership?.source === "native_scan") return;
+            }
+            await prisma.$transaction((transaction) =>
+                promoteAlbumOwnership(transaction, album, "native_scan"),
+            );
+        } catch (error: unknown) {
+            promotedAlbumIds.delete(album.id);
+            throw error;
+        }
+    }
+
     private async markTrackHealthIssue(
         trackId: string,
         status: "MISSING_FROM_DISK" | "UNREADABLE_METADATA",
@@ -409,6 +442,7 @@ export class MusicScannerService {
             errors: [],
         };
         const newTrackPaths = new Set<string>();
+        const promotedAlbumIds = new Set<string>();
 
         for (const audioFile of audioFiles) {
             await this.scanQueue.add(async () => {
@@ -474,6 +508,7 @@ export class MusicScannerService {
                         existingTrack?.duration ?? null,
                         contentChangeDetected,
                         Boolean(removedTrack),
+                        promotedAlbumIds,
                     );
                     if (!existingTrack) newTrackPaths.add(relativePath);
                 } catch (err: any) {
@@ -1004,6 +1039,7 @@ export class MusicScannerService {
         previousDuration: number | null = null,
         contentChangeDetected = false,
         revival = false,
+        promotedAlbumIds: Set<string> = new Set<string>(),
     ): Promise<void> {
         // Extract metadata in two stages. The cheap header-only parse yields
         // a duration for most formats (FLAC STREAMINFO, MP3 Xing, MP4 atoms).
@@ -1350,6 +1386,7 @@ export class MusicScannerService {
                                 source: "native_scan",
                             },
                         });
+                        promotedAlbumIds.add(created.id);
                     }
                     return created;
                 });
@@ -1437,23 +1474,15 @@ export class MusicScannerService {
         }
 
         if (!isDiscoveryAlbum) {
-            const albumToPromote = album;
             if (album.location !== "LIBRARY") {
                 logger.info(
                     `[Scanner] Promoting album "${album.title}" (${album.id}) from ${album.location} to LIBRARY after local scan`,
                 );
             }
-            await prisma.$transaction(async (transaction) => {
-                await promoteAlbumOwnership(
-                    transaction,
-                    {
-                        id: albumToPromote.id,
-                        artistId: artist.id,
-                        rgMbid: albumToPromote.rgMbid,
-                    },
-                    "native_scan",
-                );
-            });
+            await this.promoteNativeAlbumOnce(
+                { ...album, artistId: artist.id },
+                promotedAlbumIds,
+            );
             album = { ...album, location: "LIBRARY" };
         }
 

@@ -16,6 +16,7 @@ import { Prisma } from "@prisma/client";
 import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
 import { config } from "../config";
 import { cleanupOrphanedLibraryEntities } from "../services/libraryOrphanCleanup";
+import { DISCOVERY_LIKED_OWNERSHIP_SOURCE } from "../services/albumOwnershipPromotion";
 import {
     albumOrphanRetentionGuardWhere,
     artistOrphanRetentionGuardWhere,
@@ -304,7 +305,12 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 prisma.ownedAlbum.findFirst({
                     where: {
                         artistId: album.artistId,
-                        source: { in: ["native_scan", "discovery_liked"] },
+                        source: {
+                            in: [
+                                "native_scan",
+                                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                            ],
+                        },
                     },
                 }),
         );

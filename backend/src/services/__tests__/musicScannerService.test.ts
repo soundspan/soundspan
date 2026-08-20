@@ -51,6 +51,7 @@ const mockPrisma = {
     },
     ownedAlbum: {
         create: jest.fn(),
+        findUnique: jest.fn(),
         upsert: jest.fn(),
     },
     libraryHealthRecord: {
@@ -1840,7 +1841,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(result.tracksUpdated).toBe(1);
     });
 
-    it("soft-removes ambiguous identical moves when lower tiers cannot disambiguate them", async () => {
+    it("promotes a shared album once before soft-removing ambiguous moves", async () => {
         const scanner = new MusicScannerService();
         const shared = {
             audioHash: "sha256:" + "66".repeat(32),
@@ -1876,7 +1877,8 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3);
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledTimes(1);
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-old-1", "track-old-2"] },

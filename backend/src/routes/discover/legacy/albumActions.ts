@@ -1,7 +1,11 @@
 import type { Request, Response } from "express";
 import type { Prisma } from "@prisma/client";
 import { lidarrService } from "../../../services/lidarr";
-import { promoteAlbumOwnership } from "../../../services/albumOwnershipPromotion";
+import {
+    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+    promoteAlbumOwnership,
+} from "../../../services/albumOwnershipPromotion";
+import { resolveDiscoveryCatalogAlbum } from "../../../services/discoveryCatalogAlbum";
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
 import {
@@ -14,6 +18,8 @@ import {
 type LegacyDiscoveryAlbum = NonNullable<
     Awaited<ReturnType<typeof prisma.discoveryAlbum.findFirst>>
 > & { catalogAlbumId?: string | null };
+
+class DiscoveryCatalogAlbumMissingError extends Error {}
 
 async function updateDiscoveryPlays(
     transaction: Prisma.TransactionClient,
@@ -36,69 +42,57 @@ async function updateDiscoveryPlays(
     });
 }
 
-async function findLegacyCatalogAlbum(
-    transaction: Prisma.TransactionClient,
-    discoveryAlbum: LegacyDiscoveryAlbum,
-) {
-    return transaction.album.findFirst({
-        where: {
-            OR: [
-                ...(discoveryAlbum.catalogAlbumId
-                    ? [{ id: discoveryAlbum.catalogAlbumId }]
-                    : []),
-                { rgMbid: discoveryAlbum.rgMbid },
-                {
-                    title: {
-                        equals: discoveryAlbum.albumTitle,
-                        mode: "insensitive",
-                    },
-                    artist: {
-                        name: {
-                            equals: discoveryAlbum.artistName,
-                            mode: "insensitive",
-                        },
-                    },
-                },
-            ],
-        },
-        include: { artist: true },
-    });
-}
-
 async function commitLegacyLike(userId: string, albumId: string) {
-    return prisma.$transaction(async (transaction) => {
-        const discoveryAlbum = await transaction.discoveryAlbum.findFirst({
-            where: { userId, rgMbid: albumId, status: "ACTIVE" },
-        });
-        if (!discoveryAlbum) return null;
-        const dbAlbum = await findLegacyCatalogAlbum(
-            transaction,
-            discoveryAlbum,
-        );
-        await transaction.discoveryAlbum.update({
-            where: { id: discoveryAlbum.id },
-            data: {
-                catalogAlbumId: dbAlbum?.id,
-                status: "LIKED",
-                likedAt: new Date(),
-            },
-        });
-        if (dbAlbum) {
+    try {
+        return await prisma.$transaction(async (transaction) => {
+            const discoveryAlbum = await transaction.discoveryAlbum.findFirst({
+                where: { userId, rgMbid: albumId, status: "ACTIVE" },
+            });
+            if (!discoveryAlbum) return null;
+            const liked = await transaction.discoveryAlbum.updateMany({
+                where: { id: discoveryAlbum.id, status: "ACTIVE" },
+                data: {
+                    status: "LIKED",
+                    likedAt: new Date(),
+                },
+            });
+            if (liked.count === 0) return null;
+            const dbAlbum = await resolveDiscoveryCatalogAlbum(
+                transaction,
+                discoveryAlbum,
+            );
+            if (!dbAlbum) {
+                throw new DiscoveryCatalogAlbumMissingError();
+            }
+            const catalogLock = await transaction.album.updateMany({
+                where: { id: dbAlbum.id },
+                data: { location: dbAlbum.location },
+            });
+            if (catalogLock.count === 0) {
+                throw new DiscoveryCatalogAlbumMissingError();
+            }
+            await transaction.discoveryAlbum.update({
+                where: { id: discoveryAlbum.id },
+                data: { catalogAlbumId: dbAlbum.id },
+            });
             await promoteAlbumOwnership(
                 transaction,
                 dbAlbum,
-                "discovery_liked",
+                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
             );
-        }
-        await updateDiscoveryPlays(
-            transaction,
-            discoveryAlbum.id,
-            userId,
-            "DISCOVERY",
-            "DISCOVERY_KEPT",
-        );
-        return { discoveryAlbum, dbAlbum };
-    });
+            await updateDiscoveryPlays(
+                transaction,
+                discoveryAlbum.id,
+                userId,
+                "DISCOVERY",
+                "DISCOVERY_KEPT",
+            );
+            return { discoveryAlbum, dbAlbum };
+        });
+    } catch (error: unknown) {
+        if (error instanceof DiscoveryCatalogAlbumMissingError) return null;
+        throw error;
+    }
 }
 
 async function removeLegacyDiscoveryTag(
@@ -141,7 +135,7 @@ async function commitLegacyUnlike(
             where: { userId, rgMbid: albumId, status: "LIKED" },
         });
         if (!discoveryAlbum) return false;
-        const dbAlbum = await findLegacyCatalogAlbum(
+        const dbAlbum = await resolveDiscoveryCatalogAlbum(
             transaction,
             discoveryAlbum,
         );
@@ -154,7 +148,7 @@ async function commitLegacyUnlike(
                 where: {
                     artistId: dbAlbum.artistId,
                     rgMbid: dbAlbum.rgMbid,
-                    source: "discovery_liked",
+                    source: DISCOVERY_LIKED_OWNERSHIP_SOURCE,
                 },
             });
         }

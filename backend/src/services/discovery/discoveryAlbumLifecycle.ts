@@ -10,7 +10,11 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { updateArtistCounts } from "../artistCountsService";
-import { promoteAlbumOwnership } from "../albumOwnershipPromotion";
+import {
+    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+    promoteAlbumOwnership,
+} from "../albumOwnershipPromotion";
+import { resolveDiscoveryCatalogAlbum } from "../discoveryCatalogAlbum";
 import { deleteDiscoveryAlbumCatalogEntry } from "../discoveryAlbumCatalogCleanup";
 import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
@@ -38,34 +42,32 @@ export class DiscoveryAlbumLifecycle {
      * Updates album location, creates OwnedAlbum record, updates artist counts.
      */
     async moveLikedAlbumToLibrary(album: DiscoveryAlbumInfo): Promise<void> {
-        const dbAlbum = await prisma.album.findFirst({
-            where: {
-                OR: [
-                    ...(album.catalogAlbumId
-                        ? [{ id: album.catalogAlbumId }]
-                        : []),
-                    { rgMbid: album.rgMbid },
-                ],
-            },
-            include: { artist: true },
+        const dbAlbum = await prisma.$transaction(async (transaction) => {
+            const catalogAlbum = await resolveDiscoveryCatalogAlbum(
+                transaction,
+                album,
+            );
+            if (catalogAlbum) {
+                await promoteAlbumOwnership(
+                    transaction,
+                    catalogAlbum,
+                    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                );
+            }
+            await transaction.discoveryAlbum.update({
+                where: { id: album.id },
+                data: { status: "MOVED" },
+            });
+            return catalogAlbum;
         });
 
         if (dbAlbum) {
-            await prisma.$transaction((transaction) =>
-                promoteAlbumOwnership(transaction, dbAlbum, "discover_liked"),
-            );
-
             await updateArtistCounts(dbAlbum.artistId);
 
             logger.debug(
                 `[DiscoveryLifecycle] Moved to library: ${album.artistName} - ${album.albumTitle}`,
             );
         }
-
-        await prisma.discoveryAlbum.update({
-            where: { id: album.id },
-            data: { status: "MOVED" },
-        });
     }
 
     /**
@@ -77,12 +79,7 @@ export class DiscoveryAlbumLifecycle {
         album: DiscoveryAlbumInfo,
         settings: LidarrSettings,
     ): Promise<boolean> {
-        const catalogResult = await deleteDiscoveryAlbumCatalogEntry({
-            OR: [
-                ...(album.catalogAlbumId ? [{ id: album.catalogAlbumId }] : []),
-                { rgMbid: album.rgMbid },
-            ],
-        });
+        const catalogResult = await deleteDiscoveryAlbumCatalogEntry(album);
         if (catalogResult === "retained") {
             logger.debug(
                 `[DiscoveryLifecycle] Preserved retained album: ${album.artistName} - ${album.albumTitle}`,
@@ -121,11 +118,6 @@ export class DiscoveryAlbumLifecycle {
 
         await prisma.discoveryTrack.deleteMany({
             where: { discoveryAlbumId: album.id },
-        });
-
-        await prisma.discoveryAlbum.update({
-            where: { id: album.id },
-            data: { status: "DELETED" },
         });
 
         logger.debug(

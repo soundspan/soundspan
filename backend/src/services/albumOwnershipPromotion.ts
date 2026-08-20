@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 
+/** Canonical ownership source for albums retained by a discovery like. */
+export const DISCOVERY_LIKED_OWNERSHIP_SOURCE = "discovery_liked";
+
 /** Album identity required to promote catalog ownership atomically. */
 export interface AlbumOwnershipPromotion {
     id: string;

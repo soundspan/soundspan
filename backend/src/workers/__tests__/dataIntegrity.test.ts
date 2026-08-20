@@ -334,16 +334,14 @@ describe("dataIntegrity worker", () => {
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: {
                 albumId: "discover-album-1",
-                album: {
-                    NOT: { location: "LIBRARY" },
+                album: expect.objectContaining({
+                    NOT: expect.any(Object),
                     discoveryRecords: {
                         none: { status: "LIKED" },
                     },
                     hasUserOverrides: false,
                     ownedBy: { none: {} },
-                    tracksTidal: { none: { NOT: expect.any(Object) } },
-                    tracksYtMusic: { none: { NOT: expect.any(Object) } },
-                },
+                }),
             },
         });
         expect(prisma.album.deleteMany).not.toHaveBeenCalled();

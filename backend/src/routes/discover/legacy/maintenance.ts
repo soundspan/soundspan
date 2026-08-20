@@ -5,6 +5,7 @@ import { logger } from "../../../utils/logger";
 import { getSystemSettings } from "../../../utils/systemSettings";
 import { sendRouteError } from "../../routeErrorResponse";
 import { sendCleanupLidarrFailure, sendFixTaggingFailure } from "../shared";
+import { DISCOVERY_LIKED_OWNERSHIP_SOURCE } from "../../../services/albumOwnershipPromotion";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
@@ -173,7 +174,9 @@ export async function handleLegacyFixTagging(
             const hasProtectedContent = await prisma.ownedAlbum.findFirst({
                 where: {
                     artist: { mbid: da.artistMbid },
-                    source: { in: ["native_scan", "discovery_liked"] },
+                    source: {
+                        in: ["native_scan", DISCOVERY_LIKED_OWNERSHIP_SOURCE],
+                    },
                 },
             });
 
@@ -224,7 +227,12 @@ export async function handleLegacyFixTagging(
                 const removed = await prisma.ownedAlbum.deleteMany({
                     where: {
                         artist: { mbid: da.artistMbid },
-                        source: { notIn: ["native_scan", "discovery_liked"] },
+                        source: {
+                            notIn: [
+                                "native_scan",
+                                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                            ],
+                        },
                     },
                 });
 

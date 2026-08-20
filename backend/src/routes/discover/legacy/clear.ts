@@ -5,11 +5,16 @@ import path from "path";
 import { config } from "../../../config";
 import { lidarrService } from "../../../services/lidarr";
 import { deleteDiscoveryAlbumCatalogEntry } from "../../../services/discoveryAlbumCatalogCleanup";
-import { promoteAlbumOwnership } from "../../../services/albumOwnershipPromotion";
+import {
+    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+    promoteAlbumOwnership,
+} from "../../../services/albumOwnershipPromotion";
+import { resolveDiscoveryCatalogAlbum } from "../../../services/discoveryCatalogAlbum";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
     discoveryAlbumOrphanRetentionGuardWhere,
     discoveryAlbumTracksOrphanRetentionGuardWhere,
+    findUnlinkedLikedDiscoveryRgMbids,
     providerTrackRetentionCutoff,
 } from "../../../services/providerTrackRetention";
 import { prisma } from "../../../utils/db";
@@ -23,6 +28,7 @@ import { sendClearPlaylistFailure } from "../shared";
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
 interface LegacyCleanupAlbum {
+    id: string;
     catalogAlbumId?: string | null;
     albumTitle: string;
     artistName: string;
@@ -32,14 +38,28 @@ interface LegacyCleanupAlbum {
 async function deleteLegacyCatalogAlbum(
     album: LegacyCleanupAlbum,
 ): ReturnType<typeof deleteDiscoveryAlbumCatalogEntry> {
-    return deleteDiscoveryAlbumCatalogEntry(
-        album.catalogAlbumId
-            ? { id: album.catalogAlbumId }
-            : {
-                  title: album.albumTitle,
-                  artist: { name: album.artistName },
-              },
-    );
+    return deleteDiscoveryAlbumCatalogEntry(album);
+}
+
+async function moveLegacyLikedAlbum(album: LegacyCleanupAlbum) {
+    return prisma.$transaction(async (transaction) => {
+        const catalogAlbum = await resolveDiscoveryCatalogAlbum(
+            transaction,
+            album,
+        );
+        if (catalogAlbum) {
+            await promoteAlbumOwnership(
+                transaction,
+                catalogAlbum,
+                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+            );
+        }
+        await transaction.discoveryAlbum.update({
+            where: { id: album.id },
+            data: { status: "MOVED" },
+        });
+        return catalogAlbum;
+    });
 }
 
 /** Handles frozen legacy discovery playlist cleanup. */
@@ -90,24 +110,9 @@ export async function handleLegacyClear(
 
             for (const album of likedAlbums) {
                 try {
-                    // Find the album in the database by matching artist + title
-                    const dbAlbum = await prisma.album.findFirst({
-                        where: {
-                            title: album.albumTitle,
-                            artist: { name: album.artistName },
-                        },
-                        include: { artist: true },
-                    });
+                    const dbAlbum = await moveLegacyLikedAlbum(album);
 
                     if (dbAlbum) {
-                        await prisma.$transaction((transaction) =>
-                            promoteAlbumOwnership(
-                                transaction,
-                                dbAlbum,
-                                "discover_liked",
-                            ),
-                        );
-
                         // If Lidarr is enabled, move the album files to main library
                         if (
                             settings.lidarrEnabled &&
@@ -178,12 +183,6 @@ export async function handleLegacyClear(
 
                         likedMoved++;
                     }
-
-                    // Mark as MOVED in discovery database
-                    await prisma.discoveryAlbum.update({
-                        where: { id: album.id },
-                        data: { status: "MOVED" },
-                    });
                 } catch (error: any) {
                     logger.error(
                         `  ✗ Failed to move ${album.albumTitle}: ${error.message}`,
@@ -370,12 +369,6 @@ export async function handleLegacyClear(
                     // Delete discovery links only after catalog deletion succeeds.
                     await prisma.discoveryTrack.deleteMany({
                         where: { discoveryAlbumId: album.id },
-                    });
-
-                    // Mark as DELETED in discovery database
-                    await prisma.discoveryAlbum.update({
-                        where: { id: album.id },
-                        data: { status: "DELETED" },
                     });
 
                     activeDeleted++;
@@ -716,8 +709,12 @@ export async function handleLegacyClear(
             new Date(),
             config.workers.providerTrackRetentionDays,
         );
-        const retentionWhere =
-            discoveryAlbumOrphanRetentionGuardWhere(retentionCutoff);
+        const unlinkedLikedRgMbids =
+            await findUnlinkedLikedDiscoveryRgMbids(prisma);
+        const retentionWhere = discoveryAlbumOrphanRetentionGuardWhere(
+            retentionCutoff,
+            unlinkedLikedRgMbids,
+        );
 
         // Find all DISCOVER albums that don't have a corresponding DiscoveryAlbum record
         const orphanedAlbums = await prisma.album.findMany({
@@ -757,6 +754,7 @@ export async function handleLegacyClear(
                     where: discoveryAlbumTracksOrphanRetentionGuardWhere(
                         orphanAlbum.id,
                         retentionCutoff,
+                        unlinkedLikedRgMbids,
                     ),
                 });
                 logger.debug(
