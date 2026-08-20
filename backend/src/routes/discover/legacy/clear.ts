@@ -5,10 +5,11 @@ import path from "path";
 import { config } from "../../../config";
 import { lidarrService } from "../../../services/lidarr";
 import { deleteDiscoveryAlbumCatalogEntry } from "../../../services/discoveryAlbumCatalogCleanup";
+import { promoteAlbumOwnership } from "../../../services/albumOwnershipPromotion";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
     discoveryAlbumOrphanRetentionGuardWhere,
-    albumTracksOrphanRetentionGuardWhere,
+    discoveryAlbumTracksOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "../../../services/providerTrackRetention";
 import { prisma } from "../../../utils/db";
@@ -22,18 +23,23 @@ import { sendClearPlaylistFailure } from "../shared";
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
 interface LegacyCleanupAlbum {
+    catalogAlbumId?: string | null;
     albumTitle: string;
     artistName: string;
+    rgMbid: string;
 }
 
 async function deleteLegacyCatalogAlbum(
     album: LegacyCleanupAlbum,
-): Promise<boolean> {
-    return deleteDiscoveryAlbumCatalogEntry({
-        title: album.albumTitle,
-        artist: { name: album.artistName },
-        location: "DISCOVER",
-    });
+): ReturnType<typeof deleteDiscoveryAlbumCatalogEntry> {
+    return deleteDiscoveryAlbumCatalogEntry(
+        album.catalogAlbumId
+            ? { id: album.catalogAlbumId }
+            : {
+                  title: album.albumTitle,
+                  artist: { name: album.artistName },
+              },
+    );
 }
 
 /** Handles frozen legacy discovery playlist cleanup. */
@@ -94,27 +100,13 @@ export async function handleLegacyClear(
                     });
 
                     if (dbAlbum) {
-                        // Update album location to LIBRARY
-                        await prisma.album.update({
-                            where: { id: dbAlbum.id },
-                            data: { location: "LIBRARY" },
-                        });
-
-                        // Create OwnedAlbum record if doesn't exist
-                        await prisma.ownedAlbum.upsert({
-                            where: {
-                                artistId_rgMbid: {
-                                    artistId: dbAlbum.artistId,
-                                    rgMbid: dbAlbum.rgMbid,
-                                },
-                            },
-                            create: {
-                                artistId: dbAlbum.artistId,
-                                rgMbid: dbAlbum.rgMbid,
-                                source: "discover_liked",
-                            },
-                            update: {}, // No update needed if exists
-                        });
+                        await prisma.$transaction((transaction) =>
+                            promoteAlbumOwnership(
+                                transaction,
+                                dbAlbum,
+                                "discover_liked",
+                            ),
+                        );
 
                         // If Lidarr is enabled, move the album files to main library
                         if (
@@ -208,14 +200,16 @@ export async function handleLegacyClear(
 
             for (const album of activeAlbums) {
                 try {
-                    const deleted = await deleteLegacyCatalogAlbum(album);
-                    if (!deleted) {
+                    const catalogResult = await deleteLegacyCatalogAlbum(album);
+                    if (catalogResult === "retained") {
                         logger.debug(
                             `  Preserved retained album: ${album.artistName} - ${album.albumTitle}`,
                         );
                         continue;
                     }
 
+                    // Catalog deletion commits first. Remote and local files
+                    // are best-effort so retries can converge links and state.
                     // Remove from Lidarr if enabled
                     if (
                         settings.lidarrEnabled &&
@@ -326,8 +320,8 @@ export async function handleLegacyClear(
                             }
                         } catch (lidarrError: any) {
                             if (lidarrError.response?.status !== 404) {
-                                logger.debug(
-                                    `  Lidarr delete failed for ${album.albumTitle}: ${lidarrError.message}`,
+                                logger.warn(
+                                    `  Lidarr delete failed for discoveryAlbum=${album.id}, rgMbid=${album.rgMbid}, lidarrAlbumId=${album.lidarrAlbumId}: ${lidarrError.message}`,
                                 );
                             }
                         }
@@ -368,8 +362,8 @@ export async function handleLegacyClear(
                             }
                         }
                     } catch (fsError: any) {
-                        logger.debug(
-                            `    Filesystem delete failed for ${album.albumTitle}: ${fsError.message}`,
+                        logger.warn(
+                            `    Filesystem delete failed for discoveryAlbum=${album.id}, rgMbid=${album.rgMbid}, album=${album.albumTitle}: ${fsError.message}`,
                         );
                     }
 
@@ -760,7 +754,7 @@ export async function handleLegacyClear(
             if (!hasDiscoveryRecord && !hasOwnedRecord) {
                 // Delete tracks first
                 await prisma.track.deleteMany({
-                    where: albumTracksOrphanRetentionGuardWhere(
+                    where: discoveryAlbumTracksOrphanRetentionGuardWhere(
                         orphanAlbum.id,
                         retentionCutoff,
                     ),

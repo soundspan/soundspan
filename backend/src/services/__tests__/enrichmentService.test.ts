@@ -397,7 +397,7 @@ describe("enrichment service behavior", () => {
         });
     });
 
-    it("applies album enrichment, persists owned albums for MBIDs, and skips empty updates", async () => {
+    it("applies album enrichment without creating ownership and skips empty updates", async () => {
         const service = new EnrichmentService();
         mockIsNativePath.mockReturnValue(false);
         mockDownloadAndStoreImage.mockResolvedValueOnce(null);
@@ -425,20 +425,7 @@ describe("enrichment service behavior", () => {
                 genres: ["jazz"],
             },
         });
-        expect(prisma.ownedAlbum.upsert).toHaveBeenCalledWith({
-            where: {
-                artistId_rgMbid: {
-                    artistId: "artist-1",
-                    rgMbid: "rg-1",
-                },
-            },
-            create: {
-                artistId: "artist-1",
-                rgMbid: "rg-1",
-                source: "enrichment",
-            },
-            update: {},
-        });
+        expect(prisma.ownedAlbum.upsert).not.toHaveBeenCalled();
 
         await service.applyAlbumEnrichment("album-2", {
             confidence: 0.1,

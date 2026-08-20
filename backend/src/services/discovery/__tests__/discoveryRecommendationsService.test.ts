@@ -1068,6 +1068,7 @@ describe("DiscoveryRecommendationsService", () => {
             expect(tx.discoveryAlbum.create).toHaveBeenNthCalledWith(1, {
                 data: {
                     userId: "user-1",
+                    catalogAlbumId: "album-1",
                     rgMbid: "rg-1",
                     artistName: "Artist One",
                     artistMbid: "artist-mbid-1",

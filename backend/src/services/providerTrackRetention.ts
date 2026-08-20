@@ -129,6 +129,7 @@ export function discoveryAlbumOrphanRetentionGuardWhere(
     return {
         ...albumOrphanRetentionGuardWhere(cutoff),
         NOT: { location: "LIBRARY" },
+        discoveryRecords: { none: { status: "LIKED" } },
     } as Prisma.AlbumWhereInput;
 }
 
@@ -140,6 +141,17 @@ export function albumTracksOrphanRetentionGuardWhere(
     return {
         albumId,
         album: albumOrphanRetentionGuardWhere(cutoff),
+    };
+}
+
+/** Guards discovery-scoped track deletion with discovery retention state. */
+export function discoveryAlbumTracksOrphanRetentionGuardWhere(
+    albumId: string,
+    cutoff: Date,
+): Prisma.TrackWhereInput {
+    return {
+        albumId,
+        album: discoveryAlbumOrphanRetentionGuardWhere(cutoff),
     };
 }
 

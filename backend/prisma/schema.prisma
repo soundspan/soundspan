@@ -342,6 +342,7 @@ model Album {
   tracksTidal      TrackTidal[]
   tracksYtMusic    TrackYtMusic[]
   ownedBy          OwnedAlbum[]
+  discoveryRecords DiscoveryAlbum[]
 
   @@unique([peerId, remoteId])
   @@index([artistId])
@@ -856,28 +857,31 @@ model ListeningState {
 }
 
 model DiscoveryAlbum {
-  id            String           @id @default(cuid())
-  userId        String
-  rgMbid        String
-  artistName    String
-  artistMbid    String?
-  albumTitle    String
-  lidarrAlbumId Int?
-  downloadedAt  DateTime?
-  folderPath    String           @default("")
-  weekStartDate DateTime
-  weekEndDate   DateTime         @default(now())
-  status        DiscoverStatus   @default(ACTIVE)
-  likedAt       DateTime?
-  similarity    Float?
-  tier          String?
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tracks        DiscoveryTrack[]
+  id             String         @id @default(cuid())
+  userId         String
+  rgMbid         String
+  artistName     String
+  artistMbid     String?
+  albumTitle     String
+  lidarrAlbumId  Int?
+  downloadedAt   DateTime?
+  folderPath     String         @default("")
+  weekStartDate  DateTime
+  weekEndDate    DateTime       @default(now())
+  status         DiscoverStatus @default(ACTIVE)
+  likedAt        DateTime?
+  catalogAlbumId String?
+  similarity     Float?
+  tier           String?
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  catalogAlbum   Album?         @relation(fields: [catalogAlbumId], references: [id], onDelete: SetNull)
+  tracks         DiscoveryTrack[]
 
   @@unique([userId, weekStartDate, rgMbid])
   @@index([userId, weekStartDate])
   @@index([downloadedAt])
   @@index([status])
+  @@index([catalogAlbumId])
 }
 
 model DiscoveryTrack {

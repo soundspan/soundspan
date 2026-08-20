@@ -30,6 +30,7 @@ import { rebindMovedTrack } from "./trackRebinding";
 import { recomputeAlbumLoudness } from "./albumLoudness";
 import { persistScannedTrack } from "./scannedTrackPersistence";
 import { deriveAudioFormatLabel } from "./audioFormatLabel";
+import { promoteAlbumOwnership } from "./albumOwnershipPromotion";
 
 const scanLogger = logger.child("MusicScannerService");
 const TRACK_IDENTITY_SELECT = {
@@ -1330,15 +1331,27 @@ export class MusicScannerService {
             const rgMbid = albumMbid || `temp-${Date.now()}-${Math.random()}`;
 
             try {
-                album = await prisma.album.create({
-                    data: {
-                        title: albumTitle,
-                        artistId: artist.id,
-                        rgMbid,
-                        year,
-                        primaryType: "Album",
-                        location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
-                    },
+                album = await prisma.$transaction(async (transaction) => {
+                    const created = await transaction.album.create({
+                        data: {
+                            title: albumTitle,
+                            artistId: artist.id,
+                            rgMbid,
+                            year,
+                            primaryType: "Album",
+                            location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
+                        },
+                    });
+                    if (!isDiscoveryAlbum) {
+                        await transaction.ownedAlbum.create({
+                            data: {
+                                artistId: artist.id,
+                                rgMbid,
+                                source: "native_scan",
+                            },
+                        });
+                    }
+                    return created;
                 });
             } catch (error: any) {
                 // Handle concurrent scanner workers (queue concurrency is 10)
@@ -1424,32 +1437,24 @@ export class MusicScannerService {
         }
 
         if (!isDiscoveryAlbum) {
+            const albumToPromote = album;
             if (album.location !== "LIBRARY") {
                 logger.info(
                     `[Scanner] Promoting album "${album.title}" (${album.id}) from ${album.location} to LIBRARY after local scan`,
                 );
-                album = await prisma.album.update({
-                    where: { id: album.id },
-                    data: { location: "LIBRARY" },
-                });
             }
-
-            await prisma.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
+            await prisma.$transaction(async (transaction) => {
+                await promoteAlbumOwnership(
+                    transaction,
+                    {
+                        id: albumToPromote.id,
                         artistId: artist.id,
-                        rgMbid: album.rgMbid,
+                        rgMbid: albumToPromote.rgMbid,
                     },
-                },
-                update: {
-                    source: "native_scan",
-                },
-                create: {
-                    rgMbid: album.rgMbid,
-                    artistId: artist.id,
-                    source: "native_scan",
-                },
+                    "native_scan",
+                );
             });
+            album = { ...album, location: "LIBRARY" };
         }
 
         const hashFields: {

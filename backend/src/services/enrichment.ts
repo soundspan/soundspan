@@ -505,6 +505,8 @@ export class EnrichmentService {
             updateData.genres = data.genres;
         }
 
+        // The album FK cascade preserves existing ownership across MBID edits.
+        // Enrichment must not recreate ownership removed by an unlike.
         if (Object.keys(updateData).length > 0) {
             await prisma.album.update({
                 where: { id: albumId },
@@ -515,31 +517,6 @@ export class EnrichmentService {
                     data.genres?.length || 0
                 } genres, label: ${data.label || "none"}`,
             );
-        }
-
-        // Update OwnedAlbum table if MBID changed
-        if (data.rgMbid) {
-            const album = await prisma.album.findUnique({
-                where: { id: albumId },
-                select: { artistId: true },
-            });
-
-            if (album) {
-                await prisma.ownedAlbum.upsert({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: album.artistId,
-                            rgMbid: data.rgMbid,
-                        },
-                    },
-                    create: {
-                        artistId: album.artistId,
-                        rgMbid: data.rgMbid,
-                        source: "enrichment",
-                    },
-                    update: {},
-                });
-            }
         }
     }
 }

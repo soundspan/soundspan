@@ -335,6 +335,10 @@ describe("dataIntegrity worker", () => {
             where: {
                 albumId: "discover-album-1",
                 album: {
+                    NOT: { location: "LIBRARY" },
+                    discoveryRecords: {
+                        none: { status: "LIKED" },
+                    },
                     hasUserOverrides: false,
                     ownedBy: { none: {} },
                     tracksTidal: { none: { NOT: expect.any(Object) } },

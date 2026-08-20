@@ -512,6 +512,7 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                             },
                             create: {
                                 userId: batch.userId,
+                                catalogAlbumId: track.album.id,
                                 rgMbid: track.album.rgMbid,
                                 artistName: track.album.artist.name,
                                 artistMbid: track.album.artist.mbid,
@@ -525,6 +526,7 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                             },
                             update: {
                                 // Refresh data on regeneration
+                                catalogAlbumId: track.album.id,
                                 artistName: track.album.artist.name,
                                 artistMbid: track.album.artist.mbid,
                                 albumTitle: track.album.title,
@@ -802,6 +804,7 @@ export class PlaylistPersistenceService extends LidarrCleanupService {
                         const discoveryAlbum = await tx.discoveryAlbum.create({
                             data: {
                                 userId: batch.userId,
+                                catalogAlbumId: album.id,
                                 rgMbid: album.rgMbid,
                                 artistName: album.artist.name,
                                 artistMbid: album.artist.mbid,

@@ -3,6 +3,7 @@ import {
     albumTracksOrphanRetentionGuardWhere,
     artistOrphanRetentionGuardWhere,
     classifyProviderTrackRetention,
+    discoveryAlbumTracksOrphanRetentionGuardWhere,
     type ProviderTrackRetentionInput,
 } from "../providerTrackRetention";
 
@@ -90,6 +91,18 @@ describe("provider track retention policy", () => {
                 album: albumOrphanRetentionGuardWhere(cutoff),
             },
         );
+    });
+
+    it("rechecks discovery retention at the track deletion boundary", () => {
+        expect(
+            discoveryAlbumTracksOrphanRetentionGuardWhere("album-1", cutoff),
+        ).toEqual({
+            albumId: "album-1",
+            album: expect.objectContaining({
+                NOT: { location: "LIBRARY" },
+                discoveryRecords: { none: { status: "LIKED" } },
+            }),
+        });
     });
 
     it("protects owned and overridden artists from parent collection", () => {

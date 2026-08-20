@@ -3,9 +3,13 @@ import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
 import { deleteDiscoveryAlbumCatalogEntry } from "../src/services/discoveryAlbumCatalogCleanup";
-import { albumTracksOrphanRetentionGuardWhere } from "../src/services/providerTrackRetention";
+import {
+    albumTracksOrphanRetentionGuardWhere,
+    discoveryAlbumTracksOrphanRetentionGuardWhere,
+} from "../src/services/providerTrackRetention";
 import { updateAlbumMetadataWithOwnership } from "../src/services/albumMetadataPersistence";
 import { handleDeleteAlbum } from "../src/routes/library/albums";
+import { handleLegacyUnlike } from "../src/routes/discover/legacy/albumActions";
 import { prisma } from "../src/utils/db";
 import {
     applyScaleMigrations,
@@ -382,7 +386,7 @@ describeWithPostgres(
             ).resolves.not.toBeNull();
         });
 
-        it("preserves files and discovery links when a like wins the cleanup guard", async () => {
+        it("retains a DISCOVER album when its linked discovery record is LIKED", async () => {
             await createArtistAndAlbum("discovery-like-race");
             await prisma.track.create({
                 data: {
@@ -414,29 +418,20 @@ describeWithPostgres(
                     filePath: "/music/discovery/track.flac",
                 },
             });
-            await prisma.$transaction(async (transaction) => {
-                await transaction.discoveryAlbum.update({
-                    where: { id: discovery.id },
-                    data: { status: "LIKED", likedAt: firstNow },
-                });
-                await transaction.album.update({
-                    where: { id: "discovery-like-race-album" },
-                    data: { location: "LIBRARY" },
-                });
-                await transaction.ownedAlbum.create({
-                    data: {
-                        artistId: "discovery-like-race-artist",
-                        rgMbid: "discovery-like-race-album-mbid",
-                        source: "discovery_liked",
-                    },
-                });
+            await prisma.discoveryAlbum.update({
+                where: { id: discovery.id },
+                data: {
+                    catalogAlbumId: "discovery-like-race-album",
+                    status: "LIKED",
+                    likedAt: firstNow,
+                },
             });
 
             const deleted = await deleteDiscoveryAlbumCatalogEntry({
                 rgMbid: discovery.rgMbid,
             });
 
-            expect(deleted).toBe(false);
+            expect(deleted).toBe("retained");
             await expect(
                 prisma.track.findUnique({
                     where: { id: "discovery-like-race-track" },
@@ -452,6 +447,100 @@ describeWithPostgres(
                     where: { id: discovery.id },
                 }),
             ).resolves.toEqual(expect.objectContaining({ status: "LIKED" }));
+        });
+
+        it("blocks discovery track deletion after the album is promoted", async () => {
+            await createArtistAndAlbum("discovery-track-promotion");
+            await prisma.track.create({
+                data: {
+                    id: "discovery-track-promotion-track",
+                    albumId: "discovery-track-promotion-album",
+                    title: "promoted track",
+                    trackNo: 1,
+                    duration: 180,
+                    fileModified: old,
+                    fileSize: 1,
+                },
+            });
+            await prisma.album.update({
+                where: { id: "discovery-track-promotion-album" },
+                data: { location: "LIBRARY" },
+            });
+
+            const deleted = await prisma.track.deleteMany({
+                where: discoveryAlbumTracksOrphanRetentionGuardWhere(
+                    "discovery-track-promotion-album",
+                    firstNow,
+                ),
+            });
+
+            expect(deleted.count).toBe(0);
+            await expect(
+                prisma.track.findUnique({
+                    where: { id: "discovery-track-promotion-track" },
+                }),
+            ).resolves.not.toBeNull();
+        });
+
+        it("unlikes by the current catalog MBID after metadata edits cascade ownership", async () => {
+            const staleRgMbid = "44444444-4444-4444-8444-444444444444";
+            const currentRgMbid = "55555555-5555-4555-8555-555555555555";
+            await createArtistAndAlbum("unlike-after-edit");
+            await prisma.album.update({
+                where: { id: "unlike-after-edit-album" },
+                data: { rgMbid: staleRgMbid, location: "LIBRARY" },
+            });
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: "unlike-after-edit-artist",
+                    rgMbid: staleRgMbid,
+                    source: "discovery_liked",
+                },
+            });
+            const discovery = await prisma.discoveryAlbum.create({
+                data: {
+                    id: "unlike-after-edit-discovery",
+                    userId,
+                    catalogAlbumId: "unlike-after-edit-album",
+                    rgMbid: staleRgMbid,
+                    artistName: "unlike-after-edit artist",
+                    albumTitle: "unlike-after-edit album",
+                    weekStartDate: old,
+                    status: "LIKED",
+                    likedAt: firstNow,
+                },
+            });
+            await updateAlbumMetadataWithOwnership("unlike-after-edit-album", {
+                rgMbid: currentRgMbid,
+            });
+            const response = createResponse();
+
+            await handleLegacyUnlike(
+                {
+                    user: { id: userId },
+                    body: { albumId: staleRgMbid },
+                } as any,
+                response as any,
+            );
+
+            expect(response.statusCode).toBe(200);
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: "unlike-after-edit-artist",
+                            rgMbid: currentRgMbid,
+                        },
+                    },
+                }),
+            ).resolves.toBeNull();
+            await expect(
+                prisma.discoveryAlbum.findUnique({
+                    where: { id: discovery.id },
+                }),
+            ).resolves.toEqual(
+                expect.objectContaining({ status: "ACTIVE", likedAt: null }),
+            );
         });
 
         it("moves existing ownership but does not recreate unliked ownership after an album rgMbid correction", async () => {

@@ -782,6 +782,7 @@ export class DiscoveryRecommendationsService {
                 const discoveryAlbum = await tx.discoveryAlbum.create({
                     data: {
                         userId,
+                        catalogAlbumId: item.albumId,
                         rgMbid: item.albumMbid,
                         artistName: item.artistName,
                         artistMbid: item.artistMbid,

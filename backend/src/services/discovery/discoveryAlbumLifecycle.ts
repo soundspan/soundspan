@@ -10,11 +10,13 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { updateArtistCounts } from "../artistCountsService";
+import { promoteAlbumOwnership } from "../albumOwnershipPromotion";
 import { deleteDiscoveryAlbumCatalogEntry } from "../discoveryAlbumCatalogCleanup";
 import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
 export interface DiscoveryAlbumInfo {
     id: string;
+    catalogAlbumId?: string | null;
     rgMbid: string;
     artistName: string;
     albumTitle: string;
@@ -37,30 +39,21 @@ export class DiscoveryAlbumLifecycle {
      */
     async moveLikedAlbumToLibrary(album: DiscoveryAlbumInfo): Promise<void> {
         const dbAlbum = await prisma.album.findFirst({
-            where: { rgMbid: album.rgMbid },
+            where: {
+                OR: [
+                    ...(album.catalogAlbumId
+                        ? [{ id: album.catalogAlbumId }]
+                        : []),
+                    { rgMbid: album.rgMbid },
+                ],
+            },
             include: { artist: true },
         });
 
         if (dbAlbum) {
-            await prisma.album.update({
-                where: { id: dbAlbum.id },
-                data: { location: "LIBRARY" },
-            });
-
-            await prisma.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
-                        artistId: dbAlbum.artistId,
-                        rgMbid: dbAlbum.rgMbid,
-                    },
-                },
-                create: {
-                    artistId: dbAlbum.artistId,
-                    rgMbid: dbAlbum.rgMbid,
-                    source: "discover_liked",
-                },
-                update: {},
-            });
+            await prisma.$transaction((transaction) =>
+                promoteAlbumOwnership(transaction, dbAlbum, "discover_liked"),
+            );
 
             await updateArtistCounts(dbAlbum.artistId);
 
@@ -84,16 +77,21 @@ export class DiscoveryAlbumLifecycle {
         album: DiscoveryAlbumInfo,
         settings: LidarrSettings,
     ): Promise<boolean> {
-        const deleted = await deleteDiscoveryAlbumCatalogEntry({
-            rgMbid: album.rgMbid,
+        const catalogResult = await deleteDiscoveryAlbumCatalogEntry({
+            OR: [
+                ...(album.catalogAlbumId ? [{ id: album.catalogAlbumId }] : []),
+                { rgMbid: album.rgMbid },
+            ],
         });
-        if (!deleted) {
+        if (catalogResult === "retained") {
             logger.debug(
                 `[DiscoveryLifecycle] Preserved retained album: ${album.artistName} - ${album.albumTitle}`,
             );
             return false;
         }
 
+        // Catalog deletion commits first. Remote files are best-effort so a
+        // retry can still converge discovery links and status after failure.
         if (
             settings.lidarrEnabled &&
             settings.lidarrUrl &&
@@ -114,8 +112,8 @@ export class DiscoveryAlbumLifecycle {
                         ? error.status !== 404
                         : true
                 ) {
-                    logger.debug(
-                        `[DiscoveryLifecycle] Lidarr delete failed: ${error instanceof Error ? error.message : String(error)}`,
+                    logger.warn(
+                        `[DiscoveryLifecycle] Lidarr delete failed for discoveryAlbum=${album.id}, rgMbid=${album.rgMbid}, lidarrAlbumId=${album.lidarrAlbumId}: ${error instanceof Error ? error.message : String(error)}`,
                     );
                 }
             }
@@ -184,6 +182,7 @@ export class DiscoveryAlbumLifecycle {
             try {
                 await this.moveLikedAlbumToLibrary({
                     id: album.id,
+                    catalogAlbumId: album.catalogAlbumId,
                     rgMbid: album.rgMbid,
                     artistName: album.artistName,
                     albumTitle: album.albumTitle,
@@ -202,6 +201,7 @@ export class DiscoveryAlbumLifecycle {
                 const wasDeleted = await this.deleteRejectedAlbum(
                     {
                         id: album.id,
+                        catalogAlbumId: album.catalogAlbumId,
                         rgMbid: album.rgMbid,
                         artistName: album.artistName,
                         albumTitle: album.albumTitle,

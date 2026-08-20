@@ -1284,7 +1284,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         expect(mockRecomputeAlbumLoudness).not.toHaveBeenCalled();
         expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
             where: { trackId: "track-1" },
@@ -1876,7 +1876,7 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3);
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
                 id: { in: ["track-old-1", "track-old-2"] },
