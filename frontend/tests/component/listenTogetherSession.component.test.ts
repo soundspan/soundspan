@@ -1260,8 +1260,20 @@ test("live-session re-check reconnect never adopts the server position onto the 
     providerEngineState.playing = true;
     providerSocket.isConnected = false;
 
+    // Defer the probe so the adoption decision is provably made at
+    // connectSocket call time, after the await, not from a stale closure.
+    let releaseProbe: (() => void) | null = null;
+    providerSocket.probeRoute = async () => {
+        await new Promise<void>((resolve) => {
+            releaseProbe = resolve;
+        });
+        return { ok: true };
+    };
     await host.act(async () => {
-        assert.equal(await host.latest().recheckSocketRoute(), true);
+        const pending = host.latest().recheckSocketRoute();
+        await waitFor(() => releaseProbe !== null, "probe never started");
+        releaseProbe?.();
+        assert.equal(await pending, true);
     });
     const staleSnapshot = {
         ...makeGroup(true, 0),

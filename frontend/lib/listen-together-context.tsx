@@ -324,6 +324,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const isApplyingRemoteRef = useRef(false);
     const pendingHostTrackIndexRef = useRef<number | null>(null);
     const hostMustAdoptGroupPositionRef = useRef(false);
+    const hasEverConnectedRef = useRef(false);
     const awaitingInitialStateRef = useRef(true);
     const readyReportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
@@ -935,9 +936,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const connectSocket = useCallback(
         (groupId: string, options?: { adoptGroupPosition?: boolean }) => {
             awaitingInitialStateRef.current = true;
-            // One-shot adoption: fresh-session hydration only, never re-checks.
+            // One-shot adoption: only a session's first-ever connection
+            // hydrates; reading the ref here avoids stale-closure decisions.
             hostMustAdoptGroupPositionRef.current =
-                options?.adoptGroupPosition ?? true;
+                options?.adoptGroupPosition ?? !hasEverConnectedRef.current;
 
             listenTogetherSocket.connect({
                 onGroupState: (snapshot) => {
@@ -1377,6 +1379,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     setActiveGroup(null);
                     setTrackAvailability(new Map());
                     trackAvailabilityStateVersionRef.current = null;
+                    hasEverConnectedRef.current = false;
                     setHasConnectedOnce(false);
                     lastAppliedVersionRef.current = 0;
                     pendingHostTrackIndexRef.current = null;
@@ -1392,6 +1395,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         disconnectGraceTimerRef.current = null;
                     }
                     setIsConnected(true);
+                    hasEverConnectedRef.current = true;
                     setHasConnectedOnce(true);
                     setReconnectAttempt(0);
                     setSocketRouteStatus("ok");
@@ -1860,6 +1864,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         setActiveGroup(null);
         setTrackAvailability(new Map());
         trackAvailabilityStateVersionRef.current = null;
+        hasEverConnectedRef.current = false;
         setHasConnectedOnce(false);
         lastAppliedVersionRef.current = 0;
         pendingHostTrackIndexRef.current = null;
@@ -1884,15 +1889,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (ok) {
             const group = activeGroupRef.current;
             if (group?.id && !listenTogetherSocket.isConnected) {
-                // A first-ever connection (mount probe failed earlier) still
-                // hydrates; live-session reconnects keep the host authoritative.
-                connectSocket(group.id, {
-                    adoptGroupPosition: !hasConnectedOnce,
-                });
+                connectSocket(group.id);
             }
         }
         return ok;
-    }, [connectSocket, hasConnectedOnce, validateSocketRoute]);
+    }, [connectSocket, validateSocketRoute]);
     // -----------------------------------------------------------------------
     // Actions — hot path (Socket.IO wrappers)
     // -----------------------------------------------------------------------
