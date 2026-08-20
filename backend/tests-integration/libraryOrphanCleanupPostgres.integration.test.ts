@@ -172,8 +172,14 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
     });
 
     it("preserves provider-backed and raced entities while deleting true orphans", async () => {
+        // Cleanup now runs one transaction per batch, so the race injection
+        // wraps EVERY transaction and fires once per entity type overall:
+        // the first album selection and the first artist selection each get
+        // a competing link inserted between selection and guarded deletion.
         const runTransaction = prisma.$transaction.bind(prisma);
-        jest.spyOn(prisma, "$transaction").mockImplementationOnce((async (
+        let albumRaceInjected = false;
+        let artistRaceInjected = false;
+        jest.spyOn(prisma, "$transaction").mockImplementation((async (
             callback: (
                 transaction: Prisma.TransactionClient,
             ) => Promise<unknown>,
@@ -185,26 +191,26 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
                 const findArtists = transaction.artist.findMany.bind(
                     transaction.artist,
                 );
-                jest.spyOn(
-                    transaction.album,
-                    "findMany",
-                ).mockImplementationOnce((async (
-                    args?: Prisma.AlbumFindManyArgs,
-                ) => {
-                    const candidates = await findAlbums(args ?? {});
-                    await insertRacedAlbumLink(database);
-                    return candidates;
-                }) as never);
-                jest.spyOn(
-                    transaction.artist,
-                    "findMany",
-                ).mockImplementationOnce((async (
-                    args?: Prisma.ArtistFindManyArgs,
-                ) => {
-                    const candidates = await findArtists(args ?? {});
-                    await insertRacedArtistLink(database);
-                    return candidates;
-                }) as never);
+                jest.spyOn(transaction.album, "findMany").mockImplementation(
+                    (async (args?: Prisma.AlbumFindManyArgs) => {
+                        const candidates = await findAlbums(args ?? {});
+                        if (!albumRaceInjected && candidates.length > 0) {
+                            albumRaceInjected = true;
+                            await insertRacedAlbumLink(database);
+                        }
+                        return candidates;
+                    }) as never,
+                );
+                jest.spyOn(transaction.artist, "findMany").mockImplementation(
+                    (async (args?: Prisma.ArtistFindManyArgs) => {
+                        const candidates = await findArtists(args ?? {});
+                        if (!artistRaceInjected && candidates.length > 0) {
+                            artistRaceInjected = true;
+                            await insertRacedArtistLink(database);
+                        }
+                        return candidates;
+                    }) as never,
+                );
                 return callback(transaction);
             })) as never);
 
