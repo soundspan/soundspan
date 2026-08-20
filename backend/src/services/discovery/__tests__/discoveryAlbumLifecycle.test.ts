@@ -348,7 +348,7 @@ describe("DiscoveryAlbumLifecycle", () => {
                 where: {
                     id: "album-db-1",
                     hasUserOverrides: false,
-                    location: { not: "LIBRARY" },
+                    NOT: { location: "LIBRARY" },
                     ownedBy: { none: {} },
                     tracksTidal: { none: { NOT: expect.any(Object) } },
                     tracksYtMusic: { none: { NOT: expect.any(Object) } },

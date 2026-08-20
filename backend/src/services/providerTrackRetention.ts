@@ -124,9 +124,11 @@ export function albumOrphanRetentionGuardWhere(
 export function discoveryAlbumOrphanRetentionGuardWhere(
     cutoff: Date,
 ): Prisma.AlbumWhereInput {
+    // Uses the NOT key (not `location`) so spreading this guard next to a
+    // caller's explicit `location` filter cannot clobber it.
     return {
         ...albumOrphanRetentionGuardWhere(cutoff),
-        location: { not: "LIBRARY" },
+        NOT: { location: "LIBRARY" },
     } as Prisma.AlbumWhereInput;
 }
 

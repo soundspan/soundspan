@@ -7,7 +7,7 @@ import { lidarrService } from "../../../services/lidarr";
 import { deleteDiscoveryAlbumCatalogEntry } from "../../../services/discoveryAlbumCatalogCleanup";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
-    albumOrphanRetentionGuardWhere,
+    discoveryAlbumOrphanRetentionGuardWhere,
     albumTracksOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "../../../services/providerTrackRetention";
@@ -722,7 +722,8 @@ export async function handleLegacyClear(
             new Date(),
             config.workers.providerTrackRetentionDays,
         );
-        const retentionWhere = albumOrphanRetentionGuardWhere(retentionCutoff);
+        const retentionWhere =
+            discoveryAlbumOrphanRetentionGuardWhere(retentionCutoff);
 
         // Find all DISCOVER albums that don't have a corresponding DiscoveryAlbum record
         const orphanedAlbums = await prisma.album.findMany({
