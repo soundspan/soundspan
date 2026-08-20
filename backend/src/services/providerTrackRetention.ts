@@ -116,6 +116,20 @@ export function albumOrphanRetentionGuardWhere(
     } as Prisma.AlbumWhereInput;
 }
 
+/**
+ * Discovery cleanup must never collect an album promoted into the library.
+ * Like-promotion writes location and ownership atomically, so this scope is
+ * defense in depth on top of the ownership guard.
+ */
+export function discoveryAlbumOrphanRetentionGuardWhere(
+    cutoff: Date,
+): Prisma.AlbumWhereInput {
+    return {
+        ...albumOrphanRetentionGuardWhere(cutoff),
+        location: { not: "LIBRARY" },
+    } as Prisma.AlbumWhereInput;
+}
+
 /** Guards child-track deletion with the current album retention state. */
 export function albumTracksOrphanRetentionGuardWhere(
     albumId: string,

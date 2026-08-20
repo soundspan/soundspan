@@ -375,7 +375,7 @@ describe("enrichment metadata compatibility", () => {
         expect(res.statusCode).toBe(200);
     });
 
-    it("updates OwnedAlbum mapping when album release-group MBID is corrected", async () => {
+    it("preserves ownership through cascade without creating it during an MBID correction", async () => {
         const originalRgMbid = "11111111-1111-4111-8111-111111111111";
         const updatedRgMbid = "22222222-2222-4222-8222-222222222222";
         mockAlbumFindUnique.mockResolvedValue({
@@ -383,7 +383,6 @@ describe("enrichment metadata compatibility", () => {
             rgMbid: originalRgMbid,
             location: "LIBRARY",
         });
-        mockOwnedAlbumUpsert.mockResolvedValue({});
         mockAlbumUpdate.mockResolvedValue({
             id: "album-1",
             rgMbid: updatedRgMbid,
@@ -404,32 +403,16 @@ describe("enrichment metadata compatibility", () => {
 
         expect(mockAlbumFindUnique).toHaveBeenCalledWith({
             where: { id: "album-1" },
-            select: { artistId: true, rgMbid: true, location: true },
+            select: { rgMbid: true },
         });
         expect(mockOwnedAlbumDeleteMany).not.toHaveBeenCalled();
-        expect(mockOwnedAlbumUpsert).toHaveBeenCalledWith({
-            where: {
-                artistId_rgMbid: {
-                    artistId: "artist-1",
-                    rgMbid: updatedRgMbid,
-                },
-            },
-            create: {
-                artistId: "artist-1",
-                rgMbid: updatedRgMbid,
-                source: "metadata_edit",
-            },
-            update: {},
-        });
+        expect(mockOwnedAlbumUpsert).not.toHaveBeenCalled();
         expect(mockAlbumUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({ rgMbid: updatedRgMbid }),
             }),
         );
         expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
-        expect(mockAlbumUpdate.mock.invocationCallOrder[0]).toBeLessThan(
-            mockOwnedAlbumUpsert.mock.invocationCallOrder[0],
-        );
         expect(res.statusCode).toBe(200);
     });
 
@@ -524,7 +507,7 @@ describe("enrichment metadata compatibility", () => {
 
         expect(mockAlbumFindUnique).toHaveBeenCalledWith({
             where: { id: "album-1" },
-            select: { artistId: true, rgMbid: true, location: true },
+            select: { rgMbid: true },
         });
         expect(mockAlbumFindFirst).not.toHaveBeenCalled();
         expect(mockOwnedAlbumDeleteMany).not.toHaveBeenCalled();

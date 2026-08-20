@@ -1669,16 +1669,12 @@ router.put("/albums/:id/metadata", async (req, res) => {
         }
 
         const { prisma } = await import("../utils/db");
-        let existingAlbum: {
-            artistId: string;
-            rgMbid: string;
-            location: string;
-        } | null = null;
+        let existingAlbum: { rgMbid: string } | null = null;
 
         if (normalizedRgMbid) {
             existingAlbum = await prisma.album.findUnique({
                 where: { id: req.params.id },
-                select: { artistId: true, rgMbid: true, location: true },
+                select: { rgMbid: true },
             });
 
             if (!existingAlbum) {
@@ -1718,19 +1714,9 @@ router.put("/albums/:id/metadata", async (req, res) => {
             }
         }
 
-        const ownership =
-            normalizedRgMbid &&
-            existingAlbum?.rgMbid !== normalizedRgMbid &&
-            existingAlbum?.location === "LIBRARY"
-                ? {
-                      artistId: existingAlbum.artistId,
-                      rgMbid: normalizedRgMbid,
-                  }
-                : null;
         const album = await updateAlbumMetadataWithOwnership(
             req.params.id,
             updateData,
-            ownership,
         );
 
         res.json(album);

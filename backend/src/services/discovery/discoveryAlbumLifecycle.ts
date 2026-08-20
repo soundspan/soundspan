@@ -9,13 +9,8 @@
 
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { config } from "../../config";
 import { updateArtistCounts } from "../artistCountsService";
-import {
-    albumOrphanRetentionGuardWhere,
-    albumTracksOrphanRetentionGuardWhere,
-    providerTrackRetentionCutoff,
-} from "../providerTrackRetention";
+import { deleteDiscoveryAlbumCatalogEntry } from "../discoveryAlbumCatalogCleanup";
 import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
 export interface DiscoveryAlbumInfo {
@@ -88,7 +83,17 @@ export class DiscoveryAlbumLifecycle {
     async deleteRejectedAlbum(
         album: DiscoveryAlbumInfo,
         settings: LidarrSettings,
-    ): Promise<void> {
+    ): Promise<boolean> {
+        const deleted = await deleteDiscoveryAlbumCatalogEntry({
+            rgMbid: album.rgMbid,
+        });
+        if (!deleted) {
+            logger.debug(
+                `[DiscoveryLifecycle] Preserved retained album: ${album.artistName} - ${album.albumTitle}`,
+            );
+            return false;
+        }
+
         if (
             settings.lidarrEnabled &&
             settings.lidarrUrl &&
@@ -116,26 +121,6 @@ export class DiscoveryAlbumLifecycle {
             }
         }
 
-        const dbAlbum = await prisma.album.findFirst({
-            where: { rgMbid: album.rgMbid },
-        });
-
-        if (dbAlbum) {
-            const cutoff = providerTrackRetentionCutoff(
-                new Date(),
-                config.workers.providerTrackRetentionDays,
-            );
-            await prisma.track.deleteMany({
-                where: albumTracksOrphanRetentionGuardWhere(dbAlbum.id, cutoff),
-            });
-            await prisma.album.deleteMany({
-                where: {
-                    id: dbAlbum.id,
-                    ...albumOrphanRetentionGuardWhere(cutoff),
-                },
-            });
-        }
-
         await prisma.discoveryTrack.deleteMany({
             where: { discoveryAlbumId: album.id },
         });
@@ -148,6 +133,7 @@ export class DiscoveryAlbumLifecycle {
         logger.debug(
             `[DiscoveryLifecycle] Deleted: ${album.artistName} - ${album.albumTitle}`,
         );
+        return true;
     }
 
     /**
@@ -213,7 +199,7 @@ export class DiscoveryAlbumLifecycle {
 
         for (const album of activeAlbums) {
             try {
-                await this.deleteRejectedAlbum(
+                const wasDeleted = await this.deleteRejectedAlbum(
                     {
                         id: album.id,
                         rgMbid: album.rgMbid,
@@ -223,7 +209,7 @@ export class DiscoveryAlbumLifecycle {
                     },
                     settings,
                 );
-                deleted++;
+                if (wasDeleted) deleted++;
             } catch (error: any) {
                 logger.error(
                     `[DiscoveryLifecycle] Failed to delete ${album.albumTitle}: ${error.message}`,

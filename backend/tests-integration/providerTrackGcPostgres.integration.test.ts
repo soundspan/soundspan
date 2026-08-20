@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
+import { deleteDiscoveryAlbumCatalogEntry } from "../src/services/discoveryAlbumCatalogCleanup";
 import { albumTracksOrphanRetentionGuardWhere } from "../src/services/providerTrackRetention";
 import { updateAlbumMetadataWithOwnership } from "../src/services/albumMetadataPersistence";
 import { handleDeleteAlbum } from "../src/routes/library/albums";
@@ -56,6 +57,7 @@ async function createArtistAndAlbum(prefix: string): Promise<void> {
             artistId: `${prefix}-artist`,
             title: `${prefix} album`,
             primaryType: "Album",
+            location: "DISCOVER",
         },
     });
 }
@@ -380,7 +382,79 @@ describeWithPostgres(
             ).resolves.not.toBeNull();
         });
 
-        it("moves or creates ownership after an album rgMbid correction", async () => {
+        it("preserves files and discovery links when a like wins the cleanup guard", async () => {
+            await createArtistAndAlbum("discovery-like-race");
+            await prisma.track.create({
+                data: {
+                    id: "discovery-like-race-track",
+                    albumId: "discovery-like-race-album",
+                    title: "discovery like race track",
+                    trackNo: 1,
+                    duration: 180,
+                    fileModified: old,
+                    fileSize: 1,
+                },
+            });
+            const discovery = await prisma.discoveryAlbum.create({
+                data: {
+                    id: "discovery-like-race-link",
+                    userId,
+                    rgMbid: "discovery-like-race-album-mbid",
+                    artistName: "discovery-like-race artist",
+                    albumTitle: "discovery-like-race album",
+                    weekStartDate: old,
+                    status: "ACTIVE",
+                },
+            });
+            await prisma.discoveryTrack.create({
+                data: {
+                    discoveryAlbumId: discovery.id,
+                    trackId: "discovery-like-race-track",
+                    fileName: "track.flac",
+                    filePath: "/music/discovery/track.flac",
+                },
+            });
+            await prisma.$transaction(async (transaction) => {
+                await transaction.discoveryAlbum.update({
+                    where: { id: discovery.id },
+                    data: { status: "LIKED", likedAt: firstNow },
+                });
+                await transaction.album.update({
+                    where: { id: "discovery-like-race-album" },
+                    data: { location: "LIBRARY" },
+                });
+                await transaction.ownedAlbum.create({
+                    data: {
+                        artistId: "discovery-like-race-artist",
+                        rgMbid: "discovery-like-race-album-mbid",
+                        source: "discovery_liked",
+                    },
+                });
+            });
+
+            const deleted = await deleteDiscoveryAlbumCatalogEntry({
+                rgMbid: discovery.rgMbid,
+            });
+
+            expect(deleted).toBe(false);
+            await expect(
+                prisma.track.findUnique({
+                    where: { id: "discovery-like-race-track" },
+                }),
+            ).resolves.not.toBeNull();
+            await expect(
+                prisma.discoveryTrack.findFirst({
+                    where: { discoveryAlbumId: discovery.id },
+                }),
+            ).resolves.not.toBeNull();
+            await expect(
+                prisma.discoveryAlbum.findUnique({
+                    where: { id: discovery.id },
+                }),
+            ).resolves.toEqual(expect.objectContaining({ status: "LIKED" }));
+        });
+
+        it("moves existing ownership but does not recreate unliked ownership after an album rgMbid correction", async () => {
             const oldRgMbid = "11111111-1111-4111-8111-111111111111";
             const newRgMbid = "22222222-2222-4222-8222-222222222222";
             await createArtistAndAlbum("rg-edit");
@@ -395,11 +469,9 @@ describeWithPostgres(
                     source: "native_scan",
                 },
             });
-            await updateAlbumMetadataWithOwnership(
-                "rg-edit-album",
-                { rgMbid: newRgMbid },
-                { artistId: "rg-edit-artist", rgMbid: newRgMbid },
-            );
+            await updateAlbumMetadataWithOwnership("rg-edit-album", {
+                rgMbid: newRgMbid,
+            });
 
             await expect(
                 prisma.ownedAlbum.findUnique({
@@ -433,14 +505,22 @@ describeWithPostgres(
                 where: { id: "rg-edit-fresh-album" },
                 data: { location: "LIBRARY" },
             });
-            await updateAlbumMetadataWithOwnership(
-                "rg-edit-fresh-album",
-                { rgMbid: freshRgMbid },
-                {
+            await prisma.ownedAlbum.create({
+                data: {
                     artistId: "rg-edit-fresh-artist",
-                    rgMbid: freshRgMbid,
+                    rgMbid: "rg-edit-fresh-album-mbid",
+                    source: "discovery_liked",
                 },
-            );
+            });
+            await prisma.ownedAlbum.deleteMany({
+                where: {
+                    artistId: "rg-edit-fresh-artist",
+                    source: "discovery_liked",
+                },
+            });
+            await updateAlbumMetadataWithOwnership("rg-edit-fresh-album", {
+                rgMbid: freshRgMbid,
+            });
             await expect(
                 prisma.ownedAlbum.findUnique({
                     where: {
@@ -450,9 +530,7 @@ describeWithPostgres(
                         },
                     },
                 }),
-            ).resolves.toEqual(
-                expect.objectContaining({ source: "metadata_edit" }),
-            );
+            ).resolves.toBeNull();
         });
     },
 );

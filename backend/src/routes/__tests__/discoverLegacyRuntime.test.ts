@@ -100,6 +100,12 @@ const prisma = {
     },
 };
 
+const prismaTransaction = jest.fn(
+    async (callback: (transaction: typeof prisma) => unknown) =>
+        callback(prisma),
+);
+Object.assign(prisma, { $transaction: prismaTransaction });
+
 jest.mock("../../utils/db", () => ({
     prisma,
 }));
@@ -597,6 +603,7 @@ describe("discover legacy-mode runtime behavior", () => {
             data: { location: "LIBRARY" },
         });
         expect(prisma.ownedAlbum.upsert).toHaveBeenCalled();
+        expect(prismaTransaction).toHaveBeenCalledTimes(1);
         expect(prisma.play.updateMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
@@ -898,30 +905,30 @@ describe("discover legacy-mode runtime behavior", () => {
                 }),
             }),
         );
-        expect(prisma.track.deleteMany).toHaveBeenCalledWith({
-            where: {
-                albumId: "album-active",
-                album: {
-                    hasUserOverrides: false,
-                    ownedBy: { none: {} },
-                    tracksTidal: { none: { NOT: expect.any(Object) } },
-                    tracksYtMusic: { none: { NOT: expect.any(Object) } },
-                },
-            },
+        expect(prisma.track.deleteMany).not.toHaveBeenCalledWith({
+            where: expect.objectContaining({ albumId: "album-active" }),
         });
         expect(prisma.album.deleteMany).toHaveBeenCalledWith({
             where: {
                 id: "album-active",
                 hasUserOverrides: false,
+                NOT: { location: "LIBRARY" },
                 ownedBy: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
+        expect(
+            (prisma.album.deleteMany as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(
+            (prisma.discoveryTrack.deleteMany as jest.Mock).mock
+                .invocationCallOrder[0],
+        );
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
                 location: "DISCOVER",
                 hasUserOverrides: false,
+                NOT: { location: "LIBRARY" },
                 ownedBy: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
@@ -943,6 +950,42 @@ describe("discover legacy-mode runtime behavior", () => {
             orphanedAlbumsDeleted: 1,
             lidarrArtistsRemoved: 0,
         });
+    });
+
+    it("preserves files, links, and state when legacy cleanup loses a like race", async () => {
+        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "da-raced",
+                userId: "user-1",
+                status: "ACTIVE",
+                artistName: "Raced Artist",
+                albumTitle: "Raced Album",
+                rgMbid: "rg-raced",
+                lidarrAlbumId: 44,
+            },
+        ]);
+        (prisma.album.findFirst as jest.Mock).mockResolvedValueOnce({
+            id: "album-raced",
+        });
+        (prisma.album.deleteMany as jest.Mock).mockResolvedValueOnce({
+            count: 0,
+        });
+        (prisma.album.findMany as jest.Mock).mockResolvedValueOnce([]);
+        const existsSpy = jest.spyOn(fs, "existsSync");
+        const res = createRes();
+
+        await clearHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(mockAxiosDelete).not.toHaveBeenCalled();
+        expect(existsSpy).not.toHaveBeenCalled();
+        expect(prisma.discoveryTrack.deleteMany).not.toHaveBeenCalledWith({
+            where: { discoveryAlbumId: "da-raced" },
+        });
+        expect(prisma.discoveryAlbum.update).not.toHaveBeenCalledWith({
+            where: { id: "da-raced" },
+            data: { status: "DELETED" },
+        });
+        expect(res.body).toEqual(expect.objectContaining({ activeDeleted: 0 }));
     });
 
     it("returns no-op clear payload when no legacy discovery albums exist", async () => {

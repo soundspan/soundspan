@@ -171,7 +171,12 @@ export async function handlePurgeRemovedTracksNow(
     try {
         const matched = await countRemovedLocalTracks();
         if (matched === 0) {
-            return res.json({ enqueued: false, matched });
+            await enqueuePurgeAt(new Date());
+            return res.json({
+                enqueued: false,
+                matched,
+                terminalEnqueued: true,
+            });
         }
 
         await enqueuePurgeAt(new Date());

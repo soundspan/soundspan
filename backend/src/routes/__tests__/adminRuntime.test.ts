@@ -213,14 +213,24 @@ describe("admin library health routes", () => {
         expect(res.body).toEqual({ enqueued: true, matched: 3 });
     });
 
-    it("skips the purge job when no removed local tracks match", async () => {
+    it("enqueues a terminal purge job when no removed local tracks match", async () => {
         mockRemovedTrackCount.mockResolvedValueOnce(0);
         const res = createRes();
 
         await purgeRemovedTracksHandler({} as any, res);
 
-        expect(mockSchedulerAdd).not.toHaveBeenCalled();
-        expect(res.body).toEqual({ enqueued: false, matched: 0 });
+        expect(mockSchedulerAdd).toHaveBeenCalledWith(
+            "track-removal-purge",
+            expect.objectContaining({ cutoffAt: expect.any(String) }),
+            expect.objectContaining({
+                jobId: "scheduler:track-removal-purge:purge-now",
+            }),
+        );
+        expect(res.body).toEqual({
+            enqueued: false,
+            matched: 0,
+            terminalEnqueued: true,
+        });
     });
 
     it("uses a singleton job id for the purge-now sweep", async () => {

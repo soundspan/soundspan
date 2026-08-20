@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "../../../config";
 import { lidarrService } from "../../../services/lidarr";
+import { deleteDiscoveryAlbumCatalogEntry } from "../../../services/discoveryAlbumCatalogCleanup";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
     albumOrphanRetentionGuardWhere,
@@ -19,6 +20,21 @@ import { scanQueue } from "../../../workers/queues";
 import { sendClearPlaylistFailure } from "../shared";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
+
+interface LegacyCleanupAlbum {
+    albumTitle: string;
+    artistName: string;
+}
+
+async function deleteLegacyCatalogAlbum(
+    album: LegacyCleanupAlbum,
+): Promise<boolean> {
+    return deleteDiscoveryAlbumCatalogEntry({
+        title: album.albumTitle,
+        artist: { name: album.artistName },
+        location: "DISCOVER",
+    });
+}
 
 /** Handles frozen legacy discovery playlist cleanup. */
 export async function handleLegacyClear(
@@ -192,6 +208,14 @@ export async function handleLegacyClear(
 
             for (const album of activeAlbums) {
                 try {
+                    const deleted = await deleteLegacyCatalogAlbum(album);
+                    if (!deleted) {
+                        logger.debug(
+                            `  Preserved retained album: ${album.artistName} - ${album.albumTitle}`,
+                        );
+                        continue;
+                    }
+
                     // Remove from Lidarr if enabled
                     if (
                         settings.lidarrEnabled &&
@@ -349,44 +373,10 @@ export async function handleLegacyClear(
                         );
                     }
 
-                    // Delete DiscoveryTrack records first (foreign key to Track)
+                    // Delete discovery links only after catalog deletion succeeds.
                     await prisma.discoveryTrack.deleteMany({
                         where: { discoveryAlbumId: album.id },
                     });
-
-                    // Remove from local database
-                    const dbAlbum = await prisma.album.findFirst({
-                        where: {
-                            title: album.albumTitle,
-                            artist: { name: album.artistName },
-                            location: "DISCOVER",
-                        },
-                        include: { tracks: true },
-                    });
-
-                    if (dbAlbum) {
-                        const cutoff = providerTrackRetentionCutoff(
-                            new Date(),
-                            config.workers.providerTrackRetentionDays,
-                        );
-                        const albumRetentionWhere =
-                            albumOrphanRetentionGuardWhere(cutoff);
-                        // Delete tracks first
-                        await prisma.track.deleteMany({
-                            where: albumTracksOrphanRetentionGuardWhere(
-                                dbAlbum.id,
-                                cutoff,
-                            ),
-                        });
-
-                        // Delete album
-                        await prisma.album.deleteMany({
-                            where: {
-                                id: dbAlbum.id,
-                                ...albumRetentionWhere,
-                            },
-                        });
-                    }
 
                     // Mark as DELETED in discovery database
                     await prisma.discoveryAlbum.update({

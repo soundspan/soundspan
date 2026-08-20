@@ -1,6 +1,6 @@
 BEGIN;
 
-LOCK TABLE "OwnedAlbum" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "Album", "OwnedAlbum" IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE INDEX "OwnedAlbum_rgMbid_idx" ON "OwnedAlbum"("rgMbid");
 

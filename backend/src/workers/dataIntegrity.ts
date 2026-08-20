@@ -54,14 +54,21 @@ function isRetryableDataIntegrityPrismaError(error: unknown): boolean {
     );
 }
 
-async function withDataIntegrityPrismaRetry<T>(
+/** Runs a data-integrity database operation with bounded transient retries. */
+export async function withDataIntegrityPrismaRetry<T>(
     operationName: string,
     operation: () => Promise<T>,
 ): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
+    let lastError: unknown;
+    for (
+        let attempt = 1;
+        attempt <= DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS;
+        attempt += 1
+    ) {
         try {
             return await operation();
         } catch (error) {
+            lastError = error;
             if (
                 !isRetryableDataIntegrityPrismaError(error) ||
                 attempt === DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS
@@ -77,6 +84,7 @@ async function withDataIntegrityPrismaRetry<T>(
             await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
         }
     }
+    throw lastError ?? new Error(`${operationName} retry attempts exhausted`);
 }
 
 interface IntegrityReport {

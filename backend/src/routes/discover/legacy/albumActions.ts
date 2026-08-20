@@ -9,6 +9,35 @@ import {
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
+interface LegacyPromotionAlbum {
+    id: string;
+    artistId: string;
+    rgMbid: string;
+}
+
+async function promoteLegacyAlbum(album: LegacyPromotionAlbum): Promise<void> {
+    await prisma.$transaction(async (transaction) => {
+        await transaction.album.update({
+            where: { id: album.id },
+            data: { location: "LIBRARY" },
+        });
+        await transaction.ownedAlbum.upsert({
+            where: {
+                artistId_rgMbid: {
+                    artistId: album.artistId,
+                    rgMbid: album.rgMbid,
+                },
+            },
+            create: {
+                artistId: album.artistId,
+                rgMbid: album.rgMbid,
+                source: "discovery_liked",
+            },
+            update: { source: "discovery_liked" },
+        });
+    });
+}
+
 /** Handles frozen legacy discovery album likes. */
 export async function handleLegacyLike(
     req: Request,
@@ -115,29 +144,7 @@ export async function handleLegacyLike(
         });
 
         if (dbAlbum) {
-            // Update album location to LIBRARY so it appears in owned view
-            await prisma.album.update({
-                where: { id: dbAlbum.id },
-                data: { location: "LIBRARY" },
-            });
-
-            // Create OwnedAlbum record if doesn't exist (makes it appear in "Owned" filter)
-            await prisma.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
-                        artistId: dbAlbum.artistId,
-                        rgMbid: dbAlbum.rgMbid,
-                    },
-                },
-                create: {
-                    artistId: dbAlbum.artistId,
-                    rgMbid: dbAlbum.rgMbid,
-                    source: "discovery_liked",
-                },
-                update: {
-                    source: "discovery_liked",
-                },
-            });
+            await promoteLegacyAlbum(dbAlbum);
             logger.debug(
                 ` Added liked album to library: ${dbAlbum.artist.name} - ${dbAlbum.title} (matched from discovery)`,
             );
