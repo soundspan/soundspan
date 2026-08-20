@@ -1,21 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { AudioLines, Shuffle } from "lucide-react";
-import { api } from "@/lib/api";
+import { AudioLines } from "lucide-react";
+import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { Track } from "@/lib/audio-state-context";
-import { toast } from "sonner";
-import { shuffleArray } from "@/utils/shuffle";
+import { openRadioStation } from "@/lib/radio/openRadioStation";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import {
     RadioStationCard,
     RadioStationCardStation,
 } from "@/components/ui/RadioStationCard";
 
-type RadioStation = RadioStationCardStation;
+// Narrow the card's loose filter union so non-shuffle stations are provably
+// valid generated-playlist filters.
+type RadioStation = Omit<RadioStationCardStation, "filter"> & {
+    filter: { type: "all" } | RadioPlaylistFilter;
+};
 
 interface GenreCount {
     genre: string;
@@ -164,6 +166,7 @@ function SectionHeader({
  * Renders the RadioPage component.
  */
 export default function RadioPage() {
+    const router = useRouter();
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
 
@@ -187,45 +190,13 @@ export default function RadioPage() {
     const decades = decadesData ?? [];
     const isLoading = genresLoading || decadesLoading;
 
-    const startRadio = async (station: RadioStation) => {
+    const handleStation = async (station: RadioStation) => {
         setLoadingStation(station.id);
-
         try {
-            const params = new URLSearchParams();
-            params.set("type", station.filter.type);
-            if (station.filter.value) {
-                params.set("value", station.filter.value);
-            }
-            params.set("limit", "100");
-
-            const response = await api.get<{ tracks: Track[] }>(
-                `/library/radio?${params.toString()}`,
-            );
-
-            if (!response.tracks || response.tracks.length === 0) {
-                toast.error(`No tracks found for ${station.name}`);
-                return;
-            }
-
-            if (response.tracks.length < (station.minTracks || 10)) {
-                toast.error(`Not enough tracks for ${station.name} radio`, {
-                    description: `Found ${response.tracks.length}, need at least ${station.minTracks || 10}`,
-                });
-                return;
-            }
-
-            // Shuffle the tracks
-            const shuffled = shuffleArray(response.tracks);
-
-            // Start playing
-            playTracks(shuffled, 0);
-            toast.success(`${station.name} Radio`, {
-                description: `Shuffling ${shuffled.length} tracks`,
-                icon: <Shuffle className="w-4 h-4" />,
+            await openRadioStation(station, {
+                push: router.push,
+                playTracks,
             });
-        } catch (error) {
-            sharedFrontendLogger.error("Failed to start radio:", error);
-            toast.error("Failed to start radio station");
         } finally {
             setLoadingStation(null);
         }
@@ -292,7 +263,7 @@ export default function RadioPage() {
                             <RadioStationCard
                                 key={station.id}
                                 station={station}
-                                onPlay={() => startRadio(station)}
+                                onPlay={() => handleStation(station)}
                                 isLoading={loadingStation === station.id}
                             />
                         ))}
@@ -321,7 +292,7 @@ export default function RadioPage() {
                                     <RadioStationCard
                                         key={station.id}
                                         station={station}
-                                        onPlay={() => startRadio(station)}
+                                        onPlay={() => handleStation(station)}
                                         isLoading={
                                             loadingStation === station.id
                                         }
@@ -354,7 +325,7 @@ export default function RadioPage() {
                                     <RadioStationCard
                                         key={station.id}
                                         station={station}
-                                        onPlay={() => startRadio(station)}
+                                        onPlay={() => handleStation(station)}
                                         isLoading={
                                             loadingStation === station.id
                                         }
@@ -372,10 +343,11 @@ export default function RadioPage() {
                     </h3>
                     <p className="text-sm text-white/60">
                         Radio stations are generated from your personal music
-                        library. As you add more music, new genre and decade
-                        stations will automatically appear. Each station
-                        requires a minimum number of tracks to ensure a good
-                        listening experience.
+                        library. Opening a station builds a playlist you can
+                        replay, regenerate, or extend with more tracks — Shuffle
+                        All starts playing your whole library right away. As you
+                        add more music, new genre and decade stations will
+                        automatically appear.
                     </p>
                 </div>
             </div>

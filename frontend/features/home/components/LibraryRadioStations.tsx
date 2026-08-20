@@ -2,12 +2,9 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { shuffleArray } from "@/utils/shuffle";
-import { Shuffle } from "lucide-react";
 import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import type { Track } from "@/lib/audio-state-context";
-import { toast } from "sonner";
+import { openRadioStation } from "@/lib/radio/openRadioStation";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import {
     RadioStationCard,
@@ -226,50 +223,13 @@ export function LibraryRadioStations({
         ? (externalLoading ?? false)
         : internalData.isLoading;
 
-    const startShuffleAll = async (station: RadioStation) => {
-        const params = new URLSearchParams({ type: "all", limit: "100" });
-        const response = await api.get<{ tracks: Track[] }>(
-            `/library/radio?${params.toString()}`,
-        );
-
-        if (!response.tracks || response.tracks.length === 0) {
-            toast.error(`No tracks found for ${station.name}`);
-            return;
-        }
-
-        if (response.tracks.length < (station.minTracks || 10)) {
-            toast.error(`Not enough tracks for ${station.name} radio`, {
-                description: `Found ${response.tracks.length}, need at least ${station.minTracks || 10}`,
-            });
-            return;
-        }
-
-        const shuffled = shuffleArray(response.tracks);
-        playTracks(shuffled, 0);
-        toast.success(`${station.name} Radio`, {
-            description: `Shuffling ${shuffled.length} tracks`,
-            icon: <Shuffle className="w-4 h-4" />,
-        });
-    };
-
-    const openGeneratedPlaylist = async (filter: RadioPlaylistFilter) => {
-        const response = await api.createRadioPlaylist({
-            filter,
-        });
-        router.push(`/playlist/${response.playlistId}`);
-    };
-
     const handleStation = async (station: RadioStation) => {
         setLoadingStation(station.id);
         try {
-            if (station.filter.type === "all") {
-                await startShuffleAll(station);
-            } else {
-                await openGeneratedPlaylist(station.filter);
-            }
-        } catch (error) {
-            sharedFrontendLogger.error("Failed to open radio station:", error);
-            toast.error("Failed to open radio station");
+            await openRadioStation(station, {
+                push: router.push,
+                playTracks,
+            });
         } finally {
             setLoadingStation(null);
         }

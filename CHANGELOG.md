@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Backend database pool connections now enable TCP keepalive with a 10-second initial probe delay, which detects dead pooled connections sooner and reduces "Connection terminated unexpectedly" failures when connections cross NAT hops (NodePort services, firewalls, cross-cluster routing).
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Library and audiobook metadata, local cover-art, and audio-stream handlers now run rate limiting before authentication and use exactly one surface-specific budget per request. Local covers retain a high-volume shared budget without weakening the original 500/minute in-memory protection on external browse image proxies. The backend also overrides vulnerable `deepmerge-ts` 7.1.5 with 8.0.0 (#647).
 - OpenSubsonic playlist replacement and update mutations now share the Playlist-first transaction lock with generated-radio regeneration, preventing concurrent edits from deadlocking, mixing contents, or producing duplicate sort positions.
 - Artist Popular Tracks now preserve persisted local and federated preference IDs after provider enrichment and use the same canonical remote ID for playback and heart state, preventing likes from switching identity (#642).
@@ -106,6 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Fixed the 2.3.2 audio-analyzer images failing to start because new loudness
   modules were missing from both the standalone and all-in-one images.
 
@@ -174,6 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - The DCLAP provider no longer exhausts memory on very long tracks because
   audio decoding is capped and mel segments stream through inference.
 - Purge status no longer reports a purge as running when only the daily
@@ -210,6 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Fixed embedding-space index checks so existing matching indexes are not
   rebuilt on every lifecycle tick.
@@ -315,6 +323,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Provider heartbeats now re-probe reachability each cycle, migration progress
   is visible in settings, coverage sampling is statement-time bounded, and Helm
   upgrade guidance waits for old backend and worker pods to be deleted.
@@ -381,6 +391,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Fixed the local-profile Docker build for the MusicCNN audio analyzer by using
   the repository root, matching the root-relative paths its Dockerfile uses.
 - The interface font (Montserrat) is now bundled with the app instead of
@@ -425,6 +437,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audiobook detail loads now serve validated sections and metadata from the local cache instead of fetching Audiobookshelf live. Sections are computed during sync when expanded Audiobookshelf data is available and backfilled lazily on first view for books synced before this change or from minified library listings. The retained `numChapters` column is superseded and no longer refreshed.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Guarded every Python sidecar against Docker interpreter and uv lock-target
   drift, and documented the TensorFlow 2.15 wheel ceiling that keeps the
@@ -572,6 +586,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - OIDC browser flows now bind callback and one-time hand-off tokens to the
   initiating browser, count redirect responses against rate limits, serialize
   role demotion and identity unlink guards, enforce one identity per provider
@@ -624,6 +640,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - M3U playlist import previews no longer fail with a 15-second timeout on
   large libraries. The frontend now gives the M3U preview the same 60-second
   window as URL imports. The backend now matches entries against a prebuilt
@@ -638,6 +656,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - The CLAP analyzer image now ships `pgrep` so the Helm chart's default liveness and readiness probes work (#448).
 
@@ -986,6 +1006,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of being dropped.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - The release-notes generator now supports the Accessibility changelog section.
 - The all-in-one image builds again by copying the Prisma config's database-URL
@@ -1872,6 +1894,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - The vibe map's `/api/vibe/map` projection worker now loads under tsx dev mode: tsx's loader hooks don't propagate into `worker_threads`, so the `.ts` UMAP worker registers tsx in its own `execArgv` (compiled `dist/` deployments are unaffected).
 - Direct Soulseek downloads now require an administrator, matching the existing
   server-side authorization on YouTube acquisition and preventing ordinary
@@ -1948,6 +1972,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Queue auto-advance can no longer land on a silently paused next track (#53). Track-end advancement now _declares_ play intent — the end handler stamps a bounded (30s) intent that the next load consumes for its autoplay decision — instead of inferring it from transient UI playing state, which raced the element's `pause`→`ended` event pair under the native engine (the element's pause fires before ended, so both the isPlaying mirror and `engine.isPlaying()` could read false by load time). And when autoplay is rejected with `NotAllowedError` in a hidden tab (auto-advance while tabbed away), the native engine now retries `play()` once on the hidden→visible transition instead of sitting silent until a user gesture; the one-shot gesture retry stays armed as the fallback, and a user pause in between is respected.
 - Clearing the queue actually sticks now (#52). `DELETE /api/playback-state` removed only the caller's device row, while `GET /api/playback-state` still fell back to the shared pre-device `legacy` row and opportunistically re-migrated it onto the device — so the next playback-state poll resurrected the entire cleared queue within a minute. An explicit clear now deletes the legacy row along with the device row; the GET fallback's legacy migration for genuinely new devices is unchanged.
 - Repaired the five backend radio test failures that shipped silently with 1.7.0's generation-diversity work (#46): the library route tests' config mock lacked the new `generationDiversity` block, their mock chains didn't account for the diversify stage's artist lookup query, and the vibe random-filler matcher still required the `take` parameter that #46 replaced with uniform sampling. The backend "Tests + Coverage" job is a non-blocking visibility job, so the failures never turned a run red — worth revisiting alongside the CI gating gap tracked in #54.
@@ -1967,6 +1993,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Genre radio, auto-mixes, and every other generated queue are no longer dominated by the same 1-3 artists (#46). All generation surfaces now select through one shared damped-proportional artist allocator (each artist weighs `n^alpha`, default alpha `0.5`, under a hard per-artist ceiling, default 30% of queue size — both env-tunable via `GENERATION_ARTIST_WEIGHT_ALPHA` / `GENERATION_ARTIST_SHARE_CEILING`), so large discographies still carry more weight than one-hit wonders without ever being a majority. Pool construction biases fixed everywhere: genre radio prefers track-level genre evidence (Last.fm track tags, Essentia) over whole-discography artist tags and samples pools uniformly instead of taking a deterministic unordered slice (decade/mood/workout/discovery/favorites radio and the vibe fallbacks likewise); the mix artist-cap's refill-after-relaxation no longer un-caps itself (a shorter diverse playlist beats a full-length dominated one); mood buckets sample a 500-track quality band instead of a deterministic top-100; the Subsonic `getSongsByGenre` alphabetical slice became a day-stable seeded shuffle (pagination stays coherent within a day); and the frontend's no-op client-side "diversifier" was removed (diversity is enforced server-side). Daily/weekly mixes remain deterministic per seed. The playlist-diversity baseline script now also asserts the weighting bound on its artist-skewed stratum.
 
 ### Changed
@@ -1976,6 +2004,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.1] - 2026-07-08
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - The empty-string overwrite hazard is closed for **all** stored secrets, not just TIDAL. `POST /api/system-settings` now treats every encrypted secret field (`lidarrApiKey`, `lidarrWebhookSecret`, `openaiApiKey`, `fanartApiKey`, `lastfmApiKey`, `audiobookshelfApiKey`, `soulseekPassword`, `spotifyClientSecret`, `ytMusicClientSecret`) as write-only with explicit semantics: a non-empty value replaces the secret, an empty string is a no-op (so a settings-form round-trip can never wipe a stored credential), and `null` explicitly clears it. The guard iterates the canonical `ENCRYPTED_SETTINGS_COLUMNS` list, so future secret columns are covered automatically, and the post-save consumers (`.env` file sync, Lidarr webhook auto-configuration) resolve the same effective values — previously the `.env` sync wrote `null` over `LIDARR_API_KEY`/`FANART_API_KEY`/`OPENAI_API_KEY`/`AUDIOBOOKSHELF_API_KEY` on the identical empty-string round-trip. Note: clearing a secret from the settings UI (by emptying the field) is no longer possible — disable the service instead, or send an explicit `null` via the API. The Soulseek connection is also no longer bounced when the settings form round-trips an empty password.
 - Library scans no longer starve the worker's event loop and get the worker killed. The 1.6.0 opus-duration fix made every file pay for a full-file `duration: true` parse; with the scanner's 10-way concurrency a large scan pegged the single Node thread for minutes, so Bull couldn't renew job locks ("Missing lock"/"job stalled" errors, scans endlessly re-queued) and the liveness probe timed out until the kubelet killed the worker — on repeat, on both replicas. The scanner now does a cheap header-only parse first and pays for the full-file parse only when the header lacks a duration (ogg/opus, e.g. YouTube downloads), preserving the 1.6.0 fix at a fraction of the cost.
@@ -2001,6 +2031,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persisted playback state (server and local) round-trips mixed queues; queues saved by older clients are migrated as music tracks automatically.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Invite-code registration is now race-safe. The use-count check and increment were separated (check read before the transaction, increment unconditional), so two concurrent registrations on a single-use code could both succeed and push `useCount` past `maxUses`. Consumption is now an atomic conditional update (`useCount < maxUses`) inside the registration transaction; if no use remains the transaction aborts and no account is created.
 - The `library-scan` queue no longer grows Redis unbounded. Most enqueue sites added scan jobs without retention options, so completed/failed records accumulated forever. The queue now defaults to keeping the last 100 completed (still enough for the recent-job status lookup) and 200 failed jobs.
@@ -2097,6 +2129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Admin Library Health now loads and dismisses health records through dedicated `/api/admin/library-health` endpoints instead of failing on a missing backend route.
 - Library validation no longer deletes unrelated health records (e.g. `UNREADABLE_METADATA`) when clearing `MISSING_FROM_DISK` entries for tracks that reappear on disk.
 - Generic import job cancellation now uses an intermediate `cancelling` state so late cancellations after playlist creation record the completed playlist instead of discarding it.
@@ -2117,6 +2151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Frontend queued-track ID memoization now stays stable when queue membership is unchanged, reducing queue-derived state churn across local playback and Listen Together sessions.
 - Remote liked-track metadata now repairs itself when placeholder-only TIDAL or YouTube entries are liked or replayed, and the background TIDAL repair job no longer depends on whichever unrelated authenticated user happens to sort first in the database.
 - Listen Together queue creation and shared-queue additions once again truncate overflow beyond the 500-track cap instead of rejecting oversized requests outright.
@@ -2131,6 +2167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Foreground recovery now detects tracks that finished while the screen was locked and advances to the next track instead of replaying the same one.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Fixed playback not advancing to the next queued track when the phone screen is locked (Android PWA and background tabs). Browsers throttle JavaScript timers when the page is hidden, preventing the audio engine from detecting track completion. The player now listens for the native HTML5 audio `ended` event as a fallback, and foreground recovery on unlock advances to the next track when the current one finished while backgrounded.
 
@@ -2153,6 +2191,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Listen Together: fixed a guest recovery race where follower-side stall/handoff recovery could run in parallel with session resync after mid-track buffering, causing doubled playback or unintended stops.
 - Library scan now promotes preexisting remote album rows into owned library albums when local files arrive, preventing downloaded albums from staying hidden behind `REMOTE` state.
 - Track-mapping reconciliation now sweeps forward through the backlog instead of retrying the same oldest skipped rows forever, so imported provider tracks can switch over to local copies after scan.
@@ -2168,6 +2208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent audio transcodes for the same track and quality now share a single ffmpeg job instead of spawning duplicates, and the transcoded file cache uses upsert to prevent duplicate-record races.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Listen Together: fixed a race condition where hard-refreshing the page with a large queue could disconnect the user from the session due to the Socket.IO payload exceeding the buffer limit.
 - Listen Together: fixed duplicate resume and recovery races in the playback orchestrator, including follower pause recovery and reconnect delta suppression that could cause playback state to flicker.
@@ -2240,6 +2282,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Fixed remote stream duration display where TIDAL HI_RES_LOSSLESS fragmented MP4 streams reported only the first fragment's duration (~4 seconds) instead of the full track length.
 - Fixed playlist and Subsonic serializers to handle nullable track references safely after the remote-track schema changes.
 - Fixed track-mapping batch validation to reject payloads missing all linkage keys.
@@ -2298,6 +2342,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Profile picture serving returned JSON-serialized byte arrays (`{"0":255,"1":216,...}`) instead of binary image data because Express `res.send()` doesn't handle `Uint8Array` from Prisma. Fixed by wrapping with `Buffer.from()`.
 - Profile picture avatar never recovered from initial 404 — once `imgError` was set (no picture uploaded yet), it stayed true permanently even after uploading. Added cross-component event dispatch and cache-busting query parameter.
 - Library could appear empty in the UI due to the Next.js API proxy double-decompressing gzip responses. Node.js `fetch` auto-decompresses but preserves `Content-Encoding` headers, causing the browser to attempt a second decompression. Fixed by stripping compression-related headers in the proxy.
@@ -2349,6 +2395,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Fixed transient Listen Together socket conflicts for `seek()`/`reportReady()` with bounded retry, backoff, and jitter.
 - Fixed segmented-playback recovery so local player state remains authoritative for resume position and play/pause intent after disruptions.
 - Fixed long buffering/spinner stalls by keeping heartbeat checks active during buffering and retrying segmented startup within bounded stage/window budgets before surfacing timeout errors.
@@ -2398,6 +2446,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Reduced unnecessary client API traffic by removing render-phase state writes and consolidating overlapping polling ownership in activity/download/playback flows.
 - Added backend response compression for compressible API responses while excluding stream/media and `no-transform` responses.
 - Added missing `next/image` `sizes` attributes across fixed-size image callsites to improve responsive image selection.
@@ -2427,6 +2477,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Fixed queue insertion behavior so Add to Queue appends to the queue tail instead of being inserted after the current track.
 - Fixed overlay player layering so playlist picker/menus render inside the correct z-index context.
 - Fixed mobile track-row spacing and control sizing on small screens.
@@ -2449,6 +2501,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
+
 - Reduced repeated-artist clustering across radio/vibe/discovery recommendation paths and applied light thumbs weighting.
 - Fixed repeated thumbs taps so active thumbs-up/down cleanly toggle back to neutral; opposite action now cleanly overrides prior state.
 - Fixed intermittent UI navigation stalls by re-enabling sidebar route prefetch and bypassing Next.js route-transition requests in the service worker.
@@ -2467,6 +2521,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated preflight/index validation flow to rebuild indexes before strict verification, reducing stale-index blocking during release checks.
 
 ### Fixed
+
+- Radio station cards on the /radio page now open generated playlists (like the Explore tiles) instead of instantly replacing the queue, covering dynamically generated genre and decade stations; Shuffle All keeps its instant-play behavior. The shared open flow lives in one helper used by both pages, and the hover play-button overlay is gone from station cards — a spinner shows only while a station opens.
 
 - Activity Social tab no longer flickers to "Social status unavailable" during transient refresh failures when cached online users are already available.
 - Fixed off-theme discover play controls so they match the active UI color system.

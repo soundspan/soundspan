@@ -1,31 +1,14 @@
 import assert from "node:assert/strict";
-import { beforeEach, mock, test } from "node:test";
+import { mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-
-const feedbackState = {
-    showSpinner: false,
-    triggerCalls: 0,
-};
 
 const Icon = ({ "data-icon": dataIcon }: { "data-icon"?: string }) =>
     React.createElement("svg", { "data-icon": dataIcon });
 
 mock.module("lucide-react", {
     namedExports: {
-        Play: () => React.createElement(Icon, { "data-icon": "play" }),
         Loader2: () => React.createElement(Icon, { "data-icon": "loader" }),
-    },
-});
-
-mock.module("@/hooks/usePlayButtonFeedback", {
-    namedExports: {
-        usePlayButtonFeedback: () => ({
-            showSpinner: feedbackState.showSpinner,
-            triggerPlayFeedback: () => {
-                feedbackState.triggerCalls += 1;
-            },
-        }),
     },
 });
 
@@ -38,11 +21,6 @@ mock.module("@/app/radio/RadioStationMosaic", {
                 filter.type,
             ),
     },
-});
-
-beforeEach(() => {
-    feedbackState.showSpinner = false;
-    feedbackState.triggerCalls = 0;
 });
 
 type Station = {
@@ -99,7 +77,7 @@ test("RadioStationCard renders station metadata and mosaic", async () => {
     assert.match(html, /genre/);
 });
 
-test("RadioStationCard shows play icon when not loading", async () => {
+test("RadioStationCard renders no play overlay or spinner at rest", async () => {
     const RadioStationCard = await loadCardComponent();
     const html = renderToStaticMarkup(
         React.createElement(RadioStationCard, {
@@ -109,11 +87,11 @@ test("RadioStationCard shows play icon when not loading", async () => {
         }),
     );
 
-    assert.match(html, /data-icon="play"/);
+    assert.doesNotMatch(html, /data-icon="play"/);
     assert.doesNotMatch(html, /data-icon="loader"/);
 });
 
-test("RadioStationCard shows spinner icon while loading or play feedback spinner is active", async () => {
+test("RadioStationCard shows spinner only while loading", async () => {
     const RadioStationCard = await loadCardComponent();
 
     const loadingHtml = renderToStaticMarkup(
@@ -124,19 +102,10 @@ test("RadioStationCard shows spinner icon while loading or play feedback spinner
         }),
     );
     assert.match(loadingHtml, /data-icon="loader"/);
-
-    feedbackState.showSpinner = true;
-    const feedbackSpinnerHtml = renderToStaticMarkup(
-        React.createElement(RadioStationCard, {
-            station: baseStation,
-            onPlay: () => undefined,
-            isLoading: false,
-        }),
-    );
-    assert.match(feedbackSpinnerHtml, /data-icon="loader"/);
+    assert.doesNotMatch(loadingHtml, /data-icon="play"/);
 });
 
-test("RadioStationCard click handler triggers feedback and onPlay callback", async () => {
+test("RadioStationCard click handler invokes the onPlay callback", async () => {
     const RadioStationCard = await loadCardComponent();
     let playCalls = 0;
 
@@ -153,7 +122,6 @@ test("RadioStationCard click handler triggers feedback and onPlay callback", asy
 
     onClick?.();
 
-    assert.equal(feedbackState.triggerCalls, 1);
     assert.equal(playCalls, 1);
     assert.equal((element.props as { disabled?: boolean }).disabled, false);
 });
@@ -176,6 +144,5 @@ test("RadioStationCard suppresses click side effects while loading", async () =>
 
     onClick?.();
 
-    assert.equal(feedbackState.triggerCalls, 0);
     assert.equal(playCalls, 0);
 });
