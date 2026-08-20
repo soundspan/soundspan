@@ -2,30 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import { AudioLines } from "lucide-react";
-import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { openRadioStation } from "@/lib/radio/openRadioStation";
-import { PageHeader } from "@/components/layout/PageHeader";
 import {
-    RadioStationCard,
-    RadioStationCardStation,
-} from "@/components/ui/RadioStationCard";
-
-// Narrow the card's loose filter union so non-shuffle stations are provably
-// valid generated-playlist filters.
-type RadioStation = Omit<RadioStationCardStation, "filter"> & {
-    filter: { type: "all" } | RadioPlaylistFilter;
-};
-
-interface GenreCount {
-    genre: string;
-    count: number;
-}
+    useRadioPageStations,
+    type RadioPageStation,
+} from "@/lib/radio/radioPageStations";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { RadioStationCard } from "@/components/ui/RadioStationCard";
 
 // Static radio stations
-const STATIC_STATIONS: RadioStation[] = [
+const STATIC_STATIONS: RadioPageStation[] = [
     {
         id: "all",
         name: "Shuffle All",
@@ -60,90 +48,6 @@ const STATIC_STATIONS: RadioStation[] = [
     },
 ];
 
-interface DecadeCount {
-    decade: number;
-    count: number;
-}
-
-// Decade color mapping - covers from 1700s (classical) to 2020s
-const DECADE_COLORS: Record<number, string> = {
-    1700: "from-amber-800/30 to-yellow-900/30",
-    1710: "from-amber-700/30 to-yellow-800/30",
-    1720: "from-amber-700/30 to-yellow-800/30",
-    1730: "from-amber-700/30 to-yellow-800/30",
-    1740: "from-amber-700/30 to-yellow-800/30",
-    1750: "from-amber-600/30 to-yellow-700/30",
-    1760: "from-amber-600/30 to-yellow-700/30",
-    1770: "from-amber-600/30 to-yellow-700/30",
-    1780: "from-amber-600/30 to-yellow-700/30",
-    1790: "from-amber-600/30 to-yellow-700/30",
-    1800: "from-slate-600/30 to-gray-700/30",
-    1810: "from-slate-600/30 to-gray-700/30",
-    1820: "from-slate-500/30 to-gray-600/30",
-    1830: "from-slate-500/30 to-gray-600/30",
-    1840: "from-slate-500/30 to-gray-600/30",
-    1850: "from-slate-400/30 to-gray-500/30",
-    1860: "from-slate-400/30 to-gray-500/30",
-    1870: "from-slate-400/30 to-gray-500/30",
-    1880: "from-slate-400/30 to-gray-500/30",
-    1890: "from-slate-400/30 to-gray-500/30",
-    1900: "from-sepia-400/30 to-amber-500/30",
-    1910: "from-amber-400/30 to-yellow-500/30",
-    1920: "from-yellow-500/30 to-amber-600/30",
-    1930: "from-orange-400/30 to-amber-500/30",
-    1940: "from-red-400/30 to-orange-500/30",
-    1950: "from-pink-400/30 to-red-500/30",
-    1960: "from-amber-500/30 to-orange-600/30",
-    1970: "from-orange-500/30 to-red-600/30",
-    1980: "from-fuchsia-500/30 to-purple-600/30",
-    1990: "from-purple-500/30 to-violet-600/30",
-    2000: "from-blue-500/30 to-cyan-600/30",
-    2010: "from-teal-500/30 to-emerald-600/30",
-    2020: "from-orange-500/30 to-amber-600/30",
-};
-
-const getDecadeColor = (decade: number): string => {
-    return DECADE_COLORS[decade] || "from-gray-500/30 to-slate-600/30";
-};
-
-const getDecadeName = (decade: number): string => {
-    if (decade < 1900) return `${decade}s`;
-    if (decade < 2000) return `${decade.toString().slice(2)}s`;
-    return `${decade}s`;
-};
-
-const getDecadeDescription = (decade: number, count: number): string => {
-    return `${decade}-${decade + 9} • ${count} tracks`;
-};
-
-// Genre color mapping
-const GENRE_COLORS: Record<string, string> = {
-    rock: "from-red-500/30 to-orange-600/30",
-    pop: "from-pink-500/30 to-rose-600/30",
-    "hip hop": "from-purple-500/30 to-indigo-600/30",
-    "hip-hop": "from-purple-500/30 to-indigo-600/30",
-    rap: "from-purple-500/30 to-indigo-600/30",
-    electronic: "from-cyan-500/30 to-blue-600/30",
-    jazz: "from-amber-500/30 to-yellow-600/30",
-    classical: "from-slate-400/30 to-gray-500/30",
-    metal: "from-zinc-600/30 to-neutral-700/30",
-    country: "from-orange-400/30 to-amber-500/30",
-    folk: "from-green-500/30 to-emerald-600/30",
-    indie: "from-violet-500/30 to-purple-600/30",
-    alternative: "from-indigo-500/30 to-blue-600/30",
-    "r&b": "from-fuchsia-500/30 to-pink-600/30",
-    soul: "from-amber-600/30 to-orange-700/30",
-    blues: "from-blue-600/30 to-indigo-700/30",
-    punk: "from-lime-500/30 to-green-600/30",
-    reggae: "from-green-400/30 to-yellow-500/30",
-    default: "from-gray-500/30 to-slate-600/30",
-};
-
-const getGenreColor = (genre: string): string => {
-    const lower = genre.toLowerCase();
-    return GENRE_COLORS[lower] || GENRE_COLORS.default;
-};
-
 // Section Header Component
 function SectionHeader({
     title,
@@ -162,6 +66,42 @@ function SectionHeader({
     );
 }
 
+function StationGridSkeleton() {
+    return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                    key={i}
+                    className="aspect-square rounded-lg bg-white/5 animate-pulse"
+                />
+            ))}
+        </div>
+    );
+}
+
+function StationGrid({
+    stations,
+    loadingStation,
+    onOpen,
+}: {
+    stations: RadioPageStation[];
+    loadingStation: string | null;
+    onOpen: (station: RadioPageStation) => void;
+}) {
+    return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {stations.map((station) => (
+                <RadioStationCard
+                    key={station.id}
+                    station={station}
+                    onPlay={() => onOpen(station)}
+                    isLoading={loadingStation === station.id}
+                />
+            ))}
+        </div>
+    );
+}
+
 /**
  * Renders the RadioPage component.
  */
@@ -169,28 +109,9 @@ export default function RadioPage() {
     const router = useRouter();
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
+    const { genreStations, decadeStations, isLoading } = useRadioPageStations();
 
-    // Fetch genres from library
-    const { data: genresData, isLoading: genresLoading } = useQuery({
-        queryKey: ["library", "genres"],
-        queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
-        staleTime: 5 * 60 * 1000,
-        select: (data) => (data.genres || []).filter((g) => g.count >= 15),
-    });
-
-    // Fetch decades from library
-    const { data: decadesData, isLoading: decadesLoading } = useQuery({
-        queryKey: ["library", "decades"],
-        queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
-        staleTime: 5 * 60 * 1000,
-        select: (data) => data.decades || [],
-    });
-
-    const genres = genresData ?? [];
-    const decades = decadesData ?? [];
-    const isLoading = genresLoading || decadesLoading;
-
-    const handleStation = async (station: RadioStation) => {
+    const handleStation = async (station: RadioPageStation) => {
         setLoadingStation(station.id);
         try {
             await openRadioStation(station, {
@@ -201,26 +122,6 @@ export default function RadioPage() {
             setLoadingStation(null);
         }
     };
-
-    // Create genre stations from library
-    const genreStations: RadioStation[] = genres.map((g) => ({
-        id: `genre-${g.genre}`,
-        name: g.genre,
-        description: `${g.count} tracks`,
-        color: getGenreColor(g.genre),
-        filter: { type: "genre" as const, value: g.genre },
-        minTracks: 15,
-    }));
-
-    // Create decade stations from library (dynamically based on what's available)
-    const decadeStations: RadioStation[] = decades.map((d) => ({
-        id: `decade-${d.decade}`,
-        name: getDecadeName(d.decade),
-        description: getDecadeDescription(d.decade, d.count),
-        color: getDecadeColor(d.decade),
-        filter: { type: "decade" as const, value: d.decade.toString() },
-        minTracks: 15,
-    }));
 
     return (
         <div className="min-h-screen relative">
@@ -247,7 +148,7 @@ export default function RadioPage() {
                 {/* Header */}
                 <PageHeader
                     title="Radio Stations"
-                    subtitle="Continuous shuffle from your library"
+                    subtitle="Generated stations from your library"
                     icon={AudioLines}
                     className="mb-8"
                 />
@@ -256,18 +157,13 @@ export default function RadioPage() {
                 <section className="mb-10">
                     <SectionHeader
                         title="Quick Start"
-                        description="Jump into your music instantly"
+                        description="Open a ready-made station from your library"
                     />
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                        {STATIC_STATIONS.map((station) => (
-                            <RadioStationCard
-                                key={station.id}
-                                station={station}
-                                onPlay={() => handleStation(station)}
-                                isLoading={loadingStation === station.id}
-                            />
-                        ))}
-                    </div>
+                    <StationGrid
+                        stations={STATIC_STATIONS}
+                        loadingStation={loadingStation}
+                        onOpen={handleStation}
+                    />
                 </section>
 
                 {/* Genres Section */}
@@ -278,27 +174,13 @@ export default function RadioPage() {
                             description="Shuffle tracks from specific genres"
                         />
                         {isLoading ? (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                                {Array.from({ length: 6 }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="aspect-square rounded-lg bg-white/5 animate-pulse"
-                                    />
-                                ))}
-                            </div>
+                            <StationGridSkeleton />
                         ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                                {genreStations.map((station) => (
-                                    <RadioStationCard
-                                        key={station.id}
-                                        station={station}
-                                        onPlay={() => handleStation(station)}
-                                        isLoading={
-                                            loadingStation === station.id
-                                        }
-                                    />
-                                ))}
-                            </div>
+                            <StationGrid
+                                stations={genreStations}
+                                loadingStation={loadingStation}
+                                onOpen={handleStation}
+                            />
                         )}
                     </section>
                 )}
@@ -311,27 +193,13 @@ export default function RadioPage() {
                             description="Travel through time with your music"
                         />
                         {isLoading ? (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                                {Array.from({ length: 6 }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="aspect-square rounded-lg bg-white/5 animate-pulse"
-                                    />
-                                ))}
-                            </div>
+                            <StationGridSkeleton />
                         ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                                {decadeStations.map((station) => (
-                                    <RadioStationCard
-                                        key={station.id}
-                                        station={station}
-                                        onPlay={() => handleStation(station)}
-                                        isLoading={
-                                            loadingStation === station.id
-                                        }
-                                    />
-                                ))}
-                            </div>
+                            <StationGrid
+                                stations={decadeStations}
+                                loadingStation={loadingStation}
+                                onOpen={handleStation}
+                            />
                         )}
                     </section>
                 )}

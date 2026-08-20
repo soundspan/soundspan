@@ -4,7 +4,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { openRadioStation } from "@/lib/radio/openRadioStation";
+import {
+    isGeneratedPlaylistDecade,
+    openRadioStation,
+} from "@/lib/radio/openRadioStation";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import {
     RadioStationCard,
@@ -145,7 +148,11 @@ export function useLibraryRadioData(skip = false) {
                     genresRes.genres || [],
                 );
                 setGenres(validGenres);
-                setDecades((decadesRes.decades || []).slice(0, 4));
+                setDecades(
+                    (decadesRes.decades || [])
+                        .filter((d) => isGeneratedPlaylistDecade(d.decade))
+                        .slice(0, 4),
+                );
             } catch (error) {
                 sharedFrontendLogger.error(
                     "Failed to fetch radio data:",

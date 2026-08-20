@@ -7,6 +7,22 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const SHUFFLE_ALL_TRACK_LIMIT = 100;
 const DEFAULT_MIN_TRACKS = 10;
+const GENERATED_PLAYLIST_DECADE_MIN = 1000;
+const GENERATED_PLAYLIST_DECADE_MAX = 2090;
+
+/**
+ * The generated-playlist API only accepts decade values 1000-2090 in steps
+ * of ten. Library years are unbounded (metadata edits allow any year), so
+ * station producers must filter decades the API would reject.
+ */
+export function isGeneratedPlaylistDecade(decade: number): boolean {
+    return (
+        Number.isInteger(decade) &&
+        decade % 10 === 0 &&
+        decade >= GENERATED_PLAYLIST_DECADE_MIN &&
+        decade <= GENERATED_PLAYLIST_DECADE_MAX
+    );
+}
 
 /** The station fields the open flow needs, shared by Explore and /radio. */
 export interface OpenableRadioStation {

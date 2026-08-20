@@ -167,6 +167,18 @@ test("Shuffle All refuses to play below the station minimum", async () => {
     assert.match(state.errorToasts[0] ?? "", /Not enough tracks/);
 });
 
+test("decade guard accepts only API-valid decades", async () => {
+    const { isGeneratedPlaylistDecade } =
+        await import("../../lib/radio/openRadioStation");
+
+    for (const valid of [1000, 1700, 1990, 2020, 2090]) {
+        assert.equal(isGeneratedPlaylistDecade(valid), true, `${valid}`);
+    }
+    for (const invalid of [990, 2100, 1995, 2020.5, Number.NaN]) {
+        assert.equal(isGeneratedPlaylistDecade(invalid), false, `${invalid}`);
+    }
+});
+
 test("generation failures surface a toast and resolve", async () => {
     const openRadioStation = await loadHelper();
     state.failCreate = true;
