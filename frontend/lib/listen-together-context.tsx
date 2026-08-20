@@ -59,7 +59,6 @@ import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherOptimisticTrackSelectionPolicy,
     getListenTogetherSessionSnapshot,
-    requestListenTogetherGroupResync,
     scheduleListenTogetherGroupResync,
     setListenTogetherMembershipPending,
     setListenTogetherSessionSnapshot,
