@@ -1,7 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { Client } from "pg";
 import { config } from "../src/config";
-import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
+import {
+    cleanupOrphanedLibraryEntities,
+    ORPHAN_CLEANUP_BATCH_SIZE,
+} from "../src/services/libraryOrphanCleanup";
 import { prisma } from "../src/utils/db";
 import { runDataIntegrityCheck } from "../src/workers/dataIntegrity";
 import {
@@ -157,12 +160,15 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
     });
 
     afterAll(async () => {
-        jest.restoreAllMocks();
         await prisma.$disconnect();
         await database?.end();
         if (admin && databaseName) {
             await dropScaleDatabase(admin, databaseName);
         }
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     it("preserves provider-backed and raced entities while deleting true orphans", async () => {
@@ -261,6 +267,80 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
         ).resolves.toEqual([
             { entityType: "album", entityId: albumId },
             { entityType: "artist", entityId: artistId },
+        ]);
+    });
+
+    it("cleans and tombstones orphans across batch boundaries", async () => {
+        const entityCount = ORPHAN_CLEANUP_BATCH_SIZE + 1;
+        const artistIds = Array.from(
+            { length: entityCount },
+            (_, index) => `00-batch-artist-${String(index).padStart(3, "0")}`,
+        );
+        const albumIds = Array.from(
+            { length: entityCount },
+            (_, index) => `00-batch-album-${String(index).padStart(3, "0")}`,
+        );
+        await prisma.artist.createMany({
+            data: artistIds.map((id) => ({
+                id,
+                mbid: `${id}-mbid`,
+                name: id,
+                normalizedName: id,
+            })),
+        });
+        await prisma.album.createMany({
+            data: albumIds.map((id, index) => ({
+                id,
+                rgMbid: `${id}-rg-mbid`,
+                artistId: artistIds[index],
+                title: id,
+                primaryType: "Album",
+            })),
+        });
+        const federationWasEnabled = config.features.federation;
+        config.features.federation = true;
+        const runTransaction = prisma.$transaction.bind(prisma);
+        const tombstoneCountsAfterCommit: number[] = [];
+        jest.spyOn(prisma, "$transaction").mockImplementation((async (
+            callback: (
+                transaction: Prisma.TransactionClient,
+            ) => Promise<unknown>,
+            options: { maxWait: number; timeout: number },
+        ) => {
+            const result = await runTransaction(callback, options);
+            tombstoneCountsAfterCommit.push(
+                await prisma.federationTombstone.count({
+                    where: { entityId: { in: [...albumIds, ...artistIds] } },
+                }),
+            );
+            return result;
+        }) as never);
+
+        try {
+            await expect(cleanupOrphanedLibraryEntities()).resolves.toEqual({
+                albumsDeleted: entityCount,
+                artistsDeleted: entityCount,
+            });
+        } finally {
+            config.features.federation = federationWasEnabled;
+        }
+
+        await expect(
+            prisma.federationTombstone.count({
+                where: { entityId: { in: [...albumIds, ...artistIds] } },
+            }),
+        ).resolves.toBe(entityCount * 2);
+        await expect(
+            prisma.album.count({ where: { id: { in: albumIds } } }),
+        ).resolves.toBe(0);
+        await expect(
+            prisma.artist.count({ where: { id: { in: artistIds } } }),
+        ).resolves.toBe(0);
+        expect(tombstoneCountsAfterCommit).toEqual([
+            ORPHAN_CLEANUP_BATCH_SIZE,
+            entityCount,
+            entityCount + ORPHAN_CLEANUP_BATCH_SIZE,
+            entityCount * 2,
         ]);
     });
 });

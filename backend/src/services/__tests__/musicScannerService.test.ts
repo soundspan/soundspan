@@ -1286,8 +1286,8 @@ describe("MusicScannerService.scanLibrary", () => {
 
         await scanner.scanLibrary("/music");
 
-        // Fast path plus the now-transactional orphan cleanup pass.
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+        // Fast path plus one bounded transaction per orphan entity phase.
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3);
         expect(mockRecomputeAlbumLoudness).not.toHaveBeenCalled();
         expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
             where: { trackId: "track-1" },
@@ -1879,8 +1879,8 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        // Promotion, soft-remove, and the now-transactional orphan cleanup.
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3);
+        // Promotion, soft-remove, and one transaction per orphan entity phase.
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(4);
         expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledTimes(1);
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
@@ -2042,7 +2042,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 ...albumOrphanRetentionGuardWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
-            take: 10_000,
+            take: 100,
             select: { id: true },
         });
         expect(mockPrisma.artist.findMany).toHaveBeenCalledWith({
@@ -2052,7 +2052,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 ...artistOrphanRetentionGuardWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
-            take: 10_000,
+            take: 100,
             select: { id: true },
         });
         expect(mockPrisma.album.deleteMany).not.toHaveBeenCalled();
