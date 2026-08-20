@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Episode } from "../../features/podcast/types";
+import { createConsecutiveErrorBreaker } from "../../lib/audio-engine/consecutiveErrorBreaker";
+import {
+    consumePlaybackAdvanceOrigin,
+    playbackAdvanceOriginRef,
+    setPlaybackAutoRestartSuppressed,
+} from "../../lib/audio-engine/playbackAdvanceOrigin";
 
 /**
  * Behavior tests for the mixed-queue UX fixes in
@@ -34,6 +40,11 @@ const apiCalls: { updatePodcastProgress: unknown[][] } = {
 const getPodcastImpl: { current: (id: string) => Promise<unknown> } = {
     current: async () => ({ episodes: [] }),
 };
+
+afterEach(() => {
+    playbackAdvanceOriginRef.current = null;
+    setPlaybackAutoRestartSuppressed(false);
+});
 
 mock.module("@/lib/audio-state-context", {
     namedExports: { useAudioState: () => stateHolder.current },
@@ -520,4 +531,33 @@ test("moveQueueItem refuses to move the current row or cross into history", asyn
         ["t1", "t2", "t3"],
     );
     assert.equal(state.currentIndex, 1);
+});
+
+test("repeat toggle resets two prior failures before the next failure", async () => {
+    const currentTrack = makeTrack("repeat-current", "artist-1");
+    const state = createDeferredAudioState({
+        queue: [currentTrack],
+        currentIndex: 0,
+        currentTrack,
+        playbackType: "track",
+        repeatMode: "off",
+    });
+    const controls = await renderControls({
+        state,
+        playback: createPlaybackStub(),
+    });
+    const breaker = createConsecutiveErrorBreaker();
+    breaker.recordError();
+    breaker.recordError();
+
+    controls.toggleRepeat();
+    state.commit();
+    const origin = consumePlaybackAdvanceOrigin();
+    if (origin?.origin === "manual") breaker.reset();
+    const tripped = breaker.recordError();
+
+    assert.equal(state.repeatMode, "all");
+    assert.equal(origin?.origin, "manual");
+    assert.equal(tripped, false);
+    assert.equal(breaker.getErrorCount(), 1);
 });

@@ -27,6 +27,8 @@ import {
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import type { usePlaybackRecoveryHelpers } from "./usePlaybackRecoveryHelpers";
 import {
+    isPlaybackAutoRestartSuppressed,
+    setPlaybackAutoRestartSuppressed,
     type PlaybackAdvanceOrigin,
     writePlaybackAdvanceOrigin,
 } from "@/lib/audio-engine/playbackAdvanceOrigin";
@@ -257,13 +259,24 @@ export function useTrackRecovery({
         [setIsBuffering],
     );
 
+    const stopAutomaticPlaybackRestarts = useCallback((): void => {
+        setPlaybackAutoRestartSuppressed(true);
+        isLoadingRef.current = false;
+        playbackStateMachine.forceTransition("READY");
+        setIsBuffering(false);
+    }, [isLoadingRef, setIsBuffering]);
+
     const scheduleTrackErrorSkip = useCallback(
-        (failedTrackId: string | null) => {
+        (failedTrackId: string | null): boolean => {
             if (
                 pendingTrackErrorSkipRef.current &&
                 pendingTrackErrorTrackIdRef.current === failedTrackId
             ) {
-                return;
+                return false;
+            }
+            if (isPlaybackAutoRestartSuppressed()) {
+                stopAutomaticPlaybackRestarts();
+                return true;
             }
 
             // Record the error in the circuit breaker. If it trips (3 consecutive
@@ -272,6 +285,7 @@ export function useTrackRecovery({
             const justTripped =
                 consecutiveErrorBreakerRef.current.recordError();
             if (consecutiveErrorBreakerRef.current.isTripped()) {
+                stopAutomaticPlaybackRestarts();
                 if (justTripped) {
                     sharedFrontendLogger.warn(
                         "[AudioPlaybackOrchestrator] Consecutive error circuit breaker tripped — stopping auto-advance",
@@ -285,7 +299,7 @@ export function useTrackRecovery({
                         { duration: 6000 },
                     );
                 }
-                return;
+                return true;
             }
 
             clearPendingTrackErrorSkip();
@@ -325,9 +339,10 @@ export function useTrackRecovery({
                 advancePlayIntentAtMsRef.current = Date.now();
                 next("error");
             }, TRACK_ERROR_SKIP_DELAY_MS);
+            return false;
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Preserve the relocated ref access and original hook scheduling.
-        [clearPendingTrackErrorSkip, next],
+        [clearPendingTrackErrorSkip, next, stopAutomaticPlaybackRestarts],
     );
 
     const attemptTransientTrackRecovery = useCallback(

@@ -1902,6 +1902,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) return;
 
+        writePlaybackAdvanceOrigin("manual", state.currentTrack?.id ?? null);
         state.setRepeatMode((prev) => {
             if (prev === "off") return "all";
             if (prev === "all") return "one";

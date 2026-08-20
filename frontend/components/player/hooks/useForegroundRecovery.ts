@@ -13,7 +13,11 @@ import {
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import type { createConsecutiveErrorBreaker } from "@/lib/audio-engine/consecutiveErrorBreaker";
 import type { TrackEndWatchdog } from "../trackEndWatchdog";
-import type { PlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
+import {
+    isPlaybackAutoRestartSuppressed,
+    setPlaybackAutoRestartSuppressed,
+    type PlaybackAdvanceOrigin,
+} from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UseForegroundRecoveryOptions {
     currentAudiobook: Audiobook | null;
@@ -76,7 +80,9 @@ export function useForegroundRecovery({
                 return;
             }
 
+            if (isPlaybackAutoRestartSuppressed()) return;
             consecutiveErrorBreakerRef.current.reset();
+            setPlaybackAutoRestartSuppressed(false);
 
             const decision = resolveForegroundRecoveryDecision({
                 isVisible: true,

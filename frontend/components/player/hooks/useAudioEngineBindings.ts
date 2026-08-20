@@ -6,6 +6,7 @@ import type {
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import { transitionPlaybackProgressConfirmation } from "@/lib/audio-engine/playbackProgressConfirmation";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
+import { setPlaybackAutoRestartSuppressed } from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UseAudioEngineBindingsOptions {
     refs: PlaybackOrchestratorRefs;
@@ -31,6 +32,7 @@ const createPlaybackConfirmationTimeUpdateHandler = (
         refs.playbackProgressConfirmationRef.current = result.nextState;
         if (result.confirmed) {
             refs.consecutiveErrorBreakerRef.current.recordSuccess();
+            setPlaybackAutoRestartSuppressed(false);
         }
     };
 };

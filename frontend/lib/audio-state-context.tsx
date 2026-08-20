@@ -49,6 +49,7 @@ import {
     type QueueItem,
 } from "@/lib/queue-item";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { markRemoteTrackChange } from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 /**
  * Returns true when an error represents an expired or invalid session (HTTP
@@ -509,6 +510,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         remoteQueueTrack &&
                         !isEpisodeQueueItem(remoteQueueTrack)
                     ) {
+                        markRemoteTrackChange(
+                            hydratedLocalTrack?.id ?? null,
+                            remoteQueueTrack.id,
+                        );
                         // Remote (yt:/tidal:/youtube-direct) tracks are not
                         // in the library — materialize the current track from
                         // the persisted queue snapshot instead of the library
@@ -524,6 +529,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     } else {
                         api.getTrack(serverState.trackId)
                             .then((track) => {
+                                markRemoteTrackChange(
+                                    hydratedLocalTrack?.id ?? null,
+                                    track.id,
+                                );
                                 setCurrentTrack(track);
                                 setPlaybackType("track");
                                 setCurrentAudiobook(null);
@@ -916,6 +925,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             remoteQueueTrack &&
                             !isEpisodeQueueItem(remoteQueueTrack)
                         ) {
+                            markRemoteTrackChange(
+                                localCurrentTrackId ?? null,
+                                remoteQueueTrack.id,
+                            );
                             // Remote (yt:/tidal:/youtube-direct) tracks are
                             // not in the library — materialize from the
                             // persisted queue snapshot instead of the library
@@ -954,6 +967,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                     serverState.trackId,
                                 );
                                 if (!mounted) return;
+                                markRemoteTrackChange(
+                                    localCurrentTrackId ?? null,
+                                    track.id,
+                                );
                                 setCurrentTrack(track);
                                 setPlaybackType("track");
                                 setCurrentAudiobook(null);

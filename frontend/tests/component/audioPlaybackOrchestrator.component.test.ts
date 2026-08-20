@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import * as realPlaybackRecoveryPolicy from "../../lib/audio-engine/playbackRecoveryPolicy";
 import {
+    isPlaybackAutoRestartSuppressed,
+    markRemoteTrackChange,
     playbackAdvanceOriginRef,
+    setPlaybackAutoRestartSuppressed,
     writePlaybackAdvanceOrigin,
 } from "../../lib/audio-engine/playbackAdvanceOrigin";
 import { afterEach, before, beforeEach, mock, test } from "node:test";
@@ -549,6 +552,7 @@ const resetHarnessState = (): void => {
     runtimeEngineMode = "howler";
     listenTogetherSnapshot = null;
     playbackAdvanceOriginRef.current = null;
+    setPlaybackAutoRestartSuppressed(false);
     podcastCacheStatus = {
         cached: true,
         downloading: false,
@@ -1218,6 +1222,10 @@ const applyListenTogetherResume = async (
     tracks: Track[],
     index: number,
 ): Promise<void> => {
+    markRemoteTrackChange(
+        audioState.currentTrack?.id ?? null,
+        tracks[index]?.id ?? null,
+    );
     selectTrack(tracks, index);
     await flushAsync();
     engine.emit("load", { durationSec: 210 });
@@ -1301,7 +1309,7 @@ test("recoverable autoplay rejection preserves the track without scheduling a sk
     assert.equal(playbackState.isPlaying, true);
 });
 
-test("foreground visibility reset re-enables fatal-error skips after the breaker trips", async () => {
+test("foreground visibility does not bypass a tripped failure breaker", async () => {
     mock.timers.enable();
     const visibilityDocument = installVisibilityDocument();
     const tracks = [
@@ -1348,7 +1356,8 @@ test("foreground visibility reset re-enables fatal-error skips after the breaker
     await emitFatalLoadError();
     mock.timers.tick(1_201);
     await flushAsync();
-    assert.equal(controlCalls.next, 3);
+    assert.equal(controlCalls.next, 2);
+    assert.equal(isPlaybackAutoRestartSuppressed(), true);
 });
 
 test("three play events without playback progress trip the error breaker", async () => {
@@ -1441,6 +1450,49 @@ test("listen-together follower resync preserves consecutive failures until the b
         loggerCalls.warn.some((args) =>
             String(args[0]).includes("circuit breaker tripped"),
         ),
+    );
+    assert.equal(playbackState.isBuffering, false);
+    assert.equal(playbackMachine.state, "READY");
+    assert.equal(isPlaybackAutoRestartSuppressed(), true);
+});
+
+test("fresh host media resets two follower failures before the next failure", async () => {
+    mock.timers.enable();
+    const tracks = [
+        makeTrack("lt-follower-prior-1"),
+        makeTrack("lt-follower-prior-2"),
+        makeTrack("lt-follower-resynced"),
+        makeTrack("lt-follower-host-selection"),
+        makeTrack("lt-follower-after-host-selection"),
+    ];
+    listenTogetherSnapshot = {
+        groupId: "lt-follower-fresh-host-media",
+        isHost: false,
+    };
+    audioState.currentTrack = tracks[0];
+    audioState.queue = tracks;
+
+    renderOrchestrator();
+    await flushAsync();
+
+    await failPlayingTrack();
+    await applyListenTogetherResume(tracks, 1);
+    await failPlayingTrack();
+    await applyListenTogetherResume(tracks, 2);
+
+    await applyListenTogetherResume(tracks, 3);
+    await failPlayingTrack();
+
+    assert.deepEqual(listenTogetherResyncCalls, [
+        "lt-follower-fresh-host-media",
+        "lt-follower-fresh-host-media",
+        "lt-follower-fresh-host-media",
+    ]);
+    assert.equal(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+        false,
     );
 });
 

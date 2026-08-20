@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
+import { setPlaybackAutoRestartSuppressed } from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UsePlaybackUnmountCleanupOptions {
     refs: PlaybackOrchestratorRefs;
@@ -32,6 +33,7 @@ export function usePlaybackUnmountCleanup({
         return () => {
             desiredLoadPlayRef.current = null;
             cancelledLoadPlayIdRef.current = null;
+            setPlaybackAutoRestartSuppressed(false);
             audioEngine.stop();
 
             if (progressSaveIntervalRef.current) {

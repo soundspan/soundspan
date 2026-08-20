@@ -708,7 +708,7 @@ export const AudioPlaybackOrchestrator = memo(
                     const listenTogetherSession =
                         getListenTogetherSessionSnapshot();
                     if (listenTogetherSession?.groupId) {
-                        scheduleTrackErrorSkip(failedTrackId);
+                        if (scheduleTrackErrorSkip(failedTrackId)) return;
                         playbackStateMachine.forceTransition("LOADING");
                         setIsBuffering(true);
                         return;

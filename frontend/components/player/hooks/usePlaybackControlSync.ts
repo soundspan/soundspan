@@ -9,7 +9,10 @@ import {
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import type { PlaybackOrchestratorRefs } from "./usePlaybackOrchestratorRefs";
 import { useLoudnessNormalization } from "./useLoudnessNormalization";
-import { consumePlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
+import {
+    consumePlaybackAdvanceOrigin,
+    isPlaybackAutoRestartSuppressed,
+} from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 interface UsePlaybackControlSyncOptions {
     refs: PlaybackOrchestratorRefs;
@@ -175,6 +178,7 @@ export function usePlaybackControlSync({
             if (advanceOrigin?.origin === "manual") {
                 consecutiveErrorBreakerRef.current.reset();
             }
+            if (isPlaybackAutoRestartSuppressed()) return;
             applyCurrentOutputState();
             audioEngine.play();
             if (playbackType === "track" && currentTrack?.id) {

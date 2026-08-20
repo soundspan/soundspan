@@ -63,7 +63,12 @@ import {
     toLegacyStreamFields,
 } from "@soundspan/media-metadata-contract";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
-import { writePlaybackAdvanceOrigin as writeOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
+import {
+    isPlaybackAutoRestartSuppressed,
+    markRemoteTrackChange as markTrackChange,
+    writePlaybackAdvanceOrigin as writeOrigin,
+} from "@/lib/audio-engine/playbackAdvanceOrigin";
+import { resumeListenTogetherPlayback } from "@/lib/audio-engine/listenTogetherPlaybackResume";
 const playbackEngine = createRuntimeAudioEngine();
 const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
 const LT_READY_REPORT_DELAY_MS = 150;
@@ -510,6 +515,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
             const state = audioStateRef.current;
             const ctrl = controlsRef.current;
+            const outgoingTrackId = state.currentTrack?.id ?? null;
+            markTrackChange(outgoingTrackId, targetTrack?.id ?? null);
 
             if (
                 pendingHostTrackIndexRef.current !== null &&
@@ -573,12 +580,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
                 // Let recoverAudioAfterReconnect handle resume after reload
             } else if (pb.isPlaying) {
-                ctrl.resume({
-                    suppressListenTogetherBroadcast: true,
-                    listenTogetherForceIsPlaying: true,
-                    listenTogetherPositionMs: pb.positionMs,
-                    listenTogetherServerTimeMs: pb.serverTime,
-                });
+                resumeListenTogetherPlayback(ctrl.resume, pb);
             } else {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -625,6 +627,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
                 clearObsoleteReadyReportLoadListener(safeIdx, delta.trackId);
                 if (trackChanged) {
+                    markTrackChange(
+                        state.currentTrack?.id ?? null,
+                        effectiveTrack?.id ?? null,
+                    );
                     // Pause before switching to prevent buffered audio from the old
                     // track replaying during the async transition.
                     if (playbackEngine.isPlaying()) {
@@ -673,12 +679,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 delta.isPlaying &&
                 (trackChanged || !playbackEngine.isPlaying())
             ) {
-                ctrl.resume({
-                    suppressListenTogetherBroadcast: true,
-                    listenTogetherForceIsPlaying: true,
-                    listenTogetherPositionMs: delta.positionMs,
-                    listenTogetherServerTimeMs: delta.serverTime,
-                });
+                resumeListenTogetherPlayback(ctrl.resume, delta);
             } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -708,6 +709,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             );
             const targetTrack = pb.queue[safeIndex];
             if (!targetTrack) {
+                pendingReconnectAudioRecoveryRef.current = false;
+                return;
+            }
+            if (isPlaybackAutoRestartSuppressed()) {
                 pendingReconnectAudioRecoveryRef.current = false;
                 return;
             }
@@ -741,12 +746,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     allowListenTogetherFollower: true,
                     suppressListenTogetherBroadcast: true,
                 });
-                controlsRef.current.resume({
-                    suppressListenTogetherBroadcast: true,
-                    listenTogetherForceIsPlaying: true,
-                    listenTogetherPositionMs: active.playback.positionMs,
-                    listenTogetherServerTimeMs: active.playback.serverTime,
-                });
+                resumeListenTogetherPlayback(
+                    controlsRef.current.resume,
+                    active.playback,
+                );
             };
 
             // Force stream re-open to recover from dead socket-backed stream handles
@@ -896,6 +899,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             clearObsoleteReadyReportLoadListener(safeIndex, delta.trackId);
             isApplyingRemoteRef.current = true;
             const aState = audioStateRef.current;
+            markTrackChange(
+                aState.currentTrack?.id ?? null,
+                mappedQueue[safeIndex]?.id ?? null,
+            );
 
             startTransition(() => {
                 aState.setPlaybackType("track");
@@ -1295,12 +1302,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         allowListenTogetherFollower: true,
                         suppressListenTogetherBroadcast: true,
                     });
-                    ctrl.resume({
-                        suppressListenTogetherBroadcast: true,
-                        listenTogetherForceIsPlaying: true,
-                        listenTogetherPositionMs: data.positionMs,
-                        listenTogetherServerTimeMs: data.serverTime,
-                    });
+                    resumeListenTogetherPlayback(ctrl.resume, data);
 
                     queueMicrotask(() => {
                         isApplyingRemoteRef.current = false;

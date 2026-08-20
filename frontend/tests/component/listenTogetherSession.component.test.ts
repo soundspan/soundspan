@@ -21,6 +21,13 @@ import {
     type ListenTogetherSocketCallbacks,
 } from "../../lib/listen-together-socket";
 import { api } from "@/lib/api";
+import {
+    consumePlaybackAdvanceOrigin,
+    isPlaybackAutoRestartSuppressed,
+    playbackAdvanceOriginRef,
+    setPlaybackAutoRestartSuppressed,
+    writePlaybackAdvanceOrigin,
+} from "@/lib/audio-engine/playbackAdvanceOrigin";
 
 GlobalRegistrator.register();
 (
@@ -131,12 +138,16 @@ beforeEach(() => {
     setListenTogetherSessionSnapshot(null);
     setListenTogetherMembershipPending(false);
     clearWindowStorage();
+    playbackAdvanceOriginRef.current = null;
+    setPlaybackAutoRestartSuppressed(false);
 });
 
 afterEach(() => {
     listenTogetherSocket.disconnect();
     setListenTogetherSessionSnapshot(null);
     setListenTogetherMembershipPending(false);
+    playbackAdvanceOriginRef.current = null;
+    setPlaybackAutoRestartSuppressed(false);
 
     if (typeof previousWindow === "undefined") {
         Reflect.deleteProperty(globalScope, "window");
@@ -1075,6 +1086,79 @@ test("host play-at echoes do not restart an optimistic track, while guests still
     assert.equal(providerControlCalls.resume, 1);
     assert.equal(providerEngineState.currentTime, 0);
     await guest.unmount();
+});
+
+test("tripped followers suppress heartbeat restarts until a track-changing delta arrives", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    providerEngineState.playing = false;
+    providerEngineState.currentTime = 5;
+    providerControlCalls.resume = 0;
+    setPlaybackAutoRestartSuppressed(true);
+
+    await guest.act(() =>
+        guest.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 5_000,
+            serverTime: Date.now(),
+            stateVersion: 2,
+            currentIndex: 0,
+            trackId: "remote-0",
+        }),
+    );
+    await guest.act(() =>
+        guest.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 10_000,
+            serverTime: Date.now(),
+            stateVersion: 3,
+            currentIndex: 0,
+            trackId: "remote-0",
+        }),
+    );
+
+    assert.equal(providerControlCalls.resume, 0);
+    assert.equal(isPlaybackAutoRestartSuppressed(), true);
+
+    await guest.act(() =>
+        guest.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 0,
+            serverTime: Date.now(),
+            stateVersion: 4,
+            currentIndex: 1,
+            trackId: "remote-1",
+        }),
+    );
+
+    assert.equal(providerAudioState.currentTrack?.id, "remote-1");
+    assert.equal(providerControlCalls.resume, 1);
+    assert.equal(isPlaybackAutoRestartSuppressed(), false);
+    assert.deepEqual(consumePlaybackAdvanceOrigin(), {
+        origin: "manual",
+        originatingTrackId: "remote-0",
+    });
+});
+
+test("follower error-resync track changes consume their marker without a reset", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+    writePlaybackAdvanceOrigin("error", "remote-0");
+
+    await guest.act(() =>
+        guest.callbacks().onPlaybackDelta({
+            isPlaying: true,
+            positionMs: 0,
+            serverTime: Date.now(),
+            stateVersion: 2,
+            currentIndex: 1,
+            trackId: "remote-1",
+        }),
+    );
+
+    assert.equal(providerAudioState.currentTrack?.id, "remote-1");
+    assert.equal(providerControlCalls.resume, 1);
+    assert.equal(consumePlaybackAdvanceOrigin(), null);
 });
 
 test("remote-apply guards clear without animation frames so host heartbeats continue", async (t) => {
