@@ -526,6 +526,10 @@ export async function joinGroupById(
     // Verify membership in DB
     const membership = await prisma.syncGroupMember.findFirst({
         where: { syncGroupId: groupId, userId, leftAt: null },
+        select: {
+            syncGroupId: true,
+            syncGroup: { select: { hostUserId: true } },
+        },
     });
     if (!membership)
         throw new GroupError("NOT_MEMBER", "Not a member of this group");
@@ -539,10 +543,17 @@ export async function joinGroupById(
 
     const group = groupManager.get(groupId);
     if (!group) throw new GroupError("NOT_FOUND", "Group not found");
+    const authoritativeHostUserId = membership.syncGroup.hostUserId;
+    groupManager.reconcileHost(groupId, authoritativeHostUserId);
 
     // Make sure the member exists in-memory
     if (!group.members.has(userId)) {
-        groupManager.addMember(groupId, userId, memberPresentationName);
+        groupManager.addMember(
+            groupId,
+            userId,
+            memberPresentationName,
+            userId === authoritativeHostUserId,
+        );
     }
 
     const snapshot = groupManager.snapshot(group);

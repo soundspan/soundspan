@@ -72,6 +72,7 @@ describe("listenTogether service", () => {
             get: jest.fn(() => groupState),
             hydrate: jest.fn(),
             applyExternalSnapshot: jest.fn(),
+            reconcileHost: jest.fn(),
             snapshot: jest.fn(() => ({
                 id: "group-1",
                 playback: {},
@@ -481,6 +482,7 @@ describe("listenTogether service", () => {
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
             syncGroupId: "group-1",
             userId: "u1",
+            syncGroup: { hostUserId: "host-1" },
         });
         groupManager.has.mockReturnValueOnce(true);
         groupManager.get.mockReturnValueOnce(null);
@@ -515,6 +517,7 @@ describe("listenTogether service", () => {
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
             syncGroupId: "group-1",
             userId: "u1",
+            syncGroup: { hostUserId: "host-1" },
         });
         groupManager.has.mockReturnValueOnce(true);
         groupManager.get.mockReturnValueOnce(group);
@@ -536,10 +539,58 @@ describe("listenTogether service", () => {
             "group-1",
             "u1",
             "User",
+            false,
+        );
+        expect(groupManager.reconcileHost).toHaveBeenCalledWith(
+            "group-1",
+            "host-1",
         );
         expect(listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
             "group-1",
             { id: "group-1", playback: {}, members: [{ id: "u1" }] },
+        );
+    });
+
+    it("restores persisted host identity when joinGroupById re-adds the host", async () => {
+        const { listenTogether, prisma, groupManager } = loadService();
+        const group = {
+            id: "group-1",
+            members: new Map([
+                ["transient-host", { userId: "transient-host", isHost: true }],
+            ]),
+            playback: {
+                queue: [],
+                currentIndex: 0,
+                isPlaying: false,
+                positionMs: 0,
+                lastPositionUpdate: Date.now(),
+                stateVersion: 1,
+            },
+            hostUserId: "transient-host",
+        };
+        prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
+            syncGroupId: "group-1",
+            userId: "persisted-host",
+            syncGroup: { hostUserId: "persisted-host" },
+        });
+        groupManager.has.mockReturnValueOnce(true);
+        groupManager.get.mockReturnValueOnce(group);
+
+        await listenTogether.joinGroupById(
+            "persisted-host",
+            "Persisted Host",
+            "group-1",
+        );
+
+        expect(groupManager.reconcileHost).toHaveBeenCalledWith(
+            "group-1",
+            "persisted-host",
+        );
+        expect(groupManager.addMember).toHaveBeenCalledWith(
+            "group-1",
+            "persisted-host",
+            "Persisted Host",
+            true,
         );
     });
 
@@ -1209,6 +1260,7 @@ describe("listenTogether service", () => {
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
             syncGroupId: "group-1",
             userId: "u1",
+            syncGroup: { hostUserId: "host-1" },
         });
         groupManager.has.mockReturnValueOnce(true);
         groupManager.get.mockReturnValueOnce({
@@ -1232,6 +1284,10 @@ describe("listenTogether service", () => {
 
         await listenTogether.joinGroupById("u1", "User", "group-1");
         expect(groupManager.addMember).not.toHaveBeenCalled();
+        expect(groupManager.reconcileHost).toHaveBeenCalledWith(
+            "group-1",
+            "host-1",
+        );
     });
 
     it("returns null getMyGroup when DB group cannot be hydrated", async () => {

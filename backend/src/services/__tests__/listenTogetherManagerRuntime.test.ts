@@ -971,6 +971,165 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(afterFresh?.playback.queue[0]?.id).toBe("fresh-1");
     });
 
+    it("preserves locally connected members missing from an external snapshot", () => {
+        groupManager.setCallbacks(createCallbacks());
+        groupManager.create("g-member-merge", {
+            name: "Member Merge",
+            joinCode: "MERGE1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date("2026-02-16T00:00:00.000Z"),
+        });
+        groupManager.addMember("g-member-merge", "connected", "Connected");
+        groupManager.addMember("g-member-merge", "socketless", "Socketless");
+        groupManager.addSocket(
+            "g-member-merge",
+            "connected",
+            "connected-socket",
+        );
+        groupManager.setUnavailableIndices("g-member-merge", "connected", [2]);
+
+        const localConnected = groupManager
+            .get("g-member-merge")!
+            .members.get("connected")!;
+        const originalJoinedAt = localConnected.joinedAt;
+        const externalSnapshot = groupManager.snapshotById("g-member-merge")!;
+        externalSnapshot.members = externalSnapshot.members.filter(
+            (member) => member.userId === "host",
+        );
+
+        groupManager.applyExternalSnapshot(externalSnapshot);
+
+        const merged = groupManager.get("g-member-merge")!;
+        expect(merged.members.has("socketless")).toBe(false);
+        expect(merged.members.get("connected")).toEqual(
+            expect.objectContaining({
+                joinedAt: originalJoinedAt,
+                socketIds: new Set(["connected-socket"]),
+                unavailableIndices: new Set([2]),
+            }),
+        );
+    });
+
+    it("reconciles external membership to exactly one authoritative host", () => {
+        groupManager.setCallbacks(createCallbacks());
+        groupManager.create("g-host-merge", {
+            name: "Host Merge",
+            joinCode: "HOSTM1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host-b",
+            hostUsername: "Host B",
+            queue: [track("1")],
+            createdAt: new Date("2026-02-16T00:00:00.000Z"),
+        });
+        groupManager.addMember("g-host-merge", "host-a", "Host A");
+        groupManager.addSocket("g-host-merge", "host-a", "host-a-socket");
+
+        const externalSnapshot = groupManager.snapshotById("g-host-merge")!;
+        externalSnapshot.hostUserId = "host-a";
+        externalSnapshot.members = externalSnapshot.members
+            .filter((member) => member.userId === "host-b")
+            .map((member) => ({ ...member, isHost: true }));
+
+        groupManager.applyExternalSnapshot(externalSnapshot);
+
+        const mergedMembers = Array.from(
+            groupManager.get("g-host-merge")!.members.values(),
+        );
+        expect(mergedMembers.filter((member) => member.isHost)).toHaveLength(1);
+        expect(mergedMembers.find((member) => member.isHost)?.userId).toBe(
+            "host-a",
+        );
+        expect(groupManager.socketCount("g-host-merge", "host-a")).toBe(1);
+    });
+
+    it("re-adds the persisted host without retaining a transferred host flag", () => {
+        groupManager.setCallbacks(createCallbacks());
+        groupManager.create("g-host-rejoin", {
+            name: "Host Rejoin",
+            joinCode: "HOSTR1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "transient-host",
+            hostUsername: "Transient Host",
+            queue: [track("1")],
+            createdAt: new Date("2026-02-16T00:00:00.000Z"),
+        });
+
+        groupManager.reconcileHost("g-host-rejoin", "persisted-host");
+        groupManager.addMember(
+            "g-host-rejoin",
+            "persisted-host",
+            "Persisted Host",
+            true,
+        );
+
+        const group = groupManager.get("g-host-rejoin")!;
+        const hosts = Array.from(group.members.values()).filter(
+            (member) => member.isHost,
+        );
+        expect(group.hostUserId).toBe("persisted-host");
+        expect(hosts.map((member) => member.userId)).toEqual([
+            "persisted-host",
+        ]);
+    });
+
+    it("anchors external playback to the local clock with bounded age compensation", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const now = Date.parse("2026-02-16T12:00:00.000Z");
+        jest.spyOn(Date, "now").mockReturnValue(now);
+        groupManager.create("g-clock-merge", {
+            name: "Clock Merge",
+            joinCode: "CLOCK1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(now),
+        });
+
+        const externalSnapshot = groupManager.snapshotById("g-clock-merge")!;
+        groupManager.applyExternalSnapshot({
+            ...externalSnapshot,
+            syncState: "playing",
+            playback: {
+                ...externalSnapshot.playback,
+                isPlaying: true,
+                positionMs: 1_000,
+                serverTime: now - 60_000,
+                stateVersion: externalSnapshot.playback.stateVersion + 1,
+            },
+        });
+
+        const pastClockPlayback = groupManager.get("g-clock-merge")!.playback;
+        expect(pastClockPlayback.positionMs).toBe(3_000);
+        expect(pastClockPlayback.lastPositionUpdate).toBe(now);
+        expect(
+            groupManager.snapshotById("g-clock-merge")!.playback.positionMs,
+        ).toBe(3_000);
+
+        groupManager.applyExternalSnapshot({
+            ...externalSnapshot,
+            syncState: "playing",
+            playback: {
+                ...externalSnapshot.playback,
+                isPlaying: true,
+                positionMs: 4_000,
+                serverTime: now + 60_000,
+                stateVersion: externalSnapshot.playback.stateVersion + 2,
+            },
+        });
+
+        const futureClockPlayback = groupManager.get("g-clock-merge")!.playback;
+        expect(futureClockPlayback.positionMs).toBe(4_000);
+        expect(futureClockPlayback.lastPositionUpdate).toBe(now);
+    });
+
     it("cleans up stale members and returns removed user IDs", () => {
         groupManager.setCallbacks(createCallbacks());
         const now = Date.now();

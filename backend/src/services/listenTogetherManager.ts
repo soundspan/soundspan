@@ -11,6 +11,12 @@
 import type {} from "@soundspan/media-metadata-contract";
 import type { SyncQueueItem } from "./listenTogetherQueueItem";
 import { logger } from "../utils/logger";
+import {
+    compensateSnapshotPosition,
+    mergeSnapshotMembers,
+    reconcileHostFlags,
+    shouldApplyIncomingPlayback,
+} from "./listenTogetherSnapshot";
 
 const log = logger.child("ListenTogetherManager");
 
@@ -194,28 +200,6 @@ function computePosition(pb: GroupPlayback): number {
 
 function currentTrackId(pb: GroupPlayback): string | null {
     return pb.queue[pb.currentIndex]?.id ?? null;
-}
-
-/**
- * Determine whether incoming playback payload should overwrite local playback.
- *
- * Rules:
- * - higher stateVersion always wins
- * - lower stateVersion is stale
- * - equal stateVersion uses serverTime as tie-breaker to prevent time rewind
- */
-function shouldApplyIncomingPlayback(
-    existing: GroupState | undefined,
-    incomingStateVersion: number,
-    incomingServerTime: number,
-): boolean {
-    if (!existing) return true;
-
-    const currentStateVersion = existing.playback.stateVersion;
-    if (incomingStateVersion > currentStateVersion) return true;
-    if (incomingStateVersion < currentStateVersion) return false;
-
-    return incomingServerTime >= existing.playback.lastPositionUpdate;
 }
 
 /** Hard cap on queue size to keep Socket.IO snapshots within 1 MB. */
@@ -540,6 +524,7 @@ class GroupManager {
         groupId: string,
         userId: string,
         username: string,
+        isHost: boolean = false,
     ): GroupSnapshot {
         const group = this.requireGroup(groupId);
 
@@ -547,20 +532,25 @@ class GroupManager {
         const existing = group.members.get(userId);
         if (existing) {
             existing.lastSeen = Date.now();
+            if (isHost) group.hostUserId = userId;
+            reconcileHostFlags(group.members, group.hostUserId);
             this.broadcastState(group);
             return this.snapshot(group);
         }
 
+        if (isHost) group.hostUserId = userId;
+
         group.members.set(userId, {
             userId,
             username,
-            isHost: false,
+            isHost,
             joinedAt: new Date(),
             socketIds: new Set(),
             isReady: false,
             unavailableIndices: new Set(),
             lastSeen: Date.now(),
         });
+        reconcileHostFlags(group.members, group.hostUserId);
 
         group.lastActivity = Date.now();
         group.dirty = true;
@@ -569,6 +559,13 @@ class GroupManager {
         this.callbacks?.onMemberJoined(groupId, { userId, username });
         this.broadcastState(group);
         return this.snapshot(group);
+    }
+
+    /** Reconcile member host flags to an authoritative persisted identity. */
+    reconcileHost(groupId: string, hostUserId: string): void {
+        const group = this.requireGroup(groupId);
+        group.hostUserId = hostUserId;
+        reconcileHostFlags(group.members, hostUserId);
     }
 
     removeMember(
@@ -1097,21 +1094,13 @@ class GroupManager {
             }
         }
 
-        const members = new Map<string, GroupMember>();
-        for (const member of snapshot.members ?? []) {
-            const existingMember = existing?.members.get(member.userId);
-            members.set(member.userId, {
-                userId: member.userId,
-                username: member.username,
-                isHost: Boolean(member.isHost),
-                joinedAt: new Date(member.joinedAt),
-                // Preserve local socket presence for users connected to this pod.
-                socketIds: existingMember?.socketIds ?? new Set<string>(),
-                isReady: readyUserIds.has(member.userId),
-                unavailableIndices: new Set(),
-                lastSeen: now,
-            });
-        }
+        const members = mergeSnapshotMembers(
+            snapshot.members ?? [],
+            existing?.members,
+            readyUserIds,
+            now,
+        );
+        reconcileHostFlags(members, snapshot.hostUserId);
 
         const existingPlayback = existing?.playback;
         const playback: GroupPlayback =
@@ -1120,12 +1109,13 @@ class GroupManager {
                       queue: incomingQueue,
                       currentIndex: incomingIndex,
                       isPlaying: incomingIsPlaying,
-                      positionMs: incomingPositionMs,
-                      // Preserve server-relative elapsed playback behavior.
-                      lastPositionUpdate:
-                          incomingIsPlaying && incomingServerTime > 0
-                              ? incomingServerTime
-                              : now,
+                      positionMs: compensateSnapshotPosition(
+                          incomingPositionMs,
+                          incomingServerTime,
+                          now,
+                          incomingIsPlaying,
+                      ),
+                      lastPositionUpdate: now,
                       stateVersion: incomingStateVersion,
                   }
                 : {
