@@ -1137,6 +1137,49 @@ test("self member-left falls back to cleanup while another departure does not", 
     assert.equal(providerSocketState.disconnectCalls, 1);
 });
 
+test("member events from a previous group on the same socket are discarded", async (t) => {
+    const guest = await mountListenTogetherProvider(false, 0);
+    t.after(guest.unmount);
+
+    // A stale self-departure from an earlier group must not tear down the
+    // current session (the socket is reused across group switches).
+    await guest.act(() =>
+        guest.callbacks().onMemberLeft({
+            userId: "guest-id",
+            username: "Guest",
+            groupId: "group-previous",
+        }),
+    );
+    assert.equal(guest.latest().activeGroup?.id, "group-provider");
+    assert.equal(providerSocketState.disconnectCalls, 0);
+
+    // A stale join from another group must not toast or mutate members.
+    await guest.act(() =>
+        guest.callbacks().onMemberJoined({
+            userId: "stranger",
+            username: "Stranger",
+            groupId: "group-previous",
+        }),
+    );
+    assert.equal(
+        guest
+            .latest()
+            .activeGroup?.members.some((m) => m.userId === "stranger"),
+        false,
+    );
+
+    // A matching groupId still performs the self-departure cleanup.
+    await guest.act(() =>
+        guest.callbacks().onMemberLeft({
+            userId: "guest-id",
+            username: "Guest",
+            groupId: "group-provider",
+        }),
+    );
+    assert.equal(guest.latest().activeGroup, null);
+    assert.equal(providerSocketState.disconnectCalls, 1);
+});
+
 test("ready-gated play-at resumes hosts without seeking and followers with a compensated seek", async (t) => {
     t.mock.method(Date, "now", () => 100_000);
     const host = await mountListenTogetherProvider(true, 0);

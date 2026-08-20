@@ -647,6 +647,7 @@ describe("listen together socket runtime behavior", () => {
         expect(mocks.roomEmit).toHaveBeenCalledWith("group:member-presence", {
             userId: "user-1",
             isConnected: true,
+            groupId: "group-1",
         });
         expect(mocks.roomEmit).not.toHaveBeenCalledWith(
             "group:state",
@@ -707,6 +708,7 @@ describe("listen together socket runtime behavior", () => {
         expect(mocks.roomEmit).toHaveBeenCalledWith("group:member-left", {
             userId: "user-1",
             username: "User One",
+            groupId: "group-1",
         });
         expect(secondTab.emit).toHaveBeenCalledWith(
             "group:membership-revoked",

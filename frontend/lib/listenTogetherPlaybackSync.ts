@@ -2,6 +2,14 @@ import type { ListenTogetherSessionSnapshot } from "@/lib/listen-together-sessio
 
 const FOLLOWER_DRIFT_SEEK_THRESHOLD_SEC = 1.5;
 
+/** True when a member event originated in a different group than the session's. */
+export function isStaleGroupEvent(
+    event: { groupId?: string },
+    sessionGroupId: string,
+): boolean {
+    return event.groupId !== undefined && event.groupId !== sessionGroupId;
+}
+
 export interface ResolveListenTogetherHostControlInput {
     activeGroupId: string | null | undefined;
     hostUserId: string | null | undefined;

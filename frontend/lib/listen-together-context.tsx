@@ -53,6 +53,7 @@ import {
 import {
     canIssueListenTogetherHostPlaybackCommand,
     computeCompensatedTargetMs,
+    isStaleGroupEvent,
     resolveFollowerSeekTarget,
     resolveReconnectSeekTarget,
 } from "@/lib/listenTogetherPlaybackSync";
@@ -1326,6 +1327,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     });
                 },
                 onMemberJoined: (data) => {
+                    if (isStaleGroupEvent(data, groupId)) return;
                     if (data.userId !== user?.id)
                         toast.info(`${data.username} joined`);
                     setActiveGroup((prev) => {
@@ -1351,13 +1353,16 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         return next;
                     });
                 },
-                onMemberPresence: (data) =>
+                onMemberPresence: (data) => {
+                    if (isStaleGroupEvent(data, groupId)) return;
                     setActiveGroup((prev) =>
                         applyGroupMemberPresence(prev, data),
-                    ),
+                    );
+                },
                 onMemberLeft: (data) => {
+                    if (isStaleGroupEvent(data, groupId)) return;
                     if (data.userId === user?.id) {
-                        handleMembershipRevoked(groupId);
+                        handleMembershipRevoked(data.groupId ?? groupId);
                         return;
                     }
                     toast.info(`${data.username} left`);

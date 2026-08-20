@@ -633,14 +633,19 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         emitEnded(groupId, reason) {
             ns.to(groupId).emit("group:ended", { reason });
         },
+        // Member events carry their originating groupId so a client that
+        // switched groups on the same socket can discard stale deliveries.
         emitMemberJoined(groupId, member) {
-            ns.to(groupId).emit("group:member-joined", member);
+            ns.to(groupId).emit("group:member-joined", { ...member, groupId });
         },
         emitMemberPresence(groupId, member) {
-            ns.to(groupId).emit("group:member-presence", member);
+            ns.to(groupId).emit("group:member-presence", {
+                ...member,
+                groupId,
+            });
         },
         emitMemberLeft(groupId, member) {
-            ns.to(groupId).emit("group:member-left", member);
+            ns.to(groupId).emit("group:member-left", { ...member, groupId });
         },
         revokeSockets(groupId, socketIds) {
             return revokeGroupSockets(ns, groupId, socketIds);

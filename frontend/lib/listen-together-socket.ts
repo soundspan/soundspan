@@ -130,12 +130,16 @@ export interface PlayAtEvent {
 export interface MemberEvent {
     userId: string;
     username: string;
+    /** Originating group; absent on older servers. */
+    groupId?: string;
 }
 
 /** Presence-only update that does not carry playback state. */
 export interface MemberPresenceEvent {
     userId: string;
     isConnected: boolean;
+    /** Originating group; absent on older servers. */
+    groupId?: string;
 }
 
 /** Apply a presence-only event to an existing client snapshot. */
