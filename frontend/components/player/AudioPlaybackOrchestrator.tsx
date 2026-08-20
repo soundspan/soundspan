@@ -11,7 +11,7 @@ import {
 import { api } from "@/lib/api";
 import type { AudioEngineErrorPayload } from "@/lib/audio-engine/types";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
-import { createPlaybackProgressConfirmationState } from "@/lib/audio-engine/playbackProgressConfirmation";
+import { restartPlaybackProgressConfirmation } from "@/lib/audio-engine/playbackProgressConfirmation";
 import { consumePlaybackAdvanceOrigin } from "@/lib/audio-engine/playbackAdvanceOrigin";
 import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
 import {
@@ -498,7 +498,9 @@ export const AudioPlaybackOrchestrator = memo(
                 } else if (playbackType === "track") {
                     if (repeatMode === "one" && !isListenTogether) {
                         playbackProgressConfirmationRef.current =
-                            createPlaybackProgressConfirmationState();
+                            restartPlaybackProgressConfirmation(
+                                currentTrack?.id ?? null,
+                            );
                         audioEngine.seek(0);
                         audioEngine.play();
                     } else {

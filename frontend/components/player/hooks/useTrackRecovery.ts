@@ -18,6 +18,7 @@ import {
 } from "@/lib/audio-engine/audioPlaybackOrchestratorConstants";
 import { audioEngine } from "@/lib/audio-engine/audioPlaybackOrchestratorRuntime";
 import { isLikelyTransientStreamError } from "@/lib/audio-engine/audioPlaybackTrackPolicy";
+import { rearmPlaybackProgressConfirmationOnError } from "@/lib/audio-engine/playbackProgressConfirmation";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { toast } from "sonner";
 import {
@@ -70,6 +71,7 @@ export function useTrackRecovery({
         pendingTrackErrorSkipRef,
         pendingTrackErrorTrackIdRef,
         consecutiveErrorBreakerRef,
+        playbackProgressConfirmationRef,
         queueLengthRef,
         lastTrackIdRef,
         advancePlayIntentAtMsRef,
@@ -282,6 +284,15 @@ export function useTrackRecovery({
             // Record the error in the circuit breaker. If it trips (3 consecutive
             // errors without a successful play), halt auto-advance to prevent
             // infinite rapid error loops.
+            // Error-driven repeat-one and unchanged-track LT recovery must prove
+            // progress again. Non-error LT resyncs leave the breaker unchanged,
+            // so they need no second confirmation; podcast seek-reload does not
+            // participate in the track breaker.
+            playbackProgressConfirmationRef.current =
+                rearmPlaybackProgressConfirmationOnError(
+                    playbackProgressConfirmationRef.current,
+                    failedTrackId,
+                );
             const justTripped =
                 consecutiveErrorBreakerRef.current.recordError();
             if (consecutiveErrorBreakerRef.current.isTripped()) {

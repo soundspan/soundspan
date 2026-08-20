@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     createPlaybackProgressConfirmationState,
+    rearmPlaybackProgressConfirmationOnError,
+    restartPlaybackProgressConfirmation,
     transitionPlaybackProgressConfirmation,
     type PlaybackProgressConfirmationEvent,
 } from "../../lib/audio-engine/playbackProgressConfirmation";
+import { createConsecutiveErrorBreaker } from "../../lib/audio-engine/consecutiveErrorBreaker";
 
 const positionEvent = (
     currentTimeSeconds: number,
@@ -162,7 +165,7 @@ test("repeat-one restart resets confirmation for the same media", () => {
         positionEvent(0.5),
     ).nextState;
 
-    state = createPlaybackProgressConfirmationState();
+    state = restartPlaybackProgressConfirmation("track-1");
     const baseline = transitionPlaybackProgressConfirmation(
         state,
         positionEvent(0),
@@ -173,6 +176,87 @@ test("repeat-one restart resets confirmation for the same media", () => {
         positionEvent(0.5),
     );
     assert.equal(confirmed.confirmed, true);
+});
+
+test("a same-media error re-arms confirmed progress and the next real movement resets the breaker", () => {
+    const breaker = createConsecutiveErrorBreaker();
+    let state = restartPlaybackProgressConfirmation("track-1");
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(10),
+    ).nextState;
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(10.5),
+    ).nextState;
+    assert.equal(state.confirmed, true);
+
+    assert.equal(breaker.recordError(), false);
+    state = rearmPlaybackProgressConfirmationOnError(state, "track-1");
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(20),
+    ).nextState;
+    const recovered = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(20.5),
+    );
+    if (recovered.confirmed) breaker.recordSuccess();
+
+    assert.equal(recovered.confirmed, true);
+    assert.equal(breaker.getErrorCount(), 0);
+});
+
+test("an error for another media item does not re-arm confirmed progress", () => {
+    let state = restartPlaybackProgressConfirmation("track-1");
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0),
+    ).nextState;
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0.5),
+    ).nextState;
+
+    const unchanged = rearmPlaybackProgressConfirmationOnError(
+        state,
+        "track-2",
+    );
+
+    assert.equal(unchanged, state);
+    assert.equal(unchanged.confirmed, true);
+});
+
+test("three same-media failures separated by confirmed recoveries do not trip the breaker", () => {
+    const breaker = createConsecutiveErrorBreaker();
+    let state = restartPlaybackProgressConfirmation("track-1");
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0),
+    ).nextState;
+    state = transitionPlaybackProgressConfirmation(
+        state,
+        positionEvent(0.5),
+    ).nextState;
+
+    for (const baselineSeconds of [10, 20, 30]) {
+        assert.equal(breaker.recordError(), false);
+        state = rearmPlaybackProgressConfirmationOnError(state, "track-1");
+        state = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(baselineSeconds),
+        ).nextState;
+        const recovered = transitionPlaybackProgressConfirmation(
+            state,
+            positionEvent(baselineSeconds + 0.5),
+        );
+        state = recovered.nextState;
+        assert.equal(recovered.confirmed, true);
+        breaker.recordSuccess();
+    }
+
+    assert.equal(breaker.isTripped(), false);
+    assert.equal(breaker.getErrorCount(), 0);
 });
 
 test("invalid positions and non-playing movement do not confirm", () => {

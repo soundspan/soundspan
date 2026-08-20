@@ -48,6 +48,26 @@ const createBaselineState = (
     confirmed: false,
 });
 
+/** Re-arms confirmation when runtime restarts the current media item. */
+export function restartPlaybackProgressConfirmation(
+    mediaId: string | null,
+): PlaybackProgressConfirmationState {
+    return mediaId
+        ? createBaselineState(mediaId, null)
+        : createPlaybackProgressConfirmationState();
+}
+
+/** Re-arms only the failed media item's previously established state. */
+export function rearmPlaybackProgressConfirmationOnError(
+    previousState: PlaybackProgressConfirmationState,
+    failedMediaId: string | null,
+): PlaybackProgressConfirmationState {
+    if (!failedMediaId || previousState.mediaId !== failedMediaId) {
+        return previousState;
+    }
+    return restartPlaybackProgressConfirmation(failedMediaId);
+}
+
 /**
  * Advances confirmation state from one engine position event.
  *

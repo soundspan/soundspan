@@ -1456,6 +1456,48 @@ test("listen-together follower resync preserves consecutive failures until the b
     assert.equal(isPlaybackAutoRestartSuppressed(), true);
 });
 
+test("same-track follower recoveries confirm progress after every fatal error", async () => {
+    mock.timers.enable();
+    const track = makeTrack("lt-follower-same-track-recovery");
+    listenTogetherSnapshot = {
+        groupId: "lt-follower-same-track-recovery",
+        isHost: false,
+    };
+    audioState.currentTrack = track;
+    audioState.queue = [track, makeTrack("lt-follower-next")];
+
+    renderOrchestrator();
+    await flushAsync();
+    engine.emit("load", { durationSec: 210 });
+    engine.playing = true;
+    engine.emit("play");
+    engine.emit("timeupdate", { timeSec: 0 });
+    engine.emit("timeupdate", { timeSec: 0.5 });
+
+    for (const baselineSeconds of [10, 20, 30]) {
+        await emitFatalLoadError();
+        mock.timers.tick(1_201);
+        await flushAsync();
+        engine.emit("load", { durationSec: 210 });
+        engine.playing = true;
+        engine.emit("timeupdate", { timeSec: baselineSeconds });
+        engine.emit("timeupdate", { timeSec: baselineSeconds + 0.5 });
+    }
+
+    assert.deepEqual(listenTogetherResyncCalls, [
+        "lt-follower-same-track-recovery",
+        "lt-follower-same-track-recovery",
+        "lt-follower-same-track-recovery",
+    ]);
+    assert.equal(
+        loggerCalls.warn.some((args) =>
+            String(args[0]).includes("circuit breaker tripped"),
+        ),
+        false,
+    );
+    assert.equal(isPlaybackAutoRestartSuppressed(), false);
+});
+
 test("fresh host media resets two follower failures before the next failure", async () => {
     mock.timers.enable();
     const tracks = [
