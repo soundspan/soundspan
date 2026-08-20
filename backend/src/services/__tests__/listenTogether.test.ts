@@ -14,7 +14,10 @@ describe("listenTogether service", () => {
     });
 
     function loadService() {
-        process.env = { ...originalEnv };
+        process.env = {
+            ...originalEnv,
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "false",
+        };
 
         const prisma: any = {
             $transaction: jest.fn(),
@@ -27,6 +30,7 @@ describe("listenTogether service", () => {
             },
             syncGroupMember: {
                 findFirst: jest.fn(),
+                findMany: jest.fn(),
                 create: jest.fn(),
                 upsert: jest.fn(),
                 updateMany: jest.fn(),
@@ -38,6 +42,9 @@ describe("listenTogether service", () => {
                 findUnique: jest.fn(),
             },
         };
+        prisma.$transaction.mockImplementation(async (input: any) =>
+            typeof input === "function" ? input(prisma) : undefined,
+        );
 
         class MockGroupError extends Error {
             code: string;
@@ -86,6 +93,7 @@ describe("listenTogether service", () => {
             removeMember: jest.fn(() => ({ ended: false })),
             remove: jest.fn(),
             endGroup: jest.fn(),
+            forceEnd: jest.fn(),
             dirtyGroups: jest.fn(() => []),
             markClean: jest.fn(),
             allGroupIds: jest.fn(() => []),
@@ -100,10 +108,13 @@ describe("listenTogether service", () => {
         const logger = {
             debug: jest.fn(),
             error: jest.fn(),
+            child: jest.fn(),
         };
+        logger.child.mockReturnValue(logger);
 
         jest.doMock("crypto", () => ({
             __esModule: true,
+            randomUUID: () => "test-lock-node",
             default: {
                 randomInt: () => 0,
             },
@@ -113,6 +124,15 @@ describe("listenTogether service", () => {
         }));
         jest.doMock("../../utils/logger", () => ({
             logger,
+        }));
+        jest.doMock("../../config", () => ({
+            config: {
+                listenTogether: {
+                    mutationLockEnabled: false,
+                    mutationLockTtlMs: 3000,
+                    mutationLockPrefix: "listen-together:mutation-lock",
+                },
+            },
         }));
         jest.doMock("../listenTogetherManager", () => ({
             groupManager,
@@ -604,8 +624,7 @@ describe("listenTogether service", () => {
 
         groupManager.has.mockReturnValue(true);
         groupManager.removeMember.mockReturnValueOnce({ ended: true });
-        prisma.$transaction.mockResolvedValueOnce(undefined);
-        groupManager.snapshotById.mockReturnValueOnce(null);
+        prisma.$transaction.mockResolvedValueOnce({ ended: true });
 
         await expect(
             listenTogether.leaveGroup("u1", "group-1"),
@@ -620,7 +639,12 @@ describe("listenTogether service", () => {
             newHostUserId: "u2",
             newHostUsername: "User Two",
         });
-        prisma.$transaction.mockResolvedValueOnce(undefined);
+        prisma.$transaction.mockResolvedValueOnce({
+            ended: false,
+            hostUserId: "u2",
+            newHostUserId: "u2",
+            newHostUsername: "User Two",
+        });
         groupManager.snapshotById.mockReturnValueOnce({
             id: "group-1",
             playback: {},
@@ -653,6 +677,270 @@ describe("listenTogether service", () => {
             ended: false,
         });
         expect(groupManager.removeMember).not.toHaveBeenCalled();
+    });
+
+    it("serializes a reconnect behind an in-flight host transfer", async () => {
+        const {
+            listenTogether,
+            prisma,
+            groupManager,
+            listenTogetherStateStore,
+        } = loadService();
+        const joinedAt = new Date("2026-02-16T00:00:00.000Z");
+        const members = new Map([
+            [
+                "departing-host",
+                {
+                    userId: "departing-host",
+                    username: "Departing Host",
+                    isHost: true,
+                    joinedAt,
+                },
+            ],
+            [
+                "successor",
+                {
+                    userId: "successor",
+                    username: "Alpha Successor",
+                    isHost: false,
+                    joinedAt,
+                },
+            ],
+            [
+                "rejoining-member",
+                {
+                    userId: "rejoining-member",
+                    username: "Rejoining Member",
+                    isHost: false,
+                    joinedAt,
+                },
+            ],
+        ]);
+        const group = { id: "group-1", hostUserId: "departing-host", members };
+        let committedHostUserId = "departing-host";
+        let releaseDeparture: () => void = () => undefined;
+        let markDepartureStarted: () => void = () => undefined;
+        const departureStarted = new Promise<void>((resolve) => {
+            markDepartureStarted = resolve;
+        });
+        const departureGate = new Promise<void>((resolve) => {
+            releaseDeparture = resolve;
+        });
+        const pauseDeparture = jest.fn(async () => {
+            markDepartureStarted();
+            await departureGate;
+        });
+        const remainingMemberships = [
+            {
+                userId: "successor",
+                joinedAt,
+                user: { username: "successor", displayName: "Alpha Successor" },
+            },
+            {
+                userId: "rejoining-member",
+                joinedAt,
+                user: { username: "rejoining-member", displayName: null },
+            },
+        ];
+        const tx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    hostUserId: committedHostUserId,
+                    isActive: true,
+                })),
+                update: jest.fn(async ({ data }: any) => {
+                    if (typeof data.hostUserId === "string") {
+                        committedHostUserId = data.hostUserId;
+                    }
+                }),
+            },
+            syncGroupMember: {
+                updateMany: pauseDeparture,
+                findMany: jest.fn(async () => remainingMemberships),
+            },
+        };
+
+        groupManager.has.mockReturnValue(true);
+        groupManager.get.mockReturnValue(group);
+        groupManager.removeMember.mockImplementation(() => {
+            members.delete("departing-host");
+            return {
+                ended: false,
+                newHostUserId: "successor",
+                newHostUsername: "Alpha Successor",
+            };
+        });
+        groupManager.reconcileHost.mockImplementation(
+            (_groupId: string, hostUserId: string) => {
+                group.hostUserId = hostUserId;
+                for (const member of members.values()) {
+                    member.isHost = member.userId === hostUserId;
+                }
+            },
+        );
+        const snapshot = () => ({
+            id: "group-1",
+            hostUserId: group.hostUserId,
+            playback: {},
+            members: [],
+        });
+        groupManager.snapshot.mockImplementation(snapshot);
+        groupManager.snapshotById.mockImplementation(snapshot);
+        prisma.syncGroupMember.updateMany.mockImplementation(pauseDeparture);
+        prisma.syncGroupMember.findFirst.mockImplementation(async () => ({
+            syncGroupId: "group-1",
+            userId: "rejoining-member",
+            syncGroup: { hostUserId: committedHostUserId },
+        }));
+        prisma.syncGroup.update.mockImplementation(
+            async ({ data }: any) => {
+                if (typeof data.hostUserId === "string") {
+                    committedHostUserId = data.hostUserId;
+                }
+            },
+        );
+        prisma.$transaction.mockImplementation(async (input: any) =>
+            typeof input === "function" ? input(tx) : undefined,
+        );
+
+        const leavePromise = listenTogether.leaveGroup(
+            "departing-host",
+            "group-1",
+        );
+        await departureStarted;
+
+        let joinSettled = false;
+        const joinPromise = listenTogether
+            .joinGroupById("rejoining-member", "Rejoining Member", "group-1")
+            .finally(() => {
+                joinSettled = true;
+            });
+        await new Promise((resolve) => setImmediate(resolve));
+        const joinedBeforeDepartureCommitted = joinSettled;
+
+        releaseDeparture();
+        await Promise.all([leavePromise, joinPromise]);
+
+        expect(joinedBeforeDepartureCommitted).toBe(false);
+        expect(committedHostUserId).toBe("successor");
+        expect(group.hostUserId).toBe("successor");
+        expect(
+            listenTogetherStateStore.setSnapshot.mock.calls.map(
+                (call: any[]) => call[1].hostUserId,
+            ),
+        ).toEqual(["successor", "successor"]);
+    });
+
+    it("transfers a socketless missing host using active DB membership order", async () => {
+        const {
+            listenTogether,
+            prisma,
+            groupManager,
+            listenTogetherStateStore,
+        } = loadService();
+        const earlierJoin = new Date("2026-02-16T00:00:00.000Z");
+        const laterJoin = new Date("2026-02-16T00:01:00.000Z");
+        const members = new Map([
+            [
+                "beta",
+                {
+                    userId: "beta",
+                    username: "Beta",
+                    isHost: false,
+                    joinedAt: earlierJoin,
+                },
+            ],
+            [
+                "alpha-late",
+                {
+                    userId: "alpha-late",
+                    username: "Alpha",
+                    isHost: false,
+                    joinedAt: laterJoin,
+                },
+            ],
+            [
+                "alpha-early",
+                {
+                    userId: "alpha-early",
+                    username: "Alpha",
+                    isHost: false,
+                    joinedAt: earlierJoin,
+                },
+            ],
+        ]);
+        const group = { id: "group-1", hostUserId: "departed-host", members };
+        const tx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    hostUserId: "departed-host",
+                    isActive: true,
+                })),
+                update: jest.fn(async () => undefined),
+            },
+            syncGroupMember: {
+                updateMany: jest.fn(async () => ({ count: 1 })),
+                findMany: jest.fn(async () => [
+                    {
+                        userId: "beta",
+                        joinedAt: earlierJoin,
+                        user: { username: "Beta", displayName: null },
+                    },
+                    {
+                        userId: "alpha-late",
+                        joinedAt: laterJoin,
+                        user: { username: "Alpha", displayName: null },
+                    },
+                    {
+                        userId: "alpha-early",
+                        joinedAt: earlierJoin,
+                        user: { username: "Alpha", displayName: null },
+                    },
+                ]),
+            },
+        };
+
+        prisma.$transaction.mockImplementation(async (input: any) => input(tx));
+        groupManager.has.mockReturnValue(true);
+        groupManager.get.mockReturnValue(group);
+        groupManager.removeMember.mockReturnValue({ ended: false });
+        groupManager.reconcileHost.mockImplementation(
+            (_groupId: string, hostUserId: string) => {
+                group.hostUserId = hostUserId;
+                for (const member of members.values()) {
+                    member.isHost = member.userId === hostUserId;
+                }
+            },
+        );
+        groupManager.snapshotById.mockImplementation(() => ({
+            id: "group-1",
+            hostUserId: group.hostUserId,
+            playback: {},
+            members: Array.from(members.values()),
+        }));
+
+        await expect(
+            listenTogether.leaveGroup("departed-host", "group-1"),
+        ).resolves.toEqual({
+            ended: false,
+            newHostUserId: "alpha-early",
+            newHostUsername: "Alpha",
+        });
+
+        expect(tx.syncGroup.update).toHaveBeenCalledWith({
+            where: { id: "group-1" },
+            data: { hostUserId: "alpha-early" },
+        });
+        expect(groupManager.reconcileHost).toHaveBeenCalledWith(
+            "group-1",
+            "alpha-early",
+        );
+        expect(members.get("alpha-early")?.isHost).toBe(true);
+        expect(members.get("alpha-late")?.isHost).toBe(false);
+        expect(listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
+            "group-1",
+            expect.objectContaining({ hostUserId: "alpha-early" }),
+        );
     });
 
     it("ends groups whether or not they are currently loaded in memory", async () => {
@@ -1108,6 +1396,9 @@ describe("listenTogether service", () => {
             "[ListenTogether] Persistence loop started",
         );
         expect(groupManager.markClean).toHaveBeenCalledWith("group-1");
+        expect(prisma.syncGroup.update.mock.calls[0][0].data).not.toHaveProperty(
+            "hostUserId",
+        );
         expect(logger.error).toHaveBeenCalledWith(
             "[ListenTogether] Failed to persist group group-2:",
             expect.any(Error),
@@ -1165,6 +1456,11 @@ describe("listenTogether service", () => {
         await listenTogether.persistAllGroups();
 
         expect(prisma.syncGroup.update).toHaveBeenCalledTimes(2);
+        expect(
+            prisma.syncGroup.update.mock.calls.map(
+                (call: any[]) => "hostUserId" in call[0].data,
+            ),
+        ).toEqual([false, false]);
         expect(logger.error).toHaveBeenCalledWith(
             "[ListenTogether] Final persist failed for group-2:",
             expect.any(Error),

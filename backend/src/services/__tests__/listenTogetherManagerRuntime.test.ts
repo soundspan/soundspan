@@ -44,6 +44,7 @@ describe("listenTogetherManager runtime behavior", () => {
         jest.useRealTimers();
         resetManager();
         jest.clearAllMocks();
+        jest.restoreAllMocks();
     });
 
     it("creates and hydrates groups with expected initial playback state", () => {
@@ -1128,6 +1129,76 @@ describe("listenTogetherManager runtime behavior", () => {
         const futureClockPlayback = groupManager.get("g-clock-merge")!.playback;
         expect(futureClockPlayback.positionMs).toBe(4_000);
         expect(futureClockPlayback.lastPositionUpdate).toBe(now);
+    });
+
+    it("orders equal-version external playback by foreign snapshot time", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const fastLocalNow = 100_000;
+        jest.spyOn(Date, "now").mockReturnValue(fastLocalNow);
+        groupManager.create("g-fast-clock", {
+            name: "Fast Clock",
+            joinCode: "FAST01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(fastLocalNow),
+        });
+
+        const base = groupManager.snapshotById("g-fast-clock")!;
+        groupManager.applyExternalSnapshot({
+            ...base,
+            playback: {
+                ...base.playback,
+                positionMs: 1_000,
+                serverTime: 1_000,
+                stateVersion: 1,
+            },
+        });
+        groupManager.applyExternalSnapshot({
+            ...base,
+            playback: {
+                ...base.playback,
+                positionMs: 2_000,
+                serverTime: 2_000,
+                stateVersion: 1,
+            },
+        });
+
+        expect(groupManager.get("g-fast-clock")!.playback.positionMs).toBe(
+            2_000,
+        );
+    });
+
+    it("rejects an older equal-version bounce-back from the producing pod", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const clockSpy = jest.spyOn(Date, "now");
+        clockSpy.mockReturnValue(1_000);
+        const group = groupManager.create("g-own-bounce", {
+            name: "Own Bounce",
+            joinCode: "OWN001",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            currentTimeMs: 1_000,
+            isPlaying: true,
+            createdAt: new Date(1_000),
+        });
+        clockSpy.mockReturnValue(2_000);
+        const olderSnapshot = groupManager.snapshot(group);
+        clockSpy.mockReturnValue(3_000);
+        groupManager.snapshot(group);
+        const lastPositionUpdate = group.playback.lastPositionUpdate;
+
+        clockSpy.mockReturnValue(3_500);
+        groupManager.applyExternalSnapshot(olderSnapshot);
+
+        const playback = groupManager.get("g-own-bounce")!.playback;
+        expect(playback.lastPositionUpdate).toBe(lastPositionUpdate);
+        expect(playback.lastAppliedSnapshotServerTime).toBe(3_000);
     });
 
     it("cleans up stale members and returns removed user IDs", () => {

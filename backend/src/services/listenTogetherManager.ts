@@ -15,6 +15,7 @@ import {
     compensateSnapshotPosition,
     mergeSnapshotMembers,
     reconcileHostFlags,
+    selectHostSuccessor,
     shouldApplyIncomingPlayback,
 } from "./listenTogetherSnapshot";
 
@@ -45,6 +46,8 @@ export interface GroupPlayback {
     positionMs: number;
     /** Date.now() when `positionMs` was last written. */
     lastPositionUpdate: number;
+    /** Producer clock from the most recently applied or published snapshot. */
+    lastAppliedSnapshotServerTime: number;
     stateVersion: number;
 }
 
@@ -328,6 +331,7 @@ class GroupManager {
                 isPlaying: false, // Always start paused after hydration (no one is connected yet)
                 positionMs: opts.currentTimeMs,
                 lastPositionUpdate: now,
+                lastAppliedSnapshotServerTime: 0,
                 stateVersion: opts.stateVersion,
             },
             members,
@@ -404,6 +408,7 @@ class GroupManager {
                 isPlaying: initialIsPlaying,
                 positionMs: initialPositionMs,
                 lastPositionUpdate: now,
+                lastAppliedSnapshotServerTime: 0,
                 stateVersion: 0,
             },
             members,
@@ -596,21 +601,7 @@ class GroupManager {
 
         if (wasHost) {
             // Transfer host: alphabetical by username, then by join order
-            const candidates = Array.from(group.members.values()).sort(
-                (a, b) => {
-                    const nameComp = a.username.localeCompare(
-                        b.username,
-                        undefined,
-                        {
-                            sensitivity: "accent",
-                        },
-                    );
-                    if (nameComp !== 0) return nameComp;
-                    return a.joinedAt.getTime() - b.joinedAt.getTime();
-                },
-            );
-
-            const nextHost = candidates[0];
+            const nextHost = selectHostSuccessor(group.members.values());
             if (nextHost) {
                 // Demote all, promote new host
                 for (const m of group.members.values()) m.isHost = false;
@@ -988,6 +979,8 @@ class GroupManager {
 
     snapshot(group: GroupState): GroupSnapshot {
         const pb = group.playback;
+        const serverTime = Date.now();
+        pb.lastAppliedSnapshotServerTime = serverTime;
         return {
             id: group.id,
             name: group.name,
@@ -1005,7 +998,7 @@ class GroupManager {
                 currentIndex: pb.currentIndex,
                 isPlaying: pb.isPlaying,
                 positionMs: computePosition(pb),
-                serverTime: Date.now(),
+                serverTime,
                 stateVersion: pb.stateVersion,
                 trackId: currentTrackId(pb),
             },
@@ -1116,6 +1109,7 @@ class GroupManager {
                           incomingIsPlaying,
                       ),
                       lastPositionUpdate: now,
+                      lastAppliedSnapshotServerTime: incomingServerTime,
                       stateVersion: incomingStateVersion,
                   }
                 : {
@@ -1124,6 +1118,8 @@ class GroupManager {
                       isPlaying: existingPlayback.isPlaying,
                       positionMs: existingPlayback.positionMs,
                       lastPositionUpdate: existingPlayback.lastPositionUpdate,
+                      lastAppliedSnapshotServerTime:
+                          existingPlayback.lastAppliedSnapshotServerTime,
                       stateVersion: existingPlayback.stateVersion,
                   };
 

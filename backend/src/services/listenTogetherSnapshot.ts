@@ -7,6 +7,24 @@ import type {
 /** Bounds snapshot-age compensation so clock skew cannot add more than 2 seconds. */
 const SNAPSHOT_POSITION_COMPENSATION_MAX_MS = 2_000;
 
+interface HostSuccessorCandidate {
+    username: string;
+    joinedAt: Date;
+}
+
+/** Pick the next host by display name, then original join order. */
+export function selectHostSuccessor<T extends HostSuccessorCandidate>(
+    members: Iterable<T>,
+): T | undefined {
+    return Array.from(members).sort((a, b) => {
+        const nameComparison = a.username.localeCompare(b.username, undefined, {
+            sensitivity: "accent",
+        });
+        if (nameComparison !== 0) return nameComparison;
+        return a.joinedAt.getTime() - b.joinedAt.getTime();
+    })[0];
+}
+
 /** Make the persisted host identity the only host among the supplied members. */
 export function reconcileHostFlags(
     members: Map<string, GroupMember>,
@@ -74,5 +92,9 @@ export function shouldApplyIncomingPlayback(
     if (incomingStateVersion > currentStateVersion) return true;
     if (incomingStateVersion < currentStateVersion) return false;
 
-    return incomingServerTime >= existing.playback.lastPositionUpdate;
+    // Keep the tie-breaker in the producer clock domain; lastPositionUpdate is local-only.
+    return (
+        incomingServerTime >=
+        existing.playback.lastAppliedSnapshotServerTime
+    );
 }

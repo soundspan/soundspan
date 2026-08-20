@@ -9,7 +9,6 @@
 
 import type { Server as HttpServer } from "http";
 import { Server, type Namespace, type Socket } from "socket.io";
-import { randomUUID } from "crypto";
 import { verifyAccessToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -39,6 +38,10 @@ import {
 } from "./listenTogether";
 import { resolveQueueForUser } from "./listenTogetherResolution";
 import { trackMappingService } from "./trackMappingService";
+import {
+    shutdownGroupMutationLock,
+    withGroupMutationLock as withSharedGroupMutationLock,
+} from "./listenTogetherMutationLock";
 
 const log = logger.child("ListenTogetherSocket");
 
@@ -122,16 +125,7 @@ const listenTogetherObservabilityCounters = {
 };
 let redisAdapterPubClient: any = null;
 let redisAdapterSubClient: any = null;
-const mutationLockNodeId = randomUUID();
-let mutationLockRedisClient: ReturnType<typeof createIORedisClient> | null =
-    null;
 let unsubscribeSocialPresenceUpdates: (() => void) | null = null;
-
-if (LISTEN_TOGETHER_MUTATION_LOCK_ENABLED) {
-    mutationLockRedisClient = createIORedisClient(
-        "listen-together-mutation-locks",
-    );
-}
 
 function logListenTogetherObservability(reason: string): void {
     logger.info(
@@ -316,77 +310,22 @@ async function withGroupMutationLock<T>(
     operationName: string,
     operation: () => Promise<T>,
 ): Promise<T> {
-    if (!LISTEN_TOGETHER_MUTATION_LOCK_ENABLED || !mutationLockRedisClient) {
-        try {
-            return await operation();
-        } finally {
-            await flushGroupSnapshotWrites(groupId);
-        }
-    }
-
-    const lockKey = `${LISTEN_TOGETHER_MUTATION_LOCK_PREFIX}:${groupId}`;
-    const lockToken = `${mutationLockNodeId}:${Date.now()}:${Math.random()}`;
-    const ttlSeconds = Math.max(
-        1,
-        Math.ceil(LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS / 1000),
-    );
-
-    try {
-        const acquired = await mutationLockRedisClient.set(
-            lockKey,
-            lockToken,
-            "EX",
-            ttlSeconds,
-            "NX",
-        );
-
-        if (acquired !== "OK") {
-            throw new GroupError(
-                "CONFLICT",
-                "Another group update is in progress. Please retry.",
+    return withSharedGroupMutationLock(groupId, operationName, operation, {
+        beforeOperation: async () => {
+            const authoritativeSnapshot =
+                await listenTogetherStateStore.getSnapshot(groupId);
+            if (authoritativeSnapshot) {
+                groupManager.applyExternalSnapshot(authoritativeSnapshot);
+            }
+        },
+        afterOperation: () => flushGroupSnapshotWrites(groupId),
+        onAcquireFailure: () => {
+            listenTogetherObservabilityCounters.mutationLockAcquireFailures += 1;
+            maybeLogListenTogetherObservability(
+                "mutation-lock-acquire-failure",
             );
-        }
-    } catch (err) {
-        if (err instanceof GroupError) {
-            throw err;
-        }
-
-        logger.error(
-            `[ListenTogether/MutationLock] Failed to acquire lock for ${operationName} (${groupId})`,
-            err,
-        );
-        listenTogetherObservabilityCounters.mutationLockAcquireFailures += 1;
-        maybeLogListenTogetherObservability("mutation-lock-acquire-failure");
-        throw new GroupError(
-            "CONFLICT",
-            "Group coordination temporarily unavailable. Please retry.",
-        );
-    }
-
-    try {
-        const authoritativeSnapshot =
-            await listenTogetherStateStore.getSnapshot(groupId);
-        if (authoritativeSnapshot) {
-            groupManager.applyExternalSnapshot(authoritativeSnapshot);
-        }
-
-        return await operation();
-    } finally {
-        await flushGroupSnapshotWrites(groupId);
-        try {
-            await mutationLockRedisClient.eval(
-                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                1,
-                lockKey,
-                lockToken,
-            );
-        } catch (err) {
-            logger.warn(
-                `[ListenTogether/MutationLock] Failed to release lock for ${operationName} (${groupId})`,
-                err,
-            );
-        }
-    }
+        },
+    });
 }
 
 function disconnectCleanupKey(groupId: string, userId: string): string {
@@ -1363,10 +1302,7 @@ export function shutdownListenTogetherSocket(): void {
         redisAdapterPubClient = null;
     }
 
-    if (mutationLockRedisClient) {
-        mutationLockRedisClient.disconnect();
-        mutationLockRedisClient = null;
-    }
+    shutdownGroupMutationLock();
 
     if (unsubscribeSocialPresenceUpdates) {
         unsubscribeSocialPresenceUpdates();
