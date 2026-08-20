@@ -95,8 +95,16 @@ describe("DiscoveryAlbumLifecycle", () => {
             },
         );
         (mockPrisma.discoveryAlbum.findUnique as jest.Mock).mockResolvedValue({
-            status: "ACTIVE",
+            catalogAlbumId: null,
         });
+        (mockPrisma.album.findUnique as jest.Mock).mockImplementation(
+            async () => {
+                const fallbackResult = (
+                    mockPrisma.album.findFirst as jest.Mock
+                ).mock.results.at(-1);
+                return fallbackResult ? await fallbackResult.value : null;
+            },
+        );
         (mockPrisma.discoveryAlbum.updateMany as jest.Mock).mockResolvedValue({
             count: 1,
         });
@@ -277,6 +285,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 1,
@@ -350,6 +359,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             mockRequest.mockRejectedValue(error);
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 1,
@@ -367,7 +377,10 @@ describe("DiscoveryAlbumLifecycle", () => {
         });
 
         it("should delete the guarded album transactionally and cascade its tracks", async () => {
-            const dbAlbum = { id: "album-db-1" };
+            const dbAlbum = {
+                id: "album-db-1",
+                rgMbid: "rg-mbid-123",
+            };
             mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(
                 dbAlbum,
@@ -399,14 +412,11 @@ describe("DiscoveryAlbumLifecycle", () => {
         it("preserves files, links, and state when the guarded delete loses a like race", async () => {
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 0,
             });
-            (mockPrisma.album.findUnique as jest.Mock).mockResolvedValue({
-                id: "album-db-1",
-            });
-
             await lifecycle.deleteRejectedAlbum(mockAlbum, mockSettings);
 
             expect(mockRequest).not.toHaveBeenCalled();
@@ -425,6 +435,7 @@ describe("DiscoveryAlbumLifecycle", () => {
         it("runs no effects when a LIKED row wins the cleanup claim", async () => {
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.discoveryAlbum.updateMany as jest.Mock)
                 .mockResolvedValueOnce({ count: 1 })
@@ -477,6 +488,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 1,
@@ -499,6 +511,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
+                rgMbid: "rg-mbid-123",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 1,
@@ -618,6 +631,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-1",
+                rgMbid: "rg-1",
             });
             (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
                 count: 1,

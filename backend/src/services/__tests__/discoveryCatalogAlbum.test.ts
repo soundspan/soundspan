@@ -22,7 +22,11 @@ function createTransaction(lockedRows: LockedRow[]) {
                 const sql = query.strings.join("");
                 if (sql.includes('FROM "Album"')) {
                     operations.push("lock-album");
-                    return [{ id: "catalog" }];
+                    return [{ artistId: "artist" }];
+                }
+                if (sql.includes('FROM "Artist"')) {
+                    operations.push("lock-artist");
+                    return [{ id: "artist" }];
                 }
                 operations.push("lock-discovery");
                 return lockedRows;
@@ -121,6 +125,7 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         ]);
         const titleAlbum = {
             id: "title-match",
+            artistId: "artist",
             rgMbid: "other-rg",
             title: "legacy title",
             artist: { name: "LEGACY ARTIST" },
@@ -130,7 +135,8 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         });
         transaction.album.findFirst
             .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(titleAlbum);
+            .mockResolvedValueOnce(titleAlbum)
+            .mockResolvedValueOnce(null);
         transaction.album.findUnique.mockResolvedValueOnce(titleAlbum);
         transaction.discoveryAlbum.updateMany.mockResolvedValue({ count: 1 });
 
@@ -153,6 +159,54 @@ describe("resolveDiscoveryCatalogAlbum", () => {
             },
             include: { artist: true },
         });
+        expect(transaction.album.findFirst).toHaveBeenNthCalledWith(3, {
+            where: { rgMbid: "missing-rg" },
+            include: { artist: true },
+        });
+        expect(transaction.operations).toEqual([
+            "lock-album",
+            "lock-artist",
+            "lock-discovery",
+        ]);
+    });
+
+    it("retries when an exact MBID appears while a title and artist fallback waits for its lock", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
+        ]);
+        const titleAlbum = {
+            id: "title-match",
+            artistId: "artist",
+            rgMbid: "other-rg",
+            title: "Legacy Title",
+            artist: { name: "Legacy Artist" },
+        };
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: null,
+        });
+        transaction.album.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(titleAlbum)
+            .mockResolvedValueOnce({
+                id: "late-exact",
+                artistId: "other-artist",
+                rgMbid: "missing-rg",
+                title: "Other Title",
+                artist: { name: "Other Artist" },
+            });
+
+        await expect(
+            resolveDiscoveryCatalogAlbum(transaction as never, {
+                id: "discovery",
+                rgMbid: "missing-rg",
+                albumTitle: "Legacy Title",
+                artistName: "Legacy Artist",
+            }),
+        ).rejects.toBeInstanceOf(DiscoveryLinkDriftError);
+
+        expect(transaction.operations).toEqual(["lock-album", "lock-artist"]);
+        expect(transaction.album.findUnique).not.toHaveBeenCalled();
+        expect(transaction.discoveryAlbum.updateMany).not.toHaveBeenCalled();
     });
 
     it("retries when an exact MBID fallback no longer matches after its album lock", async () => {
@@ -195,10 +249,12 @@ describe("resolveDiscoveryCatalogAlbum", () => {
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({
                 id: "title-match",
+                artistId: "artist",
                 rgMbid: "other-rg",
                 title: "Legacy Title",
                 artist: { name: "Legacy Artist" },
-            });
+            })
+            .mockResolvedValueOnce(null);
         transaction.album.findUnique.mockResolvedValueOnce({
             id: "title-match",
             rgMbid: "other-rg",

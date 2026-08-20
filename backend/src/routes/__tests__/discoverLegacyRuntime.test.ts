@@ -281,7 +281,13 @@ describe("discover legacy-mode runtime behavior", () => {
         );
         (prisma.album.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
         (prisma.discoveryAlbum.findUnique as jest.Mock).mockResolvedValue({
-            status: "ACTIVE",
+            catalogAlbumId: null,
+        });
+        (prisma.album.findUnique as jest.Mock).mockImplementation(async () => {
+            const fallbackResult = (
+                prisma.album.findFirst as jest.Mock
+            ).mock.results.at(-1);
+            return fallbackResult ? await fallbackResult.value : null;
         });
         (prisma.discoveryAlbum.updateMany as jest.Mock).mockResolvedValue({
             count: 1,
@@ -732,7 +738,7 @@ describe("discover legacy-mode runtime behavior", () => {
         (prisma.album.findFirst as jest.Mock).mockResolvedValueOnce({
             id: "album-liked",
             artistId: "artist-liked",
-            rgMbid: "rg-current-liked-2",
+            rgMbid: "rg-liked-2",
             artist: { name: "Liked Artist" },
         });
 
@@ -750,7 +756,7 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
             where: {
                 artistId: "artist-liked",
-                rgMbid: "rg-current-liked-2",
+                rgMbid: "rg-liked-2",
                 source: "discovery_liked",
             },
         });
@@ -1010,12 +1016,10 @@ describe("discover legacy-mode runtime behavior", () => {
         ]);
         (prisma.album.findFirst as jest.Mock).mockResolvedValueOnce({
             id: "album-raced",
+            rgMbid: "rg-raced",
         });
         (prisma.album.deleteMany as jest.Mock).mockResolvedValueOnce({
             count: 0,
-        });
-        (prisma.album.findUnique as jest.Mock).mockResolvedValueOnce({
-            id: "album-raced",
         });
         (prisma.album.findMany as jest.Mock).mockResolvedValueOnce([]);
         const existsSpy = jest.spyOn(fs, "existsSync");

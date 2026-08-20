@@ -154,14 +154,41 @@ async function readCatalogCandidate(
 async function lockCatalogAlbum(
     transaction: Prisma.TransactionClient,
     catalogAlbumId: string,
-): Promise<boolean> {
-    const rows = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT "id"
+): Promise<{ artistId: string } | null> {
+    const rows = await transaction.$queryRaw<Array<{ artistId: string }>>(
+        Prisma.sql`
+        SELECT "artistId"
         FROM "Album"
         WHERE "id" = ${catalogAlbumId}
         FOR UPDATE
+    `,
+    );
+    return rows.length === 1 ? rows[0] : null;
+}
+
+async function lockCatalogArtist(
+    transaction: Prisma.TransactionClient,
+    artistId: string,
+): Promise<boolean> {
+    const rows = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id"
+        FROM "Artist"
+        WHERE "id" = ${artistId}
+        FOR UPDATE
     `);
     return rows.length === 1;
+}
+
+async function exactMbidSupersedesFallback(
+    transaction: Prisma.TransactionClient,
+    discoveryAlbum: DiscoveryCatalogIdentity,
+    catalogAlbumId: string,
+): Promise<boolean> {
+    const exactMbid = await transaction.album.findFirst({
+        where: { rgMbid: discoveryAlbum.rgMbid },
+        include: { artist: true },
+    });
+    return exactMbid !== null && exactMbid.id !== catalogAlbumId;
 }
 
 function fallbackStillMatches(
@@ -183,15 +210,34 @@ function fallbackStillMatches(
 async function readLockedCatalogAlbum(
     transaction: Prisma.TransactionClient,
     discoveryAlbum: DiscoveryCatalogIdentity,
-    catalogAlbumId: string,
+    candidate: DiscoveryCatalogAlbum,
     fallbackMatch: DiscoveryFallbackMatch | null,
 ): Promise<DiscoveryCatalogAlbum | null> {
-    const locked = await lockCatalogAlbum(transaction, catalogAlbumId);
-    if (!locked) return null;
-    const catalogAlbum = await findCatalogAlbumById(
-        transaction,
-        catalogAlbumId,
-    );
+    const lockedAlbum = await lockCatalogAlbum(transaction, candidate.id);
+    if (!lockedAlbum) return null;
+    if (fallbackMatch === "titleArtist") {
+        const artistLocked = await lockCatalogArtist(
+            transaction,
+            lockedAlbum.artistId,
+        );
+        if (!artistLocked) {
+            throw new DiscoveryLinkDriftError(
+                "Fallback catalog artist changed during resolution",
+            );
+        }
+        if (
+            await exactMbidSupersedesFallback(
+                transaction,
+                discoveryAlbum,
+                candidate.id,
+            )
+        ) {
+            throw new DiscoveryLinkDriftError(
+                "Exact catalog match appeared during resolution",
+            );
+        }
+    }
+    const catalogAlbum = await findCatalogAlbumById(transaction, candidate.id);
     if (!catalogAlbum) {
         throw new DiscoveryLinkDriftError(
             "Catalog album changed during resolution",
@@ -272,8 +318,8 @@ async function persistFallbackLink(
 }
 
 /**
- * Resolves a catalog candidate without locks, then locks the Album before all
- * requested DiscoveryAlbum rows and validates the discovery assumptions.
+ * Resolves a catalog candidate without locks, then locks the Album, its Artist
+ * for title/artist fallback, and all requested DiscoveryAlbum rows in order.
  */
 export async function resolveDiscoveryCatalogAlbum(
     transaction: Prisma.TransactionClient,
@@ -287,7 +333,7 @@ export async function resolveDiscoveryCatalogAlbum(
         ? await readLockedCatalogAlbum(
               transaction,
               discoveryAlbum,
-              candidate.catalogAlbum.id,
+              candidate.catalogAlbum,
               candidate.fallbackMatch,
           )
         : null;
