@@ -28,3 +28,23 @@ export function resumeListenTogetherPlayback(
     });
     return true;
 }
+
+type HostResumePlayback = (options: {
+    suppressListenTogetherBroadcast: true;
+}) => void;
+
+/**
+ * Resumes group playback for either role: the authoritative host resumes in
+ * place (no follower position sync), followers resume onto the group timeline.
+ */
+export function resumeGroupPlaybackForRole(
+    isHost: boolean,
+    resume: HostResumePlayback & ResumePlayback,
+    playback: ListenTogetherPlaybackPosition,
+): void {
+    if (isHost) {
+        resume({ suppressListenTogetherBroadcast: true });
+        return;
+    }
+    resumeListenTogetherPlayback(resume, playback);
+}

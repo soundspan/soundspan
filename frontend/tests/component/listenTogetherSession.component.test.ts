@@ -1185,6 +1185,57 @@ test("initial host hydration adopts group position once before ignoring delta ec
     assert.equal(providerEngineState.currentTime, 33);
 });
 
+test("host hydration seeks even when the target sits inside the drift threshold", async (t) => {
+    t.mock.method(Date, "now", () => 100_000);
+    const host = await mountListenTogetherProvider(true, 0);
+    t.after(host.unmount);
+    const nearZero = {
+        ...makeGroup(true, 0),
+        playback: {
+            ...makeGroup(true, 0).playback,
+            positionMs: 1_200,
+            serverTime: 100_000,
+        },
+    };
+
+    await host.act(() => host.callbacks().onGroupState(nearZero));
+
+    // Engine sits at 0 and the 1.2s target is inside the 1.5s follower
+    // threshold; an adopting host must still take the group position or its
+    // zeroed local timeline becomes authoritative on the next heartbeat.
+    assert.deepEqual(providerControlCalls.seek, [1.2]);
+});
+
+test("live-session re-check reconnect never adopts the server position onto the host", async (t) => {
+    t.mock.method(Date, "now", () => 100_000);
+    const host = await mountListenTogetherProvider(true, 0);
+    t.after(host.unmount);
+    await host.act(() => host.callbacks().onGroupState(getProviderGroup()));
+    providerControlCalls.seek = [];
+    providerEngineState.currentTime = 42;
+    providerEngineState.playing = true;
+    providerSocket.isConnected = false;
+
+    await host.act(async () => {
+        assert.equal(await host.latest().recheckSocketRoute(), true);
+    });
+    const staleSnapshot = {
+        ...makeGroup(true, 0),
+        playback: {
+            ...makeGroup(true, 0).playback,
+            positionMs: 20_000,
+            serverTime: 95_000,
+            stateVersion: 5,
+        },
+    };
+    await host.act(() => host.callbacks().onGroupState(staleSnapshot));
+
+    // The re-check reconnect must not re-arm adoption: the host's live local
+    // timeline stays authoritative over the stale server snapshot.
+    assert.deepEqual(providerControlCalls.seek, []);
+    assert.equal(providerEngineState.currentTime, 42);
+});
+
 test("reconnect recovery restores host position and compensates follower position", async (t) => {
     t.mock.method(Date, "now", () => 100_000);
     const reconnectSnapshot = {

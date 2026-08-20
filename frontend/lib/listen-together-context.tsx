@@ -74,7 +74,10 @@ import {
     markRemoteTrackChange as markTrackChange,
     writePlaybackAdvanceOrigin as writeOrigin,
 } from "@/lib/audio-engine/playbackAdvanceOrigin";
-import { resumeListenTogetherPlayback } from "@/lib/audio-engine/listenTogetherPlaybackResume";
+import {
+    resumeGroupPlaybackForRole,
+    resumeListenTogetherPlayback,
+} from "@/lib/audio-engine/listenTogetherPlaybackResume";
 const playbackEngine = createRuntimeAudioEngine();
 const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
 const LT_READY_REPORT_DELAY_MS = 150;
@@ -256,9 +259,6 @@ export function resolveListenTogetherMembershipPendingState(
 ): boolean {
     return operation === "create" || operation === "join";
 }
-
-export { canIssueListenTogetherHostPlaybackCommand };
-export type { ResolveListenTogetherHostControlInput } from "@/lib/listenTogetherPlaybackSync";
 
 export type ListenTogetherReadyReportRecoveryAction =
     | "retry"
@@ -551,7 +551,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     nowMs: Date.now(),
                     clockOffsetMs: getServerClockOffsetMs(),
                 });
-                if (drifted || trackChanged) {
+                // Adopting hosts seek even inside the drift threshold.
+                if (
+                    (isCurrentClientHost &&
+                        hostMustAdoptGroupPositionRef.current) ||
+                    drifted ||
+                    trackChanged
+                ) {
                     ctrl.seek(targetSec, {
                         allowListenTogetherFollower: true,
                         suppressListenTogetherBroadcast: true,
@@ -569,11 +575,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
                 // Let recoverAudioAfterReconnect handle resume after reload
             } else if (pb.isPlaying) {
-                if (isCurrentClientHost) {
-                    ctrl.resume({ suppressListenTogetherBroadcast: true });
-                } else {
-                    resumeListenTogetherPlayback(ctrl.resume, pb);
-                }
+                resumeGroupPlaybackForRole(isCurrentClientHost, ctrl.resume, pb);
             } else {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -675,11 +677,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 delta.isPlaying &&
                 (trackChanged || !playbackEngine.isPlaying())
             ) {
-                if (isCurrentClientHost) {
-                    ctrl.resume({ suppressListenTogetherBroadcast: true });
-                } else {
-                    resumeListenTogetherPlayback(ctrl.resume, delta);
-                }
+                resumeGroupPlaybackForRole(
+                    isCurrentClientHost,
+                    ctrl.resume,
+                    delta,
+                );
             } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -752,16 +754,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     allowListenTogetherFollower: true,
                     suppressListenTogetherBroadcast: true,
                 });
-                if (isCurrentClientHost) {
-                    controlsRef.current.resume({
-                        suppressListenTogetherBroadcast: true,
-                    });
-                } else {
-                    resumeListenTogetherPlayback(
-                        controlsRef.current.resume,
-                        active.playback,
-                    );
-                }
+                resumeGroupPlaybackForRole(
+                    isCurrentClientHost,
+                    controlsRef.current.resume,
+                    active.playback,
+                );
             };
 
             // Force stream re-open to recover from dead socket-backed stream handles
@@ -940,9 +937,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
     /** Connect to Socket.IO and wire up event handlers. */
     const connectSocket = useCallback(
-        (groupId: string) => {
+        (groupId: string, options?: { adoptGroupPosition?: boolean }) => {
             awaitingInitialStateRef.current = true;
-            hostMustAdoptGroupPositionRef.current = true;
+            // One-shot adoption: fresh-session hydration only, never re-checks.
+            hostMustAdoptGroupPositionRef.current =
+                options?.adoptGroupPosition ?? true;
 
             listenTogetherSocket.connect({
                 onGroupState: (snapshot) => {
@@ -1777,8 +1776,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 activeGroupRef.current = group;
                 setActiveGroup(group);
 
-                // Connect socket
-                connectSocket(group.id);
+                // The creator has no server position to adopt.
+                connectSocket(group.id, { adoptGroupPosition: false });
 
                 toast.success("Group created!");
                 return group;
@@ -1889,7 +1888,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (ok) {
             const group = activeGroupRef.current;
             if (group?.id && !listenTogetherSocket.isConnected) {
-                connectSocket(group.id);
+                // Live-session reconnect: the host timeline stays authoritative.
+                connectSocket(group.id, { adoptGroupPosition: false });
             }
         }
         return ok;
