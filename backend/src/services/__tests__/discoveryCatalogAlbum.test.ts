@@ -1,8 +1,33 @@
-import { resolveDiscoveryCatalogAlbum } from "../discoveryCatalogAlbum";
+import {
+    DiscoveryCatalogResolutionError,
+    DiscoveryLinkDriftError,
+    resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
+} from "../discoveryCatalogAlbum";
 
-function createTransaction() {
+interface LockedRow {
+    id: string;
+    catalogAlbumId: string | null;
+    status: "ACTIVE" | "LIKED";
+}
+
+function createTransaction(lockedRows: LockedRow[]) {
+    const operations: string[] = [];
     return {
-        $queryRaw: jest.fn(),
+        operations,
+        $queryRaw: jest.fn(
+            async (query: {
+                strings: readonly string[];
+            }): Promise<object[]> => {
+                const sql = query.strings.join("");
+                if (sql.includes('FROM "Album"')) {
+                    operations.push("lock-album");
+                    return [{ id: "catalog" }];
+                }
+                operations.push("lock-discovery");
+                return lockedRows;
+            },
+        ),
         album: {
             findUnique: jest.fn(),
             findFirst: jest.fn(),
@@ -15,10 +40,14 @@ function createTransaction() {
 }
 
 describe("resolveDiscoveryCatalogAlbum", () => {
-    it("uses a present catalog link without stale identity fallback", async () => {
-        const transaction = createTransaction();
+    it("locks the linked album before the discovery row and uses the authoritative link", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: "linked", status: "ACTIVE" },
+        ]);
         const linkedAlbum = { id: "linked", artist: {} };
-        transaction.$queryRaw.mockResolvedValue([{ catalogAlbumId: "linked" }]);
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: "linked",
+        });
         transaction.album.findUnique.mockResolvedValue(linkedAlbum);
 
         await expect(
@@ -29,21 +58,35 @@ describe("resolveDiscoveryCatalogAlbum", () => {
                 albumTitle: "Stale Title",
                 artistName: "Stale Artist",
             }),
-        ).resolves.toBe(linkedAlbum);
-
-        expect(transaction.album.findUnique).toHaveBeenCalledWith({
-            where: { id: "linked" },
-            include: { artist: true },
+        ).resolves.toEqual({
+            catalogAlbum: linkedAlbum,
+            discoveryRows: [
+                {
+                    id: "discovery",
+                    catalogAlbumId: "linked",
+                    status: "ACTIVE",
+                },
+            ],
         });
+
+        expect(transaction.operations).toEqual([
+            "lock-album",
+            "lock-discovery",
+        ]);
         expect(transaction.album.findFirst).not.toHaveBeenCalled();
         expect(transaction.discoveryAlbum.updateMany).not.toHaveBeenCalled();
     });
 
-    it("prefers an exact release-group MBID over a title and artist decoy", async () => {
-        const transaction = createTransaction();
+    it("prefers an exact release-group MBID and persists its fallback link after locking", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
+        ]);
         const exactAlbum = { id: "exact", artist: {} };
-        transaction.$queryRaw.mockResolvedValue([{ catalogAlbumId: null }]);
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: null,
+        });
         transaction.album.findFirst.mockResolvedValueOnce(exactAlbum);
+        transaction.album.findUnique.mockResolvedValueOnce(exactAlbum);
         transaction.discoveryAlbum.updateMany.mockResolvedValue({ count: 1 });
 
         await expect(
@@ -54,37 +97,41 @@ describe("resolveDiscoveryCatalogAlbum", () => {
                 albumTitle: "Legacy Title",
                 artistName: "Legacy Artist",
             }),
-        ).resolves.toBe(exactAlbum);
+        ).resolves.toEqual(
+            expect.objectContaining({ catalogAlbum: exactAlbum }),
+        );
 
         expect(transaction.album.findFirst).toHaveBeenCalledTimes(1);
-        expect(transaction.album.findFirst).toHaveBeenCalledWith({
-            where: { rgMbid: "legacy-rg" },
-            include: { artist: true },
-        });
         expect(transaction.discoveryAlbum.updateMany).toHaveBeenCalledWith({
             where: { id: "discovery", catalogAlbumId: null },
             data: { catalogAlbumId: "exact" },
         });
+        expect(transaction.operations).toEqual([
+            "lock-album",
+            "lock-discovery",
+        ]);
     });
 
     it("falls back to title and artist only when the MBID has no match", async () => {
-        const transaction = createTransaction();
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: null, status: "ACTIVE" },
+        ]);
         const titleAlbum = { id: "title-match", artist: {} };
-        transaction.$queryRaw.mockResolvedValue([{ catalogAlbumId: null }]);
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: null,
+        });
         transaction.album.findFirst
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(titleAlbum);
+        transaction.album.findUnique.mockResolvedValueOnce(titleAlbum);
         transaction.discoveryAlbum.updateMany.mockResolvedValue({ count: 1 });
 
-        await expect(
-            resolveDiscoveryCatalogAlbum(transaction as never, {
-                id: "discovery",
-                catalogAlbumId: null,
-                rgMbid: "missing-rg",
-                albumTitle: "Legacy Title",
-                artistName: "Legacy Artist",
-            }),
-        ).resolves.toBe(titleAlbum);
+        await resolveDiscoveryCatalogAlbum(transaction as never, {
+            id: "discovery",
+            rgMbid: "missing-rg",
+            albumTitle: "Legacy Title",
+            artistName: "Legacy Artist",
+        });
 
         expect(transaction.album.findFirst).toHaveBeenNthCalledWith(2, {
             where: {
@@ -100,31 +147,93 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         });
     });
 
-    it("returns the authoritative linked album after losing the fallback CAS", async () => {
-        const transaction = createTransaction();
+    it("aborts the attempt with a retryable error when the catalog link changes before the discovery row lock", async () => {
+        const transaction = createTransaction([
+            {
+                id: "discovery",
+                catalogAlbumId: "authoritative",
+                status: "ACTIVE",
+            },
+        ]);
         const fallbackAlbum = { id: "fallback", artist: {} };
-        const authoritativeAlbum = { id: "authoritative", artist: {} };
-        transaction.$queryRaw.mockResolvedValue([{ catalogAlbumId: null }]);
-        transaction.album.findFirst.mockResolvedValueOnce(fallbackAlbum);
-        transaction.discoveryAlbum.updateMany.mockResolvedValue({ count: 0 });
         transaction.discoveryAlbum.findUnique.mockResolvedValue({
-            catalogAlbumId: "authoritative",
+            catalogAlbumId: null,
         });
-        transaction.album.findUnique.mockResolvedValue(authoritativeAlbum);
+        transaction.album.findFirst.mockResolvedValueOnce(fallbackAlbum);
+        transaction.album.findUnique.mockResolvedValueOnce(fallbackAlbum);
 
         await expect(
             resolveDiscoveryCatalogAlbum(transaction as never, {
                 id: "discovery",
-                catalogAlbumId: null,
                 rgMbid: "legacy-rg",
                 albumTitle: "Legacy Title",
                 artistName: "Legacy Artist",
             }),
-        ).resolves.toBe(authoritativeAlbum);
+        ).rejects.toBeInstanceOf(DiscoveryLinkDriftError);
+        expect(transaction.discoveryAlbum.updateMany).not.toHaveBeenCalled();
+    });
 
-        expect(transaction.album.findUnique).toHaveBeenCalledWith({
-            where: { id: "authoritative" },
-            include: { artist: true },
+    it("retries link drift with a fresh attempt", async () => {
+        const operation = jest
+            .fn<Promise<string>, []>()
+            .mockRejectedValueOnce(
+                new DiscoveryLinkDriftError(
+                    "Discovery catalog link changed during resolution",
+                ),
+            )
+            .mockResolvedValueOnce("authoritative");
+
+        await expect(retryDiscoveryLinkDrift(operation)).resolves.toBe(
+            "authoritative",
+        );
+        expect(operation).toHaveBeenCalledTimes(2);
+    });
+
+    it("surfaces the existing error after three drift attempts", async () => {
+        const drift = new DiscoveryLinkDriftError(
+            "Discovery catalog link changed during resolution",
+        );
+        const operation = jest
+            .fn<Promise<never>, []>()
+            .mockRejectedValue(drift);
+
+        await expect(retryDiscoveryLinkDrift(operation)).rejects.toBe(drift);
+        expect(operation).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not retry other resolution errors", async () => {
+        const failure = new DiscoveryCatalogResolutionError(
+            "Discovery status changed during resolution",
+        );
+        const operation = jest
+            .fn<Promise<never>, []>()
+            .mockRejectedValue(failure);
+
+        await expect(retryDiscoveryLinkDrift(operation)).rejects.toBe(failure);
+        expect(operation).toHaveBeenCalledTimes(1);
+    });
+
+    it("aborts when the expected status changes before the discovery row lock", async () => {
+        const transaction = createTransaction([
+            { id: "discovery", catalogAlbumId: "catalog", status: "LIKED" },
+        ]);
+        const catalogAlbum = { id: "catalog", artist: {} };
+        transaction.discoveryAlbum.findUnique.mockResolvedValue({
+            catalogAlbumId: "catalog",
         });
+        transaction.album.findUnique.mockResolvedValue(catalogAlbum);
+
+        await expect(
+            resolveDiscoveryCatalogAlbum(
+                transaction as never,
+                {
+                    id: "discovery",
+                    rgMbid: "catalog-rg",
+                    albumTitle: "Catalog",
+                    artistName: "Artist",
+                },
+                { expectedStatuses: ["ACTIVE"] },
+            ),
+        ).rejects.toBeInstanceOf(DiscoveryCatalogResolutionError);
     });
 });

@@ -5,7 +5,10 @@ import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
 import { deleteDiscoveryAlbumCatalogEntry } from "../src/services/discoveryAlbumCatalogCleanup";
-import { resolveDiscoveryCatalogAlbum } from "../src/services/discoveryCatalogAlbum";
+import {
+    resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
+} from "../src/services/discoveryCatalogAlbum";
 import {
     albumTracksOrphanRetentionGuardWhere,
     discoveryAlbumTracksOrphanRetentionGuardWhere,
@@ -181,6 +184,37 @@ async function waitForLockBlockedBy(
         await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Timed out waiting for the like flow to block on cleanup");
+}
+
+async function waitForBlockedFlowCount(
+    observer: Client,
+    blockerPid: number,
+    expectedCount: number,
+): Promise<void> {
+    for (let poll = 0; poll < MAX_LOCK_POLLS; poll += 1) {
+        const result = await observer.query<{ waiting_count: string }>(
+            `
+                WITH RECURSIVE blocked(pid) AS (
+                    SELECT activity.pid
+                    FROM pg_catalog.pg_stat_activity AS activity
+                    WHERE $1 = ANY(pg_catalog.pg_blocking_pids(activity.pid))
+                    UNION
+                    SELECT activity.pid
+                    FROM pg_catalog.pg_stat_activity AS activity
+                    JOIN blocked AS blocker
+                      ON blocker.pid = ANY(
+                          pg_catalog.pg_blocking_pids(activity.pid)
+                      )
+                )
+                SELECT COUNT(*) AS waiting_count
+                FROM blocked
+            `,
+            [blockerPid],
+        );
+        if (Number(result.rows[0]?.waiting_count ?? 0) >= expectedCount) return;
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for ${expectedCount} blocked flows`);
 }
 
 async function beginCleanupClaim(
@@ -625,6 +659,151 @@ describeWithPostgres(
             ).resolves.toEqual(expect.objectContaining({ status: "ACTIVE" }));
         });
 
+        it("rolls back every discovery status when a post-claim guard retains the album", async () => {
+            const prefix = "retained-claim-rollback";
+            const secondUserId = `${prefix}-user`;
+            await createArtistAndAlbum(prefix);
+            await prisma.album.update({
+                where: { id: `${prefix}-album` },
+                data: { hasUserOverrides: true },
+            });
+            await prisma.user.create({
+                data: { id: secondUserId, username: secondUserId },
+            });
+            const active = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-active`,
+                    userId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                    status: "ACTIVE",
+                },
+            });
+            await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-deleted`,
+                    userId: secondUserId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                    status: "DELETED",
+                },
+            });
+
+            await expect(
+                deleteDiscoveryAlbumCatalogEntry(active),
+            ).resolves.toBe("retained");
+            await expect(
+                prisma.discoveryAlbum.findMany({
+                    where: { catalogAlbumId: `${prefix}-album` },
+                    orderBy: { id: "asc" },
+                    select: { id: true, status: true },
+                }),
+            ).resolves.toEqual([
+                { id: `${prefix}-active`, status: "ACTIVE" },
+                { id: `${prefix}-deleted`, status: "DELETED" },
+            ]);
+        });
+
+        it(
+            "serializes cross-row like and cleanup behind the album lock without deadlock",
+            async () => {
+                const prefix = "cross-row-lock-order";
+                const secondUserId = `${prefix}-user`;
+                await createArtistAndAlbum(prefix);
+                await prisma.user.create({
+                    data: { id: secondUserId, username: secondUserId },
+                });
+                const liked = await prisma.discoveryAlbum.create({
+                    data: {
+                        id: `${prefix}-01-like`,
+                        userId,
+                        catalogAlbumId: `${prefix}-album`,
+                        rgMbid: `${prefix}-album-mbid`,
+                        artistName: `${prefix} artist`,
+                        artistMbid: `${prefix}-artist-mbid`,
+                        albumTitle: `${prefix} album`,
+                        weekStartDate: old,
+                    },
+                });
+                const cleanup = await prisma.discoveryAlbum.create({
+                    data: {
+                        id: `${prefix}-02-cleanup`,
+                        userId: secondUserId,
+                        catalogAlbumId: `${prefix}-album`,
+                        rgMbid: `${prefix}-album-mbid`,
+                        artistName: `${prefix} artist`,
+                        albumTitle: `${prefix} album`,
+                        weekStartDate: old,
+                    },
+                });
+                jest.spyOn(
+                    lidarrService,
+                    "removeDiscoveryTagByMbid",
+                ).mockResolvedValueOnce(true);
+                const lockHolder = new Client({
+                    connectionString: process.env.DATABASE_URL,
+                });
+                await lockHolder.connect();
+                let transactionOpen = false;
+                let like: ReturnType<typeof startObservedLike> | undefined;
+                let cleanupPromise:
+                    | ReturnType<typeof deleteDiscoveryAlbumCatalogEntry>
+                    | undefined;
+                try {
+                    transactionOpen = true;
+                    await lockHolder.query("BEGIN");
+                    const backend = await lockHolder.query<{ pid: number }>(
+                        "SELECT pg_backend_pid() AS pid",
+                    );
+                    await lockHolder.query(
+                        'SELECT id FROM "Album" WHERE id = $1 FOR UPDATE',
+                        [`${prefix}-album`],
+                    );
+                    const blockerPid = backend.rows[0]?.pid;
+                    if (blockerPid === undefined)
+                        throw new Error("Missing album-lock backend PID");
+
+                    like = startObservedLike(liked.rgMbid);
+                    await waitForBlockedFlowCount(database, blockerPid, 1);
+                    cleanupPromise = deleteDiscoveryAlbumCatalogEntry(cleanup);
+                    await waitForBlockedFlowCount(database, blockerPid, 2);
+                    await lockHolder.query("COMMIT");
+                    transactionOpen = false;
+
+                    await expect(like.promise).resolves.toBeUndefined();
+                    await expect(cleanupPromise).resolves.toBe("retained");
+                } finally {
+                    if (transactionOpen) await lockHolder.query("ROLLBACK");
+                    await lockHolder.end();
+                    await Promise.allSettled([
+                        ...(like ? [like.promise] : []),
+                        ...(cleanupPromise ? [cleanupPromise] : []),
+                    ]);
+                }
+
+                expect(like?.response.statusCode).toBe(200);
+                await expect(
+                    prisma.album.findUnique({
+                        where: { id: `${prefix}-album` },
+                    }),
+                ).resolves.not.toBeNull();
+                await expect(
+                    prisma.discoveryAlbum.findMany({
+                        where: { id: { in: [liked.id, cleanup.id] } },
+                        orderBy: { id: "asc" },
+                        select: { status: true },
+                    }),
+                ).resolves.toEqual([{ status: "LIKED" }, { status: "ACTIVE" }]);
+            },
+            CLAIM_RACE_TEST_TIMEOUT_MS,
+        );
+
         it("claims every eligible row linked to a shared album", async () => {
             const prefix = "shared-linked-eligible";
             const secondUserId = `${prefix}-user`;
@@ -878,14 +1057,23 @@ describeWithPostgres(
                         'UPDATE "DiscoveryAlbum" SET "catalogAlbumId" = $1 WHERE id = $2',
                         [`${prefix}-album`, discovery.id],
                     );
-                    resolution = prisma.$transaction((transaction) =>
-                        resolveDiscoveryCatalogAlbum(transaction, discovery),
+                    resolution = retryDiscoveryLinkDrift(() =>
+                        prisma.$transaction((transaction) =>
+                            resolveDiscoveryCatalogAlbum(
+                                transaction,
+                                discovery,
+                            ),
+                        ),
                     );
                     await waitForLockBlockedBy(database, backend.rows[0]!.pid);
                     await linkWriter.query("COMMIT");
                     transactionOpen = false;
                     await expect(resolution).resolves.toEqual(
-                        expect.objectContaining({ id: `${prefix}-album` }),
+                        expect.objectContaining({
+                            catalogAlbum: expect.objectContaining({
+                                id: `${prefix}-album`,
+                            }),
+                        }),
                     );
                 } finally {
                     if (transactionOpen) await linkWriter.query("ROLLBACK");
@@ -925,7 +1113,11 @@ describeWithPostgres(
                     resolveDiscoveryCatalogAlbum(transaction, discovery),
                 ),
             ).resolves.toEqual(
-                expect.objectContaining({ id: `${prefix}-album` }),
+                expect.objectContaining({
+                    catalogAlbum: expect.objectContaining({
+                        id: `${prefix}-album`,
+                    }),
+                }),
             );
             await expect(
                 prisma.discoveryAlbum.findUnique({

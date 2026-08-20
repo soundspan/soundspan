@@ -263,7 +263,14 @@ describe("discover legacy-mode runtime behavior", () => {
                     return [{ id: query.values[0] }];
                 }
                 lockedDiscoveryId = String(query.values[0]);
-                return [{ catalogAlbumId: null }];
+                const status =
+                    lockedDiscoveryId.includes("liked") ||
+                    lockedDiscoveryId.includes("no-tracks")
+                        ? "LIKED"
+                        : "ACTIVE";
+                return [
+                    { id: lockedDiscoveryId, catalogAlbumId: null, status },
+                ];
             },
         );
         (prisma.discoveryAlbum.findMany as jest.Mock).mockImplementation(
@@ -736,12 +743,10 @@ describe("discover legacy-mode runtime behavior", () => {
         const res = createRes();
         await unlikeHandler(req, res);
 
-        expect(prisma.discoveryAlbum.update).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "discovery-liked" },
-                data: { status: "ACTIVE", likedAt: null },
-            }),
-        );
+        expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+            where: { id: "discovery-liked", status: "LIKED" },
+            data: { status: "ACTIVE", likedAt: null },
+        });
         expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
             where: {
                 artistId: "artist-liked",
@@ -1023,7 +1028,7 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.discoveryTrack.deleteMany).not.toHaveBeenCalledWith({
             where: { discoveryAlbumId: "da-raced" },
         });
-        expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+        expect(prisma.discoveryAlbum.updateMany).not.toHaveBeenCalledWith({
             where: { id: { in: ["da-raced"] }, status: "DELETED" },
             data: { status: "ACTIVE" },
         });
@@ -1054,7 +1059,7 @@ describe("discover legacy-mode runtime behavior", () => {
         });
         expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
             where: {
-                id: "da-absent",
+                id: { in: ["da-absent"] },
                 status: { in: ["ACTIVE", "DELETED"] },
             },
             data: { status: "DELETED" },

@@ -9,7 +9,11 @@ import {
     DISCOVERY_LIKED_OWNERSHIP_SOURCE,
     promoteAlbumOwnership,
 } from "../../../services/albumOwnershipPromotion";
-import { resolveDiscoveryCatalogAlbum } from "../../../services/discoveryCatalogAlbum";
+import {
+    DiscoveryCatalogResolutionError,
+    resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
+} from "../../../services/discoveryCatalogAlbum";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
     discoveryAlbumOrphanRetentionGuardWhere,
@@ -42,24 +46,38 @@ async function deleteLegacyCatalogAlbum(
 }
 
 async function moveLegacyLikedAlbum(album: LegacyCleanupAlbum) {
-    return prisma.$transaction(async (transaction) => {
-        const catalogAlbum = await resolveDiscoveryCatalogAlbum(
-            transaction,
-            album,
-        );
-        if (catalogAlbum) {
-            await promoteAlbumOwnership(
+    return retryDiscoveryLinkDrift(() =>
+        prisma.$transaction(async (transaction) => {
+            const resolution = await resolveDiscoveryCatalogAlbum(
                 transaction,
-                catalogAlbum,
-                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                album,
+                { expectedStatuses: ["LIKED"] },
             );
-        }
-        await transaction.discoveryAlbum.update({
-            where: { id: album.id },
-            data: { status: "MOVED" },
-        });
-        return catalogAlbum;
-    });
+            if (!resolution) {
+                throw new DiscoveryCatalogResolutionError(
+                    "Discovery album disappeared during legacy promotion",
+                );
+            }
+            const catalogAlbum = resolution.catalogAlbum;
+            if (catalogAlbum) {
+                await promoteAlbumOwnership(
+                    transaction,
+                    catalogAlbum,
+                    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                );
+            }
+            const moved = await transaction.discoveryAlbum.updateMany({
+                where: { id: album.id, status: "LIKED" },
+                data: { status: "MOVED" },
+            });
+            if (moved.count !== 1) {
+                throw new DiscoveryCatalogResolutionError(
+                    "Legacy discovery move claim failed after row locking",
+                );
+            }
+            return catalogAlbum;
+        }),
+    );
 }
 
 /** Handles frozen legacy discovery playlist cleanup. */

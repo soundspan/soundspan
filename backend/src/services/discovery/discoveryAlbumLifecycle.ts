@@ -14,7 +14,11 @@ import {
     DISCOVERY_LIKED_OWNERSHIP_SOURCE,
     promoteAlbumOwnership,
 } from "../albumOwnershipPromotion";
-import { resolveDiscoveryCatalogAlbum } from "../discoveryCatalogAlbum";
+import {
+    DiscoveryCatalogResolutionError,
+    resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
+} from "../discoveryCatalogAlbum";
 import { deleteDiscoveryAlbumCatalogEntry } from "../discoveryAlbumCatalogCleanup";
 import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
@@ -42,24 +46,38 @@ export class DiscoveryAlbumLifecycle {
      * Updates album location, creates OwnedAlbum record, updates artist counts.
      */
     async moveLikedAlbumToLibrary(album: DiscoveryAlbumInfo): Promise<void> {
-        const dbAlbum = await prisma.$transaction(async (transaction) => {
-            const catalogAlbum = await resolveDiscoveryCatalogAlbum(
-                transaction,
-                album,
-            );
-            if (catalogAlbum) {
-                await promoteAlbumOwnership(
+        const dbAlbum = await retryDiscoveryLinkDrift(() =>
+            prisma.$transaction(async (transaction) => {
+                const resolution = await resolveDiscoveryCatalogAlbum(
                     transaction,
-                    catalogAlbum,
-                    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                    album,
+                    { expectedStatuses: ["LIKED"] },
                 );
-            }
-            await transaction.discoveryAlbum.update({
-                where: { id: album.id },
-                data: { status: "MOVED" },
-            });
-            return catalogAlbum;
-        });
+                if (!resolution) {
+                    throw new DiscoveryCatalogResolutionError(
+                        "Discovery album disappeared during lifecycle promotion",
+                    );
+                }
+                const catalogAlbum = resolution.catalogAlbum;
+                if (catalogAlbum) {
+                    await promoteAlbumOwnership(
+                        transaction,
+                        catalogAlbum,
+                        DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                    );
+                }
+                const moved = await transaction.discoveryAlbum.updateMany({
+                    where: { id: album.id, status: "LIKED" },
+                    data: { status: "MOVED" },
+                });
+                if (moved.count !== 1) {
+                    throw new DiscoveryCatalogResolutionError(
+                        "Discovery lifecycle claim failed after row locking",
+                    );
+                }
+                return catalogAlbum;
+            }),
+        );
 
         if (dbAlbum) {
             await updateArtistCounts(dbAlbum.artistId);

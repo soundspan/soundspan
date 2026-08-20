@@ -83,7 +83,15 @@ describe("DiscoveryAlbumLifecycle", () => {
                 if (!sql.includes("DiscoveryAlbum"))
                     return [{ id: query.values[0] }];
                 lockedDiscoveryId = String(query.values[0]);
-                return [{ catalogAlbumId: null }];
+                return [
+                    {
+                        id: lockedDiscoveryId,
+                        catalogAlbumId: null,
+                        status: sql.includes('OR "catalogAlbumId"')
+                            ? "ACTIVE"
+                            : "LIKED",
+                    },
+                ];
             },
         );
         (mockPrisma.discoveryAlbum.findUnique as jest.Mock).mockResolvedValue({
@@ -218,8 +226,8 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             await lifecycle.moveLikedAlbumToLibrary(mockAlbum);
 
-            expect(mockPrisma.discoveryAlbum.update).toHaveBeenCalledWith({
-                where: { id: "discovery-album-1" },
+            expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+                where: { id: "discovery-album-1", status: "LIKED" },
                 data: { status: "MOVED" },
             });
         });
@@ -232,8 +240,8 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             await lifecycle.moveLikedAlbumToLibrary(mockAlbum);
 
-            expect(mockPrisma.discoveryAlbum.update).toHaveBeenCalledWith({
-                where: { id: "discovery-album-1" },
+            expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+                where: { id: "discovery-album-1", status: "LIKED" },
                 data: { status: "MOVED" },
             });
             expect(mockPrisma.album.update).not.toHaveBeenCalled();
@@ -403,7 +411,9 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             expect(mockRequest).not.toHaveBeenCalled();
             expect(mockPrisma.discoveryTrack.deleteMany).not.toHaveBeenCalled();
-            expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+            expect(
+                mockPrisma.discoveryAlbum.updateMany,
+            ).not.toHaveBeenCalledWith({
                 where: {
                     id: { in: ["discovery-album-1"] },
                     status: "DELETED",
@@ -431,6 +441,13 @@ describe("DiscoveryAlbumLifecycle", () => {
 
         it("finishes discovery links and status when a retry finds the catalog album absent", async () => {
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
+            (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+                {
+                    id: "discovery-album-1",
+                    catalogAlbumId: null,
+                    status: "ACTIVE",
+                },
+            ]);
             (
                 mockPrisma.discoveryTrack.deleteMany as jest.Mock
             ).mockResolvedValue({ count: 1 });
@@ -449,7 +466,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             });
             expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
                 where: {
-                    id: "discovery-album-1",
+                    id: { in: ["discovery-album-1"] },
                     status: { in: ["ACTIVE", "DELETED"] },
                 },
                 data: { status: "DELETED" },
@@ -577,8 +594,8 @@ describe("DiscoveryAlbumLifecycle", () => {
             );
 
             expect(result.moved).toBe(1);
-            expect(mockPrisma.discoveryAlbum.update).toHaveBeenCalledWith({
-                where: { id: "da-1" },
+            expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+                where: { id: "da-1", status: "LIKED" },
                 data: { status: "MOVED" },
             });
         });

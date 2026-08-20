@@ -5,7 +5,11 @@ import {
     DISCOVERY_LIKED_OWNERSHIP_SOURCE,
     promoteAlbumOwnership,
 } from "../../../services/albumOwnershipPromotion";
-import { resolveDiscoveryCatalogAlbum } from "../../../services/discoveryCatalogAlbum";
+import {
+    DiscoveryCatalogResolutionError,
+    resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
+} from "../../../services/discoveryCatalogAlbum";
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
 import {
@@ -44,53 +48,56 @@ async function updateDiscoveryPlays(
 
 async function commitLegacyLike(userId: string, albumId: string) {
     try {
-        return await prisma.$transaction(async (transaction) => {
-            const discoveryAlbum = await transaction.discoveryAlbum.findFirst({
-                where: { userId, rgMbid: albumId, status: "ACTIVE" },
-            });
-            if (!discoveryAlbum) return null;
-            const liked = await transaction.discoveryAlbum.updateMany({
-                where: { id: discoveryAlbum.id, status: "ACTIVE" },
-                data: {
-                    status: "LIKED",
-                    likedAt: new Date(),
-                },
-            });
-            if (liked.count === 0) return null;
-            const dbAlbum = await resolveDiscoveryCatalogAlbum(
-                transaction,
-                discoveryAlbum,
-            );
-            if (!dbAlbum) {
-                throw new DiscoveryCatalogAlbumMissingError();
-            }
-            const catalogLock = await transaction.album.updateMany({
-                where: { id: dbAlbum.id },
-                data: { location: dbAlbum.location },
-            });
-            if (catalogLock.count === 0) {
-                throw new DiscoveryCatalogAlbumMissingError();
-            }
-            await transaction.discoveryAlbum.update({
-                where: { id: discoveryAlbum.id },
-                data: { catalogAlbumId: dbAlbum.id },
-            });
-            await promoteAlbumOwnership(
-                transaction,
-                dbAlbum,
-                DISCOVERY_LIKED_OWNERSHIP_SOURCE,
-            );
-            await updateDiscoveryPlays(
-                transaction,
-                discoveryAlbum.id,
-                userId,
-                "DISCOVERY",
-                "DISCOVERY_KEPT",
-            );
-            return { discoveryAlbum, dbAlbum };
-        });
+        return await retryDiscoveryLinkDrift(() =>
+            prisma.$transaction(async (transaction) => {
+                const discoveryAlbum =
+                    await transaction.discoveryAlbum.findFirst({
+                        where: { userId, rgMbid: albumId, status: "ACTIVE" },
+                    });
+                if (!discoveryAlbum) return null;
+                const resolution = await resolveDiscoveryCatalogAlbum(
+                    transaction,
+                    discoveryAlbum,
+                    { expectedStatuses: ["ACTIVE"] },
+                );
+                const dbAlbum = resolution?.catalogAlbum;
+                if (!dbAlbum) {
+                    throw new DiscoveryCatalogAlbumMissingError();
+                }
+                const liked = await transaction.discoveryAlbum.updateMany({
+                    where: { id: discoveryAlbum.id, status: "ACTIVE" },
+                    data: {
+                        status: "LIKED",
+                        likedAt: new Date(),
+                    },
+                });
+                if (liked.count !== 1) {
+                    throw new DiscoveryCatalogResolutionError(
+                        "Discovery like claim failed after row locking",
+                    );
+                }
+                await promoteAlbumOwnership(
+                    transaction,
+                    dbAlbum,
+                    DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                );
+                await updateDiscoveryPlays(
+                    transaction,
+                    discoveryAlbum.id,
+                    userId,
+                    "DISCOVERY",
+                    "DISCOVERY_KEPT",
+                );
+                return { discoveryAlbum, dbAlbum };
+            }),
+        );
     } catch (error: unknown) {
-        if (error instanceof DiscoveryCatalogAlbumMissingError) return null;
+        if (
+            error instanceof DiscoveryCatalogAlbumMissingError ||
+            error instanceof DiscoveryCatalogResolutionError
+        ) {
+            return null;
+        }
         throw error;
     }
 }
@@ -130,37 +137,53 @@ async function commitLegacyUnlike(
     userId: string,
     albumId: string,
 ): Promise<boolean> {
-    return prisma.$transaction(async (transaction) => {
-        const discoveryAlbum = await transaction.discoveryAlbum.findFirst({
-            where: { userId, rgMbid: albumId, status: "LIKED" },
-        });
-        if (!discoveryAlbum) return false;
-        const dbAlbum = await resolveDiscoveryCatalogAlbum(
-            transaction,
-            discoveryAlbum,
+    try {
+        return await retryDiscoveryLinkDrift(() =>
+            prisma.$transaction(async (transaction) => {
+                const discoveryAlbum =
+                    await transaction.discoveryAlbum.findFirst({
+                        where: { userId, rgMbid: albumId, status: "LIKED" },
+                    });
+                if (!discoveryAlbum) return false;
+                const resolution = await resolveDiscoveryCatalogAlbum(
+                    transaction,
+                    discoveryAlbum,
+                    { expectedStatuses: ["LIKED"] },
+                );
+                if (!resolution) return false;
+                const unliked = await transaction.discoveryAlbum.updateMany({
+                    where: { id: discoveryAlbum.id, status: "LIKED" },
+                    data: { status: "ACTIVE", likedAt: null },
+                });
+                if (unliked.count !== 1) {
+                    throw new DiscoveryCatalogResolutionError(
+                        "Discovery unlike claim failed after row locking",
+                    );
+                }
+                const dbAlbum = resolution.catalogAlbum;
+                if (dbAlbum) {
+                    await transaction.ownedAlbum.deleteMany({
+                        where: {
+                            artistId: dbAlbum.artistId,
+                            rgMbid: dbAlbum.rgMbid,
+                            source: DISCOVERY_LIKED_OWNERSHIP_SOURCE,
+                        },
+                    });
+                }
+                await updateDiscoveryPlays(
+                    transaction,
+                    discoveryAlbum.id,
+                    userId,
+                    "DISCOVERY_KEPT",
+                    "DISCOVERY",
+                );
+                return true;
+            }),
         );
-        await transaction.discoveryAlbum.update({
-            where: { id: discoveryAlbum.id },
-            data: { status: "ACTIVE", likedAt: null },
-        });
-        if (dbAlbum) {
-            await transaction.ownedAlbum.deleteMany({
-                where: {
-                    artistId: dbAlbum.artistId,
-                    rgMbid: dbAlbum.rgMbid,
-                    source: DISCOVERY_LIKED_OWNERSHIP_SOURCE,
-                },
-            });
-        }
-        await updateDiscoveryPlays(
-            transaction,
-            discoveryAlbum.id,
-            userId,
-            "DISCOVERY_KEPT",
-            "DISCOVERY",
-        );
-        return true;
-    });
+    } catch (error: unknown) {
+        if (error instanceof DiscoveryCatalogResolutionError) return false;
+        throw error;
+    }
 }
 
 /** Handles frozen legacy discovery album likes. */

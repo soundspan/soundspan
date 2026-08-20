@@ -2,8 +2,10 @@ import { Prisma, type DiscoverStatus } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import {
+    DiscoveryCatalogResolutionError,
     type DiscoveryCatalogIdentity,
     resolveDiscoveryCatalogAlbum,
+    retryDiscoveryLinkDrift,
 } from "./discoveryCatalogAlbum";
 import {
     discoveryAlbumOrphanRetentionGuardWhere,
@@ -22,32 +24,37 @@ const CLEANUP_ELIGIBLE_STATUSES: readonly DiscoverStatus[] = [
     "DELETED",
 ];
 
-async function restoreActiveDiscoveryRows(
+class DiscoveryCatalogRetainedError extends Error {}
+
+function requireEligibleStatuses(
+    rows: readonly { status: DiscoverStatus }[],
+): void {
+    const allEligible = rows.every((row) =>
+        CLEANUP_ELIGIBLE_STATUSES.includes(row.status),
+    );
+    if (!allEligible) {
+        throw new DiscoveryCatalogRetainedError(
+            "A linked discovery row is no longer cleanup eligible",
+        );
+    }
+}
+
+async function claimDiscoveryRows(
     transaction: Prisma.TransactionClient,
     discoveryAlbumIds: readonly string[],
 ): Promise<void> {
-    if (discoveryAlbumIds.length === 0) return;
-    await transaction.discoveryAlbum.updateMany({
+    const claim = await transaction.discoveryAlbum.updateMany({
         where: {
             id: { in: [...discoveryAlbumIds] },
-            status: "DELETED",
+            status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
         },
-        data: { status: "ACTIVE" },
+        data: { status: "DELETED" },
     });
-}
-
-async function lockCatalogAlbum(
-    transaction: Prisma.TransactionClient,
-    catalogAlbumId: string,
-): Promise<void> {
-    await transaction.$queryRaw(
-        Prisma.sql`
-            SELECT "id"
-            FROM "Album"
-            WHERE "id" = ${catalogAlbumId}
-            FOR UPDATE
-        `,
-    );
+    if (claim.count !== discoveryAlbumIds.length) {
+        throw new DiscoveryCatalogRetainedError(
+            "The cleanup claim changed after discovery rows were locked",
+        );
+    }
 }
 
 /**
@@ -62,67 +69,54 @@ export async function deleteDiscoveryAlbumCatalogEntry(
         now,
         config.workers.providerTrackRetentionDays,
     );
-    return prisma.$transaction(async (transaction) => {
-        const catalogAlbum = await resolveDiscoveryCatalogAlbum(
-            transaction,
-            discoveryIdentity,
-        );
-        if (!catalogAlbum) {
-            const claim = await transaction.discoveryAlbum.updateMany({
-                where: {
-                    id: discoveryIdentity.id,
-                    status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
-                },
-                data: { status: "DELETED" },
-            });
-            return claim.count === 1 ? "absent" : "retained";
-        }
+    try {
+        return await retryDiscoveryLinkDrift(() =>
+            prisma.$transaction(async (transaction) => {
+                const resolution = await resolveDiscoveryCatalogAlbum(
+                    transaction,
+                    discoveryIdentity,
+                    {
+                        expectedStatuses: CLEANUP_ELIGIBLE_STATUSES,
+                        lockAllLinkedRows: true,
+                    },
+                );
+                if (!resolution) throw new DiscoveryCatalogRetainedError();
 
-        // Stabilize the FK target before enumerating links. New link writers
-        // must take a conflicting key-share lock and cannot escape the claim.
-        await lockCatalogAlbum(transaction, catalogAlbum.id);
-        const linkedRows = await transaction.discoveryAlbum.findMany({
-            where: { catalogAlbumId: catalogAlbum.id },
-            select: { id: true, status: true },
-        });
-        const allEligible = linkedRows.every((row) =>
-            CLEANUP_ELIGIBLE_STATUSES.includes(row.status),
-        );
-        if (!allEligible) return "retained";
+                requireEligibleStatuses(resolution.discoveryRows);
+                const linkedIds = resolution.discoveryRows.map((row) => row.id);
+                await claimDiscoveryRows(transaction, linkedIds);
+                if (!resolution.catalogAlbum) return "absent";
 
-        const linkedIds = linkedRows.map((row) => row.id);
-        const activeIds = linkedRows
-            .filter((row) => row.status === "ACTIVE")
-            .map((row) => row.id);
-        const claim = await transaction.discoveryAlbum.updateMany({
-            where: {
-                id: { in: linkedIds },
-                status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
-            },
-            data: { status: "DELETED" },
-        });
-        if (claim.count !== linkedRows.length) {
-            await restoreActiveDiscoveryRows(transaction, activeIds);
+                const unlinkedLikedRgMbids =
+                    await findUnlinkedLikedDiscoveryRgMbids(transaction);
+                const retentionWhere = discoveryAlbumOrphanRetentionGuardWhere(
+                    cutoff,
+                    unlinkedLikedRgMbids,
+                );
+                const deleted = await transaction.album.deleteMany({
+                    where: {
+                        id: resolution.catalogAlbum.id,
+                        ...retentionWhere,
+                    },
+                });
+                if (deleted.count !== 1) {
+                    throw new DiscoveryCatalogRetainedError(
+                        "The catalog album is retained",
+                    );
+                }
+                await transaction.discoveryTrack.deleteMany({
+                    where: { discoveryAlbumId: { in: linkedIds } },
+                });
+                return "deleted";
+            }),
+        );
+    } catch (error: unknown) {
+        if (
+            error instanceof DiscoveryCatalogRetainedError ||
+            error instanceof DiscoveryCatalogResolutionError
+        ) {
             return "retained";
         }
-
-        const unlinkedLikedRgMbids =
-            await findUnlinkedLikedDiscoveryRgMbids(transaction);
-        const retentionWhere = discoveryAlbumOrphanRetentionGuardWhere(
-            cutoff,
-            unlinkedLikedRgMbids,
-        );
-        const deleted = await transaction.album.deleteMany({
-            where: { id: catalogAlbum.id, ...retentionWhere },
-        });
-        if (deleted.count === 1) {
-            await transaction.discoveryTrack.deleteMany({
-                where: { discoveryAlbumId: { in: linkedIds } },
-            });
-            return "deleted";
-        }
-
-        await restoreActiveDiscoveryRows(transaction, activeIds);
-        return "retained";
-    });
+        throw error;
+    }
 }
