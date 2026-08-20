@@ -1032,6 +1032,44 @@ describe("youtube music route runtime behavior", () => {
         expect(errorRes.body).toEqual({ error: "Failed to stream audio" });
     });
 
+    it.each([
+        [503, "YouTube Music streaming is busy"],
+        [504, "YouTube Music stream timed out"],
+    ])(
+        "maps sidecar %i from authenticated and public stream proxies",
+        async (status, message) => {
+            const authenticatedReq = {
+                user: { id: "user-1" },
+                params: { videoId: "vid-auth" },
+                query: { quality: "high" },
+                headers: {},
+            } as any;
+            ytMusicService.getStreamProxy.mockRejectedValueOnce({
+                response: { status },
+            });
+            const authenticatedRes = createRes();
+
+            await streamHandler(authenticatedReq, authenticatedRes);
+
+            const publicReq = {
+                params: { videoId: "vid-public" },
+                query: { quality: "high" },
+                headers: {},
+            } as any;
+            ytMusicService.getStreamProxy.mockRejectedValueOnce({
+                response: { status },
+            });
+            const publicRes = createRes();
+
+            await publicStreamHandler(publicReq, publicRes);
+
+            expect(authenticatedRes.statusCode).toBe(status);
+            expect(authenticatedRes.body).toEqual({ error: message });
+            expect(publicRes.statusCode).toBe(status);
+            expect(publicRes.body).toEqual({ error: message });
+        },
+    );
+
     it("destroys the authenticated upstream stream when the client disconnects", async () => {
         const data = {
             pipe: jest.fn(),

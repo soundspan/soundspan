@@ -25,6 +25,16 @@ def test_dockerfile_uses_entrypoint_script() -> None:
     assert any("tini" in line and "docker-entrypoint.sh" in line for line in entrypoint_lines)
 
 
+def test_exempt_dependencies_are_constrained_and_verified() -> None:
+    """The exempt install must retain lock pins and verify dependency consistency."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "requirements.lock > /tmp/lock-constraints.txt" in dockerfile
+    assert "-c /tmp/lock-constraints.txt -r requirements-exempt.txt" in dockerfile
+    assert "&& pip check" in dockerfile
+    assert "&& rm /tmp/lock-constraints.txt" in dockerfile
+
+
 def test_entrypoint_script_fixes_legacy_volume_ownership() -> None:
     """Startup must repair /data ownership and then support non-root execution."""
     assert ENTRYPOINT_SCRIPT.exists()

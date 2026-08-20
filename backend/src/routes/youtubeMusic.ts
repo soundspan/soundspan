@@ -434,6 +434,24 @@ function handleYtMusicAuthError(
     return true;
 }
 
+type StreamProxyErrorBody = { error: string; message?: string };
+const YT_MUSIC_STREAM_PROXY_ERRORS: Record<number, StreamProxyErrorBody> = {
+    404: { error: "Stream not found" },
+    451: {
+        error: "age_restricted",
+        message:
+            "This content requires age verification and cannot be streamed via YouTube Music.",
+    },
+    503: { error: "YouTube Music streaming is busy" },
+    504: { error: "YouTube Music stream timed out" },
+};
+function handleYtMusicStreamProxyError(res: Response, err: any): boolean {
+    const status = err?.response?.status;
+    if (typeof status !== "number" || !YT_MUSIC_STREAM_PROXY_ERRORS[status])
+        return false;
+    res.status(status).json(YT_MUSIC_STREAM_PROXY_ERRORS[status]);
+    return true;
+}
 const getRequestedStreamQuality = (rawQuality: unknown): string | undefined => {
     if (typeof rawQuality !== "string") {
         return undefined;
@@ -1132,16 +1150,7 @@ router.get(
             });
             proxyRes.data.pipe(res);
         } catch (err: any) {
-            if (err.response?.status === 404) {
-                return res.status(404).json({ error: "Stream not found" });
-            }
-            if (err.response?.status === 451) {
-                return res.status(451).json({
-                    error: "age_restricted",
-                    message:
-                        "This content requires age verification and cannot be streamed via YouTube Music.",
-                });
-            }
+            if (handleYtMusicStreamProxyError(res, err)) return;
             if (handleYtMusicAuthError(res, err)) return;
             logger.error("[YTMusic Route] Stream proxy failed:", err);
             res.status(500).json({
@@ -1591,16 +1600,7 @@ router.get(
             });
             proxyRes.data.pipe(res);
         } catch (err: any) {
-            if (err.response?.status === 404) {
-                return res.status(404).json({ error: "Stream not found" });
-            }
-            if (err.response?.status === 451) {
-                return res.status(451).json({
-                    error: "age_restricted",
-                    message:
-                        "This content requires age verification and cannot be streamed via YouTube Music.",
-                });
-            }
+            if (handleYtMusicStreamProxyError(res, err)) return;
             logger.error("[YTMusic Route] Public stream proxy failed:", err);
             res.status(500).json({
                 error: "Failed to stream audio",
