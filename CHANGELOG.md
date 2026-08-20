@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backend database pool connections now enable TCP keepalive with a 10-second initial probe delay, so pooled connections crossing NAT hops (NodePort services, firewalls, cross-cluster routing) no longer die silently and surface as "Connection terminated unexpectedly" errors.
 - Library and audiobook metadata, local cover-art, and audio-stream handlers now run rate limiting before authentication and use exactly one surface-specific budget per request. Local covers retain a high-volume shared budget without weakening the original 500/minute in-memory protection on external browse image proxies. The backend also overrides vulnerable `deepmerge-ts` 7.1.5 with 8.0.0 (#647).
 - OpenSubsonic playlist replacement and update mutations now share the Playlist-first transaction lock with generated-radio regeneration, preventing concurrent edits from deadlocking, mixing contents, or producing duplicate sort positions.
 - Artist Popular Tracks now preserve persisted local and federated preference IDs after provider enrichment and use the same canonical remote ID for playback and heart state, preventing likes from switching identity (#642).

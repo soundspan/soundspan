@@ -1,6 +1,9 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
+// First keepalive probe after 10s idle; kernel defaults handle the cadence.
+const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
+
 export interface CreatePrismaClientOptions {
     /** Maximum pooled connections (pg Pool `max`). */
     connectionLimit?: number;
@@ -48,6 +51,12 @@ export function createPrismaClient(
     const adapter = new PrismaPg(
         {
             connectionString: databaseUrl,
+            // TCP keepalive protects pooled connections that cross NAT hops
+            // (NodePort, firewalls, cross-cluster routing): without probes an
+            // idle flow's conntrack entry expires and the next query dies with
+            // "Connection terminated unexpectedly".
+            keepAlive: true,
+            keepAliveInitialDelayMillis: KEEP_ALIVE_INITIAL_DELAY_MS,
             ...(connectionLimit !== undefined ? { max: connectionLimit } : {}),
             ...(poolTimeoutSeconds !== undefined
                 ? { connectionTimeoutMillis: poolTimeoutSeconds * 1000 }
