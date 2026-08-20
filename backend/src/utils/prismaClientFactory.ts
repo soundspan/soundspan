@@ -1,7 +1,8 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-// First keepalive probe after 10s idle; kernel defaults handle the cadence.
+// First keepalive probe after 10s idle. Node then applies its own probe
+// cadence (TCP_KEEPINTVL=1s, TCP_KEEPCNT=10) rather than kernel defaults.
 const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000;
 
 export interface CreatePrismaClientOptions {

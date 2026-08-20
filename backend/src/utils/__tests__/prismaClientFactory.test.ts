@@ -1,13 +1,6 @@
-const prismaPgConstructor = jest.fn();
-const prismaClientConstructor = jest.fn();
+import type { PrismaPg } from "@prisma/adapter-pg";
 
-jest.mock("@prisma/adapter-pg", () => ({
-    PrismaPg: class {
-        constructor(...args: unknown[]) {
-            prismaPgConstructor(...args);
-        }
-    },
-}));
+const prismaClientConstructor = jest.fn();
 
 jest.mock("@prisma/client", () => ({
     Prisma: {},
@@ -20,36 +13,62 @@ jest.mock("@prisma/client", () => ({
 
 import { createPrismaClient } from "../prismaClientFactory";
 
+interface PgPoolOptions {
+    keepAlive?: boolean;
+    keepAliveInitialDelayMillis?: number;
+    max?: number;
+    connectionTimeoutMillis?: number;
+}
+
+/**
+ * Builds the REAL PrismaPg adapter through the factory and returns the pg
+ * pool options it hands to pg.Pool. connect() constructs the pool lazily,
+ * so no database connection is opened.
+ */
+async function poolOptionsFor(
+    options: Parameters<typeof createPrismaClient>[0],
+): Promise<{ poolOptions: PgPoolOptions; adapterFactory: PrismaPg }> {
+    createPrismaClient(options);
+    const clientArgs = prismaClientConstructor.mock.calls.at(-1)?.[0] as {
+        adapter: PrismaPg;
+    };
+    const adapterFactory = clientArgs.adapter;
+    const adapter = await adapterFactory.connect();
+    const pool = adapter.underlyingDriver() as unknown as {
+        options: PgPoolOptions;
+    };
+    const poolOptions = pool.options;
+    await adapter.dispose();
+    return { poolOptions, adapterFactory };
+}
+
 describe("createPrismaClient", () => {
     beforeEach(() => {
-        prismaPgConstructor.mockClear();
         prismaClientConstructor.mockClear();
     });
 
-    it("enables TCP keepalive on the pg pool", () => {
-        createPrismaClient({ databaseUrl: "postgresql://u:p@db:5432/app" });
+    it("enables TCP keepalive on the pg pool", async () => {
+        const { poolOptions } = await poolOptionsFor({
+            databaseUrl: "postgresql://u:p@db:5432/app",
+        });
 
-        expect(prismaPgConstructor).toHaveBeenCalledTimes(1);
-        const poolConfig = prismaPgConstructor.mock.calls[0]?.[0] as Record<
-            string,
-            unknown
-        >;
-        expect(poolConfig.keepAlive).toBe(true);
-        expect(poolConfig.keepAliveInitialDelayMillis).toBe(10_000);
+        expect(poolOptions.keepAlive).toBe(true);
+        expect(poolOptions.keepAliveInitialDelayMillis).toBe(10_000);
     });
 
-    it("applies pool sizing and schema options", () => {
-        createPrismaClient({
+    it("applies pool sizing and schema options", async () => {
+        const { poolOptions, adapterFactory } = await poolOptionsFor({
             databaseUrl: "postgresql://u:p@db:5432/app?schema=tenant",
             connectionLimit: 12,
             poolTimeoutSeconds: 20,
         });
 
-        const [poolConfig, adapterOptions] = prismaPgConstructor.mock
-            .calls[0] as [Record<string, unknown>, Record<string, unknown>];
-        expect(poolConfig.max).toBe(12);
-        expect(poolConfig.connectionTimeoutMillis).toBe(20_000);
-        expect(adapterOptions).toEqual({ schema: "tenant" });
+        expect(poolOptions.max).toBe(12);
+        expect(poolOptions.connectionTimeoutMillis).toBe(20_000);
+        expect(
+            (adapterFactory as unknown as { options?: { schema?: string } })
+                .options?.schema,
+        ).toBe("tenant");
     });
 
     it("rejects invalid pool bounds", () => {
