@@ -1,7 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { Client } from "pg";
+import { config } from "../src/config";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
 import { prisma } from "../src/utils/db";
+import { runDataIntegrityCheck } from "../src/workers/dataIntegrity";
 import {
     applyScaleMigrations,
     createScaleDatabase,
@@ -21,6 +23,9 @@ const ids = {
     racedAlbum: "orphan-cleanup-raced-album",
     racedAlbumArtist: "orphan-cleanup-raced-album-artist",
     racedArtist: "orphan-cleanup-raced-artist",
+    overriddenAlbum: "orphan-cleanup-overridden-album",
+    overriddenAlbumArtist: "orphan-cleanup-overridden-album-artist",
+    overriddenArtist: "orphan-cleanup-overridden-artist",
 } as const;
 
 async function createArtist(id: string): Promise<void> {
@@ -52,12 +57,23 @@ async function seedCatalog(): Promise<void> {
         ids.providerArtist,
         ids.racedAlbumArtist,
         ids.racedArtist,
+        ids.overriddenAlbumArtist,
+        ids.overriddenArtist,
     ]) {
         await createArtist(artistId);
     }
     await createAlbum(ids.emptyAlbum, ids.emptyArtist);
     await createAlbum(ids.providerAlbum, ids.providerArtist);
     await createAlbum(ids.racedAlbum, ids.racedAlbumArtist);
+    await createAlbum(ids.overriddenAlbum, ids.overriddenAlbumArtist);
+    await prisma.album.update({
+        where: { id: ids.overriddenAlbum },
+        data: { hasUserOverrides: true },
+    });
+    await prisma.artist.update({
+        where: { id: ids.overriddenArtist },
+        data: { hasUserOverrides: true },
+    });
     await prisma.trackTidal.create({
         data: {
             tidalId: 646001,
@@ -181,11 +197,17 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
             artistsDeleted: 1,
         });
         await expect(entityIds()).resolves.toEqual({
-            albums: [ids.providerAlbum, ids.racedAlbum].sort(),
+            albums: [
+                ids.overriddenAlbum,
+                ids.providerAlbum,
+                ids.racedAlbum,
+            ].sort(),
             artists: [
                 ids.providerArtist,
                 ids.racedAlbumArtist,
                 ids.racedArtist,
+                ids.overriddenAlbumArtist,
+                ids.overriddenArtist,
             ].sort(),
         });
 
@@ -204,5 +226,31 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
                 select: { artistId: true },
             }),
         ).resolves.toEqual({ artistId: ids.racedArtist });
+    });
+
+    it("writes tombstones when data integrity delegates parent deletion", async () => {
+        const albumId = "data-integrity-tombstone-album";
+        const artistId = "data-integrity-tombstone-artist";
+        await createArtist(artistId);
+        await createAlbum(albumId, artistId);
+        const federationWasEnabled = config.features.federation;
+        config.features.federation = true;
+
+        try {
+            await runDataIntegrityCheck();
+        } finally {
+            config.features.federation = federationWasEnabled;
+        }
+
+        await expect(
+            prisma.federationTombstone.findMany({
+                where: { entityId: { in: [albumId, artistId] } },
+                orderBy: { entityType: "asc" },
+                select: { entityType: true, entityId: true },
+            }),
+        ).resolves.toEqual([
+            { entityType: "album", entityId: albumId },
+            { entityType: "artist", entityId: artistId },
+        ]);
     });
 });

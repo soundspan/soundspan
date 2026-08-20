@@ -182,6 +182,7 @@ describeWithPostgres(
                 "provider-gc-parent-video",
                 recentStaleAt,
             );
+            const ownedId = await createTidalTrack("owned-parent", 649004, old);
 
             await prisma.likedRemoteTrack.create({
                 data: { userId, trackTidalId: likedId },
@@ -198,6 +199,13 @@ describeWithPostgres(
                     userId,
                     trackTidalId: recentPlayId,
                     playedAt: new Date("2026-08-18T00:00:00.000Z"),
+                },
+            });
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: "owned-parent-artist",
+                    rgMbid: "owned-parent-album-mbid",
+                    source: "discover_liked",
                 },
             });
 
@@ -221,7 +229,7 @@ describeWithPostgres(
                 retentionDays: 30,
             });
 
-            expect(first.deleted).toEqual({ tidal: 1, youtube: 0 });
+            expect(first.deleted).toEqual({ tidal: 2, youtube: 0 });
             await expect(existingProviderIds()).resolves.toEqual({
                 tidal: [likedId, recentPlayId].sort(),
                 youtube: [activeId, parentId, playlistIdRef, racedId].sort(),
@@ -229,6 +237,19 @@ describeWithPostgres(
             await expect(
                 prisma.trackTidal.findUnique({ where: { id: collectableId } }),
             ).resolves.toBeNull();
+            await expect(
+                prisma.trackTidal.findUnique({ where: { id: ownedId } }),
+            ).resolves.toBeNull();
+            await expect(
+                prisma.album.findUnique({
+                    where: { id: "owned-parent-album" },
+                }),
+            ).resolves.not.toBeNull();
+            await expect(
+                prisma.artist.findUnique({
+                    where: { id: "owned-parent-artist" },
+                }),
+            ).resolves.not.toBeNull();
             await expect(
                 prisma.album.findUnique({
                     where: { id: "parent-retention-album" },

@@ -32,6 +32,7 @@ import {
 } from "./providerMetrics";
 import {
     createProviderTrackGcMetrics,
+    type ProviderTrackGcBacklogMetrics,
     type ProviderTrackGcOutcome,
     type ProviderTrackGcProvider,
 } from "./providerTrackGcMetrics";
@@ -214,8 +215,9 @@ export function recordProviderTrackGcPass(
     outcome: ProviderTrackGcOutcome,
     durationSeconds: number,
     deleted: Readonly<Record<ProviderTrackGcProvider, number>>,
+    health?: ProviderTrackGcBacklogMetrics,
 ): void {
-    providerTrackGcMetrics.record(outcome, durationSeconds, deleted);
+    providerTrackGcMetrics.record(outcome, durationSeconds, deleted, health);
 }
 
 /** Records one final backend-driven audio embedding job outcome. */

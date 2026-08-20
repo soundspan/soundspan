@@ -341,6 +341,7 @@ model Album {
   tracks           Track[]
   tracksTidal      TrackTidal[]
   tracksYtMusic    TrackYtMusic[]
+  ownedBy          OwnedAlbum[]
 
   @@unique([peerId, remoteId])
   @@index([artistId])
@@ -798,9 +799,11 @@ model OwnedAlbum {
   rgMbid   String
   source   String
   artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  album    Album  @relation(fields: [rgMbid], references: [rgMbid], onDelete: NoAction)
 
   @@id([artistId, rgMbid])
   @@index([artistId])
+  @@index([rgMbid])
 }
 
 model DownloadJob {

@@ -63,6 +63,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
                 peerId: null,
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
                 tracks: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
@@ -75,6 +77,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
             where: {
                 id: { in: ["local-album"] },
                 peerId: null,
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
                 tracks: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
@@ -83,6 +87,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
         expect(prisma.artist.findMany).toHaveBeenCalledWith({
             where: {
                 peerId: null,
+                hasUserOverrides: false,
+                ownedAlbums: { none: {} },
                 albums: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
@@ -95,6 +101,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
             where: {
                 id: { in: ["local-artist"] },
                 peerId: null,
+                hasUserOverrides: false,
+                ownedAlbums: { none: {} },
                 albums: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },

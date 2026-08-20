@@ -23,6 +23,10 @@ describe("dataIntegrity worker", () => {
             warn: jest.fn(),
             error: jest.fn(),
         };
+        const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
+            albumsDeleted: 0,
+            artistsDeleted: 0,
+        }));
 
         const discoverExclusionDeleteMany = jest
             .fn()
@@ -40,7 +44,6 @@ describe("dataIntegrity worker", () => {
 
         const prisma = {
             $connect: jest.fn(async () => undefined),
-            $executeRaw: jest.fn(async () => 0),
             discoverExclusion: {
                 deleteMany: discoverExclusionDeleteMany,
             },
@@ -92,6 +95,9 @@ describe("dataIntegrity worker", () => {
         jest.doMock("../../config", () => ({
             config: { workers: { providerTrackRetentionDays: 30 } },
         }));
+        jest.doMock("../../services/libraryOrphanCleanup", () => ({
+            cleanupOrphanedLibraryEntities,
+        }));
         const Prisma = {
             PrismaClientKnownRequestError,
             PrismaClientRustPanicError,
@@ -103,7 +109,13 @@ describe("dataIntegrity worker", () => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../dataIntegrity");
 
-        return { module, prisma, logger, Prisma };
+        return {
+            module,
+            prisma,
+            logger,
+            Prisma,
+            cleanupOrphanedLibraryEntities,
+        };
     }
 
     it("runs integrity cleanup and returns expected report", async () => {
@@ -277,8 +289,9 @@ describe("dataIntegrity worker", () => {
         );
     });
 
-    it("removes orphaned discover albums and empty albums", async () => {
-        const { module, prisma } = loadDataIntegrity();
+    it("delegates orphaned parent deletion to shared tombstone-aware cleanup", async () => {
+        const { module, prisma, cleanupOrphanedLibraryEntities } =
+            loadDataIntegrity();
 
         (prisma.album.findMany as jest.Mock)
             .mockReset()
@@ -291,38 +304,28 @@ describe("dataIntegrity worker", () => {
                     artist: { name: "Lost Artist" },
                 },
             ]) // discover albums
-            .mockResolvedValueOnce([]) // library albums
-            .mockResolvedValueOnce([
-                {
-                    id: "empty-album-1",
-                    title: "Empty Album",
-                    rgMbid: "rg-empty",
-                    artistId: "artist-2",
-                    artist: { name: "Empty Artist" },
-                },
-            ]); // empty albums
+            .mockResolvedValueOnce([]); // library albums
         (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValueOnce(
             null,
         );
         (prisma.ownedAlbum.findFirst as jest.Mock).mockResolvedValueOnce(null);
+        cleanupOrphanedLibraryEntities.mockResolvedValueOnce({
+            albumsDeleted: 1,
+            artistsDeleted: 1,
+        });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
             expect.objectContaining({
-                orphanedAlbums: 2,
+                orphanedAlbums: 1,
+                orphanedArtists: 1,
             }),
         );
 
         expect(prisma.album.findMany).toHaveBeenNthCalledWith(1, {
             where: {
                 location: "DISCOVER",
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-            include: { artist: true },
-        });
-        expect(prisma.album.findMany).toHaveBeenNthCalledWith(3, {
-            where: {
-                tracks: { none: {} },
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
@@ -331,29 +334,15 @@ describe("dataIntegrity worker", () => {
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
             where: { albumId: "discover-album-1" },
         });
-        expect(prisma.album.deleteMany).toHaveBeenNthCalledWith(1, {
-            where: {
-                id: "discover-album-1",
-                location: "DISCOVER",
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
-        expect(prisma.album.deleteMany).toHaveBeenNthCalledWith(2, {
-            where: {
-                id: "empty-album-1",
-                tracks: { none: {} },
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
-        expect(prisma.ownedAlbum.deleteMany).toHaveBeenCalledWith({
-            where: { rgMbid: "rg-empty" },
-        });
+        expect(prisma.album.deleteMany).not.toHaveBeenCalled();
+        expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledWith(
+            expect.any(Date),
+        );
     });
 
-    it("consolidates duplicate artists and cleans up orphaned artists", async () => {
-        const { module, prisma } = loadDataIntegrity();
+    it("consolidates duplicate artists and lets shared cleanup delete the orphan", async () => {
+        const { module, prisma, cleanupOrphanedLibraryEntities } =
+            loadDataIntegrity();
 
         (prisma.artist.findMany as jest.Mock)
             .mockReset()
@@ -363,14 +352,14 @@ describe("dataIntegrity worker", () => {
                     name: "Artist Name",
                     normalizedName: "artist name",
                 },
-            ]) // temp artists
-            .mockResolvedValueOnce([{ id: "orphan-artist-1" }]); // orphaned artists
+            ]); // temp artists
         (prisma.artist.findFirst as jest.Mock).mockResolvedValueOnce({
             id: "real-artist-1",
             mbid: "real-mbid",
         });
-        (prisma.artist.deleteMany as jest.Mock).mockResolvedValueOnce({
-            count: 1,
+        cleanupOrphanedLibraryEntities.mockResolvedValueOnce({
+            albumsDeleted: 0,
+            artistsDeleted: 1,
         });
 
         await expect(module.runDataIntegrityCheck()).resolves.toEqual(
@@ -384,24 +373,8 @@ describe("dataIntegrity worker", () => {
             where: { artistId: "temp-artist-1" },
             data: { artistId: "real-artist-1" },
         });
-        expect(prisma.artist.delete).toHaveBeenCalledWith({
-            where: { id: "temp-artist-1" },
-        });
-        expect(prisma.artist.findMany).toHaveBeenNthCalledWith(2, {
-            where: {
-                albums: { none: {} },
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
-        expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: { in: ["orphan-artist-1"] },
-                albums: { none: {} },
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
+        expect(prisma.artist.delete).not.toHaveBeenCalled();
+        expect(cleanupOrphanedLibraryEntities).toHaveBeenCalled();
     });
 
     it("propagates non-retryable prisma failures without reconnect retries", async () => {
@@ -725,20 +698,6 @@ describe("dataIntegrity worker", () => {
             expect.objectContaining({
                 where: { id: "album-liked-1" },
             }),
-        );
-    });
-
-    it("logs orphaned OwnedAlbum cleanup when raw delete removes rows", async () => {
-        const { module, prisma, logger } = loadDataIntegrity();
-        (prisma.$executeRaw as jest.Mock).mockResolvedValueOnce(2);
-
-        await expect(module.runDataIntegrityCheck()).resolves.toEqual(
-            expect.objectContaining({
-                oldDownloadJobs: 3,
-            }),
-        );
-        expect(logger.debug).toHaveBeenCalledWith(
-            "     Removed 2 orphaned OwnedAlbum records",
         );
     });
 

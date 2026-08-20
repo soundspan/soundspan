@@ -172,7 +172,7 @@ const { MusicScannerService } =
     require("../musicScanner") as typeof import("../musicScanner");
 const { isLossyAudioCodec } =
     require("../libraryHealthDashboard/qualityOutliers") as typeof import("../libraryHealthDashboard/qualityOutliers");
-const { parentHasNoLiveProviderTracksWhere } =
+const { albumOrphanRetentionGuardWhere, artistOrphanRetentionGuardWhere } =
     require("../providerTrackRetention") as typeof import("../providerTrackRetention");
 
 interface TestIdentityTrack {
@@ -2002,7 +2002,7 @@ describe("MusicScannerService.scanLibrary", () => {
             where: {
                 peerId: null,
                 tracks: { none: {} },
-                ...parentHasNoLiveProviderTracksWhere(orphanCutoff),
+                ...albumOrphanRetentionGuardWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -2012,7 +2012,7 @@ describe("MusicScannerService.scanLibrary", () => {
             where: {
                 peerId: null,
                 albums: { none: {} },
-                ...parentHasNoLiveProviderTracksWhere(orphanCutoff),
+                ...artistOrphanRetentionGuardWhere(orphanCutoff),
             },
             orderBy: { id: "asc" },
             take: 10_000,
@@ -2043,7 +2043,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 id: { in: ["album-1"] },
                 peerId: null,
                 tracks: { none: {} },
-                ...parentHasNoLiveProviderTracksWhere(deleteCutoff),
+                ...albumOrphanRetentionGuardWhere(deleteCutoff),
             },
         });
         expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
@@ -2051,7 +2051,7 @@ describe("MusicScannerService.scanLibrary", () => {
                 id: { in: ["artist-1"] },
                 peerId: null,
                 albums: { none: {} },
-                ...parentHasNoLiveProviderTracksWhere(deleteCutoff),
+                ...artistOrphanRetentionGuardWhere(deleteCutoff),
             },
         });
     });

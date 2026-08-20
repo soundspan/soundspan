@@ -143,6 +143,14 @@ const discoverQueue = {
 const scanQueue = {
     add: jest.fn(async () => undefined),
 };
+const cleanupOrphanedLibraryEntities = jest.fn(async () => ({
+    albumsDeleted: 0,
+    artistsDeleted: 0,
+}));
+
+jest.mock("../../services/libraryOrphanCleanup", () => ({
+    cleanupOrphanedLibraryEntities,
+}));
 
 jest.mock("../../workers/queues", () => ({
     discoverQueue,
@@ -786,7 +794,7 @@ describe("discover legacy-mode runtime behavior", () => {
         });
     });
 
-    it("clears legacy playlist by moving liked albums, deleting active albums, and pruning orphans", async () => {
+    it("clears legacy playlist and delegates orphan pruning to tombstone-aware cleanup", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             lidarrEnabled: false,
             lidarrUrl: "",
@@ -867,6 +875,10 @@ describe("discover legacy-mode runtime behavior", () => {
                 count: 3,
             },
         );
+        cleanupOrphanedLibraryEntities.mockResolvedValueOnce({
+            albumsDeleted: 1,
+            artistsDeleted: 1,
+        });
         scanQueue.add.mockResolvedValueOnce(undefined);
 
         const req = { user: { id: "user-1" } } as any;
@@ -895,44 +907,16 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
                 location: "DISCOVER",
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
                 tracksTidal: { none: { NOT: expect.any(Object) } },
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
             include: { artist: true, tracks: true },
         });
-        expect(prisma.album.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: "orphan-album-1",
-                location: "DISCOVER",
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
-        expect(prisma.artist.findMany).toHaveBeenCalledWith({
-            where: {
-                albums: { none: {} },
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
-        expect(prisma.similarArtist.deleteMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: {
-                    OR: [
-                        { fromArtistId: { in: ["artist-orphan"] } },
-                        { toArtistId: { in: ["artist-orphan"] } },
-                    ],
-                },
-            }),
-        );
-        expect(prisma.artist.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: { in: ["artist-orphan"] },
-                albums: { none: {} },
-                tracksTidal: { none: { NOT: expect.any(Object) } },
-                tracksYtMusic: { none: { NOT: expect.any(Object) } },
-            },
-        });
+        expect(prisma.album.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
+        expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
         expect(scanQueue.add).toHaveBeenCalledWith("scan", {
             userId: "user-1",
             musicPath: "/music",

@@ -4,6 +4,11 @@ import fs from "fs";
 import path from "path";
 import { config } from "../../../config";
 import { lidarrService } from "../../../services/lidarr";
+import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
+import {
+    albumOrphanRetentionGuardWhere,
+    providerTrackRetentionCutoff,
+} from "../../../services/providerTrackRetention";
 import { prisma } from "../../../utils/db";
 import { TRACK_VISIBLE_WHERE } from "../../../utils/librarySorting";
 import { logger } from "../../../utils/logger";
@@ -11,10 +16,6 @@ import { safeResolvePath } from "../../../utils/safeResolvePath";
 import { getSystemSettings } from "../../../utils/systemSettings";
 import { scanQueue } from "../../../workers/queues";
 import { sendClearPlaylistFailure } from "../shared";
-import {
-    parentHasNoLiveProviderTracksWhere,
-    providerTrackRetentionCutoff,
-} from "../../../services/providerTrackRetention";
 
 // Deprecated legacy discovery code is frozen: no fixes; removal is planned.
 
@@ -714,7 +715,7 @@ export async function handleLegacyClear(
         // These are Album/Track records with location="DISCOVER" that weren't linked to a DiscoveryAlbum
         // This can happen if downloads failed or playlist build failed
         logger.debug(`\n Cleaning up orphaned discovery records...`);
-        const providerWhere = parentHasNoLiveProviderTracksWhere(
+        const retentionWhere = albumOrphanRetentionGuardWhere(
             providerTrackRetentionCutoff(
                 new Date(),
                 config.workers.providerTrackRetentionDays,
@@ -725,12 +726,11 @@ export async function handleLegacyClear(
         const orphanedAlbums = await prisma.album.findMany({
             where: {
                 location: "DISCOVER",
-                ...providerWhere,
+                ...retentionWhere,
             },
             include: { artist: true, tracks: true },
         });
 
-        let orphanedAlbumsDeleted = 0;
         for (const orphanAlbum of orphanedAlbums) {
             // Check if there's a DiscoveryAlbum record for this
             // Include MOVED status because liked albums are marked MOVED during clear
@@ -759,63 +759,19 @@ export async function handleLegacyClear(
                 await prisma.track.deleteMany({
                     where: { albumId: orphanAlbum.id },
                 });
-                // Delete album
-                const deletedAlbum = await prisma.album.deleteMany({
-                    where: {
-                        id: orphanAlbum.id,
-                        location: "DISCOVER",
-                        ...providerWhere,
-                    },
-                });
-                if (deletedAlbum.count > 0) {
-                    orphanedAlbumsDeleted += deletedAlbum.count;
-                    logger.debug(
-                        `    Deleted orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`,
-                    );
-                }
+                logger.debug(
+                    `    Removed tracks from orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`,
+                );
             }
         }
+
+        const orphanedParents = await cleanupOrphanedLibraryEntities();
+        const orphanedAlbumsDeleted = orphanedParents.albumsDeleted;
 
         if (orphanedAlbumsDeleted > 0) {
             logger.debug(
                 `  Cleaned up ${orphanedAlbumsDeleted} orphaned discovery albums`,
             );
-        }
-
-        // Clean up orphaned artists (artists with no albums)
-        const orphanedArtists = await prisma.artist.findMany({
-            where: {
-                albums: { none: {} },
-                ...providerWhere,
-            },
-        });
-
-        if (orphanedArtists.length > 0) {
-            const orphanIds = orphanedArtists.map((a) => a.id);
-
-            // Delete artist relations first (SimilarArtist records)
-            // Note: SimilarArtist uses fromArtistId/toArtistId field names
-            await prisma.similarArtist.deleteMany({
-                where: {
-                    OR: [
-                        { fromArtistId: { in: orphanIds } },
-                        { toArtistId: { in: orphanIds } },
-                    ],
-                },
-            });
-
-            const deletedArtists = await prisma.artist.deleteMany({
-                where: {
-                    id: { in: orphanIds },
-                    albums: { none: {} },
-                    ...providerWhere,
-                },
-            });
-            if (deletedArtists.count > 0) {
-                logger.debug(
-                    `  Cleaned up ${deletedArtists.count} orphaned artists`,
-                );
-            }
         }
 
         // Clean up orphaned DiscoveryTrack records (tracks whose album was deleted)

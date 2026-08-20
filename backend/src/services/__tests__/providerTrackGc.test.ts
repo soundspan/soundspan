@@ -9,10 +9,13 @@ describe("provider track garbage collection", () => {
             failSelection?: boolean;
             failCleanup?: boolean;
             deletedCount?: number;
+            tidalPageSizes?: number[];
+            youtubePageSizes?: number[];
         } = {},
     ) {
         const logger = {
             info: jest.fn(),
+            warn: jest.fn(),
             error: jest.fn(),
             child: jest.fn(),
         };
@@ -26,6 +29,12 @@ describe("provider track garbage collection", () => {
                   albumsDeleted: 1,
                   artistsDeleted: 1,
               }));
+        const page = (provider: string, sizes: number[] | undefined) => {
+            const size = sizes?.shift() ?? 1;
+            return Array.from({ length: size }, (_, index) => ({
+                id: `${provider}-${index + 1}`,
+            }));
+        };
         let prisma: any;
         prisma = {
             trackTidal: {
@@ -33,16 +42,24 @@ describe("provider track garbage collection", () => {
                     ? jest.fn(async () => {
                           throw new Error("selection failed");
                       })
-                    : jest.fn(async () => [{ id: "tidal-1" }]),
-                deleteMany: jest.fn(async () => ({
-                    count: options.deletedCount ?? 1,
+                    : jest.fn(async () =>
+                          page("tidal", options.tidalPageSizes),
+                      ),
+                deleteMany: jest.fn(async (args: any) => ({
+                    count: options.deletedCount ?? args.where.id.in.length,
                 })),
+                count: jest.fn(async () => 0),
+                findFirst: jest.fn(async () => null),
             },
             trackYtMusic: {
-                findMany: jest.fn(async () => [{ id: "youtube-1" }]),
-                deleteMany: jest.fn(async () => ({
-                    count: options.deletedCount ?? 1,
+                findMany: jest.fn(async () =>
+                    page("youtube", options.youtubePageSizes),
+                ),
+                deleteMany: jest.fn(async (args: any) => ({
+                    count: options.deletedCount ?? args.where.id.in.length,
                 })),
+                count: jest.fn(async () => 0),
+                findFirst: jest.fn(async () => null),
             },
             trackMapping: {
                 deleteMany: jest.fn(async () => ({ count: 2 })),
@@ -103,11 +120,21 @@ describe("provider track garbage collection", () => {
             where: { id: { in: ["youtube-1"] }, ...selectionWhere },
         });
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.trackTidal.count).toHaveBeenCalledWith(
+            expect.objectContaining({ take: 50_000 }),
+        );
+        expect(prisma.trackTidal.findFirst).toHaveBeenCalledWith(
+            expect.objectContaining({ orderBy: { createdAt: "asc" } }),
+        );
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledWith(now);
         expect(recordProviderTrackGcPass).toHaveBeenCalledWith(
             "success",
             expect.any(Number),
             { tidal: 1, youtube: 1 },
+            {
+                backlog: { tidal: 0, youtube: 0 },
+                oldestCollectableAgeSeconds: { tidal: 0, youtube: 0 },
+            },
         );
         expect(logger.info).toHaveBeenCalledWith(
             "Provider track garbage collection pass completed",
@@ -118,6 +145,41 @@ describe("provider track garbage collection", () => {
                 deletedYoutube: 1,
                 durationMs: expect.any(Number),
             }),
+        );
+    });
+
+    it("drains more than one provider batch in a single invocation", async () => {
+        const { module, prisma } = loadGc({
+            tidalPageSizes: [100, 100, 20],
+            youtubePageSizes: [100, 100, 20],
+        });
+
+        await expect(module.collectProviderTracks()).resolves.toEqual(
+            expect.objectContaining({
+                selected: { tidal: 220, youtube: 220 },
+                deleted: { tidal: 220, youtube: 220 },
+            }),
+        );
+        expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    });
+
+    it("stops provider continuation at the hard pass ceiling", async () => {
+        const fullPages = Array.from({ length: 50 }, () => 100);
+        const { module, prisma, logger } = loadGc({
+            tidalPageSizes: [...fullPages],
+            youtubePageSizes: [...fullPages],
+        });
+
+        await expect(module.collectProviderTracks()).resolves.toEqual(
+            expect.objectContaining({
+                selected: { tidal: 5_000, youtube: 5_000 },
+                deleted: { tidal: 5_000, youtube: 5_000 },
+            }),
+        );
+        expect(prisma.$transaction).toHaveBeenCalledTimes(50);
+        expect(logger.warn).toHaveBeenCalledWith(
+            "Provider track garbage collection reached its safety ceiling",
+            expect.objectContaining({ maxPasses: 50 }),
         );
     });
 

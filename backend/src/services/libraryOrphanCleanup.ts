@@ -3,7 +3,8 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import {
-    parentHasNoLiveProviderTracksWhere,
+    albumOrphanRetentionGuardWhere,
+    artistOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "./providerTrackRetention";
 
@@ -24,12 +25,12 @@ async function deleteOrphanedAlbums(
     writeTombstones: boolean,
     cutoff: Date,
 ): Promise<number> {
-    const providerWhere = parentHasNoLiveProviderTracksWhere(cutoff);
+    const retentionWhere = albumOrphanRetentionGuardWhere(cutoff);
     const orphanedAlbums = await client.album.findMany({
         where: {
             peerId: null,
             tracks: { none: {} },
-            ...providerWhere,
+            ...retentionWhere,
         },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
@@ -41,7 +42,7 @@ async function deleteOrphanedAlbums(
             id: { in: orphanedAlbums.map((album) => album.id) },
             peerId: null,
             tracks: { none: {} },
-            ...providerWhere,
+            ...retentionWhere,
         },
     });
     if (writeTombstones && result.count > 0) {
@@ -85,12 +86,12 @@ async function deleteOrphanedArtists(
     writeTombstones: boolean,
     cutoff: Date,
 ): Promise<number> {
-    const providerWhere = parentHasNoLiveProviderTracksWhere(cutoff);
+    const retentionWhere = artistOrphanRetentionGuardWhere(cutoff);
     const orphanedArtists = await client.artist.findMany({
         where: {
             peerId: null,
             albums: { none: {} },
-            ...providerWhere,
+            ...retentionWhere,
         },
         orderBy: { id: "asc" },
         take: ORPHAN_CLEANUP_BATCH_SIZE,
@@ -102,7 +103,7 @@ async function deleteOrphanedArtists(
             id: { in: orphanedArtists.map((artist) => artist.id) },
             peerId: null,
             albums: { none: {} },
-            ...providerWhere,
+            ...retentionWhere,
         },
     });
     if (writeTombstones && result.count > 0) {

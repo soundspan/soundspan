@@ -1,4 +1,6 @@
 import {
+    albumOrphanRetentionGuardWhere,
+    artistOrphanRetentionGuardWhere,
     classifyProviderTrackRetention,
     type ProviderTrackRetentionInput,
 } from "../providerTrackRetention";
@@ -69,5 +71,23 @@ describe("provider track retention policy", () => {
         },
     ])("$name", ({ value, expected }) => {
         expect(classifyProviderTrackRetention(value, cutoff)).toBe(expected);
+    });
+
+    it("protects owned and overridden albums from parent collection", () => {
+        expect(albumOrphanRetentionGuardWhere(cutoff)).toEqual(
+            expect.objectContaining({
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
+            }),
+        );
+    });
+
+    it("protects owned and overridden artists from parent collection", () => {
+        expect(artistOrphanRetentionGuardWhere(cutoff)).toEqual(
+            expect.objectContaining({
+                hasUserOverrides: false,
+                ownedAlbums: { none: {} },
+            }),
+        );
     });
 });

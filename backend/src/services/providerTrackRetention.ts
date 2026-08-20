@@ -104,3 +104,25 @@ export function parentHasNoLiveProviderTracksWhere(cutoff: Date) {
         tracksYtMusic: { none: live },
     } satisfies Pick<Prisma.AlbumWhereInput, "tracksTidal" | "tracksYtMusic">;
 }
+
+/** Guards an album against collection when provider or user-owned state remains. */
+export function albumOrphanRetentionGuardWhere(
+    cutoff: Date,
+): Prisma.AlbumWhereInput {
+    return {
+        hasUserOverrides: false,
+        ownedBy: { none: {} },
+        ...parentHasNoLiveProviderTracksWhere(cutoff),
+    } as Prisma.AlbumWhereInput;
+}
+
+/** Guards an artist against collection when provider or user-owned state remains. */
+export function artistOrphanRetentionGuardWhere(
+    cutoff: Date,
+): Prisma.ArtistWhereInput {
+    return {
+        hasUserOverrides: false,
+        ownedAlbums: { none: {} },
+        ...parentHasNoLiveProviderTracksWhere(cutoff),
+    };
+}

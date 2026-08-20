@@ -15,10 +15,12 @@ metadata that can otherwise pin empty albums and artists indefinitely. The
 value is read at process startup and must be from 1 through 3650 days.
 
 The existing `track-removal-purge` startup and daily scheduler invokes provider
-GC. Each pass selects at most 100 TIDAL and 100 YouTube Music rows. Deletion
-runs in one transaction and repeats the full liveness predicate in each delete
-statement. Prometheus exposes deleted-row counters by provider and pass-duration
-histograms by outcome.
+GC. Each transaction selects at most 100 TIDAL and 100 YouTube Music rows. One
+invocation continues for at most 50 transactions, so it can delete up to 5,000
+rows per provider without allowing an unbounded sweep. Each delete repeats the
+full liveness predicate. Prometheus exposes deleted-row counters, capped
+remaining-backlog and oldest-collectable-age gauges by provider, and
+pass-duration histograms by outcome.
 
 `TrackMapping.staleAt` supplies the stale clock. The migration timestamps all
 existing stale mappings at migration time, so deployment does not immediately
@@ -26,9 +28,12 @@ collect them. A database trigger maintains the timestamp for mixed-version and
 future writers.
 
 After each pass, the existing orphan cleanup applies the same policy to albums
-and artists. With federation enabled, that cleanup writes album and artist
-tombstones in its deletion transaction. Federation delta export already
-includes those tombstone types, so peers remove parents that become empty.
+and artists. An `OwnedAlbum` reference or manual `hasUserOverrides` flag keeps
+the applicable album or artist. With federation enabled, cleanup writes album
+and artist tombstones in its deletion transaction. Federation delta export
+already includes those tombstone types, so peers remove parents that become
+empty. When federation is disabled, parent cleanup mirrors track purge and does
+not write tombstones.
 
 Direct foreign-key references are `TrackMapping`, `LikedRemoteTrack`,
 `PlaylistItem`, and `Play`. Offline cache rows reference local `Track` rows.
