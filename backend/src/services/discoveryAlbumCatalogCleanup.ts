@@ -1,4 +1,4 @@
-import type { DiscoverStatus, Prisma } from "@prisma/client";
+import { Prisma, type DiscoverStatus } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import {
@@ -22,21 +22,37 @@ const CLEANUP_ELIGIBLE_STATUSES: readonly DiscoverStatus[] = [
     "DELETED",
 ];
 
-async function restoreDiscoveryStatus(
+async function restoreActiveDiscoveryRows(
     transaction: Prisma.TransactionClient,
-    discoveryAlbumId: string,
-    status: DiscoverStatus,
+    discoveryAlbumIds: readonly string[],
 ): Promise<void> {
-    if (status === "DELETED") return;
-    await transaction.discoveryAlbum.update({
-        where: { id: discoveryAlbumId },
-        data: { status },
+    if (discoveryAlbumIds.length === 0) return;
+    await transaction.discoveryAlbum.updateMany({
+        where: {
+            id: { in: [...discoveryAlbumIds] },
+            status: "DELETED",
+        },
+        data: { status: "ACTIVE" },
     });
 }
 
+async function lockCatalogAlbum(
+    transaction: Prisma.TransactionClient,
+    catalogAlbumId: string,
+): Promise<void> {
+    await transaction.$queryRaw(
+        Prisma.sql`
+            SELECT "id"
+            FROM "Album"
+            WHERE "id" = ${catalogAlbumId}
+            FOR UPDATE
+        `,
+    );
+}
+
 /**
- * Claims one discovery row and deletes its catalog album in one transaction.
- * A retry may reclaim DELETED; a concurrent LIKED transition retains content.
+ * Claims every linked eligible discovery row and deletes the catalog album.
+ * A retry may reclaim DELETED; any linked LIKED or MOVED row retains content.
  */
 export async function deleteDiscoveryAlbumCatalogEntry(
     discoveryIdentity: DiscoveryCatalogIdentity,
@@ -47,25 +63,48 @@ export async function deleteDiscoveryAlbumCatalogEntry(
         config.workers.providerTrackRetentionDays,
     );
     return prisma.$transaction(async (transaction) => {
-        const discoveryAlbum = await transaction.discoveryAlbum.findUnique({
-            where: { id: discoveryIdentity.id },
-            select: { status: true },
-        });
-        if (!discoveryAlbum) return "retained";
-
-        const claim = await transaction.discoveryAlbum.updateMany({
-            where: {
-                id: discoveryIdentity.id,
-                status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
-            },
-            data: { status: "DELETED" },
-        });
-        if (claim.count === 0) return "retained";
         const catalogAlbum = await resolveDiscoveryCatalogAlbum(
             transaction,
             discoveryIdentity,
         );
-        if (!catalogAlbum) return "absent";
+        if (!catalogAlbum) {
+            const claim = await transaction.discoveryAlbum.updateMany({
+                where: {
+                    id: discoveryIdentity.id,
+                    status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
+                },
+                data: { status: "DELETED" },
+            });
+            return claim.count === 1 ? "absent" : "retained";
+        }
+
+        // Stabilize the FK target before enumerating links. New link writers
+        // must take a conflicting key-share lock and cannot escape the claim.
+        await lockCatalogAlbum(transaction, catalogAlbum.id);
+        const linkedRows = await transaction.discoveryAlbum.findMany({
+            where: { catalogAlbumId: catalogAlbum.id },
+            select: { id: true, status: true },
+        });
+        const allEligible = linkedRows.every((row) =>
+            CLEANUP_ELIGIBLE_STATUSES.includes(row.status),
+        );
+        if (!allEligible) return "retained";
+
+        const linkedIds = linkedRows.map((row) => row.id);
+        const activeIds = linkedRows
+            .filter((row) => row.status === "ACTIVE")
+            .map((row) => row.id);
+        const claim = await transaction.discoveryAlbum.updateMany({
+            where: {
+                id: { in: linkedIds },
+                status: { in: [...CLEANUP_ELIGIBLE_STATUSES] },
+            },
+            data: { status: "DELETED" },
+        });
+        if (claim.count !== linkedRows.length) {
+            await restoreActiveDiscoveryRows(transaction, activeIds);
+            return "retained";
+        }
 
         const unlinkedLikedRgMbids =
             await findUnlinkedLikedDiscoveryRgMbids(transaction);
@@ -76,13 +115,14 @@ export async function deleteDiscoveryAlbumCatalogEntry(
         const deleted = await transaction.album.deleteMany({
             where: { id: catalogAlbum.id, ...retentionWhere },
         });
-        if (deleted.count === 1) return "deleted";
+        if (deleted.count === 1) {
+            await transaction.discoveryTrack.deleteMany({
+                where: { discoveryAlbumId: { in: linkedIds } },
+            });
+            return "deleted";
+        }
 
-        await restoreDiscoveryStatus(
-            transaction,
-            discoveryIdentity.id,
-            discoveryAlbum.status,
-        );
+        await restoreActiveDiscoveryRows(transaction, activeIds);
         return "retained";
     });
 }

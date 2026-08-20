@@ -18,6 +18,7 @@ jest.mock("../../../utils/db", () => ({
         },
         ownedAlbum: {
             upsert: jest.fn(),
+            updateMany: jest.fn(),
         },
         discoveryAlbum: {
             findMany: jest.fn(),
@@ -34,6 +35,7 @@ jest.mock("../../../utils/db", () => ({
         unavailableAlbum: {
             deleteMany: jest.fn(),
         },
+        $queryRaw: jest.fn(),
         $transaction: jest.fn(),
     },
 }));
@@ -67,16 +69,38 @@ const mockUpdateArtistCounts = updateArtistCounts as jest.Mock;
 
 describe("DiscoveryAlbumLifecycle", () => {
     let lifecycle: DiscoveryAlbumLifecycle;
+    let lockedDiscoveryId: string;
 
     beforeEach(() => {
         jest.clearAllMocks();
+        lockedDiscoveryId = "discovery-album-1";
+        (mockPrisma.$queryRaw as jest.Mock).mockImplementation(
+            async (query: {
+                strings: readonly string[];
+                values: unknown[];
+            }) => {
+                const sql = query.strings.join("");
+                if (!sql.includes("DiscoveryAlbum"))
+                    return [{ id: query.values[0] }];
+                lockedDiscoveryId = String(query.values[0]);
+                return [{ catalogAlbumId: null }];
+            },
+        );
         (mockPrisma.discoveryAlbum.findUnique as jest.Mock).mockResolvedValue({
             status: "ACTIVE",
         });
         (mockPrisma.discoveryAlbum.updateMany as jest.Mock).mockResolvedValue({
             count: 1,
         });
-        (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockImplementation(
+            async (args: { where?: { catalogAlbumId?: string } }) =>
+                args.where?.catalogAlbumId
+                    ? [{ id: lockedDiscoveryId, status: "ACTIVE" }]
+                    : [],
+        );
+        (mockPrisma.ownedAlbum.updateMany as jest.Mock).mockResolvedValue({
+            count: 0,
+        });
         (mockPrisma.$transaction as jest.Mock).mockImplementation(
             async (callback: (transaction: typeof prisma) => unknown) =>
                 callback(prisma),
@@ -379,8 +403,11 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             expect(mockRequest).not.toHaveBeenCalled();
             expect(mockPrisma.discoveryTrack.deleteMany).not.toHaveBeenCalled();
-            expect(mockPrisma.discoveryAlbum.update).toHaveBeenCalledWith({
-                where: { id: "discovery-album-1" },
+            expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+                where: {
+                    id: { in: ["discovery-album-1"] },
+                    status: "DELETED",
+                },
                 data: { status: "ACTIVE" },
             });
         });
@@ -389,9 +416,9 @@ describe("DiscoveryAlbumLifecycle", () => {
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue({
                 id: "album-db-1",
             });
-            (
-                mockPrisma.discoveryAlbum.updateMany as jest.Mock
-            ).mockResolvedValueOnce({ count: 0 });
+            (mockPrisma.discoveryAlbum.updateMany as jest.Mock)
+                .mockResolvedValueOnce({ count: 1 })
+                .mockResolvedValueOnce({ count: 0 });
 
             await expect(
                 lifecycle.deleteRejectedAlbum(mockAlbum, mockSettings),
@@ -470,7 +497,7 @@ describe("DiscoveryAlbumLifecycle", () => {
 
             expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
                 where: {
-                    id: "discovery-album-1",
+                    id: { in: ["discovery-album-1"] },
                     status: { in: ["ACTIVE", "DELETED"] },
                 },
                 data: { status: "DELETED" },
@@ -596,7 +623,7 @@ describe("DiscoveryAlbumLifecycle", () => {
             expect(result.deleted).toBe(1);
             expect(mockPrisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
                 where: {
-                    id: "da-1",
+                    id: { in: ["da-1"] },
                     status: { in: ["ACTIVE", "DELETED"] },
                 },
                 data: { status: "DELETED" },

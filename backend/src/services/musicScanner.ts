@@ -173,37 +173,49 @@ export class MusicScannerService {
         }
     }
 
-    private async promoteNativeAlbumOnce(
+    private async promoteNativeAlbum(album: {
+        id: string;
+        artistId: string;
+        rgMbid: string;
+        location: string;
+    }): Promise<void> {
+        if (album.location === "LIBRARY") {
+            const ownership = await prisma.ownedAlbum.findUnique({
+                where: {
+                    artistId_rgMbid: {
+                        artistId: album.artistId,
+                        rgMbid: album.rgMbid,
+                    },
+                },
+                select: { source: true },
+            });
+            if (ownership?.source === "native_scan") return;
+        }
+        await prisma.$transaction((transaction) =>
+            promoteAlbumOwnership(transaction, album, "native_scan"),
+        );
+    }
+
+    private promoteNativeAlbumOnce(
         album: {
             id: string;
             artistId: string;
             rgMbid: string;
             location: string;
         },
-        promotedAlbumIds: Set<string>,
+        albumPromotions: Map<string, Promise<void>>,
     ): Promise<void> {
-        if (promotedAlbumIds.has(album.id)) return;
-        promotedAlbumIds.add(album.id);
-        try {
-            if (album.location === "LIBRARY") {
-                const ownership = await prisma.ownedAlbum.findUnique({
-                    where: {
-                        artistId_rgMbid: {
-                            artistId: album.artistId,
-                            rgMbid: album.rgMbid,
-                        },
-                    },
-                    select: { source: true },
-                });
-                if (ownership?.source === "native_scan") return;
+        const currentPromotion = albumPromotions.get(album.id);
+        if (currentPromotion) return currentPromotion;
+        let promotion: Promise<void>;
+        promotion = this.promoteNativeAlbum(album).catch((error: unknown) => {
+            if (albumPromotions.get(album.id) === promotion) {
+                albumPromotions.delete(album.id);
             }
-            await prisma.$transaction((transaction) =>
-                promoteAlbumOwnership(transaction, album, "native_scan"),
-            );
-        } catch (error: unknown) {
-            promotedAlbumIds.delete(album.id);
             throw error;
-        }
+        });
+        albumPromotions.set(album.id, promotion);
+        return promotion;
     }
 
     private async markTrackHealthIssue(
@@ -442,7 +454,7 @@ export class MusicScannerService {
             errors: [],
         };
         const newTrackPaths = new Set<string>();
-        const promotedAlbumIds = new Set<string>();
+        const albumPromotions = new Map<string, Promise<void>>();
 
         for (const audioFile of audioFiles) {
             await this.scanQueue.add(async () => {
@@ -508,7 +520,7 @@ export class MusicScannerService {
                         existingTrack?.duration ?? null,
                         contentChangeDetected,
                         Boolean(removedTrack),
-                        promotedAlbumIds,
+                        albumPromotions,
                     );
                     if (!existingTrack) newTrackPaths.add(relativePath);
                 } catch (err: any) {
@@ -1039,7 +1051,7 @@ export class MusicScannerService {
         previousDuration: number | null = null,
         contentChangeDetected = false,
         revival = false,
-        promotedAlbumIds: Set<string> = new Set<string>(),
+        albumPromotions: Map<string, Promise<void>> = new Map(),
     ): Promise<void> {
         // Extract metadata in two stages. The cheap header-only parse yields
         // a duration for most formats (FLAC STREAMINFO, MP3 Xing, MP4 atoms).
@@ -1386,7 +1398,7 @@ export class MusicScannerService {
                                 source: "native_scan",
                             },
                         });
-                        promotedAlbumIds.add(created.id);
+                        albumPromotions.set(created.id, Promise.resolve());
                     }
                     return created;
                 });
@@ -1481,7 +1493,7 @@ export class MusicScannerService {
             }
             await this.promoteNativeAlbumOnce(
                 { ...album, artistId: artist.id },
-                promotedAlbumIds,
+                albumPromotions,
             );
             album = { ...album, location: "LIBRARY" };
         }

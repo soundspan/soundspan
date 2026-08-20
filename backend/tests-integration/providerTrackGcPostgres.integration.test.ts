@@ -5,6 +5,7 @@ import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
 import { deleteDiscoveryAlbumCatalogEntry } from "../src/services/discoveryAlbumCatalogCleanup";
+import { resolveDiscoveryCatalogAlbum } from "../src/services/discoveryCatalogAlbum";
 import {
     albumTracksOrphanRetentionGuardWhere,
     discoveryAlbumTracksOrphanRetentionGuardWhere,
@@ -582,6 +583,109 @@ describeWithPostgres(
             ).resolves.toEqual(expect.objectContaining({ status: "LIKED" }));
         });
 
+        it("retains a shared album when another linked row is liked", async () => {
+            const prefix = "shared-linked-liked";
+            const secondUserId = `${prefix}-user`;
+            await createArtistAndAlbum(prefix);
+            await prisma.user.create({
+                data: { id: secondUserId, username: secondUserId },
+            });
+            await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-liked`,
+                    userId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                    status: "LIKED",
+                },
+            });
+            const active = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-active`,
+                    userId: secondUserId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                },
+            });
+
+            await expect(
+                deleteDiscoveryAlbumCatalogEntry(active),
+            ).resolves.toBe("retained");
+            await expect(
+                prisma.album.findUnique({ where: { id: `${prefix}-album` } }),
+            ).resolves.not.toBeNull();
+            await expect(
+                prisma.discoveryAlbum.findUnique({ where: { id: active.id } }),
+            ).resolves.toEqual(expect.objectContaining({ status: "ACTIVE" }));
+        });
+
+        it("claims every eligible row linked to a shared album", async () => {
+            const prefix = "shared-linked-eligible";
+            const secondUserId = `${prefix}-user`;
+            await createArtistAndAlbum(prefix);
+            await prisma.user.create({
+                data: { id: secondUserId, username: secondUserId },
+            });
+            const first = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-first`,
+                    userId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                },
+            });
+            const second = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-second`,
+                    userId: secondUserId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                },
+            });
+            await prisma.discoveryTrack.createMany({
+                data: [
+                    {
+                        discoveryAlbumId: first.id,
+                        fileName: "first.flac",
+                        filePath: `/discovery/${prefix}/first.flac`,
+                    },
+                    {
+                        discoveryAlbumId: second.id,
+                        fileName: "second.flac",
+                        filePath: `/discovery/${prefix}/second.flac`,
+                    },
+                ],
+            });
+
+            await expect(deleteDiscoveryAlbumCatalogEntry(first)).resolves.toBe(
+                "deleted",
+            );
+            await expect(
+                prisma.discoveryAlbum.findMany({
+                    where: { id: { in: [first.id, second.id] } },
+                    orderBy: { id: "asc" },
+                    select: { status: true },
+                }),
+            ).resolves.toEqual([{ status: "DELETED" }, { status: "DELETED" }]);
+            await expect(
+                prisma.discoveryTrack.count({
+                    where: { discoveryAlbumId: { in: [first.id, second.id] } },
+                }),
+            ).resolves.toBe(0);
+        });
+
         it("rejects like cleanly after cleanup claims and deletes the album", async () => {
             const prefix = "claim-race-cleanup-wins";
             await createArtistAndAlbum(prefix);
@@ -742,6 +846,95 @@ describeWithPostgres(
             );
         });
 
+        it(
+            "returns the authoritative album when a catalog-link race commits first",
+            async () => {
+                const prefix = "authoritative-link-race";
+                await createArtistAndAlbum(prefix);
+                await createArtistAndAlbum(`${prefix}-fallback`);
+                const discovery = await prisma.discoveryAlbum.create({
+                    data: {
+                        id: `${prefix}-discovery`,
+                        userId,
+                        rgMbid: `${prefix}-fallback-album-mbid`,
+                        artistName: `${prefix}-fallback artist`,
+                        albumTitle: `${prefix}-fallback album`,
+                        weekStartDate: old,
+                    },
+                });
+                const linkWriter = new Client({
+                    connectionString: process.env.DATABASE_URL,
+                });
+                await linkWriter.connect();
+                let transactionOpen = false;
+                let resolution: Promise<unknown> | undefined;
+                try {
+                    transactionOpen = true;
+                    await linkWriter.query("BEGIN");
+                    const backend = await linkWriter.query<{ pid: number }>(
+                        "SELECT pg_backend_pid() AS pid",
+                    );
+                    await linkWriter.query(
+                        'UPDATE "DiscoveryAlbum" SET "catalogAlbumId" = $1 WHERE id = $2',
+                        [`${prefix}-album`, discovery.id],
+                    );
+                    resolution = prisma.$transaction((transaction) =>
+                        resolveDiscoveryCatalogAlbum(transaction, discovery),
+                    );
+                    await waitForLockBlockedBy(database, backend.rows[0]!.pid);
+                    await linkWriter.query("COMMIT");
+                    transactionOpen = false;
+                    await expect(resolution).resolves.toEqual(
+                        expect.objectContaining({ id: `${prefix}-album` }),
+                    );
+                } finally {
+                    if (transactionOpen) await linkWriter.query("ROLLBACK");
+                    await linkWriter.end();
+                    if (resolution) await Promise.allSettled([resolution]);
+                }
+            },
+            CLAIM_RACE_TEST_TIMEOUT_MS,
+        );
+
+        it("links an exact MBID match instead of a title and artist decoy", async () => {
+            const prefix = "catalog-mbid-precedence";
+            await createArtistAndAlbum(prefix);
+            await prisma.album.create({
+                data: {
+                    id: `${prefix}-decoy-album`,
+                    rgMbid: `${prefix}-decoy-mbid`,
+                    artistId: `${prefix}-artist`,
+                    title: `${prefix} album`,
+                    primaryType: "Album",
+                    location: "DISCOVER",
+                },
+            });
+            const discovery = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-discovery`,
+                    userId,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                },
+            });
+
+            await expect(
+                prisma.$transaction((transaction) =>
+                    resolveDiscoveryCatalogAlbum(transaction, discovery),
+                ),
+            ).resolves.toEqual(
+                expect.objectContaining({ id: `${prefix}-album` }),
+            );
+            await expect(
+                prisma.discoveryAlbum.findUnique({
+                    where: { id: discovery.id },
+                    select: { catalogAlbumId: true },
+                }),
+            ).resolves.toEqual({ catalogAlbumId: `${prefix}-album` });
+        });
+
         it("protects an album through an unlinked rolling-deploy LIKED row", async () => {
             const prefix = "unlinked-liked-guard";
             await createArtistAndAlbum(prefix);
@@ -884,6 +1077,76 @@ describeWithPostgres(
                     select: { id: true },
                 }),
             ).resolves.toEqual({ id: `${likedEnrichment}-artist` });
+        });
+
+        it("upgrades enrichment ownership on like so unlike removes it", async () => {
+            const prefix = "ownership-live-promotion";
+            await createArtistAndAlbum(prefix);
+            const discovery = await prisma.discoveryAlbum.create({
+                data: {
+                    id: `${prefix}-discovery`,
+                    userId,
+                    catalogAlbumId: `${prefix}-album`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    artistName: `${prefix} artist`,
+                    albumTitle: `${prefix} album`,
+                    weekStartDate: old,
+                },
+            });
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: `${prefix}-artist`,
+                    rgMbid: `${prefix}-album-mbid`,
+                    source: "enrichment",
+                },
+            });
+            jest.spyOn(
+                lidarrService,
+                "removeDiscoveryTagByMbid",
+            ).mockResolvedValueOnce(true);
+            const likeResponse = createResponse();
+            const unlikeResponse = createResponse();
+
+            await handleLegacyLike(
+                {
+                    user: { id: userId },
+                    body: { albumId: discovery.rgMbid },
+                } as any,
+                likeResponse as any,
+            );
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: `${prefix}-artist`,
+                            rgMbid: `${prefix}-album-mbid`,
+                        },
+                    },
+                }),
+            ).resolves.toEqual(
+                expect.objectContaining({ source: "discovery_liked" }),
+            );
+
+            await handleLegacyUnlike(
+                {
+                    user: { id: userId },
+                    body: { albumId: discovery.rgMbid },
+                } as any,
+                unlikeResponse as any,
+            );
+
+            expect(likeResponse.statusCode).toBe(200);
+            expect(unlikeResponse.statusCode).toBe(200);
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: `${prefix}-artist`,
+                            rgMbid: `${prefix}-album-mbid`,
+                        },
+                    },
+                }),
+            ).resolves.toBeNull();
         });
 
         it("blocks discovery track deletion after the album is promoted", async () => {

@@ -67,6 +67,7 @@ const prisma = {
     ownedAlbum: {
         findFirst: jest.fn(async () => null),
         upsert: jest.fn(async () => undefined),
+        updateMany: jest.fn(async () => ({ count: 0 })),
         deleteMany: jest.fn(async () => ({ count: 0 })),
     },
     discoveryTrack: {
@@ -103,11 +104,13 @@ const prisma = {
     },
 };
 
+const queryRaw = jest.fn(async () => [{ catalogAlbumId: null }]);
+
 const prismaTransaction = jest.fn(
     async (callback: (transaction: typeof prisma) => unknown) =>
         callback(prisma),
 );
-Object.assign(prisma, { $transaction: prismaTransaction });
+Object.assign(prisma, { $queryRaw: queryRaw, $transaction: prismaTransaction });
 
 jest.mock("../../utils/db", () => ({
     prisma,
@@ -249,6 +252,26 @@ describe("discover legacy-mode runtime behavior", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        let lockedDiscoveryId = "discovery-album-1";
+        (queryRaw as jest.Mock).mockImplementation(
+            async (query: {
+                strings: readonly string[];
+                values: unknown[];
+            }) => {
+                const sql = query.strings.join("");
+                if (!sql.includes("DiscoveryAlbum")) {
+                    return [{ id: query.values[0] }];
+                }
+                lockedDiscoveryId = String(query.values[0]);
+                return [{ catalogAlbumId: null }];
+            },
+        );
+        (prisma.discoveryAlbum.findMany as jest.Mock).mockImplementation(
+            async (args: { where?: { catalogAlbumId?: string } }) =>
+                args.where?.catalogAlbumId
+                    ? [{ id: lockedDiscoveryId, status: "ACTIVE" }]
+                    : [],
+        );
         (prisma.album.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
         (prisma.discoveryAlbum.findUnique as jest.Mock).mockResolvedValue({
             status: "ACTIVE",
@@ -851,10 +874,7 @@ describe("discover legacy-mode runtime behavior", () => {
         ]);
         (prisma.album.findFirst as jest.Mock).mockImplementation(
             async (args: any) => {
-                const alternatives = args?.where?.OR ?? [];
-                if (
-                    alternatives.some((item: any) => item.rgMbid === "rg-liked")
-                ) {
+                if (args?.where?.rgMbid === "rg-liked") {
                     return {
                         id: "album-liked",
                         artistId: "artist-liked",
@@ -862,11 +882,7 @@ describe("discover legacy-mode runtime behavior", () => {
                         artist: { id: "artist-liked", name: "Liked Artist" },
                     };
                 }
-                if (
-                    alternatives.some(
-                        (item: any) => item.rgMbid === "rg-active",
-                    )
-                ) {
+                if (args?.where?.rgMbid === "rg-active") {
                     return {
                         id: "album-active",
                         artistId: "artist-active",
@@ -1007,8 +1023,8 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(prisma.discoveryTrack.deleteMany).not.toHaveBeenCalledWith({
             where: { discoveryAlbumId: "da-raced" },
         });
-        expect(prisma.discoveryAlbum.update).toHaveBeenCalledWith({
-            where: { id: "da-raced" },
+        expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["da-raced"] }, status: "DELETED" },
             data: { status: "ACTIVE" },
         });
         expect(res.body).toEqual(expect.objectContaining({ activeDeleted: 0 }));
@@ -1110,6 +1126,12 @@ describe("discover legacy-mode runtime behavior", () => {
             ])
             .mockResolvedValueOnce([
                 {
+                    id: "da-active",
+                    status: "ACTIVE",
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
                     rgMbid: "rg-liked",
                     artistName: "Liked Artist",
                     albumTitle: "Liked Album",
@@ -1154,10 +1176,7 @@ describe("discover legacy-mode runtime behavior", () => {
 
         (prisma.album.findFirst as jest.Mock).mockImplementation(
             async (args: any) => {
-                const alternatives = args?.where?.OR ?? [];
-                if (
-                    alternatives.some((item: any) => item.rgMbid === "rg-liked")
-                ) {
+                if (args?.where?.rgMbid === "rg-liked") {
                     return {
                         id: "album-liked",
                         artistId: "artist-liked",
@@ -1165,11 +1184,7 @@ describe("discover legacy-mode runtime behavior", () => {
                         artist: { id: "artist-liked", name: "Liked Artist" },
                     };
                 }
-                if (
-                    alternatives.some(
-                        (item: any) => item.rgMbid === "rg-active",
-                    )
-                ) {
+                if (args?.where?.rgMbid === "rg-active") {
                     return {
                         id: "album-active",
                         artistId: "artist-active",

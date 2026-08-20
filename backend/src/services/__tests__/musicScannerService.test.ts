@@ -1901,6 +1901,38 @@ describe("MusicScannerService.scanLibrary", () => {
         );
     });
 
+    it("shares an in-flight album promotion and retries after failure", async () => {
+        const scanner = new MusicScannerService() as any;
+        const promotions = new Map<string, Promise<void>>();
+        const album = {
+            id: "album-1",
+            artistId: "artist-1",
+            rgMbid: "rg-album-1",
+            location: "DISCOVER",
+        };
+        let rejectPromotion: ((error: Error) => void) | undefined;
+        mockPrisma.$transaction.mockImplementationOnce(
+            () =>
+                new Promise<void>((_resolve, reject) => {
+                    rejectPromotion = reject;
+                }),
+        );
+
+        const first = scanner.promoteNativeAlbumOnce(album, promotions);
+        const concurrent = scanner.promoteNativeAlbumOnce(album, promotions);
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        rejectPromotion?.(new Error("promotion failed"));
+        await expect(first).rejects.toThrow("promotion failed");
+        await expect(concurrent).rejects.toThrow("promotion failed");
+        expect(promotions.has(album.id)).toBe(false);
+
+        await expect(
+            scanner.promoteNativeAlbumOnce(album, promotions),
+        ).resolves.toBeUndefined();
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+    });
+
     it("marks missing tracks as unhealthy without deleting library context", async () => {
         const scanner = new MusicScannerService();
 
