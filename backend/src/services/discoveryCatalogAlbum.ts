@@ -34,8 +34,37 @@ export class DiscoveryCatalogResolutionError extends Error {}
 export class DiscoveryLinkDriftError extends DiscoveryCatalogResolutionError {}
 
 const DISCOVERY_LINK_DRIFT_MAX_ATTEMPTS = 3;
+const RETRYABLE_TRANSACTION_ABORT_CODES = new Set(["P2034", "40001", "40P01"]);
 
-/** Retries a catalog operation when its transaction observes link drift. */
+function isRetryableTransactionAbort(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    const record = error as Record<string, unknown>;
+    const meta =
+        typeof record.meta === "object" && record.meta !== null
+            ? (record.meta as Record<string, unknown>)
+            : null;
+    const adapter =
+        typeof meta?.driverAdapterError === "object" &&
+        meta.driverAdapterError !== null
+            ? (meta.driverAdapterError as Record<string, unknown>)
+            : null;
+    const cause =
+        typeof adapter?.cause === "object" && adapter.cause !== null
+            ? (adapter.cause as Record<string, unknown>)
+            : null;
+    return [record, meta, cause].some(
+        (candidate) =>
+            typeof candidate?.code === "string" &&
+            RETRYABLE_TRANSACTION_ABORT_CODES.has(candidate.code),
+    );
+}
+
+function isRetryableDiscoveryTransactionError(error: unknown): boolean {
+    if (error instanceof DiscoveryLinkDriftError) return true;
+    return isRetryableTransactionAbort(error);
+}
+
+/** Retries a catalog operation after link drift or a retryable DB abort. */
 export async function retryDiscoveryLinkDrift<T>(
     operation: () => Promise<T>,
 ): Promise<T> {
@@ -48,7 +77,7 @@ export async function retryDiscoveryLinkDrift<T>(
             return await operation();
         } catch (error: unknown) {
             const exhausted = attempt === DISCOVERY_LINK_DRIFT_MAX_ATTEMPTS;
-            if (!(error instanceof DiscoveryLinkDriftError) || exhausted) {
+            if (!isRetryableDiscoveryTransactionError(error) || exhausted) {
                 throw error;
             }
         }

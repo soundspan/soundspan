@@ -319,6 +319,42 @@ describe("resolveDiscoveryCatalogAlbum", () => {
         expect(operation).toHaveBeenCalledTimes(2);
     });
 
+    it.each([
+        {
+            name: "Prisma transaction conflict",
+            failure: { code: "P2034" },
+        },
+        {
+            name: "PostgreSQL deadlock abort",
+            failure: {
+                code: "P2010",
+                meta: {
+                    driverAdapterError: { cause: { code: "40P01" } },
+                },
+            },
+        },
+    ])("retries a $name with a fresh attempt", async ({ failure }) => {
+        const operation = jest
+            .fn<Promise<string>, []>()
+            .mockRejectedValueOnce(failure)
+            .mockResolvedValueOnce("completed");
+
+        await expect(retryDiscoveryLinkDrift(operation)).resolves.toBe(
+            "completed",
+        );
+        expect(operation).toHaveBeenCalledTimes(2);
+    });
+
+    it("surfaces a deadlock abort after the bounded attempt cap", async () => {
+        const deadlock = { code: "40P01" };
+        const operation = jest
+            .fn<Promise<never>, []>()
+            .mockRejectedValue(deadlock);
+
+        await expect(retryDiscoveryLinkDrift(operation)).rejects.toBe(deadlock);
+        expect(operation).toHaveBeenCalledTimes(3);
+    });
+
     it("surfaces the existing error after three drift attempts", async () => {
         const drift = new DiscoveryLinkDriftError(
             "Discovery catalog link changed during resolution",

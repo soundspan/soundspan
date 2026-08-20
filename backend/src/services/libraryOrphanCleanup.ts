@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -98,9 +98,17 @@ async function deleteOrphanedArtists(
         select: { id: true },
     });
     if (orphanedArtists.length === 0) return 0;
+    const artistIds = orphanedArtists.map((artist) => artist.id);
+    await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id"
+        FROM "Album"
+        WHERE "artistId" IN (${Prisma.join(artistIds)})
+        ORDER BY "id"
+        FOR UPDATE
+    `);
     const result = await client.artist.deleteMany({
         where: {
-            id: { in: orphanedArtists.map((artist) => artist.id) },
+            id: { in: artistIds },
             peerId: null,
             albums: { none: {} },
             ...retentionWhere,
@@ -168,11 +176,9 @@ export async function cleanupOrphanedLibraryEntities(
         now,
         config.workers.providerTrackRetentionDays,
     );
-    const result = config.features.federation
-        ? await prisma.$transaction((transaction) =>
-              cleanupWithClient(transaction, true, cutoff),
-          )
-        : await cleanupWithClient(prisma, false, cutoff);
+    const result = await prisma.$transaction((transaction) =>
+        cleanupWithClient(transaction, config.features.federation, cutoff),
+    );
 
     if (result.albumsDeleted > 0 || result.artistsDeleted > 0) {
         cleanupLogger.info(

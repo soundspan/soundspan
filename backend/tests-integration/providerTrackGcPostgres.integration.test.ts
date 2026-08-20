@@ -12,6 +12,7 @@ import {
 } from "../src/services/providerTrackRetention";
 import { updateAlbumMetadataWithOwnership } from "../src/services/albumMetadataPersistence";
 import { handleDeleteAlbum } from "../src/routes/library/albums";
+import { deleteArtistCatalogEntry } from "../src/services/artistCatalogDeletion";
 import {
     handleLegacyLike,
     handleLegacyUnlike,
@@ -481,6 +482,109 @@ describeWithPostgres(
                 }),
             ).resolves.toBeNull();
         });
+
+        it(
+            "completes resolver and artist deletion when the resolver already holds the album lock",
+            async () => {
+                const prefix = "resolver-artist-delete-order";
+                await createArtistAndAlbum(prefix);
+                await prisma.artist.update({
+                    where: { id: `${prefix}-artist` },
+                    data: { mbid: `temp-${prefix}` },
+                });
+                const discovery = await prisma.discoveryAlbum.create({
+                    data: {
+                        id: `${prefix}-discovery`,
+                        userId,
+                        rgMbid: `${prefix}-missing-mbid`,
+                        artistName: `${prefix} artist`,
+                        albumTitle: `${prefix} album`,
+                        weekStartDate: old,
+                    },
+                });
+                let releaseResolver: (() => void) | undefined;
+                const resolverRelease = new Promise<void>((resolve) => {
+                    releaseResolver = resolve;
+                });
+                let reportAlbumLocked: (() => void) | undefined;
+                const albumLocked = new Promise<void>((resolve) => {
+                    reportAlbumLocked = resolve;
+                });
+                let resolverPid: number | undefined;
+                let resolverPromise: Promise<unknown> | undefined;
+                let deletePromise: Promise<unknown> | undefined;
+
+                try {
+                    resolverPromise = prisma.$transaction(async (tx) => {
+                        const backend = await tx.$queryRaw<
+                            Array<{ pid: number }>
+                        >`SELECT pg_backend_pid() AS pid`;
+                        resolverPid = backend[0]?.pid;
+                        const wrapped = new Proxy(tx, {
+                            get(target, property, receiver) {
+                                if (property !== "$queryRaw") {
+                                    return Reflect.get(
+                                        target,
+                                        property,
+                                        receiver,
+                                    );
+                                }
+                                return async (query: Prisma.Sql) => {
+                                    const rows = await tx.$queryRaw(query);
+                                    const sql = query.strings.join("");
+                                    if (
+                                        sql.includes('FROM "Album"') &&
+                                        sql.includes("FOR UPDATE")
+                                    ) {
+                                        reportAlbumLocked?.();
+                                        await resolverRelease;
+                                    }
+                                    return rows;
+                                };
+                            },
+                        });
+                        return resolveDiscoveryCatalogAlbum(wrapped, discovery);
+                    });
+                    await albumLocked;
+                    if (resolverPid === undefined) {
+                        throw new Error("Missing resolver backend PID");
+                    }
+
+                    deletePromise = deleteArtistCatalogEntry(
+                        `${prefix}-artist`,
+                    );
+                    await waitForLockBlockedBy(database, resolverPid);
+                    releaseResolver?.();
+
+                    await expect(resolverPromise).resolves.toEqual(
+                        expect.objectContaining({
+                            catalogAlbum: expect.objectContaining({
+                                id: `${prefix}-album`,
+                            }),
+                        }),
+                    );
+                    await expect(deletePromise).resolves.toBeUndefined();
+                } finally {
+                    releaseResolver?.();
+                    await Promise.allSettled([
+                        ...(resolverPromise ? [resolverPromise] : []),
+                        ...(deletePromise ? [deletePromise] : []),
+                    ]);
+                }
+
+                await expect(
+                    prisma.artist.findUnique({
+                        where: { id: `${prefix}-artist` },
+                    }),
+                ).resolves.toBeNull();
+                await expect(
+                    prisma.album.findUnique({
+                        where: { id: `${prefix}-album` },
+                    }),
+                ).resolves.toBeNull();
+            },
+            CLAIM_RACE_TEST_TIMEOUT_MS,
+        );
 
         it("retains tracks when ownership arrives after orphan selection", async () => {
             await createArtistAndAlbum("ownership-race");

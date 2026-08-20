@@ -45,6 +45,7 @@ import {
     libraryDeletionLogger,
 } from "../../utils/libraryDeletion";
 import { findRouteNameMatch } from "../artistRouteName";
+import { deleteArtistCatalogEntry } from "../../services/artistCatalogDeletion";
 
 /**
  * Router segments for artists routes registered at their mount positions.
@@ -1519,9 +1520,7 @@ export async function handleDeleteArtist(
         logger.debug(
             `[DELETE] Deleting artist from database: ${artist.name} (${artist.id})`,
         );
-        await prisma.artist.delete({
-            where: { id: artist.id },
-        });
+        await deleteArtistCatalogEntry(artist.id);
 
         logger.debug(
             `[DELETE] Successfully deleted artist: ${

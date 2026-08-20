@@ -166,31 +166,41 @@ describeWithPostgres("library orphan cleanup PostgreSQL behavior", () => {
     });
 
     it("preserves provider-backed and raced entities while deleting true orphans", async () => {
-        const findAlbums = prisma.album.findMany.bind(
-            prisma.album,
-        ) as unknown as (
-            args: Prisma.AlbumFindManyArgs,
-        ) => Promise<Array<{ id: string }>>;
-        const findArtists = prisma.artist.findMany.bind(
-            prisma.artist,
-        ) as unknown as (
-            args: Prisma.ArtistFindManyArgs,
-        ) => Promise<Array<{ id: string }>>;
-
-        jest.spyOn(prisma.album, "findMany").mockImplementationOnce((async (
-            args?: Prisma.AlbumFindManyArgs,
-        ) => {
-            const candidates = await findAlbums(args ?? {});
-            await insertRacedAlbumLink(database);
-            return candidates;
-        }) as never);
-        jest.spyOn(prisma.artist, "findMany").mockImplementationOnce((async (
-            args?: Prisma.ArtistFindManyArgs,
-        ) => {
-            const candidates = await findArtists(args ?? {});
-            await insertRacedArtistLink(database);
-            return candidates;
-        }) as never);
+        const runTransaction = prisma.$transaction.bind(prisma);
+        jest.spyOn(prisma, "$transaction").mockImplementationOnce((async (
+            callback: (
+                transaction: Prisma.TransactionClient,
+            ) => Promise<unknown>,
+        ) =>
+            runTransaction(async (transaction) => {
+                const findAlbums = transaction.album.findMany.bind(
+                    transaction.album,
+                );
+                const findArtists = transaction.artist.findMany.bind(
+                    transaction.artist,
+                );
+                jest.spyOn(
+                    transaction.album,
+                    "findMany",
+                ).mockImplementationOnce((async (
+                    args?: Prisma.AlbumFindManyArgs,
+                ) => {
+                    const candidates = await findAlbums(args ?? {});
+                    await insertRacedAlbumLink(database);
+                    return candidates;
+                }) as never);
+                jest.spyOn(
+                    transaction.artist,
+                    "findMany",
+                ).mockImplementationOnce((async (
+                    args?: Prisma.ArtistFindManyArgs,
+                ) => {
+                    const candidates = await findArtists(args ?? {});
+                    await insertRacedArtistLink(database);
+                    return candidates;
+                }) as never);
+                return callback(transaction);
+            })) as never);
 
         await expect(cleanupOrphanedLibraryEntities()).resolves.toEqual({
             albumsDeleted: 1,

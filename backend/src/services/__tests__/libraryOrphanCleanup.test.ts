@@ -11,6 +11,7 @@ describe("cleanupOrphanedLibraryEntities", () => {
         };
         logger.child.mockReturnValue(logger);
         let prisma: any;
+        const operations: string[] = [];
         prisma = {
             album: {
                 findMany: jest.fn(
@@ -26,7 +27,10 @@ describe("cleanupOrphanedLibraryEntities", () => {
                         { id: "local-artist" },
                     ],
                 ),
-                deleteMany: jest.fn(async () => ({ count: 1 })),
+                deleteMany: jest.fn(async () => {
+                    operations.push("delete-artist");
+                    return { count: 1 };
+                }),
             },
             federationTombstone: {
                 createMany: jest.fn(async ({ data }: { data: unknown[] }) => ({
@@ -36,6 +40,10 @@ describe("cleanupOrphanedLibraryEntities", () => {
             $transaction: jest.fn(async (callback: (tx: unknown) => unknown) =>
                 callback(prisma),
             ),
+            $queryRaw: jest.fn(async () => {
+                operations.push("lock-artist-albums");
+                return [];
+            }),
         };
 
         jest.doMock("../../utils/db", () => ({ prisma }));
@@ -49,7 +57,7 @@ describe("cleanupOrphanedLibraryEntities", () => {
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const module = require("../libraryOrphanCleanup");
-        return { module, prisma };
+        return { module, operations, prisma };
     }
 
     it("deletes only peerless orphaned albums and artists", async () => {
@@ -108,6 +116,8 @@ describe("cleanupOrphanedLibraryEntities", () => {
                 tracksYtMusic: { none: { NOT: expect.any(Object) } },
             },
         });
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
     it("leaves peer-owned entities untouched during an empty sync window", async () => {
@@ -162,12 +172,20 @@ describe("cleanupOrphanedLibraryEntities", () => {
         );
     });
 
-    it("writes no orphan tombstones when federation is disabled", async () => {
-        const { module, prisma } = loadCleanup(false);
+    it("locks candidate artist album rows before deletion without federation", async () => {
+        const { module, operations, prisma } = loadCleanup(false);
 
         await module.cleanupOrphanedLibraryEntities();
 
-        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(operations).toEqual(["lock-artist-albums", "delete-artist"]);
+        const query = prisma.$queryRaw.mock.calls[0][0];
+        expect(query.strings.join("")).toContain(
+            'FROM "Album"\n        WHERE "artistId" IN (',
+        );
+        expect(query.strings.join("")).toContain(
+            'ORDER BY "id"\n        FOR UPDATE',
+        );
         expect(prisma.federationTombstone.createMany).not.toHaveBeenCalled();
     });
 });

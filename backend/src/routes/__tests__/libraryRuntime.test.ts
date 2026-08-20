@@ -5048,6 +5048,55 @@ describe("library catalog list runtime coverage", () => {
         rmSpy.mockRestore();
     });
 
+    it("locks an artist's albums in id order before deleting the artist", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            libraryDeletionEnabled: true,
+        });
+        mockArtistFindUnique.mockResolvedValueOnce({
+            id: "artist-lock-order",
+            name: "Lock Order Artist",
+            mbid: "temp-lock-order",
+            albums: [],
+        });
+        const operations: string[] = [];
+        const lockAlbums = jest.fn(
+            async (_query: { strings: readonly string[] }) => {
+                operations.push("lock-albums");
+                return [];
+            },
+        );
+        const deleteArtist = jest.fn(async () => {
+            operations.push("delete-artist");
+            return { id: "artist-lock-order" };
+        });
+        mockPrismaTransaction.mockImplementationOnce(async (callback: any) =>
+            callback({
+                $queryRaw: lockAlbums,
+                artist: { delete: deleteArtist },
+            }),
+        );
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
+
+        const res = createRes();
+        await deleteArtistHandler(
+            { params: { id: "artist-lock-order" } } as any,
+            res,
+        );
+
+        expect(res.statusCode).toBe(200);
+        expect(operations).toEqual(["lock-albums", "delete-artist"]);
+        const query = lockAlbums.mock.calls[0][0];
+        expect(query.strings.join("")).toContain('WHERE "artistId" = ');
+        expect(query.strings.join("")).toContain(
+            'ORDER BY "id"\n            FOR UPDATE',
+        );
+        expect(deleteArtist).toHaveBeenCalledWith({
+            where: { id: "artist-lock-order" },
+        });
+
+        existsSpy.mockRestore();
+    });
+
     it("contains artist file and recursive folder deletion for malicious persisted paths", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             libraryDeletionEnabled: true,
