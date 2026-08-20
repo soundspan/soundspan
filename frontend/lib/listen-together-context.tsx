@@ -49,7 +49,11 @@ import {
     type SyncQueueItem,
     type SocketRouteProbeResult,
 } from "@/lib/listen-together-socket";
-import { computeCompensatedTargetMs } from "@/lib/listenTogetherPlaybackSync";
+import {
+    canIssueListenTogetherHostPlaybackCommand,
+    computeCompensatedTargetMs,
+    resolveFollowerSeekTarget,
+} from "@/lib/listenTogetherPlaybackSync";
 import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherOptimisticTrackSelectionPolicy,
@@ -253,36 +257,8 @@ export function resolveListenTogetherMembershipPendingState(
     return operation === "create" || operation === "join";
 }
 
-export interface ResolveListenTogetherHostControlInput {
-    activeGroupId: string | null | undefined;
-    hostUserId: string | null | undefined;
-    userId: string | null | undefined;
-    snapshot: ListenTogetherSessionSnapshot | null;
-}
-
-/**
- * Executes canIssueListenTogetherHostPlaybackCommand.
- */
-export function canIssueListenTogetherHostPlaybackCommand(
-    input: ResolveListenTogetherHostControlInput,
-): boolean {
-    if (!input.activeGroupId) return false;
-
-    const hasUserId =
-        typeof input.userId === "string" && input.userId.length > 0;
-    const hasHostUserId =
-        typeof input.hostUserId === "string" && input.hostUserId.length > 0;
-
-    if (hasUserId && hasHostUserId) {
-        return input.hostUserId === input.userId;
-    }
-
-    if (!input.snapshot || !input.snapshot.isHost) {
-        return false;
-    }
-
-    return input.snapshot.groupId === input.activeGroupId;
-}
+export { canIssueListenTogetherHostPlaybackCommand };
+export type { ResolveListenTogetherHostControlInput } from "@/lib/listenTogetherPlaybackSync";
 
 export type ListenTogetherReadyReportRecoveryAction =
     | "retry"
@@ -567,25 +543,16 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             state.setVibeMode(false);
 
             if (!isCurrentClientHost) {
-                let targetMs = Math.max(0, pb.positionMs);
-                if (pb.isPlaying && pb.serverTime) {
-                    targetMs = computeCompensatedTargetMs(
-                        pb.positionMs,
-                        pb.serverTime,
-                        Date.now(),
-                        getServerClockOffsetMs(),
-                        5_000,
-                    );
-                }
-                if (targetTrack?.duration) {
-                    targetMs = Math.min(targetMs, targetTrack.duration * 1000);
-                }
-
-                const targetSec = targetMs / 1000;
-                const drift = Math.abs(
-                    playbackEngine.getCurrentTime() - targetSec,
-                );
-                if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
+                const { targetSec, drifted } = resolveFollowerSeekTarget({
+                    positionMs: pb.positionMs,
+                    serverTimeMs: pb.serverTime,
+                    isPlaying: pb.isPlaying,
+                    trackDurationSec: targetTrack?.duration,
+                    currentTimeSec: playbackEngine.getCurrentTime(),
+                    nowMs: Date.now(),
+                    clockOffsetMs: getServerClockOffsetMs(),
+                });
+                if (drifted || state.currentTrack?.id !== targetTrack?.id) {
                     ctrl.seek(targetSec, {
                         allowListenTogetherFollower: true,
                         suppressListenTogetherBroadcast: true,
@@ -676,16 +643,6 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             }
 
             if (!isCurrentClientHost) {
-                let targetMs = Math.max(0, delta.positionMs);
-                if (delta.isPlaying && delta.serverTime) {
-                    targetMs = computeCompensatedTargetMs(
-                        delta.positionMs,
-                        delta.serverTime,
-                        Date.now(),
-                        getServerClockOffsetMs(),
-                        5_000,
-                    );
-                }
                 const safeTrackIdx =
                     currentQueue.length > 0
                         ? Math.min(
@@ -695,15 +652,16 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                         : -1;
                 const track =
                     safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
-                if (track?.duration) {
-                    targetMs = Math.min(targetMs, track.duration * 1000);
-                }
-
-                const targetSec = targetMs / 1000;
-                const drift = Math.abs(
-                    playbackEngine.getCurrentTime() - targetSec,
-                );
-                if (drift > 1.5) {
+                const { targetSec, drifted } = resolveFollowerSeekTarget({
+                    positionMs: delta.positionMs,
+                    serverTimeMs: delta.serverTime,
+                    isPlaying: delta.isPlaying,
+                    trackDurationSec: track?.duration,
+                    currentTimeSec: playbackEngine.getCurrentTime(),
+                    nowMs: Date.now(),
+                    clockOffsetMs: getServerClockOffsetMs(),
+                });
+                if (drifted) {
                     ctrl.seek(targetSec, {
                         allowListenTogetherFollower: true,
                         suppressListenTogetherBroadcast: true,
