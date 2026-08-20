@@ -19,8 +19,11 @@ describe("data integrity prisma retry contract", () => {
             "runDataIntegrityCheck.album.update.mislocated",
         );
         expect(source).toContain(
-            "runDataIntegrityCheck.$executeRaw.orphanedOwnedAlbums",
+            "runDataIntegrityCheck.album.updateMany.consolidateArtist",
         );
+        // The raw orphaned-OwnedAlbum delete is gone: ownership now guards
+        // parents from deletion instead of being cleaned up after the fact.
+        expect(source).not.toContain("orphanedOwnedAlbums");
         expect(source).toContain(
             "runDataIntegrityCheck.downloadJob.deleteMany.oldJobs",
         );
