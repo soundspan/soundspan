@@ -116,6 +116,17 @@ export function albumOrphanRetentionGuardWhere(
     } as Prisma.AlbumWhereInput;
 }
 
+/** Guards child-track deletion with the current album retention state. */
+export function albumTracksOrphanRetentionGuardWhere(
+    albumId: string,
+    cutoff: Date,
+): Prisma.TrackWhereInput {
+    return {
+        albumId,
+        album: albumOrphanRetentionGuardWhere(cutoff),
+    };
+}
+
 /** Guards an artist against collection when provider or user-owned state remains. */
 export function artistOrphanRetentionGuardWhere(
     cutoff: Date,

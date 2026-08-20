@@ -4678,11 +4678,13 @@ describe("library catalog list runtime coverage", () => {
         });
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-delete-fail",
+            rgMbid: "rg-album-delete-fail",
             title: "Album Delete Fail",
             artist: { name: "Failing Artist" },
             tracks: [],
         });
         mockAlbumDelete.mockRejectedValueOnce(new Error("album-db-down"));
+        const unlinkSpy = jest.spyOn(fs, "unlinkSync");
 
         const failureRes = createRes();
         await invokeWithErrorHandler(
@@ -4692,6 +4694,8 @@ describe("library catalog list runtime coverage", () => {
         );
 
         expect(failureRes.statusCode).toBe(500);
+        expect(unlinkSpy).not.toHaveBeenCalled();
+        unlinkSpy.mockRestore();
     });
 
     it("applies delete-policy gates and not-found/success behavior for track, album, and artist deletion", async () => {
@@ -4754,6 +4758,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-2",
+            rgMbid: "rg-album-2",
             title: "Album Two",
             artist: { name: "Artist Two" },
             tracks: [],
@@ -4766,6 +4771,9 @@ describe("library catalog list runtime coverage", () => {
         );
         expect(mockAlbumDelete).toHaveBeenCalledWith({
             where: { id: "album-2" },
+        });
+        expect(mockOwnedAlbumDeleteMany).toHaveBeenCalledWith({
+            where: { rgMbid: "rg-album-2" },
         });
         expect(deleteAlbumResOk.statusCode).toBe(200);
         expect(deleteAlbumResOk.body).toEqual({
@@ -5298,6 +5306,7 @@ describe("library catalog list runtime coverage", () => {
         });
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-del",
+            rgMbid: "rg-album-del",
             title: "Deletion Album",
             artist: { name: "Delete Artist" },
             tracks: [{ filePath: "Delete Artist/Deletion Album/track.flac" }],
@@ -5318,6 +5327,12 @@ describe("library catalog list runtime coverage", () => {
         expect(mockAlbumDelete).toHaveBeenCalledWith({
             where: { id: "album-del" },
         });
+        expect(mockOwnedAlbumDeleteMany).toHaveBeenCalledWith({
+            where: { rgMbid: "rg-album-del" },
+        });
+        expect(mockAlbumDelete.mock.invocationCallOrder[0]).toBeLessThan(
+            unlinkSpy.mock.invocationCallOrder[0],
+        );
         expect(unlinkSpy).toHaveBeenCalledWith(
             "/music/Delete Artist/Deletion Album/track.flac",
         );
@@ -5345,6 +5360,7 @@ describe("library catalog list runtime coverage", () => {
         });
         mockAlbumFindUnique.mockResolvedValueOnce({
             id: "album-contained",
+            rgMbid: "rg-album-contained",
             title: "..",
             artist: { name: ".." },
             tracks: [

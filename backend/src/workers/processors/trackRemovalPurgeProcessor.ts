@@ -338,6 +338,7 @@ async function finishPurge(
     sweepDeleted: number,
     sweepRunId: string,
 ): Promise<void> {
+    await collectProviderTracks();
     if (sweepDeleted > 0) {
         await refreshCatalogAfterPurge(sweepDeleted);
     }
@@ -403,7 +404,6 @@ export async function processTrackRemovalPurge(
     job: Job<TrackRemovalPurgeJobData>,
 ): Promise<TrackRemovalPurgeResult> {
     const cursor = parsePurgeCursor(job.data);
-    await collectProviderTracks();
     // Persist a minted run id back into the job so Bull retries of this
     // same job reuse one marker owner instead of stranding the previous
     // attempt's marker under a fresh id.

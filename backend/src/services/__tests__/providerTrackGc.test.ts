@@ -163,6 +163,21 @@ describe("provider track garbage collection", () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(3);
     });
 
+    it("opens no delete transaction when the candidate set is empty", async () => {
+        const { module, prisma } = loadGc({
+            tidalPageSizes: [0],
+            youtubePageSizes: [0],
+        });
+
+        await expect(module.collectProviderTracks()).resolves.toEqual(
+            expect.objectContaining({
+                selected: { tidal: 0, youtube: 0 },
+                deleted: { tidal: 0, youtube: 0 },
+            }),
+        );
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it("stops provider continuation at the hard pass ceiling", async () => {
         const fullPages = Array.from({ length: 50 }, () => 100);
         const { module, prisma, logger } = loadGc({

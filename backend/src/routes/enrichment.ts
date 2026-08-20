@@ -34,6 +34,7 @@ import { sendFeatureDisabled } from "../utils/featureGate";
 import { parseBoundedInt } from "../utils/queryParams";
 import { sendRouteError } from "./routeErrorResponse";
 import { invalidateVibeAnalysis } from "../services/vibeInvalidation";
+import { updateAlbumMetadataWithOwnership } from "../services/albumMetadataPersistence";
 
 const router = Router();
 
@@ -1668,9 +1669,14 @@ router.put("/albums/:id/metadata", async (req, res) => {
         }
 
         const { prisma } = await import("../utils/db");
+        let existingAlbum: {
+            artistId: string;
+            rgMbid: string;
+            location: string;
+        } | null = null;
 
         if (normalizedRgMbid) {
-            const existingAlbum = await prisma.album.findUnique({
+            existingAlbum = await prisma.album.findUnique({
                 where: { id: req.params.id },
                 select: { artistId: true, rgMbid: true, location: true },
             });
@@ -1709,53 +1715,23 @@ router.put("/albums/:id/metadata", async (req, res) => {
                         hint: "Use MusicBrainz lookup to pick the correct release-group MBID",
                     });
                 }
-
-                if (existingAlbum.location === "LIBRARY") {
-                    await prisma.ownedAlbum.deleteMany({
-                        where: {
-                            artistId: existingAlbum.artistId,
-                            rgMbid: existingAlbum.rgMbid,
-                        },
-                    });
-
-                    await prisma.ownedAlbum.upsert({
-                        where: {
-                            artistId_rgMbid: {
-                                artistId: existingAlbum.artistId,
-                                rgMbid: normalizedRgMbid,
-                            },
-                        },
-                        create: {
-                            artistId: existingAlbum.artistId,
-                            rgMbid: normalizedRgMbid,
-                            source: "metadata_edit",
-                        },
-                        update: {},
-                    });
-                }
             }
         }
 
-        const album = await prisma.album.update({
-            where: { id: req.params.id },
-            data: updateData,
-            include: {
-                artist: {
-                    select: {
-                        id: true,
-                        name: true,
-                    },
-                },
-                tracks: {
-                    select: {
-                        id: true,
-                        title: true,
-                        trackNo: true,
-                        duration: true,
-                    },
-                },
-            },
-        });
+        const ownership =
+            normalizedRgMbid &&
+            existingAlbum?.rgMbid !== normalizedRgMbid &&
+            existingAlbum?.location === "LIBRARY"
+                ? {
+                      artistId: existingAlbum.artistId,
+                      rgMbid: normalizedRgMbid,
+                  }
+                : null;
+        const album = await updateAlbumMetadataWithOwnership(
+            req.params.id,
+            updateData,
+            ownership,
+        );
 
         res.json(album);
     } catch (error: any) {

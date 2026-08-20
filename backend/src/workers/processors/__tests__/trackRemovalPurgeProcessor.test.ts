@@ -365,7 +365,7 @@ describe("trackRemovalPurgeProcessor", () => {
         jest.useFakeTimers().setSystemTime(
             new Date("2026-08-15T12:00:00.000Z"),
         );
-        const { module, prisma } = loadProcessor(
+        const { module, prisma, collectProviderTracks } = loadProcessor(
             [{ id: "track-old" }],
             90,
             1,
@@ -381,6 +381,7 @@ describe("trackRemovalPurgeProcessor", () => {
         expect(prisma.federationTombstone.deleteMany).toHaveBeenCalledWith({
             where: { deletedAt: { lt: new Date("2026-05-17T12:00:00.000Z") } },
         });
+        expect(collectProviderTracks).toHaveBeenCalledTimes(1);
     });
 
     it("writes no tombstones when federation is disabled", async () => {
@@ -419,6 +420,7 @@ describe("trackRemovalPurgeProcessor", () => {
             schedulerQueue,
             cleanupOrphanedLibraryEntities,
             backfillAllArtistCounts,
+            collectProviderTracks,
         } = loadProcessor(candidates, 90, 100);
 
         await expect(
@@ -460,6 +462,7 @@ describe("trackRemovalPurgeProcessor", () => {
         );
         expect(cleanupOrphanedLibraryEntities).not.toHaveBeenCalled();
         expect(backfillAllArtistCounts).not.toHaveBeenCalled();
+        expect(collectProviderTracks).not.toHaveBeenCalled();
     });
 
     it("propagates the processor-minted root run id to its continuation", async () => {

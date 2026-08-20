@@ -146,6 +146,13 @@ async function drainCandidates(
             tidal: candidates.tidal.length,
             youtube: candidates.youtube.length,
         };
+        if (passSelected.tidal === 0 && passSelected.youtube === 0) {
+            return {
+                ...progress,
+                passes: pass,
+                reachedCeiling: false,
+            };
+        }
         const passDeleted = await deleteCandidates(candidates, cutoff);
         progress.selected = addCounts(progress.selected, passSelected);
         progress.deleted = addCounts(progress.deleted, passDeleted);

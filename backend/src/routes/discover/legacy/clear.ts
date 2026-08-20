@@ -7,6 +7,7 @@ import { lidarrService } from "../../../services/lidarr";
 import { cleanupOrphanedLibraryEntities } from "../../../services/libraryOrphanCleanup";
 import {
     albumOrphanRetentionGuardWhere,
+    albumTracksOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "../../../services/providerTrackRetention";
 import { prisma } from "../../../utils/db";
@@ -364,14 +365,26 @@ export async function handleLegacyClear(
                     });
 
                     if (dbAlbum) {
+                        const cutoff = providerTrackRetentionCutoff(
+                            new Date(),
+                            config.workers.providerTrackRetentionDays,
+                        );
+                        const albumRetentionWhere =
+                            albumOrphanRetentionGuardWhere(cutoff);
                         // Delete tracks first
                         await prisma.track.deleteMany({
-                            where: { albumId: dbAlbum.id },
+                            where: albumTracksOrphanRetentionGuardWhere(
+                                dbAlbum.id,
+                                cutoff,
+                            ),
                         });
 
                         // Delete album
-                        await prisma.album.delete({
-                            where: { id: dbAlbum.id },
+                        await prisma.album.deleteMany({
+                            where: {
+                                id: dbAlbum.id,
+                                ...albumRetentionWhere,
+                            },
                         });
                     }
 
@@ -715,12 +728,11 @@ export async function handleLegacyClear(
         // These are Album/Track records with location="DISCOVER" that weren't linked to a DiscoveryAlbum
         // This can happen if downloads failed or playlist build failed
         logger.debug(`\n Cleaning up orphaned discovery records...`);
-        const retentionWhere = albumOrphanRetentionGuardWhere(
-            providerTrackRetentionCutoff(
-                new Date(),
-                config.workers.providerTrackRetentionDays,
-            ),
+        const retentionCutoff = providerTrackRetentionCutoff(
+            new Date(),
+            config.workers.providerTrackRetentionDays,
         );
+        const retentionWhere = albumOrphanRetentionGuardWhere(retentionCutoff);
 
         // Find all DISCOVER albums that don't have a corresponding DiscoveryAlbum record
         const orphanedAlbums = await prisma.album.findMany({
@@ -757,7 +769,10 @@ export async function handleLegacyClear(
             if (!hasDiscoveryRecord && !hasOwnedRecord) {
                 // Delete tracks first
                 await prisma.track.deleteMany({
-                    where: { albumId: orphanAlbum.id },
+                    where: albumTracksOrphanRetentionGuardWhere(
+                        orphanAlbum.id,
+                        retentionCutoff,
+                    ),
                 });
                 logger.debug(
                     `    Removed tracks from orphaned album: ${orphanAlbum.artist.name} - ${orphanAlbum.title}`,

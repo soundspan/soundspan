@@ -93,6 +93,7 @@ jest.mock("../../utils/db", () => ({
             deleteMany: jest.fn(),
             upsert: jest.fn(),
         },
+        $transaction: jest.fn(),
     },
 }));
 
@@ -127,6 +128,7 @@ const mockTrackFindFirst = prisma.track.findFirst as jest.Mock;
 const mockTrackUpdate = prisma.track.update as jest.Mock;
 const mockOwnedAlbumDeleteMany = prisma.ownedAlbum.deleteMany as jest.Mock;
 const mockOwnedAlbumUpsert = prisma.ownedAlbum.upsert as jest.Mock;
+const mockPrismaTransaction = prisma.$transaction as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 
 function getHandler(
@@ -176,6 +178,10 @@ describe("enrichment metadata compatibility", () => {
         mockArtistFindFirst.mockResolvedValue(null);
         mockAlbumFindFirst.mockResolvedValue(null);
         mockTrackFindFirst.mockResolvedValue({ id: "track-1" });
+        mockPrismaTransaction.mockImplementation(
+            async (callback: (transaction: typeof prisma) => unknown) =>
+                callback(prisma),
+        );
     });
 
     it("stores track metadata as non-destructive user overrides", async () => {
@@ -377,7 +383,6 @@ describe("enrichment metadata compatibility", () => {
             rgMbid: originalRgMbid,
             location: "LIBRARY",
         });
-        mockOwnedAlbumDeleteMany.mockResolvedValue({ count: 1 });
         mockOwnedAlbumUpsert.mockResolvedValue({});
         mockAlbumUpdate.mockResolvedValue({
             id: "album-1",
@@ -401,9 +406,7 @@ describe("enrichment metadata compatibility", () => {
             where: { id: "album-1" },
             select: { artistId: true, rgMbid: true, location: true },
         });
-        expect(mockOwnedAlbumDeleteMany).toHaveBeenCalledWith({
-            where: { artistId: "artist-1", rgMbid: originalRgMbid },
-        });
+        expect(mockOwnedAlbumDeleteMany).not.toHaveBeenCalled();
         expect(mockOwnedAlbumUpsert).toHaveBeenCalledWith({
             where: {
                 artistId_rgMbid: {
@@ -422,6 +425,10 @@ describe("enrichment metadata compatibility", () => {
             expect.objectContaining({
                 data: expect.objectContaining({ rgMbid: updatedRgMbid }),
             }),
+        );
+        expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
+        expect(mockAlbumUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+            mockOwnedAlbumUpsert.mock.invocationCallOrder[0],
         );
         expect(res.statusCode).toBe(200);
     });

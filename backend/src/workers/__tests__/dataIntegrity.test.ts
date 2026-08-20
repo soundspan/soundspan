@@ -332,7 +332,15 @@ describe("dataIntegrity worker", () => {
             include: { artist: true },
         });
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
-            where: { albumId: "discover-album-1" },
+            where: {
+                albumId: "discover-album-1",
+                album: {
+                    hasUserOverrides: false,
+                    ownedBy: { none: {} },
+                    tracksTidal: { none: { NOT: expect.any(Object) } },
+                    tracksYtMusic: { none: { NOT: expect.any(Object) } },
+                },
+            },
         });
         expect(prisma.album.deleteMany).not.toHaveBeenCalled();
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledWith(

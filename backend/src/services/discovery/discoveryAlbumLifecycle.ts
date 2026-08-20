@@ -9,7 +9,13 @@
 
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { config } from "../../config";
 import { updateArtistCounts } from "../artistCountsService";
+import {
+    albumOrphanRetentionGuardWhere,
+    albumTracksOrphanRetentionGuardWhere,
+    providerTrackRetentionCutoff,
+} from "../providerTrackRetention";
 import { LidarrHttpClient, LidarrHttpError } from "../lidarr/lidarrHttpClient";
 
 export interface DiscoveryAlbumInfo {
@@ -115,10 +121,19 @@ export class DiscoveryAlbumLifecycle {
         });
 
         if (dbAlbum) {
+            const cutoff = providerTrackRetentionCutoff(
+                new Date(),
+                config.workers.providerTrackRetentionDays,
+            );
             await prisma.track.deleteMany({
-                where: { albumId: dbAlbum.id },
+                where: albumTracksOrphanRetentionGuardWhere(dbAlbum.id, cutoff),
             });
-            await prisma.album.delete({ where: { id: dbAlbum.id } });
+            await prisma.album.deleteMany({
+                where: {
+                    id: dbAlbum.id,
+                    ...albumOrphanRetentionGuardWhere(cutoff),
+                },
+            });
         }
 
         await prisma.discoveryTrack.deleteMany({

@@ -18,6 +18,7 @@ import { config } from "../config";
 import { cleanupOrphanedLibraryEntities } from "../services/libraryOrphanCleanup";
 import {
     albumOrphanRetentionGuardWhere,
+    albumTracksOrphanRetentionGuardWhere,
     artistOrphanRetentionGuardWhere,
     providerTrackRetentionCutoff,
 } from "../services/providerTrackRetention";
@@ -201,7 +202,10 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 "runDataIntegrityCheck.track.deleteMany.orphanedAlbumTracks",
                 () =>
                     prisma.track.deleteMany({
-                        where: { albumId: album.id },
+                        where: albumTracksOrphanRetentionGuardWhere(
+                            album.id,
+                            cutoff,
+                        ),
                     }),
             );
             logger.debug(

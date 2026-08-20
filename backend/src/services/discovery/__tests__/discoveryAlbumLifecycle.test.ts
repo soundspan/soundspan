@@ -13,6 +13,7 @@ jest.mock("../../../utils/db", () => ({
             findFirst: jest.fn(),
             update: jest.fn(),
             delete: jest.fn(),
+            deleteMany: jest.fn(),
         },
         ownedAlbum: {
             upsert: jest.fn(),
@@ -34,7 +35,10 @@ jest.mock("../../../utils/db", () => ({
 }));
 
 jest.mock("../../../config", () => ({
-    config: { lidarr: undefined },
+    config: {
+        lidarr: undefined,
+        workers: { providerTrackRetentionDays: 30 },
+    },
 }));
 jest.mock("../../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn(),
@@ -308,7 +312,9 @@ describe("DiscoveryAlbumLifecycle", () => {
                 dbAlbum,
             );
             (mockPrisma.track.deleteMany as jest.Mock).mockResolvedValue({});
-            (mockPrisma.album.delete as jest.Mock).mockResolvedValue({});
+            (mockPrisma.album.deleteMany as jest.Mock).mockResolvedValue({
+                count: 0,
+            });
             (
                 mockPrisma.discoveryTrack.deleteMany as jest.Mock
             ).mockResolvedValue({});
@@ -319,10 +325,24 @@ describe("DiscoveryAlbumLifecycle", () => {
             await lifecycle.deleteRejectedAlbum(mockAlbum, mockSettings);
 
             expect(mockPrisma.track.deleteMany).toHaveBeenCalledWith({
-                where: { albumId: "album-db-1" },
+                where: {
+                    albumId: "album-db-1",
+                    album: {
+                        hasUserOverrides: false,
+                        ownedBy: { none: {} },
+                        tracksTidal: { none: { NOT: expect.any(Object) } },
+                        tracksYtMusic: { none: { NOT: expect.any(Object) } },
+                    },
+                },
             });
-            expect(mockPrisma.album.delete).toHaveBeenCalledWith({
-                where: { id: "album-db-1" },
+            expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
+                where: {
+                    id: "album-db-1",
+                    hasUserOverrides: false,
+                    ownedBy: { none: {} },
+                    tracksTidal: { none: { NOT: expect.any(Object) } },
+                    tracksYtMusic: { none: { NOT: expect.any(Object) } },
+                },
             });
         });
 

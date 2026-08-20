@@ -2,6 +2,9 @@ import type { Prisma } from "@prisma/client";
 import { Client } from "pg";
 import { collectProviderTracks } from "../src/services/providerTrackGc";
 import { cleanupOrphanedLibraryEntities } from "../src/services/libraryOrphanCleanup";
+import { albumTracksOrphanRetentionGuardWhere } from "../src/services/providerTrackRetention";
+import { updateAlbumMetadataWithOwnership } from "../src/services/albumMetadataPersistence";
+import { handleDeleteAlbum } from "../src/routes/library/albums";
 import { prisma } from "../src/utils/db";
 import {
     applyScaleMigrations,
@@ -20,6 +23,22 @@ const recentStaleAt = new Date("2026-08-10T00:00:00.000Z");
 const laterNow = new Date("2026-09-20T00:00:00.000Z");
 const userId = "provider-gc-user";
 const playlistId = "provider-gc-playlist";
+
+function createResponse() {
+    const response = {
+        statusCode: 200,
+        body: undefined as unknown,
+        status(code: number) {
+            response.statusCode = code;
+            return response;
+        },
+        json(payload: unknown) {
+            response.body = payload;
+            return response;
+        },
+    };
+    return response;
+}
 
 async function createArtistAndAlbum(prefix: string): Promise<void> {
     await prisma.artist.create({
@@ -279,6 +298,161 @@ describeWithPostgres(
                     where: { id: "parent-retention-artist" },
                 }),
             ).resolves.toBeNull();
+        });
+
+        it("deletes an explicitly administered album and its liked ownership row", async () => {
+            await createArtistAndAlbum("admin-delete");
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: "admin-delete-artist",
+                    rgMbid: "admin-delete-album-mbid",
+                    source: "discovery_liked",
+                },
+            });
+            const response = createResponse();
+
+            await handleDeleteAlbum(
+                { params: { id: "admin-delete-album" } } as any,
+                response as any,
+            );
+
+            expect(response.statusCode).toBe(200);
+            await expect(
+                prisma.album.findUnique({
+                    where: { id: "admin-delete-album" },
+                }),
+            ).resolves.toBeNull();
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: "admin-delete-artist",
+                            rgMbid: "admin-delete-album-mbid",
+                        },
+                    },
+                }),
+            ).resolves.toBeNull();
+        });
+
+        it("retains tracks when ownership arrives after orphan selection", async () => {
+            await createArtistAndAlbum("ownership-race");
+            await prisma.track.create({
+                data: {
+                    id: "ownership-race-track",
+                    albumId: "ownership-race-album",
+                    title: "ownership race track",
+                    trackNo: 1,
+                    duration: 180,
+                    fileModified: old,
+                    fileSize: 1,
+                },
+            });
+            const cutoff = new Date("2026-07-20T00:00:00.000Z");
+            const selected = await prisma.album.findMany({
+                where: {
+                    id: "ownership-race-album",
+                    hasUserOverrides: false,
+                    ownedBy: { none: {} },
+                },
+                select: { id: true },
+            });
+            expect(selected).toEqual([{ id: "ownership-race-album" }]);
+
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: "ownership-race-artist",
+                    rgMbid: "ownership-race-album-mbid",
+                    source: "discovery_liked",
+                },
+            });
+            const deleted = await prisma.track.deleteMany({
+                where: albumTracksOrphanRetentionGuardWhere(
+                    "ownership-race-album",
+                    cutoff,
+                ),
+            });
+
+            expect(deleted.count).toBe(0);
+            await expect(
+                prisma.track.findUnique({
+                    where: { id: "ownership-race-track" },
+                }),
+            ).resolves.not.toBeNull();
+        });
+
+        it("moves or creates ownership after an album rgMbid correction", async () => {
+            const oldRgMbid = "11111111-1111-4111-8111-111111111111";
+            const newRgMbid = "22222222-2222-4222-8222-222222222222";
+            await createArtistAndAlbum("rg-edit");
+            await prisma.album.update({
+                where: { id: "rg-edit-album" },
+                data: { rgMbid: oldRgMbid, location: "LIBRARY" },
+            });
+            await prisma.ownedAlbum.create({
+                data: {
+                    artistId: "rg-edit-artist",
+                    rgMbid: oldRgMbid,
+                    source: "native_scan",
+                },
+            });
+            await updateAlbumMetadataWithOwnership(
+                "rg-edit-album",
+                { rgMbid: newRgMbid },
+                { artistId: "rg-edit-artist", rgMbid: newRgMbid },
+            );
+
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: "rg-edit-artist",
+                            rgMbid: oldRgMbid,
+                        },
+                    },
+                }),
+            ).resolves.toBeNull();
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: "rg-edit-artist",
+                            rgMbid: newRgMbid,
+                        },
+                    },
+                }),
+            ).resolves.toEqual(
+                expect.objectContaining({ source: "native_scan" }),
+            );
+            await expect(
+                prisma.album.findUnique({ where: { id: "rg-edit-album" } }),
+            ).resolves.toEqual(expect.objectContaining({ rgMbid: newRgMbid }));
+
+            await createArtistAndAlbum("rg-edit-fresh");
+            const freshRgMbid = "33333333-3333-4333-8333-333333333333";
+            await prisma.album.update({
+                where: { id: "rg-edit-fresh-album" },
+                data: { location: "LIBRARY" },
+            });
+            await updateAlbumMetadataWithOwnership(
+                "rg-edit-fresh-album",
+                { rgMbid: freshRgMbid },
+                {
+                    artistId: "rg-edit-fresh-artist",
+                    rgMbid: freshRgMbid,
+                },
+            );
+            await expect(
+                prisma.ownedAlbum.findUnique({
+                    where: {
+                        artistId_rgMbid: {
+                            artistId: "rg-edit-fresh-artist",
+                            rgMbid: freshRgMbid,
+                        },
+                    },
+                }),
+            ).resolves.toEqual(
+                expect.objectContaining({ source: "metadata_edit" }),
+            );
         });
     },
 );

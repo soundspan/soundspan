@@ -1,5 +1,6 @@
 import {
     albumOrphanRetentionGuardWhere,
+    albumTracksOrphanRetentionGuardWhere,
     artistOrphanRetentionGuardWhere,
     classifyProviderTrackRetention,
     type ProviderTrackRetentionInput,
@@ -79,6 +80,15 @@ describe("provider track retention policy", () => {
                 hasUserOverrides: false,
                 ownedBy: { none: {} },
             }),
+        );
+    });
+
+    it("rechecks album retention at the track deletion boundary", () => {
+        expect(albumTracksOrphanRetentionGuardWhere("album-1", cutoff)).toEqual(
+            {
+                albumId: "album-1",
+                album: albumOrphanRetentionGuardWhere(cutoff),
+            },
         );
     });
 

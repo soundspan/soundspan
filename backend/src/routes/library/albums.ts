@@ -594,7 +594,16 @@ export async function handleDeleteAlbum(
         return sendRouteError(res, 404, "Album not found");
     }
 
-    // Delete all track files
+    await prisma.$transaction(async (transaction) => {
+        await transaction.ownedAlbum.deleteMany({
+            where: { rgMbid: album.rgMbid },
+        });
+        await transaction.album.delete({
+            where: { id: album.id },
+        });
+    });
+
+    // Delete track files only after the database transaction commits.
     let deletedFiles = 0;
     for (const track of album.tracks) {
         if (track.filePath) {
@@ -641,11 +650,6 @@ export async function handleDeleteAlbum(
     } catch (err) {
         logger.warn("[DELETE] Could not delete album folder:", err);
     }
-
-    // Delete from database (cascade will delete tracks)
-    await prisma.album.delete({
-        where: { id: album.id },
-    });
 
     logger.debug(
         `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,

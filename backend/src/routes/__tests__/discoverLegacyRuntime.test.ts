@@ -899,10 +899,24 @@ describe("discover legacy-mode runtime behavior", () => {
             }),
         );
         expect(prisma.track.deleteMany).toHaveBeenCalledWith({
-            where: { albumId: "album-active" },
+            where: {
+                albumId: "album-active",
+                album: {
+                    hasUserOverrides: false,
+                    ownedBy: { none: {} },
+                    tracksTidal: { none: { NOT: expect.any(Object) } },
+                    tracksYtMusic: { none: { NOT: expect.any(Object) } },
+                },
+            },
         });
-        expect(prisma.album.delete).toHaveBeenCalledWith({
-            where: { id: "album-active" },
+        expect(prisma.album.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: "album-active",
+                hasUserOverrides: false,
+                ownedBy: { none: {} },
+                tracksTidal: { none: { NOT: expect.any(Object) } },
+                tracksYtMusic: { none: { NOT: expect.any(Object) } },
+            },
         });
         expect(prisma.album.findMany).toHaveBeenCalledWith({
             where: {
@@ -914,7 +928,6 @@ describe("discover legacy-mode runtime behavior", () => {
             },
             include: { artist: true, tracks: true },
         });
-        expect(prisma.album.deleteMany).not.toHaveBeenCalled();
         expect(prisma.artist.deleteMany).not.toHaveBeenCalled();
         expect(cleanupOrphanedLibraryEntities).toHaveBeenCalledTimes(1);
         expect(scanQueue.add).toHaveBeenCalledWith("scan", {
