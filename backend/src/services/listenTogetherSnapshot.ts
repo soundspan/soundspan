@@ -4,6 +4,14 @@ import type {
     GroupState,
 } from "./listenTogetherManager";
 
+/** Authoritative active membership loaded from the database. */
+export interface PersistedGroupMember {
+    userId: string;
+    username: string;
+    isHost: boolean;
+    joinedAt: Date;
+}
+
 /** Bounds snapshot-age compensation so clock skew cannot add more than 2 seconds. */
 const SNAPSHOT_POSITION_COMPENSATION_MAX_MS = 2_000;
 
@@ -33,6 +41,60 @@ export function reconcileHostFlags(
     for (const member of members.values()) {
         member.isHost = member.userId === hostUserId;
     }
+}
+
+/** Replace local membership with the committed database membership set. */
+export function reconcileCommittedMembers(
+    group: GroupState,
+    persistedMembers: PersistedGroupMember[],
+    hostUserId: string,
+    now: number,
+): void {
+    const members = new Map<string, GroupMember>();
+    for (const persisted of persistedMembers) {
+        const existing = group.members.get(persisted.userId);
+        members.set(persisted.userId, {
+            ...persisted,
+            isHost: persisted.userId === hostUserId,
+            socketIds: existing?.socketIds ?? new Set<string>(),
+            isReady: group.readyUserIds.has(persisted.userId),
+            unavailableIndices:
+                existing?.unavailableIndices ?? new Set<number>(),
+            lastSeen: existing?.lastSeen ?? now,
+        });
+    }
+    group.hostUserId = hostUserId;
+    group.members = members;
+    group.readyUserIds = new Set(
+        Array.from(group.readyUserIds).filter((userId) => members.has(userId)),
+    );
+    group.lastActivity = now;
+}
+
+/** Serialize members in stable host-then-join order. */
+export function snapshotMembers(
+    members: Map<string, GroupMember>,
+): GroupSnapshot["members"] {
+    return Array.from(members.values())
+        .sort((a, b) => {
+            if (a.isHost !== b.isHost) return a.isHost ? -1 : 1;
+            return a.joinedAt.getTime() - b.joinedAt.getTime();
+        })
+        .map((member) => ({
+            userId: member.userId,
+            username: member.username,
+            isHost: member.isHost,
+            joinedAt: member.joinedAt.toISOString(),
+            isConnected: member.socketIds.size > 0,
+        }));
+}
+
+/** Advance a snapshot time watermark without allowing clock-domain rewind. */
+export function advanceSnapshotWatermark(
+    current: number,
+    incoming: number,
+): number {
+    return Math.max(current, incoming);
 }
 
 /** Merge snapshot membership while retaining members connected to this pod. */

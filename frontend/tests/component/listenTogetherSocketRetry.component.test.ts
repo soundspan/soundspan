@@ -112,6 +112,139 @@ test("seek retries transient conflicts with bounded backoff and succeeds", async
     assert.deepEqual(scheduledDelaysMs, [120, 120]);
 });
 
+test("joinGroup retries transient lock conflicts with bounded backoff", async () => {
+    const { socketClient, emits } = createSocketWithAckSequence([
+        {
+            error: "lock conflict",
+            code: "CONFLICT",
+            transient: true,
+            retryable: true,
+            retryAfterMs: 90,
+        },
+        { ok: true },
+    ]);
+
+    await socketClient.joinGroup("group-retry");
+
+    assert.deepEqual(emits, [
+        {
+            event: "join-group",
+            payload: { groupId: "group-retry" },
+        },
+        {
+            event: "join-group",
+            payload: { groupId: "group-retry" },
+        },
+    ]);
+    assert.deepEqual(scheduledDelaysMs, [90]);
+});
+
+test("joinGroup stops after the transient conflict retry budget", async () => {
+    const transientConflictAck: AckResponse = {
+        error: "Another group update is in progress. Please retry.",
+        code: "CONFLICT",
+        transient: true,
+        retryable: true,
+        retryAfterMs: 75,
+    };
+    const { socketClient, emits } = createSocketWithAckSequence([
+        transientConflictAck,
+        transientConflictAck,
+        transientConflictAck,
+        transientConflictAck,
+    ]);
+
+    await assert.rejects(
+        socketClient.joinGroup("group-budget"),
+        /Another group update is in progress. Please retry./,
+    );
+
+    assert.equal(emits.length, 4);
+    assert.equal(
+        emits.every(
+            (entry) =>
+                entry.event === "join-group" &&
+                JSON.stringify(entry.payload) ===
+                    JSON.stringify({ groupId: "group-budget" }),
+        ),
+        true,
+    );
+    assert.deepEqual(scheduledDelaysMs, [75, 120, 240]);
+});
+
+test("reconnect reports a final rejoin rejection without a floating promise", async () => {
+    const handlers = new Map<string, () => void>();
+    const joinEmits: EmitRecord[] = [];
+    const transientConflictAck: AckResponse = {
+        error: "lock conflict",
+        code: "CONFLICT",
+        transient: true,
+        retryable: true,
+        retryAfterMs: 75,
+    };
+    const fakeSocket = {
+        connected: true,
+        auth: {},
+        connect: () => undefined,
+        disconnect: () => undefined,
+        removeAllListeners: () => undefined,
+        on: (event: string, handler: () => void) => {
+            handlers.set(event, handler);
+        },
+        io: { on: () => undefined },
+        emit: (
+            event: string,
+            payloadOrAck: unknown,
+            maybeAck?: (response: AckResponse) => void,
+        ) => {
+            const ack =
+                typeof payloadOrAck === "function"
+                    ? (payloadOrAck as (response: AckResponse) => void)
+                    : maybeAck;
+            if (event === "lt-ping") {
+                ack?.({ serverTime: 0 } as AckResponse);
+                return;
+            }
+            joinEmits.push({ event, payload: payloadOrAck });
+            ack?.(transientConflictAck);
+        },
+    };
+    const socketClient = new ListenTogetherSocket({
+        createSocket: (() => fakeSocket) as never,
+        getToken: () => "token",
+        now: () => 0,
+        setInterval: (() => 0) as never,
+        clearInterval: () => undefined,
+    });
+    (
+        socketClient as unknown as { currentGroupId: string | null }
+    ).currentGroupId = "group-reconnect";
+    const reportedErrors: Error[] = [];
+
+    socketClient.connect({
+        onGroupState: () => undefined,
+        onPlaybackDelta: () => undefined,
+        onQueueDelta: () => undefined,
+        onWaiting: () => undefined,
+        onPlayAt: () => undefined,
+        onMemberJoined: () => undefined,
+        onMemberLeft: () => undefined,
+        onGroupEnded: () => undefined,
+        onConnect: () => undefined,
+        onDisconnect: () => undefined,
+        onError: (error) => {
+            reportedErrors.push(error);
+        },
+    });
+    handlers.get("connect")?.();
+    for (let turn = 0; turn < 20 && reportedErrors.length === 0; turn += 1) {
+        await Promise.resolve();
+    }
+
+    assert.equal(joinEmits.length, 4);
+    assert.equal(reportedErrors[0]?.message, "lock conflict");
+});
+
 test("seek does not retry non-conflict errors", async () => {
     const { socketClient, emits } = createSocketWithAckSequence([
         {

@@ -10,13 +10,18 @@
 
 import type {} from "@soundspan/media-metadata-contract";
 import type { SyncQueueItem } from "./listenTogetherQueueItem";
+import type { ManagerCallbacks } from "./listenTogetherCallbacks";
 import { logger } from "../utils/logger";
 import {
     compensateSnapshotPosition,
+    advanceSnapshotWatermark,
     mergeSnapshotMembers,
+    reconcileCommittedMembers,
     reconcileHostFlags,
     selectHostSuccessor,
     shouldApplyIncomingPlayback,
+    snapshotMembers,
+    type PersistedGroupMember,
 } from "./listenTogetherSnapshot";
 
 const log = logger.child("ListenTogetherManager");
@@ -26,6 +31,10 @@ const log = logger.child("ListenTogetherManager");
 // ---------------------------------------------------------------------------
 
 export type { SyncQueueItem } from "./listenTogetherQueueItem";
+export type {
+    ManagerCallbacks,
+    StatePublicationOptions,
+} from "./listenTogetherCallbacks";
 
 export interface GroupMember {
     userId: string;
@@ -37,6 +46,8 @@ export interface GroupMember {
     unavailableIndices?: Set<number>;
     lastSeen: number; // Date.now()
 }
+
+export type { PersistedGroupMember } from "./listenTogetherSnapshot";
 
 export interface GroupPlayback {
     queue: SyncQueueItem[];
@@ -221,42 +232,6 @@ const STALE_MEMBER_MS = 60_000;
 // GroupManager singleton
 // ---------------------------------------------------------------------------
 
-/**
- * Callback interface so the manager can notify the socket layer without
- * depending on Socket.IO directly.
- */
-export interface ManagerCallbacks {
-    onGroupState(groupId: string, snapshot: GroupSnapshot): void;
-    onPlaybackDelta(groupId: string, delta: PlaybackDelta): void;
-    onQueueDelta(groupId: string, delta: QueueDelta): void;
-    onWaiting(
-        groupId: string,
-        data: { trackId: string | null; currentIndex: number },
-    ): void;
-    onPlayAt(
-        groupId: string,
-        data: { positionMs: number; serverTime: number; stateVersion: number },
-    ): void;
-    onMemberJoined(
-        groupId: string,
-        member: { userId: string; username: string },
-    ): void;
-    onMemberLeft(
-        groupId: string,
-        data: {
-            userId: string;
-            username: string;
-            newHostUserId?: string;
-            newHostUsername?: string;
-        },
-    ): void;
-    onGroupEnded(groupId: string, reason: string): void;
-    onBoundaryWatchdog?(
-        groupId: string,
-        data: { currentIndex: number; stateVersion: number },
-    ): void;
-}
-
 class GroupManager {
     private groups = new Map<string, GroupState>();
     private callbacks: ManagerCallbacks | null = null;
@@ -284,12 +259,7 @@ class GroupManager {
             currentTimeMs: number;
             stateVersion: number;
             createdAt: Date;
-            members: Array<{
-                userId: string;
-                username: string;
-                isHost: boolean;
-                joinedAt: Date;
-            }>;
+            members: PersistedGroupMember[];
         },
     ): GroupState {
         const queue =
@@ -571,6 +541,38 @@ class GroupManager {
         const group = this.requireGroup(groupId);
         group.hostUserId = hostUserId;
         reconcileHostFlags(group.members, hostUserId);
+    }
+
+    /** Replace local membership with the committed database membership set. */
+    reconcileMembers(
+        groupId: string,
+        persistedMembers: PersistedGroupMember[],
+        hostUserId: string,
+    ): void {
+        const group = this.requireGroup(groupId);
+        reconcileCommittedMembers(
+            group,
+            persistedMembers,
+            hostUserId,
+            Date.now(),
+        );
+    }
+
+    /** Emit a snapshot already synchronized by the service layer. */
+    async publishAuthoritativeSnapshot(snapshot: GroupSnapshot): Promise<void> {
+        await this.callbacks?.onGroupState(snapshot.id, snapshot, {
+            synchronize: false,
+        });
+    }
+
+    /** Emit an end notification already synchronized by the service layer. */
+    async publishAuthoritativeEnd(
+        groupId: string,
+        reason: string,
+    ): Promise<void> {
+        await this.callbacks?.onGroupEnded(groupId, reason, {
+            synchronize: false,
+        });
     }
 
     removeMember(
@@ -980,7 +982,10 @@ class GroupManager {
     snapshot(group: GroupState): GroupSnapshot {
         const pb = group.playback;
         const serverTime = Date.now();
-        pb.lastAppliedSnapshotServerTime = serverTime;
+        pb.lastAppliedSnapshotServerTime = advanceSnapshotWatermark(
+            pb.lastAppliedSnapshotServerTime,
+            serverTime,
+        );
         return {
             id: group.id,
             name: group.name,
@@ -1002,18 +1007,7 @@ class GroupManager {
                 stateVersion: pb.stateVersion,
                 trackId: currentTrackId(pb),
             },
-            members: Array.from(group.members.values())
-                .sort((a, b) => {
-                    if (a.isHost !== b.isHost) return a.isHost ? -1 : 1;
-                    return a.joinedAt.getTime() - b.joinedAt.getTime();
-                })
-                .map((m) => ({
-                    userId: m.userId,
-                    username: m.username,
-                    isHost: m.isHost,
-                    joinedAt: m.joinedAt.toISOString(),
-                    isConnected: m.socketIds.size > 0,
-                })),
+            members: snapshotMembers(group.members),
         };
     }
 
@@ -1096,6 +1090,10 @@ class GroupManager {
         reconcileHostFlags(members, snapshot.hostUserId);
 
         const existingPlayback = existing?.playback;
+        const lastAppliedSnapshotServerTime = advanceSnapshotWatermark(
+            existingPlayback?.lastAppliedSnapshotServerTime ?? 0,
+            incomingServerTime,
+        );
         const playback: GroupPlayback =
             applyIncomingPlayback || !existingPlayback
                 ? {
@@ -1109,7 +1107,7 @@ class GroupManager {
                           incomingIsPlaying,
                       ),
                       lastPositionUpdate: now,
-                      lastAppliedSnapshotServerTime: incomingServerTime,
+                      lastAppliedSnapshotServerTime,
                       stateVersion: incomingStateVersion,
                   }
                 : {
@@ -1118,8 +1116,7 @@ class GroupManager {
                       isPlaying: existingPlayback.isPlaying,
                       positionMs: existingPlayback.positionMs,
                       lastPositionUpdate: existingPlayback.lastPositionUpdate,
-                      lastAppliedSnapshotServerTime:
-                          existingPlayback.lastAppliedSnapshotServerTime,
+                      lastAppliedSnapshotServerTime,
                       stateVersion: existingPlayback.stateVersion,
                   };
 

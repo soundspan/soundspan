@@ -7,12 +7,15 @@
 
 import { io, type Socket } from "socket.io-client";
 import { api } from "./api";
+import { frontendLogger } from "./logger";
 import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
     RemoteMediaSource,
     ResolvedMediaSource,
 } from "@soundspan/media-metadata-contract";
+
+const log = frontendLogger.child("ListenTogetherSocket");
 
 // ---------------------------------------------------------------------------
 // Server → Client event types
@@ -359,7 +362,18 @@ export class ListenTogetherSocket {
             this.callbacks?.onConnect();
             // Re-join group on reconnect
             if (this.currentGroupId) {
-                this.joinGroup(this.currentGroupId);
+                const groupId = this.currentGroupId;
+                void this.joinGroup(groupId).catch((error: unknown) => {
+                    const normalizedError =
+                        error instanceof Error
+                            ? error
+                            : new Error("Listen Together rejoin failed");
+                    log.warn("Reconnect rejoin failed", {
+                        groupId,
+                        error: normalizedError,
+                    });
+                    this.callbacks?.onError(normalizedError);
+                });
             }
         });
 
@@ -608,7 +622,11 @@ export class ListenTogetherSocket {
 
     joinGroup(groupId: string): Promise<void> {
         this.currentGroupId = groupId;
-        return this.emit("join-group", { groupId });
+        return this.emit(
+            "join-group",
+            { groupId },
+            TRANSIENT_CONFLICT_RETRY_POLICY,
+        );
     }
 
     leaveGroup(): Promise<void> {

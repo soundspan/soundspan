@@ -29,6 +29,7 @@ import {
     type GroupSnapshot,
     type PlaybackDelta,
     type QueueDelta,
+    type StatePublicationOptions,
 } from "./listenTogetherManager";
 import {
     joinGroupById,
@@ -220,12 +221,9 @@ function queuePersistAndPublishSnapshot(
 }
 
 function queueEndedSnapshotSync(groupId: string): Promise<void> {
-    const snapshot = groupManager.snapshotById(groupId);
     return enqueueGroupSnapshotWrite(groupId, async () => {
         await listenTogetherStateStore.deleteSnapshot(groupId);
-        if (snapshot) {
-            await listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-        }
+        await listenTogetherClusterSync.publishEnded(groupId);
     });
 }
 
@@ -523,9 +521,14 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
 
     if (listenTogetherClusterSync.isEnabled()) {
         listenTogetherClusterSync
-            .start((snapshot) => {
-                groupManager.applyExternalSnapshot(snapshot);
-            })
+            .start(
+                (snapshot) => {
+                    groupManager.applyExternalSnapshot(snapshot);
+                },
+                (groupId) => {
+                    groupManager.remove(groupId);
+                },
+            )
             .catch((err) => {
                 logger.error(
                     "[ListenTogether/StateSync] Failed to start cluster sync; proceeding with pod-local state",
@@ -615,9 +618,15 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
 
     // Wire up manager callbacks → Socket.IO broadcasts
     const callbacks: ManagerCallbacks = {
-        onGroupState(groupId: string, snapshot: GroupSnapshot) {
+        onGroupState(
+            groupId: string,
+            snapshot: GroupSnapshot,
+            options?: StatePublicationOptions,
+        ) {
             ns.to(groupId).emit("group:state", snapshot);
-            void queuePersistAndPublishSnapshot(groupId, snapshot);
+            if (options?.synchronize !== false) {
+                void queuePersistAndPublishSnapshot(groupId, snapshot);
+            }
             void emitAvailabilityForGroup(ns, groupId, snapshot);
         },
         onPlaybackDelta(groupId: string, delta: PlaybackDelta) {
@@ -645,9 +654,15 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
             ns.to(groupId).emit("group:member-left", data);
             void queuePersistAndPublishSnapshot(groupId);
         },
-        onGroupEnded(groupId: string, reason: string) {
+        onGroupEnded(
+            groupId: string,
+            reason: string,
+            options?: StatePublicationOptions,
+        ) {
             ns.to(groupId).emit("group:ended", { reason });
-            void queueEndedSnapshotSync(groupId);
+            if (options?.synchronize !== false) {
+                void queueEndedSnapshotSync(groupId);
+            }
         },
         onBoundaryWatchdog(groupId: string, data) {
             void withGroupMutationLock(
@@ -725,6 +740,18 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                         err instanceof GroupError
                             ? err.message
                             : "Failed to join group";
+                    if (err instanceof GroupError && err.code === "CONFLICT") {
+                        recordGroupConflict(
+                            typeof data?.groupId === "string"
+                                ? data.groupId
+                                : null,
+                            userId,
+                            "join-group",
+                            message,
+                        );
+                        sendAck(ack, buildTransientConflictAck(message));
+                        return;
+                    }
                     sendAck(ack, { error: message });
                     logger.error(`[ListenTogether/WS] join-group error:`, err);
                 }

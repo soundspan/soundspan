@@ -1079,6 +1079,48 @@ describe("listenTogetherManager runtime behavior", () => {
         ]);
     });
 
+    it("reconciles committed membership before granting control to a transferred host", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const joinedAt = new Date("2026-08-20T12:00:00.000Z");
+        groupManager.create("g-committed-members", {
+            name: "Committed Members",
+            joinCode: "CMMT01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "departed-host",
+            hostUsername: "Departed Host",
+            queue: [track("1")],
+            createdAt: joinedAt,
+        });
+        groupManager.addMember(
+            "g-committed-members",
+            "committed-host",
+            "Committed Host",
+        );
+
+        groupManager.reconcileMembers(
+            "g-committed-members",
+            [
+                {
+                    userId: "committed-host",
+                    username: "Committed Host",
+                    isHost: true,
+                    joinedAt,
+                },
+            ],
+            "committed-host",
+        );
+
+        expect(() =>
+            groupManager.play("g-committed-members", "committed-host"),
+        ).not.toThrow();
+        expect(
+            groupManager
+                .get("g-committed-members")
+                ?.members.has("departed-host"),
+        ).toBe(false);
+    });
+
     it("anchors external playback to the local clock with bounded age compensation", () => {
         groupManager.setCallbacks(createCallbacks());
         const now = Date.parse("2026-02-16T12:00:00.000Z");
@@ -1133,8 +1175,8 @@ describe("listenTogetherManager runtime behavior", () => {
 
     it("orders equal-version external playback by foreign snapshot time", () => {
         groupManager.setCallbacks(createCallbacks());
-        const fastLocalNow = 100_000;
-        jest.spyOn(Date, "now").mockReturnValue(fastLocalNow);
+        const localNow = 100;
+        jest.spyOn(Date, "now").mockReturnValue(localNow);
         groupManager.create("g-fast-clock", {
             name: "Fast Clock",
             joinCode: "FAST01",
@@ -1143,7 +1185,7 @@ describe("listenTogetherManager runtime behavior", () => {
             hostUserId: "host",
             hostUsername: "Host",
             queue: [track("1")],
-            createdAt: new Date(fastLocalNow),
+            createdAt: new Date(localNow),
         });
 
         const base = groupManager.snapshotById("g-fast-clock")!;
@@ -1199,6 +1241,48 @@ describe("listenTogetherManager runtime behavior", () => {
         const playback = groupManager.get("g-own-bounce")!.playback;
         expect(playback.lastPositionUpdate).toBe(lastPositionUpdate);
         expect(playback.lastAppliedSnapshotServerTime).toBe(3_000);
+    });
+
+    it("keeps the foreign snapshot watermark after a slower local snapshot", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const clockSpy = jest.spyOn(Date, "now").mockReturnValue(200);
+        groupManager.create("g-cross-clock-watermark", {
+            name: "Cross Clock Watermark",
+            joinCode: "XCLK01",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(200),
+        });
+
+        const base = groupManager.snapshotById("g-cross-clock-watermark")!;
+        groupManager.applyExternalSnapshot({
+            ...base,
+            playback: {
+                ...base.playback,
+                positionMs: 1_000,
+                serverTime: 100_000,
+                stateVersion: 1,
+            },
+        });
+
+        groupManager.snapshotById("g-cross-clock-watermark");
+        groupManager.applyExternalSnapshot({
+            ...base,
+            playback: {
+                ...base.playback,
+                positionMs: 9_000,
+                serverTime: 90_000,
+                stateVersion: 1,
+            },
+        });
+
+        const playback = groupManager.get("g-cross-clock-watermark")!.playback;
+        expect(playback.positionMs).toBe(1_000);
+        expect(playback.lastAppliedSnapshotServerTime).toBe(100_000);
+        clockSpy.mockRestore();
     });
 
     it("cleans up stale members and returns removed user IDs", () => {

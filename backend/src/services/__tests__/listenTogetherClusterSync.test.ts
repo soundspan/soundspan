@@ -154,6 +154,7 @@ describe("listenTogetherClusterSync", () => {
             playback: {},
             members: [],
         });
+        await listenTogetherClusterSync.publishEnded("g1");
 
         expect(createIORedisClient).not.toHaveBeenCalled();
         expect(handler).not.toHaveBeenCalled();
@@ -173,6 +174,7 @@ describe("listenTogetherClusterSync", () => {
         await listenTogetherClusterSync.start(handler);
         await listenTogetherClusterSync.start(jest.fn());
         await listenTogetherClusterSync.publishSnapshot("g1", snapshot);
+        await listenTogetherClusterSync.publishEnded("g1");
 
         expect(createIORedisClient).toHaveBeenCalledTimes(1);
         expect(subClient.subscribe).toHaveBeenCalledWith(
@@ -181,6 +183,10 @@ describe("listenTogetherClusterSync", () => {
         expect(pubClient.publish).toHaveBeenCalledWith(
             "listen-together:state-sync",
             expect.stringContaining('"groupId":"g1"'),
+        );
+        expect(pubClient.publish).toHaveBeenCalledWith(
+            "listen-together:state-sync",
+            expect.stringContaining('"type":"group-ended"'),
         );
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("Enabled on channel"),
@@ -242,6 +248,26 @@ describe("listenTogetherClusterSync", () => {
         );
         expect(handler).toHaveBeenCalledTimes(1);
         expect(handler).toHaveBeenCalledWith(validSnapshot);
+    });
+
+    it("dispatches ended events from other nodes", async () => {
+        const { listenTogetherClusterSync, emitMessage } = loadClusterSync();
+        const snapshotHandler = jest.fn();
+        const endedHandler = jest.fn();
+        await listenTogetherClusterSync.start(snapshotHandler, endedHandler);
+
+        emitMessage(
+            "listen-together:state-sync",
+            JSON.stringify({
+                type: "group-ended",
+                groupId: "g-ended",
+                originNodeId: "node-2",
+                ts: Date.now(),
+            }),
+        );
+
+        expect(endedHandler).toHaveBeenCalledWith("g-ended");
+        expect(snapshotHandler).not.toHaveBeenCalled();
     });
 
     it("unsubscribes and disconnects clients on stop", async () => {

@@ -82,6 +82,7 @@ describe("listen together socket runtime behavior", () => {
             isEnabled: jest.fn(() => false),
             start: jest.fn(async () => undefined),
             publishSnapshot: jest.fn(async () => undefined),
+            publishEnded: jest.fn(async () => undefined),
             stop: jest.fn(async () => undefined),
         };
         const listenTogetherStateStore: any = {
@@ -94,6 +95,7 @@ describe("listen together socket runtime behavior", () => {
         const groupManager: any = {
             setCallbacks: jest.fn(),
             applyExternalSnapshot: jest.fn(),
+            remove: jest.fn(),
             snapshotById: jest.fn(() => null),
             setUnavailableIndices: jest.fn(),
             removeSocket: jest.fn(),
@@ -858,6 +860,9 @@ describe("listen together socket runtime behavior", () => {
         expect(
             mocks.listenTogetherStateStore.deleteSnapshot,
         ).toHaveBeenCalledWith("group-1");
+        expect(
+            mocks.listenTogetherClusterSync.publishEnded,
+        ).toHaveBeenCalledWith("group-1");
     });
 
     it("broadcasts social presence updates and unsubscribes on shutdown", () => {
@@ -1453,6 +1458,25 @@ describe("listen together socket runtime behavior", () => {
             expect.any(Error),
         );
 
+        mocks.joinGroupById.mockRejectedValueOnce(
+            new mocks.MockGroupError(
+                "CONFLICT",
+                "Another group update is in progress. Please retry.",
+            ),
+        );
+        const conflictJoinAck = jest.fn();
+        await eventHandlers["join-group"](
+            { groupId: "group-1" },
+            conflictJoinAck,
+        );
+        expect(conflictJoinAck).toHaveBeenCalledWith({
+            error: "Another group update is in progress. Please retry.",
+            code: "CONFLICT",
+            transient: true,
+            retryable: true,
+            retryAfterMs: expect.any(Number),
+        });
+
         socket.data.groupId = "group-1";
         mocks.leaveGroup.mockRejectedValueOnce(new Error("leave failed"));
         const leaveAck = jest.fn();
@@ -1610,11 +1634,15 @@ describe("listen together socket runtime behavior", () => {
 
         const clusterHandler =
             mocks.listenTogetherClusterSync.start.mock.calls[0][0];
+        const endedHandler =
+            mocks.listenTogetherClusterSync.start.mock.calls[0][1];
         const snapshot = { id: "group-1", playback: {}, members: [] };
         clusterHandler(snapshot);
+        endedHandler("group-1");
         expect(mocks.groupManager.applyExternalSnapshot).toHaveBeenCalledWith(
             snapshot,
         );
+        expect(mocks.groupManager.remove).toHaveBeenCalledWith("group-1");
     });
 
     it("continues queued snapshot writes after a prior persistence failure and skips ended publish without snapshot", async () => {

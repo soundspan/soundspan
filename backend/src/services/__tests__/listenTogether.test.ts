@@ -80,6 +80,9 @@ describe("listenTogether service", () => {
             hydrate: jest.fn(),
             applyExternalSnapshot: jest.fn(),
             reconcileHost: jest.fn(),
+            reconcileMembers: jest.fn(),
+            publishAuthoritativeSnapshot: jest.fn(async () => undefined),
+            publishAuthoritativeEnd: jest.fn(async () => undefined),
             snapshot: jest.fn(() => ({
                 id: "group-1",
                 playback: {},
@@ -103,6 +106,10 @@ describe("listenTogether service", () => {
             getSnapshot: jest.fn(async () => null),
             setSnapshot: jest.fn(async () => undefined),
             deleteSnapshot: jest.fn(async () => undefined),
+        };
+        const listenTogetherClusterSync = {
+            publishSnapshot: jest.fn(async () => undefined),
+            publishEnded: jest.fn(async () => undefined),
         };
 
         const logger = {
@@ -142,6 +149,9 @@ describe("listenTogether service", () => {
         jest.doMock("../listenTogetherStateStore", () => ({
             listenTogetherStateStore,
         }));
+        jest.doMock("../listenTogetherClusterSync", () => ({
+            listenTogetherClusterSync,
+        }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const listenTogether = require("../listenTogether");
@@ -151,6 +161,7 @@ describe("listenTogether service", () => {
             prisma,
             groupManager,
             listenTogetherStateStore,
+            listenTogetherClusterSync,
             MockGroupError,
             logger,
         };
@@ -340,6 +351,7 @@ describe("listenTogether service", () => {
         });
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce(null);
         prisma.syncGroupMember.upsert.mockResolvedValueOnce({});
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({ isActive: true });
         prisma.user.findUnique.mockResolvedValueOnce({
             id: "guest-1",
             username: "guest-user",
@@ -372,6 +384,7 @@ describe("listenTogether service", () => {
         prisma.syncGroup.findFirst.mockResolvedValueOnce({ id: "group-1" });
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce(null); // maybeLeaveExisting
         prisma.syncGroupMember.upsert.mockResolvedValueOnce({});
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({ isActive: true });
         groupManager.has.mockReturnValue(false);
         (
             listenTogetherStateStore.getSnapshot as jest.Mock
@@ -464,6 +477,9 @@ describe("listenTogether service", () => {
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
             syncGroupId: "old-group",
         });
+        prisma.syncGroup.findUnique
+            .mockResolvedValueOnce({ isActive: false })
+            .mockResolvedValueOnce({ isActive: true });
         groupManager.has.mockReturnValueOnce(true);
         groupManager.addMember.mockReturnValueOnce({
             id: "new-group",
@@ -624,7 +640,7 @@ describe("listenTogether service", () => {
 
         groupManager.has.mockReturnValue(true);
         groupManager.removeMember.mockReturnValueOnce({ ended: true });
-        prisma.$transaction.mockResolvedValueOnce({ ended: true });
+        prisma.$transaction.mockResolvedValueOnce({ status: "ended" });
 
         await expect(
             listenTogether.leaveGroup("u1", "group-1"),
@@ -640,8 +656,16 @@ describe("listenTogether service", () => {
             newHostUsername: "User Two",
         });
         prisma.$transaction.mockResolvedValueOnce({
-            ended: false,
+            status: "active",
             hostUserId: "u2",
+            memberships: [
+                {
+                    userId: "u2",
+                    username: "User Two",
+                    isHost: true,
+                    joinedAt: new Date("2026-02-16T00:00:00.000Z"),
+                },
+            ],
             newHostUserId: "u2",
             newHostUsername: "User Two",
         });
@@ -674,9 +698,219 @@ describe("listenTogether service", () => {
         await expect(
             listenTogether.leaveGroup("u1", "group-missing"),
         ).resolves.toEqual({
-            ended: false,
+            ended: true,
         });
         expect(groupManager.removeMember).not.toHaveBeenCalled();
+    });
+
+    it("hydrates and publishes the committed successor from a non-owning pod", async () => {
+        const {
+            listenTogether,
+            prisma,
+            groupManager,
+            listenTogetherStateStore,
+            listenTogetherClusterSync,
+        } = loadService();
+        const joinedAt = new Date("2026-08-20T12:00:00.000Z");
+        const remainingMemberships = [
+            {
+                userId: "successor",
+                username: "Alpha Successor",
+                joinedAt,
+                isHost: true,
+            },
+        ];
+        const tx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    hostUserId: "departed-host",
+                    isActive: true,
+                })),
+                update: jest.fn(async () => undefined),
+            },
+            syncGroupMember: {
+                updateMany: jest.fn(async () => ({ count: 1 })),
+                findMany: jest.fn(async () => [
+                    {
+                        userId: "successor",
+                        joinedAt,
+                        user: {
+                            username: "successor",
+                            displayName: "Alpha Successor",
+                        },
+                    },
+                ]),
+            },
+        };
+        prisma.$transaction.mockImplementationOnce(async (fn: any) => fn(tx));
+        groupManager.has.mockReturnValueOnce(false).mockReturnValueOnce(true);
+        listenTogetherStateStore.getSnapshot.mockResolvedValueOnce(null);
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({
+            id: "group-1",
+            isActive: true,
+            name: "Remote Group",
+            joinCode: "REMOTE",
+            visibility: "private",
+            hostUserId: "successor",
+            queue: [],
+            currentIndex: 0,
+            isPlaying: false,
+            currentTime: 0,
+            stateVersion: 4,
+            createdAt: joinedAt,
+            members: [
+                {
+                    userId: "successor",
+                    isHost: true,
+                    joinedAt,
+                    user: {
+                        id: "successor",
+                        username: "successor",
+                        displayName: "Alpha Successor",
+                    },
+                },
+            ],
+        });
+        const authoritativeSnapshot = {
+            id: "group-1",
+            hostUserId: "successor",
+            playback: {},
+            members: [{ userId: "successor", isHost: true }],
+        };
+        groupManager.snapshotById.mockReturnValue(authoritativeSnapshot);
+
+        await expect(
+            listenTogether.leaveGroup("departed-host", "group-1"),
+        ).resolves.toEqual({
+            ended: false,
+            newHostUserId: "successor",
+            newHostUsername: "Alpha Successor",
+        });
+
+        expect(groupManager.removeMember).not.toHaveBeenCalled();
+        expect(groupManager.hydrate).toHaveBeenCalledWith(
+            "group-1",
+            expect.objectContaining({
+                hostUserId: "successor",
+                members: remainingMemberships,
+            }),
+        );
+        expect(groupManager.reconcileMembers).toHaveBeenCalledWith(
+            "group-1",
+            remainingMemberships,
+            "successor",
+        );
+        expect(listenTogetherStateStore.setSnapshot).toHaveBeenCalledTimes(1);
+        expect(listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
+            "group-1",
+            authoritativeSnapshot,
+        );
+        expect(listenTogetherClusterSync.publishSnapshot).toHaveBeenCalledWith(
+            "group-1",
+            authoritativeSnapshot,
+        );
+        expect(groupManager.publishAuthoritativeSnapshot).toHaveBeenCalledWith(
+            authoritativeSnapshot,
+        );
+    });
+
+    it("cleans stale memory and deletes snapshots for an already inactive group", async () => {
+        const {
+            listenTogether,
+            prisma,
+            groupManager,
+            listenTogetherStateStore,
+            listenTogetherClusterSync,
+        } = loadService();
+        const tx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    hostUserId: "host-1",
+                    isActive: false,
+                })),
+            },
+            syncGroupMember: {
+                updateMany: jest.fn(async () => ({ count: 0 })),
+            },
+        };
+        prisma.$transaction.mockImplementationOnce(async (fn: any) => fn(tx));
+        groupManager.has.mockReturnValue(true);
+
+        await expect(
+            listenTogether.leaveGroup("host-1", "group-1"),
+        ).resolves.toEqual({ ended: true });
+
+        expect(groupManager.removeMember).not.toHaveBeenCalled();
+        expect(groupManager.remove).toHaveBeenCalledWith("group-1");
+        expect(listenTogetherStateStore.deleteSnapshot).toHaveBeenCalledWith(
+            "group-1",
+        );
+        expect(listenTogetherStateStore.setSnapshot).not.toHaveBeenCalled();
+        expect(listenTogetherClusterSync.publishEnded).toHaveBeenCalledWith(
+            "group-1",
+        );
+    });
+
+    it("revalidates a join after a final departure commits first", async () => {
+        const { listenTogether, prisma, groupManager, MockGroupError } =
+            loadService();
+        let groupIsActive = true;
+        let releaseDeparture: () => void = () => undefined;
+        let markDepartureStarted: () => void = () => undefined;
+        const departureStarted = new Promise<void>((resolve) => {
+            markDepartureStarted = resolve;
+        });
+        const departureGate = new Promise<void>((resolve) => {
+            releaseDeparture = resolve;
+        });
+        const departureTx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    hostUserId: "host-1",
+                    isActive: true,
+                })),
+                update: jest.fn(async () => {
+                    groupIsActive = false;
+                }),
+            },
+            syncGroupMember: {
+                updateMany: jest.fn(async () => {
+                    markDepartureStarted();
+                    await departureGate;
+                    return { count: 1 };
+                }),
+                findMany: jest.fn(async () => []),
+            },
+        };
+        const joinUpsert = jest.fn(async () => undefined);
+        const joinTx = {
+            syncGroup: {
+                findUnique: jest.fn(async () => ({
+                    isActive: groupIsActive,
+                })),
+            },
+            syncGroupMember: { upsert: joinUpsert },
+        };
+        prisma.syncGroup.findFirst.mockResolvedValueOnce({ id: "group-1" });
+        prisma.syncGroupMember.findFirst.mockResolvedValueOnce(null);
+        prisma.$transaction
+            .mockImplementationOnce(async (fn: any) => fn(departureTx))
+            .mockImplementationOnce(async (fn: any) => fn(joinTx));
+        groupManager.has.mockReturnValue(true);
+
+        const leavePromise = listenTogether.leaveGroup("host-1", "group-1");
+        await departureStarted;
+        const joinPromise = listenTogether.joinGroup(
+            "joining-user",
+            "Joining User",
+            "AAAAAA",
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        releaseDeparture();
+        await leavePromise;
+
+        await expect(joinPromise).rejects.toBeInstanceOf(MockGroupError);
+        expect(joinUpsert).not.toHaveBeenCalled();
     });
 
     it("serializes a reconnect behind an in-flight host transfer", async () => {
@@ -776,6 +1010,15 @@ describe("listenTogether service", () => {
                 for (const member of members.values()) {
                     member.isHost = member.userId === hostUserId;
                 }
+            },
+        );
+        groupManager.reconcileMembers.mockImplementation(
+            (_groupId: string, persistedMembers: any[], hostUserId: string) => {
+                members.clear();
+                for (const member of persistedMembers) {
+                    members.set(member.userId, { ...member });
+                }
+                group.hostUserId = hostUserId;
             },
         );
         const snapshot = () => ({
@@ -910,6 +1153,15 @@ describe("listenTogether service", () => {
                 }
             },
         );
+        groupManager.reconcileMembers.mockImplementation(
+            (_groupId: string, persistedMembers: any[], hostUserId: string) => {
+                members.clear();
+                for (const member of persistedMembers) {
+                    members.set(member.userId, { ...member });
+                }
+                group.hostUserId = hostUserId;
+            },
+        );
         groupManager.snapshotById.mockImplementation(() => ({
             id: "group-1",
             hostUserId: group.hostUserId,
@@ -929,8 +1181,9 @@ describe("listenTogether service", () => {
             where: { id: "group-1" },
             data: { hostUserId: "alpha-early" },
         });
-        expect(groupManager.reconcileHost).toHaveBeenCalledWith(
+        expect(groupManager.reconcileMembers).toHaveBeenCalledWith(
             "group-1",
+            expect.any(Array),
             "alpha-early",
         );
         expect(members.get("alpha-early")?.isHost).toBe(true);
@@ -950,10 +1203,14 @@ describe("listenTogether service", () => {
         } = loadService();
 
         groupManager.has.mockReturnValueOnce(true);
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({
+            hostUserId: "host-1",
+            isActive: true,
+        });
         prisma.$transaction.mockResolvedValueOnce(undefined);
 
         await listenTogether.endGroup("host-1", "group-1");
-        expect(groupManager.endGroup).toHaveBeenCalledWith("group-1", "host-1");
+        expect(groupManager.endGroup).not.toHaveBeenCalled();
         expect(groupManager.remove).toHaveBeenCalledWith("group-1");
         expect(listenTogetherStateStore.deleteSnapshot).toHaveBeenCalledWith(
             "group-1",
@@ -971,8 +1228,52 @@ describe("listenTogether service", () => {
             where: { id: "group-2" },
             select: { hostUserId: true, isActive: true },
         });
-        expect(groupManager.endGroup).toHaveBeenCalledTimes(1);
+        expect(groupManager.endGroup).not.toHaveBeenCalled();
         expect(groupManager.remove).toHaveBeenCalledWith("group-2");
+    });
+
+    it("serializes endGroup with another mutation for the same group", async () => {
+        const { listenTogether, prisma, groupManager } = loadService();
+        let releaseEndUpdate: () => void = () => undefined;
+        let markEndUpdateStarted: () => void = () => undefined;
+        const endUpdateStarted = new Promise<void>((resolve) => {
+            markEndUpdateStarted = resolve;
+        });
+        const endUpdateGate = new Promise<void>((resolve) => {
+            releaseEndUpdate = resolve;
+        });
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({
+            hostUserId: "host-1",
+            isActive: true,
+        });
+        prisma.syncGroup.update.mockImplementationOnce(async () => {
+            markEndUpdateStarted();
+            await endUpdateGate;
+        });
+        prisma.syncGroupMember.findFirst.mockResolvedValueOnce(null);
+        groupManager.has.mockReturnValue(true);
+        prisma.$transaction.mockImplementationOnce(async (input: any) =>
+            Array.isArray(input) ? Promise.all(input) : input(prisma),
+        );
+
+        const endPromise = listenTogether.endGroup("host-1", "group-1");
+        await endUpdateStarted;
+
+        let joinSettled = false;
+        const joinPromise = listenTogether
+            .joinGroupById("guest-1", "Guest", "group-1")
+            .catch(() => undefined)
+            .finally(() => {
+                joinSettled = true;
+            });
+        await new Promise((resolve) => setImmediate(resolve));
+        const joinedBeforeEndCommitted = joinSettled;
+
+        releaseEndUpdate();
+        await Promise.all([endPromise, joinPromise]);
+
+        expect(joinedBeforeEndCommitted).toBe(false);
+        expect(groupManager.remove).toHaveBeenCalledWith("group-1");
     });
 
     it("maps discoverGroups from memory and DB fallbacks", async () => {
@@ -1531,6 +1832,7 @@ describe("listenTogether service", () => {
         prisma.syncGroupMember.findFirst.mockResolvedValueOnce({
             syncGroupId: "group-1",
         });
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({ isActive: true });
         groupManager.has.mockReturnValueOnce(true);
         groupManager.addMember.mockReturnValueOnce({
             id: "group-1",

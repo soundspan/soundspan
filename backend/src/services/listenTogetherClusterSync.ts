@@ -10,14 +10,15 @@ const LISTEN_TOGETHER_STATE_SYNC_CHANNEL =
     config.listenTogether.stateSyncChannel;
 
 interface ListenTogetherStateSyncEvent {
-    type: "group-snapshot";
+    type: "group-snapshot" | "group-ended";
     groupId: string;
     originNodeId: string;
-    snapshot: GroupSnapshot;
+    snapshot?: GroupSnapshot;
     ts: number;
 }
 
 type SnapshotHandler = (snapshot: GroupSnapshot) => void;
+type GroupEndedHandler = (groupId: string) => void;
 
 class ListenTogetherClusterSync {
     private readonly nodeId = randomUUID();
@@ -25,22 +26,28 @@ class ListenTogetherClusterSync {
     private subClient: ReturnType<typeof createIORedisClient> | null = null;
     private started = false;
     private handler: SnapshotHandler | null = null;
+    private endedHandler: GroupEndedHandler | null = null;
 
     isEnabled(): boolean {
         return LISTEN_TOGETHER_STATE_SYNC_ENABLED;
     }
 
-    async start(handler: SnapshotHandler): Promise<void> {
+    async start(
+        handler: SnapshotHandler,
+        endedHandler?: GroupEndedHandler,
+    ): Promise<void> {
         if (!LISTEN_TOGETHER_STATE_SYNC_ENABLED) {
             return;
         }
 
         if (this.started) {
             this.handler = handler;
+            this.endedHandler = endedHandler ?? null;
             return;
         }
 
         this.handler = handler;
+        this.endedHandler = endedHandler ?? null;
         this.pubClient = createIORedisClient("listen-together-state-sync-pub");
         this.subClient = this.pubClient.duplicate();
 
@@ -85,8 +92,34 @@ class ListenTogetherClusterSync {
         }
     }
 
+    async publishEnded(groupId: string): Promise<void> {
+        if (!LISTEN_TOGETHER_STATE_SYNC_ENABLED || !this.pubClient) {
+            return;
+        }
+
+        const payload: ListenTogetherStateSyncEvent = {
+            type: "group-ended",
+            groupId,
+            originNodeId: this.nodeId,
+            ts: Date.now(),
+        };
+
+        try {
+            await this.pubClient.publish(
+                LISTEN_TOGETHER_STATE_SYNC_CHANNEL,
+                JSON.stringify(payload),
+            );
+        } catch (err) {
+            logger.warn(
+                `[ListenTogether/StateSync] Failed to publish end for group ${groupId}`,
+                err,
+            );
+        }
+    }
+
     async stop(): Promise<void> {
         this.handler = null;
+        this.endedHandler = null;
 
         if (this.subClient) {
             try {
@@ -117,8 +150,13 @@ class ListenTogetherClusterSync {
             const parsed = JSON.parse(
                 rawMessage,
             ) as ListenTogetherStateSyncEvent;
-            if (parsed.type !== "group-snapshot") return;
             if (parsed.originNodeId === this.nodeId) return;
+            if (parsed.type === "group-ended") {
+                if (typeof parsed.groupId !== "string") return;
+                this.endedHandler?.(parsed.groupId);
+                return;
+            }
+            if (parsed.type !== "group-snapshot") return;
             if (!parsed.snapshot || parsed.groupId !== parsed.snapshot.id)
                 return;
 
