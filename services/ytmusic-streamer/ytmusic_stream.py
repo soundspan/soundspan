@@ -1,9 +1,11 @@
 """Stream extraction, proxying, regular-YouTube metadata, and caches."""
 
 import asyncio
+import os
 import re
 import threading
 import time
+from pathlib import Path
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar, cast
@@ -16,7 +18,7 @@ from common.sidecar_runtime_utils import (
     env_int,
 )
 from fastapi import HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
     YT_PLAYER_CLIENTS,
@@ -54,6 +56,27 @@ _yt_dlp_extract_executor = ThreadPoolExecutor(
 )
 BROWSE_TIMEOUT = env_float("YTMUSIC_BROWSE_TIMEOUT", "30")
 YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
+
+# YouTube Music HLS spool. yt-dlp owns YouTube delivery; clients range-read
+# the completed local file instead of continuation-reading signed URLs.
+YTMUSIC_SPOOL_DIR = Path(
+    os.getenv("YTMUSIC_SPOOL_DIR", "/tmp/soundspan-ytmusic-spool")
+)
+YTMUSIC_SPOOL_MAX_BYTES = max(
+    16 * 1024 * 1024,
+    env_int("YTMUSIC_SPOOL_MAX_BYTES", str(256 * 1024 * 1024)),
+)
+YTMUSIC_SPOOL_TIMEOUT = env_float("YTMUSIC_SPOOL_TIMEOUT", "120")
+YTMUSIC_SPOOL_CONCURRENCY = max(
+    1, min(4, env_int("YTMUSIC_SPOOL_CONCURRENCY", "2"))
+)
+_yt_dlp_spool_executor = ThreadPoolExecutor(
+    max_workers=YTMUSIC_SPOOL_CONCURRENCY,
+    thread_name_prefix="yt-dlp-spool",
+)
+_spool_tasks: dict[str, asyncio.Task[tuple[str, str]]] = {}
+_spool_tasks_lock = asyncio.Lock()
+
 
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _ALLOWED_STREAM_QUALITIES = {"LOW", "MEDIUM", "HIGH", "LOSSLESS"}
@@ -270,6 +293,219 @@ async def _browse_public_bounded(func: Callable[..., T], *args: Any) -> T:
         raise HTTPException(status_code=504, detail="YouTube Music request timed out") from error
 
 
+
+_YTMUSIC_HLS_FORMATS = {
+    "LOW": (
+        "ba[protocol=m3u8_native][abr<=64]/"
+        "ba[protocol=m3u8][abr<=64]/"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+    ),
+    "MEDIUM": (
+        "ba[protocol=m3u8_native][abr<=128]/"
+        "ba[protocol=m3u8][abr<=128]/"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+    ),
+    "HIGH": (
+        "ba[protocol=m3u8_native][abr<=256]/"
+        "ba[protocol=m3u8][abr<=256]/"
+        "ba[protocol=m3u8_native]/ba[protocol=m3u8]"
+    ),
+    "LOSSLESS": "ba[protocol=m3u8_native]/ba[protocol=m3u8]",
+}
+
+
+def _spool_candidates(video_id: str, quality: str) -> list[Path]:
+    """Return completed spool files for one track, newest first."""
+    if not YTMUSIC_SPOOL_DIR.exists():
+        return []
+    prefix = f"{video_id}-{quality}."
+    paths = [
+        path
+        for path in YTMUSIC_SPOOL_DIR.iterdir()
+        if path.is_file()
+        and path.name.startswith(prefix)
+        and ".part" not in path.name
+        and not path.name.endswith(".ytdl")
+    ]
+    return sorted(paths, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def _find_spooled_file(video_id: str, quality: str) -> Path | None:
+    """Return and touch a valid completed spool entry."""
+    for path in _spool_candidates(video_id, quality):
+        try:
+            if path.stat().st_size > 0:
+                os.utime(path, None)
+                return path
+        except FileNotFoundError:
+            continue
+    return None
+
+
+def _spool_content_type(path: Path) -> str:
+    """Map the downloaded container to a browser audio content type."""
+    if path.suffix.lower() in {".mp4", ".m4a", ".aac"}:
+        return "audio/mp4"
+    if path.suffix.lower() in {".webm", ".opus"}:
+        return "audio/webm"
+    return "application/octet-stream"
+
+
+def _prune_spool(exclude: Path | None = None) -> None:
+    """Evict least-recently-used completed files until under the disk budget."""
+    if not YTMUSIC_SPOOL_DIR.exists():
+        return
+
+    entries: list[tuple[float, int, Path]] = []
+    total = 0
+    for path in YTMUSIC_SPOOL_DIR.iterdir():
+        if (
+            not path.is_file()
+            or ".part" in path.name
+            or path.name.endswith(".ytdl")
+        ):
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        total += stat.st_size
+        entries.append((stat.st_mtime, stat.st_size, path))
+
+    for _, size, path in sorted(entries):
+        if total <= YTMUSIC_SPOOL_MAX_BYTES:
+            break
+        if exclude is not None and path == exclude:
+            continue
+        try:
+            path.unlink()
+            total -= size
+            log.debug("Evicted YouTube Music spool file %s", path.name)
+        except FileNotFoundError:
+            pass
+
+
+def _download_ytmusic_spool_sync(video_id: str, quality: str) -> tuple[str, str]:
+    """Download a complete YouTube Music HLS stream into the bounded spool."""
+    import yt_dlp
+
+    YTMUSIC_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing = _find_spooled_file(video_id, quality)
+    if existing is not None:
+        return str(existing), _spool_content_type(existing)
+
+    fmt = _YTMUSIC_HLS_FORMATS.get(
+        quality, _YTMUSIC_HLS_FORMATS["HIGH"]
+    )
+    outtmpl = str(YTMUSIC_SPOOL_DIR / f"{video_id}-{quality}.%(ext)s")
+
+    ydl_opts = {
+        "format": fmt,
+        "outtmpl": outtmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
+        "http_headers": {
+            "User-Agent": _USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://music.youtube.com/",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["default", "web_safari"],
+            },
+        },
+        "js_runtimes": {"deno": {}},
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(
+                f"https://music.youtube.com/watch?v={video_id}",
+                download=True,
+            )
+            if not info:
+                raise ValueError("No info extracted while spooling stream")
+
+        completed = _find_spooled_file(video_id, quality)
+        if completed is None:
+            raise ValueError("yt-dlp completed without a spool file")
+
+        _prune_spool(exclude=completed)
+        log.info(
+            "Spooled YouTube Music track %s (%s, %.1f MiB)",
+            video_id,
+            quality,
+            completed.stat().st_size / (1024 * 1024),
+        )
+        return str(completed), _spool_content_type(completed)
+    except Exception as error:
+        # yt-dlp normally cleans these itself; remove leftovers after failures.
+        prefix = f"{video_id}-{quality}."
+        if YTMUSIC_SPOOL_DIR.exists():
+            for path in YTMUSIC_SPOOL_DIR.iterdir():
+                if path.name.startswith(prefix) and (
+                    ".part" in path.name or path.name.endswith(".ytdl")
+                ):
+                    try:
+                        path.unlink()
+                    except FileNotFoundError:
+                        pass
+        raise _stream_extraction_http_error(
+            video_id,
+            f"yt-dlp HLS spool for {video_id}",
+            error,
+        ) from error
+
+
+async def _download_ytmusic_spool_bounded(
+    video_id: str, quality: str
+) -> tuple[str, str]:
+    """Run one spool download in its bounded executor."""
+    try:
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(
+            _yt_dlp_spool_executor,
+            _download_ytmusic_spool_sync,
+            video_id,
+            quality,
+        )
+        return await asyncio.wait_for(future, timeout=YTMUSIC_SPOOL_TIMEOUT)
+    except TimeoutError as error:
+        raise HTTPException(
+            status_code=504, detail="YouTube Music spool timed out"
+        ) from error
+
+
+async def _get_ytmusic_spooled_stream(
+    video_id: str, quality: str
+) -> tuple[str, str]:
+    """Return a cached spool entry, coalescing concurrent requests per track."""
+    existing = _find_spooled_file(video_id, quality)
+    if existing is not None:
+        return str(existing), _spool_content_type(existing)
+
+    key = f"{video_id}:{quality}"
+    async with _spool_tasks_lock:
+        task = _spool_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                _download_ytmusic_spool_bounded(video_id, quality)
+            )
+            _spool_tasks[key] = task
+
+    try:
+        # One disconnected client must not cancel the shared download.
+        return await asyncio.shield(task)
+    finally:
+        if task.done():
+            async with _spool_tasks_lock:
+                if _spool_tasks.get(key) is task:
+                    _spool_tasks.pop(key, None)
+
+
 def _clean_stream_cache_locked() -> int:
     """Remove expired stream entries while the owning lock is held."""
     now = time.time()
@@ -319,53 +555,29 @@ async def proxy_stream(
     request: Request,
     user_id: str = Query(...),
     quality: str = "HIGH",
-) -> StreamingResponse:
-    """
-    Proxy the audio stream from YouTube. The backend pipes this to the
-    frontend player. Stream URLs are IP-locked to the server, so we
-    must proxy.
+) -> FileResponse:
+    """Serve YouTube Music audio from a bounded local yt-dlp HLS spool.
 
-    When user_id is "__public__", skips OAuth verification (yt-dlp
-    extraction is unauthenticated). This enables free-tier streaming
-    for users without YT Music OAuth connected.
+    YouTube progressive signed URLs no longer reliably support continuation
+    ranges. yt-dlp downloads the complete HLS audio first; Starlette then
+    provides normal local-file Range semantics to the player.
+
+    Concurrent requests for the same track share one download.
     """
     video_id = _validate_video_id(video_id)
     quality = _validate_stream_quality(quality)
-    # Skip OAuth check for public/unauthenticated streaming
+
     if user_id != "__public__":
         _get_ytmusic(user_id)
 
-    stream_info = await _extract_stream_info_bounded(
-        _get_stream_url_sync, user_id, video_id, quality
+    # FileResponse consumes Range from the ASGI request scope itself.
+    _ = request
+    path, content_type = await _get_ytmusic_spooled_stream(video_id, quality)
+    return FileResponse(
+        path,
+        media_type=content_type,
+        headers={"Accept-Ranges": "bytes"},
     )
-    stream_url = stream_info["url"]
-
-    # Determine content type for the response
-    acodec = stream_info.get("acodec", "")
-    if "opus" in acodec:
-        content_type = "audio/webm"
-    elif "mp4a" in acodec or "aac" in acodec:
-        content_type = "audio/mp4"
-    else:
-        content_type = "audio/mp4"
-
-    # Build headers for upstream request — use realistic browser headers
-    # so CDN requests look like a normal Chrome session.
-    headers = {
-        "User-Agent": _USER_AGENT,
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://music.youtube.com/",
-        "Origin": "https://music.youtube.com",
-    }
-    if request and "range" in request.headers:
-        headers["Range"] = request.headers["range"]
-
-    if headers.get("Range"):
-        return await build_range_proxy_response(
-            stream_url, headers, content_type, _USER_AGENT, log, video_id
-        )
-    return build_full_proxy_response(stream_url, headers, content_type, _USER_AGENT, log, video_id)
 
 
 @app.get("/yt/info")

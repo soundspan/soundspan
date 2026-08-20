@@ -10,5 +10,5 @@
 # requirements.lock, so only these two dists float at build time.
 #
 # Floors here must match services/ytmusic-streamer/requirements.txt.
-yt-dlp>=2026.7.4
+yt-dlp[default]>=2026.8.19
 ytmusicapi>=1.12.2
