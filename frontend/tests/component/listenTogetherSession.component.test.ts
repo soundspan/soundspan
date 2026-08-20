@@ -1252,16 +1252,12 @@ test("re-check after a failed mount probe still hydrates the host position", asy
 
 test("live-session re-check reconnect never adopts the server position onto the host", async (t) => {
     t.mock.method(Date, "now", () => 100_000);
-    const host = await mountListenTogetherProvider(true, 0);
+    // Start with a session that has NEVER connected, so a stale pre-await
+    // adoption decision would read "adopt". The first connection then happens
+    // DURING the deferred probe; the post-probe connectSocket must see it.
+    const host = await mountListenTogetherProvider(true, 0, { connect: false });
     t.after(host.unmount);
-    await host.act(() => host.callbacks().onGroupState(getProviderGroup()));
-    providerControlCalls.seek = [];
-    providerEngineState.currentTime = 42;
-    providerEngineState.playing = true;
-    providerSocket.isConnected = false;
 
-    // Defer the probe so the adoption decision is provably made at
-    // connectSocket call time, after the await, not from a stale closure.
     let releaseProbe: (() => void) | null = null;
     providerSocket.probeRoute = async () => {
         await new Promise<void>((resolve) => {
@@ -1272,6 +1268,19 @@ test("live-session re-check reconnect never adopts the server position onto the 
     await host.act(async () => {
         const pending = host.latest().recheckSocketRoute();
         await waitFor(() => releaseProbe !== null, "probe never started");
+
+        // While the probe is pending: a racing path completes the session's
+        // first connection lifecycle, then the socket drops again.
+        providerSocket.probeRoute = async () => ({ ok: true });
+        assert.equal(await host.latest().recheckSocketRoute(), true);
+        providerSocket.isConnected = true;
+        host.callbacks().onConnect();
+        providerSocket.isConnected = false;
+
+        providerEngineState.currentTime = 42;
+        providerEngineState.playing = true;
+        providerControlCalls.seek = [];
+
         releaseProbe?.();
         assert.equal(await pending, true);
     });
@@ -1286,8 +1295,9 @@ test("live-session re-check reconnect never adopts the server position onto the 
     };
     await host.act(() => host.callbacks().onGroupState(staleSnapshot));
 
-    // The re-check reconnect must not re-arm adoption: the host's live local
-    // timeline stays authoritative over the stale server snapshot.
+    // The deferred re-check's connectSocket ran AFTER the first connection:
+    // it must read the ref at call time and not re-arm adoption, keeping the
+    // host's live local timeline authoritative over the stale snapshot.
     assert.deepEqual(providerControlCalls.seek, []);
     assert.equal(providerEngineState.currentTime, 42);
 });
