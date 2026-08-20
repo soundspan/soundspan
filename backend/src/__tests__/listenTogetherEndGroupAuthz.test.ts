@@ -17,6 +17,12 @@ const mockTransaction = jest.fn(async (ops: unknown[]) =>
     Promise.all(ops as Promise<unknown>[]),
 );
 
+// The mutation-lock module evaluates config at import; disable the Redis
+// lock so this suite needs no environment.
+jest.mock("../config", () => ({
+    config: { listenTogether: { mutationLockEnabled: false } },
+}));
+
 jest.mock("../utils/db", () => ({
     prisma: {
         syncGroup: {

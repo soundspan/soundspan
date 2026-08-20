@@ -94,7 +94,6 @@ export function shouldApplyIncomingPlayback(
 
     // Keep the tie-breaker in the producer clock domain; lastPositionUpdate is local-only.
     return (
-        incomingServerTime >=
-        existing.playback.lastAppliedSnapshotServerTime
+        incomingServerTime >= existing.playback.lastAppliedSnapshotServerTime
     );
 }

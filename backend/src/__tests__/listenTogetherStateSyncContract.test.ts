@@ -17,6 +17,13 @@ describe("listen together state sync contract", () => {
 
     const socketSource = fs.readFileSync(socketServicePath, "utf8");
     const managerSource = fs.readFileSync(managerPath, "utf8");
+    const snapshotPath = path.join(
+        __dirname,
+        "..",
+        "services",
+        "listenTogetherSnapshot.ts",
+    );
+    const snapshotSource = fs.readFileSync(snapshotPath, "utf8");
 
     it("starts cluster sync and applies external snapshots", () => {
         expect(socketSource).toContain("listenTogetherClusterSync");
@@ -35,12 +42,17 @@ describe("listen together state sync contract", () => {
         expect(managerSource).toContain(
             "applyExternalSnapshot(snapshot: GroupSnapshot)",
         );
-        expect(managerSource).toContain(
-            "Preserve local socket presence for users connected to this pod.",
-        );
+        expect(managerSource).toContain("mergeSnapshotMembers(");
         expect(managerSource).toContain("shouldApplyIncomingPlayback(");
-        expect(managerSource).toContain(
-            "incomingServerTime >= existing.playback.lastPositionUpdate",
+        expect(snapshotSource).toContain(
+            "Merge snapshot membership while retaining members connected to this pod.",
+        );
+        expect(snapshotSource).toContain(
+            "existingMember?.socketIds ?? new Set<string>()",
+        );
+        // Equal-version ordering stays in the producer clock domain.
+        expect(snapshotSource).toContain(
+            "existing.playback.lastAppliedSnapshotServerTime",
         );
     });
 });

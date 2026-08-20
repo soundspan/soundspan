@@ -792,13 +792,11 @@ describe("listenTogether service", () => {
             userId: "rejoining-member",
             syncGroup: { hostUserId: committedHostUserId },
         }));
-        prisma.syncGroup.update.mockImplementation(
-            async ({ data }: any) => {
-                if (typeof data.hostUserId === "string") {
-                    committedHostUserId = data.hostUserId;
-                }
-            },
-        );
+        prisma.syncGroup.update.mockImplementation(async ({ data }: any) => {
+            if (typeof data.hostUserId === "string") {
+                committedHostUserId = data.hostUserId;
+            }
+        });
         prisma.$transaction.mockImplementation(async (input: any) =>
             typeof input === "function" ? input(tx) : undefined,
         );
@@ -1396,9 +1394,9 @@ describe("listenTogether service", () => {
             "[ListenTogether] Persistence loop started",
         );
         expect(groupManager.markClean).toHaveBeenCalledWith("group-1");
-        expect(prisma.syncGroup.update.mock.calls[0][0].data).not.toHaveProperty(
-            "hostUserId",
-        );
+        expect(
+            prisma.syncGroup.update.mock.calls[0][0].data,
+        ).not.toHaveProperty("hostUserId");
         expect(logger.error).toHaveBeenCalledWith(
             "[ListenTogether] Failed to persist group group-2:",
             expect.any(Error),

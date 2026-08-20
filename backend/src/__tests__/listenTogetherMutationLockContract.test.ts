@@ -28,9 +28,10 @@ describe("listen together mutation lock", () => {
         }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { withGroupMutationLock, shutdownGroupMutationLock } = require(
-            "../services/listenTogetherMutationLock",
-        );
+        const {
+            withGroupMutationLock,
+            shutdownGroupMutationLock,
+        } = require("../services/listenTogetherMutationLock");
         const events: string[] = [];
         let releaseFirst: () => void = () => undefined;
         let markFirstStarted: () => void = () => undefined;
@@ -41,25 +42,17 @@ describe("listen together mutation lock", () => {
             releaseFirst = resolve;
         });
 
-        const first = withGroupMutationLock(
-            "group-1",
-            "first",
-            async () => {
-                events.push("first:start");
-                markFirstStarted();
-                await firstGate;
-                events.push("first:end");
-            },
-        );
+        const first = withGroupMutationLock("group-1", "first", async () => {
+            events.push("first:start");
+            markFirstStarted();
+            await firstGate;
+            events.push("first:end");
+        });
         await firstStarted;
-        const second = withGroupMutationLock(
-            "group-1",
-            "second",
-            async () => {
-                events.push("second:start");
-                events.push("second:end");
-            },
-        );
+        const second = withGroupMutationLock("group-1", "second", async () => {
+            events.push("second:start");
+            events.push("second:end");
+        });
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(events).toEqual(["first:start"]);
