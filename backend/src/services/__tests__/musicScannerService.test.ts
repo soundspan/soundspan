@@ -59,6 +59,7 @@ const mockPrisma = {
         deleteMany: jest.fn(),
     },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn(async () => []),
 };
 
 const mockLogger = {
@@ -1285,7 +1286,8 @@ describe("MusicScannerService.scanLibrary", () => {
 
         await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        // Fast path plus the now-transactional orphan cleanup pass.
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
         expect(mockRecomputeAlbumLoudness).not.toHaveBeenCalled();
         expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
             where: { trackId: "track-1" },
@@ -1877,7 +1879,8 @@ describe("MusicScannerService.scanLibrary", () => {
 
         const result = await scanner.scanLibrary("/music");
 
-        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+        // Promotion, soft-remove, and the now-transactional orphan cleanup.
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3);
         expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledTimes(1);
         expect(mockPrisma.track.updateMany).toHaveBeenCalledWith({
             where: {
