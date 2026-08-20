@@ -410,9 +410,8 @@ test("useListenTogether resolves within provider with deterministic mocked depen
         resolveListenTogetherMembershipPendingState,
         resolveListenTogetherReadyReportRecoveryAction,
     } = await import("../../lib/listen-together-context");
-    const { canIssueListenTogetherHostPlaybackCommand } = await import(
-        "../../lib/listenTogetherPlaybackSync"
-    );
+    const { canIssueListenTogetherHostPlaybackCommand } =
+        await import("../../lib/listenTogetherPlaybackSync");
 
     const capturedRef = {
         current: null as ReturnType<typeof useListenTogether> | null,

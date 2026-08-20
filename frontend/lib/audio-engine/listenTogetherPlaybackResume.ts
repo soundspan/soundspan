@@ -37,7 +37,7 @@ type HostResumePlayback = (options: {
  * Resumes group playback for either role: the authoritative host resumes in
  * place (no follower position sync), followers resume onto the group timeline.
  */
-export function resumeGroupPlaybackForRole(
+export function resumeGroupForRole(
     isHost: boolean,
     resume: HostResumePlayback & ResumePlayback,
     playback: ListenTogetherPlaybackPosition,

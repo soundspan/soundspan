@@ -75,7 +75,7 @@ import {
     writePlaybackAdvanceOrigin as writeOrigin,
 } from "@/lib/audio-engine/playbackAdvanceOrigin";
 import {
-    resumeGroupPlaybackForRole,
+    resumeGroupForRole,
     resumeListenTogetherPlayback,
 } from "@/lib/audio-engine/listenTogetherPlaybackResume";
 const playbackEngine = createRuntimeAudioEngine();
@@ -575,7 +575,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
                 // Let recoverAudioAfterReconnect handle resume after reload
             } else if (pb.isPlaying) {
-                resumeGroupPlaybackForRole(isCurrentClientHost, ctrl.resume, pb);
+                resumeGroupForRole(isCurrentClientHost, ctrl.resume, pb);
             } else {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -677,11 +677,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 delta.isPlaying &&
                 (trackChanged || !playbackEngine.isPlaying())
             ) {
-                resumeGroupPlaybackForRole(
-                    isCurrentClientHost,
-                    ctrl.resume,
-                    delta,
-                );
+                resumeGroupForRole(isCurrentClientHost, ctrl.resume, delta);
             } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
                 ctrl.pause({ suppressListenTogetherBroadcast: true });
             }
@@ -754,7 +750,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     allowListenTogetherFollower: true,
                     suppressListenTogetherBroadcast: true,
                 });
-                resumeGroupPlaybackForRole(
+                resumeGroupForRole(
                     isCurrentClientHost,
                     controlsRef.current.resume,
                     active.playback,
