@@ -40,6 +40,11 @@ RUN sed -n 's/^\([A-Za-z0-9._-]\+==[^ \\]\+\).*$/\1/p' requirements.lock > /tmp/
     && pip check \
     && rm /tmp/lock-constraints.txt
 
+# pip is build-time tooling only; removing it from the runtime image drops
+# its vendored dependencies (msgpack, setuptools metadata) from the scan
+# surface alongside the other removed network tools.
+RUN python3 -m pip uninstall -y pip
+
 # Copy the entrypoint and its split sidecar modules.
 COPY services/ytmusic-streamer/*.py ./
 COPY services/common ./common

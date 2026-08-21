@@ -19,6 +19,11 @@ WORKDIR /app
 COPY services/tidal-downloader/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
+# pip is build-time tooling only; removing it from the runtime image drops
+# its vendored dependencies (msgpack, setuptools metadata) from the scan
+# surface alongside the other removed network tools.
+RUN python3 -m pip uninstall -y pip
+
 # Copy application code
 COPY services/tidal-downloader/app.py ./app.py
 COPY services/common ./common

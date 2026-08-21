@@ -39,6 +39,11 @@ WORKDIR /app
 COPY services/audio-analyzer/requirements.lock ./requirements.lock
 RUN pip3 install --no-cache-dir --require-hashes -r requirements.lock
 
+# pip is build-time tooling only; removing it from the runtime image drops
+# its vendored dependencies (msgpack, setuptools metadata) from the scan
+# surface alongside the other removed network tools.
+RUN python3 -m pip uninstall -y pip
+
 # Verify TensorFlow is importable and Essentia package is present.
 # Avoid importing `essentia.standard` at build time; some build environments can
 # fail entropy initialization (`random_device could not be read`) despite runtime

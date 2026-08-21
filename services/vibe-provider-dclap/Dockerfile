@@ -30,6 +30,11 @@ WORKDIR /app
 COPY services/vibe-provider-dclap/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
+# pip is build-time tooling only; removing it from the runtime image drops
+# its vendored dependencies (msgpack, setuptools metadata) from the scan
+# surface alongside the other removed network tools.
+RUN python3 -m pip uninstall -y pip
+
 RUN mkdir -p /app/models /app/tokenizer /app/licenses/dclap
 
 # Vendor the immutable upstream v1 release artifacts and fail on any byte drift.
