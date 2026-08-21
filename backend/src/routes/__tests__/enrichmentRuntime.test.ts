@@ -1077,10 +1077,7 @@ describe("enrichment route runtime behavior", () => {
 
     it("reconciles failure rows and returns a safe error on failure", async () => {
         const res = createRes();
-        await reconcileFailuresHandler(
-            { user: { id: "admin-1" } } as any,
-            res,
-        );
+        await reconcileFailuresHandler({ user: { id: "admin-1" } } as any, res);
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ resolved: 4, checked: 9 });
 
