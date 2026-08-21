@@ -15,6 +15,7 @@ import {
     updateArtistCountsInBatches,
 } from "../../services/artistCountsService";
 import { trackMappingService } from "../../services/trackMappingService";
+import { outboundClientOptions } from "../../services/federationPeers";
 import { decodeFederationIdentity } from "../../utils/federationDedup";
 import { upsertTrackEmbedding } from "../../services/trackEmbeddings";
 import { prisma } from "../../utils/db";
@@ -1439,10 +1440,7 @@ export async function processFederationSync(
     const data = jobDataSchema.parse(job.data);
     const peer = await getAvailableConsumerPeer(data.peerId);
     const startedAt = new Date();
-    const client = createFederationClient(peer, {
-        allowPrivatePeers: config.federation.allowPrivatePeers,
-        allowProxy: config.federation.allowProxy,
-    });
+    const client = createFederationClient(peer, outboundClientOptions());
     const manifest = await client.getManifest();
     const localEmbeddingSpace = await resolveLocalEmbeddingSpace(peer.id);
     const context = newSyncContext(
