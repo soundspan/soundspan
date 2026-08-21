@@ -1,5 +1,5 @@
 # DCLAP student ONNX provider for CPU-first vibe embeddings
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+FROM python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \

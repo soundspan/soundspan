@@ -3,7 +3,7 @@
 # PyPI publishes its Linux wheels only through CPython 3.11. Essentia dev1389
 # has newer-interpreter wheels, but cannot move this image without TensorFlow.
 # Keep this base paired with the requirements.lock --python-version target.
-FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
+FROM python:3.11-slim@sha256:ff05d1a05204fb9f7444c435db8e8ec104e587a413280dc9ffc27a4797554182
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive

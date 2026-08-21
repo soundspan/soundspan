@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+- Refreshed every pinned base-image digest (`node:24-bookworm-slim`, `python:3.11-slim`, `python:3.12-slim`, `python:3.14-slim`, and the `denoland/deno:bin-2.9.5` binary stage) so all published images pick up the current Debian and npm security content, clearing the fixable HIGH-severity OS-package findings (util-linux family) and npm-bundled dependency findings (undici, tar, ip-address, brace-expansion) reported by Trivy image scanning (#671).
+
 ## [2.4.0] - 2026-08-21
 
 ### Added
