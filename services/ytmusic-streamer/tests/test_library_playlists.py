@@ -8,7 +8,7 @@ import threading
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -257,10 +257,13 @@ def library_playlist_provider_runner(
     """Run ordinary provider mocks inline; real-thread regressions restore the runner."""
     import app
 
-    real_runner = app._run_library_playlist_provider
+    real_runner = cast(
+        "Callable[[str, int], Awaitable[list[dict[str, Any]]]]",
+        app._run_library_playlist_provider,
+    )
 
     async def run_inline(user_id: str, limit: int) -> list[dict[str, Any]]:
-        return app._call_library_playlist_provider(user_id, limit)
+        return cast("list[dict[str, Any]]", app._call_library_playlist_provider(user_id, limit))
 
     monkeypatch.setattr(app, "_run_library_playlist_provider", run_inline)
     return real_runner

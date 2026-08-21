@@ -232,7 +232,7 @@ async def _run_library_playlist_flight(key: _LibraryPlaylistKey, generation: int
 
 async def _await_library_playlist_flight(task: _LibraryPlaylistTask, deadline: float) -> JsonObject:
     """Bound one request wait without cancelling the registry-owned provider task."""
-    waiter = asyncio.get_running_loop().create_future()
+    waiter: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
 
     def forward_outcome(completed_task: _LibraryPlaylistTask) -> None:
         _forward_library_playlist_outcome(completed_task, waiter)
