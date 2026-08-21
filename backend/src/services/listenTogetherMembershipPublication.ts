@@ -8,6 +8,7 @@ import {
     enqueueGroupEndedPublication,
     enqueueGroupMembershipPublication,
     enqueueGroupSnapshotPublication,
+    type PublicationExecutionOptions,
 } from "./listenTogetherCallbacks";
 import type { ClusterGroupMembership } from "./listenTogetherClusterSync";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
@@ -195,6 +196,7 @@ async function publishDepartureWithoutSnapshot(
     membership: Parameters<typeof enqueueGroupMembershipPublication>[1],
     committedMembership: ClusterGroupMembership,
     fence: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     const revokedSocketIds = groupManager.has(groupId)
         ? groupManager.applyCommittedMembership(
@@ -210,7 +212,15 @@ async function publishDepartureWithoutSnapshot(
         committedMembership,
         revokedSocketIds,
         fence,
+        options,
     );
+}
+
+function departedMember(
+    captured: GroupSnapshot | null,
+    userId: string,
+): GroupSnapshot["members"][number] | undefined {
+    return captured?.members.find((member) => member.userId === userId);
 }
 
 /** Hydrate and queue one committed departure, or emit membership-only after eviction. */
@@ -220,15 +230,15 @@ export async function publishCommittedDeparture(
     captured: GroupSnapshot | null,
     committed: CommittedDeparturePublication,
     fence: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
-    const departedMember = captured?.members.find(
-        (member) => member.userId === userId,
-    );
+    options?.signal.throwIfAborted();
+    const departed = departedMember(captured, userId);
     const membership = {
         type: "left" as const,
         member: {
             userId,
-            username: departedMember?.username ?? userId,
+            username: departed?.username ?? userId,
             newHostUserId: committed.newHostUserId,
             newHostUsername: committed.newHostUsername,
         },
@@ -244,6 +254,7 @@ export async function publishCommittedDeparture(
             membership,
             committedMembership,
             fence,
+            options,
         );
         return;
     }
@@ -268,6 +279,8 @@ export async function publishCommittedDeparture(
         committedMembership,
         revokedSocketIds,
         fence,
+        undefined,
+        options,
     );
 }
 
@@ -277,10 +290,12 @@ export async function publishCommittedEnd(
     captured: GroupSnapshot | null,
     reason: string,
     fence: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
+    options?.signal.throwIfAborted();
     if (captured) {
         hydrateFromCapturedSnapshot(captured);
     }
     groupManager.remove(groupId);
-    await enqueueGroupEndedPublication(groupId, reason, fence);
+    await enqueueGroupEndedPublication(groupId, reason, fence, options);
 }

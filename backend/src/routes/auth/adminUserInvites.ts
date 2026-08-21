@@ -15,6 +15,13 @@ import {
     recordInviteCodeUsage,
 } from "../../services/inviteCodes";
 import type { LoginUser } from "../../services/oidcAccountResolution";
+import {
+    cleanupReservedUserForDeletion,
+    deleteMarkedUserWithRoleGuard,
+    markUserPendingDeletion,
+    type UserDeletionReservationResult,
+    type UserDeletionResult,
+} from "../../services/userDeletion";
 import { acquireRoleGuardLock } from "../../utils/advisoryLocks";
 import { sendRouteError } from "../routeErrorResponse";
 import { hasErrorCode, sendLoginSuccess } from "./shared";
@@ -229,7 +236,11 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
             if (!target) return { kind: "notFound" };
             if (target.role === "admin") {
                 const otherAdmins = await tx.user.count({
-                    where: { role: "admin", id: { not: userId } },
+                    where: {
+                        role: "admin",
+                        id: { not: userId },
+                        pendingDeletionAt: null,
+                    },
                 });
                 if (otherAdmins === 0) return { kind: "lastAdmin" };
             }
@@ -483,27 +494,19 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
         },
     );
 
-    type DeleteUserResult = "deleted" | "lastAdmin" | "notFound";
-
-    async function deleteUserWithRoleGuard(
-        userId: string,
-    ): Promise<DeleteUserResult> {
-        return prisma.$transaction(async (tx) => {
-            await acquireRoleGuardLock(tx);
-            const target = await tx.user.findUnique({
-                where: { id: userId },
-                select: { role: true },
-            });
-            if (!target) return "notFound";
-            if (target.role === "admin") {
-                const otherAdmins = await tx.user.count({
-                    where: { role: "admin", id: { not: userId } },
-                });
-                if (otherAdmins === 0) return "lastAdmin";
-            }
-            await tx.user.delete({ where: { id: userId } });
-            return "deleted";
-        });
+    function sendDeleteUserGuardFailure(
+        res: Response,
+        result: UserDeletionReservationResult | UserDeletionResult,
+    ): boolean {
+        if (result === "notFound") {
+            res.status(404).json({ error: "User not found" });
+            return true;
+        }
+        if (result === "lastAdmin") {
+            res.status(400).json({ error: "Cannot delete the last admin" });
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -532,6 +535,8 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
      *         description: Admin access required
      *       404:
      *         description: User not found
+     *       503:
+     *         description: User deletion is pending retryable cleanup
      */
     // DELETE /auth/users/:id (Admin only)
     router.delete<{ id: string }>(
@@ -550,15 +555,23 @@ export default function registerAdminUserInviteRoutes(router: Router): void {
                         .json({ error: "Cannot delete your own account" });
                 }
 
-                const result = await deleteUserWithRoleGuard(id);
-                if (result === "notFound") {
-                    return res.status(404).json({ error: "User not found" });
+                const reservation = await markUserPendingDeletion(id);
+                if (sendDeleteUserGuardFailure(res, reservation)) return;
+
+                try {
+                    await cleanupReservedUserForDeletion(id);
+                } catch (error: unknown) {
+                    logger.warn("Delete user cleanup remains pending:", error);
+                    return sendRouteError(
+                        res,
+                        503,
+                        "User deletion is pending. Retry to finish cleanup.",
+                        { code: "USER_DELETION_PENDING", retryable: true },
+                    );
                 }
-                if (result === "lastAdmin") {
-                    return res
-                        .status(400)
-                        .json({ error: "Cannot delete the last admin" });
-                }
+
+                const result = await deleteMarkedUserWithRoleGuard(id);
+                if (sendDeleteUserGuardFailure(res, result)) return;
 
                 return res.json({ message: "User deleted successfully" });
             } catch (error: unknown) {

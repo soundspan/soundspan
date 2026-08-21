@@ -42,12 +42,19 @@ const prisma = {
         findUnique: jest.fn(),
         count: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
     },
     $executeRaw: jest.fn(),
     $transaction: jest.fn(),
 };
 jest.mock("../../utils/db", () => ({ prisma }));
+
+const cleanupListenTogetherForUser = jest.fn();
+jest.mock("../../services/listenTogetherUserCleanup", () => ({
+    cleanupListenTogetherForUser,
+}));
 
 const bcryptHash = jest.fn();
 jest.mock("bcrypt", () => ({
@@ -115,8 +122,11 @@ describe("admin SSO user contracts", () => {
         bcryptHash.mockResolvedValue("new-hash");
         prisma.user.count.mockResolvedValue(1);
         prisma.user.delete.mockResolvedValue({});
+        prisma.user.updateMany.mockResolvedValue({ count: 1 });
+        prisma.user.deleteMany.mockResolvedValue({ count: 1 });
         prisma.$executeRaw.mockResolvedValue(0);
         prisma.$transaction.mockImplementation(async (run) => run(prisma));
+        cleanupListenTogetherForUser.mockResolvedValue(undefined);
     });
 
     it("summarizes local passwords and linked providers in the user list", async () => {
@@ -220,11 +230,11 @@ describe("admin SSO user contracts", () => {
             email: "admin@example.com",
             role: "admin",
         });
-        prisma.$executeRaw.mockImplementationOnce(async () => {
+        prisma.$executeRaw.mockImplementation(async () => {
             order.push("lock");
             return 0;
         });
-        prisma.user.count.mockImplementationOnce(async () => {
+        prisma.user.count.mockImplementation(async () => {
             order.push("count");
             return 1;
         });
@@ -250,6 +260,13 @@ describe("admin SSO user contracts", () => {
         expect(prisma.user.update).toHaveBeenCalledWith(
             expect.objectContaining({ data: { role: "user" } }),
         );
+        expect(prisma.user.count).toHaveBeenCalledWith({
+            where: {
+                role: "admin",
+                id: { not: "admin-2" },
+                pendingDeletionAt: null,
+            },
+        });
         expect(res.statusCode).toBe(200);
     });
 
@@ -259,17 +276,24 @@ describe("admin SSO user contracts", () => {
             id: "admin-2",
             role: "admin",
         });
-        prisma.$executeRaw.mockImplementationOnce(async () => {
+        prisma.$executeRaw.mockImplementation(async () => {
             order.push("lock");
             return 0;
         });
-        prisma.user.count.mockImplementationOnce(async () => {
+        prisma.user.count.mockImplementation(async () => {
             order.push("count");
             return 1;
         });
-        prisma.user.delete.mockImplementationOnce(async () => {
+        prisma.user.updateMany.mockImplementationOnce(async () => {
+            order.push("reserve");
+            return { count: 1 };
+        });
+        prisma.user.deleteMany.mockImplementationOnce(async () => {
             order.push("delete");
-            return {};
+            return { count: 1 };
+        });
+        cleanupListenTogetherForUser.mockImplementationOnce(async () => {
+            order.push("listen-together-cleanup");
         });
         const res = createRes();
 
@@ -278,9 +302,123 @@ describe("admin SSO user contracts", () => {
             res,
         );
 
-        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-        expect(order).toEqual(["lock", "count", "delete"]);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(order).toEqual([
+            "lock",
+            "count",
+            "reserve",
+            "listen-together-cleanup",
+            "lock",
+            "count",
+            "delete",
+        ]);
         expect(res.body).toEqual({ message: "User deleted successfully" });
+    });
+
+    it("leaves the marker set and returns a retryable response when cleanup fails", async () => {
+        prisma.user.findUnique.mockResolvedValue({
+            id: "user-2",
+            role: "user",
+            pendingDeletionAt: null,
+        });
+        cleanupListenTogetherForUser.mockRejectedValueOnce(
+            new Error("publication failed"),
+        );
+        const res = createRes();
+
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-1" }, params: { id: "user-2" } },
+            res,
+        );
+
+        expect(prisma.user.updateMany).toHaveBeenCalledWith({
+            where: { id: "user-2", pendingDeletionAt: null },
+            data: { pendingDeletionAt: expect.any(Date) },
+        });
+        expect(prisma.user.deleteMany).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "User deletion is pending. Retry to finish cleanup.",
+            code: "USER_DELETION_PENDING",
+            retryable: true,
+        });
+
+        prisma.user.findUnique.mockResolvedValue({
+            id: "user-2",
+            role: "user",
+            pendingDeletionAt: new Date("2026-08-21T12:00:00.000Z"),
+        });
+        cleanupListenTogetherForUser.mockResolvedValueOnce(undefined);
+        const retryRes = createRes();
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-1" }, params: { id: "user-2" } },
+            retryRes,
+        );
+
+        expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+        expect(prisma.user.deleteMany).toHaveBeenCalledTimes(1);
+        expect(retryRes.body).toEqual({
+            message: "User deleted successfully",
+        });
+    });
+
+    it("retries an already-marked deletion and deletes after cleanup succeeds", async () => {
+        const pendingDeletionAt = new Date("2026-08-21T12:00:00.000Z");
+        prisma.user.findUnique.mockResolvedValue({
+            id: "user-2",
+            role: "user",
+            pendingDeletionAt,
+        });
+        const res = createRes();
+
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-1" }, params: { id: "user-2" } },
+            res,
+        );
+
+        expect(prisma.user.updateMany).not.toHaveBeenCalled();
+        expect(cleanupListenTogetherForUser).toHaveBeenCalledWith("user-2");
+        expect(prisma.user.deleteMany).toHaveBeenCalledWith({
+            where: {
+                id: "user-2",
+                pendingDeletionAt: { not: null },
+            },
+        });
+        expect(res.body).toEqual({ message: "User deleted successfully" });
+    });
+
+    it("keeps a reserved admin when another admin is demoted during cleanup", async () => {
+        const pendingDeletionAt = new Date("2026-08-21T12:00:00.000Z");
+        prisma.user.findUnique
+            .mockResolvedValueOnce({
+                id: "admin-b",
+                role: "admin",
+                pendingDeletionAt: null,
+            })
+            .mockResolvedValueOnce({
+                id: "admin-b",
+                role: "admin",
+                pendingDeletionAt,
+            });
+        prisma.user.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+        cleanupListenTogetherForUser.mockImplementationOnce(async () => {
+            // Admin A is demoted after B was legitimately deletion-reserved.
+        });
+        const res = createRes();
+
+        await getHandler("/users/:id", "delete")(
+            { user: { id: "admin-a" }, params: { id: "admin-b" } },
+            res,
+        );
+
+        expect(cleanupListenTogetherForUser).toHaveBeenCalledWith("admin-b");
+        expect(prisma.user.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.user.updateMany).toHaveBeenLastCalledWith({
+            where: { id: "admin-b", pendingDeletionAt: { not: null } },
+            data: { pendingDeletionAt: null },
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Cannot delete the last admin" });
     });
 
     it("keeps the final admin when deletion or demotion is requested", async () => {
@@ -313,5 +451,6 @@ describe("admin SSO user contracts", () => {
         });
         expect(prisma.user.update).not.toHaveBeenCalled();
         expect(prisma.user.delete).not.toHaveBeenCalled();
+        expect(cleanupListenTogetherForUser).not.toHaveBeenCalled();
     });
 });

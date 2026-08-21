@@ -27,6 +27,7 @@ model User {
   profilePicture         Bytes?
   moodMixParams          Json?
   tokenVersion           Int                   @default(0)
+  pendingDeletionAt      DateTime?
   createdAt              DateTime              @default(now())
   appPasswords           AppPassword[]
   apiKeys                ApiKey[]
@@ -173,6 +174,7 @@ model SyncGroup {
   visibility String  @default("public") // "public" | "private"
   hostUserId String
   isActive   Boolean @default(true)
+  cleanupPublicationPending Boolean @default(false)
 
   // Playback state (persisted periodically from in-memory manager)
   trackId        String?
@@ -194,6 +196,7 @@ model SyncGroup {
   members  SyncGroupMember[]
 
   @@index([hostUserId, isActive])
+  @@index([hostUserId, cleanupPublicationPending, id])
   @@index([isActive, visibility, updatedAt])
 }
 
@@ -205,12 +208,14 @@ model SyncGroupMember {
   joinedAt    DateTime  @default(now())
   lastSeenAt  DateTime  @updatedAt
   leftAt      DateTime?
+  cleanupPublicationPending Boolean @default(false)
 
   syncGroup SyncGroup @relation(fields: [syncGroupId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([syncGroupId, userId])
   @@index([userId, leftAt])
+  @@index([userId, cleanupPublicationPending, id])
   @@index([syncGroupId, leftAt])
 }
 

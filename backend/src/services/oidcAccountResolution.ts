@@ -61,7 +61,11 @@ async function demoteOidcAdmin(user: LoginUser): Promise<LoginUser> {
     return prisma.$transaction(async (tx) => {
         await acquireRoleGuardLock(tx);
         const otherAdmins = await tx.user.count({
-            where: { role: "admin", id: { not: user.id } },
+            where: {
+                role: "admin",
+                id: { not: user.id },
+                pendingDeletionAt: null,
+            },
         });
         if (otherAdmins === 0) {
             oidcLog.warn("Skipped OIDC role demotion for the last admin", {

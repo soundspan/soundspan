@@ -276,15 +276,15 @@ describe("listen together publication state-store behavior", () => {
         expect(emitMemberLeft).not.toHaveBeenCalled();
     });
 
-    it("adds fencing order metadata to membership and revocation fanout", async () => {
+    it("adds fencing order and departed-user metadata to membership and revocation fanout", async () => {
         const { callbacks } = loadCallbacks();
-        const emitMemberJoined = jest.fn();
+        const emitMemberLeft = jest.fn();
         const revokeSockets = jest.fn();
         callbacks.configureGroupPublicationBroadcaster({
             emitSnapshot: jest.fn(),
             emitEnded: jest.fn(),
-            emitMemberJoined,
-            emitMemberLeft: jest.fn(),
+            emitMemberJoined: jest.fn(),
+            emitMemberLeft,
             emitMemberPresence: jest.fn(),
             revokeSockets,
         });
@@ -292,7 +292,7 @@ describe("listen together publication state-store behavior", () => {
         await callbacks.enqueueGroupMembershipPublication(
             "group-1",
             {
-                type: "joined",
+                type: "left",
                 member: { userId: "member-1", username: "Member" },
             },
             undefined,
@@ -305,7 +305,7 @@ describe("listen together publication state-store behavior", () => {
         );
 
         const metadata = { membershipVersion: 9 };
-        expect(emitMemberJoined).toHaveBeenCalledWith(
+        expect(emitMemberLeft).toHaveBeenCalledWith(
             "group-1",
             { userId: "member-1", username: "Member" },
             metadata,
@@ -314,6 +314,7 @@ describe("listen together publication state-store behavior", () => {
             "group-1",
             ["socket-1"],
             metadata,
+            "member-1",
         );
     });
 });

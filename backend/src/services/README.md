@@ -95,9 +95,11 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/listenTogetherAvailability.ts` | Queue identity checks for late availability resolution |
 | `backend/src/services/listenTogetherAvailabilityPublication.ts` | Resolve, revalidate, and publish per-user queue availability |
 | `backend/src/services/listenTogetherCallbacks.ts` | Per-stage fenced snapshot, membership, and socket publication queue |
-| `backend/src/services/listenTogetherClusterSync.ts` | Post-authority-check deferred cluster effects and replay watermarks |
-| `backend/src/services/listenTogetherDeadline.ts` | Bounded Listen Together Redis and publication operations |
+| `backend/src/services/listenTogetherClusterSync.ts` | Post-authority-check deferred cluster effects, replay watermarks, direct local identity revocation, and reconnect reconciliation ownership |
+| `backend/src/services/listenTogetherDeadline.ts` | Bounded Listen Together Redis, publication, and shared-deadline operations |
 | `backend/src/services/listenTogetherExternalSnapshot.ts` | Bounded adoption of externally produced group snapshots |
+| `backend/src/services/listenTogetherGroupDeparture.ts` | Abort-aware fenced PostgreSQL departure, group ending, and host-transfer orchestration |
+| `backend/src/services/listenTogetherGroupEnding.ts` | Idempotent fenced PostgreSQL group ending for normal and retry cleanup paths |
 | `backend/src/services/listenTogetherGroupError.ts` | Stable Listen Together domain error |
 | `backend/src/services/listenTogetherLeaseFencing.ts` | Mutation fencing contracts |
 | `backend/src/services/listenTogetherInternalCompletion.ts` | Bounded ready-gate completion retry policy |
@@ -113,7 +115,15 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/listenTogetherSnapshot.ts` | Version-aware snapshot membership and playback adoption helpers |
 | `backend/src/services/listenTogetherShutdownDrain.ts` | Shared shutdown drain deadline and outcome |
 | `backend/src/services/listenTogetherSocket.ts` | Socket command admission, fenced mutation orchestration, and ordered fanout |
+| `backend/src/services/listenTogetherSocketMutationAuthority.ts` | Locked Redis-authority hydration and stale local socket-group eviction |
+| `backend/src/services/listenTogetherSocketMutationEligibility.ts` | In-lock pending-deletion check and local socket revocation for acting users |
+| `backend/src/services/listenTogetherSocketPlayback.ts` | Socket playback command validation and manager dispatch |
+| `backend/src/services/listenTogetherSocketRevocation.ts` | Retry-safe group and all-user socket eviction by socket and user identity |
+| `backend/src/services/listenTogetherSocketReconciliation.ts` | Single-flight reconnect audit of exact attached socket-membership pairs; the current Prisma read is non-cancelable, so one 100-pair batch remains active until settlement before a coalesced trailing audit may start |
 | `backend/src/services/listenTogetherStateStore.ts` | Core |
+| `backend/src/services/listenTogetherUserCleanup.ts` | Abortable fail-closed administrative user cleanup with historical and final cluster revocation sweeps |
+| `backend/src/services/listenTogetherUserEligibility.ts` | Transactional create/join and reconnect fences for pending user deletion |
+| `backend/src/services/listenTogetherUserQuiescence.ts` | Bounded per-group local mutation-tail barrier before administrative user cleanup |
 | `backend/src/services/lyrics.ts` | Core |
 | `backend/src/services/m3uParser.ts` | Core |
 | `backend/src/services/moodBucketService.ts` | Core |
@@ -183,6 +193,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/trackReplacement.ts` | Replacement analysis, transcode invalidation, and loudness refresh |
 | `backend/src/services/umapProjection.ts` | Core |
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
+| `backend/src/services/userDeletion.ts` | Transactional deletion reservation, last-admin guards, and marker cancellation |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeCalibration.ts` | Vibe distance calibration |
 | `backend/src/services/vibeEmbedJobs.ts` | Provider-backed audio embedding job lifecycle |

@@ -1,3 +1,11 @@
+import { DeterministicRedisServer } from "./support/deterministicRedis";
+import {
+    LISTEN_TOGETHER_ACQUIRE_LEASE_SCRIPT,
+    LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
+    LISTEN_TOGETHER_RELEASE_LEASE_SCRIPT,
+    LISTEN_TOGETHER_SET_SNAPSHOT_SCRIPT,
+} from "../listenTogetherRedisScripts";
+
 describe("listen together socket runtime behavior", () => {
     const originalEnv = process.env;
 
@@ -7,7 +15,9 @@ describe("listen together socket runtime behavior", () => {
         jest.clearAllMocks();
     });
 
-    function setupListenTogetherSocketMocks() {
+    function setupListenTogetherSocketMocks(
+        redisServer?: DeterministicRedisServer,
+    ) {
         let ioInstance: any = null;
         let serverOptions: any = null;
         const roomEmit = jest.fn();
@@ -37,6 +47,7 @@ describe("listen together socket runtime behavior", () => {
             username: "User One",
             role: "USER",
             tokenVersion: 1,
+            pendingDeletionAt: null,
         }));
 
         class MockServer {
@@ -50,7 +61,7 @@ describe("listen together socket runtime behavior", () => {
         }
 
         let nextFencingToken = 0;
-        const mutationLockClient = {
+        const fallbackMutationLockClient = {
             set: jest.fn(async () => "OK"),
             incr: jest.fn(async () => {
                 nextFencingToken += 1;
@@ -71,7 +82,7 @@ describe("listen together socket runtime behavior", () => {
         const adapterSubClient = {
             disconnect: jest.fn(),
         };
-        const adapterPubClient = {
+        const fallbackAdapterPubClient = {
             set: jest.fn(async () => "OK"),
             incr: jest.fn(async () => 1),
             eval: jest.fn(async () => 1),
@@ -79,6 +90,12 @@ describe("listen together socket runtime behavior", () => {
             duplicate: jest.fn(() => adapterSubClient),
         };
 
+        const mutationLockClient: any = redisServer
+            ? redisServer.createClient()
+            : fallbackMutationLockClient;
+        const adapterPubClient: any = redisServer
+            ? redisServer.createClient()
+            : fallbackAdapterPubClient;
         const createIORedisClient = jest.fn((name: string) => {
             if (name.includes("socket-adapter-pub")) return adapterPubClient;
             return mutationLockClient;
@@ -100,11 +117,17 @@ describe("listen together socket runtime behavior", () => {
             publishSnapshot: jest.fn(async () => undefined),
             publishMembership: jest.fn(async () => undefined),
             publishEnded: jest.fn(async () => undefined),
+            publishUserRevocation: jest.fn(async () => undefined),
             stop: jest.fn(async () => undefined),
         };
         const listenTogetherStateStore: any = {
             isEnabled: jest.fn(() => true),
-            getSnapshot: jest.fn(async () => null),
+            getSnapshot: jest.fn(async () => ({
+                id: "group-1",
+                joinCode: "ABC123",
+                members: [],
+                playback: { queue: [], stateVersion: 1 },
+            })),
             setSnapshot: jest.fn(async () => "accepted"),
             deleteSnapshot: jest.fn(async () => "accepted"),
             claimFence: jest.fn(async () => "accepted"),
@@ -126,6 +149,7 @@ describe("listen together socket runtime behavior", () => {
             })),
             applyExternalSnapshot: jest.fn(),
             applyCommittedMembership: jest.fn(() => []),
+            evictLocalMember: jest.fn(),
             remove: jest.fn(),
             snapshotById: jest.fn(() => null),
             setUnavailableIndices: jest.fn(),
@@ -202,6 +226,8 @@ describe("listen together socket runtime behavior", () => {
                     process.env.LISTEN_TOGETHER_MUTATION_LOCK_ENABLED !==
                     "false",
                 stateStoreEnabled: true,
+                stateSyncEnabled:
+                    process.env.LISTEN_TOGETHER_STATE_SYNC_ENABLED !== "false",
                 mutationLockTtlMs: positiveIntEnvOr(
                     process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
                     3000,
@@ -219,6 +245,11 @@ describe("listen together socket runtime behavior", () => {
                     "listen-together:mutation-lock",
             },
         };
+        configMock.listenTogether.stateStoreEnabled =
+            process.env.LISTEN_TOGETHER_STATE_STORE_ENABLED !== "false";
+        listenTogetherStateStore.isEnabled.mockImplementation(
+            () => configMock.listenTogether.stateStoreEnabled,
+        );
 
         jest.doMock("socket.io", () => ({ Server: MockServer }));
         jest.doMock("../../config", () => ({ config: configMock }));
@@ -835,6 +866,19 @@ describe("listen together socket runtime behavior", () => {
         await authMiddleware(makeSocket("token"), missingUserNext);
         expect(missingUserNext.mock.calls[0][0].message).toBe("User not found");
 
+        mocks.prismaUserFindUnique.mockResolvedValueOnce({
+            id: "user-1",
+            username: "User One",
+            role: "USER",
+            tokenVersion: 1,
+            pendingDeletionAt: new Date("2026-08-21T12:00:00.000Z"),
+        });
+        const deletingUserNext = jest.fn();
+        await authMiddleware(makeSocket("token"), deletingUserNext);
+        expect(deletingUserNext.mock.calls[0][0].message).toBe(
+            "User deletion is pending",
+        );
+
         mocks.jwtVerify.mockReturnValueOnce({
             userId: "user-1",
             username: "User One",
@@ -879,6 +923,293 @@ describe("listen together socket runtime behavior", () => {
             username: "User One",
             groupId: null,
         });
+    });
+
+    it("rejects and evicts a second replica command after cleanup removed Redis authority", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "true",
+        };
+        const redis = new DeterministicRedisServer();
+        const mocks = setupListenTogetherSocketMocks(redis);
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+        const groupId = "group-1";
+        const lockKey = `listen-together:mutation-lock:${groupId}`;
+        const counterKey = `listen-together:mutation-lock:fencing-token:${groupId}`;
+        const snapshotKey = `listen-together:state:${groupId}`;
+        const snapshotFenceKey = `listen-together:state:fence:${groupId}`;
+        redis.write(
+            snapshotKey,
+            JSON.stringify({
+                id: groupId,
+                joinCode: "ABC123",
+                members: [],
+                playback: { queue: [], stateVersion: 1 },
+            }),
+        );
+        mocks.listenTogetherStateStore.getSnapshot.mockImplementation(
+            async () => {
+                const raw = redis.peek(snapshotKey);
+                return raw ? JSON.parse(raw) : null;
+            },
+        );
+        socket.data.groupId = groupId;
+        mocks.namespace.sockets.set(socket.id, socket);
+        mocks.groupManager.has.mockReturnValue(false);
+
+        const cleanupConsumer = redis.createClient();
+        const cleanupOwner = "cleanup-consumer";
+        const acquisition = (await cleanupConsumer.eval(
+            LISTEN_TOGETHER_ACQUIRE_LEASE_SCRIPT,
+            2,
+            lockKey,
+            counterKey,
+            cleanupOwner,
+            "3000",
+        )) as [number, number];
+        await cleanupConsumer.eval(
+            LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
+            3,
+            snapshotKey,
+            snapshotFenceKey,
+            counterKey,
+            "21600",
+            `${acquisition[1]}`,
+        );
+        await cleanupConsumer.eval(
+            LISTEN_TOGETHER_RELEASE_LEASE_SCRIPT,
+            1,
+            lockKey,
+            cleanupOwner,
+        );
+
+        const ack = jest.fn();
+        await eventHandlers["playback"]({ action: "pause" }, ack);
+
+        expect(ack).toHaveBeenCalledWith({
+            error: "Group not found",
+            code: "NOT_FOUND",
+        });
+        expect(mocks.groupManager.pause).not.toHaveBeenCalled();
+        expect(mocks.groupManager.invalidate).toHaveBeenCalledWith(groupId);
+        expect(mocks.roomEmit).toHaveBeenCalledWith("group:ended", {
+            reason: "Group ended",
+        });
+        expect(socket.emit).toHaveBeenCalledWith("group:ended", {
+            reason: "Group ended",
+        });
+        expect(socket.emit).toHaveBeenCalledWith("group:membership-revoked", {
+            groupId,
+        });
+        expect(socket.leave).toHaveBeenCalledWith(groupId);
+        expect(socket.data.groupId).toBeNull();
+        const consumers = new Set(
+            redis.commandLog
+                .filter(
+                    (command) =>
+                        command.name === "EVAL" &&
+                        String(command.args[0]).includes(
+                            "acquire-lease-and-fence",
+                        ),
+                )
+                .map((command) => command.clientId),
+        );
+        expect(consumers.size).toBe(2);
+        socketService.shutdownListenTogetherSocket();
+    });
+
+    it("rejects a lagging replica command at fence N+1 after deletion fence N", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "true",
+        };
+        const redis = new DeterministicRedisServer();
+        const mocks = setupListenTogetherSocketMocks(redis);
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+        const groupId = "group-1";
+        const lockKey = `listen-together:mutation-lock:${groupId}`;
+        const counterKey = `listen-together:mutation-lock:fencing-token:${groupId}`;
+        const snapshotKey = `listen-together:state:${groupId}`;
+        const snapshotFenceKey = `listen-together:state:fence:${groupId}`;
+        const cleanedSnapshot = {
+            id: groupId,
+            joinCode: "ABC123",
+            hostUserId: "host-1",
+            members: [
+                {
+                    userId: "host-1",
+                    username: "Host",
+                    isHost: true,
+                    joinedAt: "2026-08-20T12:00:00.000Z",
+                    isConnected: true,
+                },
+            ],
+            playback: { queue: [], stateVersion: 2, serverTime: 2 },
+        };
+        const cleanupClient = redis.createClient();
+        const cleanupOwner = "cleanup-consumer";
+        const cleanupFence = (await cleanupClient.eval(
+            LISTEN_TOGETHER_ACQUIRE_LEASE_SCRIPT,
+            2,
+            lockKey,
+            counterKey,
+            cleanupOwner,
+            "3000",
+        )) as [number, number];
+        await cleanupClient.eval(
+            LISTEN_TOGETHER_SET_SNAPSHOT_SCRIPT,
+            3,
+            snapshotKey,
+            snapshotFenceKey,
+            counterKey,
+            JSON.stringify(cleanedSnapshot),
+            "21600",
+            "2",
+            "2",
+            `${cleanupFence[1]}`,
+        );
+        await cleanupClient.eval(
+            LISTEN_TOGETHER_RELEASE_LEASE_SCRIPT,
+            1,
+            lockKey,
+            cleanupOwner,
+        );
+        mocks.listenTogetherStateStore.getSnapshot.mockImplementation(
+            async () => JSON.parse(redis.peek(snapshotKey) ?? "null"),
+        );
+        mocks.prismaUserFindUnique.mockResolvedValue({
+            pendingDeletionAt: new Date("2026-08-21T12:00:00.000Z"),
+        });
+        socket.data.groupId = groupId;
+        mocks.namespace.sockets.set(socket.id, socket);
+        const ack = jest.fn();
+
+        await eventHandlers["playback"]({ action: "pause" }, ack);
+
+        expect(cleanupFence).toEqual([1, 1]);
+        expect(redis.peek(counterKey)).toBe("2");
+        expect(mocks.prismaUserFindUnique).toHaveBeenCalledWith({
+            where: { id: "user-1" },
+            select: { pendingDeletionAt: true },
+        });
+        expect(
+            mocks.listenTogetherStateStore.getSnapshot,
+        ).not.toHaveBeenCalled();
+        expect(mocks.groupManager.pause).not.toHaveBeenCalled();
+        expect(mocks.groupManager.evictLocalMember).toHaveBeenCalledWith(
+            groupId,
+            "user-1",
+        );
+        expect(socket.emit).toHaveBeenCalledWith("group:membership-revoked", {
+            groupId,
+        });
+        expect(socket.leave).toHaveBeenCalledWith(groupId);
+        expect(socket.data.groupId).toBeNull();
+        expect(ack).toHaveBeenCalledWith({
+            error: "User deletion is pending",
+            code: "NOT_ALLOWED",
+        });
+        socketService.shutdownListenTogetherSocket();
+    });
+
+    it("keeps a malformed Redis snapshot transient without ending or evicting the group", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: "true",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "true",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        mocks.listenTogetherStateStore.getSnapshot.mockRejectedValue(
+            new mocks.MockGroupError(
+                "UNAVAILABLE",
+                "Group state is temporarily unavailable. Please retry.",
+            ),
+        );
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+        socket.data.groupId = "group-1";
+        mocks.namespace.sockets.set(socket.id, socket);
+        const ack = jest.fn();
+
+        await eventHandlers["playback"]({ action: "pause" }, ack);
+
+        expect(ack).toHaveBeenCalledWith({
+            error: "Group state is temporarily unavailable. Please retry.",
+            code: "CONFLICT",
+            transient: true,
+            retryable: true,
+            retryAfterMs: 300,
+        });
+        expect(mocks.groupManager.pause).not.toHaveBeenCalled();
+        expect(mocks.groupManager.invalidate).not.toHaveBeenCalled();
+        expect(mocks.roomEmit).not.toHaveBeenCalledWith(
+            "group:ended",
+            expect.anything(),
+        );
+        expect(socket.leave).not.toHaveBeenCalled();
+        expect(socket.data.groupId).toBe("group-1");
+        socketService.shutdownListenTogetherSocket();
+    });
+
+    it("keeps fully local socket mutations unchanged when no snapshot exists", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "false",
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: "false",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        mocks.listenTogetherStateStore.getSnapshot.mockResolvedValue(null);
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+        socket.data.groupId = "group-1";
+        const ack = jest.fn();
+
+        await eventHandlers["playback"]({ action: "pause" }, ack);
+
+        expect(ack).toHaveBeenCalledWith({ ok: true });
+        expect(mocks.groupManager.pause).toHaveBeenCalledTimes(1);
+        expect(mocks.groupManager.invalidate).not.toHaveBeenCalled();
+        socketService.shutdownListenTogetherSocket();
+    });
+
+    it("keeps new-group publication valid without a prior Redis snapshot", async () => {
+        process.env = { ...originalEnv, JWT_SECRET: "test-secret" };
+        const mocks = setupListenTogetherSocketMocks();
+        const { socketService } = bootstrapConnectedSocket(mocks);
+        const callbacks = mocks.groupManager.setCallbacks.mock.calls[0][0];
+        const createdSnapshot = {
+            id: "new-group",
+            joinCode: "NEW123",
+            members: [],
+            playback: { queue: [], stateVersion: 0 },
+        };
+
+        callbacks.onGroupState("new-group", createdSnapshot);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(mocks.listenTogetherStateStore.setSnapshot).toHaveBeenCalledWith(
+            "new-group",
+            { ...createdSnapshot, membershipVersion: 0 },
+            0,
+        );
+        expect(mocks.groupManager.invalidate).not.toHaveBeenCalled();
+        socketService.shutdownListenTogetherSocket();
     });
 
     it("covers setup branches for disabled adapter/locks and cluster-sync startup failure", async () => {
@@ -1157,9 +1488,19 @@ describe("listen together socket runtime behavior", () => {
                 events.push("join-capture:start");
                 await captureGate;
                 events.push("join-capture:end");
-                return null;
+                return {
+                    id: "group-1",
+                    joinCode: "ABC123",
+                    members: [],
+                    playback: { queue: [], stateVersion: 1 },
+                };
             })
-            .mockResolvedValueOnce(null);
+            .mockResolvedValueOnce({
+                id: "group-1",
+                joinCode: "ABC123",
+                members: [],
+                playback: { queue: [], stateVersion: 1 },
+            });
         mocks.groupManager.pause.mockImplementationOnce(() => {
             events.push("join-capture:mutation");
         });
@@ -1263,13 +1604,14 @@ describe("listen together socket runtime behavior", () => {
         ).not.toHaveBeenCalled();
 
         const acquireCall = mocks.mutationLockClient.eval.mock.calls.find(
-            ([script]) => String(script).includes("acquire-lease-and-fence"),
+            (call: unknown[]) =>
+                String(call[0]).includes("acquire-lease-and-fence"),
         );
         releaseAcquire();
         await jest.advanceTimersByTimeAsync(1);
         await stop;
         const releaseCall = mocks.mutationLockClient.eval.mock.calls.find(
-            ([script]) => String(script).includes("redis.call('del'"),
+            (call: unknown[]) => String(call[0]).includes("redis.call('del'"),
         );
         expect((releaseCall as any[])?.[3]).toBe((acquireCall as any[])?.[4]);
         socketService.shutdownListenTogetherSocket();
@@ -1318,8 +1660,8 @@ describe("listen together socket runtime behavior", () => {
 
         expect(setSnapshotStarted).toBe(true);
         expect(
-            mocks.mutationLockClient.eval.mock.calls.some(([script]) =>
-                String(script).includes("redis.call('del'"),
+            mocks.mutationLockClient.eval.mock.calls.some((call: unknown[]) =>
+                String(call[0]).includes("redis.call('del'"),
             ),
         ).toBe(false);
         expect(playbackAck).not.toHaveBeenCalled();
@@ -1775,7 +2117,7 @@ describe("listen together socket runtime behavior", () => {
         mocks.groupManager.hasMember
             .mockReturnValueOnce(true)
             .mockReturnValueOnce(false);
-        mocks.groupManager.has.mockReturnValueOnce(false);
+        mocks.groupManager.has.mockReturnValue(false);
         const ack = jest.fn();
 
         await eventHandlers["join-group"]({ groupId: "group-1" }, ack);
@@ -2270,6 +2612,8 @@ describe("listen together socket runtime behavior", () => {
             mocks.listenTogetherClusterSync.start.mock.calls[0][2];
         const recoveryHandler =
             mocks.listenTogetherClusterSync.start.mock.calls[0][3];
+        const revocationHandler =
+            mocks.listenTogetherClusterSync.start.mock.calls[0][4];
         const snapshot = { id: "group-1", playback: {}, members: [] };
         const deferredSnapshotEffect = clusterHandler(snapshot);
         expect(
@@ -2298,10 +2642,31 @@ describe("listen together socket runtime behavior", () => {
         ).not.toHaveBeenCalled();
         await deferredMembershipEffect?.();
         await new Promise((resolve) => setImmediate(resolve));
+        const lingeringEndedSocket = {
+            data: { userId: "lingering-user", groupId: "group-1" },
+            emit: jest.fn(),
+            leave: jest.fn(async () => undefined),
+        };
+        mocks.namespace.sockets.set(
+            "lingering-ended-socket",
+            lingeringEndedSocket,
+        );
         const deferredEndedEffect = endedHandler("group-1");
         expect(mocks.groupManager.remove).not.toHaveBeenCalledWith("group-1");
         await deferredEndedEffect?.();
-        recoveryHandler("group-recovered-ended", null);
+        const recoveredEndedSocket = {
+            data: {
+                userId: "recovered-ended-user",
+                groupId: "group-recovered-ended",
+            },
+            emit: jest.fn(),
+            leave: jest.fn(async () => undefined),
+        };
+        mocks.namespace.sockets.set(
+            "recovered-ended-socket",
+            recoveredEndedSocket,
+        );
+        await recoveryHandler("group-recovered-ended", null);
         expect(mocks.groupManager.applyExternalSnapshot).toHaveBeenCalledWith(
             snapshot,
         );
@@ -2317,6 +2682,47 @@ describe("listen together socket runtime behavior", () => {
             peerSocket.leave.mock.invocationCallOrder[0],
         );
         expect(peerSocket.data.groupId).toBeNull();
+        expect(lingeringEndedSocket.emit).toHaveBeenCalledWith("group:ended", {
+            reason: "Group ended",
+        });
+        expect(lingeringEndedSocket.emit).toHaveBeenCalledWith(
+            "group:membership-revoked",
+            { groupId: "group-1" },
+        );
+        expect(lingeringEndedSocket.leave).toHaveBeenCalledWith("group-1");
+        expect(lingeringEndedSocket.data.groupId).toBeNull();
+        expect(
+            lingeringEndedSocket.leave.mock.invocationCallOrder[0],
+        ).toBeLessThan(mocks.groupManager.remove.mock.invocationCallOrder[0]);
+        expect(recoveredEndedSocket.emit).toHaveBeenCalledWith("group:ended", {
+            reason: "Group ended",
+        });
+        expect(recoveredEndedSocket.leave).toHaveBeenCalledWith(
+            "group-recovered-ended",
+        );
+        expect(recoveredEndedSocket.data.groupId).toBeNull();
+
+        const remoteOnlySocket = {
+            data: { userId: "deleted-user", groupId: "remote-only" },
+            emit: jest.fn(),
+            leave: jest.fn(async () => undefined),
+        };
+        mocks.namespace.sockets.set("remote-only-socket", remoteOnlySocket);
+        mocks.groupManager.has.mockReturnValueOnce(false);
+        const deferredRevocationEffect = revocationHandler(
+            {
+                userId: "deleted-user",
+                groupIds: ["remote-only"],
+            },
+            { fencingToken: 18, publicationId: "revocation-18" },
+        );
+        await deferredRevocationEffect?.();
+        expect(remoteOnlySocket.emit).toHaveBeenCalledWith(
+            "group:membership-revoked",
+            { groupId: "remote-only", membershipVersion: 18 },
+        );
+        expect(remoteOnlySocket.leave).toHaveBeenCalledWith("remote-only");
+        expect(remoteOnlySocket.data.groupId).toBeNull();
         expect(mocks.groupManager.remove).toHaveBeenCalledWith("group-1");
         expect(mocks.groupManager.remove).toHaveBeenCalledWith(
             "group-recovered-ended",

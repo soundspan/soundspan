@@ -77,6 +77,7 @@ const prisma = {
         update: jest.fn(),
         updateMany: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
     },
     userSettings: {
         create: jest.fn(),
@@ -87,6 +88,11 @@ const prisma = {
 
 jest.mock("../../utils/db", () => ({
     prisma,
+}));
+
+const mockCleanupListenTogetherForUser = jest.fn();
+jest.mock("../../services/listenTogetherUserCleanup", () => ({
+    cleanupListenTogetherForUser: mockCleanupListenTogetherForUser,
 }));
 
 const mockBcryptCompare = jest.fn();
@@ -296,9 +302,11 @@ describe("auth routes runtime", () => {
         prisma.user.updateMany.mockResolvedValue({ count: 1 });
         prisma.user.count.mockResolvedValue(1);
         prisma.user.delete.mockResolvedValue({});
+        prisma.user.deleteMany.mockResolvedValue({ count: 1 });
         prisma.userSettings.create.mockResolvedValue({});
         prisma.$executeRaw.mockResolvedValue(0);
         prisma.$transaction.mockImplementation(async (run) => run(prisma));
+        mockCleanupListenTogetherForUser.mockResolvedValue(undefined);
 
         mockBcryptCompare.mockResolvedValue(true);
         mockBcryptHash.mockResolvedValue("new-hash");
@@ -865,7 +873,7 @@ describe("auth routes runtime", () => {
         await deleteUser(selfDeleteReq, selfDeleteRes);
         expect(selfDeleteRes.statusCode).toBe(400);
 
-        prisma.user.delete.mockRejectedValueOnce({ code: "P2025" });
+        prisma.user.deleteMany.mockResolvedValueOnce({ count: 0 });
         const missingDeleteReq = {
             user: { id: "admin-1" },
             params: { id: "u404" },
@@ -874,7 +882,7 @@ describe("auth routes runtime", () => {
         await deleteUser(missingDeleteReq, missingDeleteRes);
         expect(missingDeleteRes.statusCode).toBe(404);
 
-        prisma.user.delete.mockResolvedValueOnce({});
+        prisma.user.deleteMany.mockResolvedValueOnce({ count: 1 });
         const okDeleteReq = {
             user: { id: "admin-1" },
             params: { id: "u2" },
@@ -882,6 +890,14 @@ describe("auth routes runtime", () => {
         const okDeleteRes = createRes();
         await deleteUser(okDeleteReq, okDeleteRes);
         expect(okDeleteRes.statusCode).toBe(200);
+        expect(mockCleanupListenTogetherForUser).toHaveBeenCalledWith("u2");
+        const cleanupOrder =
+            mockCleanupListenTogetherForUser.mock.invocationCallOrder.at(-1);
+        const deleteOrder =
+            prisma.user.deleteMany.mock.invocationCallOrder.at(-1);
+        expect(cleanupOrder).toBeDefined();
+        expect(deleteOrder).toBeDefined();
+        expect(cleanupOrder!).toBeLessThan(deleteOrder!);
     });
 
     it("returns 500 when listing users fails", async () => {
@@ -908,7 +924,7 @@ describe("auth routes runtime", () => {
     });
 
     it("returns 500 for generic delete-user failures", async () => {
-        prisma.user.delete.mockRejectedValue(new Error("db"));
+        prisma.user.deleteMany.mockRejectedValue(new Error("db"));
         const req = {
             user: { id: "admin-1" },
             params: { id: "u2" },
@@ -918,6 +934,27 @@ describe("auth routes runtime", () => {
 
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to delete user" });
+    });
+
+    it("rejects user deletion when Listen Together cleanup fails", async () => {
+        mockCleanupListenTogetherForUser.mockRejectedValueOnce(
+            new Error("publication failed"),
+        );
+        const req = {
+            user: { id: "admin-1" },
+            params: { id: "u2" },
+        } as any;
+        const res = createRes();
+
+        await deleteUser(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "User deletion is pending. Retry to finish cleanup.",
+            code: "USER_DELETION_PENDING",
+            retryable: true,
+        });
+        expect(prisma.user.deleteMany).not.toHaveBeenCalled();
     });
 
     it("handles 2FA setup, enable, disable, and status endpoints", async () => {

@@ -593,6 +593,20 @@ class GroupManager {
         }
     }
 
+    /** Drop revoked local membership without producing a new publication. */
+    evictLocalMember(groupId: string, userId: string): void {
+        const group = this.groups.get(groupId);
+        const member = group?.members.get(userId);
+        if (!group || !member) return;
+        if (group.hostUserId === userId) {
+            this.invalidate(groupId);
+            return;
+        }
+        group.members.delete(userId);
+        group.readyUserIds.delete(userId);
+        group.lastActivity = Date.now();
+    }
+
     /** How many sockets a user has in a group. */
     socketCount(groupId: string, userId: string): number {
         const member = this.groups.get(groupId)?.members.get(userId);

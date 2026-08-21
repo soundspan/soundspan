@@ -7,6 +7,13 @@ jest.mock("../../config", () => ({
         redisUrl: "redis://localhost:6379",
         localLoginEnabled: true,
         secureCookies: false,
+        listenTogether: {
+            mutationLockEnabled: false,
+            publicationDeadlineMs: 750,
+            stateStoreEnabled: false,
+            stateStoreKeyPrefix: "listen-together:test-state",
+            stateStoreTtlSeconds: 21_600,
+        },
         oidc: {
             enabled: true,
             issuerUrl: "",

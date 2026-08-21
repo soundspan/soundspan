@@ -4,6 +4,7 @@ import type { GroupSnapshot } from "./listenTogetherManager";
 import { config } from "../config";
 import { withListenTogetherDeadline } from "./listenTogetherDeadline";
 import type { FencedStateWriteResult } from "./listenTogetherLeaseFencing";
+import { GroupError } from "./listenTogetherGroupError";
 import {
     LISTEN_TOGETHER_CLAIM_FENCE_SCRIPT,
     LISTEN_TOGETHER_DELETE_SNAPSHOT_SCRIPT,
@@ -21,15 +22,185 @@ const LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS =
     config.listenTogether.publicationDeadlineMs;
 const LISTEN_TOGETHER_MUTATION_LOCK_PREFIX =
     config.listenTogether.mutationLockPrefix ?? "listen-together:mutation-lock";
+const MAX_INVALID_SNAPSHOT_WARNING_GROUPS = 10_000;
+const MAX_SNAPSHOT_MEMBERS = 10_000;
+const MAX_SNAPSHOT_QUEUE_ITEMS = 500;
+const log = logger.child("ListenTogetherStateStore");
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+    return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isOptionalString(value: unknown): boolean {
+    return value === undefined || typeof value === "string";
+}
+
+function isOptionalNumberOrNull(value: unknown): boolean {
+    return value === undefined || value === null || isFiniteNumber(value);
+}
+
+function isMediaSource(value: unknown): boolean {
+    return (
+        value === "local" ||
+        value === "tidal" ||
+        value === "youtube" ||
+        value === "youtube-direct"
+    );
+}
+
+function isProvider(value: unknown): boolean {
+    if (value === undefined) return true;
+    if (!isRecord(value) || !isMediaSource(value.source)) return false;
+    return (
+        isOptionalString(value.providerTrackId) &&
+        (value.tidalTrackId === undefined ||
+            isFiniteNumber(value.tidalTrackId)) &&
+        isOptionalString(value.youtubeVideoId) &&
+        (value.youtubeAudioFormat === undefined ||
+            value.youtubeAudioFormat === "mp4" ||
+            value.youtubeAudioFormat === "webm")
+    );
+}
+
+function isQueueItem(value: unknown): boolean {
+    if (!isRecord(value) || !isRecord(value.artist) || !isRecord(value.album)) {
+        return false;
+    }
+    const validSources =
+        (value.mediaSource === undefined || isMediaSource(value.mediaSource)) &&
+        (value.streamSource === undefined ||
+            (isMediaSource(value.streamSource) &&
+                value.streamSource !== "local")) &&
+        (value.originSource === undefined ||
+            value.originSource === "local" ||
+            value.originSource === "tidal" ||
+            value.originSource === "youtube");
+    return (
+        typeof value.id === "string" &&
+        typeof value.title === "string" &&
+        isFiniteNumber(value.duration) &&
+        value.duration >= 0 &&
+        isOptionalNumberOrNull(value.loudnessLufs) &&
+        isOptionalNumberOrNull(value.truePeakDb) &&
+        typeof value.artist.id === "string" &&
+        typeof value.artist.name === "string" &&
+        typeof value.album.id === "string" &&
+        typeof value.album.title === "string" &&
+        (value.album.coverArt === null ||
+            typeof value.album.coverArt === "string") &&
+        isOptionalNumberOrNull(value.album.albumLoudnessLufs) &&
+        isOptionalNumberOrNull(value.album.albumTruePeakDb) &&
+        validSources &&
+        isProvider(value.provider) &&
+        isOptionalString(value.localTrackId) &&
+        isOptionalString(value.trackTidalId) &&
+        isOptionalString(value.trackYtMusicId) &&
+        isOptionalString(value.trackMappingId) &&
+        (value.tidalTrackId === undefined ||
+            isFiniteNumber(value.tidalTrackId)) &&
+        isOptionalString(value.youtubeVideoId) &&
+        (value.youtubeAudioFormat === undefined ||
+            value.youtubeAudioFormat === "mp4" ||
+            value.youtubeAudioFormat === "webm")
+    );
+}
+
+function isSnapshotPlayback(value: unknown): boolean {
+    if (!isRecord(value) || !Array.isArray(value.queue)) return false;
+    if (
+        value.queue.length > MAX_SNAPSHOT_QUEUE_ITEMS ||
+        !value.queue.every(isQueueItem)
+    ) {
+        return false;
+    }
+    const validCurrentIndex =
+        isNonNegativeInteger(value.currentIndex) &&
+        (value.queue.length === 0
+            ? value.currentIndex === 0
+            : value.currentIndex < value.queue.length);
+    return (
+        validCurrentIndex &&
+        typeof value.isPlaying === "boolean" &&
+        isFiniteNumber(value.positionMs) &&
+        value.positionMs >= 0 &&
+        isFiniteNumber(value.serverTime) &&
+        value.serverTime >= 0 &&
+        isNonNegativeInteger(value.stateVersion) &&
+        (value.trackId === null || typeof value.trackId === "string")
+    );
+}
+
+function isSnapshotMember(value: unknown): boolean {
+    if (!isRecord(value)) return false;
+    return (
+        typeof value.userId === "string" &&
+        typeof value.username === "string" &&
+        typeof value.isHost === "boolean" &&
+        typeof value.joinedAt === "string" &&
+        Number.isFinite(Date.parse(value.joinedAt)) &&
+        typeof value.isConnected === "boolean"
+    );
+}
+
+function hasSnapshotCollections(snapshot: Record<string, unknown>): boolean {
+    if (
+        !Array.isArray(snapshot.members) ||
+        snapshot.members.length > MAX_SNAPSHOT_MEMBERS ||
+        !snapshot.members.every(isSnapshotMember)
+    ) {
+        return false;
+    }
+    if (snapshot.readyUserIds === undefined) return true;
+    return (
+        Array.isArray(snapshot.readyUserIds) &&
+        snapshot.readyUserIds.length <= MAX_SNAPSHOT_MEMBERS &&
+        snapshot.readyUserIds.every((userId) => typeof userId === "string")
+    );
+}
+
+function hasSnapshotMetadata(snapshot: Record<string, unknown>): boolean {
+    const validMembershipVersion =
+        snapshot.membershipVersion === undefined ||
+        isNonNegativeInteger(snapshot.membershipVersion);
+    const validReadyDeadline =
+        snapshot.readyDeadlineMs === undefined ||
+        snapshot.readyDeadlineMs === null ||
+        (isFiniteNumber(snapshot.readyDeadlineMs) &&
+            snapshot.readyDeadlineMs >= 0);
+    return (
+        typeof snapshot.id === "string" &&
+        typeof snapshot.name === "string" &&
+        typeof snapshot.joinCode === "string" &&
+        (snapshot.groupType === "host-follower" ||
+            snapshot.groupType === "collaborative") &&
+        (snapshot.visibility === "public" ||
+            snapshot.visibility === "private") &&
+        typeof snapshot.isActive === "boolean" &&
+        typeof snapshot.hostUserId === "string" &&
+        validMembershipVersion &&
+        (snapshot.syncState === "idle" ||
+            snapshot.syncState === "waiting" ||
+            snapshot.syncState === "playing" ||
+            snapshot.syncState === "paused") &&
+        validReadyDeadline
+    );
+}
 
 function isLikelyGroupSnapshot(value: unknown): value is GroupSnapshot {
-    if (!value || typeof value !== "object") return false;
-    const snapshot = value as Record<string, unknown>;
-    if (typeof snapshot.id !== "string") return false;
-    if (!snapshot.playback || typeof snapshot.playback !== "object")
-        return false;
-    if (!Array.isArray(snapshot.members)) return false;
-    return true;
+    return (
+        isRecord(value) &&
+        hasSnapshotMetadata(value) &&
+        hasSnapshotCollections(value) &&
+        isSnapshotPlayback(value.playback)
+    );
 }
 
 function snapshotOrdering(snapshot: GroupSnapshot): {
@@ -53,6 +224,7 @@ function snapshotOrdering(snapshot: GroupSnapshot): {
 
 class ListenTogetherStateStore {
     private client: ReturnType<typeof createIORedisClient> | null = null;
+    private readonly invalidSnapshotWarningGroups = new Set<string>();
 
     isEnabled(): boolean {
         return LISTEN_TOGETHER_STATE_STORE_ENABLED;
@@ -82,34 +254,62 @@ class ListenTogetherStateStore {
             return null;
         }
 
+        let raw: string | null;
         try {
-            const raw = await withListenTogetherDeadline(
+            raw = await withListenTogetherDeadline(
                 this.ensureClient().get(this.key(groupId)),
                 "listen together snapshot read",
                 LISTEN_TOGETHER_PUBLICATION_DEADLINE_MS,
             );
-            if (!raw) return null;
-            const parsed = JSON.parse(raw) as unknown;
-            if (!isLikelyGroupSnapshot(parsed)) {
-                logger.warn(
-                    `[ListenTogether/StateStore] Ignoring malformed snapshot for group ${groupId}`,
-                );
-                return null;
-            }
-            if (parsed.id !== groupId) {
-                logger.warn(
-                    `[ListenTogether/StateStore] Ignoring snapshot with mismatched id for group ${groupId}`,
-                );
-                return null;
-            }
-            return parsed;
         } catch (err) {
-            logger.warn(
-                `[ListenTogether/StateStore] Failed to fetch snapshot for group ${groupId}`,
-                err,
-            );
+            log.warn("Snapshot read failed", { groupId, error: err });
             throw err;
         }
+        if (raw === null) return null;
+
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(raw) as unknown;
+        } catch (error) {
+            return this.rejectInvalidSnapshot(groupId, "malformed-json", error);
+        }
+        if (!isLikelyGroupSnapshot(parsed)) {
+            return this.rejectInvalidSnapshot(groupId, "malformed-shape");
+        }
+        if (parsed.id !== groupId) {
+            return this.rejectInvalidSnapshot(groupId, "mismatched-group-id");
+        }
+        return parsed;
+    }
+
+    private rejectInvalidSnapshot(
+        groupId: string,
+        reason: string,
+        error?: unknown,
+    ): never {
+        if (!this.invalidSnapshotWarningGroups.has(groupId)) {
+            if (
+                this.invalidSnapshotWarningGroups.size >=
+                MAX_INVALID_SNAPSHOT_WARNING_GROUPS
+            ) {
+                const oldest = this.invalidSnapshotWarningGroups
+                    .values()
+                    .next();
+                if (!oldest.done) {
+                    this.invalidSnapshotWarningGroups.delete(oldest.value);
+                }
+            }
+            this.invalidSnapshotWarningGroups.add(groupId);
+            log.warn("Invalid authoritative snapshot", {
+                groupId,
+                reason,
+                error,
+            });
+        }
+        throw new GroupError(
+            "UNAVAILABLE",
+            "Group state is temporarily unavailable. Please retry.",
+        );
     }
 
     async setSnapshot(

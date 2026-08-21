@@ -364,6 +364,33 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
     });
 
+    it("evicts local non-host membership without publishing or disturbing peers", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-local-revocation", {
+            name: "Local revocation",
+            joinCode: "LOCAL1",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-local-revocation", "deleted", "Deleted");
+        callbacks.onMemberLeft.mockClear();
+        callbacks.onGroupState.mockClear();
+
+        groupManager.evictLocalMember("g-local-revocation", "deleted");
+
+        expect(groupManager.hasMember("g-local-revocation", "deleted")).toBe(
+            false,
+        );
+        expect(groupManager.hasMember("g-local-revocation", "host")).toBe(true);
+        expect(callbacks.onMemberLeft).not.toHaveBeenCalled();
+        expect(callbacks.onGroupState).not.toHaveBeenCalled();
+    });
+
     it("emits presence only when a DB-fallback hydrated member connects", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);

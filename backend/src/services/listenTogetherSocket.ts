@@ -59,7 +59,6 @@ import {
     enqueueGroupSnapshotPublication,
     flushGroupPublications,
     resetGroupPublications,
-    type MembershipFanoutMetadata,
 } from "./listenTogetherCallbacks";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
 import { ReadyGateCompletionSupervisor } from "./listenTogetherInternalCompletion";
@@ -75,6 +74,17 @@ import {
     type ListenTogetherDrainResult,
 } from "./listenTogetherMutationAdmission";
 import { drainListenTogetherMutationBoundaries } from "./listenTogetherShutdownDrain";
+import { revokeGroupSockets } from "./listenTogetherSocketRevocation";
+import { createClusterSocketReconciliationHandlers } from "./listenTogetherSocketReconciliation";
+import {
+    createClusterSocketAuthorityHandlers,
+    hydrateSocketMutationAuthority,
+} from "./listenTogetherSocketMutationAuthority";
+import { assertSocketMutationUserEligible } from "./listenTogetherSocketMutationEligibility";
+import {
+    applySocketPlaybackAction,
+    type SocketPlaybackRequest,
+} from "./listenTogetherSocketPlayback";
 
 const log = logger.child("ListenTogetherSocket");
 
@@ -101,6 +111,7 @@ interface SocketMutationOptions {
     signal?: AbortSignal;
     abandonOperationOnAbort?: boolean;
     flushPublications?: boolean;
+    actingUserId?: string;
 }
 
 function resolveAck(arg1?: unknown, arg2?: unknown): SocketAck | undefined {
@@ -171,6 +182,7 @@ const listenTogetherObservabilityCounters = {
 let redisAdapterPubClient: any = null;
 let redisAdapterSubClient: any = null;
 let unsubscribeSocialPresenceUpdates: (() => void) | null = null;
+let listenTogetherNamespace: Namespace | null = null;
 let clusterStopStarted = false;
 
 function stopClusterStateSync(): void {
@@ -280,7 +292,7 @@ async function runSocketGroupMutation<T>(
     operation: (fence: GroupMutationFence) => Promise<T>,
     options: SocketMutationOptions = {},
 ): Promise<T> {
-    const { signal, abandonOperationOnAbort } = options;
+    const { signal, abandonOperationOnAbort, actingUserId } = options;
     const flushPublications = options.flushPublications ?? true;
     let enteredMutationBoundary = false;
     try {
@@ -292,14 +304,18 @@ async function runSocketGroupMutation<T>(
                 beforeOperation: async () => {
                     signal?.throwIfAborted();
                     enteredMutationBoundary = true;
-                    const authoritativeSnapshot =
-                        await listenTogetherStateStore.getSnapshot(groupId);
+                    await assertSocketMutationUserEligible(
+                        listenTogetherNamespace,
+                        groupId,
+                        actingUserId,
+                        clearRevokedSocketState,
+                    );
+                    await hydrateSocketMutationAuthority(
+                        groupId,
+                        listenTogetherNamespace,
+                        clearRevokedSocketState,
+                    );
                     signal?.throwIfAborted();
-                    if (authoritativeSnapshot) {
-                        groupManager.applyExternalSnapshot(
-                            authoritativeSnapshot,
-                        );
-                    }
                 },
                 afterOperation: async () => {
                     signal?.throwIfAborted();
@@ -466,30 +482,9 @@ function scheduleDisconnectCleanup(
     pendingDisconnectCleanupTimers.set(key, timer);
 }
 
-async function revokeGroupSockets(
-    ns: Namespace,
-    groupId: string,
-    socketIds: string[],
-    metadata?: MembershipFanoutMetadata,
-): Promise<void> {
-    await Promise.all(
-        socketIds.map(async (socketId) => {
-            const socket = ns.sockets.get(socketId) as
-                | AuthenticatedSocket
-                | undefined;
-            if (!socket || socket.data.groupId !== groupId) return;
-            clearDisconnectCleanup(groupId, socket.data.userId);
-            recentDisconnectAtMs.delete(
-                disconnectCleanupKey(groupId, socket.data.userId),
-            );
-            socket.emit("group:membership-revoked", {
-                groupId,
-                ...metadata,
-            });
-            socket.data.groupId = null;
-            await socket.leave(groupId);
-        }),
-    );
+function clearRevokedSocketState(groupId: string, userId: string): void {
+    clearDisconnectCleanup(groupId, userId);
+    recentDisconnectAtMs.delete(disconnectCleanupKey(groupId, userId));
 }
 
 function isJoinedGroupCurrent(
@@ -511,8 +506,11 @@ async function attachJoinedSocket(
     groupId: string,
     snapshot: GroupSnapshot,
 ): Promise<GroupSnapshot> {
-    return runSocketGroupMutation(groupId, "join-group-attachment", async () =>
-        attachSocketInsideBoundary(socket, groupId, snapshot),
+    return runSocketGroupMutation(
+        groupId,
+        "join-group-attachment",
+        async () => attachSocketInsideBoundary(socket, groupId, snapshot),
+        { actingUserId: socket.data.userId },
     );
 }
 
@@ -687,8 +685,15 @@ function configureSocketBroadcaster(ns: Namespace): void {
                 ...metadata,
             });
         },
-        revokeSockets: (groupId, socketIds, metadata) =>
-            revokeGroupSockets(ns, groupId, socketIds, metadata),
+        revokeSockets: (groupId, socketIds, metadata, userId) =>
+            revokeGroupSockets(
+                ns,
+                groupId,
+                socketIds,
+                metadata,
+                userId,
+                clearRevokedSocketState,
+            ),
     });
 }
 
@@ -778,49 +783,44 @@ function applyClusterMembership(
             membership.hostUserId,
             metadata.fencingToken,
         );
-        try {
-            await revokeGroupSockets(ns, groupId, revokedSocketIds, {
+        await revokeGroupSockets(
+            ns,
+            groupId,
+            revokedSocketIds,
+            {
                 membershipVersion: metadata.fencingToken,
-            });
-        } catch (error) {
-            log.error(
-                `Failed to revoke committed departure sockets for ${groupId}`,
-                error,
-            );
-        }
+            },
+            undefined,
+            clearRevokedSocketState,
+        );
     };
 }
 
-function recoverClusterAuthority(
-    groupId: string,
-    snapshot: GroupSnapshot | null,
-): void {
-    groupManager.invalidate(groupId);
-    if (snapshot) {
-        groupManager.applyExternalSnapshot(snapshot);
-        return;
-    }
-    groupManager.remove(groupId);
-    releaseLocalGroupMutationState(groupId);
-}
-
 function configureClusterStateSync(ns: Namespace): void {
+    const authorityHandlers = createClusterSocketAuthorityHandlers(
+        ns,
+        clearRevokedSocketState,
+    );
+    const handlers = createClusterSocketReconciliationHandlers(
+        ns,
+        authorityHandlers.recoveryHandler,
+        clearRevokedSocketState,
+        (groupId, userId) => groupManager.evictLocalMember(groupId, userId),
+    );
     if (!listenTogetherClusterSync.isEnabled()) {
         logger.info(
-            "[ListenTogether/StateSync] Disabled via LISTEN_TOGETHER_STATE_SYNC_ENABLED=false",
+            "[ListenTogether/StateSync] Disabled; local socket eviction remains authoritative and cluster publication is a no-op",
         );
-        return;
     }
     void listenTogetherClusterSync
         .start(
             (snapshot) => () => groupManager.applyExternalSnapshot(snapshot),
-            (groupId) => () => {
-                groupManager.remove(groupId);
-                releaseLocalGroupMutationState(groupId);
-            },
+            authorityHandlers.endedHandler,
             (groupId, membership, metadata) =>
                 applyClusterMembership(ns, groupId, membership, metadata),
-            recoverClusterAuthority,
+            authorityHandlers.recoveryHandler,
+            handlers.userRevocationHandler,
+            handlers.reconciliationHandler,
         )
         .catch((error) => {
             logger.error(
@@ -843,9 +843,13 @@ function configureSocketAuthentication(ns: Namespace): void {
                     username: true,
                     role: true,
                     tokenVersion: true,
+                    pendingDeletionAt: true,
                 },
             });
             if (!user) return next(new Error("User not found"));
+            if (user.pendingDeletionAt) {
+                return next(new Error("User deletion is pending"));
+            }
             if (
                 decoded.tokenVersion !== undefined &&
                 decoded.tokenVersion !== user.tokenVersion
@@ -897,6 +901,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     resetAvailabilityPublications();
     io = createListenTogetherServer(httpServer);
     const ns = io.of("/listen-together");
+    listenTogetherNamespace = ns;
     configureSocialPresence(ns);
     configureRedisSocketAdapter(io);
     configureClusterStateSync(ns);
@@ -907,13 +912,6 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     registerConnectionHandler(ns);
     return io;
 }
-
-type PlaybackRequest = {
-    action: string;
-    positionMs?: number;
-    index?: number;
-    stateVersion?: number;
-};
 
 type QueueRequest = {
     action: string;
@@ -989,85 +987,43 @@ function registerJoinHandler(ns: Namespace, socket: AuthenticatedSocket): void {
     );
 }
 
-function applyPlaybackAction(
-    groupId: string,
-    userId: string,
-    data: PlaybackRequest,
-    fence: GroupMutationFence,
-): void {
-    if (data.action === "play") {
-        groupManager.play(groupId, userId, fence);
-        return;
-    }
-    if (data.action === "pause") {
-        groupManager.pause(groupId, userId, fence);
-        return;
-    }
-    if (data.action === "next") {
-        groupManager.next(groupId, userId, fence);
-        return;
-    }
-    if (data.action === "previous") {
-        groupManager.previous(groupId, userId, fence);
-        return;
-    }
-    if (data.action === "seek") {
-        if (typeof data.positionMs !== "number") {
-            throw new GroupError("INVALID", "positionMs required for seek");
-        }
-        if (
-            data.stateVersion !== undefined &&
-            (!Number.isInteger(data.stateVersion) || data.stateVersion < 0)
-        ) {
-            throw new GroupError(
-                "INVALID",
-                "stateVersion must be a non-negative integer",
-            );
-        }
-        groupManager.seek(
-            groupId,
-            userId,
-            data.positionMs,
-            data.stateVersion,
-            fence,
-        );
-        return;
-    }
-    if (data.action === "set-track") {
-        if (typeof data.index !== "number") {
-            throw new GroupError("INVALID", "index required for set-track");
-        }
-        groupManager.setTrack(groupId, userId, data.index, true, fence);
-        return;
-    }
-    throw new GroupError("INVALID", `Unknown action: ${data.action}`);
-}
-
 function registerPlaybackHandler(socket: AuthenticatedSocket): void {
-    socket.on("playback", async (data: PlaybackRequest, ack?: SocketAck) => {
-        const { groupId, userId } = socket.data;
-        if (!groupId) return sendAck(ack, { error: "Not in a group" });
-        try {
-            const operationName = `playback:${data.action}`;
-            await withListenTogetherMutationAdmission(operationName, () =>
-                runSocketGroupMutation(groupId, operationName, async (fence) =>
-                    applyPlaybackAction(groupId, userId, data, fence),
-                ),
-            );
-            sendAck(ack, { ok: true });
-        } catch (error) {
-            const message = groupErrorMessage(error, "Playback error");
-            if (error instanceof GroupError && error.retryable) {
-                recordGroupConflict(
-                    groupId,
-                    userId,
-                    `playback:${data.action}`,
-                    message,
+    socket.on(
+        "playback",
+        async (data: SocketPlaybackRequest, ack?: SocketAck) => {
+            const { groupId, userId } = socket.data;
+            if (!groupId) return sendAck(ack, { error: "Not in a group" });
+            try {
+                const operationName = `playback:${data.action}`;
+                await withListenTogetherMutationAdmission(operationName, () =>
+                    runSocketGroupMutation(
+                        groupId,
+                        operationName,
+                        async (fence) =>
+                            applySocketPlaybackAction(
+                                groupId,
+                                userId,
+                                data,
+                                fence,
+                            ),
+                        { actingUserId: userId },
+                    ),
                 );
+                sendAck(ack, { ok: true });
+            } catch (error) {
+                const message = groupErrorMessage(error, "Playback error");
+                if (error instanceof GroupError && error.retryable) {
+                    recordGroupConflict(
+                        groupId,
+                        userId,
+                        `playback:${data.action}`,
+                        message,
+                    );
+                }
+                sendAck(ack, buildOperationErrorAck(error, message));
             }
-            sendAck(ack, buildOperationErrorAck(error, message));
-        }
-    });
+        },
+    );
 }
 
 function queueTrackInputs(data: QueueRequest): QueueTrackInput[] {
@@ -1103,17 +1059,22 @@ async function insertQueueTracks(
     const items = await validateQueueTracks(allowedInputs);
     if (items.length === 0) return { error: "No valid tracks found" };
     let acceptedCount = 0;
-    await runSocketGroupMutation(groupId, `queue:${action}`, async (fence) => {
-        const before =
-            groupManager.snapshotById(groupId)?.playback.queue.length ?? 0;
-        const delta = groupManager.modifyQueue(
-            groupId,
-            userId,
-            { action, items },
-            fence,
-        );
-        acceptedCount = Math.max(0, delta.queue.length - before);
-    });
+    await runSocketGroupMutation(
+        groupId,
+        `queue:${action}`,
+        async (fence) => {
+            const before =
+                groupManager.snapshotById(groupId)?.playback.queue.length ?? 0;
+            const delta = groupManager.modifyQueue(
+                groupId,
+                userId,
+                { action, items },
+                fence,
+            );
+            acceptedCount = Math.max(0, delta.queue.length - before);
+        },
+        { actingUserId: userId },
+    );
     return {
         ok: true,
         acceptedCount,
@@ -1131,14 +1092,19 @@ async function runQueueIndexAction(
 ): Promise<Record<string, unknown>> {
     if (data.action === "remove") {
         if (typeof data.index !== "number") return { error: "index required" };
-        await runSocketGroupMutation(groupId, "queue:remove", async (fence) => {
-            groupManager.modifyQueue(
-                groupId,
-                userId,
-                { action: "remove", index: data.index as number },
-                fence,
-            );
-        });
+        await runSocketGroupMutation(
+            groupId,
+            "queue:remove",
+            async (fence) => {
+                groupManager.modifyQueue(
+                    groupId,
+                    userId,
+                    { action: "remove", index: data.index as number },
+                    fence,
+                );
+            },
+            { actingUserId: userId },
+        );
         return { ok: true };
     }
     if (data.action === "reorder") {
@@ -1163,18 +1129,24 @@ async function runQueueIndexAction(
                     fence,
                 );
             },
+            { actingUserId: userId },
         );
         return { ok: true };
     }
     if (data.action === "clear") {
-        await runSocketGroupMutation(groupId, "queue:clear", async (fence) => {
-            groupManager.modifyQueue(
-                groupId,
-                userId,
-                { action: "clear" },
-                fence,
-            );
-        });
+        await runSocketGroupMutation(
+            groupId,
+            "queue:clear",
+            async (fence) => {
+                groupManager.modifyQueue(
+                    groupId,
+                    userId,
+                    { action: "clear" },
+                    fence,
+                );
+            },
+            { actingUserId: userId },
+        );
         return { ok: true };
     }
     return { error: `Unknown action: ${data.action}` };
@@ -1224,14 +1196,19 @@ function registerQueueHandler(socket: AuthenticatedSocket): void {
 async function reportSocketReady(socket: AuthenticatedSocket): Promise<void> {
     const { groupId, userId } = socket.data;
     if (!groupId) throw new GroupError("NOT_FOUND", "Not in a group");
-    await runSocketGroupMutation(groupId, "ready", async (fence) => {
-        const wasWaiting =
-            groupManager.snapshotById(groupId)?.syncState === "waiting";
-        groupManager.reportReady(groupId, userId);
-        if (wasWaiting) {
-            void queuePersistAndPublishSnapshot(groupId, undefined, fence);
-        }
-    });
+    await runSocketGroupMutation(
+        groupId,
+        "ready",
+        async (fence) => {
+            const wasWaiting =
+                groupManager.snapshotById(groupId)?.syncState === "waiting";
+            groupManager.reportReady(groupId, userId);
+            if (wasWaiting) {
+                void queuePersistAndPublishSnapshot(groupId, undefined, fence);
+            }
+        },
+        { actingUserId: userId },
+    );
 }
 
 function registerReadyHandler(socket: AuthenticatedSocket): void {
@@ -1263,13 +1240,18 @@ async function processPlaybackFailure(
 ): Promise<void> {
     const groupId = socket.data.groupId;
     if (!groupId) throw new GroupError("NOT_FOUND", "Not in a group");
-    await runSocketGroupMutation(groupId, "track:playback-failed", async () => {
-        const failedItem =
-            groupManager.snapshotById(groupId)?.playback.queue[queueIndex];
-        if (failedItem?.trackMappingId) {
-            await trackMappingService.markStale(failedItem.trackMappingId);
-        }
-    });
+    await runSocketGroupMutation(
+        groupId,
+        "track:playback-failed",
+        async () => {
+            const failedItem =
+                groupManager.snapshotById(groupId)?.playback.queue[queueIndex];
+            if (failedItem?.trackMappingId) {
+                await trackMappingService.markStale(failedItem.trackMappingId);
+            }
+        },
+        { actingUserId: socket.data.userId },
+    );
     await publishAvailabilityForGroup(ns, groupId, runSocketGroupMutation);
 }
 
@@ -1446,6 +1428,7 @@ export async function stopListenTogetherSocketIntake(): Promise<ListenTogetherDr
         io.close();
         io = null;
     }
+    listenTogetherNamespace = null;
     const admissionResult = await mutationDrain;
     if (!admissionResult.drained) return admissionResult;
     const boundaryResult = await drainListenTogetherMutationBoundaries(
@@ -1475,6 +1458,7 @@ export function shutdownListenTogetherSocket(): void {
 
     if (io) io.close();
     io = null;
+    listenTogetherNamespace = null;
 
     if (redisAdapterSubClient) {
         redisAdapterSubClient.disconnect();

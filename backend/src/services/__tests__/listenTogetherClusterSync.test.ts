@@ -4,6 +4,7 @@ import {
     type ManagerCallbacks,
     type SyncQueueItem,
 } from "../listenTogetherManager";
+import { DeterministicRedisServer } from "./support/deterministicRedis";
 
 describe("listenTogetherClusterSync", () => {
     const originalEnv = process.env;
@@ -60,7 +61,10 @@ describe("listenTogetherClusterSync", () => {
         jest.clearAllMocks();
     });
 
-    function loadClusterSync(options?: { enabled?: boolean }) {
+    function loadClusterSync(options?: {
+        enabled?: boolean;
+        realStateStoreServer?: DeterministicRedisServer;
+    }) {
         process.env = { ...originalEnv };
         if (options?.enabled === false) {
             process.env.LISTEN_TOGETHER_STATE_SYNC_ENABLED = "false";
@@ -72,6 +76,7 @@ describe("listenTogetherClusterSync", () => {
         let messageHandler:
             | ((channel: string, message: string) => void)
             | null = null;
+        let readyHandler: (() => void) | null = null;
 
         const subClient = {
             on: jest.fn(
@@ -81,6 +86,9 @@ describe("listenTogetherClusterSync", () => {
                 ) => {
                     if (event === "message") {
                         messageHandler = handler;
+                    }
+                    if (event === "ready") {
+                        readyHandler = handler as () => void;
                     }
                 },
             ),
@@ -95,11 +103,16 @@ describe("listenTogetherClusterSync", () => {
             disconnect: jest.fn(),
         };
 
-        const createIORedisClient = jest.fn(() => pubClient);
-        const logger = {
+        const createIORedisClient = jest.fn((clientName: string) =>
+            options?.realStateStoreServer && clientName.includes("state-store")
+                ? options.realStateStoreServer.createClient()
+                : pubClient,
+        );
+        const logger: any = {
             info: jest.fn(),
             warn: jest.fn(),
         };
+        logger.child = jest.fn(() => logger);
         const stateStore: any = {
             validatePublication: jest.fn(async () => true),
             getSnapshot: jest.fn(async () => null),
@@ -143,12 +156,21 @@ describe("listenTogetherClusterSync", () => {
                     stateSyncChannel:
                         process.env.LISTEN_TOGETHER_STATE_SYNC_CHANNEL ||
                         "listen-together:state-sync",
+                    stateStoreEnabled: true,
+                    stateStoreKeyPrefix: "listen-together:state",
+                    stateStoreTtlSeconds: 21_600,
+                    publicationDeadlineMs: 1_000,
+                    mutationLockPrefix: "listen-together:mutation-lock",
                 },
             },
         }));
-        jest.doMock("../listenTogetherStateStore", () => ({
-            listenTogetherStateStore: stateStore,
-        }));
+        if (options?.realStateStoreServer) {
+            jest.dontMock("../listenTogetherStateStore");
+        } else {
+            jest.doMock("../listenTogetherStateStore", () => ({
+                listenTogetherStateStore: stateStore,
+            }));
+        }
         jest.doMock("../listenTogetherMutationLock", () => ({
             withLocalGroupMutationBoundary,
         }));
@@ -157,6 +179,10 @@ describe("listenTogetherClusterSync", () => {
         const {
             listenTogetherClusterSync,
         } = require("../listenTogetherClusterSync");
+        const resolvedStateStore = options?.realStateStoreServer
+            ? // eslint-disable-next-line @typescript-eslint/no-var-requires
+              require("../listenTogetherStateStore").listenTogetherStateStore
+            : stateStore;
 
         return {
             listenTogetherClusterSync,
@@ -164,8 +190,15 @@ describe("listenTogetherClusterSync", () => {
             pubClient,
             subClient,
             logger,
-            stateStore,
+            stateStore: resolvedStateStore,
             withLocalGroupMutationBoundary,
+            fireReady() {
+                readyHandler?.();
+            },
+            async emitReady() {
+                readyHandler?.();
+                await new Promise((resolve) => setImmediate(resolve));
+            },
             async emitMessage(channel: string, message: string) {
                 if (messageHandler) {
                     messageHandler(channel, message);
@@ -183,7 +216,19 @@ describe("listenTogetherClusterSync", () => {
         const handler = jest.fn();
 
         expect(listenTogetherClusterSync.isEnabled()).toBe(false);
-        await listenTogetherClusterSync.start(handler);
+        const localEffect = jest.fn(async () => undefined);
+        const localRevocation = jest.fn(() => localEffect);
+        await listenTogetherClusterSync.start(
+            handler,
+            undefined,
+            undefined,
+            undefined,
+            localRevocation,
+        );
+        await listenTogetherClusterSync.revokeLocalUser({
+            userId: "deleted-user",
+            groupIds: "all-for-user",
+        });
         await listenTogetherClusterSync.publishSnapshot("g1", {
             id: "g1",
             playback: {},
@@ -194,9 +239,199 @@ describe("listenTogetherClusterSync", () => {
             members: [],
         });
         await listenTogetherClusterSync.publishEnded("g1");
+        await listenTogetherClusterSync.publishUserRevocation(
+            "deleted-user",
+            ["g1"],
+            { fencingToken: 7, publicationId: "revocation-7" },
+        );
+        await listenTogetherClusterSync.publishUserRevocation(
+            "deleted-user",
+            "all-for-user",
+        );
 
         expect(createIORedisClient).not.toHaveBeenCalled();
         expect(handler).not.toHaveBeenCalled();
+        expect(localRevocation).toHaveBeenCalledTimes(1);
+        expect(localEffect).toHaveBeenCalledTimes(1);
+    });
+
+    it("audits local sockets after the initial subscription and reconnect", async () => {
+        const { listenTogetherClusterSync, subClient, emitReady } =
+            loadClusterSync();
+        const reconcileSockets = jest.fn(async () => undefined);
+
+        await listenTogetherClusterSync.start(
+            jest.fn(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            reconcileSockets,
+        );
+        await emitReady();
+
+        expect(subClient.subscribe).toHaveBeenCalledTimes(2);
+        expect(reconcileSockets).toHaveBeenCalledTimes(2);
+        expect(reconcileSockets).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+                deadlineAtMs: expect.any(Number),
+            }),
+        );
+    });
+
+    it("coalesces rapid reconnects into one active audit and one trailing rerun", async () => {
+        const { listenTogetherClusterSync, subClient, fireReady } =
+            loadClusterSync();
+        const releases: Array<() => void> = [];
+        let active = 0;
+        let maximumActive = 0;
+        const reconcileSockets = jest
+            .fn<Promise<void>, []>()
+            .mockResolvedValueOnce(undefined)
+            .mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        active += 1;
+                        maximumActive = Math.max(maximumActive, active);
+                        releases.push(() => {
+                            active -= 1;
+                            resolve();
+                        });
+                    }),
+            );
+        await listenTogetherClusterSync.start(
+            jest.fn(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            reconcileSockets,
+        );
+
+        fireReady();
+        await new Promise((resolve) => setImmediate(resolve));
+        for (let event = 0; event < 10; event += 1) fireReady();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(reconcileSockets).toHaveBeenCalledTimes(2);
+        releases.shift()?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(reconcileSockets).toHaveBeenCalledTimes(3);
+        releases.shift()?.();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(reconcileSockets).toHaveBeenCalledTimes(3);
+        expect(subClient.subscribe).toHaveBeenCalledTimes(3);
+        expect(maximumActive).toBe(1);
+    });
+
+    it("does not overlap a trailing audit after the active audit times out", async () => {
+        const { listenTogetherClusterSync, fireReady } = loadClusterSync();
+        const releases: Array<() => void> = [];
+        let active = 0;
+        let maximumActive = 0;
+        const reconcileSockets = jest
+            .fn<Promise<void>, []>()
+            .mockResolvedValueOnce(undefined)
+            .mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        active += 1;
+                        maximumActive = Math.max(maximumActive, active);
+                        releases.push(() => {
+                            active -= 1;
+                            resolve();
+                        });
+                    }),
+            );
+        await listenTogetherClusterSync.start(
+            jest.fn(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            reconcileSockets,
+        );
+        jest.useFakeTimers();
+
+        fireReady();
+        await jest.advanceTimersByTimeAsync(0);
+        fireReady();
+        await jest.advanceTimersByTimeAsync(10_000);
+
+        expect(reconcileSockets).toHaveBeenCalledTimes(2);
+        expect(maximumActive).toBe(1);
+        releases.shift()?.();
+        await jest.advanceTimersByTimeAsync(0);
+        expect(reconcileSockets).toHaveBeenCalledTimes(3);
+        expect(maximumActive).toBe(1);
+        releases.shift()?.();
+        await jest.advanceTimersByTimeAsync(0);
+    });
+
+    it("keeps a real stalled membership query in flight before the trailing audit", async () => {
+        const prisma = {
+            syncGroup: { findMany: jest.fn() },
+        };
+        jest.doMock("../../utils/db", () => ({ prisma }));
+        const { listenTogetherClusterSync, fireReady } = loadClusterSync();
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const {
+            createSocketMembershipReconciliationHandler,
+        } = require("../listenTogetherSocketReconciliation");
+        let releaseQuery: (rows: []) => void = () => undefined;
+        const stalledQuery = new Promise<[]>((resolve) => {
+            releaseQuery = resolve;
+        });
+        prisma.syncGroup.findMany
+            .mockResolvedValueOnce([])
+            .mockReturnValueOnce(stalledQuery)
+            .mockResolvedValue([]);
+        const socket = {
+            data: { userId: "user-1", groupId: "group-1" },
+        };
+        const namespace = {
+            sockets: new Map([["socket-1", socket]]),
+        };
+        const reconciliationHandler =
+            createSocketMembershipReconciliationHandler(namespace, {
+                recoverAuthority: jest.fn(async () => undefined),
+                revokeUser: jest.fn(),
+            });
+        await listenTogetherClusterSync.start(
+            jest.fn(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            reconciliationHandler,
+        );
+        jest.useFakeTimers();
+
+        fireReady();
+        await jest.advanceTimersByTimeAsync(0);
+        fireReady();
+        await jest.advanceTimersByTimeAsync(10_000);
+        const callsAtDeadline = prisma.syncGroup.findMany.mock.calls.length;
+
+        releaseQuery([]);
+        await jest.advanceTimersByTimeAsync(0);
+
+        expect(callsAtDeadline).toBe(2);
+        expect(prisma.syncGroup.findMany).toHaveBeenCalledTimes(3);
+    });
+
+    it("rejects revocation publication when cluster sync is enabled but uninitialized", async () => {
+        const { listenTogetherClusterSync } = loadClusterSync();
+
+        await expect(
+            listenTogetherClusterSync.publishUserRevocation(
+                "deleted-user",
+                "all-for-user",
+            ),
+        ).rejects.toThrow("cluster publication is not initialized");
     });
 
     it("starts once, subscribes to channel, and publishes snapshots", async () => {
@@ -218,6 +453,11 @@ describe("listenTogetherClusterSync", () => {
             members: [],
         });
         await listenTogetherClusterSync.publishEnded("g1");
+        await listenTogetherClusterSync.publishUserRevocation(
+            "deleted-user",
+            ["g1"],
+            { fencingToken: 7, publicationId: "revocation-7" },
+        );
 
         expect(createIORedisClient).toHaveBeenCalledTimes(1);
         expect(subClient.subscribe).toHaveBeenCalledWith(
@@ -235,9 +475,69 @@ describe("listenTogetherClusterSync", () => {
             "listen-together:state-sync",
             expect.stringContaining('"type":"group-ended"'),
         );
+        expect(pubClient.publish).toHaveBeenCalledWith(
+            "listen-together:state-sync",
+            expect.stringContaining('"type":"user-revocation"'),
+        );
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("Enabled on channel"),
         );
+    });
+
+    it("dispatches identity revocations without group authority state", async () => {
+        const { listenTogetherClusterSync, emitMessage, stateStore } =
+            loadClusterSync();
+        const revocationHandler = jest.fn(() => jest.fn());
+        await listenTogetherClusterSync.start(
+            jest.fn(),
+            jest.fn(),
+            jest.fn(),
+            jest.fn(),
+            revocationHandler,
+        );
+
+        await emitMessage(
+            "listen-together:state-sync",
+            JSON.stringify({
+                type: "user-revocation",
+                groupId: "remote-only",
+                originNodeId: "node-2",
+                fencingToken: 4,
+                publicationId: "revocation-4",
+                revocation: {
+                    userId: "deleted-user",
+                    groupIds: ["remote-only"],
+                },
+                ts: Date.now(),
+            }),
+        );
+        await emitMessage(
+            "listen-together:state-sync",
+            JSON.stringify({
+                type: "user-revocation",
+                groupId: "__all-for-user__",
+                originNodeId: "node-1",
+                fencingToken: 5,
+                publicationId: "revocation-5",
+                revocation: {
+                    userId: "deleted-user",
+                    groupIds: "all-for-user",
+                },
+                ts: Date.now(),
+            }),
+        );
+
+        expect(revocationHandler).toHaveBeenNthCalledWith(
+            1,
+            { userId: "deleted-user", groupIds: ["remote-only"] },
+            { fencingToken: 4, publicationId: "revocation-4" },
+        );
+        expect(revocationHandler).toHaveBeenNthCalledWith(
+            2,
+            { userId: "deleted-user", groupIds: "all-for-user" },
+            { fencingToken: 5, publicationId: "revocation-5" },
+        );
+        expect(stateStore.validatePublication).not.toHaveBeenCalled();
     });
 
     it("dispatches only valid snapshots from other nodes", async () => {
@@ -402,6 +702,75 @@ describe("listenTogetherClusterSync", () => {
         expect(handler).toHaveBeenNthCalledWith(1, stale);
         expect(handler).toHaveBeenNthCalledWith(2, current);
         expect(appliedVersions).toEqual([2]);
+    });
+
+    it("keeps nested corruption transient during cluster authority recovery", async () => {
+        const redis = new DeterministicRedisServer();
+        const loaded = loadClusterSync({ realStateStoreServer: redis });
+        const groupId = "g-corrupt-recovery";
+        redis.write(
+            `listen-together:state:${groupId}`,
+            JSON.stringify({
+                id: groupId,
+                name: "Corrupt Recovery",
+                joinCode: "BAD001",
+                groupType: "host-follower",
+                visibility: "private",
+                isActive: true,
+                hostUserId: "host",
+                membershipVersion: 1,
+                syncState: "paused",
+                readyDeadlineMs: null,
+                readyUserIds: [],
+                playback: {
+                    queue: [],
+                    currentIndex: 0,
+                    isPlaying: false,
+                    positionMs: 0,
+                    serverTime: 2,
+                    stateVersion: 2,
+                    trackId: null,
+                },
+                members: [null],
+            }),
+        );
+        jest.spyOn(loaded.stateStore, "validatePublication")
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false);
+        const deferredEffect = jest.fn();
+        const snapshotHandler = jest.fn(() => deferredEffect);
+        const recoveryHandler = jest.fn();
+        await loaded.listenTogetherClusterSync.start(
+            snapshotHandler,
+            undefined,
+            undefined,
+            recoveryHandler,
+        );
+
+        await loaded.emitMessage(
+            "listen-together:state-sync",
+            JSON.stringify({
+                type: "group-snapshot",
+                groupId,
+                originNodeId: "node-2",
+                fencingToken: 1,
+                publicationId: "stale-publication",
+                snapshot: {
+                    id: groupId,
+                    playback: { stateVersion: 1, serverTime: 1 },
+                    members: [],
+                },
+                ts: Date.now(),
+            }),
+        );
+
+        expect(recoveryHandler).not.toHaveBeenCalled();
+        expect(deferredEffect).not.toHaveBeenCalled();
+        expect(loaded.logger.warn).toHaveBeenCalledWith(
+            "[ListenTogether/StateSync] Failed cluster authority validation",
+            expect.objectContaining({ code: "UNAVAILABLE", retryable: true }),
+        );
+        await loaded.listenTogetherClusterSync.stop();
     });
 
     it("applies a peer membership transfer without replacing playback", async () => {

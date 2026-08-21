@@ -15,6 +15,7 @@ import {
     listenTogetherRetryDelayMs,
     waitForListenTogetherRetry,
     withListenTogetherDeadline,
+    withListenTogetherDeadlineAt,
 } from "./listenTogetherDeadline";
 import type { GroupMutationFence } from "./listenTogetherLeaseFencing";
 import { GroupError } from "./listenTogetherGroupError";
@@ -35,6 +36,12 @@ interface PublicationStage {
 
 interface PublicationProgress {
     irreversible: boolean;
+}
+
+/** Optional caller lifetime for a queued publication. */
+export interface PublicationExecutionOptions {
+    signal: AbortSignal;
+    deadlineAtMs: number;
 }
 
 /** Optional fence order attached to direct membership socket events. */
@@ -73,6 +80,7 @@ export interface GroupPublicationBroadcaster {
         groupId: string,
         socketIds: string[],
         metadata?: MembershipFanoutMetadata,
+        userId?: string,
     ): void | Promise<void>;
 }
 
@@ -117,26 +125,39 @@ async function assertFenceBeforeEffect(
 async function awaitPublicationStage(
     stage: PublicationStage,
     progress: PublicationProgress,
+    options?: PublicationExecutionOptions,
 ): Promise<void | "halt"> {
+    options?.signal.throwIfAborted();
     if (stage.effect === "external" || stage.effect === "deduplicated") {
         progress.irreversible = true;
     }
     const operation = Promise.resolve().then(stage.publish);
     try {
-        const result = await withListenTogetherDeadline(
-            operation,
-            `listen together ${stage.name}`,
-            PUBLICATION_DEADLINE_MS,
-        );
+        const operationName = `listen together ${stage.name}`;
+        const result = options
+            ? await withListenTogetherDeadlineAt(
+                  operation,
+                  operationName,
+                  Math.min(
+                      options.deadlineAtMs,
+                      Date.now() + PUBLICATION_DEADLINE_MS,
+                  ),
+                  options.signal,
+              )
+            : await withListenTogetherDeadline(
+                  operation,
+                  operationName,
+                  PUBLICATION_DEADLINE_MS,
+              );
         if (stage.effect === "guarded" && result !== "halt") {
             progress.irreversible = true;
         }
         return result;
     } catch (error) {
         if (!isListenTogetherDeadlineError(error)) throw error;
-        if (!stage.lateCompletionHarmless) return operation;
-        // Token/version guarded Lua and publication-id dedupe make a late
-        // completion harmless. Observe rejection before abandoning the wait.
+        // The stage deadline is also the await deadline. Cleanup retries replay
+        // idempotent effects; ordinary external stages are never retried by this
+        // queue after an irreversible effect may have started.
         void operation.catch(() => undefined);
         if (stage.effect !== "none") progress.irreversible = true;
         throw error;
@@ -147,11 +168,13 @@ async function runStageAttempt(
     stage: PublicationStage,
     fence: GroupMutationFence | undefined,
     progress: PublicationProgress,
+    options?: PublicationExecutionOptions,
 ): Promise<void | "halt"> {
+    options?.signal.throwIfAborted();
     if (stage.effect !== "none") {
         await assertFenceBeforeEffect(fence);
     }
-    return awaitPublicationStage(stage, progress);
+    return awaitPublicationStage(stage, progress, options);
 }
 
 function publicationFailure(
@@ -176,7 +199,9 @@ async function handlePublicationAttemptFailure(
         fencingToken: number;
     },
     progress: PublicationProgress,
+    options?: PublicationExecutionOptions,
 ): Promise<"retry"> {
+    options?.signal.throwIfAborted();
     const stageName = context.stage?.name ?? "unknown";
     if (error instanceof GroupError && error.code === "CONFLICT") {
         log.debug("Fenced publication rejected", {
@@ -201,9 +226,19 @@ async function handlePublicationAttemptFailure(
         stageName,
         error,
     });
-    await waitForListenTogetherRetry(
+    const retry = waitForListenTogetherRetry(
         listenTogetherRetryDelayMs(context.attempt, 20, 100),
     );
+    if (options) {
+        await withListenTogetherDeadlineAt(
+            retry,
+            "Listen Together publication retry",
+            options.deadlineAtMs,
+            options.signal,
+        );
+    } else {
+        await retry;
+    }
     return "retry";
 }
 
@@ -212,6 +247,7 @@ async function runPublicationStages(
     publicationName: string,
     stages: PublicationStage[],
     fence?: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     if (stages.length > PUBLICATION_MAX_STAGES) {
         throw new Error(`Publication stage limit exceeded for ${groupId}`);
@@ -223,10 +259,12 @@ async function runPublicationStages(
     for (let attempt = 1; attempt <= PUBLICATION_MAX_ATTEMPTS; attempt += 1) {
         try {
             for (; stageIndex < stages.length; stageIndex += 1) {
+                options?.signal.throwIfAborted();
                 const outcome = await runStageAttempt(
                     stages[stageIndex],
                     fence,
                     progress,
+                    options,
                 );
                 if (outcome === "halt") {
                     throw new GroupError(
@@ -237,6 +275,7 @@ async function runPublicationStages(
             }
             return;
         } catch (error) {
+            options?.signal.throwIfAborted();
             await handlePublicationAttemptFailure(
                 error,
                 {
@@ -247,6 +286,7 @@ async function runPublicationStages(
                     fencingToken: fence?.fencingToken ?? 0,
                 },
                 progress,
+                options,
             );
         }
     }
@@ -257,6 +297,7 @@ function enqueueGroupPublication(
     publicationName: string,
     stages: PublicationStage[],
     fence?: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     const previous = pendingGroupPublications.get(groupId) ?? Promise.resolve();
     let queued: Promise<void>;
@@ -266,7 +307,13 @@ function enqueueGroupPublication(
             () => undefined,
         )
         .then(() =>
-            runPublicationStages(groupId, publicationName, stages, fence),
+            runPublicationStages(
+                groupId,
+                publicationName,
+                stages,
+                fence,
+                options,
+            ),
         )
         .finally(() => {
             if (pendingGroupPublications.get(groupId) === queued) {
@@ -325,7 +372,9 @@ function membershipPublicationStages(
                 emitMembershipPublication(groupId, publication, fanoutMetadata),
         });
     }
-    if (revokedSocketIds.length > 0) {
+    const departedUserId =
+        publication?.type === "left" ? publication.member.userId : undefined;
+    if (revokedSocketIds.length > 0 || departedUserId) {
         stages.push({
             name: "socket-revocation",
             effect: "external",
@@ -334,6 +383,7 @@ function membershipPublicationStages(
                     groupId,
                     revokedSocketIds,
                     fanoutMetadata,
+                    departedUserId,
                 );
             },
         });
@@ -446,6 +496,7 @@ export function enqueueGroupSnapshotPublication(
     revokedSocketIds: string[] = [],
     fence?: GroupMutationFence,
     emitPayload?: () => void | Promise<void>,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     const stages = snapshotPublicationStages(
         groupId,
@@ -456,7 +507,7 @@ export function enqueueGroupSnapshotPublication(
         fence,
         emitPayload,
     );
-    return enqueueGroupPublication(groupId, "snapshot", stages, fence);
+    return enqueueGroupPublication(groupId, "snapshot", stages, fence, options);
 }
 
 /** Queue socket fanout for a snapshot synchronized by another boundary. */
@@ -480,6 +531,7 @@ export function enqueueGroupEndedPublication(
     groupId: string,
     reason: string,
     fence?: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     const clusterMetadata = clusterPublicationMetadata(fence);
     return enqueueGroupPublication(
@@ -518,6 +570,7 @@ export function enqueueGroupEndedPublication(
             },
         ],
         fence,
+        options,
     ).finally(() => releaseLocalGroupMutationState(groupId));
 }
 
@@ -544,6 +597,7 @@ export function enqueueGroupMembershipPublication(
     committedMembership?: ClusterGroupMembership,
     revokedSocketIds: string[] = [],
     fence?: GroupMutationFence,
+    options?: PublicationExecutionOptions,
 ): Promise<void> {
     const clusterMetadata = clusterPublicationMetadata(fence);
     const stages: PublicationStage[] = [
@@ -567,7 +621,13 @@ export function enqueueGroupMembershipPublication(
             clusterMetadata,
         ),
     ];
-    return enqueueGroupPublication(groupId, "membership", stages, fence);
+    return enqueueGroupPublication(
+        groupId,
+        "membership",
+        stages,
+        fence,
+        options,
+    );
 }
 
 /** Queue a presence-only socket event without publishing playback state. */

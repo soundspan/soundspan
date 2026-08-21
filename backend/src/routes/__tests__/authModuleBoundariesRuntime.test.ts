@@ -4,6 +4,13 @@ jest.mock("../../config", () => ({
     config: {
         localLoginEnabled: true,
         secureCookies: false,
+        listenTogether: {
+            mutationLockEnabled: false,
+            publicationDeadlineMs: 750,
+            stateStoreEnabled: false,
+            stateStoreKeyPrefix: "listen-together:test-state",
+            stateStoreTtlSeconds: 21_600,
+        },
         oidc: {
             enabled: false,
             redirectUri: "",
@@ -95,12 +102,20 @@ jest.mock("qrcode", () => ({
     default: { toDataURL: jest.fn() },
 }));
 
+const mockCleanupModuleEvaluated = jest.fn();
+jest.mock("../../services/listenTogetherUserCleanup", () => {
+    mockCleanupModuleEvaluated();
+    return { cleanupListenTogetherForUser: jest.fn() };
+});
+
 import registerOidcRoutes from "../auth/oidc";
 import registerLocalCredentialRoutes from "../auth/localCredentials";
 import { registerSecondFactorAndSubsonicRoutes } from "../auth/accountSecurity";
 import registerAppPasswordRoutes from "../auth/appPasswords";
 import registerLinkedIdentityRoutes from "../auth/linkedIdentities";
 import registerAdminUserInviteRoutes from "../auth/adminUserInvites";
+
+const cleanupModuleImportCalls = mockCleanupModuleEvaluated.mock.calls.length;
 
 type HttpMethod = "get" | "post";
 
@@ -199,6 +214,10 @@ describe("auth concern module boundaries", () => {
         prisma.externalIdentity.findMany.mockResolvedValue([]);
         prisma.inviteCode.findMany.mockResolvedValue([]);
         prisma.user.findUnique.mockResolvedValue({ twoFactorEnabled: false });
+    });
+
+    it("does not evaluate Listen Together cleanup during auth route import", () => {
+        expect(cleanupModuleImportCalls).toBe(0);
     });
 
     it("serves the OIDC capability route", async () => {

@@ -412,9 +412,11 @@ async function runLocalOperation<T>(
 ): Promise<T> {
     let fence: GroupMutationFence;
     try {
-        fence = mutationLockMode.usesRedisFencing
-            ? await nextRedisFence(groupId)
-            : nextLocalFence(groupId);
+        hooks.signal?.throwIfAborted();
+        const allocation = mutationLockMode.usesRedisFencing
+            ? nextRedisFence(groupId)
+            : Promise.resolve(nextLocalFence(groupId));
+        fence = await awaitLockOperation(allocation, hooks);
     } catch (error) {
         hooks.onAcquireFailure?.();
         throw error;
@@ -478,6 +480,36 @@ export async function drainListenTogetherMutationLocks(
             await withListenTogetherDeadline(
                 Promise.allSettled(tails),
                 "listen together mutation lock drain",
+                remainingMs,
+            );
+        }
+        return {
+            drained: true,
+            deadlineAtMs,
+            remainingMs: Math.max(0, deadlineAtMs - Date.now()),
+        };
+    } catch {
+        return { drained: false, deadlineAtMs, remainingMs: 0 };
+    }
+}
+
+/** Wait for the currently-enqueued local boundaries of selected groups. */
+export async function drainLocalGroupMutationTails(
+    groupIds: readonly string[],
+    deadlineAtMs: number,
+): Promise<ListenTogetherDrainResult> {
+    const tails = Array.from(new Set(groupIds))
+        .map((groupId) => localMutationTails.get(groupId))
+        .filter((tail): tail is Promise<void> => tail !== undefined);
+    const remainingMs = deadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+        return { drained: false, deadlineAtMs, remainingMs: 0 };
+    }
+    try {
+        if (tails.length > 0) {
+            await withListenTogetherDeadline(
+                Promise.allSettled(tails),
+                "listen together user mutation quiescence",
                 remainingMs,
             );
         }

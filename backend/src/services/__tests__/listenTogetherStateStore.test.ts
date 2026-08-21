@@ -16,7 +16,8 @@ describe("listenTogetherStateStore", () => {
         const server = options?.server ?? new DeterministicRedisServer();
         const redisClient = server.createClient();
         const createIORedisClient = jest.fn(() => redisClient);
-        const logger = { warn: jest.fn() };
+        const logger: any = { warn: jest.fn() };
+        logger.child = jest.fn(() => logger);
         jest.doMock("../../utils/ioredis", () => ({ createIORedisClient }));
         jest.doMock("../../utils/logger", () => ({ logger }));
         jest.doMock("../../config", () => ({
@@ -49,7 +50,25 @@ describe("listenTogetherStateStore", () => {
         serverTime: number = 34_567,
     ) => ({
         id: groupId,
-        playback: { stateVersion, serverTime },
+        name: "Group One",
+        joinCode: "ABC123",
+        groupType: "host-follower",
+        visibility: "private",
+        isActive: true,
+        hostUserId: "host-1",
+        membershipVersion: 1,
+        syncState: "paused",
+        readyDeadlineMs: null,
+        readyUserIds: [],
+        playback: {
+            queue: [],
+            currentIndex: 0,
+            isPlaying: false,
+            positionMs: 0,
+            stateVersion,
+            serverTime,
+            trackId: null,
+        },
         members: [],
     });
 
@@ -114,7 +133,20 @@ describe("listenTogetherStateStore", () => {
         ]);
     });
 
-    it("ignores malformed shapes and mismatched group identities", async () => {
+    it("rejects malformed JSON as transient and suppresses repeat warnings", async () => {
+        const loaded = loadStateStore();
+        loaded.server.write("listen-together:state:group-1", "{");
+
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
+        expect(loaded.logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects malformed shapes and mismatched group identities", async () => {
         const loaded = loadStateStore();
         loaded.server.write(
             "listen-together:state:group-1",
@@ -122,7 +154,7 @@ describe("listenTogetherStateStore", () => {
         );
         await expect(
             loaded.listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
+        ).rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
 
         loaded.server.write(
             "listen-together:state:group-1",
@@ -130,8 +162,38 @@ describe("listenTogetherStateStore", () => {
         );
         await expect(
             loaded.listenTogetherStateStore.getSnapshot("group-1"),
-        ).resolves.toBeNull();
-        expect(loaded.logger.warn).toHaveBeenCalledTimes(2);
+        ).rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
+        expect(loaded.logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["a null member", { members: [null] }],
+        ["an array playback value", { playback: [] }],
+        [
+            "a non-numeric playback version",
+            { playback: { stateVersion: "12" } },
+        ],
+    ])("rejects nested snapshot corruption with %s", async (_name, corrupt) => {
+        const loaded = loadStateStore();
+        const valid = snapshot();
+        const corruptPlayback =
+            "playback" in corrupt ? corrupt.playback : undefined;
+        loaded.server.write(
+            "listen-together:state:group-1",
+            JSON.stringify({
+                ...valid,
+                ...corrupt,
+                playback:
+                    corruptPlayback !== undefined &&
+                    !Array.isArray(corruptPlayback)
+                        ? { ...valid.playback, ...corruptPlayback }
+                        : (corruptPlayback ?? valid.playback),
+            }),
+        );
+
+        await expect(
+            loaded.listenTogetherStateStore.getSnapshot("group-1"),
+        ).rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
     });
 
     it("propagates authoritative Redis read and write failures", async () => {

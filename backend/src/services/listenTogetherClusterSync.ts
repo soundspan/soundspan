@@ -5,6 +5,7 @@ import type { GroupSnapshot } from "./listenTogetherManager";
 import { config } from "../config";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 import { withLocalGroupMutationBoundary } from "./listenTogetherMutationLock";
+import { withListenTogetherDeadlineAt } from "./listenTogetherDeadline";
 
 const LISTEN_TOGETHER_STATE_SYNC_ENABLED =
     config.listenTogether.stateSyncEnabled;
@@ -23,14 +24,25 @@ export interface ClusterPublicationMetadata {
     publicationId: string;
 }
 
+/** Durable user identity and bounded group scope for socket revocation. */
+export interface ClusterUserRevocation {
+    userId: string;
+    groupIds: string[] | "all-for-user";
+}
+
 interface ListenTogetherStateSyncEvent {
-    type: "group-snapshot" | "group-membership" | "group-ended";
+    type:
+        | "group-snapshot"
+        | "group-membership"
+        | "group-ended"
+        | "user-revocation";
     groupId: string;
     originNodeId: string;
     fencingToken: number;
     publicationId: string;
     snapshot?: GroupSnapshot;
     membership?: ClusterGroupMembership;
+    revocation?: ClusterUserRevocation;
     ts: number;
 }
 
@@ -43,6 +55,7 @@ interface ClusterEventWatermark {
 const MAX_PUBLICATION_IDS_PER_FENCE = 16;
 const MAX_EVENT_WATERMARK_GROUPS = 10_000;
 const EVENT_WATERMARK_IDLE_TTL_MS = 6 * 60 * 60 * 1_000;
+const RECONNECT_RECONCILIATION_DEADLINE_MS = 10_000;
 
 type DeferredClusterEffect = () => void | Promise<void>;
 type SnapshotHandler = (
@@ -60,6 +73,14 @@ type RecoveryHandler = (
     groupId: string,
     snapshot: GroupSnapshot | null,
 ) => void | Promise<void>;
+type UserRevocationHandler = (
+    revocation: ClusterUserRevocation,
+    metadata: ClusterPublicationMetadata,
+) => DeferredClusterEffect | Promise<DeferredClusterEffect>;
+type ReconciliationHandler = (scope: {
+    signal: AbortSignal;
+    deadlineAtMs: number;
+}) => void | Promise<void>;
 
 function isClusterMembership(value: unknown): value is ClusterGroupMembership {
     if (!value || typeof value !== "object") return false;
@@ -85,6 +106,30 @@ function isClusterMembership(value: unknown): value is ClusterGroupMembership {
     });
 }
 
+function isUserRevocation(value: unknown): value is ClusterUserRevocation {
+    if (!value || typeof value !== "object") return false;
+    const revocation = value as Record<string, unknown>;
+    if (
+        typeof revocation.userId !== "string" ||
+        revocation.userId.length < 1 ||
+        revocation.userId.length > 128
+    ) {
+        return false;
+    }
+    if (revocation.groupIds === "all-for-user") return true;
+    return (
+        Array.isArray(revocation.groupIds) &&
+        revocation.groupIds.length > 0 &&
+        revocation.groupIds.length <= 400 &&
+        revocation.groupIds.every(
+            (groupId) =>
+                typeof groupId === "string" &&
+                groupId.length > 0 &&
+                groupId.length <= 128,
+        )
+    );
+}
+
 /** Redis pub/sub synchronization with per-group fencing and deduplication. */
 export class ListenTogetherClusterSync {
     private readonly nodeId = randomUUID();
@@ -95,6 +140,10 @@ export class ListenTogetherClusterSync {
     private endedHandler: GroupEndedHandler | null = null;
     private membershipHandler: MembershipHandler | null = null;
     private recoveryHandler: RecoveryHandler | null = null;
+    private userRevocationHandler: UserRevocationHandler | null = null;
+    private reconciliationHandler: ReconciliationHandler | null = null;
+    private reconciliationFlight: Promise<void> | null = null;
+    private reconciliationRerunRequested = false;
     private readonly eventWatermarks = new Map<string, ClusterEventWatermark>();
 
     isEnabled(): boolean {
@@ -106,23 +155,25 @@ export class ListenTogetherClusterSync {
         endedHandler?: GroupEndedHandler,
         membershipHandler?: MembershipHandler,
         recoveryHandler?: RecoveryHandler,
+        userRevocationHandler?: UserRevocationHandler,
+        reconciliationHandler?: ReconciliationHandler,
     ): Promise<void> {
+        this.configureHandlers(
+            handler,
+            endedHandler,
+            membershipHandler,
+            recoveryHandler,
+            userRevocationHandler,
+            reconciliationHandler,
+        );
         if (!LISTEN_TOGETHER_STATE_SYNC_ENABLED) {
             return;
         }
 
         if (this.started) {
-            this.handler = handler;
-            this.endedHandler = endedHandler ?? null;
-            this.membershipHandler = membershipHandler ?? null;
-            this.recoveryHandler = recoveryHandler ?? null;
             return;
         }
 
-        this.handler = handler;
-        this.endedHandler = endedHandler ?? null;
-        this.membershipHandler = membershipHandler ?? null;
-        this.recoveryHandler = recoveryHandler ?? null;
         this.pubClient = createIORedisClient("listen-together-state-sync-pub");
         this.subClient = this.pubClient.duplicate();
 
@@ -135,12 +186,33 @@ export class ListenTogetherClusterSync {
                 );
             });
         });
+        this.subClient.on("ready", () => {
+            if (!this.started) return;
+            this.enqueueSubscriptionReconciliation();
+        });
 
-        await this.subClient.subscribe(LISTEN_TOGETHER_STATE_SYNC_CHANNEL);
+        await this.subscribeAndReconcile();
         this.started = true;
         logger.info(
             `[ListenTogether/StateSync] Enabled on channel "${LISTEN_TOGETHER_STATE_SYNC_CHANNEL}" (node=${this.nodeId})`,
         );
+    }
+
+    /** Evict this pod before any best-effort cross-pod publication. */
+    async revokeLocalUser(
+        revocation: ClusterUserRevocation,
+        metadata?: ClusterPublicationMetadata,
+    ): Promise<void> {
+        if (!this.userRevocationHandler) {
+            throw new Error(
+                "Listen Together local revocation is not initialized",
+            );
+        }
+        const effect = await this.userRevocationHandler(
+            revocation,
+            this.resolveMetadata(metadata),
+        );
+        await effect();
     }
 
     async publishSnapshot(
@@ -236,11 +308,52 @@ export class ListenTogetherClusterSync {
         }
     }
 
+    async publishUserRevocation(
+        userId: string,
+        groupIds: ClusterUserRevocation["groupIds"],
+        metadata?: ClusterPublicationMetadata,
+    ): Promise<void> {
+        // Single-pod mode is complete after revokeLocalUser(); there is no peer
+        // transport to acknowledge, so publication is an explicit no-op.
+        if (!LISTEN_TOGETHER_STATE_SYNC_ENABLED) return;
+        if (!this.pubClient) {
+            throw new Error(
+                "Listen Together cluster publication is not initialized",
+            );
+        }
+        const payload: ListenTogetherStateSyncEvent = {
+            type: "user-revocation",
+            groupId:
+                groupIds === "all-for-user"
+                    ? "__all-for-user__"
+                    : (groupIds[0] ?? "__all-for-user__"),
+            originNodeId: this.nodeId,
+            ...this.resolveMetadata(metadata),
+            revocation: { userId, groupIds },
+            ts: Date.now(),
+        };
+        try {
+            await this.pubClient.publish(
+                LISTEN_TOGETHER_STATE_SYNC_CHANNEL,
+                JSON.stringify(payload),
+            );
+        } catch (err) {
+            logger.warn(
+                `[ListenTogether/StateSync] Failed to publish revocation for user ${userId}`,
+                err,
+            );
+            throw err;
+        }
+    }
+
     async stop(): Promise<void> {
         this.handler = null;
         this.endedHandler = null;
         this.membershipHandler = null;
         this.recoveryHandler = null;
+        this.userRevocationHandler = null;
+        this.reconciliationHandler = null;
+        this.reconciliationRerunRequested = false;
 
         if (this.subClient) {
             try {
@@ -263,10 +376,127 @@ export class ListenTogetherClusterSync {
         this.eventWatermarks.clear();
     }
 
+    private configureHandlers(
+        handler: SnapshotHandler,
+        endedHandler?: GroupEndedHandler,
+        membershipHandler?: MembershipHandler,
+        recoveryHandler?: RecoveryHandler,
+        userRevocationHandler?: UserRevocationHandler,
+        reconciliationHandler?: ReconciliationHandler,
+    ): void {
+        this.handler = handler;
+        this.endedHandler = endedHandler ?? null;
+        this.membershipHandler = membershipHandler ?? null;
+        this.recoveryHandler = recoveryHandler ?? null;
+        this.userRevocationHandler = userRevocationHandler ?? null;
+        this.reconciliationHandler = reconciliationHandler ?? null;
+    }
+
+    private async subscribeAndReconcile(): Promise<void> {
+        if (!this.subClient) {
+            throw new Error("Listen Together subscriber is not initialized");
+        }
+        const controller = new AbortController();
+        const deadlineAtMs = Date.now() + RECONNECT_RECONCILIATION_DEADLINE_MS;
+        const timer = setTimeout(
+            () =>
+                controller.abort(new Error("Reconnect audit deadline expired")),
+            RECONNECT_RECONCILIATION_DEADLINE_MS,
+        );
+        timer.unref?.();
+        try {
+            const subscription = this.subClient.subscribe(
+                LISTEN_TOGETHER_STATE_SYNC_CHANNEL,
+            );
+            await this.awaitOwnedReconciliationOperation(
+                subscription,
+                "Listen Together cluster subscription",
+                deadlineAtMs,
+                controller,
+            );
+            const reconciliation = Promise.resolve(
+                this.reconciliationHandler?.({
+                    signal: controller.signal,
+                    deadlineAtMs,
+                }),
+            );
+            await this.awaitOwnedReconciliationOperation(
+                reconciliation,
+                "Listen Together reconnect reconciliation",
+                deadlineAtMs,
+                controller,
+            );
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    private enqueueSubscriptionReconciliation(): void {
+        if (this.reconciliationFlight) {
+            this.reconciliationRerunRequested = true;
+            return;
+        }
+        const flight = this.subscribeAndReconcile();
+        this.reconciliationFlight = flight;
+        void flight.then(
+            () => this.finishReconciliationFlight(flight),
+            (error) => this.finishReconciliationFlight(flight, error),
+        );
+    }
+
+    private finishReconciliationFlight(
+        flight: Promise<void>,
+        error?: unknown,
+    ): void {
+        if (this.reconciliationFlight !== flight) return;
+        this.reconciliationFlight = null;
+        if (error !== undefined) {
+            logger.warn(
+                "[ListenTogether/StateSync] Reconnect reconciliation failed",
+                error,
+            );
+        }
+        const rerunRequested = this.reconciliationRerunRequested;
+        this.reconciliationRerunRequested = false;
+        if (rerunRequested && this.started) {
+            this.enqueueSubscriptionReconciliation();
+        }
+    }
+
+    private async awaitOwnedReconciliationOperation<T>(
+        operation: Promise<T>,
+        operationName: string,
+        deadlineAtMs: number,
+        controller: AbortController,
+    ): Promise<T> {
+        try {
+            return await withListenTogetherDeadlineAt(
+                operation,
+                operationName,
+                deadlineAtMs,
+                controller.signal,
+            );
+        } catch (error) {
+            controller.abort(error);
+            try {
+                await operation;
+            } catch {
+                // Preserve the deadline/abort error after owning settlement.
+            }
+            throw error;
+        }
+    }
+
     private async handleMessage(rawMessage: string): Promise<void> {
         if (!this.handler) return;
         const event = this.parseEvent(rawMessage);
-        if (!event || event.originNodeId === this.nodeId) return;
+        if (!event) return;
+        if (event.type === "user-revocation") {
+            await this.consumeUserRevocation(event);
+            return;
+        }
+        if (event.originNodeId === this.nodeId) return;
+        if (!event.groupId) return;
         await withLocalGroupMutationBoundary(event.groupId, () =>
             this.consumeEvent(event),
         );
@@ -289,6 +519,12 @@ export class ListenTogetherClusterSync {
     }
 
     private validEventPayload(event: ListenTogetherStateSyncEvent): boolean {
+        if (event.type === "user-revocation") {
+            return (
+                typeof event.groupId === "string" &&
+                isUserRevocation(event.revocation)
+            );
+        }
         if (typeof event.groupId !== "string") return false;
         if (event.type === "group-ended") return true;
         if (event.type === "group-membership") {
@@ -299,6 +535,21 @@ export class ListenTogetherClusterSync {
             Boolean(event.snapshot) &&
             event.groupId === event.snapshot?.id
         );
+    }
+
+    private async consumeUserRevocation(
+        event: ListenTogetherStateSyncEvent,
+    ): Promise<void> {
+        if (!event.revocation || !this.userRevocationHandler) return;
+        const metadata = this.eventMetadata(event);
+        if (!metadata) return;
+        // Identity eviction is idempotent. Replays and cross-group ordering are
+        // safe because a revoked socket no longer has an attached group.
+        const effect = await this.userRevocationHandler(
+            event.revocation,
+            metadata,
+        );
+        await effect();
     }
 
     private async consumeEvent(
@@ -357,6 +608,7 @@ export class ListenTogetherClusterSync {
     private async isAuthoritative(
         event: ListenTogetherStateSyncEvent,
     ): Promise<boolean> {
+        if (event.type === "user-revocation") return false;
         const metadata = this.eventMetadata(event);
         if (!metadata) return false;
         // Local watermarks are only a bounded replay cache. Redis state-store

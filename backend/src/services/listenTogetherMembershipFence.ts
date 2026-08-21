@@ -11,9 +11,12 @@ function staleMembershipFence(): GroupError {
 
 async function assertMembershipFenceCurrent(
     fence: GroupMutationFence,
+    signal?: AbortSignal,
 ): Promise<void> {
+    signal?.throwIfAborted();
     if (fence.isFenced()) throw staleMembershipFence();
     await fence.assertCurrent?.();
+    signal?.throwIfAborted();
     if (fence.isFenced()) throw staleMembershipFence();
 }
 
@@ -22,8 +25,9 @@ export async function advanceSyncGroupMembershipFence(
     tx: Prisma.TransactionClient,
     groupId: string,
     fence: GroupMutationFence,
+    signal?: AbortSignal,
 ): Promise<void> {
-    await assertMembershipFenceCurrent(fence);
+    await assertMembershipFenceCurrent(fence, signal);
     if (!fence.requiresMembershipFence) {
         // Fully local mode has one process and no concurrent lease holder. Its
         // counter may reset after restart, so a durable guard would self-block.
@@ -36,6 +40,7 @@ export async function advanceSyncGroupMembershipFence(
         },
         data: { membershipFence: BigInt(fence.fencingToken) },
     });
+    signal?.throwIfAborted();
     if (advanced.count === 1) return;
     throw staleMembershipFence();
 }
@@ -46,9 +51,12 @@ export async function withSyncGroupMembershipFence<T>(
     groupId: string,
     fence: GroupMutationFence,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
 ): Promise<T> {
-    await advanceSyncGroupMembershipFence(tx, groupId, fence);
+    await advanceSyncGroupMembershipFence(tx, groupId, fence, signal);
+    signal?.throwIfAborted();
     const result = await operation();
-    await assertMembershipFenceCurrent(fence);
+    signal?.throwIfAborted();
+    await assertMembershipFenceCurrent(fence, signal);
     return result;
 }

@@ -281,6 +281,32 @@ describe("oidcAccountResolution", () => {
             { userId: "u1" },
         );
     });
+
+    it("does not count a deletion-reserved admin during OIDC demotion", async () => {
+        mockConfig.oidc.manageRoles = true;
+        const order: string[] = [];
+        prisma.$executeRaw.mockImplementationOnce(async () => {
+            order.push("lock");
+            return 0;
+        });
+        prisma.user.count.mockImplementationOnce(async () => {
+            order.push("count-after-deletion-reservation");
+            return 0;
+        });
+        const adminUser = { ...linkedUser, role: "admin" };
+
+        await expect(syncOidcRole(adminUser, [])).resolves.toEqual(adminUser);
+
+        expect(prisma.user.count).toHaveBeenCalledWith({
+            where: {
+                role: "admin",
+                id: { not: "u1" },
+                pendingDeletionAt: null,
+            },
+        });
+        expect(order).toEqual(["lock", "count-after-deletion-reservation"]);
+        expect(prisma.user.update).not.toHaveBeenCalled();
+    });
 });
 
 function createTransaction() {

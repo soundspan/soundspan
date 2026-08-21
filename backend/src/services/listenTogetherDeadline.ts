@@ -61,3 +61,34 @@ export async function withListenTogetherDeadline<T>(
         if (timer) clearTimeout(timer);
     }
 }
+
+/** Await one operation within a shared absolute deadline and caller signal. */
+export async function withListenTogetherDeadlineAt<T>(
+    operation: Promise<T>,
+    operationName: string,
+    deadlineAtMs: number,
+    signal: AbortSignal,
+): Promise<T> {
+    // A dependency may not support cancellation. Observe its late outcome
+    // before checking the caller lifetime so abandonment cannot leak rejection.
+    void operation.catch(() => undefined);
+    signal.throwIfAborted();
+    const remainingMs = deadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+        throw new ListenTogetherDeadlineError(operationName, 0);
+    }
+    let rejectAbort: (reason?: unknown) => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject;
+    });
+    const onAbort = () => rejectAbort(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+        return await Promise.race([
+            withListenTogetherDeadline(operation, operationName, remainingMs),
+            aborted,
+        ]);
+    } finally {
+        signal.removeEventListener("abort", onAbort);
+    }
+}
