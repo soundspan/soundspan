@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -112,13 +113,17 @@ def test_entrypoints_ignore_removed_runtime_settings(
     assert result.stderr == ""
 
 
-def test_unreleased_changelog_announces_streaming_removal() -> None:
-    """The Unreleased changelog must announce the removed runtime surface."""
-    changelog = CHANGELOG.read_text(encoding="utf-8")
-    unreleased_start = changelog.index("## [Unreleased]")
-    next_release = changelog.index("\n## [", unreleased_start + 1)
-    unreleased = changelog[unreleased_start:next_release].lower()
+def test_changelog_announces_streaming_removal() -> None:
+    """The changelog must announce the removed runtime surface in a Removed section."""
+    changelog = CHANGELOG.read_text(encoding="utf-8").lower()
+    removed_sections = [
+        re.split(r"\n##+ ", chunk)[0]
+        for chunk in changelog.split("### removed")[1:]
+    ]
 
-    assert "### removed" in unreleased
-    assert "segmented/dash streaming" in unreleased
-    assert "soundspan_transcode_cache_requests_total" in unreleased
+    assert removed_sections, "changelog has no Removed section"
+    assert any(
+        "segmented/dash streaming" in section
+        and "soundspan_transcode_cache_requests_total" in section
+        for section in removed_sections
+    ), "no single Removed section announces the segmented-streaming removal"
