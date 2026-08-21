@@ -8,6 +8,7 @@ corresponding implementation is added to app.py.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -174,6 +175,53 @@ class TestTidalImageUrl:
 
         result = _tidal_image_url("", w=480, h=480)
         assert result is None
+
+
+class TestUserGetTrackArtwork:
+    """Verify tiddl-native album artwork enrichment for track lookup."""
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("cover", "expected"),
+        [
+            (
+                "ab67616d-0000-b273-1234567890ab",
+                "https://resources.tidal.com/images/ab67616d/0000/b273/1234567890ab/320x320.jpg",
+            ),
+            (None, None),
+        ],
+    )
+    async def test_uses_tiddl_album_cover_identifier(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        cover: str | None,
+        expected: str | None,
+    ) -> None:
+        """A tiddl album has ``cover`` and no tidalapi ``image`` method."""
+        import app as app_module
+
+        artist = SimpleNamespace(name="Test Artist")
+        album = SimpleNamespace(id=200, title="Test Album")
+        if cover is not None:
+            album.cover = cover
+        track = SimpleNamespace(
+            id=100,
+            title="Test Track",
+            artists=[artist],
+            duration=210,
+            isrc="USRC12300001",
+            explicit=False,
+            album=album,
+        )
+
+        async def fake_user_api_call(*_args: Any, **_kwargs: Any) -> Any:
+            return track
+
+        monkeypatch.setattr(app_module, "_run_user_api_call", fake_user_api_call)
+
+        result = await app_module.user_get_track(100, "user-1")
+
+        assert result["thumbnailUrl"] == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -142,6 +142,118 @@ remoteTracksRouter.get(
     asyncHandler(handleGetRemoteTrackPreference),
 );
 
+type ParsedRemoteTrackId = NonNullable<ReturnType<typeof parseRemoteTrackId>>;
+type RemotePreferenceMetadata = {
+    title?: string;
+    artist?: string;
+    album?: string;
+    thumbnailUrl?: string;
+    duration?: number;
+    isrc?: string;
+};
+
+function readRemotePreferenceMetadata(body: unknown): RemotePreferenceMetadata {
+    if (typeof body !== "object" || body === null) return {};
+    const requestBody = body as { metadata?: unknown };
+    const source =
+        typeof requestBody.metadata === "object" &&
+        requestBody.metadata !== null
+            ? requestBody.metadata
+            : body;
+    return source as RemotePreferenceMetadata;
+}
+
+function parseTidalId(parsed: ParsedRemoteTrackId): number | undefined {
+    if (parsed.provider !== "tidal") return undefined;
+    const tidalId = Number.parseInt(parsed.externalId, 10);
+    return Number.isFinite(tidalId) && tidalId > 0 ? tidalId : undefined;
+}
+
+async function resolveLikedRemoteTrack(
+    parsed: ParsedRemoteTrackId,
+    userId: string,
+    tidalId: number | undefined,
+    metadata: RemotePreferenceMetadata,
+) {
+    const resolved = await resolveRemoteTrackMetadataForRequest({
+        provider: parsed.provider,
+        userId,
+        ...(parsed.provider === "tidal"
+            ? { tidalId: tidalId as number }
+            : { videoId: parsed.externalId }),
+        fetchArtworkIfMissing: true,
+        metadata,
+    });
+    return parsed.provider === "tidal"
+        ? trackMappingService.ensureRemoteTrack({
+              provider: "tidal",
+              tidalId: tidalId as number,
+              ...resolved,
+          })
+        : trackMappingService.ensureRemoteTrack({
+              provider: "youtube",
+              videoId: parsed.externalId,
+              title: resolved.title,
+              artist: resolved.artist,
+              album: resolved.album,
+              duration: resolved.duration,
+              thumbnailUrl: resolved.thumbnailUrl,
+          });
+}
+
+async function saveRemoteTrackLike(
+    userId: string,
+    ensured: Awaited<ReturnType<typeof resolveLikedRemoteTrack>>,
+    likedAt: Date,
+): Promise<void> {
+    if (ensured.provider === "tidal") {
+        await prisma.likedRemoteTrack.upsert({
+            where: {
+                userId_trackTidalId: { userId, trackTidalId: ensured.id },
+            },
+            create: { userId, trackTidalId: ensured.id, likedAt },
+            update: { likedAt },
+        });
+        return;
+    }
+    await prisma.likedRemoteTrack.upsert({
+        where: {
+            userId_trackYtMusicId: { userId, trackYtMusicId: ensured.id },
+        },
+        create: { userId, trackYtMusicId: ensured.id, likedAt },
+        update: { likedAt },
+    });
+}
+
+async function clearRemoteTrackLike(
+    parsed: ParsedRemoteTrackId,
+    userId: string,
+): Promise<void> {
+    if (parsed.provider === "tidal") {
+        const tidalId = parseTidalId(parsed);
+        if (!tidalId) return;
+        const track = await prisma.trackTidal.findUnique({
+            where: { tidalId },
+            select: { id: true },
+        });
+        if (track) {
+            await prisma.likedRemoteTrack.deleteMany({
+                where: { userId, trackTidalId: track.id },
+            });
+        }
+        return;
+    }
+    const track = await prisma.trackYtMusic.findUnique({
+        where: { videoId: parsed.externalId },
+        select: { id: true },
+    });
+    if (track) {
+        await prisma.likedRemoteTrack.deleteMany({
+            where: { userId, trackYtMusicId: track.id },
+        });
+    }
+}
+
 /**
  * @openapi
  * /api/library/remote-tracks/{id}/preference:
@@ -218,138 +330,24 @@ export async function handleSetRemoteTrackPreference(
         });
     }
 
-    const metadataSource =
-        req.body?.metadata && typeof req.body.metadata === "object"
-            ? req.body.metadata
-            : (req.body ?? {});
-    const metadata = metadataSource as {
-        title?: string;
-        artist?: string;
-        album?: string;
-        thumbnailUrl?: string;
-        duration?: number;
-        isrc?: string;
-    };
+    const metadata = readRemotePreferenceMetadata(req.body);
     const now = new Date();
-
-    if (signal === "thumbs_up") {
-        const tidalId =
-            parsed.provider === "tidal"
-                ? Number.parseInt(parsed.externalId, 10)
-                : undefined;
-        if (parsed.provider === "tidal") {
-            if (
-                typeof tidalId !== "number" ||
-                !Number.isFinite(tidalId) ||
-                tidalId <= 0
-            ) {
-                return res.status(400).json({
-                    error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format.",
-                });
-            }
-        }
-
-        const resolvedMetadata = await resolveRemoteTrackMetadataForRequest({
-            provider: parsed.provider,
-            userId,
-            ...(parsed.provider === "tidal"
-                ? { tidalId: tidalId as number }
-                : { videoId: parsed.externalId }),
-            metadata: {
-                title: metadata.title,
-                artist: metadata.artist,
-                album: metadata.album,
-                duration: metadata.duration,
-                thumbnailUrl: metadata.thumbnailUrl,
-                isrc: metadata.isrc,
-            },
+    const tidalId = parseTidalId(parsed);
+    if (signal === "thumbs_up" && parsed.provider === "tidal" && !tidalId) {
+        return res.status(400).json({
+            error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format.",
         });
-
-        const ensured =
-            parsed.provider === "tidal"
-                ? await trackMappingService.ensureRemoteTrack({
-                      provider: "tidal",
-                      tidalId: tidalId as number,
-                      title: resolvedMetadata.title,
-                      artist: resolvedMetadata.artist,
-                      album: resolvedMetadata.album,
-                      duration: resolvedMetadata.duration,
-                      thumbnailUrl: resolvedMetadata.thumbnailUrl,
-                      isrc: resolvedMetadata.isrc,
-                      explicit: resolvedMetadata.explicit,
-                  })
-                : await trackMappingService.ensureRemoteTrack({
-                      provider: "youtube",
-                      videoId: parsed.externalId,
-                      title: resolvedMetadata.title,
-                      artist: resolvedMetadata.artist,
-                      album: resolvedMetadata.album,
-                      duration: resolvedMetadata.duration,
-                      thumbnailUrl: resolvedMetadata.thumbnailUrl,
-                  });
-
-        if (ensured.provider === "tidal") {
-            await prisma.likedRemoteTrack.upsert({
-                where: {
-                    userId_trackTidalId: {
-                        userId,
-                        trackTidalId: ensured.id,
-                    },
-                },
-                create: {
-                    userId,
-                    trackTidalId: ensured.id,
-                    likedAt: now,
-                },
-                update: { likedAt: now },
-            });
-        } else {
-            await prisma.likedRemoteTrack.upsert({
-                where: {
-                    userId_trackYtMusicId: {
-                        userId,
-                        trackYtMusicId: ensured.id,
-                    },
-                },
-                create: {
-                    userId,
-                    trackYtMusicId: ensured.id,
-                    likedAt: now,
-                },
-                update: { likedAt: now },
-            });
-        }
+    }
+    if (signal === "thumbs_up") {
+        const ensured = await resolveLikedRemoteTrack(
+            parsed,
+            userId,
+            tidalId,
+            metadata,
+        );
+        await saveRemoteTrackLike(userId, ensured, now);
     } else {
-        if (parsed.provider === "tidal") {
-            const tidalTrackId = Number.parseInt(parsed.externalId, 10);
-            if (Number.isFinite(tidalTrackId) && tidalTrackId > 0) {
-                const trackTidal = await prisma.trackTidal.findUnique({
-                    where: { tidalId: tidalTrackId },
-                    select: { id: true },
-                });
-                if (trackTidal) {
-                    await prisma.likedRemoteTrack.deleteMany({
-                        where: {
-                            userId,
-                            trackTidalId: trackTidal.id,
-                        },
-                    });
-                }
-            }
-        } else {
-            const trackYtMusic = await prisma.trackYtMusic.findUnique({
-                where: { videoId: parsed.externalId },
-                select: { id: true },
-            });
-            if (trackYtMusic) {
-                await prisma.likedRemoteTrack.deleteMany({
-                    where: {
-                        userId,
-                        trackYtMusicId: trackYtMusic.id,
-                    },
-                });
-            }
-        }
+        await clearRemoteTrackLike(parsed, userId);
     }
 
     const preference = resolveTrackPreference({

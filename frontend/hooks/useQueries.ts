@@ -30,6 +30,7 @@ import {
     isHiddenGenreItem,
 } from "@/features/explore/genreClassification";
 
+type AlbumDetailsSource = "library" | "remote" | "discovery";
 export const queryKeys = {
     // Artist queries
     artist: (id: string) => ["artist", id] as const,
@@ -40,12 +41,11 @@ export const queryKeys = {
 
     // Album queries
     album: (id: string) => ["album", id] as const,
-    albumDetails: (id: string, source?: "library" | "discovery" | null) =>
+    albumDetails: (id: string, source?: AlbumDetailsSource | null) =>
         ["album", "details", id, source || "unknown"] as const,
     albumLibrary: (id: string) => ["album", "library", id] as const,
     albumDiscovery: (id: string) => ["album", "discovery", id] as const,
     albums: (filters?: Record<string, unknown>) => ["albums", filters] as const,
-
     // Library queries
     library: () => ["library"] as const,
     libraryArtists: (params: {

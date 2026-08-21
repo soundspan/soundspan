@@ -1,3 +1,4 @@
+import type { TrackTidal, TrackYtMusic } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { TRACK_VISIBLE_WHERE } from "../utils/librarySorting";
 import { logger } from "../utils/logger";
@@ -43,7 +44,6 @@ export interface UpsertTrackTidalData {
     isrc?: string;
     quality?: string;
     explicit?: boolean;
-    thumbnailUrl?: string;
 }
 
 export interface UpsertTrackYtMusicData {
@@ -83,6 +83,13 @@ export interface EnsuredRemoteTrackResult {
     created: boolean;
 }
 
+interface NormalizedRemoteTrackMetadata {
+    title: string;
+    artist: string;
+    album: string;
+    duration: number;
+}
+
 const PLACEHOLDER_TITLES = new Set(["unknown", ""]);
 const DEFAULT_PLACEHOLDER_DURATION = 180;
 
@@ -113,6 +120,38 @@ function shouldPreserveDuration(
 }
 
 class TrackMappingService {
+    private async repairRemoteAlbumCover(
+        albumId: string | null,
+        thumbnailUrl: string | undefined,
+        trackLabel: string,
+    ): Promise<void> {
+        if (!albumId || !thumbnailUrl) return;
+        try {
+            await applyRemoteAlbumCoverIfMissing(albumId, thumbnailUrl);
+        } catch (error) {
+            log.warn(`Album cover repair failed for ${trackLabel}`, error);
+        }
+    }
+
+    private async repairTidalAlbumCover(
+        track: { id: string; albumId: string | null },
+        thumbnailUrl: string | undefined,
+        tidalId: number,
+    ): Promise<void> {
+        if (!thumbnailUrl) return;
+        const linked = track.albumId
+            ? track
+            : await prisma.trackTidal.findUnique({
+                  where: { id: track.id },
+                  select: { id: true, albumId: true },
+              });
+        await this.repairRemoteAlbumCover(
+            linked?.albumId ?? null,
+            thumbnailUrl,
+            `TrackTidal tidalId=${tidalId}`,
+        );
+    }
+
     private requireNonEmptyString(value: unknown, fieldName: string): string {
         if (typeof value !== "string") {
             throw new Error(
@@ -132,6 +171,125 @@ class TrackMappingService {
         if (typeof value !== "string") return undefined;
         const normalized = value.trim();
         return normalized.length > 0 ? normalized : undefined;
+    }
+
+    private refreshArtistCounts(artistId: string): void {
+        updateArtistCounts(artistId).catch((error) => {
+            log.warn(`Count refresh failed for artist=${artistId}`, error);
+        });
+    }
+
+    private mergeRemoteMetadata(
+        incoming: Pick<
+            UpsertTrackTidalData,
+            "title" | "artist" | "album" | "duration"
+        >,
+        existing: {
+            title: string;
+            artist: string;
+            album: string;
+            duration: number;
+        } | null,
+    ) {
+        return {
+            title:
+                existing && shouldPreserveField(incoming.title, existing.title)
+                    ? existing.title
+                    : incoming.title,
+            artist:
+                existing &&
+                shouldPreserveField(incoming.artist, existing.artist)
+                    ? existing.artist
+                    : incoming.artist,
+            album:
+                existing && shouldPreserveField(incoming.album, existing.album)
+                    ? existing.album
+                    : incoming.album,
+            duration:
+                existing &&
+                shouldPreserveDuration(incoming.duration, existing.duration)
+                    ? existing.duration
+                    : incoming.duration,
+        };
+    }
+
+    private async resolveTidalLinkage(
+        result: TrackTidal,
+        data: UpsertTrackTidalData,
+    ): Promise<void> {
+        if (result.artistId !== null && result.albumId !== null) return;
+        try {
+            const artist = result.artistId
+                ? { id: result.artistId, name: data.artist, created: false }
+                : await resolveArtistForRemoteTrack(data.artist);
+            const album = result.albumId
+                ? null
+                : await resolveAlbumForRemoteTrack(
+                      result.album,
+                      artist.id,
+                      "tidal",
+                      {
+                          artistName: result.artist,
+                          trackTitle: result.title,
+                      },
+                  );
+            await prisma.trackTidal.update({
+                where: { id: result.id },
+                data: {
+                    artistId: artist.id,
+                    albumId: album?.id ?? result.albumId ?? null,
+                },
+            });
+            this.refreshArtistCounts(artist.id);
+            log.debug(
+                `Resolved artist="${artist.name}" for TrackTidal tidalId=${data.tidalId}`,
+            );
+        } catch (error) {
+            log.warn(
+                `Artist/album resolution failed for TrackTidal tidalId=${data.tidalId}`,
+                error,
+            );
+        }
+    }
+
+    private async resolveYtLinkage(
+        result: TrackYtMusic,
+        data: UpsertTrackYtMusicData,
+    ): Promise<void> {
+        if (result.artistId !== null && result.albumId !== null) return;
+        try {
+            const artist = result.artistId
+                ? { id: result.artistId, name: data.artist, created: false }
+                : await resolveArtistForRemoteTrack(data.artist);
+            const album = result.albumId
+                ? null
+                : await resolveAlbumForRemoteTrack(
+                      result.album,
+                      artist.id,
+                      "youtube",
+                      {
+                          artistName: result.artist,
+                          trackTitle: result.title,
+                          coverUrl: data.thumbnailUrl,
+                      },
+                  );
+            await prisma.trackYtMusic.update({
+                where: { id: result.id },
+                data: {
+                    artistId: artist.id,
+                    albumId: album?.id ?? result.albumId ?? null,
+                },
+            });
+            this.refreshArtistCounts(artist.id);
+            log.debug(
+                `Resolved artist="${artist.name}" for TrackYtMusic videoId=${data.videoId}`,
+            );
+        } catch (error) {
+            log.warn(
+                `Artist/album resolution failed for TrackYtMusic videoId=${data.videoId}`,
+                error,
+            );
+        }
     }
 
     private sourcePriority(source: string): number {
@@ -284,31 +442,12 @@ class TrackMappingService {
                 },
             });
 
-            const updateTitle =
-                existing && shouldPreserveField(data.title, existing.title)
-                    ? existing.title
-                    : data.title;
-            const updateArtist =
-                existing && shouldPreserveField(data.artist, existing.artist)
-                    ? existing.artist
-                    : data.artist;
-            const updateAlbum =
-                existing && shouldPreserveField(data.album, existing.album)
-                    ? existing.album
-                    : data.album;
-            const updateDuration =
-                existing &&
-                shouldPreserveDuration(data.duration, existing.duration)
-                    ? existing.duration
-                    : data.duration;
+            const metadata = this.mergeRemoteMetadata(data, existing);
 
             const result = await prisma.trackTidal.upsert({
                 where: { tidalId: data.tidalId },
                 update: {
-                    title: updateTitle,
-                    artist: updateArtist,
-                    album: updateAlbum,
-                    duration: updateDuration,
+                    ...metadata,
                     isrc: data.isrc,
                     quality: data.quality,
                     explicit: data.explicit,
@@ -326,67 +465,7 @@ class TrackMappingService {
             });
             log.debug(`Upserted TrackTidal tidalId=${data.tidalId}`);
 
-            // Resolve artist/album entity linkage if not yet populated
-            if (
-                (result.artistId === null ||
-                    result.albumId === null ||
-                    Boolean(data.thumbnailUrl)) &&
-                data.artist
-            ) {
-                try {
-                    const artistResult = result.artistId
-                        ? {
-                              id: result.artistId,
-                              name: data.artist,
-                              created: false,
-                          }
-                        : await resolveArtistForRemoteTrack(data.artist);
-
-                    if (result.albumId && data.thumbnailUrl) {
-                        await applyRemoteAlbumCoverIfMissing(
-                            result.albumId,
-                            data.thumbnailUrl,
-                        );
-                    }
-
-                    const albumResult = result.albumId
-                        ? null
-                        : await resolveAlbumForRemoteTrack(
-                              result.album,
-                              artistResult.id,
-                              "tidal",
-                              {
-                                  artistName: result.artist,
-                                  trackTitle: result.title,
-                                  coverUrl: data.thumbnailUrl,
-                              },
-                          );
-
-                    await prisma.trackTidal.update({
-                        where: { id: result.id },
-                        data: {
-                            artistId: artistResult.id,
-                            albumId: albumResult?.id ?? result.albumId ?? null,
-                        },
-                    });
-
-                    // Fire-and-forget count refresh
-                    updateArtistCounts(artistResult.id).catch((err) => {
-                        log.warn(
-                            `Count refresh failed for artist=${artistResult.id}`,
-                            err,
-                        );
-                    });
-                    log.debug(
-                        `Resolved artist="${artistResult.name}" for TrackTidal tidalId=${data.tidalId}`,
-                    );
-                } catch (resolutionError) {
-                    log.warn(
-                        `Artist/album resolution failed for TrackTidal tidalId=${data.tidalId}`,
-                        resolutionError,
-                    );
-                }
-            }
+            await this.resolveTidalLinkage(result, data);
 
             return result;
         } catch (error) {
@@ -414,31 +493,12 @@ class TrackMappingService {
                 },
             });
 
-            const updateTitle =
-                existing && shouldPreserveField(data.title, existing.title)
-                    ? existing.title
-                    : data.title;
-            const updateArtist =
-                existing && shouldPreserveField(data.artist, existing.artist)
-                    ? existing.artist
-                    : data.artist;
-            const updateAlbum =
-                existing && shouldPreserveField(data.album, existing.album)
-                    ? existing.album
-                    : data.album;
-            const updateDuration =
-                existing &&
-                shouldPreserveDuration(data.duration, existing.duration)
-                    ? existing.duration
-                    : data.duration;
+            const metadata = this.mergeRemoteMetadata(data, existing);
 
             const result = await prisma.trackYtMusic.upsert({
                 where: { videoId: data.videoId },
                 update: {
-                    title: updateTitle,
-                    artist: updateArtist,
-                    album: updateAlbum,
-                    duration: updateDuration,
+                    ...metadata,
                     thumbnailUrl: data.thumbnailUrl,
                 },
                 create: {
@@ -452,67 +512,13 @@ class TrackMappingService {
             });
             log.debug(`Upserted TrackYtMusic videoId=${data.videoId}`);
 
-            // Resolve artist/album entity linkage if not yet populated
-            if (
-                (result.artistId === null ||
-                    result.albumId === null ||
-                    Boolean(data.thumbnailUrl)) &&
-                data.artist
-            ) {
-                try {
-                    const artistResult = result.artistId
-                        ? {
-                              id: result.artistId,
-                              name: data.artist,
-                              created: false,
-                          }
-                        : await resolveArtistForRemoteTrack(data.artist);
+            await this.repairRemoteAlbumCover(
+                result.albumId,
+                data.thumbnailUrl,
+                `TrackYtMusic videoId=${data.videoId}`,
+            );
 
-                    if (result.albumId && data.thumbnailUrl) {
-                        await applyRemoteAlbumCoverIfMissing(
-                            result.albumId,
-                            data.thumbnailUrl,
-                        );
-                    }
-
-                    const albumResult = result.albumId
-                        ? null
-                        : await resolveAlbumForRemoteTrack(
-                              result.album,
-                              artistResult.id,
-                              "youtube",
-                              {
-                                  artistName: result.artist,
-                                  trackTitle: result.title,
-                                  coverUrl: data.thumbnailUrl,
-                              },
-                          );
-
-                    await prisma.trackYtMusic.update({
-                        where: { id: result.id },
-                        data: {
-                            artistId: artistResult.id,
-                            albumId: albumResult?.id ?? result.albumId ?? null,
-                        },
-                    });
-
-                    // Fire-and-forget count refresh
-                    updateArtistCounts(artistResult.id).catch((err) => {
-                        log.warn(
-                            `Count refresh failed for artist=${artistResult.id}`,
-                            err,
-                        );
-                    });
-                    log.debug(
-                        `Resolved artist="${artistResult.name}" for TrackYtMusic videoId=${data.videoId}`,
-                    );
-                } catch (resolutionError) {
-                    log.warn(
-                        `Artist/album resolution failed for TrackYtMusic videoId=${data.videoId}`,
-                        resolutionError,
-                    );
-                }
-            }
+            await this.resolveYtLinkage(result, data);
 
             return result;
         } catch (error) {
@@ -522,6 +528,67 @@ class TrackMappingService {
             );
             throw error;
         }
+    }
+
+    private async ensureTidalRemoteTrack(
+        data: EnsureRemoteTrackData,
+        metadata: NormalizedRemoteTrackMetadata,
+    ): Promise<EnsuredRemoteTrackResult> {
+        if (data.videoId !== undefined) {
+            throw new Error(
+                "ensureRemoteTrack requires videoId to be omitted for tidal provider",
+            );
+        }
+        const tidalId = Math.trunc(data.tidalId as number);
+        if (!Number.isFinite(tidalId) || tidalId <= 0) {
+            throw new Error("ensureRemoteTrack requires tidalId > 0");
+        }
+        const existing = await prisma.trackTidal.findUnique({
+            where: { tidalId },
+            select: { id: true },
+        });
+        const track = await this.upsertTrackTidal({
+            tidalId,
+            ...metadata,
+            isrc: this.normalizeOptionalString(data.isrc),
+            quality: this.normalizeOptionalString(data.quality),
+            explicit:
+                typeof data.explicit === "boolean" ? data.explicit : undefined,
+        });
+        await this.repairTidalAlbumCover(
+            track,
+            this.normalizeOptionalString(data.thumbnailUrl),
+            tidalId,
+        );
+        await this.ensureMapping("tidal", track.id);
+        return { provider: "tidal", id: track.id, created: existing === null };
+    }
+
+    private async ensureYtRemoteTrack(
+        data: EnsureRemoteTrackData,
+        metadata: NormalizedRemoteTrackMetadata,
+    ): Promise<EnsuredRemoteTrackResult> {
+        if (data.tidalId !== undefined) {
+            throw new Error(
+                "ensureRemoteTrack requires tidalId to be omitted for youtube provider",
+            );
+        }
+        const videoId = this.requireNonEmptyString(data.videoId, "videoId");
+        const existing = await prisma.trackYtMusic.findUnique({
+            where: { videoId },
+            select: { id: true },
+        });
+        const track = await this.upsertTrackYtMusic({
+            videoId,
+            ...metadata,
+            thumbnailUrl: this.normalizeOptionalString(data.thumbnailUrl),
+        });
+        await this.ensureMapping("youtube", track.id);
+        return {
+            provider: "youtube",
+            id: track.id,
+            created: existing === null,
+        };
     }
 
     /**
@@ -537,79 +604,21 @@ class TrackMappingService {
         if (!Number.isFinite(data.duration) || data.duration < 0) {
             throw new Error("ensureRemoteTrack requires duration >= 0");
         }
-        const duration = Math.trunc(data.duration);
-
+        const metadata = {
+            title,
+            artist,
+            album,
+            duration: Math.trunc(data.duration),
+        };
         if (data.provider === "tidal") {
-            if (data.videoId !== undefined) {
-                throw new Error(
-                    "ensureRemoteTrack requires videoId to be omitted for tidal provider",
-                );
-            }
-
-            const tidalId = Math.trunc(data.tidalId as number);
-            if (!Number.isFinite(tidalId) || tidalId <= 0) {
-                throw new Error("ensureRemoteTrack requires tidalId > 0");
-            }
-
-            const existingTrack = await prisma.trackTidal.findUnique({
-                where: { tidalId },
-                select: { id: true },
-            });
-            const trackTidal = await this.upsertTrackTidal({
-                tidalId,
-                title,
-                artist,
-                album,
-                duration,
-                thumbnailUrl: this.normalizeOptionalString(data.thumbnailUrl),
-                isrc: this.normalizeOptionalString(data.isrc),
-                quality: this.normalizeOptionalString(data.quality),
-                explicit:
-                    typeof data.explicit === "boolean"
-                        ? data.explicit
-                        : undefined,
-            });
-
-            await this.ensureMapping("tidal", trackTidal.id);
-
-            return {
-                provider: "tidal",
-                id: trackTidal.id,
-                created: existingTrack === null,
-            };
+            return this.ensureTidalRemoteTrack(data, metadata);
         }
-
         if (data.provider !== "youtube") {
             throw new Error(
                 "ensureRemoteTrack requires provider to be tidal or youtube",
             );
         }
-        if (data.tidalId !== undefined) {
-            throw new Error(
-                "ensureRemoteTrack requires tidalId to be omitted for youtube provider",
-            );
-        }
-        const videoId = this.requireNonEmptyString(data.videoId, "videoId");
-        const existingTrack = await prisma.trackYtMusic.findUnique({
-            where: { videoId },
-            select: { id: true },
-        });
-        const trackYtMusic = await this.upsertTrackYtMusic({
-            videoId,
-            title,
-            artist,
-            album,
-            duration,
-            thumbnailUrl: this.normalizeOptionalString(data.thumbnailUrl),
-        });
-
-        await this.ensureMapping("youtube", trackYtMusic.id);
-
-        return {
-            provider: "youtube",
-            id: trackYtMusic.id,
-            created: existingTrack === null,
-        };
+        return this.ensureYtRemoteTrack(data, metadata);
     }
 
     /**

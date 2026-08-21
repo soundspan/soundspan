@@ -3,7 +3,11 @@ import type {
     UnifiedTrackSource,
 } from "@soundspan/media-metadata-contract";
 
-export type AlbumSource = "library" | "discovery";
+/** Album-page data source used to choose hydration and available controls. */
+export type AlbumSource = "library" | "remote" | "discovery";
+
+/** Source values returned by the album API. */
+export type AlbumApiSource = "local" | "remote" | "federated";
 
 export interface Album {
     albumLoudnessLufs?: number | null;
@@ -28,7 +32,7 @@ export interface Album {
     owned?: boolean;
     tracks?: Track[];
     similarAlbums?: SimilarAlbum[];
-    source?: UnifiedTrackSource;
+    source?: AlbumApiSource;
     peer?: FederatedTrackPeer;
 }
 
@@ -61,10 +65,20 @@ export interface Track {
     streamSource?: "local" | "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    thumbnailUrl?: string;
     // Local file path (present for owned/library tracks)
     filePath?: string;
     source?: UnifiedTrackSource;
     peer?: FederatedTrackPeer;
+}
+
+/** Resolves the album-page state without conflating remote-library visibility with ownership. */
+export function resolveAlbumSource(
+    album: Pick<Album, "owned" | "source"> | null | undefined,
+): AlbumSource | null {
+    if (!album) return null;
+    if (album.source === "remote") return "remote";
+    return album.owned === true ? "library" : "discovery";
 }
 
 export interface SimilarAlbum {

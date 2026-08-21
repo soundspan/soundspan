@@ -1964,7 +1964,7 @@ async def user_get_track(
             "duration": track.duration,
             "isrc": track.isrc,
             "explicit": track.explicit,
-            "thumbnailUrl": _serialize_track(track).get("thumbnailUrl"),
+            "thumbnailUrl": _tidal_image_url(getattr(track.album, "cover", None), 320, 320),
             "album": {"id": track.album.id, "title": track.album.title},
         }
     except ApiError as e:

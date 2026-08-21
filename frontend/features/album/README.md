@@ -14,13 +14,19 @@ Start-here guide for `frontend/features/album`.
 
 | Path | Kind |
 | --- | --- |
+| `albumActionVisibility.ts` | action visibility and acquisition policy |
+| `albumHydration.ts` | source-specific album hydration |
+| `albumPlayback.ts` | playback mapping |
 | `components/AlbumActionBar.tsx` | components |
 | `components/AlbumHero.tsx` | components |
 | `components/SimilarAlbums.tsx` | components |
 | `components/TrackList.tsx` | components |
 | `hooks/providerStatusCache.ts` | hooks |
 | `hooks/useAlbumActions.ts` | hooks |
+| `hooks/useAlbumAcquisition.ts` | acquisition hook |
 | `hooks/useAlbumData.ts` | hooks |
+| `hooks/useAlbumPlaybackActions.ts` | playback and queue hook |
+| `hooks/useAlbumPreferenceActions.ts` | album preference hooks |
 | `hooks/useTidalGapFill.ts` | hooks |
 | `hooks/useYtMusicGapFill.ts` | hooks |
 | `types.ts` | root |

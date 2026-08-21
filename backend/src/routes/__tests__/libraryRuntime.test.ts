@@ -4422,7 +4422,7 @@ describe("library catalog list runtime coverage", () => {
         });
     });
 
-    it("returns album preference response with zero tracks when album has no tracks", async () => {
+    it("rejects album preference updates when an album has no local tracks", async () => {
         mockAlbumFindFirst.mockResolvedValue({ id: "album-empty" });
         mockTrackFindMany.mockResolvedValueOnce([]);
 
@@ -4435,14 +4435,10 @@ describe("library catalog list runtime coverage", () => {
 
         await setAlbumPreferenceHandler(req, res);
 
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(
-            expect.objectContaining({
-                albumId: "album-empty",
-                trackCount: 0,
-                signal: "thumbs_up",
-            }),
-        );
+        expect(res.statusCode).toBe(422);
+        expect(res.body).toEqual({
+            error: "Album preferences require at least one local track",
+        });
         expect(mockPrismaTransaction).not.toHaveBeenCalled();
     });
 

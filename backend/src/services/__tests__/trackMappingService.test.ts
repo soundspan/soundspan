@@ -2,10 +2,12 @@ const mockPrisma = {
     trackTidal: {
         findUnique: jest.fn(),
         upsert: jest.fn(),
+        update: jest.fn(),
     },
     trackYtMusic: {
         findUnique: jest.fn(),
         upsert: jest.fn(),
+        update: jest.fn(),
     },
     trackMapping: {
         create: jest.fn(),
@@ -37,6 +39,23 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
+const mockResolveArtistForRemoteTrack = jest.fn();
+jest.mock("../artistResolutionService", () => ({
+    resolveArtistForRemoteTrack: mockResolveArtistForRemoteTrack,
+}));
+
+const mockApplyRemoteAlbumCoverIfMissing = jest.fn();
+const mockResolveAlbumForRemoteTrack = jest.fn();
+jest.mock("../albumResolutionService", () => ({
+    applyRemoteAlbumCoverIfMissing: mockApplyRemoteAlbumCoverIfMissing,
+    resolveAlbumForRemoteTrack: mockResolveAlbumForRemoteTrack,
+}));
+
+const mockUpdateArtistCounts = jest.fn();
+jest.mock("../artistCountsService", () => ({
+    updateArtistCounts: mockUpdateArtistCounts,
+}));
+
 import { trackMappingService } from "../trackMappingService";
 
 describe("TrackMappingService", () => {
@@ -48,6 +67,20 @@ describe("TrackMappingService", () => {
         mockPrisma.trackMapping.findFirst.mockResolvedValue(null);
         // Default: createMapping transaction creates successfully
         mockPrisma.trackMapping.findMany.mockResolvedValue([]);
+        mockPrisma.trackTidal.update.mockResolvedValue({});
+        mockPrisma.trackYtMusic.update.mockResolvedValue({});
+        mockApplyRemoteAlbumCoverIfMissing.mockResolvedValue(undefined);
+        mockResolveArtistForRemoteTrack.mockResolvedValue({
+            id: "resolved-artist",
+            name: "Resolved Artist",
+            created: false,
+        });
+        mockResolveAlbumForRemoteTrack.mockResolvedValue({
+            id: "resolved-album",
+            title: "Resolved Album",
+            created: false,
+        });
+        mockUpdateArtistCounts.mockResolvedValue(undefined);
         mockPrisma.trackMapping.create.mockImplementation(
             async (args: any) => ({
                 id: "auto-mapping-1",
@@ -333,9 +366,116 @@ describe("TrackMappingService", () => {
                 }),
             ).rejects.toThrow("DB error");
         });
+
+        it("repairs a linked album cover without relinking or refreshing counts", async () => {
+            mockPrisma.trackYtMusic.upsert.mockResolvedValueOnce({
+                id: "cy_linked",
+                videoId: "linked-video",
+                title: "Linked Song",
+                artist: "Linked Artist",
+                album: "Linked Album",
+                duration: 200,
+                thumbnailUrl: "https://img.local/linked.jpg",
+                artistId: "artist-linked",
+                albumId: "album-linked",
+            });
+
+            await trackMappingService.upsertTrackYtMusic({
+                videoId: "linked-video",
+                title: "Linked Song",
+                artist: "Linked Artist",
+                album: "Linked Album",
+                duration: 200,
+                thumbnailUrl: "https://img.local/linked.jpg",
+            });
+
+            expect(mockApplyRemoteAlbumCoverIfMissing).toHaveBeenCalledWith(
+                "album-linked",
+                "https://img.local/linked.jpg",
+            );
+            expect(mockResolveArtistForRemoteTrack).not.toHaveBeenCalled();
+            expect(mockResolveAlbumForRemoteTrack).not.toHaveBeenCalled();
+            expect(mockPrisma.trackYtMusic.update).not.toHaveBeenCalled();
+            expect(mockUpdateArtistCounts).not.toHaveBeenCalled();
+        });
     });
 
     describe("ensureRemoteTrack", () => {
+        it("applies TIDAL artwork to an already-linked remote album without relinking", async () => {
+            mockPrisma.trackTidal.upsert.mockResolvedValueOnce({
+                id: "tt-linked",
+                tidalId: 4321,
+                title: "Linked TIDAL Song",
+                artist: "Linked Artist",
+                album: "Linked Album",
+                duration: 210,
+                artistId: "artist-linked",
+                albumId: "album-linked",
+            });
+            mockPrisma.trackMapping.findFirst.mockResolvedValueOnce({
+                id: "mapping-linked",
+            });
+
+            await trackMappingService.ensureRemoteTrack({
+                provider: "tidal",
+                tidalId: 4321,
+                title: "Linked TIDAL Song",
+                artist: "Linked Artist",
+                album: "Linked Album",
+                duration: 210,
+                thumbnailUrl: "https://img.local/tidal-linked.jpg",
+            });
+
+            expect(mockApplyRemoteAlbumCoverIfMissing).toHaveBeenCalledWith(
+                "album-linked",
+                "https://img.local/tidal-linked.jpg",
+            );
+            expect(mockPrisma.trackTidal.update).not.toHaveBeenCalled();
+            expect(mockUpdateArtistCounts).not.toHaveBeenCalled();
+        });
+
+        it("applies TIDAL artwork after resolving a missing album link", async () => {
+            mockPrisma.trackTidal.findUnique
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({
+                    id: "tt-new-link",
+                    albumId: "resolved-album",
+                });
+            mockPrisma.trackTidal.upsert.mockResolvedValueOnce({
+                id: "tt-new-link",
+                tidalId: 4322,
+                title: "New TIDAL Song",
+                artist: "Resolved Artist",
+                album: "Resolved Album",
+                duration: 211,
+                artistId: null,
+                albumId: null,
+            });
+
+            await trackMappingService.ensureRemoteTrack({
+                provider: "tidal",
+                tidalId: 4322,
+                title: "New TIDAL Song",
+                artist: "Resolved Artist",
+                album: "Resolved Album",
+                duration: 211,
+                thumbnailUrl: "https://img.local/tidal-new-link.jpg",
+            });
+
+            expect(mockPrisma.trackTidal.update).toHaveBeenCalledWith({
+                where: { id: "tt-new-link" },
+                data: {
+                    artistId: "resolved-artist",
+                    albumId: "resolved-album",
+                },
+            });
+            expect(mockApplyRemoteAlbumCoverIfMissing).toHaveBeenCalledWith(
+                "resolved-album",
+                "https://img.local/tidal-new-link.jpg",
+            );
+        });
+
         it("validates and delegates tidal payloads to upsertTrackTidal", async () => {
             mockPrisma.trackTidal.upsert.mockResolvedValueOnce({
                 id: "tt-row-1",

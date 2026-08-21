@@ -50,6 +50,8 @@ export interface RemoteTrackLookup {
     userId: string;
     tidalId?: number;
     videoId?: string;
+    /** Allow a persisted enrichment request to fetch provider artwork. */
+    fetchArtworkIfMissing?: boolean;
     metadata: RemoteTrackMetadataInput;
 }
 
@@ -140,133 +142,126 @@ export function hasPlaceholderRemoteTrackMetadata(
     );
 }
 
+async function resolveTidalMetadata(
+    lookup: RemoteTrackLookup,
+    resolved: ResolvedRemoteTrackMetadata,
+): Promise<ResolvedRemoteTrackMetadata> {
+    const tidalId =
+        typeof lookup.tidalId === "number" &&
+        Number.isFinite(lookup.tidalId) &&
+        lookup.tidalId > 0
+            ? Math.trunc(lookup.tidalId)
+            : null;
+    if (!tidalId) return resolved;
+
+    const { tidalStreamingService } = await import("./tidalStreaming");
+    const detail = await tidalStreamingService.getTrack(lookup.userId, tidalId);
+    if (!detail) return resolved;
+
+    if (!isPlaceholderValue("title", detail.title)) {
+        resolved.title = detail.title;
+    }
+    if (!isPlaceholderValue("artist", detail.artist)) {
+        resolved.artist = detail.artist;
+    }
+    if (!isPlaceholderValue("album", detail.album?.title)) {
+        resolved.album = detail.album.title;
+    }
+    if (normalizeDuration(detail.duration)) {
+        resolved.duration = Math.trunc(detail.duration);
+    }
+    resolved.thumbnailUrl =
+        normalizeOptionalString(detail.thumbnailUrl) ?? resolved.thumbnailUrl;
+    resolved.isrc = normalizeOptionalString(detail.isrc) ?? resolved.isrc;
+    if (typeof detail.explicit === "boolean") {
+        resolved.explicit = detail.explicit;
+    }
+    return resolved;
+}
+
+type YtMetadataSong = {
+    title?: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+    thumbnails?: unknown[];
+};
+
+async function fetchYtMetadataSong(
+    userId: string,
+    videoId: string,
+): Promise<YtMetadataSong | null> {
+    const { ytMusicService } = await import("./youtubeMusic");
+    let song: YtMetadataSong | null = null;
+    try {
+        song = await ytMusicService.getSong(userId, videoId);
+    } catch (error) {
+        log.debug(
+            `Falling back to __public__ YT metadata lookup for videoId=${videoId}`,
+            error,
+        );
+    }
+    return song ?? ytMusicService.getSong("__public__", videoId);
+}
+
+function applyYtMetadata(
+    resolved: ResolvedRemoteTrackMetadata,
+    song: YtMetadataSong,
+): ResolvedRemoteTrackMetadata {
+    const title = normalizeOptionalString(song.title);
+    const artist = normalizeOptionalString(song.artist);
+    const album = normalizeOptionalString(song.album);
+    if (title && !isPlaceholderValue("title", title)) {
+        resolved.title = title;
+    }
+    if (artist && !isPlaceholderValue("artist", artist)) {
+        resolved.artist = artist;
+    }
+    if (album && !isPlaceholderValue("album", album)) {
+        resolved.album = album;
+    }
+    if (normalizeDuration(song.duration)) {
+        resolved.duration = Math.trunc(song.duration!);
+    }
+    resolved.thumbnailUrl =
+        resolved.thumbnailUrl ?? pickBestThumbnailUrl(song.thumbnails);
+    return resolved;
+}
+
+async function resolveYtMetadata(
+    lookup: RemoteTrackLookup,
+    resolved: ResolvedRemoteTrackMetadata,
+): Promise<ResolvedRemoteTrackMetadata> {
+    const videoId = normalizeOptionalString(lookup.videoId);
+    if (!videoId) return resolved;
+    const song = await fetchYtMetadataSong(lookup.userId, videoId);
+    return song ? applyYtMetadata(resolved, song) : resolved;
+}
+
 /**
- * Resolve request-supplied metadata into a persistable payload, fetching
- * provider details inline when the request only carries placeholder values.
+ * Resolve request metadata into a persistable payload. Provider detail I/O is
+ * limited to placeholder repair or an explicit persisted-artwork enrichment.
  */
 export async function resolveRemoteTrackMetadataForRequest(
     lookup: RemoteTrackLookup,
 ): Promise<ResolvedRemoteTrackMetadata> {
     const resolved = normalizeResolvedMetadata(lookup.metadata);
 
-    if (
-        !hasPlaceholderRemoteTrackMetadata(lookup.metadata) &&
-        resolved.thumbnailUrl
-    ) {
+    const needsMetadataRepair = hasPlaceholderRemoteTrackMetadata(
+        lookup.metadata,
+    );
+    const needsArtworkRepair =
+        lookup.fetchArtworkIfMissing === true && !resolved.thumbnailUrl;
+
+    if (!needsMetadataRepair && !needsArtworkRepair) {
         return resolved;
     }
 
     try {
         if (lookup.provider === "tidal") {
-            const tidalId =
-                typeof lookup.tidalId === "number" &&
-                Number.isFinite(lookup.tidalId) &&
-                lookup.tidalId > 0
-                    ? Math.trunc(lookup.tidalId)
-                    : null;
-
-            if (!tidalId) {
-                return resolved;
-            }
-
-            const { tidalStreamingService } = await import("./tidalStreaming");
-            const detail = await tidalStreamingService.getTrack(
-                lookup.userId,
-                tidalId,
-            );
-            if (!detail) {
-                return resolved;
-            }
-
-            if (!isPlaceholderValue("title", detail.title)) {
-                resolved.title = detail.title;
-            }
-            if (!isPlaceholderValue("artist", detail.artist)) {
-                resolved.artist = detail.artist;
-            }
-            if (!isPlaceholderValue("album", detail.album?.title)) {
-                resolved.album = detail.album.title;
-            }
-            if (normalizeDuration(detail.duration)) {
-                resolved.duration = Math.trunc(detail.duration);
-            }
-            const normalizedThumbnailUrl = normalizeOptionalString(
-                detail.thumbnailUrl,
-            );
-            if (normalizedThumbnailUrl) {
-                resolved.thumbnailUrl = normalizedThumbnailUrl;
-            }
-
-            const normalizedIsrc = normalizeOptionalString(detail.isrc);
-            if (normalizedIsrc) {
-                resolved.isrc = normalizedIsrc;
-            }
-            if (typeof detail.explicit === "boolean") {
-                resolved.explicit = detail.explicit;
-            }
-
-            return resolved;
+            return await resolveTidalMetadata(lookup, resolved);
         }
-
-        const videoId = normalizeOptionalString(lookup.videoId);
-        if (!videoId) {
-            return resolved;
-        }
-
-        let song: {
-            title?: string;
-            artist?: string;
-            album?: string;
-            duration?: number;
-            thumbnails?: unknown[];
-        } | null = null;
-        const { ytMusicService } = await import("./youtubeMusic");
-
-        try {
-            song = await ytMusicService.getSong(lookup.userId, videoId);
-        } catch (error) {
-            log.debug(
-                `Falling back to __public__ YT metadata lookup for videoId=${videoId}`,
-                error,
-            );
-        }
-
-        if (!song) {
-            song = await ytMusicService.getSong("__public__", videoId);
-        }
-        if (!song) {
-            return resolved;
-        }
-
-        const normalizedSongTitle = normalizeOptionalString(song.title);
-        if (
-            normalizedSongTitle &&
-            !isPlaceholderValue("title", normalizedSongTitle)
-        ) {
-            resolved.title = normalizedSongTitle;
-        }
-        const normalizedSongArtist = normalizeOptionalString(song.artist);
-        if (
-            normalizedSongArtist &&
-            !isPlaceholderValue("artist", normalizedSongArtist)
-        ) {
-            resolved.artist = normalizedSongArtist;
-        }
-        const normalizedSongAlbum = normalizeOptionalString(song.album);
-        if (
-            normalizedSongAlbum &&
-            !isPlaceholderValue("album", normalizedSongAlbum)
-        ) {
-            resolved.album = normalizedSongAlbum;
-        }
-        if (normalizeDuration(song.duration)) {
-            resolved.duration = Math.trunc(song.duration!);
-        }
-        if (!resolved.thumbnailUrl) {
-            resolved.thumbnailUrl = pickBestThumbnailUrl(song.thumbnails);
-        }
-
-        return resolved;
+        return await resolveYtMetadata(lookup, resolved);
     } catch (error) {
         log.warn(
             `Failed to resolve inline metadata for ${lookup.provider} track`,

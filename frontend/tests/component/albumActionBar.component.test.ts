@@ -118,3 +118,48 @@ test("AlbumActionBar still renders share button for non-library albums", async (
 
     assert.match(html, /title="Share album"/);
 });
+
+test("AlbumActionBar keeps remote albums playable and acquirable without album preference controls", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: {
+                ...baseProps.album,
+                owned: false,
+                rgMbid: "remote-release-group",
+            },
+            source: "remote" as const,
+        }),
+    );
+
+    assert.match(html, />Play All</);
+    assert.match(html, />Download</);
+    assert.match(html, />Search</);
+    assert.match(html, /title="Add to playlist"/);
+    assert.doesNotMatch(html, /Like every track on this album/);
+    assert.doesNotMatch(html, /Remove like from all tracks/);
+});
+
+test("AlbumActionBar hides acquisition controls for a synthetic remote release group", async () => {
+    const { AlbumActionBar } =
+        await import("../../features/album/components/AlbumActionBar");
+
+    const html = renderToStaticMarkup(
+        React.createElement(AlbumActionBar, {
+            ...baseProps,
+            album: {
+                ...baseProps.album,
+                owned: false,
+                rgMbid: "remote:generated-hash",
+            },
+            source: "remote" as const,
+        }),
+    );
+
+    assert.match(html, />Play All</);
+    assert.doesNotMatch(html, />Download</);
+    assert.doesNotMatch(html, />Search</);
+});

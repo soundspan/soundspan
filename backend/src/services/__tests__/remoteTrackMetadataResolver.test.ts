@@ -165,6 +165,56 @@ describe("remoteTrackMetadataResolver", () => {
             expect(mockTidalGetTrack).not.toHaveBeenCalled();
         });
 
+        it("does not fetch missing artwork for complete metadata by default", async () => {
+            const resolved = await resolveRemoteTrackMetadataForRequest({
+                provider: "tidal",
+                userId: "user-fast-path",
+                tidalId: 123,
+                metadata: {
+                    title: "Complete Title",
+                    artist: "Complete Artist",
+                    album: "Complete Album",
+                    duration: 205,
+                },
+            });
+
+            expect(resolved.thumbnailUrl).toBeUndefined();
+            expect(mockTidalGetTrack).not.toHaveBeenCalled();
+        });
+
+        it("fetches missing artwork when persisted enrichment opts in", async () => {
+            mockTidalGetTrack.mockResolvedValueOnce({
+                title: "Complete Title",
+                artist: "Complete Artist",
+                album: { title: "Complete Album" },
+                duration: 205,
+                thumbnailUrl: "https://img.local/tidal-cover.jpg",
+                isrc: null,
+                explicit: false,
+            });
+
+            const resolved = await resolveRemoteTrackMetadataForRequest({
+                provider: "tidal",
+                userId: "user-enrichment",
+                tidalId: 124,
+                fetchArtworkIfMissing: true,
+                metadata: {
+                    title: "Complete Title",
+                    artist: "Complete Artist",
+                    album: "Complete Album",
+                    duration: 205,
+                },
+            });
+
+            expect(mockTidalGetTrack).toHaveBeenCalledWith(
+                "user-enrichment",
+                124,
+            );
+            expect(resolved.thumbnailUrl).toBe(
+                "https://img.local/tidal-cover.jpg",
+            );
+        });
+
         it("normalizes placeholders to defaults and ignores invalid optional fields", async () => {
             const metadata = {
                 title: "   ",

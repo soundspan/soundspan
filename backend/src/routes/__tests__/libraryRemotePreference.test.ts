@@ -477,6 +477,11 @@ describe("library remote track preference endpoints", () => {
             expect(res.status).toBe(200);
             expect(res.body.trackId).toBe("yt:dQw4w9WgXcQ");
             expect(res.body.signal).toBe("thumbs_up");
+            expect(
+                mockResolveRemoteTrackMetadataForRequest,
+            ).toHaveBeenCalledWith(
+                expect.objectContaining({ fetchArtworkIfMissing: true }),
+            );
             expect(mockEnsureRemoteTrack).toHaveBeenCalledWith(
                 expect.objectContaining({
                     provider: "youtube",
@@ -756,6 +761,9 @@ describe("remote-only album loading regression", () => {
         expect(res.status).toBe(200);
         expect(res.body.id).toBe("album-remote-1");
         expect(res.body.source).toBe("remote");
+        expect(res.body.owned).toBe(false);
+        expect(res.body).not.toHaveProperty("tracksTidal");
+        expect(res.body).not.toHaveProperty("tracksYtMusic");
         expect(res.body.tracks).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
