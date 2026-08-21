@@ -19,7 +19,7 @@ const BASELINE = Object.freeze({
     "backend/src/routes/auth/accountSecurity.ts": 9,
     "backend/src/routes/auth/adminUserInvites.ts": 9,
     "backend/src/routes/auth/localCredentials.ts": 1,
-    "backend/src/routes/browse.ts": 16,
+    "backend/src/routes/browse.ts": 15,
     "backend/src/routes/deviceLink.ts": 6,
     "backend/src/routes/discover/exclusions.ts": 1,
     "backend/src/routes/discover/shared.ts": 4,

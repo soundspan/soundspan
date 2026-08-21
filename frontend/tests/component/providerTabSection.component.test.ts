@@ -117,6 +117,21 @@ const baseProps = {
     tidalGenres: [],
     tidalHomeShelves: [],
     tidalExploreShelves: [],
+    providerFailures: {
+        ytMusic: {
+            mixes: false,
+            categories: false,
+            home: false,
+            charts: false,
+        },
+        tidal: {
+            mixes: false,
+            moods: false,
+            genres: false,
+            home: false,
+            explore: false,
+        },
+    },
 };
 
 test("ProviderTabSection: both providers enabled renders tab bar with both labels", async () => {
@@ -178,6 +193,108 @@ test("ProviderTabSection: neither provider enabled renders empty", async () => {
         ...baseProps,
         showYtMusicExplore: false,
         showTidalExplore: false,
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(ProviderTabSection, props),
+    );
+
+    assert.equal(html, "");
+});
+
+test("ProviderTabSection: failed YouTube mixes render an inline availability note", async () => {
+    const { ProviderTabSection } =
+        await import("../../features/explore/components/ProviderTabSection");
+    const props = {
+        ...baseProps,
+        showTidalExplore: false,
+        providerFailures: {
+            ...baseProps.providerFailures,
+            ytMusic: {
+                ...baseProps.providerFailures.ytMusic,
+                mixes: true,
+            },
+        },
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(ProviderTabSection, props),
+    );
+
+    assert.match(html, /Your Mixes/);
+    assert.match(html, /YouTube Music mixes aren&#x27;t available right now\./);
+});
+
+test("ProviderTabSection: a YouTube failure note replaces its section in order", async () => {
+    const { ProviderTabSection } =
+        await import("../../features/explore/components/ProviderTabSection");
+    const props = {
+        ...baseProps,
+        showTidalExplore: false,
+        providerFailures: {
+            ...baseProps.providerFailures,
+            ytMusic: {
+                ...baseProps.providerFailures.ytMusic,
+                charts: true,
+            },
+        },
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(ProviderTabSection, props),
+    );
+
+    const mixesIndex = html.indexOf("ytmusic-mixes-section");
+    const moodsIndex = html.indexOf("moods-genres-section");
+    const featuredIndex = html.indexOf("featured-shelves-section");
+    const chartsFailureIndex = html.indexOf(
+        "YouTube Music charts aren&#x27;t available right now.",
+    );
+    assert.ok(mixesIndex < moodsIndex);
+    assert.ok(moodsIndex < featuredIndex);
+    assert.ok(featuredIndex < chartsFailureIndex);
+});
+
+test("ProviderTabSection: a TIDAL failure note replaces its section in order", async () => {
+    const { ProviderTabSection } =
+        await import("../../features/explore/components/ProviderTabSection");
+    const props = {
+        ...baseProps,
+        showYtMusicExplore: false,
+        providerFailures: {
+            ...baseProps.providerFailures,
+            tidal: {
+                ...baseProps.providerFailures.tidal,
+                explore: true,
+            },
+        },
+    };
+    const html = renderToStaticMarkup(
+        React.createElement(ProviderTabSection, props),
+    );
+
+    const mixesIndex = html.indexOf("tidal-mixes-section");
+    const moodsGenresIndex = html.indexOf("tidal-moods-genres");
+    const featuredIndex = html.indexOf("tidal-featured-shelves");
+    const exploreFailureIndex = html.indexOf(
+        "TIDAL explore shelves aren&#x27;t available right now.",
+    );
+    assert.ok(mixesIndex < moodsGenresIndex);
+    assert.ok(moodsGenresIndex < featuredIndex);
+    assert.ok(featuredIndex < exploreFailureIndex);
+});
+
+test("ProviderTabSection: disabled providers never expose failure notes", async () => {
+    const { ProviderTabSection } =
+        await import("../../features/explore/components/ProviderTabSection");
+    const props = {
+        ...baseProps,
+        showYtMusicExplore: false,
+        showTidalExplore: false,
+        providerFailures: {
+            ...baseProps.providerFailures,
+            ytMusic: {
+                ...baseProps.providerFailures.ytMusic,
+                mixes: true,
+            },
+        },
     };
     const html = renderToStaticMarkup(
         React.createElement(ProviderTabSection, props),

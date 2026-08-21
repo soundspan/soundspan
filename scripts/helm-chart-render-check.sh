@@ -101,6 +101,23 @@ assert_deployment_env_absent() {
   fi
 }
 
+assert_deployment_termination_grace() {
+  local deployment_name="$1"
+  local expected_seconds="$2"
+  local manifest_file="$3"
+
+  if ! DEPLOYMENT_NAME="$deployment_name" EXPECTED_SECONDS="$expected_seconds" perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: \Q$ENV{DEPLOYMENT_NAME}\E$/m;
+          exit 0 if $doc =~ /^      terminationGracePeriodSeconds: \Q$ENV{EXPECTED_SECONDS}\E$/m;
+      }
+      exit 1' "$manifest_file"; then
+    echo "[ERROR] ${deployment_name} missing terminationGracePeriodSeconds=${expected_seconds}" >&2
+    exit 1
+  fi
+}
+
 assert_template_rejected() {
   local description="$1"
   local expected_message="$2"
@@ -540,6 +557,7 @@ for sidecar in tidal ytmusic; do
     exit 1
   fi
 done
+assert_deployment_termination_grace "${RELEASE_NAME}-ytmusic" "30" "$tmp_sidecars"
 assert_service_selectors_isolated "individual with HTTP sidecars" "$tmp_sidecars"
 
 echo "[CHECK] render default-off DCLAP provider in individual mode"

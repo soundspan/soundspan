@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api, type RadioPlaylistFilter } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
@@ -18,7 +19,12 @@ import {
     selectFeaturedRadioGenres,
 } from "./libraryRadioStationsGenreSelection";
 
-type RadioStation = Omit<RadioStationCardStation, "filter"> & {
+/**
+ * A renderable radio station card plus the playlist filter used to generate
+ * its ephemeral playlist. Consumed by Explore's library-backed section
+ * classification (`useExploreData`) in addition to the home-page grid.
+ */
+export type RadioStation = Omit<RadioStationCardStation, "filter"> & {
     filter: { type: "all" } | RadioPlaylistFilter;
 };
 
@@ -131,44 +137,35 @@ const getGenreColor = (genre: string): string => {
  * quickStart (static stations), genres, and decades.
  */
 export function useLibraryRadioData(skip = false) {
-    const [genres, setGenres] = useState<GenreCount[]>([]);
-    const [decades, setDecades] = useState<DecadeCount[]>([]);
-    const [isLoading, setIsLoading] = useState(!skip);
+    const genresQuery = useQuery({
+        queryKey: ["library", "genres"],
+        queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
+        enabled: !skip,
+        select: (data) => selectFeaturedRadioGenres(data.genres || []),
+    });
+    const decadesQuery = useQuery({
+        queryKey: ["library", "decades"],
+        queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
+        enabled: !skip,
+        select: (data) =>
+            (data.decades || [])
+                .filter((decade) => isGeneratedPlaylistDecade(decade.decade))
+                .slice(0, 4),
+    });
+    const queryError = genresQuery.error ?? decadesQuery.error;
 
     useEffect(() => {
-        if (skip) return;
-        const fetchData = async () => {
-            try {
-                const [genresRes, decadesRes] = await Promise.all([
-                    api.get<{ genres: GenreCount[] }>("/library/genres"),
-                    api.get<{ decades: DecadeCount[] }>("/library/decades"),
-                ]);
-
-                const validGenres = selectFeaturedRadioGenres(
-                    genresRes.genres || [],
-                );
-                setGenres(validGenres);
-                setDecades(
-                    (decadesRes.decades || [])
-                        .filter((d) => isGeneratedPlaylistDecade(d.decade))
-                        .slice(0, 4),
-                );
-            } catch (error) {
-                sharedFrontendLogger.error(
-                    "Failed to fetch radio data:",
-                    error,
-                );
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        fetchData();
-    }, [skip]);
+        if (!skip && queryError) {
+            sharedFrontendLogger.error(
+                "Failed to fetch radio data:",
+                queryError,
+            );
+        }
+    }, [queryError, skip]);
 
     const genreStations: RadioStation[] = useMemo(
         () =>
-            genres.map((g) => ({
+            (genresQuery.data ?? []).map((g) => ({
                 id: `genre-${g.genre}`,
                 name: g.genre,
                 description: `${g.count} tracks`,
@@ -176,12 +173,12 @@ export function useLibraryRadioData(skip = false) {
                 filter: { type: "genre" as const, value: g.genre },
                 minTracks: 15,
             })),
-        [genres],
+        [genresQuery.data],
     );
 
     const decadeStations: RadioStation[] = useMemo(
         () =>
-            decades.map((d) => ({
+            (decadesQuery.data ?? []).map((d) => ({
                 id: `decade-${d.decade}`,
                 name: getDecadeName(d.decade),
                 description: `${d.count} tracks`,
@@ -189,18 +186,26 @@ export function useLibraryRadioData(skip = false) {
                 filter: { type: "decade" as const, value: d.decade.toString() },
                 minTracks: 15,
             })),
-        [decades],
+        [decadesQuery.data],
+    );
+    const hasInitialError =
+        genresQuery.isLoadingError || decadesQuery.isLoadingError;
+    const allStations = useMemo(
+        () =>
+            hasInitialError
+                ? STATIC_STATIONS
+                : [...STATIC_STATIONS, ...genreStations, ...decadeStations],
+        [decadeStations, genreStations, hasInitialError],
     );
 
     return {
         quickStartStations: STATIC_STATIONS,
-        genreStations,
-        decadeStations,
-        allStations: useMemo(
-            () => [...STATIC_STATIONS, ...genreStations, ...decadeStations],
-            [genreStations, decadeStations],
-        ),
-        isLoading,
+        genreStations: hasInitialError ? [] : genreStations,
+        decadeStations: hasInitialError ? [] : decadeStations,
+        allStations,
+        isLoading: genresQuery.isLoading || decadesQuery.isLoading,
+        genresQuery,
+        decadesQuery,
     };
 }
 
@@ -212,23 +217,26 @@ interface LibraryRadioStationsProps {
 }
 
 /**
- * Renders the LibraryRadioStations component as a responsive grid of
- * full-size square radio station cards with mosaic cover art.
+ * Fetches radio data only for callers that do not supply station data.
  */
-export function LibraryRadioStations({
-    stations: stationsProp,
-    externalLoading,
-}: LibraryRadioStationsProps = {}) {
+function LibraryRadioStationsWithQuery() {
+    const { allStations, isLoading } = useLibraryRadioData();
+    return (
+        <LibraryRadioStationGrid stations={allStations} isLoading={isLoading} />
+    );
+}
+
+/** Renders one responsive grid of full-size radio station cards. */
+function LibraryRadioStationGrid({
+    stations,
+    isLoading,
+}: {
+    stations: RadioStation[];
+    isLoading: boolean;
+}) {
     const router = useRouter();
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
-
-    // When no stations prop, fetch internally (backward compat for home page)
-    const internalData = useLibraryRadioData(!!stationsProp);
-    const allStations = stationsProp ?? internalData.allStations;
-    const isLoading = stationsProp
-        ? (externalLoading ?? false)
-        : internalData.isLoading;
 
     const handleStation = async (station: RadioStation) => {
         setLoadingStation(station.id);
@@ -258,7 +266,7 @@ export function LibraryRadioStations({
 
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {allStations.map((station) => (
+            {stations.map((station) => (
                 <RadioStationCard
                     key={station.id}
                     station={station}
@@ -268,4 +276,22 @@ export function LibraryRadioStations({
             ))}
         </div>
     );
+}
+
+/**
+ * Renders radio stations from supplied data or the shared internal query.
+ */
+export function LibraryRadioStations({
+    stations,
+    externalLoading,
+}: LibraryRadioStationsProps = {}) {
+    if (stations !== undefined) {
+        return (
+            <LibraryRadioStationGrid
+                stations={stations}
+                isLoading={externalLoading ?? false}
+            />
+        );
+    }
+    return <LibraryRadioStationsWithQuery />;
 }

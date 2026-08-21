@@ -27,6 +27,9 @@ const SIDECAR_AGENT_OPTIONS = {
 const SIDE_CAR_HTTP_AGENT = new http.Agent(SIDECAR_AGENT_OPTIONS);
 const SIDE_CAR_HTTPS_AGENT = new https.Agent(SIDECAR_AGENT_OPTIONS);
 const AVAILABILITY_CACHE_TTL_MS = 10_000;
+// The sidecar's default YTMUSIC_BROWSE_TIMEOUT is 30 seconds. Leave margin so
+// its sanitized 503/504 response reaches the backend before Axios times out.
+const LIBRARY_PLAYLISTS_TIMEOUT_MS = 35_000;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -604,6 +607,7 @@ class YouTubeMusicService {
     ): Promise<YtMusicMixPreview[]> {
         const res = await this.client.get("/library/playlists", {
             params: { user_id: userId, limit, mixes_only: mixesOnly },
+            timeout: LIBRARY_PLAYLISTS_TIMEOUT_MS,
         });
         return res.data.playlists ?? [];
     }

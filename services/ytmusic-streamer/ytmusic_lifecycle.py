@@ -8,6 +8,7 @@ from ytmusic_client import (
     _ytmusic_instances,
     _ytmusic_instances_lock,
 )
+from ytmusic_library import shutdown_library_playlist_provider
 from ytmusic_runtime import DATA_PATH, JsonObject, app, log
 from ytmusic_search import (
     BATCH_CONCURRENCY,
@@ -70,6 +71,7 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    await shutdown_library_playlist_provider()
     _clean_stream_cache()
     _clean_search_cache()
     with _ytmusic_instances_lock:

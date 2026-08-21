@@ -444,6 +444,8 @@ ytmusicStreamer:
     digest: ""
     pullPolicy: Always
   port: 8586
+  # Grace window for the sidecar's bounded 20-second provider drain.
+  terminationGracePeriodSeconds: 30
   resources:
     requests:
       memory: 128Mi
@@ -483,6 +485,8 @@ ytmusicStreamer:
     # Search result cache TTL in seconds (0 to disable).
     # Prevents identical searches from hitting InnerTube repeatedly.
     YTMUSIC_SEARCH_CACHE_TTL: "300"
+    # Per-(user_id, limit, mixes_only) negative-cache TTL for upstream library-playlist HTTP 400s.
+    YTMUSIC_LIBRARY_ERROR_CACHE_SECONDS: "600"
     # Search strategy:
     # - auto: native-first; pin failing users to tv fallback on #813 errors
     # - tv: legacy TV parser only

@@ -4,7 +4,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 // Real provider: module-mocking "@tanstack/react-query" does not intercept the
 // hook's own import (project files resolve the package in the CJS realm).
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    QueryClient,
+    QueryClientProvider,
+    QueryObserver,
+} from "@tanstack/react-query";
 
 const featuresState = {
     musicCNN: false,
@@ -22,15 +26,43 @@ const queryCalls = {
     mixes: [] as unknown[][],
 };
 const failedQueries = new Set<string>();
+const refetchErrorQueries = new Set<string>();
 const refetchCalls: string[] = [];
 
 function queryResult<T>(key: string, data: T) {
+    if (refetchErrorQueries.has(key)) {
+        const queryClient = new QueryClient();
+        queryClient.setQueryData([key], data);
+        const query = queryClient.getQueryCache().find({ queryKey: [key] });
+        if (!query) throw new Error(`Missing query state for ${key}`);
+        query.setState({
+            status: "error",
+            error: new Error(`Failed to refetch ${key}`),
+            fetchStatus: "idle",
+        });
+        const result = new QueryObserver(queryClient, {
+            queryKey: [key],
+            queryFn: async () => data,
+        }).getCurrentResult();
+        return {
+            ...result,
+            refetch: async () => {
+                refetchCalls.push(key);
+                refetchErrorQueries.delete(key);
+                return result;
+            },
+        };
+    }
+
     return {
         data,
         isLoading: false,
         isError: failedQueries.has(key),
+        isLoadingError: failedQueries.has(key),
+        isRefetchError: false,
         refetch: async () => {
             refetchCalls.push(key);
+            failedQueries.delete(key);
             return { data };
         },
     };
@@ -39,6 +71,20 @@ function queryResult<T>(key: string, data: T) {
 mock.module("@/lib/features-context", {
     namedExports: {
         useFeatures: () => featuresState,
+    },
+});
+
+mock.module("@/features/home/components/LibraryRadioStations", {
+    namedExports: {
+        useLibraryRadioData: () => ({
+            quickStartStations: [],
+            genreStations: [],
+            decadeStations: [],
+            allStations: [],
+            isLoading: false,
+            genresQuery: queryResult("libraryGenres", []),
+            decadesQuery: queryResult("libraryDecades", []),
+        }),
     },
 });
 
@@ -105,7 +151,8 @@ mock.module("@/hooks/useQueries", {
             mutateAsync: async () => undefined,
             isPending: false,
         }),
-        useYtMusicHomeShelvesQuery: () => queryResult("ytHome", []),
+        useYtMusicHomeShelvesQuery: () =>
+            queryResult("ytHome", [{ title: "Retained shelf" }]),
         useYtMusicChartsQuery: () => queryResult("ytCharts", {}),
         useYtMusicCategoriesQuery: () =>
             queryResult("ytCategories", {
@@ -151,6 +198,7 @@ beforeEach(() => {
     queryCalls.discoverWeekly.length = 0;
     queryCalls.mixes.length = 0;
     failedQueries.clear();
+    refetchErrorQueries.clear();
     refetchCalls.length = 0;
 });
 
@@ -188,15 +236,78 @@ test("explore data disables mixes query and hides mixes when autoPlaylists is of
     assert.notEqual(result.discoverWeekly, null);
 });
 
-test("explore data reports degraded results and retries failed queries", async () => {
+test("provider failures stay out of the degraded banner and remain retryable", async () => {
     failedQueries.add("ytHome");
-    failedQueries.add("popularArtists");
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, false);
+    assert.equal(result.degradedFailureSignature, "");
+    assert.equal(result.providerFailures.ytMusic.home, true);
+    await result.retryAll();
+    assert.deepEqual(refetchCalls, ["ytHome"]);
+});
+
+test("Retry includes a provider refetch error alongside a library failure", async () => {
+    refetchErrorQueries.add("ytHome");
+    failedQueries.add("liked");
+    const result = await renderHook();
+
+    assert.equal(result.homeShelves.length, 1);
+    assert.equal(result.providerFailures.ytMusic.home, false);
+    assert.equal(result.hasDegradedResults, true);
+    await result.retryAll();
+    assert.deepEqual(refetchCalls.sort(), ["liked", "ytHome"]);
+});
+
+test("library failures report degraded results", async () => {
+    failedQueries.add("liked");
     const result = await renderHook();
 
     assert.equal(result.hasDegradedResults, true);
-    assert.equal(result.degradedFailureSignature, "popularArtists|ytHome");
+    assert.equal(result.degradedFailureSignature, "liked");
+});
+
+test("library genre failures join the degraded banner and Retry", async () => {
+    failedQueries.add("libraryGenres");
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, true);
+    assert.equal(result.degradedFailureSignature, "libraryGenres");
     await result.retryAll();
-    assert.deepEqual(refetchCalls.sort(), ["popularArtists", "ytHome"]);
+    assert.deepEqual(refetchCalls, ["libraryGenres"]);
+});
+
+test("library decade failures join the degraded banner and Retry", async () => {
+    failedQueries.add("libraryDecades");
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, true);
+    assert.equal(result.degradedFailureSignature, "libraryDecades");
+    await result.retryAll();
+    assert.deepEqual(refetchCalls, ["libraryDecades"]);
+});
+
+test("mixed failures report only library failures in the degraded signature", async () => {
+    failedQueries.add("ytMixes");
+    failedQueries.add("liked");
+    const result = await renderHook();
+
+    assert.equal(result.hasDegradedResults, true);
+    assert.equal(result.degradedFailureSignature, "liked");
+    assert.equal(result.providerFailures.ytMusic.mixes, true);
+    await result.retryAll();
+    assert.deepEqual(refetchCalls.sort(), ["liked", "ytMixes"]);
+});
+
+test("successful retry clears provider failure state on the next render", async () => {
+    failedQueries.add("ytMixes");
+    const failedResult = await renderHook();
+
+    assert.equal(failedResult.providerFailures.ytMusic.mixes, true);
+    await failedResult.retryAll();
+
+    const recoveredResult = await renderHook();
+    assert.equal(recoveredResult.providerFailures.ytMusic.mixes, false);
 });
 
 test("explore data is not degraded when every query succeeds", async () => {

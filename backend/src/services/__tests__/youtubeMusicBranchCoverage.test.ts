@@ -170,6 +170,7 @@ describe("youtubeMusic service branch coverage", () => {
             "/library/playlists",
             {
                 params: { user_id: "u1", limit: 25, mixes_only: false },
+                timeout: 35_000,
             },
         );
     });

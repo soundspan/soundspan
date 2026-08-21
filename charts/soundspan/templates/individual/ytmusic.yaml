@@ -29,6 +29,7 @@ spec:
       automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.ytmusicStreamer.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: ytmusic
           image: {{ include "soundspan.image" .Values.ytmusicStreamer.image | quote }}

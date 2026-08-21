@@ -6,10 +6,7 @@ import { useUserSettingsExplorePrefs } from "@/features/explore/hooks/useUserSet
 import { HomeHero } from "@/features/home/components/HomeHero";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { ArtistsGrid } from "@/features/home/components/ArtistsGrid";
-import {
-    LibraryRadioStations,
-    useLibraryRadioData,
-} from "@/features/home/components/LibraryRadioStations";
+import { LibraryRadioStations } from "@/features/home/components/LibraryRadioStations";
 import { PopularArtistsGrid } from "@/features/home/components/PopularArtistsGrid";
 import { MadeForYouSection } from "@/features/explore/components/MadeForYouSection";
 import { ExploreDegradedNotice } from "@/features/explore/components/ExploreDegradedNotice";
@@ -36,6 +33,9 @@ export default function ExplorePage() {
         homeShelves,
         charts,
         popularArtists,
+        quickStartStations,
+        genreStations,
+        decadeStations,
         moodCategories,
         genreCategories,
         tidalHomeShelves,
@@ -47,18 +47,13 @@ export default function ExplorePage() {
         isLoading,
         isRefreshingMixes,
         isMoodsLoading,
+        isRadioLoading,
         hasDegradedResults,
         degradedFailureSignature,
+        providerFailures,
         handleRefreshMixes,
         retryAll,
     } = useExploreData({ showYtMusicExplore, showTidalExplore });
-
-    const {
-        quickStartStations,
-        genreStations,
-        decadeStations,
-        isLoading: isRadioLoading,
-    } = useLibraryRadioData();
 
     if (isLoading) {
         return <LoadingScreen />;
@@ -153,6 +148,7 @@ export default function ExplorePage() {
                         tidalGenres={tidalGenres}
                         tidalHomeShelves={tidalHomeShelves}
                         tidalExploreShelves={tidalExploreShelves}
+                        providerFailures={providerFailures}
                     />
 
                     {/* Popular Artists */}

@@ -16,6 +16,10 @@ import {
 } from "../services/browseImageCache";
 import { sendFileFromRoot } from "../utils/sendFileFromRoot";
 import { config } from "../config";
+import {
+    resolveYtMusicHttpStatus,
+    sendYtMusicMixesErrorResponse,
+} from "./browseYtMusicErrors";
 
 const router = Router();
 
@@ -95,14 +99,6 @@ function parseProviderUrlCandidate(rawUrl: string): URL | null {
             return null;
         }
     }
-}
-
-function resolveHttpStatusFromError(error: any): number | null {
-    const status = error?.response?.status;
-    if (typeof status === "number" && status >= 400 && status <= 599) {
-        return status;
-    }
-    return null;
 }
 
 async function ensureYtMusicEnabled(res: Response): Promise<boolean> {
@@ -677,7 +673,7 @@ router.get("/ytmusic/home", async (req: Request, res: Response) => {
         setCache(cacheKey, result);
         res.json(result);
     } catch (error: any) {
-        const status = resolveHttpStatusFromError(error);
+        const status = resolveYtMusicHttpStatus(error);
         if (status && status >= 400 && status < 500) {
             logger.warn("[Browse] YT Music home request rejected:", {
                 status,
@@ -741,7 +737,7 @@ router.get("/ytmusic/mood-playlists", async (req: Request, res: Response) => {
         setCache(cacheKey, result);
         res.json(result);
     } catch (error: any) {
-        const status = resolveHttpStatusFromError(error);
+        const status = resolveYtMusicHttpStatus(error);
         if (status && status >= 400 && status < 500) {
             logger.warn("[Browse] YT Music mood playlists request rejected:", {
                 status,
@@ -914,6 +910,10 @@ router.get(
  *         description: YouTube Music integration not enabled
  *       401:
  *         description: Not authenticated
+ *       503:
+ *         description: YouTube Music library playlists are temporarily unavailable
+ *       504:
+ *         description: YouTube Music library playlists request timed out
  */
 router.get("/ytmusic/mixes", async (req: Request, res: Response) => {
     try {
@@ -938,24 +938,7 @@ router.get("/ytmusic/mixes", async (req: Request, res: Response) => {
         setCache(cacheKey, result);
         res.json(result);
     } catch (error: any) {
-        const status = resolveHttpStatusFromError(error);
-        if (status === 401) {
-            return res.json({ mixes: [], source: "ytmusic" as const });
-        }
-        if (status && status >= 400 && status < 500) {
-            logger.warn("[Browse] YT Music mixes request rejected:", {
-                status,
-                detail: error?.response?.data?.detail,
-            });
-            return res.status(status).json({
-                error: "Invalid request for mixes",
-            });
-        }
-        logger.error(
-            "[Browse] YT Music mixes error:",
-            error?.message || "unknown",
-        );
-        res.status(500).json({ error: "Failed to fetch YT Music mixes" });
+        return sendYtMusicMixesErrorResponse(res, error);
     }
 });
 

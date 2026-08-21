@@ -28,6 +28,7 @@ Primary sources:
 - `services/ytmusic-streamer/ytmusic_stream.py`
 - `services/ytmusic-streamer/ytmusic_downloads.py`
 - `services/ytmusic-streamer/ytmusic_browse.py`
+- `services/ytmusic-streamer/ytmusic_library.py`
 
 Status labels:
 
@@ -244,6 +245,7 @@ See the [`OIDC_SSO.md` topology matrix](OIDC_SSO.md#deployment-topology) for pro
 | `YTMUSIC_SPOOL_DOWNLOAD_TIMEOUT` | `ytmusic-streamer`                                       | Optional | `300`                      | Progress-based deadline (seconds) for one yt-dlp spool download; enforced at each download progress event, with `YTMUSIC_YTDLP_SOCKET_TIMEOUT` bounding individual stalled reads during extraction and download. Live streams are rejected outright. |
 | `YTMUSIC_SPOOL_TRACK_MAX_BYTES` | `ytmusic-streamer`                                        | Optional | `67108864`                 | Per-track downloaded-bytes cap for one spool job (64 MiB default, 1 MiB minimum); the download aborts past this, bounding disk use by any single title.                                                                            |
 | `YTMUSIC_SEARCH_CACHE_TTL`      | `ytmusic-streamer`                                        | Optional | `300`                      | Search cache TTL in seconds (`0` disables cache).                                                                                                                                                                                  |
+| `YTMUSIC_LIBRARY_ERROR_CACHE_SECONDS` | `ytmusic-streamer`                                  | Optional | `600`                      | Per-`(user_id, limit, mixes_only)` negative-cache TTL in seconds for upstream HTTP 400 failures from `/library/playlists` (`0` disables the cache); cached requests fail fast with HTTP 502 instead of calling YouTube again.                                                              |
 | `YTMUSIC_SEARCH_CACHE_MAX`      | `ytmusic-streamer`                                        | Optional | `1024`                     | Max in-memory search-cache entries; the oldest are evicted past this bound to cap memory.                                                                                                                                          |
 | `YTMUSIC_STREAM_CACHE_MAX`      | `ytmusic-streamer`                                        | Optional | `1024`                     | Max in-memory stream-URL cache entries; the oldest are evicted past this bound to cap memory.                                                                                                                                      |
 | `YTMUSIC_SEARCH_MODE`           | `ytmusic-streamer`                                        | Optional | `auto`                     | Search strategy: `auto` (native-first with per-user TV fallback on #813 invalid-argument errors), `tv` (legacy TV parser), or `native` (`ytmusicapi` `yt.search()` only).                                                          |

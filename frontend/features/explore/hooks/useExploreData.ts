@@ -12,6 +12,10 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import type { Artist, Mix, PopularArtist } from "@/features/home/types";
 import {
+    useLibraryRadioData,
+    type RadioStation,
+} from "@/features/home/components/LibraryRadioStations";
+import {
     useRecommendationsQuery,
     useLikedPlaylistQuery,
     useDiscoverWeeklySummaryQuery,
@@ -51,6 +55,23 @@ export interface DiscoverWeeklySummary {
     coverUrl: string | null;
 }
 
+/** Provider-backed Explore queries that currently have no usable result. */
+export interface ExploreProviderFailures {
+    ytMusic: {
+        mixes: boolean;
+        categories: boolean;
+        home: boolean;
+        charts: boolean;
+    };
+    tidal: {
+        mixes: boolean;
+        moods: boolean;
+        genres: boolean;
+        home: boolean;
+        explore: boolean;
+    };
+}
+
 /** Return shape for {@link useExploreData}. */
 export interface UseExploreDataReturn {
     /** My Liked playlist summary. */
@@ -67,6 +88,12 @@ export interface UseExploreDataReturn {
     charts: Record<string, YtMusicChartEntry[]>;
     /** Popular artists from Last.fm. */
     popularArtists: PopularArtist[];
+    /** Static library radio stations. */
+    quickStartStations: RadioStation[];
+    /** Library-derived genre radio stations. */
+    genreStations: RadioStation[];
+    /** Library-derived decade radio stations. */
+    decadeStations: RadioStation[];
     /** YT Music mood categories. */
     moodCategories: YtMusicCategory[];
     /** YT Music genre categories. */
@@ -89,6 +116,8 @@ export interface UseExploreDataReturn {
     isRefreshingMixes: boolean;
     /** True while moods/genres data is loading. */
     isMoodsLoading: boolean;
+    /** True while library radio metadata is loading. */
+    isRadioLoading: boolean;
     /** Whether YT Music Explore content is enabled. */
     showYtMusicExplore: boolean;
     /** Whether TIDAL Explore content is enabled. */
@@ -97,6 +126,8 @@ export interface UseExploreDataReturn {
     hasDegradedResults: boolean;
     /** Stable signature identifying the enabled Explore queries in error. */
     degradedFailureSignature: string;
+    /** Failed provider-backed sections, rendered as inline availability notes. */
+    providerFailures: ExploreProviderFailures;
     /** Trigger a mixes refresh. */
     handleRefreshMixes: () => Promise<void>;
     /** Retry every enabled Explore query that is currently in error. */
@@ -122,6 +153,7 @@ export function useExploreData(options?: {
     const { isAuthenticated } = useAuth();
     const { discovery, autoPlaylists } = useFeatures();
     const queryClient = useQueryClient();
+    const libraryRadioData = useLibraryRadioData();
 
     // Event listeners for cross-component updates
     useEffect(() => {
@@ -191,14 +223,46 @@ export function useExploreData(options?: {
     const { data: tidalMoodsData } = tidalMoodsQuery;
     const { data: tidalMixesData } = tidalMixesQuery;
 
-    const failedQueries = [
+    const libraryFailures = [
         { key: "liked", enabled: true, query: likedQuery },
-        { key: "discoverWeekly", enabled: discovery, query: discoverQuery },
-        { key: "mixes", enabled: autoPlaylists, query: mixesQuery },
-        { key: "recommendations", enabled: discovery, query: recommendedQuery },
-        { key: "ytHome", enabled: showYtMusicExplore, query: shelvesQuery },
-        { key: "ytCharts", enabled: showYtMusicExplore, query: chartsQuery },
+        {
+            key: "discoverWeekly",
+            enabled: discovery,
+            query: discoverQuery,
+        },
+        {
+            key: "mixes",
+            enabled: autoPlaylists,
+            query: mixesQuery,
+        },
+        {
+            key: "recommendations",
+            enabled: discovery,
+            query: recommendedQuery,
+        },
         { key: "popularArtists", enabled: true, query: popularQuery },
+        {
+            key: "libraryGenres",
+            enabled: true,
+            query: libraryRadioData.genresQuery,
+        },
+        {
+            key: "libraryDecades",
+            enabled: true,
+            query: libraryRadioData.decadesQuery,
+        },
+    ].filter(({ enabled, query }) => enabled && query.isError);
+    const providerQueries = [
+        {
+            key: "ytHome",
+            enabled: showYtMusicExplore,
+            query: shelvesQuery,
+        },
+        {
+            key: "ytCharts",
+            enabled: showYtMusicExplore,
+            query: chartsQuery,
+        },
         {
             key: "ytCategories",
             enabled: showYtMusicExplore,
@@ -209,7 +273,11 @@ export function useExploreData(options?: {
             enabled: showYtMusicExplore,
             query: ytMusicMixesQuery,
         },
-        { key: "tidalHome", enabled: showTidalExplore, query: tidalHomeQuery },
+        {
+            key: "tidalHome",
+            enabled: showTidalExplore,
+            query: tidalHomeQuery,
+        },
         {
             key: "tidalExplore",
             enabled: showTidalExplore,
@@ -230,14 +298,40 @@ export function useExploreData(options?: {
             enabled: showTidalExplore,
             query: tidalMixesQuery,
         },
-    ].filter(({ enabled, query }) => enabled && query.isError);
-    const hasDegradedResults = failedQueries.length > 0;
-    const degradedFailureSignature = failedQueries
+    ];
+    const providerQueryFailures = providerQueries.filter(
+        ({ enabled, query }) => enabled && query.isLoadingError,
+    );
+    const providerRetryFailures = providerQueries.filter(
+        ({ enabled, query }) => enabled && query.isError,
+    );
+    const failedKeys = new Set(providerQueryFailures.map(({ key }) => key));
+    const providerFailures: ExploreProviderFailures = {
+        ytMusic: {
+            mixes: failedKeys.has("ytMixes"),
+            categories: failedKeys.has("ytCategories"),
+            home: failedKeys.has("ytHome"),
+            charts: failedKeys.has("ytCharts"),
+        },
+        tidal: {
+            mixes: failedKeys.has("tidalMixes"),
+            moods: failedKeys.has("tidalMoods"),
+            genres: failedKeys.has("tidalGenres"),
+            home: failedKeys.has("tidalHome"),
+            explore: failedKeys.has("tidalExplore"),
+        },
+    };
+    const hasDegradedResults = libraryFailures.length > 0;
+    const degradedFailureSignature = libraryFailures
         .map(({ key }) => key)
         .sort()
         .join("|");
     const retryAll = async (): Promise<void> => {
-        await Promise.all(failedQueries.map(({ query }) => query.refetch()));
+        await Promise.all(
+            [...libraryFailures, ...providerRetryFailures].map(({ query }) =>
+                query.refetch(),
+            ),
+        );
     };
 
     // ── Loading states ───────────────────────────────────────────────────
@@ -292,6 +386,9 @@ export function useExploreData(options?: {
         homeShelves: shelvesData ?? [],
         charts: chartsData ?? {},
         popularArtists: popularData?.artists ?? [],
+        quickStartStations: libraryRadioData.quickStartStations,
+        genreStations: libraryRadioData.genreStations,
+        decadeStations: libraryRadioData.decadeStations,
         moodCategories: categoriesData?.moodCategories ?? [],
         genreCategories: categoriesData?.genreCategories ?? [],
         ytMusicMixes: ytMusicMixesData ?? [],
@@ -303,10 +400,12 @@ export function useExploreData(options?: {
         isLoading,
         isRefreshingMixes,
         isMoodsLoading,
+        isRadioLoading: libraryRadioData.isLoading,
         showYtMusicExplore,
         showTidalExplore,
         hasDegradedResults,
         degradedFailureSignature,
+        providerFailures,
         handleRefreshMixes,
         retryAll,
     };

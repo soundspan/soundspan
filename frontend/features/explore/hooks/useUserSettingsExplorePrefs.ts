@@ -1,8 +1,7 @@
 /**
  * Lightweight hook that reads user settings relevant to the Explore page.
  *
- * Returns safe defaults while the settings query is still loading
- * so the Explore page never flashes empty sections.
+ * Returns fail-closed defaults until usable settings data is available.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -18,10 +17,10 @@ interface ExplorePrefs {
  *
  * Defaults to `false` while the query is still loading so that
  * YT Music queries are not fired before the user's preference is known.
- * Once the settings have loaded, falls back to `true` (the DB default).
+ * Once settings data is available, missing values fall back to the DB default.
  */
 export function useUserSettingsExplorePrefs(): ExplorePrefs {
-    const { data, isFetched } = useQuery<{
+    const { data } = useQuery<{
         showYtMusicExplore?: boolean;
         showTidalExplore?: boolean;
     }>({
@@ -30,10 +29,12 @@ export function useUserSettingsExplorePrefs(): ExplorePrefs {
         staleTime: 5 * 60 * 1000,
     });
 
+    if (data === undefined) {
+        return { showYtMusicExplore: false, showTidalExplore: false };
+    }
+
     return {
-        showYtMusicExplore: isFetched
-            ? (data?.showYtMusicExplore ?? true)
-            : false,
-        showTidalExplore: isFetched ? (data?.showTidalExplore ?? true) : false,
+        showYtMusicExplore: data.showYtMusicExplore ?? true,
+        showTidalExplore: data.showTidalExplore ?? true,
     };
 }

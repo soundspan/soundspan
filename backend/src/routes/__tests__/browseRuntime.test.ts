@@ -11,6 +11,7 @@ jest.mock("../../utils/logger", () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn().mockReturnThis(),
     },
 }));
 
@@ -30,8 +31,12 @@ jest.mock("../../services/spotify", () => ({
     spotifyService,
 }));
 
+const ytMusicService = {
+    getLibraryPlaylists: jest.fn(),
+};
+
 jest.mock("../../services/youtubeMusic", () => ({
-    ytMusicService: {},
+    ytMusicService,
 }));
 
 jest.mock("../../services/tidalStreaming", () => ({
@@ -75,6 +80,7 @@ const createRes = createMockJsonResponse;
 
 describe("browse route runtime", () => {
     const parsePlaylistUrl = getHandler("/playlists/parse", "post");
+    const getYtMusicMixes = getHandler("/ytmusic/mixes", "get");
     const deprecatedPaths = [
         "/playlists/featured",
         "/playlists/search",
@@ -187,4 +193,34 @@ describe("browse route runtime", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({ error: "Failed to parse URL" });
     });
+
+    it.each([
+        [
+            503,
+            {
+                error: "YouTube Music library playlists are temporarily unavailable",
+            },
+        ],
+        [504, { error: "YouTube Music library playlists request timed out" }],
+    ])(
+        "preserves a sanitized sidecar %i for YT Music mixes",
+        async (status, expectedBody) => {
+            ytMusicService.getLibraryPlaylists.mockRejectedValueOnce({
+                response: {
+                    status,
+                    data: { detail: "SIDECAR-INTERNAL-DETAIL" },
+                },
+            });
+            const req = { user: { id: "user-1" } } as any;
+            const res = createRes();
+
+            await getYtMusicMixes(req, res);
+
+            expect(res.statusCode).toBe(status);
+            expect(res.body).toEqual(expectedBody);
+            expect(JSON.stringify(res.body)).not.toContain(
+                "SIDECAR-INTERNAL-DETAIL",
+            );
+        },
+    );
 });

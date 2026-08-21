@@ -4,9 +4,11 @@ import json
 import os
 import threading
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
+import requests
 from common.sidecar_runtime_utils import validate_user_id
 from fastapi import HTTPException
 from ytmusic_runtime import DATA_PATH, log
@@ -24,6 +26,8 @@ if SEARCH_MODE not in {"tv", "native", "auto"}:
 YTMUSIC_LANGUAGE = (os.getenv("YTMUSIC_LANGUAGE", "en") or "en").strip()
 TV_CLIENT_NAME = "TVHTML5"
 TV_CLIENT_VERSION = "7.20250101.00.00"
+# Keep transport work inside the sidecar's default 30-second browse and shutdown budgets.
+YTMUSIC_REQUEST_TIMEOUT_SECONDS = 25.0
 
 # Per-user authenticated clients are used for user-private operations.
 _ytmusic_instances: dict[str, YTMusic] = {}
@@ -32,6 +36,16 @@ _ytmusic_auto_tv_fallback_users: set[str] = set()
 # Public unauthenticated clients are used for search and matching.
 _public_ytmusic_instances: dict[Literal["tv", "native"], YTMusic] = {}
 _public_ytmusic_lock = threading.Lock()
+
+
+def _build_ytmusic_requests_session() -> requests.Session:
+    """Create a pooled ytmusicapi transport with a bounded request timeout."""
+    session = requests.Session()
+    session.request = partial(  # type: ignore[method-assign]
+        session.request,
+        timeout=YTMUSIC_REQUEST_TIMEOUT_SECONDS,
+    )
+    return session
 
 
 def _write_private_file(path: Path, content: str) -> None:
@@ -97,7 +111,10 @@ def _get_public_ytmusic(strategy: Literal["tv", "native"]) -> YTMusic:
     if existing:
         return existing
 
-    yt = YTMusic(language=YTMUSIC_LANGUAGE)
+    yt = YTMusic(
+        language=YTMUSIC_LANGUAGE,
+        requests_session=_build_ytmusic_requests_session(),
+    )
     if strategy == "tv":
         _apply_tv_client_context(yt)
     with _public_ytmusic_lock:
@@ -125,6 +142,7 @@ def _get_ytmusic(user_id: str) -> YTMusic:
             json.loads(oauth_path.read_text())
 
             # Build OAuthCredentials if client_id/client_secret are stored alongside
+            request_session = _build_ytmusic_requests_session()
             oauth_creds = None
             creds_path = _client_creds_file(user_id)
             if creds_path.exists():
@@ -132,14 +150,22 @@ def _get_ytmusic(user_id: str) -> YTMusic:
                 oauth_creds = OAuthCredentials(
                     client_id=creds_data["client_id"],
                     client_secret=creds_data["client_secret"],
+                    session=request_session,
                 )
 
             if oauth_creds:
                 yt = YTMusic(
-                    str(oauth_path), oauth_credentials=oauth_creds, language=YTMUSIC_LANGUAGE
+                    str(oauth_path),
+                    oauth_credentials=oauth_creds,
+                    language=YTMUSIC_LANGUAGE,
+                    requests_session=request_session,
                 )
             else:
-                yt = YTMusic(str(oauth_path), language=YTMUSIC_LANGUAGE)
+                yt = YTMusic(
+                    str(oauth_path),
+                    language=YTMUSIC_LANGUAGE,
+                    requests_session=request_session,
+                )
 
             client_mode = _resolve_user_search_strategy(user_id)
             if client_mode == "tv":

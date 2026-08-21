@@ -386,6 +386,8 @@ services:
             YTMUSIC_EXTRACT_DELAY_MAX: ${YTMUSIC_EXTRACT_DELAY_MAX:-2.0}
             # Search result cache TTL in seconds (0 to disable)
             YTMUSIC_SEARCH_CACHE_TTL: ${YTMUSIC_SEARCH_CACHE_TTL:-300}
+            # Per-(user_id, limit, mixes_only) negative-cache TTL for upstream library-playlist HTTP 400s
+            YTMUSIC_LIBRARY_ERROR_CACHE_SECONDS: ${YTMUSIC_LIBRARY_ERROR_CACHE_SECONDS:-600}
             # Search mode: auto (default), tv, native
             # auto prefers native ytmusicapi search and falls back to TV per-user
             # when #813 invalid-argument responses occur.
@@ -409,6 +411,7 @@ services:
             # land directly in the music library.
             - ${MUSIC_PATH:-./music}:/music
         restart: unless-stopped
+        stop_grace_period: 30s
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:8586/health"]
             interval: 30s
